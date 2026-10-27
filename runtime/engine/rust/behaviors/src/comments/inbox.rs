@@ -185,7 +185,7 @@ fn list(
             let reads = sql.table(READS)?;
             let follows = sql.table(FOLLOWS)?;
             format!(
-                "SELECT d.schema, d.id, d.message, m.thread, m.author, m.posted_at, m.body,
+                "SELECT d.schema, d.id, d.message, m.thread, m.author, m.for_subject, m.posted_at, m.body,
                         CASE WHEN m.stand > COALESCE(CASE WHEN m.thread IS NULL THEN r.up_to ELSE f.read_up_to END, 0)
                              THEN 1 ELSE 0 END AS unread
                    FROM {deliveries} d
@@ -204,7 +204,7 @@ fn list(
         "thread" => {
             let follows = sql.table(FOLLOWS)?;
             format!(
-                "SELECT f.schema, f.id, f.thread, m.message, m.author, m.posted_at, m.body,
+                "SELECT f.schema, f.id, f.thread, m.message, m.author, m.for_subject, m.posted_at, m.body,
                         (SELECT COUNT(*) FROM {messages} u
                           WHERE u.namespace = f.namespace AND u.schema = f.schema AND u.id = f.id
                             AND u.thread = f.thread AND u.stand IS NOT NULL AND u.stand > f.read_up_to
@@ -224,7 +224,7 @@ fn list(
         _ => {
             let reads = sql.table(READS)?;
             format!(
-                "SELECT r.schema, r.id, m.message, m.author, m.posted_at, m.body,
+                "SELECT r.schema, r.id, m.message, m.author, m.for_subject, m.posted_at, m.body,
                         (SELECT COUNT(*) FROM {messages} u
                           WHERE u.namespace = r.namespace AND u.schema = r.schema AND u.id = r.id
                             AND u.thread IS NULL AND u.stand IS NOT NULL AND u.stand > r.up_to
@@ -309,6 +309,9 @@ fn item(kind: &str, rank: i64, row: &Row) -> Result<Item> {
         out.insert("thread".into(), Value::from(thread));
     }
     out.insert("author".into(), Value::from(row.text("author")?));
+    if let Some(subject) = row.opt_text("for_subject")? {
+        out.insert("for".into(), Value::from(subject));
+    }
     out.insert("postedAt".into(), Value::from(key.posted_at));
     out.insert("excerpt".into(), Value::from(excerpt(row.text("body")?)));
     out.insert("unread".into(), Value::from(row.i64("unread")?));

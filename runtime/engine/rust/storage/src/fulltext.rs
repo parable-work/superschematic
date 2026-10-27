@@ -149,6 +149,12 @@ pub struct FullTextQuery<'a> {
     pub select: &'a [&'a str],
     /// The values columns of `keys` must hold.
     pub filters: &'a [(&'a str, SqlValue)],
+    /// A column of `keys` holding a schema's name, which keeps the hits to
+    /// the schemas a namespace operation may read (D77, `sql.readable()`):
+    /// both statements join the readable relation on it. Only a namespace
+    /// operation's match may give it; elsewhere the match refuses. `None`
+    /// filters nothing more.
+    pub readable: Option<&'a str>,
     /// A key to leave out.
     pub exclude: Option<i64>,
     /// An FTS5 expression.
@@ -638,6 +644,45 @@ pub(crate) fn postgres_create(
     extension: &str,
     columns: &[&str],
 ) -> Vec<String> {
+    let mut statements = vec![
+        postgres_configuration(config),
+        postgres_mapping(config, Some(extension)),
+    ];
+    statements.extend(postgres_tables(table, config, columns));
+    statements
+}
+
+/// The statement that creates an index's text search configuration
+/// (Postgres), Postgres's default parser with no mapping yet.
+pub(crate) fn postgres_configuration(config: &str) -> String {
+    format!(
+        "CREATE TEXT SEARCH CONFIGURATION {} (PARSER = pg_catalog.\"default\")",
+        quote_identifier(config)
+    )
+}
+
+/// The statement that maps the token types an index keeps to its
+/// dictionaries (Postgres): `unaccent` in `extension`, then `simple`; or,
+/// with no `extension`, `simple` alone, which folds case but keeps
+/// diacritics ([`Unaccent::IfAvailable`]).
+pub(crate) fn postgres_mapping(config: &str, extension: Option<&str>) -> String {
+    let dictionaries = match extension {
+        Some(extension) => format!(
+            "{}.unaccent, pg_catalog.simple",
+            quote_identifier(extension)
+        ),
+        None => "pg_catalog.simple".to_owned(),
+    };
+    format!(
+        "ALTER TEXT SEARCH CONFIGURATION {} ADD MAPPING FOR {} WITH {dictionaries}",
+        quote_identifier(config),
+        POSTGRES_TOKEN_TYPES.join(", "),
+    )
+}
+
+/// The statements that create an index's table with its generated vectors
+/// through `config`, and the GIN index over all of them (Postgres).
+pub(crate) fn postgres_tables(table: &str, config: &str, columns: &[&str]) -> Vec<String> {
     let regconfig = format!("CAST({} AS regconfig)", sql_string(config));
     let mut lines = vec!["rowid BIGINT PRIMARY KEY".to_owned()];
     lines.extend(
@@ -662,16 +707,6 @@ pub(crate) fn postgres_create(
     ));
     vec![
         format!(
-            "CREATE TEXT SEARCH CONFIGURATION {} (PARSER = pg_catalog.\"default\")",
-            quote_identifier(config)
-        ),
-        format!(
-            "ALTER TEXT SEARCH CONFIGURATION {} ADD MAPPING FOR {} WITH {}.unaccent, pg_catalog.simple",
-            quote_identifier(config),
-            POSTGRES_TOKEN_TYPES.join(", "),
-            quote_identifier(extension)
-        ),
-        format!(
             "CREATE TABLE {} (\n  {}\n)",
             quote_identifier(table),
             lines.join(",\n  ")
@@ -682,6 +717,26 @@ pub(crate) fn postgres_create(
             quote_identifier(table)
         ),
     ]
+}
+
+/// Whether a full-text index on Postgres needs the `unaccent` extension
+/// ([`crate::behavior::BehaviorSql::create_fulltext_with`]). SQLite's FTS5
+/// folds diacritics itself, so it reads neither.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Unaccent {
+    /// The index folds diacritics through `unaccent`, which the engine
+    /// creates when the database lacks it; where it cannot, the migration
+    /// fails and says so. Search's index.
+    #[default]
+    Required,
+    /// The index folds diacritics through `unaccent` where the database
+    /// has it or the engine may create it; otherwise its configuration maps
+    /// the words to `simple` alone, which folds case and keeps diacritics
+    /// (`cafe` does not find `café`), and the migration goes on. The
+    /// configuration is made once: an `unaccent` created later changes no
+    /// index made without it. Comments' search, which every engine that
+    /// composes Comments migrates, Search or not.
+    IfAvailable,
 }
 
 /// The statement that finds the schema `unaccent` lives in (Postgres).
@@ -706,6 +761,21 @@ pub(crate) struct Names<'a> {
     pub keys: &'a str,
     /// The index's configuration (Postgres).
     pub config: &'a str,
+    /// The relation of the schemas a namespace operation may read, when
+    /// the query joins it.
+    pub readable: Option<&'a str>,
+}
+
+// readable_join is the join that keeps the keys of the schemas the
+// readable relation lists.
+fn readable_join(names: &Names<'_>, query: &FullTextQuery<'_>) -> String {
+    match (names.readable, query.readable) {
+        (Some(relation), Some(column)) => format!(
+            " JOIN {relation} AS r ON r.schema = k.{}",
+            quote_identifier(column)
+        ),
+        _ => String::new(),
+    }
 }
 
 /// The statement of a match and its parameters, with the expression as
@@ -766,12 +836,13 @@ fn sqlite_match(
     ]);
     let sql = format!(
         "SELECT {}
-         FROM {index} CROSS JOIN {} AS k ON k.{key} = {index}.rowid
+         FROM {index} CROSS JOIN {} AS k ON k.{key} = {index}.rowid{}
          WHERE {}
          ORDER BY bm25({index}, {}), k.{key}
          LIMIT ? OFFSET ?",
         columns.join(", "),
         names.keys,
+        readable_join(names, query),
         conditions.join(" AND "),
         vec!["?"; query.weights.len()].join(", ")
     );
@@ -856,7 +927,7 @@ fn postgres_match(
         "SELECT {}
          FROM (
            SELECT {}
-           FROM {} AS t JOIN {} AS k ON k.{key} = t.rowid
+           FROM {} AS t JOIN {} AS k ON k.{key} = t.rowid{}
              CROSS JOIN to_tsquery({config}, ?) AS q(q)
            WHERE {}
            ORDER BY rank DESC, k.{key}
@@ -867,6 +938,7 @@ fn postgres_match(
         inner.join(", "),
         names.index,
         names.keys,
+        readable_join(names, query),
         conditions.join(" AND ")
     );
     (sql, params)
@@ -996,6 +1068,7 @@ pub(crate) fn query_problems(query: &FullTextQuery<'_>) -> Vec<String> {
         .iter()
         .chain(std::iter::once(&query.key))
         .chain(query.filters.iter().map(|(column, _)| column))
+        .chain(query.readable.iter())
     {
         if !crate::ddl::is_column_name(name) {
             problems.push(format!(

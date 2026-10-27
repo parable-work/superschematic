@@ -981,6 +981,47 @@ describe('acting for a subject (D77)', () => {
     assert.throws(() => engineApp(engine, { authenticate, actingFor: 'yes' as never }), /actingFor is true, false or a function/);
   });
 
+  test('an agent acting for Alice replies over HTTP: the reply is for her, she hears nothing of it, and searchMessages finds it', async () => {
+    const { app, engine } = serve({ actingFor: true });
+    const review = schemaDocument('Review', [{ name: 'title', typeRef: { name: 'string' }, required: true }]) as { types: { Review: Record<string, unknown> } };
+    review.types.Review.behaviors = [{ name: 'Comments', config: { deliverPermission: 'comments.notify' } }];
+    await data(call(app, 'POST', '/namespaces/default/schemas', { body: review }));
+    await data(call(app, 'POST', '/namespaces/default/schemas/Review/publish'));
+    const REVIEWS = '/namespaces/default/schemas/Review/instances';
+    await data(call(app, 'POST', REVIEWS, { body: { id: 'r1', data: { title: 'Q3 plan' } } }), 201);
+    const post = (token: string, body: Record<string, unknown>, headers: Record<string, string> = {}) =>
+      data(call(app, 'POST', `${REVIEWS}/r1/operations/post`, { token, headers, body }));
+    const thread = await post('alice', { body: 'Can someone check the totals?' });
+    await post('bob', { body: 'Looking.', thread: thread.id });
+    // The agent holds actFor and the mount honors the header: the reply is
+    // the agent's, written for Alice, mentioning her.
+    const reply = await post('agent', { body: 'Totals are off by one in March', thread: thread.id, mentions: ['alice'] }, actingFor('alice'));
+    assert.deepEqual([reply.author, reply.for], ['agent', 'alice']);
+    const [event] = engine.events.read(everything, { schema: 'Review', instanceId: 'r1', beside: true }).events.slice(-1);
+    assert.deepEqual([event?.actor, event?.for], ['agent', 'alice']);
+    // Alice gets no delivery of it, though mentioned and following; Bob
+    // does, as a follower.
+    const notifier = { subject: 'notifier', permissions: ['read', 'write', 'comments.notify'] };
+    const claimed = engine.behaviors.invoke(notifier, { behavior: 'Comments', operation: 'claimDeliveries', params: { limit: 10 } }) as { items: Array<Record<string, unknown>> };
+    assert.deepEqual(
+      claimed.items.filter((item) => item.message === reply.id).map((item) => [item.subject, item.reasons, item.author, item.for]),
+      [['bob', ['reply'], 'agent', 'alice']]
+    );
+    // searchMessages finds it, with whom it was for. (Its words match from
+    // its first to its last, so both databases write the same snippet.)
+    const found = await data(call(app, 'POST', '/namespaces/default/behaviors/Comments/operations/searchMessages', { token: 'alice', body: { query: 'totals march' } }));
+    assert.deepEqual(
+      found.items.map((item: Record<string, unknown>) => [item.instanceId, item.message, item.thread, item.author, item.for, item.rank]),
+      [['r1', reply.id, thread.id, 'agent', 'alice', 1]]
+    );
+    assert.deepEqual(found.items[0].snippet, [
+      { text: 'Totals', match: true },
+      { text: ' are off by one in ', match: false },
+      { text: 'March', match: true },
+    ]);
+    assert.equal(found.next, null);
+  });
+
   test('the MCP endpoint honors the header as the routes do', async () => {
     const engine = openTestEngine({ policy, namespaces: NAMESPACES });
     engine.schemas.define(everything, orderDocument());

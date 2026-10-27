@@ -1501,10 +1501,15 @@ function finish(name: string, record: Case): JSONObject {
 const CATALOG_CALLS = new Set(['tools.listBehaviors', 'tools.describeBehavior', 'behaviors.names', 'behaviors.has', 'behaviors.declaration']);
 
 // Search's operations rank by SQLite's FTS5 bm25: a step that calls one,
-// or the search across schemas, depends on SQLite.
+// or the search across schemas, depends on SQLite. So does Comments'
+// namespace operation searchMessages, whose order and snippets are each
+// database's own (D77).
 const SEARCH_OPERATIONS = new Set(['search', 'similar']);
 
 function isSearchCall(step: JSONObject, record: Case): boolean {
+  if (record.composed.has('Comments') && isMessageSearch(step)) {
+    return true;
+  }
   if (!record.composed.has('Search')) {
     return false;
   }
@@ -1522,6 +1527,17 @@ function isSearchCall(step: JSONObject, record: Case): boolean {
     return /(^|[_-])(search|similar)([_-]|$)/u.test(String(args[0]));
   }
   return false;
+}
+
+// isMessageSearch is a call of Comments' searchMessages: through
+// behaviors.invoke, or its MCP tool.
+function isMessageSearch(step: JSONObject): boolean {
+  const args = (step.args as JSONValue[] | undefined) ?? [];
+  if (step.call === 'behaviors.invoke') {
+    const call = args[0] as JSONObject | undefined;
+    return call?.behavior === 'Comments' && call?.operation === 'searchMessages';
+  }
+  return step.call === 'tools.call' && String(args[0]) === 'comments_search_messages';
 }
 
 // symbolize writes what differs between runs as symbols: each id the

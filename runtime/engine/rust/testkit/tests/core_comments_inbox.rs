@@ -1803,7 +1803,7 @@ fn migration_4_numbers_the_stands_of_a_conversation_migration_3_holds() {
                     .collect::<superschematic_engine::storage::Result<Vec<_>>>()
             })
             .unwrap();
-        assert_eq!(ledger, [1, 2, 3, 4]);
+        assert_eq!(ledger, [1, 2, 3, 4, 5, 6]);
         engine.shutdown();
     }
 }

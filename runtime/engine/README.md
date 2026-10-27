@@ -2539,6 +2539,19 @@ engine.behaviors.invoke(me, { namespace: 'default', behavior: 'Comments', operat
   operations, asking nothing (`config(schema)` one of them): a handler
   that keeps a schema's rows only when its config names a permission the
   caller holds (`can()`) reads the config of each schema it keeps.
+- **A full-text match across the readable schemas** (Rust). A behavior's
+  full-text index ("Search on Postgres") is one per engine, its keys
+  table holding every namespace's and schema's rows, and
+  `sql.fulltext(&FullTextQuery { .. })` filters the keys by equality
+  alone. `FullTextQuery::readable`, `Some("<column>")`, names the column
+  of the keys that holds a schema's name, and both databases' statements
+  join `sql.readable()` on it (SQLite after FTS5's `CROSS JOIN`, Postgres
+  in the subquery that ranks), so one match ranks the hits of every
+  schema the caller may read together, pages them by `limit` and
+  `offset`, and lets no row of another schema leave the statement.
+  Outside a namespace operation `readable()` refuses, so such a match is
+  a `BehaviorError`; `None`, what Search passes, filters nothing more.
+  Comments' `searchMessages` is its caller.
 - A behavior no published schema composes has no storage yet; its first
   namespace call creates it, as a publish would, and runs with empty
   tables and an empty `readable()`.
@@ -3154,7 +3167,12 @@ and `finish` posts it. Each caller has its own read markers and follows,
 each message that comes to stand records a delivery for each subject that
 should hear of it, and three namespace operations read and work them
 across a namespace: the caller's `inbox`, and `claimDeliveries` and
-`settleDeliveries` for a notifier or an agent dispatcher. A delivery is
+`settleDeliveries` for a notifier or an agent dispatcher. A fourth,
+`searchMessages`, finds messages by the words of their bodies. An agent
+acting for a person (`actingFor`, "Acting for a subject") writes as
+itself, and the message records whom it was for. A message may carry a
+place in code, which `moveAnchor` follows to a newer revision, and the
+description of a file the deployment stored. A delivery is
 recorded for each subject a message mentions, and each follower, whether
 or not that subject may read the schema, and a claim returns up to 4000
 code points of the message's body. So a notifier must check that the
@@ -3171,20 +3189,20 @@ and refusal in its order.
 
 | | |
 | --- | --- |
-| Config | all optional: `maxBodyLength` (1..40000 code points, 40000 when absent; a draft too), `editWindowMs` (at least 1000; an author's edit later than that after the message's `postedAt` is refused), `blocks` (the kinds a post, an edit or a finish may give, `ref` and `action`; every kind when absent, none when empty), `moderatePermission` (edit, delete and interrupt another's message, edit past the window, purge), `pinPermission` (pin and unpin; anyone the policy lets write when absent), `resolvePermission` (resolve and reopen another's thread; only its author when absent), `composeTimeoutMs` (5000..3600000, 60000 when absent: how long a composing message's author may append nothing before the runner interrupts it), `maxDrafts` (1..50, 5 when absent: the composing messages one subject may have on an instance at once), `deliverPermission` (what `claimDeliveries` and `settleDeliveries` need for this type's deliveries; nobody claims them when absent), `maxAttempts` (1..20, 5 when absent: the claims a delivery gets), `retryBackoffMs` (1000..3600000, 30000 when absent: a failed delivery is due again after it, doubled after each later failure, at most an hour), `deliveryRetentionMs` (one day to a year, 30 days when absent: how long a delivery is kept, and how far back the inbox's mentions reach) |
+| Config | all optional: `maxBodyLength` (1..40000 code points, 40000 when absent; a draft too), `editWindowMs` (at least 1000; an author's edit later than that after the message's `postedAt` is refused), `blocks` (the kinds a post, an edit or a finish may give, `ref`, `action`, `code` and `attachment`; every kind when absent, none when empty), `moderatePermission` (edit, delete and interrupt another's message, edit past the window, move another's anchor, purge), `anchorPermission` (move the anchor of a code block on another's message; only its author and a moderator when absent), `attachments` (`{ schemes?, mediaTypes?, maxBytes? }`: the URI schemes an attachment's `uri` may use, the whole list, `["https"]` when absent, and never `javascript`, `vbscript`, `data`, `file`, `blob` or `about`; the media types it may have, `type/subtype` or `type/*`, any when absent; its largest `bytes`, no limit when absent), `pinPermission` (pin and unpin; anyone the policy lets write when absent), `resolvePermission` (resolve and reopen another's thread; only its author when absent), `composeTimeoutMs` (5000..3600000, 60000 when absent: how long a composing message's author may append nothing before the runner interrupts it), `maxDrafts` (1..50, 5 when absent: the composing messages one subject may have on an instance at once), `deliverPermission` (what `claimDeliveries` and `settleDeliveries` need for this type's deliveries; nobody claims them when absent), `maxAttempts` (1..20, 5 when absent: the claims a delivery gets), `retryBackoffMs` (1000..3600000, 30000 when absent: a failed delivery is due again after it, doubled after each later failure, at most an hour), `deliveryRetentionMs` (one day to a year, 30 days when absent: how long a delivery is kept, and how far back the inbox's mentions reach) |
 | Fields | all volatile: `messages`, the standing (posted and interrupted) messages, top-level and replies; `lastMessageAt`, the greatest `postedAt` of a standing one, absent while there is none; `threads`, `{ open, resolved }`, the standing top-level messages; `composing`, the subjects with a composing message, each once, by the id of their earliest; `unread`, the reader's own (`perReader`, so no event records it): how many standing top-level messages of others stand above its conversation marker, 0 while it has none |
-| Operations | beside the instance and writing: `post({ body, blocks?, mentions?, thread?, quotes?, clientId? })`, `begin({ thread?, quotes?, clientId? })`, `appendDraft({ message, text })` -> `{ message, offset, length }`, `finish({ message, body?, blocks?, mentions? })`, `interrupt({ message })`, `edit({ message, body?, blocks?, mentions? })`, `deleteMessage({ message })`, `purge({ message })` -> `{ message, purged }`, `react` and `unreact({ message, emoji })`, `pin` and `unpin({ message })`, `resolve` and `reopen({ thread })`, each -> the message's record but `appendDraft` and `purge`; read-only: `listMessages({ thread?, around?, before?, after?, limit? })` -> `{ items, before, after, root? }`, `getMessage({ message })`, `listEdits({ message, limit?, cursor? })` and `listReactions({ message, emoji, limit?, cursor? })` -> a page; beside the instance, `"log": false` and `"asks": "read"`, writing only the caller's own state: `markRead({ upTo, thread? })` -> `{ readUpTo, unread }` and `follow({ thread, on })` -> `{ thread, following }`; namespace operations (`"scope": "namespace"`): `inbox({ kinds?, unread?, limit?, cursor? })` -> `{ items, next }`, which reads, and `claimDeliveries({ subjects?, prefix?, limit?, ttlMs? })` -> `{ token, expiresAt, items }` and `settleDeliveries({ token, ids, outcome, error? })` -> `{ items }`, which write |
+| Operations | beside the instance and writing: `post({ body, blocks?, mentions?, thread?, quotes?, clientId? })`, `begin({ thread?, quotes?, clientId? })`, `appendDraft({ message, text })` -> `{ message, offset, length }`, `finish({ message, body?, blocks?, mentions? })`, `interrupt({ message })`, `edit({ message, body?, blocks?, mentions? })`, `deleteMessage({ message })`, `purge({ message })` -> `{ message, purged }`, `react` and `unreact({ message, emoji })`, `pin` and `unpin({ message })`, `resolve` and `reopen({ thread })`, `moveAnchor({ message, block, revision, lines })`, each -> the message's record but `appendDraft` and `purge`; read-only: `listMessages({ thread?, around?, before?, after?, limit? })` -> `{ items, before, after, root? }`, `getMessage({ message })`, `listEdits({ message, limit?, cursor? })`, `listReactions({ message, emoji, limit?, cursor? })` and `listPinned({ limit?, cursor? })` -> a page; beside the instance, `"log": false` and `"asks": "read"`, writing only the caller's own state: `markRead({ upTo, thread? })` -> `{ readUpTo, unread }` and `follow({ thread, on })` -> `{ thread, following }`; namespace operations (`"scope": "namespace"`): `inbox({ kinds?, unread?, limit?, cursor? })` -> `{ items, next }` and `searchMessages({ query, schema?, instanceId?, thread?, limit?, cursor? })` -> `{ items, next }`, which read, and `claimDeliveries({ subjects?, prefix?, limit?, ttlMs? })` -> `{ token, expiresAt, items }` and `settleDeliveries({ token, ids, outcome, error? })` -> `{ items }`, which write |
 | Signals | `typing({ thread? })` and `viewing({})`, `read` access, which a client sends and the engine delivers; `draft({ message, offset, text })`, `operation` access, which only `appendDraft` sends, after its commit |
 | Schedules | `interrupt`, every quarter of `composeTimeoutMs`, at most 15 seconds: interrupts, as the runner, each message whose author has appended nothing for `composeTimeoutMs`, oldest first, at most 1000 a run; `prune`, hourly: removes the schema's deliveries made more than `deliveryRetentionMs` ago that no live claim holds, oldest first, in batches of 1000, going on while a batch comes back full, at most 20 batches a run |
-| Guards | none of another behavior: every write is beside the instance, so an active `Lease` lets any principal post. Its own refusals are vetoes with codes and details (`no_message`, `not_a_thread`, `not_in_thread`, `deleted`, `composing`, `not_composing`, `not_author`, `not_idle`, `edit_window_passed`, `too_many_edits`, `too_many_drafts`, `draft_too_long`, `already_reacted`, `not_reacted`, `too_many_reactions`, `already_pinned`, `not_pinned`, `already_resolved`, `not_resolved`, `block_not_allowed`, `ref_not_found`, `not_configured`, `unknown_delivery`, `token_stale`, `not_claimed`), `invalid_argument` for what the `paramsSchema` cannot say, and `forbidden` for a permission the config names and the caller lacks |
+| Guards | none of another behavior: every write is beside the instance, so an active `Lease` lets any principal post. Its own refusals are vetoes with codes and details (`no_message`, `not_a_thread`, `not_in_thread`, `deleted`, `composing`, `not_composing`, `not_author`, `not_idle`, `edit_window_passed`, `too_many_edits`, `too_many_drafts`, `draft_too_long`, `already_reacted`, `not_reacted`, `too_many_reactions`, `already_pinned`, `not_pinned`, `already_resolved`, `not_resolved`, `block_not_allowed`, `attachment_not_allowed`, `ref_not_found`, `no_block`, `not_code`, `anchor_unchanged`, `not_configured`, `unknown_delivery`, `token_stale`, `not_claimed`), `invalid_argument` for what the `paramsSchema` cannot say, and `forbidden` for a permission the config names and the caller lacks |
 | Events | each write's operation event beside the instance, `seq: null`, `beside: true`, `change: { behavior, operation, params, result }`, its `result` the record the caller got; a retry of a post or a begin appends none, `appendDraft`, `markRead` and `follow` none, the namespace operations none, and the reads none |
 | `configChange` | added to a schema with instances, which start with an empty conversation; not removed from one, since their messages would stay behind. A config change applies to the next call |
 
-A message's record is `{ id, thread?, quotes?, author, via?, state, body,
-blocks, mentions, reactions, createdAt, postedAt?, stand?, editedAt?,
-edits, pinned }`, and a top-level message's adds `replies`, `lastReplyAt?`,
-`participants` (the latest ten authors of its thread's standing
-messages) and `resolved?: { by, at }`. `state` is `composing`, `posted`,
+A message's record is `{ id, thread?, quotes?, author, for?, via?, state,
+body, blocks, mentions, reactions, createdAt, postedAt?, stand?,
+editedAt?, edits, pinned }`, and a top-level message's adds `replies`,
+`lastReplyAt?`, `participants` (the latest ten authors of its thread's
+standing messages) and `resolved?: { by, for?, at }`. `state` is `composing`, `posted`,
 `interrupted` or `deleted`; a message *stands* while it is posted or
 interrupted, and `postedAt` is when it came to stand: a post's time, or
 its finish's or interrupt's. Ids are per instance, 1, 2, 3, ..., never reused. `author` is the
@@ -3192,9 +3210,11 @@ caller's subject and `via` the calling service's deployable (D37); the
 times are the engine clock's. `reactions` holds each emoji's `count` and
 whether the caller is one of them (`mine`); in an event it is the
 actor's. A block is a reference to an instance the caller may read
-(`{ kind: "ref", schema, id }`) or an action's progress (`{ kind:
-"action", title, status, data? }`); `mentions` are subjects, recorded and
-nothing more in batch 1.
+(`{ kind: "ref", schema, id }`), an action's progress (`{ kind:
+"action", title, status, data? }`), a place in code (`{ kind: "code",
+repo, path, revision, lines, snippet }`) or a file the deployment stored
+(`{ kind: "attachment", uri, name, mediaType, bytes, sha256 }`);
+`mentions` are subjects.
 
 `clientId` makes a post safe to retry: a post with one the caller has
 used returns that message as it is now and writes nothing. `edit` keeps
@@ -3256,6 +3276,61 @@ it has read, across the schemas of the namespace it may read, newest
 first, each with how many of its messages the caller has not read; an item
 with none is done, and stays.
 
+A principal acting for a subject (D77 primitive 4) writes as itself:
+Comments asks nothing of the `for`, which the policy has seen
+(`permissionPolicy` refuses it without `actFor`). The message's `for` is
+its post's or begin's, and a finish, an edit, `moveAnchor` and the
+schedule's interrupt keep it; each edit (`listEdits`' `for`), reaction
+(`listReactions`' `for`) and resolve (`resolved.for`) records its own
+caller's, and the inbox's and a claim's items carry the message's. The
+agent is the author, so an agent acting for Alice may not edit, delete,
+finish or resolve what Alice wrote, nor interrupt her draft before it is
+idle, and Alice may not edit what the agent wrote for her; its
+reaction, read marker, follows and drafts are the agent's own. The
+subject a message was written for follows its thread as a mentioned one
+does, gets no delivery of it (nor of an edit that adds its mention), and
+finds it unread in its inbox and its `unread`, since it did not write
+it; replies to it reach the subject through the follow.
+
+A code block is a place in a repository at a revision with the text the
+poster captured (`snippet`, at most 8000 code points), its `lines` the
+first and last, the first at most the last, and its `path` relative (no
+leading or trailing `/`, no `\`, no empty, `.` or `..` part), each
+refused at the block's pointer. `moveAnchor` moves it to the same code at
+another revision once a caller that knows the repository has found it (a
+git extension after a push): its author, a holder of `anchorPermission`
+or a moderator may, past `editWindowMs` too. It is not an edit: it
+writes the block alone, which takes the new `revision` and `lines` and
+adds `original` (the anchor it was first given), `moves`, `movedAt`,
+`movedBy` and `movedFor?`, and leaves the body, `editedAt`, `edits`,
+`listEdits`, the search index and the deliveries as they were. Each move
+is an event with the record after. An edit that gives a code block back
+as it was read (the move members left out) keeps its moves; one that
+changes it starts a new block. An attachment block describes a file the
+deployment's upload route stored: the engine checks its `uri`'s scheme,
+its `mediaType` and its `bytes` against `attachments`
+(`attachment_not_allowed`, `{ block, member, value, allowed }`), and an
+https `uri` for a host, and never fetches it; an edit does not hold an
+attachment it keeps to a config narrowed since. `listPinned` pages the
+pinned messages, top-level and replies, by id.
+
+`searchMessages` searches the bodies of the standing messages of every
+schema of the namespace that composes Comments and that the caller may
+read, as one full-text match kept to `sql.readable()` ("Namespace
+operations"): the first eight words of `query`, each quoted, all
+required, so quotes, `AND`, `NOT`, `NEAR` and `*` are words; `schema`,
+`instanceId` and `thread` (the top-level message and its replies)
+narrow it, and a schema the caller may not read finds nothing, never a
+refusal. Each item is `{ schema, instanceId, message, thread?, author,
+for?, via?, state, postedAt, editedAt?, rank, snippet }`, `snippet` a few
+words around the matches in parts `{ text, match }`; `rank` counts
+across pages, and a search reaches its first 1000 hits. A draft, a
+deleted or purged message and the text before an edit are never found:
+each write that makes a message stand indexes its body, an edit replaces
+it, and a delete, a purge and the instance's delete remove it, in the
+call's transaction. The order is each database's own ranking, as
+Search's is (bm25 on SQLite, `ts_rank_cd` on Postgres).
+
 Its storage is migration 2 (`conversation`): `comment_messages`,
 `comment_edits`, `comment_reactions` and `comment_conversations`, the
 last holding each instance's counters and the counts the fields read
@@ -3268,7 +3343,18 @@ row per non-empty append, and a composing message's columns,
 each existing message's `created_at`. Migration 4 (`inbox`) adds a
 message's `stand` and the conversation's `last_stand`, numbering each
 message that stood by its id, and the tables `comment_reads`,
-`comment_follows` and `comment_deliveries`.
+`comment_follows` and `comment_deliveries`. Migration 5 (`acting_for`)
+adds `for_subject` to `comment_messages`, `comment_edits` and
+`comment_reactions`, and `resolved_for` to `comment_messages`, NULL on
+every row before it. Migration 6 (`search`) adds `comment_search`, one
+row per standing message keying its body in the full-text index
+`comment_search_text`, fills both from the messages that stand, and
+indexes the pinned messages (`comment_messages_pinned`). On Postgres the
+index folds diacritics through `unaccent` where the database has it or
+the engine may create it, and folds case alone where not
+(`Unaccent::IfAvailable`, "Search on Postgres"): an engine that
+composes Comments never fails to migrate for the extension, and on such
+a database `cafe` does not find `café`.
 
 #### Revisions
 
@@ -3836,7 +3922,16 @@ Rust over the stored bytes, the same on both.
   so a role with `CREATE` on the database may; where the role may not, a
   publish that adds Search fails and says so, and an administrator runs
   `CREATE EXTENSION unaccent` once. The official image and Cloud SQL ship
-  it.
+  it. That is `create_fulltext`'s rule, `Unaccent::Required`. A behavior
+  every engine migrates, whose search is a convenience beside its data,
+  creates its index with `create_fulltext_with(name, columns,
+  Unaccent::IfAvailable)`: where `unaccent` cannot be had (the database
+  lacks it and the engine may not create it, or the role may not use it)
+  the index's configuration maps the words to `simple` alone, which folds
+  case and keeps diacritics (`cafe` does not find `café`), and the
+  migration goes on rather than fail. The configuration is made once, at
+  the index's migration: an `unaccent` created later leaves an index made
+  without it as it is. Comments' search index is one (its migration 6).
 - **The query** is an FTS5 expression on both, plain words quoted as
   above. Postgres takes FTS5's common forms, translated to a `tsquery`
   before the statement runs, since an error inside it would end the

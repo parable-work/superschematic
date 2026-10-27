@@ -310,13 +310,16 @@ fn mention_watermark(thread: Option<i64>, stand: i64) -> i64 {
 
 /// What a message that has come to stand at `stand` writes, after its own
 /// writes: a delivery to each subject it mentions and each follower of its
-/// thread but its author, then the author's follow and marker and the
-/// mentioned subjects' follows ("Deliveries", "Who follows").
+/// thread but its author and the subject it was written for, then the
+/// author's follow and marker, the follow of the subject it was written
+/// for, and the mentioned subjects' follows ("Deliveries", "Who follows",
+/// batch 4).
 pub(super) fn came_to_stand(
     cx: Cx<'_, '_>,
     id: i64,
     thread: Option<i64>,
     author: &str,
+    for_subject: Option<&str>,
     stand: i64,
     mentions: Option<&Value>,
 ) -> Result<()> {
@@ -350,6 +353,9 @@ pub(super) fn came_to_stand(
         recipients.entry(subject.as_str()).or_default().1 = true;
     }
     recipients.remove(author);
+    if let Some(subject) = for_subject {
+        recipients.remove(subject);
+    }
     for (subject, (mention, reply)) in &recipients {
         insert_delivery(cx, id, subject, *mention, *reply)?;
     }
@@ -364,8 +370,16 @@ pub(super) fn came_to_stand(
         move_conversation_marker(cx, author, stand)?;
     }
     let watermark = mention_watermark(thread, stand);
-    for subject in &mentioned {
+    // The subject it was written for follows as a mentioned one does, its
+    // markers left: it did not write the message, so it has not read it.
+    if let Some(subject) = for_subject {
         if subject != author && !subject.starts_with(ROLE) {
+            follow_on_mention(cx, followed, subject, watermark)?;
+        }
+    }
+    for subject in &mentioned {
+        if subject != author && Some(subject.as_str()) != for_subject && !subject.starts_with(ROLE)
+        {
             follow_on_mention(cx, followed, subject, watermark)?;
         }
     }
@@ -407,7 +421,7 @@ pub(super) fn edited_mentions(cx: Cx<'_, '_>, before: &Message, mentions: &Value
     let table = cx.sql().table(DELIVERIES)?;
     let key_of = |subject: &str| keyed(cx, [SqlValue::Integer(before.id), SqlValue::from(subject)]);
     for subject in now.iter().filter(|subject| !was.contains(subject)) {
-        if *subject == before.author {
+        if *subject == before.author || before.for_subject.as_deref() == Some(subject.as_str()) {
             continue;
         }
         match delivery(cx, before.id, subject)? {
