@@ -1,8 +1,8 @@
 {
   "dialect": "postgres",
-  "expanded": "5b5220902541060605b8a6cded5cd902f8681ec71ccfe406fb77231779749e54",
-  "from": "5b5220902541060605b8a6cded5cd902f8681ec71ccfe406fb77231779749e54",
-  "hash": "d99bbcc5423f719b61137f3ca6294439ec9a73df4323cfa8e364da336242ea64",
+  "expanded": "73ea422016e8b274cde26fd493fc3150e031efea7dcfff2ffc577a2b4a033ead",
+  "from": "73ea422016e8b274cde26fd493fc3150e031efea7dcfff2ffc577a2b4a033ead",
+  "hash": "38dd9806b6b6216ca626fced3890e35117360fad5981e4c5e20df14991efde88",
   "service": "fixture-user-model-db",
   "steps": [
     {
@@ -10,7 +10,7 @@
         {
           "class": "destructive",
           "id": "destructive:role/role/member",
-          "reason": "The role member gains identity.roles.read and loses identity.users.read, identity.users.write: the step sets its permissions to the seed's (identity.roles.read), replacing any an administrator gave it since it was seeded.",
+          "reason": "The role member loses identity.users.write: the step sets its permissions to the seed's (identity.roles.read), replacing any an administrator gave it since it was seeded.",
           "subject": "role/role/member"
         }
       ],

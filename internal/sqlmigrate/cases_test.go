@@ -583,9 +583,11 @@ var planCases = []planCase{
 	// fills a role of its name with no permissions, as the first
 	// registration makes one before a seed exists; one that gains a
 	// permission is updated in expand, and one that loses one in contract.
+	// The fixture seeds member with identity.roles.read: gain adds
+	// identity.users.write to it, and lose takes that away.
 	{name: "add-seed-roles", base: userModelDir, before: func(s *ir.Schema) { s.UserRoleTable().SeedRoles = nil }, rows: unseededMember},
-	{name: "seed-roles-gain", base: userModelDir, after: memberSeed("identity.users.read", "identity.users.write")},
-	{name: "seed-roles-lose", base: userModelDir, before: memberSeed("identity.users.read", "identity.users.write")},
+	{name: "seed-roles-gain", base: userModelDir, after: memberSeed("identity.roles.read", "identity.users.write")},
+	{name: "seed-roles-lose", base: userModelDir, before: memberSeed("identity.roles.read", "identity.users.write")},
 	// @table names the queue's table and @column its key's column (D85):
 	// the plan renames both, with the key's indexes, and replaces the
 	// trigger, which is named after the queue's table.
