@@ -31,6 +31,14 @@ type EnqueueOnChange struct {
 	// of the table whose column it takes. A field it leaves out takes its
 	// column's default, so every required field of the message is mapped.
 	Message map[string]string `json:"message" yaml:"message"`
+
+	// Backfill makes the migration step that creates the trigger on a
+	// table the database already has also enqueue one message for each row
+	// that meets When, as an insert of the row would (D88). Without it the
+	// trigger enqueues only for writes after it exists, and `stack queue
+	// backfill` enqueues for the rows already there. It needs an insert or
+	// an update among On.
+	Backfill bool `json:"backfill,omitempty" yaml:"backfill,omitempty"`
 }
 
 // EnqueueCondition is one condition of an EnqueueOnChange: a field of the

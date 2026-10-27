@@ -270,7 +270,7 @@ func createSessionCurrentTenantHandler(impl SessionImplementation) gohttp.Handle
 		}
 
 		// Call implementation
-		result, err := impl.CurrentTenant(r.Context())
+		result, err := impl.CurrentTenant(callerContext(r.Context()))
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -299,7 +299,7 @@ func createTenantCustomHandlerHandler(impl TenantImplementation) gohttp.HandlerF
 		}
 
 		// Call implementation
-		result, err := impl.CustomHandler(r.Context())
+		result, err := impl.CustomHandler(callerContext(r.Context()))
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -360,7 +360,7 @@ func createTenantListTenantsHandler(impl TenantImplementation) gohttp.HandlerFun
 		}
 
 		// Call implementation
-		result, err := impl.ListTenants(r.Context(), Ids, Statuses)
+		result, err := impl.ListTenants(callerContext(r.Context()), Ids, Statuses)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -407,7 +407,7 @@ func createTenantCreateTenantHandler(impl TenantImplementation) gohttp.HandlerFu
 		}
 
 		// Call implementation
-		result, err := impl.CreateTenant(r.Context(), &input)
+		result, err := impl.CreateTenant(callerContext(r.Context()), &input)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -451,7 +451,7 @@ func createTenantGetTenantHandler(impl TenantImplementation) gohttp.HandlerFunc 
 		}
 
 		// Call implementation
-		result, err := impl.GetTenant(r.Context(), Id, IncludeArchived)
+		result, err := impl.GetTenant(callerContext(r.Context()), Id, IncludeArchived)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -512,7 +512,7 @@ func createTenantUpdateSecretHandler(impl TenantImplementation) gohttp.HandlerFu
 		}
 
 		// Call implementation
-		result, err := impl.UpdateSecret(r.Context(), Id, requestBody.Secret)
+		result, err := impl.UpdateSecret(callerContext(r.Context()), Id, requestBody.Secret)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())

@@ -177,7 +177,7 @@ func (r *EntryRepository) batchAccountByIDs(ctx context.Context, ids []types.Ide
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&AccountFilter{
 			Id: &UUIDFilter{
@@ -255,7 +255,7 @@ func (r *EntryRepository) batchTransferByIDs(ctx context.Context, ids []types.Id
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&AccountFilter{
 			Id: &UUIDFilter{
@@ -1104,7 +1104,8 @@ func (r *EntryRepository) FindOne(ctx context.Context, filter *EntryFilter, opts
 	return result, nil
 }
 
-// FindMany retrieves multiple Entry records matching the filter
+// FindMany retrieves multiple Entry records matching the filter, and how
+// many it matches in all, -1 when the options skip the count
 func (r *EntryRepository) FindMany(ctx context.Context, filter *EntryFilter, opts *EntryFindOptions) ([]*types.Entry, int, error) {
 	if opts == nil || opts.Fields.IsZero() {
 		return nil, 0, fmt.Errorf("fields must be specified in FindOptions for performance")
@@ -1145,18 +1146,20 @@ func (r *EntryRepository) FindMany(ctx context.Context, filter *EntryFilter, opt
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM entry%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
 
-	// Get total count
-	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM entry%s`, whereClause)
+	// Get total count, unless the options skip it (D89)
+	totalCount := -1
+	if !opts.SkipCount {
+		countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM entry%s`, whereClause)
 
-	var totalCount int
-	var countRow pgx.Row
-	if r.tx != nil {
-		countRow = r.tx.QueryRow(ctx, countQuery, args...)
-	} else {
-		countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
-	}
-	if err := countRow.Scan(&totalCount); err != nil {
-		return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		var countRow pgx.Row
+		if r.tx != nil {
+			countRow = r.tx.QueryRow(ctx, countQuery, args...)
+		} else {
+			countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
+		}
+		if err := countRow.Scan(&totalCount); err != nil {
+			return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		}
 	}
 
 	results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
@@ -1164,6 +1167,37 @@ func (r *EntryRepository) FindMany(ctx context.Context, filter *EntryFilter, opt
 		return nil, 0, err
 	}
 	return results, totalCount, nil
+}
+
+// findRelated reads the rows filter finds as FindMany reads them, with no
+// count: the read that loads a relation's rows for the rows of another
+// table's read (D90), which counts nothing, as the TypeScript
+// repositories' include does.
+func (r *EntryRepository) findRelated(ctx context.Context, filter *EntryFilter, opts *EntryFindOptions) ([]*types.Entry, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in FindOptions for performance")
+	}
+	fieldStrings := entryFieldStrings(opts.Fields)
+	if err := validateFields(fieldStrings, EntryAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "entry")
+	if selectFields == "" {
+		return nil, fmt.Errorf("no valid fields specified")
+	}
+	var args []interface{}
+	whereClause := filter.buildWhereClause(&args, 0)
+	if !opts.IncludeDeleted {
+		if whereClause == "" {
+			whereClause = " WHERE deleted_at IS NULL"
+		} else {
+			whereClause += " AND deleted_at IS NULL"
+		}
+	}
+	orderByClause := buildEntryOrderByClause(opts.OrderBy, `entry`)
+	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
+	query := fmt.Sprintf(`SELECT %s FROM entry%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
+	return r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
 }
 
 // entryFieldStrings are the columns fields selects, in OrderedMembers
@@ -1827,10 +1861,134 @@ func (r *EntryRepository) CreateOne(ctx context.Context, input *types.Entry) (*t
 
 // entryUniqueKeys are the conflict targets of Entry's unique keys, and
 // the assignment an upsert that sets nothing writes, so the row it
-// conflicts with is returned (sqlutil.UniqueKey, D79).
-var entryUniqueKeys = map[EntryUniqueKey]struct{ conflict, keep string }{
-	EntryUniqueById:                {`(id)`, `id = EXCLUDED.id`},
-	EntryUniqueByAccountExternalId: {`(account_id, external_id) WHERE deleted_at IS NULL`, `account_id = EXCLUDED.account_id`},
+// conflicts with is returned (sqlutil.UniqueKey, D79); the read of the rows
+// that hold keys, which an upsert only if changed reads back, empty for a
+// key over an expression, and the key's columns as a batch insert's cells
+// name them (D89).
+var entryUniqueKeys = map[EntryUniqueKey]struct {
+	conflict, keep, rows string
+	columns              []string
+}{
+	EntryUniqueById:                {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE (id) IN (%s)`, []string{`id`}},
+	EntryUniqueByAccountExternalId: {`(account_id, external_id) WHERE deleted_at IS NULL`, `account_id = EXCLUDED.account_id`, `SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE (account_id, external_id) IN (%s) AND (deleted_at IS NULL)`, []string{`account_id`, `external_id`}},
+}
+
+// entryKeyOf is the text of row's values of the unique key on, as
+// UpsertMany matches the rows a statement returns to its inputs, or false
+// when the insert leaves one of them to the database (D89).
+func entryKeyOf(on EntryUniqueKey, row *types.Entry) (string, bool) {
+	switch on {
+	case EntryUniqueById:
+		return upsertKeyText(upsertKeyValue(row.Id, false))
+	case EntryUniqueByAccountExternalId:
+		return upsertKeyText(upsertKeyValue(row.Account.Id, false), upsertKeyValue(row.ExternalId, true))
+	}
+	return "", false
+}
+
+// database is the Database the repository runs on.
+func (r *EntryRepository) database() *Database {
+	if r.txDB != nil {
+		return r.txDB
+	}
+	return r.db
+}
+
+// scanReturned scans a row of every column of Entry, as a write returns
+// it, and, with inserted, the flag an upsert returns after them (D89).
+func (r *EntryRepository) scanReturned(row pgx.Row, inserted *bool) (*types.Entry, error) {
+	result := &types.Entry{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	var tempBookedOn pgtype.Date
+	var tempMemo sql.NullString
+	var tempExternalId sql.NullString
+	var tempTags []*string
+	var tempMetadata []byte
+	var tempReviewedAt *types.TemporalDateTime
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+	var tempRelAccount *types.IdentityUUID
+	var tempRelTransfer *types.IdentityUUID
+
+	// Scan all fields in schema order (matches DDL column order)
+	dest := []any{
+
+		&result.Id,
+
+		&tempRelAccount,
+
+		&tempRelTransfer,
+
+		&result.AmountCents,
+
+		&tempBookedOn,
+
+		&result.Kind,
+
+		&tempMemo,
+
+		&tempExternalId,
+
+		&tempTags,
+
+		&tempMetadata,
+
+		&tempReviewedAt,
+
+		&result.CreatedAt,
+
+		&result.CreatedBy,
+
+		&result.UpdatedAt,
+
+		&result.UpdatedBy,
+
+		&result.DeletedAt,
+
+		&result.DeletedBy,
+	}
+	if inserted != nil {
+		dest = append(dest, inserted)
+	}
+	if err := row.Scan(dest...); err != nil {
+		return nil, err
+	}
+
+	// Copy nullable fields when present
+
+	if tempBookedOn.Valid {
+		result.BookedOn = types.TemporalDate(tempBookedOn.Time.Format("2006-01-02"))
+	}
+	if tempMemo.Valid {
+		result.Memo = tempMemo.String
+	}
+	if tempExternalId.Valid {
+		result.ExternalId = tempExternalId.String
+	}
+	if err := copyListElements("tags", tempTags, &result.Tags); err != nil {
+		return nil, fmt.Errorf("failed to decode field tags: %w", err)
+	}
+	if len(tempMetadata) > 0 {
+		if err := unmarshalGenericJSONFieldValue(tempMetadata, &result.Metadata); err != nil {
+			return nil, fmt.Errorf("failed to decode JSON field metadata: %w", err)
+		}
+	}
+	if tempReviewedAt != nil {
+		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+		result.ReviewedAt = tempReviewedAt
+	}
+
+	// Set relationship IDs from scanned FK values
+	if tempRelAccount != nil {
+		result.Account.Id = entryUUIDPtr(*tempRelAccount)
+	}
+	if tempRelTransfer != nil {
+		// Initialize pointer for optional relationship before setting ID
+		result.Transfer = &types.Account{Id: entryUUIDPtr(*tempRelTransfer)}
+	}
+
+	return result, nil
 }
 
 // UpsertOne inserts input, or, when a row already holds its value of the
@@ -1840,13 +1998,54 @@ var entryUniqueKeys = map[EntryUniqueKey]struct{ conflict, keep string }{
 // sets no field leaves the row as it is. A soft-deleted row that holds the key is
 // left as it is, and UpsertOne returns ErrNotFound.
 func (r *EntryRepository) UpsertOne(ctx context.Context, input *types.Entry, on EntryUniqueKey, update *EntryUpdate) (*types.Entry, error) {
+	result, err := r.UpsertOneResult(ctx, input, on, update, nil)
+	if err != nil {
+		return nil, err
+	}
+	return result.Row, nil
+}
+
+// UpsertOneResult is UpsertOne, and what it did with the row: inserted it,
+// updated the row that held the key, or left that row as it was (D89).
+// With opts.OnlyIfChanged it updates the row only when a field the update
+// sets differs from what the row holds, which it reads back otherwise. A write that
+// may take more than one statement runs in a transaction of its own when
+// none is open.
+func (r *EntryRepository) UpsertOneResult(ctx context.Context, input *types.Entry, on EntryUniqueKey, update *EntryUpdate, opts *UpsertOptions) (UpsertResult[*types.Entry], error) {
+	var none UpsertResult[*types.Entry]
 	key, ok := entryUniqueKeys[on]
 	if !ok {
-		return nil, fmt.Errorf("orm: Entry has no unique key %q", string(on))
+		return none, fmt.Errorf("orm: Entry has no unique key %q", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if opts.OnlyIfChanged && key.rows == "" {
+		return none, upsertExpressionKey("UpsertOneResult", "Entry", string(on))
 	}
 	if update == nil {
 		update = &EntryUpdate{}
 	}
+	write := func(repo *EntryRepository) (UpsertResult[*types.Entry], error) {
+		result, err := repo.upsertRow(ctx, input, on, update, opts.OnlyIfChanged)
+		if err != nil {
+			return none, err
+		}
+		return *result, nil
+	}
+	if !opts.OnlyIfChanged {
+		return write(r)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (UpsertResult[*types.Entry], error) {
+		return write(&EntryRepository{tx: tx, txDB: r.database()})
+	})
+}
+
+// upsertRow is UpsertOneResult on the repository's connection: the upsert,
+// a read of the row it left as it was, only if changed, and the second
+// statement of an encrypted field.
+func (r *EntryRepository) upsertRow(ctx context.Context, input *types.Entry, on EntryUniqueKey, update *EntryUpdate, onlyIfChanged bool) (*UpsertResult[*types.Entry], error) {
+	key := entryUniqueKeys[on]
 	// Set audit fields
 	if !HasUserID(ctx) {
 		return nil, ErrNoUserInContext
@@ -1990,20 +2189,26 @@ func (r *EntryRepository) UpsertOne(ctx context.Context, input *types.Entry, on 
 
 	// Build the update of the row the key conflicts with, its placeholders
 	// numbered after the insert's
-	var setClauses []string
+	var setClauses, compareCurrent, compareNext []string
 	if update.AmountCents != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`amount_cents = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `entry.amount_cents`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.AmountCents)
 	}
 	if update.BookedOn != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`booked_on = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `entry.booked_on`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.BookedOn)
 	}
 	if update.Kind != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`kind = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `entry.kind`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.Kind)
 	}
 	if update.Memo != nil && update.MemoSetNull {
@@ -2011,9 +2216,13 @@ func (r *EntryRepository) UpsertOne(ctx context.Context, input *types.Entry, on 
 	}
 	if update.MemoSetNull {
 		setClauses = append(setClauses, `memo = NULL`)
+		compareCurrent = append(compareCurrent, `entry.memo`)
+		compareNext = append(compareNext, `NULL`)
 	} else if update.Memo != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`memo = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `entry.memo`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.Memo)
 	}
 	if update.ExternalId != nil && update.ExternalIdSetNull {
@@ -2021,14 +2230,20 @@ func (r *EntryRepository) UpsertOne(ctx context.Context, input *types.Entry, on 
 	}
 	if update.ExternalIdSetNull {
 		setClauses = append(setClauses, `external_id = NULL`)
+		compareCurrent = append(compareCurrent, `entry.external_id`)
+		compareNext = append(compareNext, `NULL`)
 	} else if update.ExternalId != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`external_id = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `entry.external_id`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.ExternalId)
 	}
 	if update.Tags != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`tags = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `entry.tags`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.Tags)
 	}
 	if update.Metadata != nil && update.MetadataSetNull {
@@ -2036,9 +2251,13 @@ func (r *EntryRepository) UpsertOne(ctx context.Context, input *types.Entry, on 
 	}
 	if update.MetadataSetNull {
 		setClauses = append(setClauses, `metadata = NULL`)
+		compareCurrent = append(compareCurrent, `entry.metadata`)
+		compareNext = append(compareNext, `NULL`)
 	} else if update.Metadata != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`metadata = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `entry.metadata`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		jsonValueMetadata, err := marshalJSONFieldValue(*update.Metadata)
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal JSON field metadata: %w", err)
@@ -2050,15 +2269,21 @@ func (r *EntryRepository) UpsertOne(ctx context.Context, input *types.Entry, on 
 	}
 	if update.ReviewedAtSetNull {
 		setClauses = append(setClauses, `reviewed_at = NULL`)
+		compareCurrent = append(compareCurrent, `entry.reviewed_at`)
+		compareNext = append(compareNext, `NULL`)
 	} else if update.ReviewedAt != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`reviewed_at = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `entry.reviewed_at`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, time.Time(*update.ReviewedAt))
 	}
 	// Handle relationship foreign key: account
 	if update.AccountID != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf("account_id = $%d", paramNum))
+		compareCurrent = append(compareCurrent, `entry.account_id`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, update.AccountID.ToUUID())
 	}
 	// Handle relationship foreign key: transfer
@@ -2067,13 +2292,18 @@ func (r *EntryRepository) UpsertOne(ctx context.Context, input *types.Entry, on 
 	}
 	if update.TransferIDSetNull {
 		setClauses = append(setClauses, "transfer_id = NULL")
+		compareCurrent = append(compareCurrent, `entry.transfer_id`)
+		compareNext = append(compareNext, `NULL`)
 	} else if update.TransferID != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf("transfer_id = $%d", paramNum))
+		compareCurrent = append(compareCurrent, `entry.transfer_id`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, update.TransferID.ToUUID())
 	}
 
-	if len(setClauses) == 0 {
+	assigned := len(setClauses)
+	if assigned == 0 {
 		// An update that sets no field leaves the row as it is, stamps and
 		// all, and returns it.
 		setClauses = append(setClauses, key.keep)
@@ -2097,11 +2327,12 @@ func (r *EntryRepository) UpsertOne(ctx context.Context, input *types.Entry, on 
 	}
 
 	query := fmt.Sprintf(
-		`INSERT INTO entry (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s WHERE entry.deleted_at IS NULL RETURNING "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by"`,
+		`INSERT INTO entry (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by", (xmax = 0) AS _inserted`,
 		strings.Join(fields, ", "),
-		strings.Join(placeholders, ", "),
+		"("+strings.Join(placeholders, ", ")+")",
 		key.conflict,
 		strings.Join(setClauses, ", "),
+		upsertWhere(`entry.deleted_at IS NULL`, compareCurrent, compareNext, onlyIfChanged),
 	)
 
 	// Execute query
@@ -2111,100 +2342,468 @@ func (r *EntryRepository) UpsertOne(ctx context.Context, input *types.Entry, on 
 	} else {
 		row = r.db.pool.QueryRow(ctx, query, values...)
 	}
-
-	// Scan result
-	result := &types.Entry{}
-	// Create temporary variables for nullable fields that need pointer scanning
-
-	var tempBookedOn pgtype.Date
-	var tempMemo sql.NullString
-	var tempExternalId sql.NullString
-	var tempTags []*string
-	var tempMetadata []byte
-	var tempReviewedAt *types.TemporalDateTime
-
-	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
-	var tempRelAccount *types.IdentityUUID
-	var tempRelTransfer *types.IdentityUUID
-
-	// Scan all fields in schema order (matches DDL column order)
-	if err := row.Scan(
-
-		&result.Id,
-
-		&tempRelAccount,
-
-		&tempRelTransfer,
-
-		&result.AmountCents,
-
-		&tempBookedOn,
-
-		&result.Kind,
-
-		&tempMemo,
-
-		&tempExternalId,
-
-		&tempTags,
-
-		&tempMetadata,
-
-		&tempReviewedAt,
-
-		&result.CreatedAt,
-
-		&result.CreatedBy,
-
-		&result.UpdatedAt,
-
-		&result.UpdatedBy,
-
-		&result.DeletedAt,
-
-		&result.DeletedBy,
-	); err != nil {
-		if err == pgx.ErrNoRows {
-			// The row the key conflicts with is soft-deleted.
-			return nil, ErrNotFound
+	var inserted bool
+	scanned, err := r.scanReturned(row, &inserted)
+	var upserted *UpsertResult[*types.Entry]
+	switch {
+	case err == nil:
+		status := UpsertUnchanged
+		if inserted {
+			status = UpsertInserted
+		} else if assigned > 0 {
+			status = UpsertUpdated
 		}
+		upserted = &UpsertResult[*types.Entry]{Row: scanned, Status: status}
+	case err != pgx.ErrNoRows:
 		return nil, fmt.Errorf("failed to scan result: %w", err)
+	case !onlyIfChanged:
+		// The row the key conflicts with is soft-deleted.
+		return nil, ErrNotFound
+	default:
+		// The row the key conflicts with already held the update's values.
+		keyValues, ok := upsertCellValues(upsertCells(fields, values), key.columns)
+		if !ok {
+			return nil, fmt.Errorf("no Entry row holds an unset %s: %w", string(on), ErrNotFound)
+		}
+		found, err := r.rowsOfKeys(ctx, on, [][]any{keyValues}, []*types.Entry{input})
+		if err != nil {
+			return nil, err
+		}
+		upserted = &UpsertResult[*types.Entry]{Row: found[0], Status: UpsertUnchanged}
+	}
+	return upserted, nil
+}
+
+// UpsertMany inserts each input, or, when a row already holds its value of
+// the unique key on, sets each field update names of that row to the value
+// the input would have inserted, and returns each input's row and what it
+// did with it, in the inputs' order (D89). One statement writes a batch of
+// rows, opts.Batch or as many as Postgres binds the parameters of, and more
+// rows take a statement per batch, in one transaction; a write that may
+// take more than one statement runs in a transaction of its own when none
+// is open. An update that names no field leaves each row that holds a key
+// as it is. A soft-deleted row that holds a key is left as it is, and
+// UpsertMany returns ErrNotFound. Two inputs of one batch that hold one key fail
+// the statement, and a key over an expression, whose rows the statement's
+// cannot be matched to the inputs by, is refused.
+func (r *EntryRepository) UpsertMany(ctx context.Context, inputs []*types.Entry, on EntryUniqueKey, update EntryFields, opts *UpsertOptions) ([]UpsertResult[*types.Entry], error) {
+	key, ok := entryUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: Entry has no unique key %q", string(on))
+	}
+	if key.rows == "" {
+		return nil, upsertExpressionKey("UpsertMany", "Entry", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if update.Id {
+		return nil, fmt.Errorf("orm: UpsertMany of Entry sets the fields an update sets, not id")
+	}
+	if update.CreatedAt {
+		return nil, fmt.Errorf("orm: UpsertMany of Entry sets the fields an update sets, not createdAt")
+	}
+	if update.CreatedBy {
+		return nil, fmt.Errorf("orm: UpsertMany of Entry sets the fields an update sets, not createdBy")
+	}
+	if update.UpdatedAt {
+		return nil, fmt.Errorf("orm: UpsertMany of Entry sets the fields an update sets, not updatedAt")
+	}
+	if update.UpdatedBy {
+		return nil, fmt.Errorf("orm: UpsertMany of Entry sets the fields an update sets, not updatedBy")
+	}
+	if update.DeletedAt {
+		return nil, fmt.Errorf("orm: UpsertMany of Entry sets the fields an update sets, not deletedAt")
+	}
+	if update.DeletedBy {
+		return nil, fmt.Errorf("orm: UpsertMany of Entry sets the fields an update sets, not deletedBy")
+	}
+	batch, err := upsertBatch("Entry", opts.Batch, 4368)
+	if err != nil {
+		return nil, err
+	}
+	if len(inputs) == 0 {
+		return []UpsertResult[*types.Entry]{}, nil
+	}
+	if len(inputs) <= batch && !opts.OnlyIfChanged {
+		return r.upsertBatches(ctx, inputs, on, update, batch, false)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]UpsertResult[*types.Entry], error) {
+		return (&EntryRepository{tx: tx, txDB: r.database()}).upsertBatches(ctx, inputs, on, update, batch, opts.OnlyIfChanged)
+	})
+}
+
+// upsertBatches is UpsertMany on the repository's connection, a batch at a
+// time: each batch's statement, a read of the rows it left as they were,
+// only if changed, and the second statement of each encrypted field.
+func (r *EntryRepository) upsertBatches(ctx context.Context, inputs []*types.Entry, on EntryUniqueKey, update EntryFields, batch int, onlyIfChanged bool) ([]UpsertResult[*types.Entry], error) {
+	key := entryUniqueKeys[on]
+
+	// Set audit fields
+	if !HasUserID(ctx) {
+		return nil, ErrNoUserInContext
+	}
+	for _, input := range inputs {
+		input.CreatedBy = GetUserID(ctx)
+	}
+	for _, input := range inputs {
+		input.UpdatedBy = GetUserID(ctx)
 	}
 
-	// Copy nullable fields when present
+	// Each field update names takes the value the input would have
+	// inserted, which an upsert only if changed compares with the row's.
+	var setClauses, compareCurrent, compareNext []string
+	if update.AmountCents {
+		setClauses = append(setClauses, `amount_cents = EXCLUDED.amount_cents`)
+		compareCurrent = append(compareCurrent, `entry.amount_cents`)
+		compareNext = append(compareNext, `EXCLUDED.amount_cents`)
+	}
+	if update.BookedOn {
+		setClauses = append(setClauses, `booked_on = EXCLUDED.booked_on`)
+		compareCurrent = append(compareCurrent, `entry.booked_on`)
+		compareNext = append(compareNext, `EXCLUDED.booked_on`)
+	}
+	if update.Kind {
+		setClauses = append(setClauses, `kind = EXCLUDED.kind`)
+		compareCurrent = append(compareCurrent, `entry.kind`)
+		compareNext = append(compareNext, `EXCLUDED.kind`)
+	}
+	if update.Memo {
+		setClauses = append(setClauses, `memo = EXCLUDED.memo`)
+		compareCurrent = append(compareCurrent, `entry.memo`)
+		compareNext = append(compareNext, `EXCLUDED.memo`)
+	}
+	if update.ExternalId {
+		setClauses = append(setClauses, `external_id = EXCLUDED.external_id`)
+		compareCurrent = append(compareCurrent, `entry.external_id`)
+		compareNext = append(compareNext, `EXCLUDED.external_id`)
+	}
+	if update.Tags {
+		setClauses = append(setClauses, `tags = EXCLUDED.tags`)
+		compareCurrent = append(compareCurrent, `entry.tags`)
+		compareNext = append(compareNext, `EXCLUDED.tags`)
+	}
+	if update.Metadata {
+		setClauses = append(setClauses, `metadata = EXCLUDED.metadata`)
+		compareCurrent = append(compareCurrent, `entry.metadata`)
+		compareNext = append(compareNext, `EXCLUDED.metadata`)
+	}
+	if update.ReviewedAt {
+		setClauses = append(setClauses, `reviewed_at = EXCLUDED.reviewed_at`)
+		compareCurrent = append(compareCurrent, `entry.reviewed_at`)
+		compareNext = append(compareNext, `EXCLUDED.reviewed_at`)
+	}
+	if update.Account {
+		setClauses = append(setClauses, `account_id = EXCLUDED.account_id`)
+		compareCurrent = append(compareCurrent, `entry.account_id`)
+		compareNext = append(compareNext, `EXCLUDED.account_id`)
+	}
+	if update.Transfer {
+		setClauses = append(setClauses, `transfer_id = EXCLUDED.transfer_id`)
+		compareCurrent = append(compareCurrent, `entry.transfer_id`)
+		compareNext = append(compareNext, `EXCLUDED.transfer_id`)
+	}
 
-	if tempBookedOn.Valid {
-		result.BookedOn = types.TemporalDate(tempBookedOn.Time.Format("2006-01-02"))
-	}
-	if tempMemo.Valid {
-		result.Memo = tempMemo.String
-	}
-	if tempExternalId.Valid {
-		result.ExternalId = tempExternalId.String
-	}
-	if err := copyListElements("tags", tempTags, &result.Tags); err != nil {
-		return nil, fmt.Errorf("failed to decode field tags: %w", err)
-	}
-	if len(tempMetadata) > 0 {
-		if err := unmarshalGenericJSONFieldValue(tempMetadata, &result.Metadata); err != nil {
-			return nil, fmt.Errorf("failed to decode JSON field metadata: %w", err)
+	results := make([]UpsertResult[*types.Entry], 0, len(inputs))
+	for start := 0; start < len(inputs); start += batch {
+		chunk := inputs[start:min(start+batch, len(inputs))]
+		prepared := chunk
+
+		// The batch's rows, as CreateMany writes them.
+		rows := make([][]batchInsertCell, 0, len(prepared))
+		for _, input := range prepared {
+			var row []batchInsertCell
+			// Primary key: id. Schema-owned identities may supply a stable
+			// UUID, matching CreateOne; a row without one takes the generated default.
+			{
+				cell := batchInsertCell{column: `id`}
+				var zeroPrimaryKey types.IdentityUUID
+				if primaryKey, ok := entryUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+					cell.value, cell.set = primaryKey.ToUUID(), true
+				}
+				row = append(row, cell)
+			}
+			// Required field: amountCents
+			{
+				cell := batchInsertCell{column: `amount_cents`, set: true}
+				cell.value = input.AmountCents
+				row = append(row, cell)
+			}
+			// Required field: bookedOn
+			{
+				cell := batchInsertCell{column: `booked_on`, set: true}
+				cell.value = input.BookedOn
+				row = append(row, cell)
+			}
+			// Required field: kind
+			{
+				cell := batchInsertCell{column: `kind`, set: true}
+				// An unset enum takes its schema default; "" is never a member.
+				cell.value = input.Kind
+				if input.Kind == "" {
+					cell.value = types.EntryKind("debit")
+				}
+				row = append(row, cell)
+			}
+			// Optional field: memo
+			{
+				cell := batchInsertCell{column: `memo`}
+				if !reflect.ValueOf(input.Memo).IsZero() {
+					cell.value = input.Memo
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
+			// Optional field: externalId
+			{
+				cell := batchInsertCell{column: `external_id`}
+				if !reflect.ValueOf(input.ExternalId).IsZero() {
+					cell.value = input.ExternalId
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
+			// Required field: tags
+			{
+				cell := batchInsertCell{column: `tags`, set: true}
+				cell.value = input.Tags
+				row = append(row, cell)
+			}
+			// Optional field: metadata
+			{
+				cell := batchInsertCell{column: `metadata`}
+				if input.Metadata != nil {
+					jsonValue, err := marshalJSONFieldValue(input.Metadata)
+					if err != nil {
+						return nil, fmt.Errorf("failed to marshal JSON field metadata: %w", err)
+					}
+					cell.value = jsonValue
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
+			// Optional field: reviewedAt
+			{
+				cell := batchInsertCell{column: `reviewed_at`}
+				if input.ReviewedAt != nil {
+					cell.value = time.Time(*input.ReviewedAt)
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
+			// Required field: createdBy
+			{
+				cell := batchInsertCell{column: `created_by`, set: true}
+				cell.value = input.CreatedBy.ToUUID()
+				row = append(row, cell)
+			}
+			// Required field: updatedBy
+			{
+				cell := batchInsertCell{column: `updated_by`, set: true}
+				cell.value = input.UpdatedBy.ToUUID()
+				row = append(row, cell)
+			}
+			// Optional field: deletedAt
+			{
+				cell := batchInsertCell{column: `deleted_at`}
+				if input.DeletedAt != nil {
+					cell.value = time.Time(*input.DeletedAt)
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
+			// Optional field: deletedBy
+			{
+				cell := batchInsertCell{column: `deleted_by`}
+				if input.DeletedBy != nil {
+					cell.value = input.DeletedBy.ToUUID()
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
+
+			// Relationship foreign key columns, matching CreateOne
+			// Relationship: account (FK: account_id)
+			{
+				cell := batchInsertCell{column: `account_id`}
+				var zeroId types.IdentityUUID
+				if relID, ok := entryUUIDValue(input.Account.Id); ok && relID != zeroId {
+					cell.value, cell.set = relID.ToUUID(), true
+				}
+				row = append(row, cell)
+			}
+			// Relationship: transfer (FK: transfer_id)
+			{
+				cell := batchInsertCell{column: `transfer_id`}
+				var zeroId types.IdentityUUID
+				if input.Transfer != nil {
+					if relID, ok := entryUUIDValue(input.Transfer.Id); ok && relID != zeroId {
+						cell.value, cell.set = relID.ToUUID(), true
+					}
+				}
+				row = append(row, cell)
+			}
+			rows = append(rows, row)
+		}
+		fieldNames, valuePlaceholders, values := buildBatchInsert(rows)
+		assignments := append([]string(nil), setClauses...)
+		if len(setClauses) == 0 {
+			// An update that names no field leaves each row as it is.
+			assignments = append(assignments, key.keep)
+		} else {
+			values = append(values, time.Now())
+			assignments = append(assignments, fmt.Sprintf("updated_at = $%d", len(values)))
+			if HasUserID(ctx) {
+				values = append(values, GetUserID(ctx))
+				assignments = append(assignments, fmt.Sprintf("updated_by = $%d", len(values)))
+			}
+		}
+		query := fmt.Sprintf(
+			`INSERT INTO entry (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by", (xmax = 0) AS _inserted`,
+			strings.Join(fieldNames, ", "),
+			strings.Join(valuePlaceholders, ", "),
+			key.conflict,
+			strings.Join(assignments, ", "),
+			upsertWhere(`entry.deleted_at IS NULL`, compareCurrent, compareNext, onlyIfChanged),
+		)
+		returned, inserted, err := r.upsertReturned(ctx, query, values)
+		if err != nil {
+			return nil, err
+		}
+
+		// A row is its input's by the key's values; an input that sets none
+		// of them, whose key the database generates, takes the next row whose
+		// key no input holds, as the rows come back in the inputs' order.
+		keys := make([]string, len(prepared))
+		set := make([]bool, len(prepared))
+		for i, input := range prepared {
+			keys[i], set[i] = entryKeyOf(on, input)
+		}
+		matcher := newUpsertMatcher(keys, set)
+		matched := make([]*UpsertResult[*types.Entry], len(prepared))
+		for n, row := range returned {
+			text, ok := entryKeyOf(on, row)
+			i := matcher.take(text, ok)
+			if i < 0 {
+				return nil, fmt.Errorf("orm: UpsertMany of Entry wrote a row whose %s no input holds", string(on))
+			}
+			status := UpsertUnchanged
+			if inserted[n] {
+				status = UpsertInserted
+			} else if len(setClauses) > 0 {
+				status = UpsertUpdated
+			}
+			matched[i] = &UpsertResult[*types.Entry]{Row: row, Status: status}
+		}
+
+		// A row it did not return is one it left as it was, only if changed,
+		// which it reads back by its key, or a deleted one.
+		var left []int
+		for i := range matched {
+			if matched[i] == nil {
+				left = append(left, i)
+			}
+		}
+		if len(left) > 0 {
+			if !onlyIfChanged {
+				return nil, fmt.Errorf("the Entry row that holds the %s of input %d is deleted: %w", string(on), start+left[0], ErrNotFound)
+			}
+			keyValues := make([][]any, len(left))
+			wanted := make([]*types.Entry, len(left))
+			for n, i := range left {
+				cells, ok := upsertCellValues(rows[i], key.columns)
+				if !ok {
+					return nil, fmt.Errorf("no Entry row holds an unset %s: %w", string(on), ErrNotFound)
+				}
+				keyValues[n], wanted[n] = cells, prepared[i]
+			}
+			found, err := r.rowsOfKeys(ctx, on, keyValues, wanted)
+			if err != nil {
+				return nil, err
+			}
+			for n, i := range left {
+				matched[i] = &UpsertResult[*types.Entry]{Row: found[n], Status: UpsertUnchanged}
+			}
+		}
+		for _, result := range matched {
+			results = append(results, *result)
 		}
 	}
-	if tempReviewedAt != nil {
-		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
-		result.ReviewedAt = tempReviewedAt
-	}
+	return results, nil
+}
 
-	// Set relationship IDs from scanned FK values
-	if tempRelAccount != nil {
-		result.Account.Id = entryUUIDPtr(*tempRelAccount)
+// upsertReturned runs an upsert's statement, query with values, and scans
+// each row it returns and whether it inserted it.
+func (r *EntryRepository) upsertReturned(ctx context.Context, query string, values []any) ([]*types.Entry, []bool, error) {
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
 	}
-	if tempRelTransfer != nil {
-		// Initialize pointer for optional relationship before setting ID
-		result.Transfer = &types.Account{Id: entryUUIDPtr(*tempRelTransfer)}
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to execute upsert: %w", err)
 	}
+	defer rows.Close()
+	var returned []*types.Entry
+	var inserted []bool
+	for rows.Next() {
+		var flag bool
+		row, err := r.scanReturned(rows, &flag)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		returned = append(returned, row)
+		inserted = append(inserted, flag)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	return returned, inserted, nil
+}
 
-	return result, nil
+// rowsOfKeys reads the rows that hold keys, each the values of the unique
+// key on an input's insert binds, among the rows the key's index holds, in
+// the inputs' order: the rows an upsert only if changed left as they were
+// (D89). A key no live row holds is ErrNotFound.
+func (r *EntryRepository) rowsOfKeys(ctx context.Context, on EntryUniqueKey, keys [][]any, inputs []*types.Entry) ([]*types.Entry, error) {
+	tuples, values := upsertKeyTuples(keys)
+	query := fmt.Sprintf(entryUniqueKeys[on].rows, strings.Join(tuples, ", "))
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the rows the upsert left: %w", err)
+	}
+	defer rows.Close()
+	found := map[string]*types.Entry{}
+	for rows.Next() {
+		row, err := r.scanReturned(rows, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		if text, ok := entryKeyOf(on, row); ok {
+			found[text] = row
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	out := make([]*types.Entry, len(inputs))
+	for i, input := range inputs {
+		text, _ := entryKeyOf(on, input)
+		row := found[text]
+		if row == nil || upsertHolds(row.DeletedAt) {
+			return nil, fmt.Errorf("the Entry row that holds the key %s is deleted: %w", string(on), ErrNotFound)
+		}
+		out[i] = row
+	}
+	return out, nil
 }
 
 // CreateMany inserts multiple Entry records in a single statement

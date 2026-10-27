@@ -51,9 +51,10 @@ func TestTSWriterRoundTripsUserTraits(t *testing.T) {
 	}
 	source := writtenSource(t, schema, FormatTS)
 	for _, want := range []string{
-		`import { AutoGenerate, Relation, User, UserRole, key, unique } from "@superschematic/db";`,
+		`import { AutoGenerate, Relation, User, UserRole, key, seedRoles, unique } from "@superschematic/db";`,
 		`export abstract class Account extends Auditable implements User<{ login: "email"; name: "displayName" }> {`,
-		`export abstract class Role extends Auditable implements UserRole {`,
+		`@seedRoles([{ name: "reader", permissions: ["notes.read"] }, { name: "editor", permissions: ["notes.read", "notes.write"] }])` + "\n" +
+			`export abstract class Role extends Auditable implements UserRole {`,
 		`export abstract class Note extends Auditable {`,
 	} {
 		if !strings.Contains(source, want) {

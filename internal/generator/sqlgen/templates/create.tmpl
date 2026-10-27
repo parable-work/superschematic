@@ -176,10 +176,21 @@ CREATE INDEX {{ quote (searchIndexName $table.Name) }} ON {{ $table.QuotedName }
 -- setting a view binds without optional makes current_setting raise while
 -- it is unset, so the view fails closed.
 {{- range $view := .Projections }}
+{{- if $view.QuotedPool }}
 
 CREATE SCHEMA IF NOT EXISTS {{ $view.QuotedPool }};
+{{- end }}
 
 {{ projectionViewDDL $view }}
+{{- end }}
+{{- end }}
+{{- if .RoleSeeds }}
+
+-- Seed the roles a UserRole table's @seedRoles declares: a role of the
+-- name that exists keeps its permissions unless it has none
+{{- range $seed := .RoleSeeds }}
+
+{{ $seed.InsertSQL }};
 {{- end }}
 {{- end }}
 {{- template "rawSQL" (rawSQLAt .RawSQL "indexes") }}

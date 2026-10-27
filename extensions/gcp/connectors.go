@@ -136,7 +136,9 @@ func connectHTTP(ctx registry.ConnectorContext) (registry.Connected, error) {
 	v := valuesOf(ctx.Environment)
 	audience := serviceAudience(v, to.ResourceName)
 	credential := &ir.ServiceCredential{Source: ir.CredentialGoogleIDToken, Audience: audience}
-	if !to.Exposed {
+	if !to.Exposed && len(to.Origins) == 0 {
+		// The invoker check is on: it reads the token here. A callee a
+		// site's origin serves (D91) has it off, as an exposed one does.
 		credential.Headers = []string{ir.ServiceAuthorizationHeader, serverlessAuthorizationHeader}
 	}
 	serves := make([]string, len(from.Services))

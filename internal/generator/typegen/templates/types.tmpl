@@ -295,6 +295,49 @@ func checkVectorDimensions(errors ValidationErrors, key string, length, dimensio
 	}
 }
 {{- end}}
+{{- if .HasTypesAllowingUnknownFields}}
+
+// keepDeclaredKeys is the JSON object data with only the members whose
+// keys declared holds, as spelled, in the order data holds them: a type
+// that is @allowUnknownFields drops every other key before it decodes, so
+// a key that differs in case is dropped too, where encoding/json would read
+// it into a field (D87). Any other JSON value is data itself, which the
+// type's decoding reads as before.
+func keepDeclaredKeys(data []byte, declared map[string]bool) ([]byte, error) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		return data, nil
+	}
+	var out bytes.Buffer
+	out.WriteByte('{')
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return nil, err
+		}
+		key, _ := token.(string)
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return nil, err
+		}
+		if !declared[key] {
+			continue
+		}
+		if out.Len() > 1 {
+			out.WriteByte(',')
+		}
+		name, err := json.Marshal(key)
+		if err != nil {
+			return nil, err
+		}
+		out.Write(name)
+		out.WriteByte(':')
+		out.Write(value)
+	}
+	out.WriteByte('}')
+	return out.Bytes(), nil
+}
+{{- end}}
 {{- if .NeedsJSONValueMissing}}
 
 // jsonValueMissing reports whether a required field of a scalar that holds
@@ -1221,9 +1264,15 @@ func (t *{{.Name}}) MaskSecrets() *{{.Name}} {
 	return masked
 }
 
+{{- if .AllowUnknownFields}}
+// JSONFieldNames are the keys {{.Name}}'s JSON form declares. A generated
+// route drops any other top-level key of an input body, as every generated
+// server does for an @allowUnknownFields type (D87).
+{{- else}}
 // JSONFieldNames are the keys {{.Name}}'s JSON form declares. A generated
 // route refuses an input body with any other top-level key, as every
 // generated server does.
+{{- end}}
 func (*{{.Name}}) JSONFieldNames() []string {
 	return []string{ {{- range $i, $f := .Fields}}{{if $i}}, {{end}}"{{$f.Name}}"{{end -}} }
 }
@@ -1878,8 +1927,23 @@ var listFieldsOf{{.Name}} = []jsonListField{
 }
 {{- end}}
 
+{{- if .AllowUnknownFields}}
+// declaredKeysOf{{.Name}} are the keys {{.Name}}'s JSON form declares; its
+// UnmarshalJSON drops every other (@allowUnknownFields, D87).
+var declaredKeysOf{{.Name}} = map[string]bool{ {{- range $i, $f := .Fields}}{{if $i}}, {{end}}"{{$f.Name}}": true{{end -}} }
+{{- end}}
+
 // UnmarshalJSON unmarshals {{.Name}} from JSON with validation
 func (t *{{.Name}}) UnmarshalJSON(data []byte) error {
+{{- if .AllowUnknownFields}}
+	// @allowUnknownFields: only the keys {{.Name}} declares reach its
+	// decoding (D87).
+	declaredData, declaredErr := keepDeclaredKeys(data, declaredKeysOf{{.Name}})
+	if declaredErr != nil {
+		return fmt.Errorf("decode {{.Name}}: %w", declaredErr)
+	}
+	data = declaredData
+{{- end}}
 {{- if .StrictJSON}}
 	// @strictJSON: reject an undeclared key before any field decoder can
 	// drop it, and a required field that is absent or null.
@@ -2164,7 +2228,7 @@ func (t *{{.Name}}) FromMap(value map[string]any) error {
 	return nil
 }
 
-// FromMapStrict decodes {{.Name}} from a map and rejects unknown fields.
+// FromMapStrict decodes {{.Name}} from a map{{if .AllowUnknownFields}}, dropping the keys it does not declare{{else}} and rejects unknown fields{{end}}.
 func (t *{{.Name}}) FromMapStrict(value map[string]any) error {
 	if t == nil {
 		return fmt.Errorf("strict decode {{.Name}} from map: nil receiver")
@@ -2177,7 +2241,7 @@ func (t *{{.Name}}) FromMapStrict(value map[string]any) error {
 	return nil
 }
 
-// FromJSON decodes {{.Name}} from JSON and rejects unknown fields.
+// FromJSON decodes {{.Name}} from JSON{{if .AllowUnknownFields}}, dropping the keys it does not declare{{else}} and rejects unknown fields{{end}}.
 func (t *{{.Name}}) FromJSON(data []byte) error {
 	if t == nil {
 		return fmt.Errorf("strict decode {{.Name}} from JSON: nil receiver")
@@ -2213,7 +2277,7 @@ func (t *{{.Name}}) FromJSONNonStrict(data []byte) error {
 	return nil
 }
 
-// FromYAML decodes {{.Name}} from YAML and rejects unknown fields.
+// FromYAML decodes {{.Name}} from YAML{{if .AllowUnknownFields}}, dropping the keys it does not declare{{else}} and rejects unknown fields{{end}}.
 func (t *{{.Name}}) FromYAML(data []byte) error {
 	if t == nil {
 		return fmt.Errorf("strict decode {{.Name}} from YAML: nil receiver")
@@ -2259,7 +2323,7 @@ func {{.Name}}FromMap(value map[string]any) (*{{.Name}}, error) {
 	return decoded, nil
 }
 
-// {{.Name}}FromMapStrict builds {{.Name}} from a map and rejects unknown fields.
+// {{.Name}}FromMapStrict builds {{.Name}} from a map{{if .AllowUnknownFields}}, dropping the keys it does not declare{{else}} and rejects unknown fields{{end}}.
 func {{.Name}}FromMapStrict(value map[string]any) (*{{.Name}}, error) {
 	decoded := &{{.Name}}{}
 	if err := decoded.FromMapStrict(value); err != nil {
@@ -2269,7 +2333,7 @@ func {{.Name}}FromMapStrict(value map[string]any) (*{{.Name}}, error) {
 	return decoded, nil
 }
 
-// {{.Name}}FromJSON builds {{.Name}} from JSON and rejects unknown fields.
+// {{.Name}}FromJSON builds {{.Name}} from JSON{{if .AllowUnknownFields}}, dropping the keys it does not declare{{else}} and rejects unknown fields{{end}}.
 func {{.Name}}FromJSON(data []byte) (*{{.Name}}, error) {
 	decoded := &{{.Name}}{}
 	if err := decoded.FromJSON(data); err != nil {
@@ -2289,7 +2353,7 @@ func {{.Name}}FromJSONNonStrict(data []byte) (*{{.Name}}, error) {
 	return decoded, nil
 }
 
-// {{.Name}}FromYAML builds {{.Name}} from YAML and rejects unknown fields.
+// {{.Name}}FromYAML builds {{.Name}} from YAML{{if .AllowUnknownFields}}, dropping the keys it does not declare{{else}} and rejects unknown fields{{end}}.
 func {{.Name}}FromYAML(data []byte) (*{{.Name}}, error) {
 	decoded := &{{.Name}}{}
 	if err := decoded.FromYAML(data); err != nil {

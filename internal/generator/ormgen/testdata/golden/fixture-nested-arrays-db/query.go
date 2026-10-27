@@ -83,6 +83,9 @@ type FloatRange struct {
 // BoolFilter provides filtering operations for boolean fields
 type BoolFilter struct {
 	Eq *bool
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In []bool
 	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
 	IsNull *bool
 }
@@ -95,7 +98,10 @@ type DateTimeFilter struct {
 	Lt      *time.Time
 	Lte     *time.Time
 	Between *DateTimeRange
-	IsNull  *bool // true for IS NULL, false for IS NOT NULL
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In     []time.Time
+	IsNull *bool // true for IS NULL, false for IS NOT NULL
 }
 
 // DateTimeRange represents a range for DateTime values
@@ -290,6 +296,9 @@ type BoardFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // BoardSortField is a field FindPage orders Board rows by, by its
@@ -320,9 +329,9 @@ func ParseBoardSort(text string) (BoardSort, error) {
 	return BoardSort{}, fmt.Errorf("orm: Board sorts by id, not %q", text)
 }
 
-// BoardUniqueKey names a unique key of Board that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// BoardUniqueKey names a unique key of Board that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type BoardUniqueKey string
 
 const (
@@ -389,6 +398,11 @@ type BoardFilter struct {
 	States *ArrayStringFilter
 	Walls  *ArrayStringFilter
 	Scores *ArrayStringFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []BoardFilter
 }
 
 // BoardUpdate provides fields that can be updated
@@ -491,6 +505,30 @@ func (f *BoardFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			} else {
 				conditions = append(conditions, `board.id IS NOT NULL`)
 			}
+		}
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
 		}
 	}
 

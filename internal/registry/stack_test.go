@@ -69,6 +69,9 @@ func TestRegisterPlatformRejects(t *testing.T) {
 			s.NoIdentity = "its isolates hash no passwords"
 			s.IdentityConfig = `{"cookie": {"secure": false}}`
 		}, "declares an identity config and says it runs no identity runtime"},
+		{"identity databases without no identity", func(s *PlatformSpec) {
+			s.IdentityDatabases = []string{"fake.sql"}
+		}, "names the databases it serves the user model over, and no NoIdentity for the rest"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -603,6 +606,28 @@ func TestStackSpecsFailAfterFinalize(t *testing.T) {
 	}
 	if err := reg.Finalize(); err == nil || !strings.Contains(err.Error(), `target "fake" names platform "fake.run"`) {
 		t.Fatalf("Finalize = %v, want the target's unknown platform", err)
+	}
+	// A platform that serves the user model over database platforms names
+	// registered ones (D92).
+	for want, databases := range map[string][]string{
+		`serves the user model over database platform "fake.pg", which is not registered`: {"fake.pg"},
+		`serves the user model over platform "fake.run", a server platform`:               {"fake.run"},
+	} {
+		reg = New(naming.Default())
+		spec := runPlatform("fake.run")
+		spec.NoIdentity = "its isolates hash no passwords"
+		spec.IdentityDatabases = databases
+		if err := reg.RegisterPlatform(spec); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "enginedoc", "stack", "site", "memorystore"} {
+			if err := reg.RegisterGenerator(GeneratorSpec{Name: name, Generate: noopGenerate}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := reg.Finalize(); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("Finalize = %v, want %q", err, want)
+		}
 	}
 	reg = New(naming.Default())
 	finalizeWithCoreGenerators(t, reg)

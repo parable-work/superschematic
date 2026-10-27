@@ -21,9 +21,9 @@ carries extensions. A binary hands the error `Execute` returns to
 that already said why, such as `superschematic-identity`, exits with that
 program's status.
 
-The core has fourteen commands: `init`, `check`, `build`, `build-all`, `migrate`,
+The core has fifteen commands: `init`, `check`, `build`, `build-all`, `migrate`,
 `json-schema`, `format`, `behaviors`, `engine-client`, `env`, `catalog` and the
-`new`, `stack` and `identity` groups, beside cobra's own `help` and
+`new`, `queries`, `stack` and `identity` groups, beside cobra's own `help` and
 `completion`. `--version` prints the binary's name and release,
 `superschematic version 1.2.3`, or `0.0.0` for a binary built from a
 checkout; a generated workflow checks the binary it installs with it. The
@@ -132,7 +132,11 @@ edit's verdict comes back in tens of milliseconds instead of a build's
 seconds (D72). Check reads each service through the loader every build
 command uses: the TypeScript compiler's diagnostics, the data forms' schema
 checks, the config rules (D34), the registry's kind, decorator and check
-rules, and the verification pass, warnings included. It writes nothing
+rules, and the verification pass, warnings included. A DB service's
+declared queries are held to its `queries.lock`, which
+[`queries verify`](#queries-verify-service-dir) writes; a query the lock
+does not hold, as it is now, is an error on the lock, as it fails `build`
+too. It writes nothing
 under the output root. Like a build it writes each service's sentinel,
 `src/service.generated.ts`, the handle other services' configs import,
 when it is missing or stale.
@@ -198,7 +202,8 @@ service's `package.json` or `tsconfig.json`, the naming file, the base
 tsconfig or a new service directory discovers the services again and
 re-checks them all. It never exits on errors, and stops at Ctrl-C.
 
-It watches the `.ts`, `.json`, `.yaml`, `.yml` and `.toml` files of each
+It watches the `.ts`, `.json`, `.yaml`, `.yml` and `.toml` files and the
+`queries.lock` of each
 service outside `node_modules`, `dist`, `target` and hidden directories,
 the schemas root's `superschematic.toml` and `tsconfig.base.json`, and the
 file `--naming` names. It polls rather than subscribing to file events: a
@@ -357,6 +362,10 @@ OpenAPI document at `GET /api/openapi.json`, which every server serves
 The Go and Rust servers serve no MCP endpoint yet, so the config fails to
 load with it on another language, `--api-language` included:
 `outputs.api.mcp is on and the API's language is RUST: a TypeScript API serves the MCP endpoint; Go and Rust follow; set outputs.api.language to TYPESCRIPT, or remove mcp (D81)`.
+With a tool whose `invocationPolicy` is `"ask"`, the build needs
+`outputs.api.mcpConfirmationKey`, the `@envVars` secret the endpoint signs
+its confirmations with
+([Confirming a tool that asks](/superschematic/reference/mcp-tools/#confirming-a-tool-that-asks)).
 
 `--scaffold` writes the implementation of each Go API the command builds
 whose package is missing: an `implementation.go` at the naming file's
@@ -538,6 +547,13 @@ version's when it is a service directory or a git ref. A database whose
 previous version was not built for SQLite plans from the model it
 recorded (`--from <model.json>`).
 
+A Postgres plan of a service that declares queries (`@query`) prepares
+each of them on the new version's `create.sql` before it prints, as
+[`queries verify`](#queries-verify-service-dir) does, and fails naming
+each query that no longer prepares or no longer returns its row. It
+reaches Postgres through `--database-url`, else
+`SUPERSCHEMATIC_QUERIES_DATABASE_URL`, else Docker, and writes no lock.
+
 After a rollout that failed between a plan's phases, the database holds
 the model between them. Plan from that model (`--from <model.json>`, as
 `superschematic-migrate status --model` prints it): the new plan supersedes
@@ -569,6 +585,35 @@ superschematic migrate plan ./schemas/services/shop-db --print-model > model.jso
 | `--fail-on` | none | hazard classes, comma-separated, or `all`; exit 1 when the plan has a hazard of one that no `--allow` names |
 | `--allow` | none | a hazard id `--fail-on` lets pass; repeatable |
 | `--print-model` | false | print the new version's model as canonical JSON, for `superschematic-migrate adopt`, and plan nothing; takes none of the plan flags |
+| `--database-url` | `$SUPERSCHEMATIC_QUERIES_DATABASE_URL`, else Postgres in Docker | a Postgres server whose role may create a database, which the new version's queries are prepared on |
+| `--naming` | `<service-dir>/../../superschematic.toml` | naming config file |
+
+## `queries verify <service-dir>`
+
+Prepare each declared query (`@query`) of the DB service on Postgres and
+write its `queries.lock` ([Declared queries](/superschematic/reference/declared-queries/#verification)).
+It applies the service's `create.sql` to a database of its own, prepares
+each statement of each query, every order's and both of a page's, and
+compares what Postgres describes with the declared types: each
+parameter's type, each result column's name and type, and that a row
+field that is not `Nullable<T>` reads a column that is never null. Each
+problem names its query; a statement Postgres refuses is reported with
+its message. With none it writes `queries.lock` beside the schema config,
+which `check` and `build` then hold the queries to with no database; a
+service with no queries has its lock removed.
+
+The statements are prepared by the migration runner,
+`superschematic-migrate describe`, on `PATH` or where
+`SUPERSCHEMATIC_MIGRATE` names it.
+
+```
+superschematic queries verify ./schemas/services/finances-db
+superschematic queries verify ./schemas/services/finances-db --database-url postgres://postgres:secret@localhost:5432/postgres
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--database-url` | `$SUPERSCHEMATIC_QUERIES_DATABASE_URL`, else Postgres in Docker | a Postgres server whose role may create a database: verify creates one there and drops it. Without either, it runs the image `stack dev` runs, pgvector's when a table has a vector column |
 | `--naming` | `<service-dir>/../../superschematic.toml` | naming config file |
 
 ## `json-schema`
@@ -1018,10 +1063,11 @@ It takes the flags of the commands below, `--stack`, `--naming`,
 | --- | --- | --- |
 | `--out` | `<schemas-root>/dist` | the output root the build wrote, `stack dev`'s `--out`: where `run` reads a local environment and the job's entrypoint module |
 
-## `stack queue dead|retry|drop <environment> <queue>`
+## `stack queue dead|retry|drop|backfill <environment> <queue>`
 
 List, retry and drop the dead messages of a queue a DB service declares
-([Dead messages](/superschematic/guides/queues/#dead-messages)). `<queue>`
+([Dead messages](/superschematic/guides/queues/#dead-messages)), and
+backfill it ([Backfill](/superschematic/guides/queues/#backfill)). `<queue>`
 is the DB service and its `@queue` class, `shop-db.OrderPlaced`. The design
 is section 8.8 of
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md).
@@ -1030,6 +1076,7 @@ is section 8.8 of
 superschematic stack queue dead Dev shop-db.OrderPlaced [--limit 100]
 superschematic stack queue retry Dev shop-db.OrderPlaced <id>... | --all
 superschematic stack queue drop Dev shop-db.OrderPlaced <id>... | --all --yes
+superschematic stack queue backfill Dev shop-db.OrderPlaced
 superschematic stack queue dead Preview shop-db.OrderPlaced --param pr=123
 ```
 
@@ -1041,6 +1088,12 @@ superschematic stack queue dead Preview shop-db.OrderPlaced --param pr=123
   kept until the next failure replaces it.
 - `drop` deletes the dead messages named, or every one with `--all`,
   which takes `--yes`.
+- `backfill` enqueues a message for each row of each table whose
+  `@enqueueOnChange` names the queue that meets the trigger's `when`, as
+  the trigger's insert of the row would, under the queue's `onDuplicate`,
+  in one transaction that locks no table, and says how many it enqueued
+  (D88). A queue no trigger enqueues is refused. The runner must be a
+  release that reads a backfill.
 
 An ID is a message's UUID, in either case. A `retry` or a `drop` that
 names a message that is not dead changes none of them, and says what each

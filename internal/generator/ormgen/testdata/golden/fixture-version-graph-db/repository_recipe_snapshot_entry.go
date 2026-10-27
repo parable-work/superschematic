@@ -150,7 +150,7 @@ func (r *RecipeSnapshotEntryRepository) batchCommitByIDs(ctx context.Context, id
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&RecipeCommitFilter{
 			Id: &UUIDFilter{
@@ -593,7 +593,8 @@ func (r *RecipeSnapshotEntryRepository) FindOne(ctx context.Context, filter *Rec
 	return result, nil
 }
 
-// FindMany retrieves multiple RecipeSnapshotEntry records matching the filter
+// FindMany retrieves multiple RecipeSnapshotEntry records matching the filter, and how
+// many it matches in all, -1 when the options skip the count
 func (r *RecipeSnapshotEntryRepository) FindMany(ctx context.Context, filter *RecipeSnapshotEntryFilter, opts *RecipeSnapshotEntryFindOptions) ([]*types.RecipeSnapshotEntry, int, error) {
 	if opts == nil || opts.Fields.IsZero() {
 		return nil, 0, fmt.Errorf("fields must be specified in FindOptions for performance")
@@ -626,18 +627,20 @@ func (r *RecipeSnapshotEntryRepository) FindMany(ctx context.Context, filter *Re
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM recipe_snapshot_entry%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
 
-	// Get total count
-	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM recipe_snapshot_entry%s`, whereClause)
+	// Get total count, unless the options skip it (D89)
+	totalCount := -1
+	if !opts.SkipCount {
+		countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM recipe_snapshot_entry%s`, whereClause)
 
-	var totalCount int
-	var countRow pgx.Row
-	if r.tx != nil {
-		countRow = r.tx.QueryRow(ctx, countQuery, args...)
-	} else {
-		countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
-	}
-	if err := countRow.Scan(&totalCount); err != nil {
-		return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		var countRow pgx.Row
+		if r.tx != nil {
+			countRow = r.tx.QueryRow(ctx, countQuery, args...)
+		} else {
+			countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
+		}
+		if err := countRow.Scan(&totalCount); err != nil {
+			return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		}
 	}
 
 	results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
@@ -645,6 +648,30 @@ func (r *RecipeSnapshotEntryRepository) FindMany(ctx context.Context, filter *Re
 		return nil, 0, err
 	}
 	return results, totalCount, nil
+}
+
+// findRelated reads the rows filter finds as FindMany reads them, with no
+// count: the read that loads a relation's rows for the rows of another
+// table's read (D90), which counts nothing, as the TypeScript
+// repositories' include does.
+func (r *RecipeSnapshotEntryRepository) findRelated(ctx context.Context, filter *RecipeSnapshotEntryFilter, opts *RecipeSnapshotEntryFindOptions) ([]*types.RecipeSnapshotEntry, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in FindOptions for performance")
+	}
+	fieldStrings := recipeSnapshotEntryFieldStrings(opts.Fields)
+	if err := validateFields(fieldStrings, RecipeSnapshotEntryAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "recipe_snapshot_entry")
+	if selectFields == "" {
+		return nil, fmt.Errorf("no valid fields specified")
+	}
+	var args []interface{}
+	whereClause := filter.buildWhereClause(&args, 0)
+	orderByClause := buildRecipeSnapshotEntryOrderByClause(opts.OrderBy, `recipe_snapshot_entry`)
+	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
+	query := fmt.Sprintf(`SELECT %s FROM recipe_snapshot_entry%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
+	return r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
 }
 
 // recipeSnapshotEntryFieldStrings are the columns fields selects, in OrderedMembers
@@ -1016,10 +1043,78 @@ func (r *RecipeSnapshotEntryRepository) CreateOne(ctx context.Context, input *ty
 
 // recipeSnapshotEntryUniqueKeys are the conflict targets of RecipeSnapshotEntry's unique keys, and
 // the assignment an upsert that sets nothing writes, so the row it
-// conflicts with is returned (sqlutil.UniqueKey, D79).
-var recipeSnapshotEntryUniqueKeys = map[RecipeSnapshotEntryUniqueKey]struct{ conflict, keep string }{
-	RecipeSnapshotEntryUniqueById:                        {`(id)`, `id = EXCLUDED.id`},
-	RecipeSnapshotEntryUniqueByCommitEntityKindEntityKey: {`(commit_id, entity_kind, entity_key)`, `commit_id = EXCLUDED.commit_id`},
+// conflicts with is returned (sqlutil.UniqueKey, D79); the read of the rows
+// that hold keys, which an upsert only if changed reads back, empty for a
+// key over an expression, and the key's columns as a batch insert's cells
+// name them (D89).
+var recipeSnapshotEntryUniqueKeys = map[RecipeSnapshotEntryUniqueKey]struct {
+	conflict, keep, rows string
+	columns              []string
+}{
+	RecipeSnapshotEntryUniqueById:                        {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "commit_id", "entity_kind", "entity_key", "entity_id", "entity_version" FROM recipe_snapshot_entry WHERE (id) IN (%s)`, []string{`id`}},
+	RecipeSnapshotEntryUniqueByCommitEntityKindEntityKey: {`(commit_id, entity_kind, entity_key)`, `commit_id = EXCLUDED.commit_id`, `SELECT "id", "commit_id", "entity_kind", "entity_key", "entity_id", "entity_version" FROM recipe_snapshot_entry WHERE (commit_id, entity_kind, entity_key) IN (%s)`, []string{`commit_id`, `entity_kind`, `entity_key`}},
+}
+
+// recipeSnapshotEntryKeyOf is the text of row's values of the unique key on, as
+// UpsertMany matches the rows a statement returns to its inputs, or false
+// when the insert leaves one of them to the database (D89).
+func recipeSnapshotEntryKeyOf(on RecipeSnapshotEntryUniqueKey, row *types.RecipeSnapshotEntry) (string, bool) {
+	switch on {
+	case RecipeSnapshotEntryUniqueById:
+		return upsertKeyText(upsertKeyValue(row.Id, false))
+	case RecipeSnapshotEntryUniqueByCommitEntityKindEntityKey:
+		return upsertKeyText(upsertKeyValue(row.Commit.Id, false), upsertKeyValue(row.EntityKind, false), upsertKeyValue(row.EntityKey, false))
+	}
+	return "", false
+}
+
+// database is the Database the repository runs on.
+func (r *RecipeSnapshotEntryRepository) database() *Database {
+	if r.txDB != nil {
+		return r.txDB
+	}
+	return r.db
+}
+
+// scanReturned scans a row of every column of RecipeSnapshotEntry, as a write returns
+// it, and, with inserted, the flag an upsert returns after them (D89).
+func (r *RecipeSnapshotEntryRepository) scanReturned(row pgx.Row, inserted *bool) (*types.RecipeSnapshotEntry, error) {
+	result := &types.RecipeSnapshotEntry{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+	var tempRelCommit *types.IdentityUUID
+
+	// Scan all fields in schema order (matches DDL column order)
+	dest := []any{
+
+		&result.Id,
+
+		&tempRelCommit,
+
+		&result.EntityKind,
+
+		&result.EntityKey,
+
+		&result.EntityId,
+
+		&result.EntityVersion,
+	}
+	if inserted != nil {
+		dest = append(dest, inserted)
+	}
+	if err := row.Scan(dest...); err != nil {
+		return nil, err
+	}
+
+	// Copy nullable fields when present
+
+	// Set relationship IDs from scanned FK values
+	if tempRelCommit != nil {
+		result.Commit.Id = recipeSnapshotEntryUUIDPtr(*tempRelCommit)
+	}
+
+	return result, nil
 }
 
 // UpsertOne inserts input, or, when a row already holds its value of the
@@ -1028,13 +1123,54 @@ var recipeSnapshotEntryUniqueKeys = map[RecipeSnapshotEntryUniqueKey]struct{ con
 // UpdateOne writes, updated_at and updated_by among it, but an update that
 // sets no field leaves the row as it is.
 func (r *RecipeSnapshotEntryRepository) UpsertOne(ctx context.Context, input *types.RecipeSnapshotEntry, on RecipeSnapshotEntryUniqueKey, update *RecipeSnapshotEntryUpdate) (*types.RecipeSnapshotEntry, error) {
+	result, err := r.UpsertOneResult(ctx, input, on, update, nil)
+	if err != nil {
+		return nil, err
+	}
+	return result.Row, nil
+}
+
+// UpsertOneResult is UpsertOne, and what it did with the row: inserted it,
+// updated the row that held the key, or left that row as it was (D89).
+// With opts.OnlyIfChanged it updates the row only when a field the update
+// sets differs from what the row holds, which it reads back otherwise. A write that
+// may take more than one statement runs in a transaction of its own when
+// none is open.
+func (r *RecipeSnapshotEntryRepository) UpsertOneResult(ctx context.Context, input *types.RecipeSnapshotEntry, on RecipeSnapshotEntryUniqueKey, update *RecipeSnapshotEntryUpdate, opts *UpsertOptions) (UpsertResult[*types.RecipeSnapshotEntry], error) {
+	var none UpsertResult[*types.RecipeSnapshotEntry]
 	key, ok := recipeSnapshotEntryUniqueKeys[on]
 	if !ok {
-		return nil, fmt.Errorf("orm: RecipeSnapshotEntry has no unique key %q", string(on))
+		return none, fmt.Errorf("orm: RecipeSnapshotEntry has no unique key %q", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if opts.OnlyIfChanged && key.rows == "" {
+		return none, upsertExpressionKey("UpsertOneResult", "RecipeSnapshotEntry", string(on))
 	}
 	if update == nil {
 		update = &RecipeSnapshotEntryUpdate{}
 	}
+	write := func(repo *RecipeSnapshotEntryRepository) (UpsertResult[*types.RecipeSnapshotEntry], error) {
+		result, err := repo.upsertRow(ctx, input, on, update, opts.OnlyIfChanged)
+		if err != nil {
+			return none, err
+		}
+		return *result, nil
+	}
+	if !opts.OnlyIfChanged {
+		return write(r)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (UpsertResult[*types.RecipeSnapshotEntry], error) {
+		return write(&RecipeSnapshotEntryRepository{tx: tx, txDB: r.database()})
+	})
+}
+
+// upsertRow is UpsertOneResult on the repository's connection: the upsert,
+// a read of the row it left as it was, only if changed, and the second
+// statement of an encrypted field.
+func (r *RecipeSnapshotEntryRepository) upsertRow(ctx context.Context, input *types.RecipeSnapshotEntry, on RecipeSnapshotEntryUniqueKey, update *RecipeSnapshotEntryUpdate, onlyIfChanged bool) (*UpsertResult[*types.RecipeSnapshotEntry], error) {
+	key := recipeSnapshotEntryUniqueKeys[on]
 	// Set audit fields
 
 	// Build INSERT query
@@ -1088,35 +1224,46 @@ func (r *RecipeSnapshotEntryRepository) UpsertOne(ctx context.Context, input *ty
 
 	// Build the update of the row the key conflicts with, its placeholders
 	// numbered after the insert's
-	var setClauses []string
+	var setClauses, compareCurrent, compareNext []string
 	if update.EntityKind != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`entity_kind = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `recipe_snapshot_entry.entity_kind`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.EntityKind)
 	}
 	if update.EntityKey != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`entity_key = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `recipe_snapshot_entry.entity_key`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, (*update.EntityKey).ToUUID())
 	}
 	if update.EntityId != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`entity_id = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `recipe_snapshot_entry.entity_id`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, (*update.EntityId).ToUUID())
 	}
 	if update.EntityVersion != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`entity_version = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `recipe_snapshot_entry.entity_version`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.EntityVersion)
 	}
 	// Handle relationship foreign key: commit
 	if update.CommitID != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf("commit_id = $%d", paramNum))
+		compareCurrent = append(compareCurrent, `recipe_snapshot_entry.commit_id`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, update.CommitID.ToUUID())
 	}
 
-	if len(setClauses) == 0 {
+	assigned := len(setClauses)
+	if assigned == 0 {
 		// An update that sets no field leaves the row as it is, stamps and
 		// all, and returns it.
 		setClauses = append(setClauses, key.keep)
@@ -1128,11 +1275,12 @@ func (r *RecipeSnapshotEntryRepository) UpsertOne(ctx context.Context, input *ty
 	}
 
 	query := fmt.Sprintf(
-		`INSERT INTO recipe_snapshot_entry (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING "id", "commit_id", "entity_kind", "entity_key", "entity_id", "entity_version"`,
+		`INSERT INTO recipe_snapshot_entry (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "commit_id", "entity_kind", "entity_key", "entity_id", "entity_version", (xmax = 0) AS _inserted`,
 		strings.Join(fields, ", "),
-		strings.Join(placeholders, ", "),
+		"("+strings.Join(placeholders, ", ")+")",
 		key.conflict,
 		strings.Join(setClauses, ", "),
+		upsertWhere(``, compareCurrent, compareNext, onlyIfChanged),
 	)
 
 	// Execute query
@@ -1142,44 +1290,324 @@ func (r *RecipeSnapshotEntryRepository) UpsertOne(ctx context.Context, input *ty
 	} else {
 		row = r.db.pool.QueryRow(ctx, query, values...)
 	}
-
-	// Scan result
-	result := &types.RecipeSnapshotEntry{}
-	// Create temporary variables for nullable fields that need pointer scanning
-
-	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
-	var tempRelCommit *types.IdentityUUID
-
-	// Scan all fields in schema order (matches DDL column order)
-	if err := row.Scan(
-
-		&result.Id,
-
-		&tempRelCommit,
-
-		&result.EntityKind,
-
-		&result.EntityKey,
-
-		&result.EntityId,
-
-		&result.EntityVersion,
-	); err != nil {
-		if err == pgx.ErrNoRows {
-			// The row the key conflicts with is soft-deleted.
-			return nil, ErrNotFound
+	var inserted bool
+	scanned, err := r.scanReturned(row, &inserted)
+	var upserted *UpsertResult[*types.RecipeSnapshotEntry]
+	switch {
+	case err == nil:
+		status := UpsertUnchanged
+		if inserted {
+			status = UpsertInserted
+		} else if assigned > 0 {
+			status = UpsertUpdated
 		}
+		upserted = &UpsertResult[*types.RecipeSnapshotEntry]{Row: scanned, Status: status}
+	case err != pgx.ErrNoRows:
 		return nil, fmt.Errorf("failed to scan result: %w", err)
+	case !onlyIfChanged:
+		// The row the key conflicts with is soft-deleted.
+		return nil, ErrNotFound
+	default:
+		// The row the key conflicts with already held the update's values.
+		keyValues, ok := upsertCellValues(upsertCells(fields, values), key.columns)
+		if !ok {
+			return nil, fmt.Errorf("no RecipeSnapshotEntry row holds an unset %s: %w", string(on), ErrNotFound)
+		}
+		found, err := r.rowsOfKeys(ctx, on, [][]any{keyValues}, []*types.RecipeSnapshotEntry{input})
+		if err != nil {
+			return nil, err
+		}
+		upserted = &UpsertResult[*types.RecipeSnapshotEntry]{Row: found[0], Status: UpsertUnchanged}
+	}
+	return upserted, nil
+}
+
+// UpsertMany inserts each input, or, when a row already holds its value of
+// the unique key on, sets each field update names of that row to the value
+// the input would have inserted, and returns each input's row and what it
+// did with it, in the inputs' order (D89). One statement writes a batch of
+// rows, opts.Batch or as many as Postgres binds the parameters of, and more
+// rows take a statement per batch, in one transaction; a write that may
+// take more than one statement runs in a transaction of its own when none
+// is open. An update that names no field leaves each row that holds a key
+// as it is. Two inputs of one batch that hold one key fail
+// the statement, and a key over an expression, whose rows the statement's
+// cannot be matched to the inputs by, is refused.
+func (r *RecipeSnapshotEntryRepository) UpsertMany(ctx context.Context, inputs []*types.RecipeSnapshotEntry, on RecipeSnapshotEntryUniqueKey, update RecipeSnapshotEntryFields, opts *UpsertOptions) ([]UpsertResult[*types.RecipeSnapshotEntry], error) {
+	key, ok := recipeSnapshotEntryUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: RecipeSnapshotEntry has no unique key %q", string(on))
+	}
+	if key.rows == "" {
+		return nil, upsertExpressionKey("UpsertMany", "RecipeSnapshotEntry", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if update.Id {
+		return nil, fmt.Errorf("orm: UpsertMany of RecipeSnapshotEntry sets the fields an update sets, not id")
+	}
+	batch, err := upsertBatch("RecipeSnapshotEntry", opts.Batch, 10922)
+	if err != nil {
+		return nil, err
+	}
+	if len(inputs) == 0 {
+		return []UpsertResult[*types.RecipeSnapshotEntry]{}, nil
+	}
+	if len(inputs) <= batch && !opts.OnlyIfChanged {
+		return r.upsertBatches(ctx, inputs, on, update, batch, false)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]UpsertResult[*types.RecipeSnapshotEntry], error) {
+		return (&RecipeSnapshotEntryRepository{tx: tx, txDB: r.database()}).upsertBatches(ctx, inputs, on, update, batch, opts.OnlyIfChanged)
+	})
+}
+
+// upsertBatches is UpsertMany on the repository's connection, a batch at a
+// time: each batch's statement, a read of the rows it left as they were,
+// only if changed, and the second statement of each encrypted field.
+func (r *RecipeSnapshotEntryRepository) upsertBatches(ctx context.Context, inputs []*types.RecipeSnapshotEntry, on RecipeSnapshotEntryUniqueKey, update RecipeSnapshotEntryFields, batch int, onlyIfChanged bool) ([]UpsertResult[*types.RecipeSnapshotEntry], error) {
+	key := recipeSnapshotEntryUniqueKeys[on]
+
+	// Set audit fields
+
+	// Each field update names takes the value the input would have
+	// inserted, which an upsert only if changed compares with the row's.
+	var setClauses, compareCurrent, compareNext []string
+	if update.EntityKind {
+		setClauses = append(setClauses, `entity_kind = EXCLUDED.entity_kind`)
+		compareCurrent = append(compareCurrent, `recipe_snapshot_entry.entity_kind`)
+		compareNext = append(compareNext, `EXCLUDED.entity_kind`)
+	}
+	if update.EntityKey {
+		setClauses = append(setClauses, `entity_key = EXCLUDED.entity_key`)
+		compareCurrent = append(compareCurrent, `recipe_snapshot_entry.entity_key`)
+		compareNext = append(compareNext, `EXCLUDED.entity_key`)
+	}
+	if update.EntityId {
+		setClauses = append(setClauses, `entity_id = EXCLUDED.entity_id`)
+		compareCurrent = append(compareCurrent, `recipe_snapshot_entry.entity_id`)
+		compareNext = append(compareNext, `EXCLUDED.entity_id`)
+	}
+	if update.EntityVersion {
+		setClauses = append(setClauses, `entity_version = EXCLUDED.entity_version`)
+		compareCurrent = append(compareCurrent, `recipe_snapshot_entry.entity_version`)
+		compareNext = append(compareNext, `EXCLUDED.entity_version`)
+	}
+	if update.Commit {
+		setClauses = append(setClauses, `commit_id = EXCLUDED.commit_id`)
+		compareCurrent = append(compareCurrent, `recipe_snapshot_entry.commit_id`)
+		compareNext = append(compareNext, `EXCLUDED.commit_id`)
 	}
 
-	// Copy nullable fields when present
+	results := make([]UpsertResult[*types.RecipeSnapshotEntry], 0, len(inputs))
+	for start := 0; start < len(inputs); start += batch {
+		chunk := inputs[start:min(start+batch, len(inputs))]
+		prepared := chunk
 
-	// Set relationship IDs from scanned FK values
-	if tempRelCommit != nil {
-		result.Commit.Id = recipeSnapshotEntryUUIDPtr(*tempRelCommit)
+		// The batch's rows, as CreateMany writes them.
+		rows := make([][]batchInsertCell, 0, len(prepared))
+		for _, input := range prepared {
+			var row []batchInsertCell
+			// Primary key: id. Schema-owned identities may supply a stable
+			// UUID, matching CreateOne; a row without one takes the generated default.
+			{
+				cell := batchInsertCell{column: `id`}
+				var zeroPrimaryKey types.IdentityUUID
+				if primaryKey, ok := recipeSnapshotEntryUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+					cell.value, cell.set = primaryKey.ToUUID(), true
+				}
+				row = append(row, cell)
+			}
+			// Required field: entityKind
+			{
+				cell := batchInsertCell{column: `entity_kind`, set: true}
+				cell.value = input.EntityKind
+				row = append(row, cell)
+			}
+			// Required field: entityKey
+			{
+				cell := batchInsertCell{column: `entity_key`, set: true}
+				cell.value = input.EntityKey.ToUUID()
+				row = append(row, cell)
+			}
+			// Required field: entityId
+			{
+				cell := batchInsertCell{column: `entity_id`, set: true}
+				cell.value = input.EntityId.ToUUID()
+				row = append(row, cell)
+			}
+			// Required field: entityVersion
+			{
+				cell := batchInsertCell{column: `entity_version`, set: true}
+				cell.value = input.EntityVersion
+				row = append(row, cell)
+			}
+
+			// Relationship foreign key columns, matching CreateOne
+			// Relationship: commit (FK: commit_id)
+			{
+				cell := batchInsertCell{column: `commit_id`}
+				var zeroId types.IdentityUUID
+				if relID, ok := recipeSnapshotEntryUUIDValue(input.Commit.Id); ok && relID != zeroId {
+					cell.value, cell.set = relID.ToUUID(), true
+				}
+				row = append(row, cell)
+			}
+			rows = append(rows, row)
+		}
+		fieldNames, valuePlaceholders, values := buildBatchInsert(rows)
+		assignments := append([]string(nil), setClauses...)
+		if len(setClauses) == 0 {
+			// An update that names no field leaves each row as it is.
+			assignments = append(assignments, key.keep)
+		} else {
+		}
+		query := fmt.Sprintf(
+			`INSERT INTO recipe_snapshot_entry (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "commit_id", "entity_kind", "entity_key", "entity_id", "entity_version", (xmax = 0) AS _inserted`,
+			strings.Join(fieldNames, ", "),
+			strings.Join(valuePlaceholders, ", "),
+			key.conflict,
+			strings.Join(assignments, ", "),
+			upsertWhere(``, compareCurrent, compareNext, onlyIfChanged),
+		)
+		returned, inserted, err := r.upsertReturned(ctx, query, values)
+		if err != nil {
+			return nil, err
+		}
+
+		// A row is its input's by the key's values; an input that sets none
+		// of them, whose key the database generates, takes the next row whose
+		// key no input holds, as the rows come back in the inputs' order.
+		keys := make([]string, len(prepared))
+		set := make([]bool, len(prepared))
+		for i, input := range prepared {
+			keys[i], set[i] = recipeSnapshotEntryKeyOf(on, input)
+		}
+		matcher := newUpsertMatcher(keys, set)
+		matched := make([]*UpsertResult[*types.RecipeSnapshotEntry], len(prepared))
+		for n, row := range returned {
+			text, ok := recipeSnapshotEntryKeyOf(on, row)
+			i := matcher.take(text, ok)
+			if i < 0 {
+				return nil, fmt.Errorf("orm: UpsertMany of RecipeSnapshotEntry wrote a row whose %s no input holds", string(on))
+			}
+			status := UpsertUnchanged
+			if inserted[n] {
+				status = UpsertInserted
+			} else if len(setClauses) > 0 {
+				status = UpsertUpdated
+			}
+			matched[i] = &UpsertResult[*types.RecipeSnapshotEntry]{Row: row, Status: status}
+		}
+
+		// A row it did not return is one it left as it was, only if changed,
+		// which it reads back by its key, or a deleted one.
+		var left []int
+		for i := range matched {
+			if matched[i] == nil {
+				left = append(left, i)
+			}
+		}
+		if len(left) > 0 {
+			if !onlyIfChanged {
+				return nil, fmt.Errorf("the RecipeSnapshotEntry row that holds the %s of input %d is deleted: %w", string(on), start+left[0], ErrNotFound)
+			}
+			keyValues := make([][]any, len(left))
+			wanted := make([]*types.RecipeSnapshotEntry, len(left))
+			for n, i := range left {
+				cells, ok := upsertCellValues(rows[i], key.columns)
+				if !ok {
+					return nil, fmt.Errorf("no RecipeSnapshotEntry row holds an unset %s: %w", string(on), ErrNotFound)
+				}
+				keyValues[n], wanted[n] = cells, prepared[i]
+			}
+			found, err := r.rowsOfKeys(ctx, on, keyValues, wanted)
+			if err != nil {
+				return nil, err
+			}
+			for n, i := range left {
+				matched[i] = &UpsertResult[*types.RecipeSnapshotEntry]{Row: found[n], Status: UpsertUnchanged}
+			}
+		}
+		for _, result := range matched {
+			results = append(results, *result)
+		}
 	}
+	return results, nil
+}
 
-	return result, nil
+// upsertReturned runs an upsert's statement, query with values, and scans
+// each row it returns and whether it inserted it.
+func (r *RecipeSnapshotEntryRepository) upsertReturned(ctx context.Context, query string, values []any) ([]*types.RecipeSnapshotEntry, []bool, error) {
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to execute upsert: %w", err)
+	}
+	defer rows.Close()
+	var returned []*types.RecipeSnapshotEntry
+	var inserted []bool
+	for rows.Next() {
+		var flag bool
+		row, err := r.scanReturned(rows, &flag)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		returned = append(returned, row)
+		inserted = append(inserted, flag)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	return returned, inserted, nil
+}
+
+// rowsOfKeys reads the rows that hold keys, each the values of the unique
+// key on an input's insert binds, among the rows the key's index holds, in
+// the inputs' order: the rows an upsert only if changed left as they were
+// (D89). A key no live row holds is ErrNotFound.
+func (r *RecipeSnapshotEntryRepository) rowsOfKeys(ctx context.Context, on RecipeSnapshotEntryUniqueKey, keys [][]any, inputs []*types.RecipeSnapshotEntry) ([]*types.RecipeSnapshotEntry, error) {
+	tuples, values := upsertKeyTuples(keys)
+	query := fmt.Sprintf(recipeSnapshotEntryUniqueKeys[on].rows, strings.Join(tuples, ", "))
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the rows the upsert left: %w", err)
+	}
+	defer rows.Close()
+	found := map[string]*types.RecipeSnapshotEntry{}
+	for rows.Next() {
+		row, err := r.scanReturned(rows, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		if text, ok := recipeSnapshotEntryKeyOf(on, row); ok {
+			found[text] = row
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	out := make([]*types.RecipeSnapshotEntry, len(inputs))
+	for i, input := range inputs {
+		text, _ := recipeSnapshotEntryKeyOf(on, input)
+		row := found[text]
+		if row == nil {
+			return nil, fmt.Errorf("the RecipeSnapshotEntry row that holds the key %s is deleted: %w", string(on), ErrNotFound)
+		}
+		out[i] = row
+	}
+	return out, nil
 }
 
 // CreateMany inserts multiple RecipeSnapshotEntry records in a single statement

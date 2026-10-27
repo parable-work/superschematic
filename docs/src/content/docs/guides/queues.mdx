@@ -24,14 +24,14 @@ schema's instances into claimable work, are another thing.
 | `@queue` on a DB service's message class; its table in every dialect the service lists, which the migration plan carries | |
 | a backoff that doubles with each failure up to a maximum, and done messages removed after a retention | |
 | a message's `key`: one waiting message per key (`onDuplicate`), one claim per key (`serialize`), in every language, on Postgres and SQLite | a key over several fields; a delay on enqueue |
-| `@enqueueOnChange` on a table: a trigger, on Postgres and SQLite, that enqueues a message whatever writes the row | |
+| `@enqueueOnChange` on a table: a trigger, on Postgres and SQLite, that enqueues a message whatever writes the row; its `backfill` in the migration step that adds it, and `stack queue backfill` | `stack queue backfill` on SQLite |
 | the Go ORM's `Enqueue<Queue>` in your transaction, and its claims on Postgres; its `Enqueue<Queue>SQLite` and claims on SQLite, which the TypeScript and Rust runtimes run too | claims on D1, and `stack queue` on SQLite |
 | the TypeScript types' `./queues` entry and the HTTP runtime's `enqueue`, in a transaction of the generated repositories (`Deps.orm`, D79), and `postgresQueue`, which run the Go ORM's statements; the Rust types' `queues` module and the Rust HTTP runtime's `queue::enqueue` and `PostgresQueue`, which run them too; a location (`POINT`) and a duration (`INTERVAL`) in a message, in every language | a list of locations or durations (`POINT[]`, `INTERVAL[]`) in a queue's message |
 | `@worker` on an API, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers`, Rust's `Workers` and `create_workers`, the `worker` deployable, its entrypoint and image | |
-| `stack dev`'s worker processes, a TypeScript one on the environment's SQLite file too; on gcp a Cloud Run worker pool; a worker's `maxInstances` | scaling a worker with its queue's depth, which `maxInstances` sets the ceiling for |
+| `stack dev`'s worker processes, a TypeScript one on the environment's SQLite file too; on gcp a Cloud Run worker pool; on Cloudflare a TypeScript worker's Worker, which drains its queue from Postgres through Hyperdrive at each firing of a Cron Trigger every minute; a worker's `maxInstances` | scaling a worker with its queue's depth, which `maxInstances` sets the ceiling for; a Cloudflare worker woken sooner than its next firing |
 | `stack queue dead`, `retry` and `drop` on a local environment's queues, and on gcp through the migration job | the same on another cloud target |
 
-D53, D68 and D80 in `docs/DECISIONS.md` record the decisions, and section 8.8 of
+D53, D68, D80 and D88 in `docs/DECISIONS.md` record the decisions, and section 8.8 of
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md)
 the design.
 
@@ -163,6 +163,13 @@ acme shop, an order put back to placed is fulfilled again:
 | `fields` | the fields whose change makes an update enqueue, compared with `IS DISTINCT FROM`; every update enqueues unless set. A relation is its key's column |
 | `when` | conditions the row must meet, all of them: `{ field, isNull: true }`, `{ field, notNull: true }` or `{ field, equals: literal }`, the literal an enum's member, a text, a number or a boolean |
 | `message` | each field of the message the trigger sets, and the table's field whose value it takes |
+| `backfill` | `true` makes the migration step that adds the trigger also enqueue a message for each row the table already holds that meets `when`, as an insert of the row would ([Backfill](#backfill)); needs `insert` or `update` in `on` |
+
+An update that changes nothing is still a write, which a trigger without
+`fields` enqueues for. An upsert with `onlyIfChanged` writes no row whose
+fields already hold the update's values, so a sync that sends the same
+rows again enqueues nothing for them
+([Upserts](/superschematic/guides/database-tables/#upserts)).
 
 The build checks the declaration against the table and the queue: each
 field has a column, a null test is of a nullable field, a literal fits
@@ -170,9 +177,11 @@ its field, and each field of the message takes a table's field of its
 type, or of a relation's key. A required field of the message takes a
 value the row always has, so one from a nullable field needs a `notNull`
 condition on it, and every required field it leaves out has its
-column's default: a list, a time, a `Default<T, V>` the column carries
+column's default: a list, a `Default<T, V>` the column carries
 ([Columns](/superschematic/guides/database-tables/#columns)), or an enum's
-schema default, which the trigger writes. `when` names fields rather
+schema default, which the trigger writes. A required time the message
+leaves out has none: map it from the table's (a queue's own `created_at`
+holds when a message was enqueued). `when` names fields rather
 than SQL, since the trigger is written for Postgres and SQLite alike. An
 [`Encrypted<T>`](/superschematic/guides/database-tables/#encrypted-fields)
 field's column holds an envelope the trigger cannot open, sealed anew on
@@ -188,7 +197,41 @@ the queue's `ON CONFLICT`, so with `replace` or `skip` repeated changes
 of a row keep one waiting message, and the trigger's and your code's
 messages dedupe against each other. A migration plan adds, replaces and
 drops the trigger with the declaration; the rows a table holds when the
-trigger is added enqueue nothing until they change.
+trigger is added enqueue nothing until they change, unless the
+declaration backfills.
+
+### Backfill
+
+After an import, the rows already there need the work the trigger does
+for new ones: an embedding per categorized line item, say. With
+`backfill: true`
+([D88](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)),
+the step that creates the trigger on a table the database already has
+also inserts one message for each row that meets `when`, written as the
+trigger's insert of the row would write it and ending with the queue's
+`ON CONFLICT`. A queue that appends gets a message per row; one that
+replaces or skips keeps one waiting message per key, so a table of N
+qualifying rows leaves N ready messages, or one per key. On Postgres the
+backfill runs in the trigger's transaction, under the lock `CREATE
+TRIGGER` takes, so no write is missed or enqueued twice; the step is
+`blocking`, since that lock keeps writes to the table out for as long as
+the insert takes. A table the plan creates is empty and gets no backfill,
+and a plan that only changes a trigger backfills nothing.
+
+For a table too large to backfill inside a migration, add the trigger
+without `backfill`, deploy, and enqueue the messages afterwards:
+
+```sh
+superschematic stack queue backfill Dev shop-db.OrderPlaced
+```
+
+`stack queue backfill` runs the same insert for each table whose
+`@enqueueOnChange` names the queue, whatever its `backfill` says, in one
+transaction that takes no lock on the tables, and says how many messages
+it enqueued. A row written while it runs may be enqueued by its trigger
+too, which a queue that appends then holds twice. It runs where the other
+`stack queue` commands run ([Dead messages](#dead-messages)): on Postgres,
+with the migration runner.
 
 ## Enqueue a message
 
@@ -295,9 +338,10 @@ Rust runtime's `sqlite` feature adds `queue::enqueue_sqlite` and
 `queue::SqliteQueue`.
 
 A Worker or a Cron job on Cloudflare enqueues on D1 this way, but no
-worker claims there: Workers runs no claim loop, so an environment that
-places a worker on the cloudflare target does not resolve, and says that
-gcp or `stack dev` runs one.
+worker claims there: a worker on Workers claims on Postgres through
+Hyperdrive ([On Cloudflare](#on-cloudflare)), so an environment that places
+a worker of a queue on D1 does not resolve, and says to list postgres
+first or claim where a SQLite file is the database, as under `stack dev`.
 
 ## Write a worker
 
@@ -365,6 +409,20 @@ it to, so a message that comes again files none:
 <Snippet file="schemas/services/shop-stock/src/workers.schema.ts" symbol="ReorderStock" />
 
 <Snippet file="rust-impl/shop-stock/src/lib.rs" from="    /// Files an open restock request" to="        Ok(())" />
+
+A worker serves no request, so its writes act as no one: the ORM refuses
+a create of a table with `createdBy`, and a soft delete, until the method
+names whom they act as. `orm.AsSystem(ctx)` in Go and
+`deps.orm.asSystem()` in TypeScript act as the database's system actor
+([Who wrote a row](/superschematic/guides/database-tables/#who-wrote-a-row)):
+
+```ts
+async syncItem(message) {
+  await deps.orm.asSystem().transaction(async tx => {
+    await tx.lineItem.createOne({ ...row });
+  });
+},
+```
 
 A method that returns nil, or resolves, or returns `Ok`, completes its
 message. One that returns an error, or panics, or rejects, fails it: the
@@ -540,7 +598,9 @@ The claims run on Postgres, or on SQLite where `stack dev` places the
 queue's database on the environment's SQLite file and the worker is in
 TypeScript; a Go or Rust worker there does not resolve, since its `Deps`
 reach Postgres alone. An environment that places the queue's database on
-a platform of another dialect, or on D1, does not resolve either.
+a platform of another dialect, or on D1, does not resolve either. On
+Cloudflare the database is a Postgres reached through Hyperdrive
+([On Cloudflare](#on-cloudflare)).
 
 ## On gcp
 
@@ -559,3 +619,50 @@ worker pool takes `cpu` and `memory`, one CPU and `512Mi` unless set:
 ```ts
 settings: [{ of: ShopOrders, worker: "FulfilOrders", instances: 3, memory: "1Gi" }],
 ```
+
+## On Cloudflare
+
+A Worker runs per request or per firing, not until it is stopped, so the
+cloudflare target runs a TypeScript worker as a Worker of its own,
+`cloudflare.drainer`, under a Cron Trigger that fires it every minute
+(D92). At each firing its generated `drain.ts` builds the API's `Deps`,
+with the database reached through its Hyperdrive config
+([Databases on Hyperdrive](/superschematic/guides/stacks/#databases-on-hyperdrive)),
+and runs the same claim loop `stack dev` runs for a window,
+`WORKER_DRAIN_SECONDS`, 50 seconds unless `drainSeconds` says otherwise;
+then it stops as a process stops at SIGTERM: it claims no more, lets the
+running handlers finish within the worker's `grace`, and gives back the
+rest. The next firing begins a minute after this one did, so a message
+waits at most for the gap between a window and the minute, and for the
+claim loop's one-second poll within a window.
+
+The queue is still its Postgres table, so nothing about it changes on
+Cloudflare: a message you enqueue in your transaction commits with it,
+`@enqueueOnChange`'s triggers enqueue whatever writes a row, `key`,
+`onDuplicate` and `serialize` hold one waiting message and one claim per
+key, and the backoff, the retention and the dead messages are the
+table's. A firing prunes the done messages as it starts.
+
+```ts
+settings: [{ of: FinancesApi, worker: "EmbedLineItems", concurrency: 4, drainSeconds: 40 }],
+```
+
+| Setting | Default | |
+| --- | --- | --- |
+| `concurrency` | the `@worker`'s | how many messages a firing handles at a time, which its version binds as `WORKER_CONCURRENCY` |
+| `drainSeconds` | `50` | how long each firing claims; the window and the `grace` must fit in a Cron Trigger's 15 minutes |
+| `cpuMs` | Cloudflare's, 30 seconds | the CPU time a firing may take, up to 300000: a handler's work counts, its waits on the database and on fetches do not |
+| `logs`, `telemetry` | as a job's | Workers Logs, and trace export, a span per message |
+
+`instances` over one, and `maxInstances`, do not resolve: each
+firing runs one claim loop, so a worker grows by its concurrency, within
+the six connections a Worker's invocation may hold open at once, which
+its database's and its fetches share. `enabled: false`, or `instances: 0`,
+leaves the Worker with no Cron Trigger. A Go or Rust worker does not
+resolve, and neither does one whose queue is on D1.
+
+A deploy migrates the database from the deploying machine
+([Databases on Hyperdrive](/superschematic/guides/stacks/#databases-on-hyperdrive)),
+so a trigger's `backfill: true` runs in the plan's step there as anywhere.
+`stack queue`, `backfill` among its commands, does not reach a cloudflare
+environment's database yet (D92).

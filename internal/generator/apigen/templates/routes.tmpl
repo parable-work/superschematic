@@ -1009,7 +1009,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		}
 		{{- end }}
 		if len(rawInput) > 0 {
-			checked, refusal := bodyargs.ReadInput(bytes.NewReader(rawInput), input.JSONFieldNames())
+			checked, refusal := bodyargs.{{ if .InputAllowsUnknownFields }}ReadInputDroppingUnknown{{ else }}ReadInput{{ end }}(bytes.NewReader(rawInput), input.JSONFieldNames())
 			if refusal != nil {
 				RespondInputRefusal(w, r, refusal)
 				return
@@ -1041,11 +1041,20 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 			}
 		}
 		{{- else if .HasInput }}
+		{{- if .InputAllowsUnknownFields }}
+		// Parse and validate input: a body, JSON and an object, whose keys
+		// the input type does not declare are dropped (D87), then the type's
+		// decoding and rules, each refused with the 400 every generated
+		// server sends.
+		var input types.{{ .InputType }}
+		rawInput, refusal := bodyargs.ReadInputDroppingUnknown(r.Body, input.JSONFieldNames())
+		{{- else }}
 		// Parse and validate input: a body, JSON, an object with only the
 		// keys the input type declares, then the type's decoding and rules,
 		// each refused with the 400 every generated server sends.
 		var input types.{{ .InputType }}
 		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		{{- end }}
 		if refusal != nil {
 			RespondInputRefusal(w, r, refusal)
 			return
@@ -1416,7 +1425,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		}
 
 		// Call implementation
-		result, err := impl.{{ .ShortImplName }}(r.Context(){{- range .PathParams }}, {{ .GoName }}{{- end }}{{- range .ArgQueryParams }}, {{ .GoName }}{{- end }}{{- if .Filterable }}, filters{{- end }}{{- if .HasInput }}, &input{{- else if .ScalarArgs }}{{- range .ScalarArgs }}{{- if eq $endpointMethod "GET" }}, {{ .GoName }}{{- else }}, requestBody.{{ .GoName }}{{- end }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files{{- end }}{{- if .Page }}, page{{- end }})
+		result, err := impl.{{ .ShortImplName }}({{ if $.Deps.Database }}callerContext(r.Context()){{ else }}r.Context(){{ end }}{{- range .PathParams }}, {{ .GoName }}{{- end }}{{- range .ArgQueryParams }}, {{ .GoName }}{{- end }}{{- if .Filterable }}, filters{{- end }}{{- if .HasInput }}, &input{{- else if .ScalarArgs }}{{- range .ScalarArgs }}{{- if eq $endpointMethod "GET" }}, {{ .GoName }}{{- else }}, requestBody.{{ .GoName }}{{- end }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files{{- end }}{{- if .Page }}, page{{- end }})
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())

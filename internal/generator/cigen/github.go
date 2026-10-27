@@ -1095,10 +1095,28 @@ func signIn(identity *registry.CIIdentity, role registry.CIRole) (signedIn, erro
 		if !secretName.MatchString(token) || !secretName.MatchString(passphrase) {
 			return signedIn{}, fmt.Errorf("a %s identity needs a token and a passphrase, each the name of a GitHub Actions secret, not %q and %q", identity.Kind, token, passphrase)
 		}
-		return signedIn{env: [][2]string{
+		env := [][2]string{
 			{"CLOUDFLARE_API_TOKEN", "${{ secrets." + token + " }}"},
 			{"PULUMI_CONFIG_PASSPHRASE", "${{ secrets." + passphrase + " }}"},
-		}}, nil
+		}
+		// A field env.<VARIABLE> sets that variable from the secret it
+		// names: a deploy job's origin connection string of a database on
+		// Hyperdrive, which its migrations read (D92).
+		var vars []string
+		for field := range identity.Fields {
+			if strings.HasPrefix(field, "env.") {
+				vars = append(vars, field)
+			}
+		}
+		slices.Sort(vars)
+		for _, field := range vars {
+			name, secret := strings.TrimPrefix(field, "env."), identity.Fields[field]
+			if !secretName.MatchString(name) || !secretName.MatchString(secret) {
+				return signedIn{}, fmt.Errorf("a %s identity's %s sets a variable from a GitHub Actions secret, each named in upper case, not %q from %q", identity.Kind, field, name, secret)
+			}
+			env = append(env, [2]string{name, "${{ secrets." + secret + " }}"})
+		}
+		return signedIn{env: env}, nil
 	}
 	return signedIn{}, fmt.Errorf("the %s CI renderer cannot sign in with a CI identity of kind %q", GitHubRenderer, identity.Kind)
 }

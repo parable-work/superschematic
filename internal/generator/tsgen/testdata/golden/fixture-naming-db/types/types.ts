@@ -34,7 +34,9 @@ export interface Category {
  * keep their camel-case names, its category's foreign key among them, and
  * the bank's id of a line is unique among its category's. A line from the
  * bank enqueues a LinePosted when it is written and when its amount
- * changes; the trigger is named after both tables.
+ * changes; the trigger is named after both tables, and the plan that adds
+ * it enqueues the lines from the bank already there. A line written
+ * without the day it was posted on is posted on the day it is written.
  */
 export interface LineItem {
   id?: IdentityUUID | null;

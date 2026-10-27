@@ -1,6 +1,8 @@
 // The repositories of fixture-ddl-db on Postgres, over DDL that says what
 // its schema says (D83, D79): a create that leaves a defaulted field unset
-// writes the value the column's DEFAULT gives a raw insert, a value a
+// writes the value the column's DEFAULT gives a raw insert, one that leaves
+// a Default<T, "now"> field unset leaves it to the database and one that
+// leaves out a required timestamp is refused (D88), a value a
 // column's CHECK refuses fails the write, deleting a category clears the
 // references SET NULL names, a @jsonField value is a JSON object in its
 // JSONB column, and an upsert by a unique @index over an expression, or
@@ -48,8 +50,20 @@ describe.skipIf(dsn === '')('the DDL under the repositories', () => {
       { amountCents: cents(100), postedAt: new Date() },
       { amountCents: cents(200), postedAt: new Date(), memo: 'rent' },
     ]);
-    const raw = await db.pool.query(`INSERT INTO line_item (amount_cents) VALUES (300) RETURNING memo`);
+    const raw = await db.pool.query(`INSERT INTO line_item (amount_cents, posted_at) VALUES (300, now()) RETURNING memo`);
     expect(lines.map(l => l.memo)).toEqual([raw.rows[0].memo, 'rent']);
+  });
+
+  test('a create leaves a Default<T, "now"> field and createdAt to the database, and no line is posted without postedAt', async () => {
+    const line = await orm.lineItem.createOne({ amountCents: cents(600), postedAt: new Date('2026-01-02T03:04:05Z') });
+    const { rows } = await db.pool.query(
+      `SELECT entered_on = CURRENT_DATE AND created_at IS NOT NULL AS stamped FROM line_item WHERE id = $1`,
+      [uuidToDb(line.id)],
+    );
+    expect(rows[0].stamped).toBe(true);
+    expect(line.enteredOn).toBeTruthy();
+    await expect(orm.lineItem.createOne({ amountCents: cents(601) } as never)).rejects.toThrow(/postedAt is required/);
+    expect(await refusal(db.pool.query(`INSERT INTO line_item (amount_cents) VALUES (602)`))).toEqual({ code: '23502', constraint: undefined });
   });
 
   test("a value a column's CHECK refuses fails the write, naming the constraint", async () => {
@@ -90,6 +104,14 @@ describe.skipIf(dsn === '')('the DDL under the repositories', () => {
     const groceries = await orm.category.upsertOne({ label: 'Groceries', kind: personal }, ['label'], { sortOrder: 5 });
     const again = await orm.category.upsertOne({ label: 'GROCERIES', kind: business }, ['label'], { sortOrder: 7 });
     expect([again.id, again.label, again.kind, again.sortOrder]).toEqual([groceries.id, 'Groceries', personal, 7]);
+    // Its rows cannot be matched to inputs or read back by their columns
+    // (D89): upsertMany and an upsert only if changed refuse the key.
+    await expect(orm.category.upsertMany([{ label: 'groceries', kind: personal }], ['label'], ['sortOrder'])).rejects.toThrow(/over an expression/);
+    await expect(orm.category.upsertOne({ label: 'groceries', kind: personal }, ['label'], { sortOrder: 7 }, { onlyIfChanged: true })).rejects.toThrow(/over an expression/);
+    // The where's key reads back a line it left, only if changed.
+    const unchanged = await orm.lineItem.upsertOneResult({ externalId: 'bank-0', amountCents: cents(1), postedAt: new Date() }, ['externalId'], { amountCents: cents(1) }, { onlyIfChanged: true });
+    expect(unchanged.status).toBe('inserted');
+    expect((await orm.lineItem.upsertOneResult({ externalId: 'bank-0', amountCents: cents(1), postedAt: new Date() }, ['externalId'], { amountCents: cents(1) }, { onlyIfChanged: true })).status).toBe('unchanged');
     // external is unique among the lines that hold an external id.
     const input = { externalId: 'bank-1', amountCents: cents(100), postedAt: new Date() };
     const posted = await orm.lineItem.upsertOne(input, ['externalId'], { amountCents: cents(100) });

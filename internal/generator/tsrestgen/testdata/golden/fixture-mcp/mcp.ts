@@ -6,6 +6,9 @@
 // guidance and the invocation policy, with the operation whose route a
 // tools/call runs through and where each argument goes in that route's
 // request. buildRouter serves them at POST /api/mcp.
+//
+// A tool marked confirm runs only once the person confirms the call (D93):
+// buildRouter needs options.mcp.confirmationKey to sign its confirmations.
 
 import type { McpRouteTool } from '@superschematic/http-runtime/mcp';
 
@@ -178,7 +181,8 @@ export const mcpTools: readonly McpRouteTool[] = [
         "in": "body",
         "name": "note"
       }
-    ]
+    ],
+    "confirm": true
   },
   {
     "name": "open_return",

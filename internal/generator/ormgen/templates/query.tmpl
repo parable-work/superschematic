@@ -83,6 +83,9 @@ type FloatRange struct {
 // BoolFilter provides filtering operations for boolean fields
 type BoolFilter struct {
 	Eq *bool
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In []bool
 	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
 	IsNull *bool
 }
@@ -95,7 +98,10 @@ type DateTimeFilter struct {
 	Lt      *time.Time
 	Lte     *time.Time
 	Between *DateTimeRange
-	IsNull  *bool // true for IS NULL, false for IS NOT NULL
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In     []time.Time
+	IsNull *bool // true for IS NULL, false for IS NOT NULL
 }
 
 // DateTimeRange represents a range for DateTime values
@@ -345,6 +351,9 @@ type {{ $typeName }}FindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 {{- $pk := .PrimaryKeySortField }}
 
@@ -378,9 +387,9 @@ func Parse{{ $typeName }}Sort(text string) ({{ $typeName }}Sort, error) {
 	return {{ $typeName }}Sort{}, fmt.Errorf("orm: {{ $typeName }} sorts by {{ .SortFieldList }}, not %q", text)
 }
 
-// {{ $typeName }}UniqueKey names a unique key of {{ $typeName }} that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// {{ $typeName }}UniqueKey names a unique key of {{ $typeName }} that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type {{ $typeName }}UniqueKey string
 
 const (
@@ -499,6 +508,12 @@ type {{ .TypeName }}Filter struct {
 	{{ toGoName .FieldName }}ID *UUIDFilter
 	{{- end }}
 	{{- end }}
+	{{- range .PathRelations }}
+	// {{ .GoField }} keeps the rows whose {{ .Field }} is among the{{ if .TargetLive }} live{{ end }} {{ .Target }} rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows{{ if .Nullable }}, so a row whose {{ .Field }} is null is not kept{{ end }}.
+	{{ .GoField }} *{{ .Target }}Filter
+	{{- end }}
 	{{- range .ReferencedBy }}
 	// {{ .FilterField }} filters on the presence or absence of a
 	// {{ .SourceTypeName }} whose {{ .FieldName }} points at this row.
@@ -513,6 +528,11 @@ type {{ .TypeName }}Filter struct {
 	// words, such as a blank one, keeps every row, and nil filters nothing.
 	SearchText *string
 	{{- end }}
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []{{ .TypeName }}Filter
 }
 
 // {{ .TypeName }}Update provides fields that can be updated
@@ -648,7 +668,11 @@ func (u *{{ .TypeName }}Update) ApplyTo(row *types.{{ .TypeName }}) {
 	{{- range .Fields }}
 	{{- if eq .Name "updatedBy" }}
 	if u.UpdatedBy != nil {
+		{{- if .IsRequired }}
 		row.UpdatedBy = *u.UpdatedBy
+		{{- else }}
+		row.UpdatedBy = u.UpdatedBy
+		{{- end }}
 	}
 	{{- end }}
 	{{- end }}
@@ -709,6 +733,22 @@ func (f *{{ .TypeName }}Filter) conditions(args *[]interface{}, paramOffset int)
 	{{- end }}
 	{{- end }}
 
+	{{- range .PathRelations }}
+	if f.{{ .GoField }} != nil {
+		before := len(*args)
+		through := f.{{ .GoField }}.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		{{- if .TargetLive }}
+		through = append(through, {{ goRawString .TargetLive }})
+		{{- end }}
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf({{ goRawString .Probe }}, where))
+	}
+	{{- end }}
+
 	{{- range .ReferencedBy }}
 	if f.{{ .FilterField }} != nil {
 		probe := {{ goRawString .Probe.Probe }}
@@ -734,6 +774,30 @@ func (f *{{ .TypeName }}Filter) conditions(args *[]interface{}, paramOffset int)
 		}
 	}
 	{{- end }}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
 
 	return conditions
 }

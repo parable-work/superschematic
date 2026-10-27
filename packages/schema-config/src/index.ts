@@ -106,6 +106,10 @@ export type ApiOutputConfig = {
    * Serve the operations the mcp decorator makes visible tools over MCP at POST /api/mcp (D81): the caller authenticates as on the API's other routes, and each tools/call runs through the route of its operation. A TypeScript API serves it; the build refuses it on a Go or Rust API, where support follows. Unset is off.
    */
   readonly mcp?: boolean;
+  /**
+   * The Secret<string> config field the MCP endpoint signs the confirmations of its ask tools with (D93), by the envVars class that declares it and the field's name, as a stack names the secret: "McpKeys.MCP_CONFIRMATION_KEY". The API's envVars class holds the field, its own or one it extends; its value is a random string of at least 32 bytes, one per environment. Required with mcp when a visible tool's invocation policy is ask.
+   */
+  readonly mcpConfirmationKey?: string;
 };
 
 /**
@@ -151,6 +155,32 @@ export type SqlOutputConfig = {
    * Where the keys of the schema's Encrypted<T> fields come from (D85). A schema with one needs it.
    */
   readonly encryption?: SqlEncryptionConfig;
+  /**
+   * Who the ORMs act as for a write no request's caller makes, a job's or a worker's: orm.asSystem() in TypeScript and orm.AsSystem(ctx) in Go stamp createdBy, updatedBy and deletedBy with its id (D87). The audit fields hold a user's id with no foreign key, so it needs no user row. Unset is { id: "00000000-0000-4000-8000-000000000000", name: "system" }.
+   */
+  readonly systemActor?: SqlSystemActorConfig;
+  /**
+   * An update of a table with an updatedBy field needs an acting user, as a create of a table with createdBy does: without one the ORMs refuse it (NoUserError in TypeScript, ErrNoUserInContext in Go) where they would leave a nullable updatedBy as it was (D87). Unset is false.
+   */
+  readonly requireUpdatedBy?: boolean;
+};
+
+/**
+ * The system actor of a DB service's ORMs (D87).
+ */
+export type SqlSystemActorConfig = {
+  /**
+   * The actor's user id: a UUID, hyphenated.
+   *
+   * @pattern ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
+   */
+  readonly id: string;
+  /**
+   * The name an app shows for the actor. Unset is "system".
+   *
+   * @minLength 1
+   */
+  readonly name?: string;
 };
 
 /**

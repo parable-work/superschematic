@@ -53,11 +53,18 @@ type ORMInfo struct {
 
 	Tables []ORMTable
 
+	// Views are the projections with a key, each read through a read-only
+	// repository (D90).
+	Views []ORMTable
+
 	// Clauses are sqlutil.PostgresClauses by name, DefaultLimit the rows a
 	// find reads unless told, and HistoryActorCTE and ClearHistoryActor the
 	// statements a versioned table's hard delete runs around it.
 	Clauses      []sqlutil.NamedStatement
 	DefaultLimit int
+	// ManyLimit is the rows a one-to-many include reads of a relation
+	// (sqlutil.ManyLimit, D90).
+	ManyLimit int
 
 	// NearestMetrics are the metrics nearest orders by, and DefaultNearestK
 	// the rows it reads unless told, on a database with a vector column
@@ -66,6 +73,28 @@ type ORMInfo struct {
 	DefaultNearestK   int
 	HistoryActorCTE   string
 	ClearHistoryActor string
+
+	// NearestSettings are the settings of a vector index's scan nearest's
+	// options set, and NearestSettingsStatement the statement that sets
+	// them, beside NearestMetrics (D89).
+	NearestSettings          []sqlutil.NearestSetting
+	NearestSettingsStatement string
+
+	// Queries are the database's declared queries (D86), which orm.queries
+	// runs; none on a database that declares none.
+	Queries []ORMQuery
+
+	// SystemActor is the DB service's system actor when it names one, which
+	// asSystem() acts as (D87), and nil for the runtime's default.
+	// RequireUpdatedBy is outputs.sql.requireUpdatedBy.
+	SystemActor      *ORMSystemActor
+	RequireUpdatedBy bool
+}
+
+// ORMSystemActor is outputs.sql.systemActor as orm.ts writes it.
+type ORMSystemActor struct {
+	ID   string
+	Name string
 }
 
 // ORMTable is a table as orm.ts writes it.
@@ -104,6 +133,50 @@ type ORMTable struct {
 	// VectorFields are the members of the table's vector(n) columns, which
 	// nearest orders rows by (D84).
 	VectorFields []string
+
+	// Relations are the table's to-one relations to the tables of its
+	// schema, which a read includes and a filter reaches through, and Many
+	// its one-to-many relations, which a read includes (D90, sqlutil's
+	// ToOne and ToMany).
+	Relations []ORMRelation
+	Many      []ORMMany
+
+	// View is a projection's view, read through a read-only repository
+	// (D90), whose row is named Type, and Relation the view as a reader
+	// names it.
+	View     bool
+	Relation string
+}
+
+// ORMRelation is a to-one relation as orm.ts writes it: Field, the
+// member a read includes the target's row under and a filter reaches
+// through, Column, the row's member that holds the foreign key, the
+// Target type and the ORM's member of its repository, TargetMember, the
+// filter's Probe, and Kind, "one", or "optional" for a relation an
+// include may find no row of.
+type ORMRelation struct {
+	Field        string
+	Column       string
+	Target       string
+	TargetMember string
+	Probe        string
+	Kind         string
+	// Nullable is a relation whose foreign key may be null, and
+	// TargetSoftDelete one whose target keeps deleted rows, which a filter
+	// through it leaves out.
+	Nullable         bool
+	TargetSoftDelete bool
+}
+
+// ORMMany is a one-to-many relation as orm.ts writes it: Name, the member
+// a read includes the rows under, the Source type and the ORM's member of
+// its repository, and Column, the source row's member that holds the
+// foreign key.
+type ORMMany struct {
+	Name         string
+	Source       string
+	SourceMember string
+	Column       string
 }
 
 // ORMColumn is a column of a table as orm.ts writes it.
@@ -142,15 +215,23 @@ type ORMColumn struct {
 	Type       string
 	FilterType string
 	Nullable   bool
+
+	// Compare is the format an upsert only if changed compares the column's
+	// values as, when not the value itself (sqlutil.ColumnModel.CompareAs,
+	// D89).
+	Compare string
 }
 
 // ORMUniqueKey is a unique key an upsert is keyed by: Fields its schema
-// fields, Name them joined by ",".
+// fields, Name them joined by ",". Rows reads the rows that hold keys
+// (D89), and Expression is a key over an expression, which has none.
 type ORMUniqueKey struct {
-	Name     string
-	Fields   []string
-	Conflict string
-	Keep     string
+	Name       string
+	Fields     []string
+	Conflict   string
+	Keep       string
+	Rows       string
+	Expression bool
 }
 
 // Tuple is the key's TypeScript type, a readonly tuple of its fields.
@@ -175,7 +256,7 @@ type ORMReference struct {
 // ormStatements are the statements of sqlutil.TableStatements the
 // TypeScript runtime runs, by the names its TableStatements declares.
 var ormStatements = []string{
-	"columns", "qualifiedColumns", "getOne", "getMany", "live", "liveWhere", "liveCondition",
+	"columns", "qualifiedColumns", "selectColumn", "getOne", "getOneFields", "getMany", "live", "liveWhere", "liveCondition",
 	"findOne", "findMany", "count", "page", "pageAfterKey", "pageAfter", "pageOrder", "pageTiebreak", "pageKeyExists",
 	"insert", "insertMany", "update", "returning", "updateMany", "updatedAt", "updatedBy", "upsert",
 	"softDelete", "softDeleteMany", "delete", "deleteMany",
@@ -187,16 +268,17 @@ var encryptedStatements = []string{"stale", "reseal"}
 
 // ormMembers are the members of an ORM a table's repository may not take
 // (the HTTP runtime's ORM_MEMBERS).
-var ormMembers = []string{"actingUser", "withUser", "as", "transaction", "query", "exec"}
+var ormMembers = []string{"actingUser", "withUser", "as", "asSystem", "transaction", "query", "exec", "queries"}
 
 // typeScriptORM is what orm.ts writes for schema, or nil for a schema with
-// no table. output holds the types the rows' members take theirs from.
-func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, error) {
+// no table. output holds the types the rows' members take theirs from, and
+// projections the projections' (D90).
+func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projections []TypeInfo) (*ORMInfo, error) {
 	tables, err := sqlutil.TablesOf(schema, opts.Dependencies)
 	if err != nil {
 		return nil, err
 	}
-	if len(tables) == 0 {
+	if len(tables) == 0 && len(schema.Queries()) == 0 {
 		return nil, nil
 	}
 	types := map[string]*TypeInfo{}
@@ -229,10 +311,15 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMI
 		Name:              ORMTypeName(opts.SchemaName),
 		Clauses:           clauses.AllClauses(),
 		DefaultLimit:      sqlutil.DefaultLimit,
+		ManyLimit:         sqlutil.ManyLimit,
 		HistoryActorCTE:   sqlutil.HistoryActorCTE(opts.Naming.HistoryActorSetting),
 		ClearHistoryActor: sqlutil.ClearHistoryActor(opts.Naming.HistoryActorSetting),
+		RequireUpdatedBy:  opts.Actor.RequireUpdatedBy,
 	}
 	out.Const = lowerFirst(out.Name) + "Orm"
+	if opts.Actor.SystemSet {
+		out.SystemActor = &ORMSystemActor{ID: opts.Actor.SystemID, Name: opts.Actor.SystemName}
+	}
 	for i := range tables {
 		t := &tables[i]
 		info := types[t.Type]
@@ -272,6 +359,7 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMI
 		if statements["nearest"] != "" {
 			table.Statements = append(table.Statements, sqlutil.NamedStatement{Name: "nearest", SQL: statements["nearest"]})
 			out.NearestMetrics, out.DefaultNearestK = sqlutil.NearestMetrics(), sqlutil.DefaultNearestK
+			out.NearestSettings, out.NearestSettingsStatement = sqlutil.NearestSettingsOf(), sqlutil.NearestSettings
 		}
 		for _, c := range t.VectorColumns() {
 			table.VectorFields = append(table.VectorFields, c.Field)
@@ -284,7 +372,10 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMI
 			table.Columns = append(table.Columns, column)
 		}
 		for _, k := range t.UniqueKeys {
-			table.UniqueKeys = append(table.UniqueKeys, ORMUniqueKey{Name: k.Name, Fields: k.Fields, Conflict: k.Conflict, Keep: k.Keep})
+			table.UniqueKeys = append(table.UniqueKeys, ORMUniqueKey{Name: k.Name, Fields: k.Fields, Conflict: k.Conflict, Keep: k.Keep, Rows: k.Rows, Expression: k.Expression})
+		}
+		if err := ormRelations(&table, t); err != nil {
+			return nil, err
 		}
 		for _, ref := range t.ReferencedBy {
 			probe := sqlutil.ReferenceProbeOf(t, ref)
@@ -298,7 +389,124 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMI
 		}
 		out.Tables = append(out.Tables, table)
 	}
+	views, err := ormViews(schema, opts, out, projections, known)
+	if err != nil {
+		return nil, err
+	}
+	out.Views = views
+	if out.Queries, err = typeScriptQueries(schema, opts, types, known); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+// ormViews are the projections of schema with a key as orm.ts writes them
+// (D90): each its view as sqlutil.ViewsOf models it, its columns typed as
+// projections types them, and a read-only repository. A view's row is the
+// projection's name, which no table's types may take.
+func ormViews(schema *ir.Schema, opts Options, out *ORMInfo, projections []TypeInfo, known map[string]bool) ([]ORMTable, error) {
+	models, err := sqlutil.ViewsOf(schema, opts.Dependencies)
+	if err != nil {
+		return nil, err
+	}
+	infos := map[string]*TypeInfo{}
+	for i := range projections {
+		infos[projections[i].Name] = &projections[i]
+	}
+	taken := map[string]string{}
+	for _, t := range out.Tables {
+		for _, suffix := range []string{"Row", "Create", "Update", "Filter", "OrderField", "SortField", "UniqueKey", "PageKey", "Relations", "Repository", "VectorField"} {
+			taken[t.Type+suffix] = t.Type
+		}
+		taken[t.Member] = t.Type
+	}
+	var views []ORMTable
+	for i := range models {
+		v := &models[i]
+		member := lowerFirst(v.Type)
+		for _, name := range []string{v.Type, v.Type + "Filter", v.Type + "OrderField", v.Type + "SortField", v.Type + "PageKey", v.Type + "Repository", member} {
+			if table, ok := taken[name]; ok {
+				return nil, fmt.Errorf("tsgen: the projection %s would declare %s, which the table %s's repository declares; rename the projection", v.Type, name, table)
+			}
+		}
+		if slices.Contains(ormMembers, member) {
+			return nil, fmt.Errorf("tsgen: the repository of projection %s would be the ORM's member %s, which the ORM holds itself; rename the projection", v.Type, member)
+		}
+		info := infos[v.Type]
+		view := ORMTable{
+			Type:   v.Type,
+			Member: member,
+			Const:  member + "View",
+			Table:  v.Quoted,
+			Key:    v.KeyField,
+			View:   true,
+		}
+		if td := schema.Types[v.Type]; td != nil {
+			view.Doc = codegen.DocText(td.Description, td.Comment)
+			view.Relation = td.Projection.Relation()
+		}
+		statements := map[string]string{}
+		for _, st := range sqlutil.TableStatementsOf(v).AllStatements() {
+			statements[st.Name] = st.SQL
+		}
+		for _, name := range ormStatements {
+			view.Statements = append(view.Statements, sqlutil.NamedStatement{Name: name, SQL: statements[name]})
+		}
+		for _, c := range v.Columns {
+			column, err := ormColumn(c, info, known, "", nil)
+			if err != nil {
+				return nil, fmt.Errorf("tsgen: projection %s: %w", v.Type, err)
+			}
+			if c.Key {
+				view.KeyType = column.Type
+			}
+			view.Columns = append(view.Columns, column)
+		}
+		views = append(views, view)
+	}
+	return views, nil
+}
+
+// ormRelations gives table, as orm.ts writes it, the relations t, as
+// sqlutil models it, includes and filters through (D90). An include's
+// member is a member of the row it loads into, so one that a column
+// already holds is refused.
+func ormRelations(table *ORMTable, t *sqlutil.TableModel) error {
+	members := map[string]bool{}
+	for _, c := range table.Columns {
+		members[c.Member] = true
+	}
+	for _, rel := range t.ToOne {
+		if members[rel.Field] {
+			return fmt.Errorf("tsgen: table %s: the relation %s would include its row as the member %s, which a column holds", t.Type, rel.Field, rel.Field)
+		}
+		kind := "one"
+		if rel.Optional {
+			kind = "optional"
+		}
+		table.Relations = append(table.Relations, ORMRelation{
+			Field:            rel.Field,
+			Column:           rel.Field + "Id",
+			Target:           rel.Target,
+			TargetMember:     lowerFirst(rel.Target),
+			Probe:            rel.Probe,
+			Kind:             kind,
+			Nullable:         rel.Nullable,
+			TargetSoftDelete: rel.TargetLive != "",
+		})
+	}
+	for _, many := range t.ToMany {
+		if members[many.Name] {
+			return fmt.Errorf("tsgen: table %s: the relation %s would include its rows as the member %s, which a column holds", t.Type, many.Name, many.Name)
+		}
+		table.Many = append(table.Many, ORMMany{
+			Name:         many.Name,
+			Source:       many.Source,
+			SourceMember: lowerFirst(many.Source),
+			Column:       many.Field + "Id",
+		})
+	}
+	return nil
 }
 
 // ormColumn is the column c as orm.ts writes it, its type from the table
@@ -322,7 +530,7 @@ func ormColumn(c sqlutil.ColumnModel, info *TypeInfo, known map[string]bool, uui
 		Vector:    cl.Vector,
 		Boolean:   cl.BoolLike && !cl.JSON,
 		Key:       c.Key,
-		Auto:      c.AutoGenerated,
+		Auto:      c.AutoGenerated || c.DefaultsToNow(),
 		Required:  c.Required,
 		Internal:  c.Internal,
 		Encrypted: c.Encrypted,
@@ -331,6 +539,9 @@ func ormColumn(c sqlutil.ColumnModel, info *TypeInfo, known map[string]bool, uui
 		Filter:    sqlutil.FilterOps(c.Filter),
 		Sortable:  c.Sortable,
 		Nullable:  !c.Required && !c.Key && !c.AutoGenerated,
+	}
+	if compare := c.CompareAs(); compare != "%s" {
+		column.Compare = compare
 	}
 	if cl.Vector {
 		column.Dimensions = sqlutil.VectorDimensions(c.Type)
@@ -486,14 +697,29 @@ func qualifyTypes(t string, known map[string]bool) string {
 // ./postgres entry, sorted: those its declarations use, each once.
 func (o *ORMInfo) RuntimeTypes() []string {
 	used := map[string]bool{"Orm": true, "OrmDefinition": true, "OrmOptions": true, "OrmPool": true, "OrmTx": true, "TableDefinition": true}
-	for _, t := range o.Tables {
+	if len(o.Queries) > 0 {
+		used["QueryDefinition"] = true
+	}
+	for _, q := range o.Queries {
+		if q.Page != nil {
+			used["QueryPageOptions"] = true
+			used["RowPage"] = true
+		}
+	}
+	for _, t := range append(slices.Clone(o.Tables), o.Views...) {
+		if len(t.Relations) > 0 || len(t.Many) > 0 {
+			used["Related"] = true
+		}
 		if t.Encrypted {
 			used["EncryptedRepository"] = true
 			used["SecretValue"] = true
 		}
-		if t.SoftDelete {
+		switch {
+		case t.View:
+			used["ReadRepository"] = true
+		case t.SoftDelete:
 			used["SoftDeleteRepository"] = true
-		} else {
+		default:
 			used["Repository"] = true
 		}
 		if len(t.ReferencedBy) > 0 {
@@ -506,7 +732,10 @@ func (o *ORMInfo) RuntimeTypes() []string {
 			if c.FilterType == "" {
 				continue
 			}
+			// A filter without a type argument, PointFilter, ends where its
+			// NullFilter begins.
 			name, rest, _ := strings.Cut(c.FilterType, "<")
+			name, _, _ = strings.Cut(name, " & ")
 			used[name] = true
 			if strings.Contains(rest, "NullFilter") || strings.HasSuffix(c.FilterType, "NullFilter") {
 				used["NullFilter"] = true
@@ -524,7 +753,10 @@ func (o *ORMInfo) RuntimeTypes() []string {
 // UsesTypes reports whether a declaration of orm.ts refers to the
 // package's ./types entry.
 func (o *ORMInfo) UsesTypes() bool {
-	for _, t := range o.Tables {
+	if len(o.Queries) > 0 {
+		return true
+	}
+	for _, t := range append(slices.Clone(o.Tables), o.Views...) {
 		if strings.Contains(t.KeyType, "T.") {
 			return true
 		}
@@ -694,5 +926,44 @@ func (c ORMColumn) Flags() string {
 	if c.Dimensions > 0 {
 		fmt.Fprintf(&b, ", dimensions: %d", c.Dimensions)
 	}
+	if c.Compare != "" {
+		b.WriteString(", compare: " + jsonQuote(c.Compare))
+	}
 	return b.String()
+}
+
+// Definition is the key as orm.ts writes it in its table's uniqueKeys:
+// its conflict target, the assignment of an update that sets nothing, and
+// the read of the rows that hold keys, or that it is a key over an
+// expression (D89).
+func (k ORMUniqueKey) Definition() string {
+	out := "{ conflict: " + jsonQuote(k.Conflict) + ", keep: " + jsonQuote(k.Keep)
+	if k.Rows != "" {
+		out += ", rows: " + jsonQuote(k.Rows)
+	}
+	if k.Expression {
+		out += ", expression: true"
+	}
+	return out + " }"
+}
+
+// NearestSettingDefinitions are the settings of a vector index's scan as
+// orm.ts writes them in the ORM's nearest settings (D89): each one's
+// option, its call, and the values it takes or the range of an integer.
+func (o *ORMInfo) NearestSettingDefinitions() []string {
+	out := make([]string, len(o.NearestSettings))
+	for i, setting := range o.NearestSettings {
+		def := "{ option: " + jsonQuote(setting.Option) + ", sql: " + jsonQuote(setting.SQL)
+		if len(setting.Values) > 0 {
+			quoted := make([]string, len(setting.Values))
+			for j, v := range setting.Values {
+				quoted[j] = jsonQuote(v)
+			}
+			def += ", values: [" + strings.Join(quoted, ", ") + "]"
+		} else {
+			def += fmt.Sprintf(", min: %d, max: %d", setting.Min, setting.Max)
+		}
+		out[i] = def + " }"
+	}
+	return out
 }

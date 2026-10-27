@@ -42,6 +42,7 @@ var templatesFS embed.FS
 //	├── deps.go          # Deps and the implementation's Constructor
 //	├── config.go        # EnvConfig and its loader (settings or derived fields)
 //	├── constants.go     # SystemUserID (public schemas with a UUID scalar)
+//	├── caller.go        # The ORM acting as each request's caller (D87; with a Deps database only)
 //	└── fileupload.go    # Multipart upload helpers (only with file uploads)
 func WriteAPI(output *APIOutput, outputDir string) error {
 	return WriteAPIWithProfile(output, outputDir, nil, false)
@@ -124,6 +125,7 @@ func WriteAPIWithProfile(output *APIOutput, outputDir string, prof *profile.Prof
 		{Condition: output.Auth.Identity, Template: "identity.tmpl", Filename: "identity.go"},
 		{Condition: output.HasConstants(), Template: "constants.tmpl", Filename: "constants.go"},
 		{Condition: output.HasFileUpload, Template: "fileupload.tmpl", Filename: "fileupload.go"},
+		{Condition: output.Deps.Database != "", Template: "caller.tmpl", Filename: "caller.go"},
 	}
 	if err := codegen.WriteConditionalFilesParallel(conditionalFiles, outputDir, func(templateName, outputPath string) error {
 		return generateFile(generator, templatesFS, templateName, outputPath, output, funcs)

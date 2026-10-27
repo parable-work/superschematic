@@ -53,6 +53,9 @@ func TestWriteTypesGolden(t *testing.T) {
 		{service: "fixture-vault-db"},
 		// Tables and columns @table and @column name (D85).
 		{service: "fixture-naming-db"},
+		// Declared queries (D86): orm.ts's queries, and their params' and
+		// rows' types.
+		{service: "fixture-queries-db"},
 	}
 
 	for _, tc := range cases {

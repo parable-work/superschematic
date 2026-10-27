@@ -165,6 +165,7 @@ export interface EnqueueCondition {
 }
 
 export interface EnqueueOnChange {
+  backfill?: boolean;
   fields?: string[];
   message: { [key: string]: string };
   on: string[];
@@ -474,6 +475,11 @@ export interface OperationSetFile {
   userSessions?: UserSessionsConfig;
 }
 
+export interface Origin {
+  apis?: ServiceRef[];
+  site: ServiceRef;
+}
+
 export interface ProjectionCollapse {
   by: string[];
   order?: ProjectionOrder[];
@@ -489,7 +495,7 @@ export interface ProjectionDef {
   joins?: ProjectionJoin[];
   migration: string;
   name: string;
-  pool: string;
+  pool?: string;
   predicates?: ProjectionPredicate[];
   source: string;
 }
@@ -544,6 +550,28 @@ export interface PruneReference {
   versionColumn: string;
 }
 
+export interface QueryDef {
+  dialects?: string[];
+  name: string;
+  notNull?: string[];
+  orderBy?: QueryOrderBy;
+  page?: QueryPage;
+  params: string;
+  row: string;
+  sql: string;
+}
+
+export interface QueryOrderBy {
+  default?: string;
+  options: { [key: string]: string };
+  param: string;
+}
+
+export interface QueryPage {
+  desc?: boolean;
+  key: string[];
+}
+
 export interface QueueDef {
   backoff?: string;
   key?: string;
@@ -579,6 +607,11 @@ export interface RelationDef {
   field?: string;
   onDelete?: string;
   type?: string;
+}
+
+export interface RoleSeed {
+  name: string;
+  permissions: string[];
 }
 
 export interface ScalarDef {
@@ -655,6 +688,7 @@ export interface SourceRef {
 export interface StackDecl {
   deploy?: ServiceRef[];
   expose?: DeployableRef[];
+  origins?: Origin[];
 }
 
 export interface TraitConfigSchema {
@@ -667,6 +701,7 @@ export interface TraitRef {
 }
 
 export interface TypeDef {
+  allowUnknownFields?: boolean;
   /**
    * The behaviors the type composes, in the order their checks run. A registry
    * admits the behaviors it registers: the core's, which the engine
@@ -694,10 +729,12 @@ export interface TypeDef {
   optimistic?: boolean;
   owner?: string;
   projection?: ProjectionDef;
+  query?: QueryDef;
   queue?: QueueDef;
   rawHeritage?: RawHeritage;
   rawSql?: RawSQLDef[];
-  role: 'DBTable' | 'APIView' | 'APIInput' | 'EmbeddedStruct' | 'APIOperationSet' | 'Trait' | 'Projection';
+  role: 'DBTable' | 'APIView' | 'APIInput' | 'EmbeddedStruct' | 'APIOperationSet' | 'Trait' | 'Projection' | 'Query';
+  seedRoles?: RoleSeed[];
   server?: ServerDecl;
   source?: SourceRef;
   sqlName?: string;

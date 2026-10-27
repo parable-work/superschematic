@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -41,6 +42,11 @@ import (
 // origin. The dev server is a process of the environment as a server is:
 // one that exits stops the environment, and stopping the environment stops
 // it.
+//
+// A site with an origin (D91) is served from OriginProxy whether it is
+// built or runs a dev server: the APIs of its origin on its one origin, as
+// a deploy serves them, and every other API it calls at its own address,
+// which answers CORS for the site.
 
 // Site is a site node: the package the provisioner builds and the file
 // server it serves the build's output from.
@@ -68,6 +74,13 @@ type Site struct {
 	// Dev is the site's dev server, which runs in place of the build;
 	// nil builds the site (D82).
 	Dev *SiteDev `json:"dev,omitempty"`
+
+	// Origin is the loopback URL of each API the site serves on its own
+	// origin (D91), by service: its proxy serves each under
+	// ir.SiteDevAPIPath(service), in front of the dev server or the
+	// build. Empty serves none, and a dev server's proxy serves every API
+	// the site calls, as D82 has it.
+	Origin map[string]string `json:"origin,omitempty"`
 }
 
 // SiteDev is a site's dev server (D82): the package.json script, or
@@ -117,6 +130,15 @@ func siteOf(res *ir.Resource) (*Site, error) {
 			return nil, fmt.Errorf("its dev server's port is not a number")
 		}
 	}
+	if raw, set := res.Properties["origin"]; set {
+		origin, _ := raw.(map[string]any)
+		s.Origin = map[string]string{}
+		for service, upstream := range origin {
+			if s.Origin[service], ok = upstream.(string); !ok {
+				return nil, fmt.Errorf("its origin's upstream of %s is not a string", service)
+			}
+		}
+	}
 	s.URL = ServerURL(s.Port)
 	return s, nil
 }
@@ -136,6 +158,35 @@ func (s *Site) apis() (map[string]*url.URL, error) {
 		out[service] = u
 	}
 	return out, nil
+}
+
+// routes returns what the site's proxy serves on its origin: the upstream
+// of each API it forwards under its path, and the URL the config gives
+// each other API it calls. A site with an origin forwards its origin's
+// APIs alone (D91); one without forwards every API it calls, as a dev
+// server's proxy does (D82).
+func (s *Site) routes() (proxied map[string]*url.URL, direct map[string]string, err error) {
+	apis, err := s.apis()
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(s.Origin) == 0 {
+		return apis, nil, nil
+	}
+	proxied, direct = map[string]*url.URL{}, map[string]string{}
+	for service, api := range apis {
+		upstream, ok := s.Origin[service]
+		if !ok {
+			direct[service] = api.String()
+			continue
+		}
+		u, err := url.Parse(upstream)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return nil, nil, fmt.Errorf("site %s: its origin holds no URL of %s", s.Deployable, service)
+		}
+		proxied[service] = u
+	}
+	return proxied, direct, nil
 }
 
 func (p *Program) site(id string) *Site {
@@ -208,13 +259,25 @@ func (p *Provisioner) startSites(ctx context.Context, req registry.ProvisionRequ
 		if p.runner().PortInUse(s.Port) {
 			return fmt.Errorf("local: site %s: port %d is in use, by another program or a site an earlier run left behind; stop it, or give %s another port with its port setting", s.Deployable, s.Port, s.Deployable)
 		}
+		handler := SiteHandler(root, s.Fallback, config)
+		var served []string
+		if len(s.Origin) > 0 {
+			// The build behind the proxy that serves the site's origin
+			// (D91), as a deploy serves it.
+			proxied, direct, err := s.routes()
+			if err != nil {
+				return fmt.Errorf("local: %w", err)
+			}
+			handler = OriginProxy(s.Deployable, handler, proxied, direct)
+			served = sortedServices(proxied)
+		}
 		listener, err := net.Listen("tcp", net.JoinHostPort(Loopback, strconv.Itoa(s.Port)))
 		if err != nil {
 			return fmt.Errorf("local: site %s: listen on %s: %w", s.Deployable, s.URL, err)
 		}
 		rs := &runningSite{
 			site:   s,
-			server: &http.Server{Handler: SiteHandler(root, s.Fallback, config), ReadHeaderTimeout: 10 * time.Second},
+			server: &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second},
 			done:   make(chan struct{}),
 		}
 		go func() {
@@ -227,19 +290,35 @@ func (p *Provisioner) startSites(ctx context.Context, req registry.ProvisionRequ
 		}
 		p.sites[k] = append(p.sites[k], rs)
 		p.mu.Unlock()
+		if len(served) > 0 {
+			p.printf("serve site %s at %s from %s, and %s under %s<service>", s.Deployable, s.URL, root, strings.Join(served, ", "), ir.SiteDevAPIPrefix)
+			continue
+		}
 		p.printf("serve site %s at %s from %s", s.Deployable, s.URL, root)
 	}
 	return nil
 }
 
+// sortedServices returns the services of apis, sorted.
+func sortedServices(apis map[string]*url.URL) []string {
+	services := make([]string, 0, len(apis))
+	for service := range apis {
+		services = append(services, service)
+	}
+	sort.Strings(services)
+	return services
+}
+
 // startDevSite runs a site's dev server in dir, its package, with bun,
-// waits until it answers, and serves the site's port from its proxy (D82).
+// waits until it answers, and serves the site's port from its proxy (D82):
+// every API the site calls, or with an origin (D91) the origin's APIs, the
+// config naming each other API at its own URL, as a deploy does.
 // The dev server takes the provisioner's environment, as the build does,
 // with PORT its port, SUPERSCHEMATIC_SITE_URL the site's origin, and, for
 // each API the site calls, <API>_URL the API's own loopback URL, for a dev
 // server that proxies an API itself.
 func (p *Provisioner) startDevSite(ctx context.Context, k string, s *Site, dir, bun string) error {
-	apis, err := s.apis()
+	apis, direct, err := s.routes()
 	if err != nil {
 		return fmt.Errorf("local: %w", err)
 	}
@@ -259,14 +338,17 @@ func (p *Provisioner) startDevSite(ctx context.Context, k string, s *Site, dir, 
 		}
 	}
 	env := append(os.Environ(), "PORT="+strconv.Itoa(s.Dev.Port), "SUPERSCHEMATIC_SITE_URL="+s.URL)
-	services := make([]string, 0, len(apis))
-	for service := range apis {
-		services = append(services, service)
+	own := maps.Clone(direct)
+	if own == nil {
+		own = map[string]string{}
 	}
-	sort.Strings(services)
-	for _, service := range services {
-		env = append(env, ir.EnvName(service)+"_URL="+apis[service].String())
+	for service, u := range apis {
+		own[service] = u.String()
 	}
+	for _, service := range slices.Sorted(maps.Keys(own)) {
+		env = append(env, ir.EnvName(service)+"_URL="+own[service])
+	}
+	services := sortedServices(apis)
 	c := p.out()
 	stdout, stderr := c.writer(s.Deployable), c.writer(s.Deployable)
 	p.printf("start site %s's dev server: bun run %s in %s, on port %d", s.Deployable, s.Dev.Command, dir, s.Dev.Port)
@@ -288,7 +370,7 @@ func (p *Provisioner) startDevSite(ctx context.Context, k string, s *Site, dir, 
 	if err != nil {
 		return stopDev(fmt.Errorf("local: site %s: listen on %s: %w", s.Deployable, s.URL, err))
 	}
-	rs.server = &http.Server{Handler: SiteProxy(s.Deployable, dev, apis), ReadHeaderTimeout: 10 * time.Second}
+	rs.server = &http.Server{Handler: OriginProxy(s.Deployable, devProxy(s.Deployable, dev), apis, direct), ReadHeaderTimeout: 10 * time.Second}
 	rs.done = make(chan struct{})
 	go func() {
 		defer close(rs.done)

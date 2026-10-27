@@ -162,11 +162,17 @@ type PlatformSpec struct {
 	// NoIdentity, when set, says why a server on this platform cannot
 	// serve an API over the user model, which authenticates with the
 	// identity runtime (D50): resolution refuses such a server as
-	// unrealizable, giving the reason. The cloudflare.workers platform sets
-	// it, since the TypeScript identity runtime hashes passwords with
-	// node:crypto's argon2, which Workers lacks (D64). Only a server or an
-	// app platform sets it, and not beside IdentityConfig.
+	// unrealizable, giving the reason. Only a server or an app platform
+	// sets it, and not beside IdentityConfig.
 	NoIdentity string
+
+	// IdentityDatabases, beside NoIdentity, names the database platforms
+	// over which a server here does serve an API over the user model: one
+	// whose authDb the environment places on one of them resolves, and
+	// NoIdentity refuses the rest (D92). The cloudflare.workers platform
+	// names cloudflare.hyperdrive, since its identity store runs on Postgres
+	// through Hyperdrive, and D1 holds none.
+	IdentityDatabases []string
 
 	// NoQueueClaims, when set, says why no worker claims the messages of a
 	// queue on a database this platform places (D53, amended): resolution
@@ -195,6 +201,18 @@ type PlatformSpec struct {
 	// deployable none: a site edge or a generic one to it fails to
 	// resolve. A site platform must have it.
 	PublicAddressOf func(PlatformContext) any
+
+	// ServesOrigin says a site platform serves a site's origin (D91): each
+	// API of it (ir.ResolvedSite.Origin) under ir.SiteDevAPIPath(service)
+	// on the site's own public address, forwarded to the API's server with
+	// that prefix taken off and the query kept, as `stack dev`'s proxy
+	// forwards it, and every other path from the site's files. Its
+	// connector to a server platform of its provider derives the
+	// same-origin URL (ir.SiteOriginURL) and reaches a server that is not
+	// exposed; the generic connector reaches one on another provider at
+	// its public address (ir.SiteEndpoint.Upstream). Resolution refuses an
+	// origin on a site platform without it. Only a site platform sets it.
+	ServesOrigin bool
 
 	// Lower returns the deployable's resources. It is pure: the same
 	// context gives the same result.
@@ -729,6 +747,9 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 	if spec.NameOf == nil || spec.AddressOf == nil || spec.Lower == nil {
 		return fmt.Errorf("registry: platform %q needs NameOf, AddressOf and Lower", spec.Name)
 	}
+	if spec.ServesOrigin && spec.Kind != ir.DeployableSite {
+		return fmt.Errorf("registry: %s platform %q says it serves a site's origin; only a site platform does (D91)", spec.Kind, spec.Name)
+	}
 	if spec.Artifact != "" {
 		if !spec.Kind.RunsCode() {
 			return fmt.Errorf("registry: %s platform %q declares an artifact; only a server, job, worker, runner, deriver or app platform builds one", spec.Kind, spec.Name)
@@ -753,6 +774,9 @@ func (r *Registry) RegisterPlatform(spec PlatformSpec) error {
 		if spec.IdentityConfig != "" {
 			return fmt.Errorf("registry: platform %q declares an identity config and says it runs no identity runtime", spec.Name)
 		}
+	}
+	if len(spec.IdentityDatabases) > 0 && spec.NoIdentity == "" {
+		return fmt.Errorf("registry: platform %q names the databases it serves the user model over, and no NoIdentity for the rest", spec.Name)
 	}
 	if spec.NoQueueClaims != "" && spec.Kind != ir.DeployableDatabase {
 		return fmt.Errorf("registry: %s platform %q says why no worker claims a queue on it; only a database platform places a queue", spec.Kind, spec.Name)
@@ -1075,6 +1099,18 @@ func (r *Registry) checkStackReferences() error {
 					want[i] = string(kind)
 				}
 				return fmt.Errorf("registry: connector %q %s names platform %q, a %s platform; a %s edge's %s is a %s", name, end.role, end.platform, platform.Kind, spec.Edge, strings.ToLower(end.role), strings.Join(want, " or a "))
+			}
+		}
+	}
+	for _, name := range keysOf(r.stack.platforms) {
+		spec := r.stack.platforms[name]
+		for _, database := range spec.IdentityDatabases {
+			platform, ok := r.stack.platforms[database]
+			if !ok {
+				return fmt.Errorf("registry: platform %q serves the user model over database platform %q, which is not registered (registered platforms: %v)", name, database, keysOf(r.stack.platforms))
+			}
+			if platform.Kind != ir.DeployableDatabase {
+				return fmt.Errorf("registry: platform %q serves the user model over platform %q, a %s platform", name, database, platform.Kind)
 			}
 		}
 	}

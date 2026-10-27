@@ -206,7 +206,7 @@ func typeNames(before, after *Column) (string, string) {
 // published columns change (after nil: the view is dropped). The reader is
 // the view: its Arrow schema is its readers' contract.
 func viewHazard(c *change, before, after *View) {
-	reader := before.Schema + "." + before.Name
+	reader := viewRelation(before)
 	h := &Hazard{
 		ID:      HazardID(HazardAPIBreaking, viewSubject(before), reader),
 		Class:   HazardAPIBreaking,

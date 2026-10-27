@@ -11378,7 +11378,7 @@ queue of the same schema after a write to the table's rows.
 | On Postgres it is a plpgsql function `<table>_enqueue_<queue>` and the trigger `trg_<table>_enqueue_<queue>`, `AFTER INSERT OR UPDATE OR DELETE ... FOR EACH ROW`, as a @versioned table's capture function and triggers are (D17), so create.sql and the planner's model take them from one renderer, and the planner creates, replaces in place (`CREATE OR REPLACE`), renames and drops them as it does those. A change of `fields`, `when` or `message` replaces the function; one of `on`, the trigger. | A trigger with a WHEN clause per write, which the planner's trigger model does not read. |
 | SQLite gets triggers too: one per write, `trg_<table>_enqueue_<queue>_<write>`, each holding its insert and, in its WHEN, the comparison and the conditions. The SQLite model holds triggers for the first time: the planner creates them, replaces them (DROP IF EXISTS and CREATE, SQLite having no functions), and drops them. A table SQLite rebuilds loses its triggers with its old copy, so the rebuild creates the triggers the phase leaves on each table it keeps, the new model's and, in expand, the previous model's that contract drops. A trigger that inserts into a rebuilt table needs nothing: SQLite resolves the name when the trigger runs. | Refusing @enqueueOnChange on SQLite, which the same app runs locally. |
 | The trigger's insert ends with the queue's Conflict, so under replace or skip repeated writes keep one ready message per key, and the trigger and an application's enqueue dedupe against each other. | |
-| A trigger enqueues for writes after it exists; the plan that adds it enqueues nothing for the rows already there. | Seeding a message per row, as a new history table is seeded, which for a large table is a burst of work nobody asked for. |
+| A trigger enqueues for writes after it exists; the plan that adds it enqueues nothing for the rows already there, unless the declaration asks with `backfill: true` (D88, amended). | Seeding a message per row, as a new history table is seeded, which for a large table is a burst of work nobody asked for. |
 
 Status: built.
 - **Dedupe and serialization:** `internal/generator/sqlutil/queuesql_test.go`
@@ -11464,7 +11464,7 @@ This entry adds:
 |----------|------------------------|
 | Under `registration: "approval"` register creates the user with `pendingAt` set and answers `RegisterResult`: 202 `{ pending: true, user }` with no session and no cookie, or 200 with a session for the first administrator. Open registration keeps `LoginResult`. | `disabledAt` for pending, which an administrator cannot tell from a disabled user; always answering 200, which an SDK reads as signed in; changing open registration's result, which breaks every SDK that calls it |
 | A pending user's login is 403 `pending_approval`, and only once the password verifies; every other failure stays 401 `invalid_credentials`. A pending user's session, should one exist, does not authenticate. | 401 `invalid_credentials`, which leaves a sign-in page unable to say why; answering before the password, which tells anyone which logins are pending |
-| `defaultRoles` are granted when register creates the user, under approval too, and a role no role has the name of is created with no permissions. A pending user can neither sign in nor hold a session, so the roles take effect at approval. | Granting at approval, the requirements' wording: `approveUser` belongs to `@userAdministration`, which may sit in another API than the `@userSessions` that names the roles, so it would not know them; failing a registration whose role is missing |
+| `defaultRoles` are granted when register creates the user, under approval too, and a role no role has the name of is created with no permissions, unless the authDb's `@seedRoles` holds it from the first migration (D88, amended). A pending user can neither sign in nor hold a session, so the roles take effect at approval. | Granting at approval, the requirements' wording: `approveUser` belongs to `@userAdministration`, which may sit in another API than the `@userSessions` that names the roles, so it would not know them; failing a registration whose role is missing |
 | `approveUser` needs `users.write`, and the approver's permissions must cover the user's, the default roles' included, as for `enableUser` (D50, amended). Approving a user who is not pending is 409 `not_pending`. | `enableUser` as approval, which mixes the two states; approval as an implicit grant no one's permissions are checked against |
 | `firstUser: { role, permissions }` makes the registration that finds no role grant, the state `identity bootstrap` runs in, the first administrator: active, signed in, holding the role, created with its permissions when missing. A store reads the grants without a lock first, so only an empty database's registrations take Postgres's `LOCK TABLE ... IN SHARE ROW EXCLUSIVE MODE`, Bootstrap's lock; SQLite lets one transaction write at a time. | "the table has no user", which bootstrap and the registration would read apart; a role holding every permission the API names, which misses the ones added later; an advisory lock, whose key a deployment would have to keep apart from its own |
 | The generated wiring hands the runtime the registration (`IdentityRegistration`, `identityRegistration`, `registration()`), and only for an API whose register declares any; others build as before. | The identity config's JSON, which would let an environment open what the schema closed |
@@ -11785,3 +11785,969 @@ digit and dimension rules on an operation's argument; a version graph's
 value classes for `NUMERIC` and `vector`, which `graphdesc` refuses; the
 implicit currency of a `Finance.SignedMoney` in Topcoat; the `decimal`
 format hint in superscalar's Go metadata.
+
+## D89. A table upserts many rows a statement, says what each upsert did, writes only what changed and seals an Encrypted<T> field on any unique key; nearest takes its index's settings; and a find, a transaction and a raw query take options
+
+A bank sync reads a page of up to 500 transactions, and an OFX file
+hundreds, each by its natural key, the bank's id for it or its account and
+reference. The repositories had `upsertOne` alone (D79), so a page was a
+statement per row; nothing said whether an upsert inserted or updated a
+row, so an import's summary ("12 new, 3 updated, 40 unchanged") took
+reads of its own; and an upsert that changed nothing still wrote the row:
+it stamped `updatedAt` and fired the table's triggers, so every sync of
+the same page re-enqueued its embeddings through `@enqueueOnChange` (D80).
+An upsert could set an `Encrypted<T>` field only by the primary key (D85),
+since each envelope is bound to its row's key, so storing a Plaid item by
+its unique `itemId` was a find, then a create or an update, which races.
+
+`nearest` (D84) scanned an hnsw index with pgvector's defaults: it reads
+40 candidates and keeps those the filter keeps, so a selective filter
+left fewer than `k` rows, and the only way round was raw `SET LOCAL` in a
+transaction. And a few options were missing: `findMany` always counted
+first, a raw query's rows came back in pg's forms, a transaction began at
+the server's isolation level and could not nest, and a time or a boolean
+filtered by no set.
+
+This entry adds, in both ORMs and from statements sqlutil writes once:
+- `UpsertMany`/`upsertMany`, an upsert's result (`UpsertOneResult`,
+  `upsertOneResult`), and an upsert only if changed;
+- an upsert that sets an `Encrypted<T>` field on any unique key;
+- `nearest`'s `efSearch`, `iterativeScan`, `maxScanTuples`, `probes`,
+  `maxProbes` and `excludeIds`;
+- `findMany` without its count, a transaction's isolation level and read
+  only, nested transactions as savepoints, `in` on a time and a boolean,
+  and in TypeScript a raw query read through a table's definition.
+
+### Upserts of many rows, and what each did
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `UpsertMany(ctx, inputs, on, fields, opts)` and `upsertMany(inputs, on, fields, options)` insert each input, or, when a row holds its value of the unique key `on`, set each field `fields` names to the value the input would have inserted: `SET name = EXCLUDED.name`. `fields` is Go's `<Type>Fields`, the field selection the reads take, and TypeScript's update members, the key, the audit fields and internal metadata refused; the assignments follow `UpdateOne`'s order whatever order `fields` names them in, so both ORMs write one statement. A field `fields` names that an input leaves unset takes what the insert would have written, its default or NULL. | One `Update` applied to every row, which a sync of rows of their own values cannot use. An update per row, which no single `ON CONFLICT DO UPDATE` can apply, since it sees the target row and `EXCLUDED` alone. A callback, which the statement cannot run. |
+| One statement writes a batch, `TableStatements.Upsert`: the insert of `InsertMany`, `DEFAULT` for a column a row leaves unset that another sets, `ON CONFLICT` the key's target, and the update. A batch is as many rows as Postgres binds the parameters of, 65535 over the table's insert columns less the two stamps (`TableModel.BatchRows`), or `Batch` (`batch`) rows. More rows than a batch take a statement each, in one transaction, so a failed batch writes nothing. | `COPY` into a temporary table, then an upsert from it: two statements always, and a second write path. An `unnest` of a typed array per column: a cast per column type, and the codec of each element. |
+| `UpsertOne` and `upsertOne` keep returning the row. `UpsertOneResult` and `upsertOneResult` return `{ row, status }`, and `UpsertMany` and `upsertMany` each input's, in the inputs' order. `status` is `inserted`, `updated`, or `unchanged`: the row that held the key, left as it was, since the update set no field or, only if changed, each field it set already held its value. Go's `UpsertResult[T]` and `UpsertStatus` and TypeScript's `UpsertResult<Row>` and `UpsertStatus` are shared by every table. | Changing `upsertOne`'s return type to the result, which the requirement offered first: every caller that wants the row, the acme cart among them, would unwrap it. An `inserted` boolean alone, which cannot say unchanged. |
+| The statement returns `(xmax = 0) AS _inserted` after the row (`sqlutil.UpsertInserted`): the row version an insert wrote has no `xmax`, and the one an `ON CONFLICT` update wrote holds the conflicting row's lock. | Postgres 18's `RETURNING old.*`, which Postgres 16 has not. A read of the keys before the upsert, a statement more and a race. |
+| `RETURNING` promises no order, and an update only if changed returns no row it left, so the rows come back matched to the inputs by the key's values, each read as its column's wire form: in TypeScript `decodeValue` of the bound or returned value, in Go the driver value of the field, a time in UTC to the microsecond (`<type>KeyOf`, `upsertKeyValue`). A row takes the first input left that holds its key; one whose key no input holds, as a key the database generated or a NULL, which no unique index holds, takes the first input left that sets none of the key, as Postgres returns a `VALUES` insert's rows in their order. | The order alone, which drops a row an update leaves and which the documentation does not promise. An ordinal column through a CTE over `VALUES`, which needs a cast per column and takes no `DEFAULT`. |
+| A key over an expression, `((lower(label)))`, matches no input by its columns' values, so `upsertMany` refuses it, and so does an upsert only if changed, which reads rows back by their columns; `upsertOne` and `upsertOneResult` without it take one. | Matching on the expression in the client, which would have to evaluate SQL. |
+| Two inputs of one statement that hold one key fail it: Postgres refuses to update a row twice. | Keeping the last input of a key, which would decide for the caller which change wins. |
+
+### Only if changed
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `OnlyIfChanged` (`onlyIfChanged`) adds to the update's WHERE, after the live rows' condition, `(line_item.name, line_item.amount) IS DISTINCT FROM (EXCLUDED.name, EXCLUDED.amount)` over the columns the update sets, their new values the parameters of an `upsertOne`'s update, `NULL` for a column it sets null, or `EXCLUDED`'s for `upsertMany` (`Clauses.Changed`). The stamps are not compared, so a row whose fields hold the update's values is not rewritten: its `updatedAt` and `updatedBy` stay and no trigger fires. An update that compares no column is `WHERE FALSE` (`Clauses.Never`). | Stamping by a `CASE`, which still rewrites the row and fires every trigger. A `WHEN` on each trigger, which the ORM does not own and which `updatedAt` defeats. |
+| A `POINT`, which Postgres has no equality for, compares as its text, `CAST(%s AS POINT)::text` on both sides (`ColumnModel.CompareAs`); every other column type the ORMs write has `=`. | Leaving a point out of the comparison, which would drop a change of it alone. Comparing every column as text. |
+| A row the update left is not returned, so the repository reads it back by its key in the same transaction, where the upsert locked it: `UniqueKey.Rows`, `SELECT <columns> WHERE (<key>) IN (...)` and the partial index's predicate, one statement for a batch. A deleted row of a full key, which the update's live condition also skips, reads back deleted and is `ErrNotFound` (`NotFoundError`), as before. An upsert only if changed runs in a transaction of its own when none is open. | Reporting such a row without its row. A read outside the upsert's transaction, which a write between could change. |
+
+### Encrypted fields on any unique key (D85 amended)
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| An insert seals its encrypted fields under the input's key, which a table with one generates when the input leaves it unset (D85), so an inserted row's envelopes open. An update's encrypted field never goes in the `ON CONFLICT` update, whose row's key the statement alone names: after it, the repository opens the row the upsert returned or read back and, where the update's value differs, sets it by `UpdateOne`, sealed under that row's key and stamped, in the upsert's transaction, which the conflict's lock holds the row for. The status is then `updated`. A null in the update goes in the statement, as there is nothing to seal. `UpsertMany` does the same per row, each input's value of each encrypted field `fields` names. The primary key takes the same path, so its upsert of an encrypted field is two statements where it was one. | A find, then a create or an update, which races. Sealing in the database, which puts the key in the statement and the server's logs. Sealing under the key the insert generates and setting it from `EXCLUDED`, which binds the envelope to a key the conflicting row does not have. |
+| An upsert only if changed compares an encrypted field's plaintext, after the statement, and sets it only when it differs; a ciphertext, sealed under a fresh nonce, always differs. | Comparing envelopes, which would update every row. |
+
+### nearest's index settings
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `nearest` takes `efSearch` (hnsw's `ef_search`, 1 to 1000), `iterativeScan` (`off`, `relaxed_order`, `strict_order`), `maxScanTuples` (`hnsw.max_scan_tuples`), `probes` (`ivfflat.probes`, 1 to 32768) and `maxProbes` (`ivfflat.max_probes`), and Go's `NearestOptions` the same, a zero unset. One statement sets those it is given before the read, `SELECT set_config('hnsw.ef_search', $1, true), ...` (`sqlutil.NearestSettingsOf`), each value bound as text, and the ORM checks each range first: a setting pgvector has not yet loaded in the session is a placeholder that takes any value, which it would drop with a warning once it loads. | `SET LOCAL hnsw.ef_search = 100`, which binds no parameter, so each value would be written into the text. pgvector's own range checks alone. |
+| `iterativeScan` sets both indexes' iterative scan, hnsw's and ivfflat's, but ivfflat's to `strict_order`, which it has not; the read uses whichever index serves its metric. pgvector 0.8 has both, as `stack dev`'s image runs. | Options per index kind, `hnsw: {...}` and `ivfflat: {...}`, which a caller reads the schema's indexes to choose between. |
+| `set_config(..., true)` holds for a transaction, so `nearest` with a setting outside one opens a transaction of its own for the setting and the read; inside one the settings hold until it ends, as `SET LOCAL`'s do. | A savepoint around the read, rolled back to after it to drop the settings: three more statements per read for what a caller in a transaction may well want kept. A CTE that sets them in the read, whose order the planner does not promise. |
+| `excludeIds` (`ExcludeIDs`) leaves out the rows of those keys, `<table>.<key> NOT IN (...)` (`Clauses.NotIn`), after the filter's conditions: the row whose vector is asked for. | The caller's filter, which has no "not in" on a key. |
+
+### Query options
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `findMany(filter, { count: false })` reads the page without the `COUNT(*)` it runs first, and its `total` is undefined, which an overload types; Go's `FindOptions.SkipCount` returns -1. | A method of its own. 0, which a count can be. |
+| `transaction(fn, { isolation, readOnly })` and Go's `TransactionWith(ctx, TxOptions{Isolation, ReadOnly}, fn)` begin with `BEGIN ISOLATION LEVEL SERIALIZABLE READ ONLY` (`sqlutil.BeginTransaction`), which Go sends through pgx's `TxOptions.BeginQuery`, so both send one text. `Transaction(ctx, fn)` keeps its signature, and `DatabaseInterface` gains `TransactionWith`. | pgx's `IsoLevel` and `AccessMode`, which write lower-case statements of their own. Options on `Transaction`, which changes the method every implementation of the interface has. |
+| A transaction nests one: `tx.transaction(fn)` and Go's `Tx.Transaction(ctx, fn)` run `SAVEPOINT sp_<depth>`, release it when `fn` returns, and when it throws or returns an error roll back to it and release it, so the transaction around it goes on, as it may after a statement of `fn` failed. `TxInterface` gains `Transaction`. | pgx's nested `Tx`, whose own savepoint names TypeScript would have to copy. Rolling back to the savepoint and keeping it, which leaves one per failure. |
+| The statements of a transaction and a savepoint name no table, so the `./orm` entry does not carry them: the TypeScript runtime writes the text sqlutil's constants say, as it wrote `BEGIN` and `COMMIT`, and the parity tests hold the two to one another. nearest's settings are nearest's own and travel in its definition beside its metrics. | Every ORM definition carrying the same statements. |
+| TypeScript's `query(text, values, { decode })`, on the ORM and on a transaction, reads each row through a table's definition, as its repository reads one: each column the row holds decoded by its name and each `Encrypted<T>` column opened; `decode` takes a list of `RowField`s too, as `decodeRow` does. The ORM gains `query` and `exec` on its pool, which `ORM_MEMBERS` already reserved. | A decode helper over `Deps.db`, a raw pool, which holds no field keys. |
+| `in` filters a time and a boolean, `DateTimeFilter.In` and `BoolFilter.In` in Go (`sqlutil.FilterIn` in their kinds' operations). | |
+
+`fixture-sync-db` holds a bank sync's tables: a line item keyed by the
+bank's id for it, a partial unique index of the lines that have one, and
+by its account and reference, with a location, a JSON value and a list,
+and a trigger that enqueues on every insert and update. Its
+`PointFilter & NullFilter`, a nullable location's filter, had orm.ts
+import a type named for both, which `RuntimeTypes` now splits.
+
+Status: built.
+- **The statements:** `TestUpsertStatementsOfASync`,
+  `TestExpressionKeysCannotBeReadBack` and
+  `TestNearestSettingsAndTransactions` (`sqlutil`), and
+  `TestTableStatementsOfALedger`; ormgen's goldens, fixture-sync-db's
+  among them.
+- **Upserts of many rows, their results and only if changed:**
+  `TestGeneratedUpsertManyOnPostgres` (Go) and
+  `TestRepositoriesOnPostgres/fixture-sync-db`'s `sync.test.ts`
+  (TypeScript): a sync of 500 lines by `plaidTransactionId` is one
+  insert, each line `inserted`; a second sync, three lines changed, is the
+  insert and one read, three `updated` and 497 `unchanged`, whose
+  `updated_at` did not move, and the trigger enqueued three messages, and
+  500 without `onlyIfChanged`; batches of two are three statements in one
+  transaction, a line without the key is inserted, and a batch that fails
+  writes nothing; `upsertOneResult` compares a location as its text and
+  reads back a line it left; a deleted line's key is `ErrNotFound`.
+  `TestUpsertParityOfGoAndTypeScriptOnPostgres` holds the two ORMs to the
+  same 24 statements over these calls. `ddl.test.ts` refuses
+  `upsertMany` and only if changed on an expression key.
+- **Encrypted fields:** `vault.test.ts`'s
+  `plaidItem.upsertOne({ itemId, accessToken, ... }, ['itemId'], {
+  accessToken })` inserts an item sealed under the key it generates, then
+  updates its token under the item's own key, and `upsertMany` seals
+  each item; the same token again is `unchanged` with no second
+  statement. `TestEncryptedFieldsAcrossGoAndTypeScriptOnPostgres` adds
+  the upserts by `itemId`, one and many, to its parity script, and its
+  shared schema's Go phase sets TypeScript's row's token by `itemId`.
+- **nearest:** `TestAnIterativeScanOnPostgres` (Go, in
+  `TestVectorsAndDecimalsOnPostgres`) and `vectors.test.ts`: of 2000
+  passages through the hnsw index, ten rare ones lie opposite the query,
+  so a filtered `nearest` finds none without an iterative scan and five
+  with `relaxed_order` and `strict_order`; outside a transaction it opens
+  one, and `excludeIds` leaves a row out. `TestNearestParityOfGoAndTypeScriptOnPostgres`
+  adds the settings, in nearest's transaction and in one already open.
+- **Query options:** `sync.test.ts` and `TestGeneratedUpsertManyOnPostgres`
+  read without a count and by `in` on a time and a boolean, begin a
+  serializable read-only transaction, refuse a write in one, and roll a
+  nested savepoint back while the transaction goes on;
+  `sync.test.ts` reads a raw query through `lineItemTable`.
+
+Left: Go's raw query read through a table, whose `Tx.Query` returns pgx
+rows; `createMany`, which writes one statement whatever its size and so
+fails past 65535 parameters; `upsertMany` on an expression key, and an
+upsert only if changed on one; an encrypted field's second statement is an
+`UpdateOne` per row, not one statement for a batch; nearest's settings in
+a transaction already open hold to its end; the match of rows a database
+keyed rests on Postgres returning a `VALUES` insert's rows in order;
+upserts of many rows on SQLite and D1, whose repositories are not built
+(D79).
+
+## D90. A read includes relations and selects members in both ORMs, a filter reaches through a relation and ORs filters, and a projection is read through a repository of its own
+
+A finance app's views read a transaction with its account and provider,
+its category and that category's parent, its business, its person and its
+notes. The TypeScript repositories (D79) read one table at a time: field
+selection, include and one-to-many loading were the Go ORM's alone, and a
+relation's rows loaded through the target's `getManyByIds`, so every list
+endpoint stitched rows by hand. The dashboard's filter "the category is X,
+or its parent is X" needs a condition through a relation and an OR, and
+neither ORM had either. A flat list model, a transaction with its account
+name and its category's colour and parent, was a `@projection` the ORMs
+never read: a projection was never a language type, and its view bound to
+session settings for external Arrow readers.
+
+This entry adds:
+- `select` and `include` on every read of a TypeScript repository, to-one
+  and one-to-many, nested, the rows typed by them;
+- a filter through a to-one relation, and `anyOf`, in both ORMs;
+- a projection's row type and a read-only repository over its view, in
+  both ORMs, a projection without a pool, and a projection as an API
+  view's `@source`.
+
+### Relations and selection
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A read's options take `select`, the members each row holds, and `include`, each relation by its member, `true` or `{ select, include }` in turn: `findPage(filter, { include: { category: { include: { parent: true } }, account: true } })`. `getOne`, `findOne`, `findMany` and `findPage` take both. | Go's `Fields` struct, a flag per column and a `<Field>Nested` selection, which reads as a struct literal in Go and as noise in TypeScript. A select that holds relations too (`select: { category: { ... } }`), which mixes a row's members with what loads beside them. |
+| `true` is the target's columns and no relation of its own. The Go ORM's default nested selection stays every column and every relation, hydrated in turn under its cycle guard; the same selection in each sends the same statements. | Go's default in TypeScript, which loads every relation reachable from the row and whose row type would have to spell each one out. |
+| `orm.ts` types the rows: per table `<T>Relations`, each relation a `Related<Row, Relations, Kind>`, its kind `one`, `optional` (a relation that may be null, or a soft-deletable target, whose deleted rows a read leaves out) or `many`. A read's options are a `const` type parameter, and its rows `Loaded<Row, Relations, O>`: `Pick` of the selected members, and each included relation as its kind holds it, nested. `Checked` refuses an option, a relation or a member the table does not have at any depth, which a generic parameter would otherwise take silently, and the runtime throws on each too. | A row typed `Row & Record<string, unknown>`, which checks nothing. Overloads per shape, which cannot nest. |
+| A relation loads in one statement for all of a read's rows: the target's find, no count, its filter the keys the rows name (`{ id: { in } }`) or, for one-to-many, the rows' keys in the source's foreign key, at most `sqlutil.ManyLimit` (Go's 1000000) rows. The Go ORM's hydration ran `FindMany`, a count first, for each relation; it now runs `findRelated`, the same select with no count, so a page of 50 rows with five relations is six statements in both. `TestReadParityOfGoAndTypeScriptOnPostgres` holds the two to it. | A JOIN per to-one relation, which changes every statement's FROM and select list, needs an alias per level of a path, and cannot load one-to-many without multiplying rows. Keeping the count in both, a statement per relation that reads nothing. |
+| A read that selects or includes lists its columns as the Go ORM's field selection does: the selected members, the foreign key of each to-one relation it includes, and a column `need`s, in column order, then the key, last, when a one-to-many relation maps its rows by it, an encrypted column opens under it (D85) or a page's next key holds it. Each column is `TableStatements.SelectColumn`, `"table"."%s"`, as `buildSelectFieldsTyped` writes it. The rows then drop the members the caller did not select. | Leaving them in the row, which its type does not name and a response would carry. |
+| A to-one include reads the target's key whatever its `select`, to map the rows; Go maps by `Id`, and a nested selection without it maps none. `findPage` loads the relations of every row it reads, the one past the page among them, as the Go ORM's does, so the two send the same `IN` list. | |
+| A soft-deleted target is null in TypeScript, and a key-only stub in Go, as before: the include leaves deleted rows out as a find does. | Loading it, which a row that points at a retired category might want; `includeDeleted` per include can follow. |
+| One-to-many relations are a table's `@hasMany` fields, which Go loads too, and the to-one relations of other tables that point at it, which no field holds, `sqlutil.ToMany`: named for the source in the plural (`notes`), with `By` and the field when the source points at the table twice or the plural is taken (`lineItemsBySubCategory`), else the reference's filter name. A reference a `@hasMany` field holds is named by the field alone. | `@hasMany` alone, which the finance schema declares for no note. The filter's name, `referencedByNoteLineItem`, for every one. |
+
+### Filters through a relation, and anyOf
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A filter's member named for a to-one relation, `Category *CategoryFilter` in Go and `category?: CategoryFilter` in TypeScript, is the target's filter: one condition, `line_item.category_id IN (SELECT category.id FROM category WHERE <its conditions> AND category.deleted_at IS NULL)` (`sqlutil.ToOne.Probe`). The subquery names the target by its table and nothing outside it, so a relation of a table to itself, and a path of them (`{ category: { parent: { name } } }`), reads each level's own rows, and the target's conditions are its own filter's, `conditions` reused. | A LEFT JOIN, which changes the FROM of every statement and needs an alias per level. A correlated EXISTS, which names the outer row, so the target's conditions would need an alias at each level to keep a self relation's inner table from shadowing the outer. |
+| A row whose foreign key is null is not kept, and neither is one whose target is soft-deleted: the filter finds live targets, as a find does. | Following the outer read's `includeDeleted`. |
+| `AnyOf []XFilter` and `anyOf: XFilter[]` keep the rows any of the filters finds: each filter's conditions ANDed in parentheses, ORed, as the last condition, after the relation filters, the references and the search. A filter of no condition keeps every row, and the whole then adds none, its parameters dropped; an empty `anyOf` adds none, as `in` with no values does. Both ORMs number each branch's placeholders after the last, so `UpdateMany`'s and `DeleteMany`'s, which follow the assignments, hold too. | `or`, and an `and` beside it, which a filter's members already are. An empty `anyOf` that keeps nothing, against `in`'s rule. |
+| A filter through a relation sits in a page's WHERE beside the keyset, which it leaves as it is; a page sorts by the table's own columns. A sort by a joined column is a projection's. | Sorting through a relation, which a keyset would have to read through the same path. |
+
+### Projections
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `pool` is optional. A projection without one is a plain view beside the service's tables: created as its name alone, in `outputs.sql.sourceSchema` when set, with no `CREATE SCHEMA`; its migration pair is `<stamp>_<name>_projection` and its Arrow and docs files `<name>.*`; a migration plan names it in its schema, or by its name alone (`sqlmigrate.View.Schema`). Verification refuses one named as a table. It binds a setting only if a rule does. | A `@view` decorator beside `@projection`, a second declaration of one thing. A required pool, which puts a list model in a schema of its own for readers it does not have. |
+| A projection whose columns read its source's key, or that collapses by one column, has a key (`sqlutil.ViewKey`), and both ORMs read it: the row type is the class, `TransactionListRow` in `./orm` and `orm.TransactionListRow`, a struct of the ORM's package, and the repository the reads of a table over the view, `getOne`, `getManyByIds`, `findOne`, `findMany` and `findPage` in TypeScript (`ReadRepository`, with `select`), `GetOne`, `FindOne`, `FindMany` and `FindPage` in Go. `findMany`'s `count: false` and `FindMany`'s `SkipCount` skip the count, as a table's do (D89). A projection with neither key has no repository. | The row in the types package, where an API would take it for a response type, and which the type generators keep to tables and payloads. `@key` on a projection column, which the view's source already states. |
+| `sqlutil.ViewsOf` models the view as a table, each field a column named as sqlgen names it, of its declared type, filtered and sorted as a table's column of that type (`ClassifyColumn`, `FilterKind`, `sortableColumn`), and `TableStatementsOf` writes its statements, whose reads both ORMs run, qualified by the view's name and reading from its pool-qualified name. | A statement writer for views, which would drift from the tables'. |
+| Go reads a projection through `db.<Projection>()` over the pool and `<Projection>In(tx)` in a transaction, over a querier of the pool's and the transaction's `Query`; `projections.go` holds the rows, filters, sorts, pages and repositories. | A field of `Database` and a getter on `TxInterface`, which every table's repository edits share. |
+| An API view may take a projection as its `@source`: verification holds each field to the projection's column of its name and type, as to a table's. The TypeScript reader resolves a cross-service `@source` class's decorators by its own service's kind, so a projection's, or a table's, `@column` no longer fails an API's load. | |
+
+Status: built.
+- **The model:** `TestRelationsOfAFinanceSchema` and
+  `TestViewsOfAProjection` (sqlutil) over `fixture-finances-db`, modeled
+  on the finance draft: line items on accounts at providers, under a
+  soft-deletable category and its parent, a business and a person, with
+  soft-deletable notes, `Account.lineItems` a `@hasMany`, and the
+  `TransactionListRow` projection without a pool.
+- **Go:** ormgen's goldens (`AnyOf`, the relation filters,
+  `findRelated`); `TestFinancesOnPostgres`, a filter through a relation
+  and two deep, one that leaves out a null and a soft-deleted category,
+  `AnyOf` and one with an empty branch, the dashboard's list as one
+  `FindPage` over two pages with its account and provider, its category
+  and parent, its business and its person loaded, a deleted category's
+  stub, a `@hasMany` include, and the projection's `FindPage` on joined
+  columns, its next page, `GetOne`, `FindMany`, with its count and
+  without (D89), and a transaction.
+- **TypeScript:** `TestIncludeAndSelectTypeTheRows` type-checks a read's
+  rows against its options, each kind, nested, and `findMany`'s `total`
+  under `count: false` (D89), and refuses an unknown relation, member and
+  option; `TestRepositoriesOnPostgres`'s
+  `finances.test.ts`, the same reads, the dashboard's page in eight
+  statements with no count, a selection's statement, a soft-deleted and
+  an unset target, both kinds of one-to-many include, and the
+  projection's reads, one with `count: false`; the regenerated tsgen goldens and acme-shop's
+  `orm.ts`.
+- **Parity:** `TestReadParityOfGoAndTypeScriptOnPostgres`, 48 statements
+  over 30 calls alike, the includes' among them, and
+  `TestTableParityOfGoAndTypeScriptOnPostgres` as before.
+- **Projections:** `TestProjectionWithoutPool` (sqlgen),
+  `TestProjectionWithoutPoolPassesVerification` and the refusal of one
+  named as a table; fixture-finances-db among sqlmigrate's model
+  fixtures, whose plan from an empty database `TestConvergenceOnPostgres`
+  applies; the writer's round trip of it; `TestSettingBoundProjectionCompiles`
+  and `TestASettingBoundProjectionHasARepository`, fixture-projection's
+  view, bound to settings and collapsed by its key, read in Go and
+  TypeScript; and `TestAPIViewSourcedFromAProjection`, an API view
+  `@source(TransactionListRow)` whose package and the database's
+  type-check together.
+
+Left: `materialized: true` and a `refresh` method; the Go ORM's include of
+the references no `@hasMany` field holds, which its row types have no
+member for; `includeDeleted` per include, and an order or a limit of a
+one-to-many include's rows; include in `nearest`; selection on a
+projection's read in Go; the Go ORM's `FindOne`, which loads no
+`@hasMany` relation, where TypeScript's `findOne` does; a sort through a
+relation; the `@versioned` history readers in TypeScript.
+
+## D86. A DB service declares its reports as named SQL, checked against Postgres into a lock and run by both ORMs as typed functions
+
+The largest block of hand-written code left in a real application was
+reporting SQL: a dashboard's totals rolled up to a parent category, its
+`generate_series` time buckets, its transaction list, a transfer
+matcher's candidates. Repositories express no `GROUP BY` or aggregate, and
+a projection (`reference/projections.md`), even read through a repository
+of its own (D90), is a view that takes no parameter, so a date range or a
+bucket's width cannot reach its SQL. So the SQL was raw strings on
+`Deps.db`: nothing
+checked it against the schema, so a renamed column broke it at run time;
+each row needed a hand-picked `decodeRow` descriptor; and an optional
+filter or a sort column was spliced in by hand.
+
+This entry adds:
+- `@query<Params, Row>({ name, sql, notNull, orderBy, page, dialects })`
+  from `@superschematic/db`, carried in the IR as a `RoleQuery` type;
+- the `:name` rewrite to positional parameters, written once in
+  `sqlutil.QueriesOf`, which `orm.queries` in TypeScript and `Queries` in
+  Go both run;
+- `superschematic queries verify`, which prepares each statement on
+  Postgres through `superschematic-migrate describe` and writes
+  `queries.lock`, which `check` and `build` hold the queries to with no
+  database;
+- the re-verification of a Postgres `migrate plan`.
+
+### The declaration
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@query<Params, Row>(options)` sits on a class of its own with no field, as the requirement's draft has it. The class is a `RoleQuery` type, which no generator makes a table or a language type of, as a projection is none (`ir.RoleQuery`, `TypeDef.Query`). `name` is the class's in lower camel case unless set. | The declaration on the row class, `@query<Params>` on `CategoryTotalsRow`, one class fewer, which ties a row type to one query and reads as a table to an author who knows that every class of a DB schema is one. |
+| `Params` and `Row` are a class or an object type alias of the schema (`DecoratorSpec.typeArgAliases`). A class `@query` names becomes an embedded struct after the walk (`tsreader.finishQueries`), so every language's types declare it, with its validators; verification refuses one that carries a table's declarations (`@key`, `@index`, `@table`, a relation), which a table named by mistake would. The writer writes them back as object type aliases, the form a DB schema reads an embedded struct in. | A decorator of their own (`@queryParams`), a declaration per type of what the query already says. Leaving them tables, two tables per query. |
+| A field holds a scalar, an enum, a list of either, a JSON value or a vector (`sqlutil.QueryValueProblem`); a map, a list of lists, a union, an object type, a relation, an `Encrypted<T>` field, a POINT and an INTERVAL fail the load, naming the fix. | Every field kind a table holds, which the Go side would need the repositories' per-kind scan machinery for; the kinds left are rare in a report. |
+| Verification (`verify.checkQueries`) checks what holds with no database: the name, the types, every `:name` a params field and every params field used, the hints, the order and the page, and a query's dialects listing postgres. The SQLite model refuses a query that runs on sqlite, naming the fix, as it refuses a vector column (D84). | Checking the SQL's text against the model in the compiler, which needs a Postgres parser and type system the compiler does not hold. |
+
+### Parameters
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `sqlutil.ScanQuery` reads `:name` outside strings (`E''` escapes among them), quoted identifiers, dollar-quoted bodies and comments, skipping a `::` cast, with the tokenizer `@rawSql` splits statements with (D83). A positional `$1` and a second statement are refused; one trailing semicolon is allowed. | A Postgres parser (`pg_query`), a cgo dependency for one rewrite. `$1` positionals as written, which a reader matches to fields by count. |
+| A name is one parameter however often it is written, numbered by first use: `(:ids::uuid[] IS NULL OR id = ANY(:ids))` binds one list, so an optional filter is one field. | A parameter per use, which binds a list twice. |
+| The statement is a format string, as a table's are (D79): `%%` a literal `%`, `%s` an order's fragment, `%d` a page's rows. TypeScript fills it with `fill`, Go with `fmt.Sprintf`, or holds it as a constant when there is no order. | |
+| TypeScript binds each parameter through `encodeParam` with the codec flags of a column of its type, so a base62 UUID binds hyphenated and a list as an array. Go binds as its repositories do (`ToUUID`, `time.Time`), and a nil pointer, a nil list and the empty text of a `Nullable<string>`, whose Go type holds no null, as SQL NULL. | |
+
+### Rows and nullability
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A result column is the row field whose column it is: its name in snake case, or its `@column`, which a row field takes. TypeScript decodes a row through `decodeRow` and the fields' flags; Go maps each column by name at run time (`rows.FieldDescriptions`), so the generated code needs no database to know the order. | The described column order recorded in the lock and generated into Go, which ties the build to a verify. `pgx.RowToStructByName`, which needs `db` tags the types do not carry. |
+| A row field that is not `Nullable<T>` must read a column that comes straight from a `NOT NULL` column (the field's table OID and attribute number pgconn describes, then `attnotnull`), unless the query vouches for it with `notNull` or a `-- @notNull a, b` comment. Postgres reports a column of a `LEFT JOIN`ed table as its table's, so a column of a table after `LEFT JOIN`, and of any table of a query with a `RIGHT` or `FULL JOIN`, counts as nullable. | Trusting the table column alone, which lets a missing category through a `LEFT JOIN` as a non-null name. Parsing the join tree, for the rare query that joins one table both ways. |
+| Types compare by family (`queryverify.compatible`), as the codec reads each: text (`text`, `varchar`, `citext`, an enum), integers, floats, `numeric`, `uuid`, `timestamptz`, `date`, `bool`, JSON and `vector`, a list or not. A `SUM` of a `BIGINT` is a `NUMERIC`, which a `Finance.SignedMoney` is not, so the query casts it. | The exact type, which would refuse an `int4` count under a `Generic.Int64`. Any type, leaving the codec to decode a `NUMERIC` sum as text under a number. |
+
+### Order and pages
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `orderBy: { param, options, default? }`: the parameter, an enum of the schema whose values are exactly the options, stands in the SQL where `ORDER BY`'s terms go, and its value's fixed fragment takes its place. A value no option names is refused before a statement is sent; a null one picks `default`. Verification prepares every option. | Appending `ORDER BY` to the SQL, which cannot sit before a `LIMIT` and hides where the order goes. A string parameter, which leaves the set of orders to the runtime. |
+| `page: { key, desc? }` runs the query as a subquery ordered by its key, its after predicate a row comparison over the key's columns, bound after the query's own parameters, and a page of `limit + 1` rows telling whether another follows, as `findPage` reads one (D60). The key is required row fields of one value each; a paged query takes no `orderBy`. | Splicing the predicate into the author's `WHERE`, which needs a parser. A sort parameter with the page, which `findPage` keys by a row's id and a report's row has none. |
+
+### Verification and the lock
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `superschematic queries verify <db-service-dir>` generates the service's `create.sql`, applies it to a database of its own on Postgres, prepares each statement (every order's, both of a page's) and judges what Postgres described (`queryverify.Judge`). Each problem names its query. | Checking the statements against the model without Postgres, which would reimplement Postgres's resolution of names, operators and types. |
+| The migration runner prepares the statements (`superschematic-migrate describe`, `postgres.Describe`): the compiler writes a describe document, the runner creates a database, applies the DDL, prepares, describes each parameter and column with `format_type` and `pg_attribute`, drops the database and prints the result, and the compiler judges it. The two JSON forms are written in each module and held together by `runtime/migrate/testdata/describe`. | pgx in the compiler's module, which keeps the drivers out of its module graph (D27, Apply). |
+| The Postgres is `--database-url`, a server whose role may create a database, else `SUPERSCHEMATIC_QUERIES_DATABASE_URL`, else one `verify` runs in Docker for the run: the image `stack dev` runs, pgvector's when a table has a vector column (`queryverify.StartPostgres`), ready once `pg_isready` answers on TCP. | Docker alone, which CI and the tests would have to provide. A database of the user's to apply the DDL in, which a verify would leave changed. |
+| `queries.lock` beside the schema config holds, per query, the SHA-256 of what was verified and what Postgres described of its parameters and columns. The hash covers its statements, the SQL types of its parameters and row fields, which fields may be null, what it vouches for, and the shape of each table of the schema its SQL names (`QueryModel.Tables`: each column's name, type and nullability). `check` and `build` (`generator.generateSQL`) fail, naming the query and the command, for a query the lock holds no entry for, one whose hash differs and an entry for a query gone, so renaming `line_item.amount` makes every query that names `line_item` stale with no database. | The statement alone, which a rename of a column it reads leaves current. The whole `create.sql`, which would make every DB change, a default's among them, re-verify every query. The described types alone, which need a database to compare. |
+| A Postgres `migrate plan` of a service with queries verifies them on the new version's `create.sql` before it prints, reaching Postgres as `verify` does, and fails naming each query that no longer holds; it writes no lock, and `--print-model` verifies nothing. | Reading which columns each query depends on (`pg_depend` of a SQL-standard function body) into the lock and checking a plan's drops and renames offline, which a function's type rules make fragile. A step in the plan, which runs at deploy, after the servers it would have caught were built. |
+
+### What both ORMs carry
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| TypeScript: `orm.ts` declares `<Db>Queries`, a typed function per query over the params and row types of `./types`, `<Name>QueryPageKey` for a paged one, and the queries as data (`<db>Queries`: the statement, the codec's descriptor of each parameter and row field, the order, the page). `<Db>Repositories` holds them as `queries`, so `deps.orm.queries` and `tx.queries` are typed through `Orm<R>` and `OrmTx<R>` unchanged. The runtime's `queriesOf` (`./postgres`) runs them over the ORM's runner, with its type parsers, in the transaction when there is one. `queries` joins `ORM_MEMBERS`. | A member of `Orm` itself, a type parameter on every ORM type. Generated code per query, beside a runtime that already runs a table's statements as data (D79). |
+| Go: `queries.go` gives `Queries` a method per query, `db.Queries` and `tx.Queries` (and `GetQueries()` on both interfaces, the no-op ones answering no rows), every transaction's, a `TransactionWith`'s and a savepoint's (D89) among them, and `<Name>PageKey`, `<Name>Page` and `QueryPageOptions[K]` for a paged one. | |
+| `TestQueriesParityOfGoAndTypeScriptOnPostgres` holds the two to the same statements, call by call. | |
+
+Status: built.
+- **The acceptance:** fixture-queries-db declares the dashboard's category
+  totals, its `generate_series` time buckets and its paged transaction
+  list, an enum-ordered list, budgets with decimals and dates, and the
+  transfer candidates as `@query`. `TestRepositoriesOnPostgres/fixture-queries-db`
+  (`queries.test.ts`) runs each from TypeScript with typed params and
+  rows, on the pool and in a transaction, a savepoint nested in one of
+  options (D89) among them, and refuses an order no option names before a
+  statement is sent; `TestDeclaredQueriesOnPostgres` (ormgen) runs each
+  from Go, in `TransactionWith` and a savepoint too; `TestQueriesParityOfGoAndTypeScriptOnPostgres`
+  holds the two to one set of statements.
+  `TestQueriesVerifyAndARenamedColumn` (cli) verifies the fixture into the
+  lock it commits, then renames `line_item.amount`: `check` and `build`
+  fail on the stale lock, and `queries verify` and `migrate plan` fail
+  naming `categoryTotals`, `transactionList` and `transferCandidates`.
+- **Verification:** `TestCheckQueries` and `TestColumnOnARowField` hold
+  the load's refusals; `TestScanQuery` and `TestQueriesOf` the scanner and
+  the statements; `TestJudge`, `TestCompatible`, `TestCheckLock` and
+  `TestFixtureLockIsCurrent` the judgement and the lock;
+  `TestQueriesVerifyNamesWhatDoesNotHold` an outer join's column under a
+  required field, a computed column no hint vouches for, a type of another
+  family and an extra column, on Postgres; `TestDescribeOnPostgres` and
+  `TestDescribeDocumentForm` (runtime/migrate/go) and
+  `TestDescribeDocumentMatchesTheRunner` the runner's side and the two
+  JSON forms; `TestVerifyFixtureOnPostgres -update` writes the fixture's
+  lock. The HTTP runtime's `queries.test.ts` runs `queriesOf` over a
+  recorded runner: a list of UUIDs, a vector, a decimal, JSON and a
+  timestamp through the codec, an order refused before a statement, and
+  a page's key bound after the parameters.
+- **The forms:** `TestQueriesRoundTrip` writes the fixture to TypeScript,
+  JSON and YAML and reads back the same IR; the goldens of
+  fixture-queries-db's DDL, Go ORM and TypeScript types;
+  `TestSQLiteRefusals`' declared query.
+
+Left: queries on SQLite and D1; the field kinds no query codec reads
+(maps, lists of lists, unions, POINT, INTERVAL, encrypted fields); a sort
+parameter on a paged query; a raw SQL piece or a view a query reads, whose
+change the lock does not see; nullability finer than an outer join's
+table; queries in Rust and Python; `queries verify` in a generated CI
+workflow, which a project adds itself for now (the command, then `git diff
+--exit-code`).
+
+## D87. An operation's writes record its caller, a write no one asks for records the database's system actor, and a webhook's input drops the keys its type does not declare
+
+Two gaps of a real application's port, F2 and F3 of round 3:
+
+- The TypeScript entrypoint opened `Deps.orm` acting as no one, so every
+  write an operation made had to start with `deps.orm.as(ctx.principal)`.
+  One that forgot left a nullable `updatedBy` unstamped, silently, and
+  failed on a required `createdBy` with `NoUserError`. The Go routes did
+  not tell the ORM who called either, so each Go method that wrote rows
+  hand-copied the principal into the ORM's context (acme's `actingUser`).
+  A job or a worker had no caller at all, so a table with a required
+  `createdBy` made a project invent a user row to write as.
+- Every server refused a top-level key an input type does not declare
+  (D42), and nothing opted out: `@strictJSON` only made decoders
+  stricter. A provider such as Plaid or Stripe adds keys to its webhooks
+  over time, so a typed `@webhook` input broke in production on the
+  provider's next release, and the only way out was
+  `@manualRouteRegistration`, which gave up the typed, checked input.
+
+This entry adds:
+
+- **The caller.** A TypeScript operation's `deps.orm` acts as its caller,
+  and a Go route runs its operation with a context that does.
+- **The system actor.** `outputs.sql.systemActor` on a DB service,
+  `asSystem()` on the TypeScript ORM and `AsSystem(ctx)` in the Go ORM,
+  and `outputs.sql.requireUpdatedBy`.
+- **Unknown keys.** `@allowUnknownFields` on a type, and a `@webhook`'s
+  input that drops the keys its type does not declare.
+
+### The caller and the system actor
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| In TypeScript `deps.orm` is resolved per request: an ORM opened with no user of its own, as every entrypoint opens `Deps.orm`, acts as the caller of the operation being run. The runtime's `mountOperation` runs each implementation within its caller, `ctx.principal`, held in AsyncLocalStorage (`./caller`'s `withCaller` and `currentCaller`, which `./hono` exports), which Bun and Node.js have and a Worker has under `nodejs_als`, a flag every Worker version names already (D64, amended). The caller carries into what the operation awaits and starts, a transaction among them, and each statement reads it when it is written. | `ctx.orm`, a second handle each operation gets beside `deps.orm`: an implementation would still have to remember to use it, the slip F2 is about, and each API's interfaces would name a context type of their own. Building the implementation per request, which rebuilds its clients each time. |
+| In Go each route runs its operation with `callerContext(r.Context())`, from `caller.go`, which apigen writes for an API with a Deps database: `orm.WithCaller(ctx, session.GetPrincipalID(ctx))`. The Go ORM reads its user from the context, so binding the context is the Go form of the rule, and a method stamps the caller wherever it passes the context on. The identity runtime and both auth providers put the principal's ID there; `WithCaller` parses it with the ORM's `ParseUserID`, which reads a UUID's base62 or hyphenated form. | A middleware outside `RegisterRoutes`, which runs before the route's auth step has a principal. The ORM reading the principal itself, which would make every ORM module depend on the HTTP runtime. |
+| An explicit user wins: `as(principal)`, `withUser(id)`, `asSystem()` and `createOrm(pool, user)` act as whom they name wherever they run, an operation included, and `withUser(null)`, `as(null)` and `createOrm(pool, null)` as no one. In Go, `WithCaller` keeps a user the context has, and `WithUserID` and `AsSystem` replace it. | The caller over a user the code names, which would leave no way to write as another. |
+| A job, a worker, a manual route's handler and a route with no caller act as no one: the TypeScript `mountManualOperation` runs its handler within no caller, and the Go manual handler gets the request's own context. A write there that needs a user still refuses without one. | The system actor by default outside a request, which would stamp every write that forgot to name its actor with it, silently. Binding a manual route, whose handler owns the request. |
+| A caller whose subject is no UUID, as a custom authenticator may give, binds no one in TypeScript, and a principal ID `ParseUserID` refuses binds no one in Go. `as(principal)` still throws for one. | Throwing on every statement of such an operation, its reads included. |
+| The system actor is per DB service, `outputs.sql.systemActor: { id, name? }`: a hyphenated UUID, and a name an app may show. Unset it is `00000000-0000-4000-8000-000000000000`, named `system`, the ID a Go API already exports as `SystemUserID`. `asSystem()` on the TypeScript ORM and on a transaction, and `AsSystem(ctx)` in the Go ORM, act as it; `systemActorOf` and `DEFAULT_SYSTEM_ACTOR` (TypeScript) and `SystemActorID` and `SystemActorName` (Go) name it. The TypeScript definition carries it only when the service names one, and `ormOf` refuses one that is no UUID when it opens. | `outputs.orm`, an output key with no generator of its own, where `outputs.sql` already configures both ORMs (`encryption`). A reserved actor the identity tables seed. No default, which would make every project name one before its first job writes a row. |
+| The system actor needs no user row: an audit field is a scalar with no foreign key, and a field named `createdBy` whose type is a table is a relation, which `sqlutil` classifies before its audit name, so no audit column references the user table. Nothing is seeded, and D88's role seeds are untouched. | Seeding a user row in `create.sql` and the plans, whose required fields, the login and the name among them, no generator can fill for every user table. |
+| `outputs.sql.requireUpdatedBy: true` makes a write that would leave a nullable `updatedBy` as it was refuse without an acting user, as a required one does: a create, `updateOne`, `updateMany` and an upsert's update, with `NoUserError` in TypeScript and `ErrNoUserInContext` in Go. Unset, an update with no user leaves it as it was, as before. | On by default, which would fail every update a job makes until it names an actor. |
+| A Go ORM of a table with a nullable `updatedBy` compiles: a create stamped it with `GetUserID`, a value, where the field is a pointer, and `ApplyTo` dereferenced the update's pointer into it. A create now stamps it through its pointer, and only with a user, as TypeScript does. No fixture had one, so nothing caught it. | |
+| A Rust server's `Deps` holds a pool and no ORM (D57), so it has no caller to bind and no system actor. | |
+
+### Unknown keys
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@allowUnknownFields` (`TypeDef.AllowUnknownFields`), from `@superschematic/schema`, marks a type whose every decoder accepts a key it does not declare and drops it, so the code sees only the declared fields, which are checked as before. | `@lenientJSON`, when "lenient" already names the schema runtimes' coercing parse. Passing the keys through, which an implementation would come to read and a later declaration would change the meaning of. |
+| Each language drops them. Go: `UnmarshalJSON` keeps only the declared keys before it decodes (`keepDeclaredKeys`), so a key that differs in case alone, which `encoding/json` would read into the field, is dropped too. TypeScript: `parse<Type>Json`, its YAML and non-strict siblings drop the type's own keys, and `parse<Type>FromJSON` drops them wherever the type is nested, as a router reads an input after its validator. Python: pydantic's `extra='ignore'`, which every type that is not `@strictJSON` has already. Rust: `prepare_<type>` drops them whatever its caller's policy (`drop_unknown_fields`), and serde skips them. The Go, TypeScript and Python schema runtimes' strict parse and serialize accept and drop them, the TypeScript one reading `allowUnknownFields` from the IR and `x-allowUnknownFields` from a schema document. | Leaving Go's decoding to `encoding/json`'s matching, which reads `Item_Id` into `item_id` where every other language drops it. |
+| It applies to the type alone: a nested type's undeclared keys follow its own declaration, as `@strictJSON`'s do. | Leniency at every level the type reaches, which needs a lenient variant of every nested decoder in four languages. |
+| A server reads an input whose operation allows unknown keys (`EndpointInfo.InputAllowsUnknownFields`) with only the keys its type declares, spelled as declared: Go with `bodyargs.ReadInputDroppingUnknown`, TypeScript by handing the validator `declaredKeysOnly(value, keys)` from the runtime (a type that is `@allowUnknownFields` drops them in its own parser), Rust by parsing with `UnknownFields::Allow`, after which serde reads the declared fields alone. Every other input refuses them, as D42 says. | Skipping Go's check alone, which lets `encoding/json` read a key that differs in case. |
+| A `@webhook`'s input drops the keys its type does not declare unless the type is `@strictJSON` or `@denyUnknownFields`, which keep refusing them; a type that is `@allowUnknownFields` drops them on any route. The default belongs to the operation: the type's decoders elsewhere stay as declared. | The loader marking a webhook's input type `@allowUnknownFields`, which would loosen every other operation that takes the type, and cannot reach a type a dependency declares. Requiring the decorator on each webhook's input, which every provider's payload needs. |
+| A type that is `@allowUnknownFields` and `@strictJSON` or `@denyUnknownFields` fails the load, and so does a `@projection` class with it. | |
+| OpenAPI is unchanged: an object schema without `additionalProperties` already admits them. | `additionalProperties: true` on each such schema, a change of every document for no reader. |
+
+What changed while building:
+- The webhook default was to set the type's flag; it moved to the
+  operation for the reasons in the table.
+- Go's typed decoders, `<Type>FromJSON` among them, already ignored an
+  undeclared key: every generated struct has an `UnmarshalJSON`, which the
+  strict decoder's `DisallowUnknownFields` does not reach. Only the route
+  refused one, so only the route and `UnmarshalJSON` changed.
+
+Status: built.
+- **The caller and the system actor:**
+  `TestTypeScriptOperationsActAsTheirCallerAndWorkersAsTheSystem` and
+  `TestGoOperationsActAsTheirCallerAndWorkersAsTheSystem` (servergen,
+  `testdata/caller`) run a generated server and its worker over a
+  database with the user model and a `Note` with a required `createdBy`
+  and a nullable `updatedBy`, on Postgres. A signed-in user's operation
+  writes a note through `Deps` with no `.as()` or `WithUserID`, and
+  enqueues a follow-up in the same transaction: its `createdBy` and
+  `updatedBy` are the caller. Another user's update stamps `updatedBy`
+  with them, and an operation that asks for the system actor with it. The
+  worker is refused a write as no one, then writes the follow-up as the
+  system actor the database names. A router that binds no caller fails
+  the TypeScript test. `TestRepositoriesOnPostgres/fixture-actor-db`
+  (`actor.test.ts`) holds the TypeScript rules: the caller across awaits
+  and a transaction, the explicit users and null, a subject that is no
+  UUID, the default and a named system actor, a malformed one, and
+  `requireUpdatedBy` over `updateOne`, `updateMany`, `upsertOne` and
+  `upsertOneResult`; D89's writes act as the caller too, `upsertMany`'s
+  insert and update, an upsert only if changed, which opens a transaction
+  of its own, and a savepoint.
+  `TestGeneratedORMActsAsTheCallerAndTheSystem` (ormgen) holds the Go
+  ORM's, with and without `requireUpdatedBy`, `UpsertMany`,
+  `UpsertOneResult` and a savepoint among them, and fixture-api-session's
+  golden `caller.go` and `routes.go` the Go routes. Acme's shop-orders
+  drops its `actingUser`.
+- **Unknown keys:** `TestAllowUnknownFieldsGeneratedDecoders` (parity)
+  runs the Go, TypeScript, Python and Rust decoders of one contract over
+  the same payloads: each accepts and drops an undeclared key, at the root
+  and in a nested `@allowUnknownFields` type, and one that differs in
+  case, and refuses a declared key of the wrong type.
+  `TestGeneratedWebhooksRouter` (TypeScript),
+  `TestWebhooksAPICrateBuildsAndRoutes` (Rust) and
+  `TestWebhookRoutesDropUndeclaredKeys` (Go) post fixture-webhooks-api's
+  `PlaidItemEvent` (`webhook_type`, `webhook_code`, `item_id`) with an
+  extra `environment` key, a key that differs in case and a nested
+  error's extra key: the method gets the declared keys, typed, and a
+  mistyped declared key is refused, and a missing one in TypeScript and
+  Rust; the `@strictJSON` `LedgerEvent` refuses `environment`.
+  `TestReadInputDroppingUnknownKeepsOnlyTheDeclaredKeys`, the runtime's
+  `declaredKeysOnly` test, the Rust runtime's
+  `unknown_fields_are_dropped_for_a_lenient_type`, the schema runtimes'
+  strict-parse tests in Go, TypeScript and Python,
+  `TestAllowUnknownFieldsContradictionsAreRefused`,
+  `TestWebhookInputsAllowUnknownFields` and the writers' round trip of
+  fixture-webhooks-api hold the rest.
+
+Left: a lenient decoding that reaches every nested type of a webhook's
+input; the caller in Rust, once a Rust server's `Deps` holds an ORM; a
+manual route's handler, which may run its writes within `withCaller`
+itself; a missing required string, which the Go route still reads as
+`""` (D14, amended), so a Go webhook accepts one the TypeScript and Rust
+servers refuse. The rules are reversible until the first release.
+
+## D88. A required time defaults to now only when declared, a UserRole table seeds its roles, and @enqueueOnChange backfills the rows already there (D80, D81 and D83 amended)
+
+Porting a household finance app to superschematic left three gaps in what
+its database said:
+- **Every required date and time defaulted to now.** sqlgen gave each
+  required `Temporal.DateTime`, `Temporal.Date` and `Temporal.Time` column
+  `DEFAULT CURRENT_TIMESTAMP` (`CURRENT_DATE`, `CURRENT_TIME`), so a
+  ledger's `"date" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL` let an
+  import, an ETL or a raw insert that forgot the posting date record today
+  instead of failing. For financial data that is wrong data, silently.
+- **A default role had no permissions.** `@userSessions({ defaultRoles:
+  ["member"] })` creates a missing role with none (D81), and an
+  approver's permissions must cover the role's. A fresh install needed an
+  administrator's step, or a hand-written `@rawSql INSERT ... ON
+  CONFLICT`, before an approved member could do anything.
+- **A new trigger enqueued nothing for the rows already there.** After an
+  import, every categorized line item needed a hand-written enqueue to
+  build its embedding, since `@enqueueOnChange` enqueues for writes after
+  it exists (D80).
+
+This entry adds:
+- **`Default<T, "now">`**, the only way a required date, time or
+  timestamp column other than an audit timestamp gets a default;
+- **`@seedRoles([{ name, permissions }])`** on the UserRole table, which
+  `create.sql` inserts and a plan keeps in step;
+- **`@enqueueOnChange(Q, { ..., backfill: true })`**, and `stack queue
+  backfill` for a table too large to backfill in a migration.
+
+### The time of the insert
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A required date, time or timestamp column takes the time of the insert only where something says so (`sqlutil.ImpliedNowDefault`, `NowDefault`): an audit timestamp, `createdAt` or `updatedAt`, on any table, which the repositories leave to the database; every timestamp of a table or field the loader adds, for the user model (Session, UserCredential, UserRoleGrant, D50) or a version graph, whose runtimes write rows without some of them; and a field declared `Default<T, "now">`. Every other such column has no default. | Keeping the implicit default and adding an opt-out, which leaves wrong data the default for everyone who does not know to opt out. Defaulting by a list of names beyond the audit fields (`postedAt`), a guess the schema does not state. |
+| `"now"` is a literal V of `Default<T, V>`: on a required, single `Temporal.DateTime`, `Temporal.Date` or `Temporal.Time` field of a DB table (a date or time by the scalar's traits, as the implicit default read them), it is `CURRENT_TIMESTAMP`, `CURRENT_DATE` or `CURRENT_TIME` (`sqlutil.ColumnDefault`), which Postgres and SQLite both read. The IR keeps `default: "now"`, so the data forms and the writer carry it as they carry any default, and `codegen.IsDefaultNow` reads it. On `string`, `"now"` stays its text. | A field flag (`defaultNow`), an IR member the JSON Schema, the writer and every form would learn for what the authored form already says. `AutoGenerate<Temporal.DateTime>`, which gives the same column default but makes the field a pointer in the Go types and optional to every decoder. A function name (`"CURRENT_TIMESTAMP"`), which would be SQL in a type. |
+| No decoder fills `"now"` in: `ClassifyDefault` gives it no literal in any language and `ReadRequired` keeps the field required, since the time of a write is the database's. The loader does not check it against the scalar, and verification refuses it on a payload's field, an optional or list field, an `Encrypted<T>` field, an engine type and a queue's message (whose enqueues write every required field), each saying why. | Decoders that fill in the current time, a second clock in four languages that would disagree with the database's. |
+| Both ORMs let a create leave such a field unset and leave it to the database: the TypeScript repositories mark the column `auto`, and the Go ORM's `CreateOne`, `CreateMany`, `UpsertOne`, `UpsertOneResult` and `UpsertMany` (D89) leave its zero value out of the insert, as they do an `AutoGenerate` field's, without making it a pointer; `UpsertMany` matches a returned row to its input as if such a field of the key were unset. A required timestamp without one is still required: the TypeScript create refuses it unset, and the Go ORM writes what it holds. | Leaving the ORMs to write the zero time, which a create that relied on the column default would store as year 1. |
+| A required timestamp of a queue's message that a trigger leaves out has no default now, so verification asks that the message map it (D80's check counted a time as defaulted). The queue's own `created_at`, `updated_at` and `due_at` keep theirs, which sqlgen writes apart from the message. The User table's `createdAt` keeps its default; any other required timestamp of it needs `Default<T, "now">`, since registration writes the key, login and name alone. | Keeping the implicit default on queue tables, which would make a message's time mean two things by where it is declared. |
+| A plan from a database a compiler before D88 built drops each default it no longer gives, in `contract`, with no hazard (the plan case `drop-implied-now-default`); SQLite rebuilds the table to do it (`copy-table`), as it does for any default. | Keeping the old defaults on existing databases, under which a new database and an upgraded one would take different inserts. |
+
+### Seeded roles
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@seedRoles([{ name, permissions }])` from `@superschematic/db`, on the UserRole table, once, in any form (`TypeDef.SeedRoles`). The seeds are the authDb's: `create.sql` and the plans are the DB service's, and every API of one authDb shares its roles. | `defaultRoles: [{ name, permissions }]` on `@userSessions`, the API's decorator: the DB's `create.sql` and plans would then depend on the APIs that name it as their authDb, and two APIs of one authDb could seed one role two ways. |
+| Verification of the DB holds each role to a name, named once, and permissions of a permission's form, each listed once, and the table to a row its insert can write from a name and permissions alone (every other field optional, generated or defaulted by its column). The loader holds each name to the name field's scalar and `Validate` rules, as it does a default. | |
+| An API checks its authDb's seeds against its own permissions where it knows them (`checkSeededRoles`), and warns rather than refuses, since another API of the same authDb may require what this one does not: a default role no seed holds; a seeded permission that covers none of the API's operations' permissions or the administration routes' (a misspelling grants nothing); a seed of `firstUser`'s role, whose permissions hold over `firstUser`'s; and, under approval, a default role whose permissions the first administrator's do not cover, so that administrator could approve no one. | Errors, which would refuse a schema whose other API needs the permission. Checking only in `build-all`, which no single service's `check` would run. |
+| `create.sql` inserts each role after every other object. The insert is `INSERT ... ON CONFLICT (name) DO UPDATE SET permissions = EXCLUDED.permissions WHERE` the role has none (`cardinality` on Postgres, `json_array_length` on SQLite), or `DO NOTHING` for a seed with none: a role of the name keeps the permissions an administrator gave it, and one an earlier registration created empty (D81) takes the seed's. | `DO NOTHING` always, which leaves the empty role a registration made before the seed existed, the very install this entry fixes. Overwriting the role, which an insert of a seed that is already there should never do. |
+| The model holds each seed with its two statements in its dialect (`Model.Roles`), only for a schema that seeds, so every other model and its hash stay as they were. A plan inserts a new seed in `expand` with no hazard (`seedRole`), and updates one whose permissions change (`updateRole`): in `expand` when it only gains permissions, in `contract` when it loses one, since a server of the previous version may still serve a route the permission admits. The update is `destructive`: it replaces whatever permissions the role holds. A seed's step names no table, so a SQLite rebuild never takes it in. A removed seed changes nothing. | A new hazard class for seeds, which every gate would learn for a step `destructive` already describes. Deleting a role no seed declares, which strips it from every user who holds it. Diffing permissions into the update (removing what the seed dropped, adding what it gained), which would keep an administrator's own changes, but which SQLite's JSON list has no short statement for. |
+| The identity runtimes do not change: a seeded role exists, so registration grants it as it finds it. | Seeding at registration in the runtimes, which no plan would show and which every language would implement. |
+
+### Backfill
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@enqueueOnChange(Q, { ..., backfill: true })` (`EnqueueOnChange.Backfill`) needs an insert or an update among `on`: a backfill enqueues for each row that exists as an insert of it would. | Backfilling a delete-only trigger, for which no existing row was deleted. |
+| The backfill is one `INSERT INTO <queue> (...) SELECT ... FROM <table> AS src WHERE <when>` with the trigger's columns and values and the queue's `ON CONFLICT` (`EnqueueTrigger.BackfillSQL`, `SQLiteBackfillSQL`), so a queue that appends gets a message per row and one that replaces or skips one waiting message per key. On Postgres a replacing queue's backfill takes one row of each key (`DISTINCT ON`, the first by the table's key), since one statement's `ON CONFLICT DO UPDATE` changes a row once; SQLite's upsert takes the rows in turn, so a key's last row wins. The select always has a `WHERE`, which SQLite needs to read the `ON CONFLICT` after it. | A message per row with `ON CONFLICT` left to fail on Postgres at a key's second row. |
+| The step that creates the trigger on a table the previous model has runs the backfill after `CREATE TRIGGER`, in its transaction: the trigger's lock keeps every write out until it commits, so no row is missed and none is enqueued twice, as a new history table is seeded (D17). The step is `blocking`: the insert holds that lock for time that grows with the table. On SQLite the declaration's first trigger (the insert's or the update's) holds the backfill, and a rebuild that creates the trigger runs it after the triggers. A table the plan creates is empty and gets none, and a plan that changes an existing trigger backfills nothing: the model holds the statement on the trigger (`Trigger.Backfill`, only when declared), which the planner's comparison of triggers does not read. | `data-dependent`, the requirements' word, which D27 defines as a step that fails on rows that violate it, and a backfill fails on none. The trigger in one step and the backfill in a later one, which takes no long lock but enqueues twice, on an appending queue, the rows written between them. A backfill in `create.sql`, whose tables are empty. |
+| For a table too large to backfill inside a migration, `stack queue backfill <environment> <db>.<Queue>` runs the backfill of every `@enqueueOnChange` of the queue, whatever its `backfill`, as a queue document (`queueops.Backfill`, `migrate.QueueBackfill`) the migration runner runs in one transaction that takes no lock on the tables, and prints how many messages it enqueued, from `WITH enqueued AS (... RETURNING 1) SELECT count(*)`. A row written while it runs may be enqueued by its trigger too, which an appending queue then holds twice. It runs where the other `stack queue` commands run: on Postgres, locally or through the target's queue runner. | A flag on `superschematic-migrate apply`, which runs plans and nothing else. Locking the tables, which is what the command exists to avoid. |
+
+Status: built.
+- **The time of the insert:** sqlgen's goldens, where `fixture-ddl-db`'s
+  `posted_at` has no default while its `created_at` and `entered_on`
+  (`Default<Temporal.Date, "now">`) do, and `fixture-list-defaults-db`
+  declares the three; `TestDDLOnPostgres` (pgcheck), where a raw insert
+  without `posted_at` fails `NOT NULL` on it and one with it stamps
+  `created_at` and `entered_on`; `TestListDefaultsOnPostgres`;
+  `TestDefaultNowOnPostgres` (the Go ORM's `CreateOne` and `CreateMany`,
+  with the fields unset and set, and a raw insert refused);
+  `TestRepositoriesOnPostgres`'s `ddl.test.ts` (TypeScript);
+  `TestNowDefaults`, `TestDefaultNowIsNoDecodersDefault`,
+  `TestDefaultNowRefusedInIR`, `TestUnmappedTimestampNeedsDefaultNow`; the
+  plan cases `drop-implied-now-default` and `add-now-default` in both
+  dialects; `TestDDLRoundTrips` and `TestEncryptedAndNamedFieldsRoundTrip`
+  for the forms.
+- **Seeded roles:** `TestRoleSeedsOf`, `TestSeedRolesRefusedInIR`,
+  `TestSeededRolesWarnings`, `TestRoleSeedSQL`; sqlgen's golden
+  `fixture-user-model-db`, whose `Role` seeds `member` with
+  `identity.roles.read`; the plan cases `add-seed-roles`, which fills a
+  `member` an earlier registration created empty, `seed-roles-gain` and
+  `seed-roles-lose`, in both dialects, applied by the convergence tests;
+  `TestUserRoutesServerServesTheSDK`'s `firstUser`, on SQLite and
+  Postgres: on an empty database the first registrant is the
+  administrator, the second waits, is approved, and at once lists the
+  roles, a route `identity.roles.read` admits, and not the users;
+  `user_routes_runtime.test.ts` (TypeScript) and
+  `TestRustSDKCallsTheUserModelRoutes` (Rust), whose approved member holds
+  the seeded permission; `TestTSWriterRoundTripsUserTraits` and the
+  reader's golden of `fixture-users-db`. The identity runtimes' store
+  fixture leaves the seeds out (`TestIdentityStoreFixtureIsCurrent`),
+  since their tests make their own roles.
+- **Backfill:** `TestEnqueueOnChangeOf`, `TestBackfillSQL`; the plan cases
+  `add-enqueue-on-change-backfill`, where the two orders with a note wait
+  once each and the one without waits not at all, and
+  `add-enqueue-on-change-backfill-per-key`, where a customer of three
+  orders waits once, applied on Postgres and SQLite by the convergence
+  tests; `TestBackfillDocument`, `TestReadsTheBackfillDocument`,
+  `TestQueueBackfillOnPostgres` (the runner: two ready messages for three
+  orders, one without a product, and none more on a second run) and
+  `TestStackQueueBackfillOnACloudEnvironment`; `fixture-naming-db`'s
+  trigger in the forms' round trip.
+
+Left: `Default<T, "now">` on a queue's message, which the enqueues of all
+three languages would have to leave out when unset; decoders that fill in
+the current time; seeds of rows other than roles; `stack queue backfill`
+on SQLite, with the other operator statements (D68); a backfill when a
+plan changes an existing trigger's `when`, which the declaration would
+have to ask for. The rules are reversible until the first release.
+
+## D93. An API's MCP endpoint runs a tool that asks only once the person confirms the call, and three build messages say what they meant (D81 amended)
+
+`@mcp({ invocationPolicy: "ask" })` reached a client only as `_meta`
+(D11, D81): the endpoint ran every call it was sent, so an agent whose
+client ignored the hint, or that called the endpoint itself, moved money
+or recategorized a ledger without a person seeing the call. D81 left the
+asking to the client. A server that publishes "ask" and runs the call
+anyway does not keep its own promise; this entry makes the endpoint keep
+it. Drafting the finances API also met three messages that sent the
+author the wrong way:
+- `capability: "finances.line_items.list"` failed with "must contain at
+  least two dot-separated lowercase segments"; it had three, and the
+  underscore was the problem.
+- An `@mcp` operation that uploads a file vanished from `tools/list` with
+  only a comment in the generated `mcp.ts`.
+- The `Encrypted<T>` error said to set `outputs.sql.encryption.key`, not
+  where the named `@envVars` class goes.
+
+### Confirming a call
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The endpoint confirms a call of a tool whose policy the build's policy `Confirm`s before the call reaches the route: the call runs only with a confirmation that redeems, and every other call of it runs nothing. The confirmation sits in the transport (`Server.confirm` in `mcp.ts`), asked through the tool set's `confirms`, so the route's checks run after it, on the confirmed call alone. | Enforcing in the route, which would confirm a call from the SDK or a browser that no agent made; leaving it to the client, which D81 did. |
+| A 2026-07-28 client whose envelope's `clientCapabilities` elicit forms (`elicitation: {}` or `{ form: {} }`) is asked in band, by MCP's multi-round-trip requests: the call answers `resultType: "input_required"` with one input request, `confirm`, an `elicitation/create` whose message is the call's summary and whose `requestedSchema` asks for nothing, and a `requestState`. The client asks the person and retries with `inputResponses.confirm`; `accept` runs the call, `decline` and `cancel` are a tool error, `403 confirmation_declined`, and run nothing. | A form with a "confirm" boolean, which `accept` already says; URL-mode elicitation, which needs a page to confirm on. |
+| Every other client gets a two-step token: the call answers a tool error, `428 confirmation_required`, whose `details` hold `summary`, `confirmationToken` and `expiresAt`, and the same call with `confirmationToken` added to its arguments runs. `tools/list` adds the optional argument to each such tool's input schema, and a tool that asks may not take an argument of that name (`tsrestgen` refuses it at build, `mountMcp` at mount). | The token in `params._meta`, which a model cannot set; a token-only `input_required` (a `requestState` with no input request), which the official client retries by itself with no person asked; a 2xx result, which an agent reads as done. |
+| A 2025 client gets the token even when it declared elicitation at `initialize`. The 2025 transport asks a client mid-call with a request on the call's event stream and takes the answer as a new POST; the endpoint is stateless, as the engine's is, so it neither keeps the capabilities `initialize` declared nor finds the call that waits for the answer, which may be on another replica or Worker isolate. 2026-07-28 carries both in the call, so the endpoint asks there. | Sessions (`Mcp-Session-Id`) with an in-process wait, which works on one process and hangs a call whose answer lands on another; sessions in a shared store with a relay between replicas, a new dependency for the revision the protocol is leaving. |
+| A confirmation, a `requestState` and a token alike, is `v1.<mode>.<expires>.<nonce>.<binding>.<mac>`: `mode` is `elicit` or `token`, and one does not redeem as the other, so a `requestState` sent as a token runs nothing the person was not asked about; `binding` is an HMAC-SHA-256 of the API's name, the tool, the caller (the principal's subject and the calling service's deployable) and the arguments as canonical JSON (sorted keys); `mac` an HMAC-SHA-256 of the rest. Both are keyed with the endpoint's confirmation key. Redeeming checks the MAC (`invalid`), the mode (`mismatch`), the expiry (`expired`), the binding (`mismatch`) and the claim (`used`), in that order; only a confirmation that passes all is claimed, so a call with other arguments does not spend the person's. One that does not redeem asks again, naming why in `details.refused` and the detail, or at the start of the next elicitation's message. | A random id kept server-side with the call, which needs a shared store before anything works across replicas; a JWT, a header and a library for five fields; the binding's fields in clear, which put the caller's id in what an agent logs. |
+| The summary is the tool's title and handle and its arguments as canonical JSON; past 2,000 characters the rest is counted, not shown. The binding covers every argument whatever the summary shows. | Every argument shown, which makes a 500-row bulk recategorization a dialog no one reads; a summary the author writes, a new `@mcp` option for what the arguments already say. |
+| The key is an `@envVars` `Secret<string>` the API's config names, `outputs.api.mcpConfirmationKey`, by the type that declares it and the field's name, as `outputs.sql.encryption.key` names a database's (D85). The API's `@envVars` class holds it, its own or one it extends, so the stack binds the one secret to every deployable of the API, set per environment with `stack secrets set`, and each server's generated entrypoint builds the router with `mcp: { confirmationKey: config.FIELD }` (`main.ts`, and a Worker's `fetch.ts`). The build refuses an API whose endpoint serves a tool that asks with no key, or whose `@envVars` lacks the field, naming the tools, where the class goes and the docs section; `mcpConfirmationKey` without `mcp` fails the config; `mountMcp` refuses a confirming tool without a key, and `McpConfirmations` a key under 32 bytes. | A key per process, generated at start, under which a token one replica minted fails on the next; a fixed environment variable the runtime reads, which the stack would not see (D85's reason); deriving it from the identity runtime's secrets, which an API without users has not got. |
+| A confirmation is good for ten minutes (`confirmationTtlSeconds`). Its nonce is claimed in an `McpConfirmationStore`, one method, `claim(id, ttlMs, now)`; the default keeps claims in process, bounded, refusing a claim while full of live ones rather than forgetting one. A deployment passes a store its replicas share (`confirmationStore`) for a token to be single-use across them; with the default, a token redeems once per replica until it expires. | A shared store by default, which the runtime has none of without a memory store, and which D75's reserved declarations would have to grow for; forgetting the oldest claim when full, which lets its token redeem again. |
+| Which values confirm is the invocation policy's: `ToolInvocationPolicy.Confirm`, `["ask"]` in the core's (D11, amended). A policy that lists none, as one registered before this entry, confirms every value but its default, the exception an author opts into, so it asks before more calls rather than fewer. acme's lists `always`. `mcp.ts` marks each such tool `confirm: true`, and `MCPInfo.Confirming` names them. | Matching the literal `ask`, which an extension's `confirm: "always"` never is; a list with no fallback, under which an extension's policy confirms nothing until it learns the field. |
+
+The engine's MCP endpoint (D58) publishes the same policy for its tools
+and does not confirm them yet. The Go and Rust servers serve no MCP
+endpoint (D81), so the TypeScript runtime is the one that enforces it, and
+there is no second implementation for parity vectors to hold to it; the
+engine's corpus (`mcp-parity.test.ts`) still replays unchanged.
+
+D81, amended: its row on the invocation policy ("published in `_meta`, as
+the engine does", with "enforcing `ask` on the server, which is the
+client's to ask" not taken) is replaced by the table above.
+
+### Messages that say what they meant
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A refused `@docs` capability names the first character it may not hold and where, else what is wrong with its segments (one segment, an empty one, a stray hyphen); says what a capability holds, two or more dot-separated segments of lowercase letters, digits and hyphens; and gives an example made from it, its underscores and spaces made hyphens and its letters lowercased, when that is a capability: `capability "finances.line_items.list" holds "_" at character 14; ... such as "finances.line-items.list"`. | Allowing underscores, which every tool document and catalog that keys on the capability would then have to accept; the pattern itself in the message. |
+| A visible `@mcp` tool whose input carries a file, or whose payload is encrypted, is a load warning that names the operation, the tool and the reason, and the fix that says so on purpose, `@mcp({ hidden: true, reason })`. It is the verification pass's warning, the channel `check` reports and `build` prints, and it fires whether or not `outputs.api.mcp` is on: the tool documents mark an upload `unsupported_multipart` and `invokeTool` refuses it too. A `FileDownload` with a visible `@mcp` stays an error (D81). | A warning from the TypeScript API generator, which has no channel to report one and runs only with `mcp` on; an error, which would break every API whose author meant the tool for the SDK alone. |
+| The `Encrypted<T>` key errors say the declaring `@envVars` class lives in each API on the database, or in a General service whose class each API's extends, and end with the docs section's address; the MCP key's errors do the same with theirs. Both read the field through one lookup, `envVarsSecret`. | A longer guide in the message; the docs address alone. |
+
+Status: built.
+- **The runtime.** `runtime/http/typescript/src/mcpconfirm.test.ts`
+  (20 tests): tokens that redeem once for their call, refuse another
+  tool, other arguments, another caller, scope or mode as `mismatch`
+  without spending themselves, expire, and are `invalid` when any part is
+  changed or another key made them; the bounded store; canonical JSON.
+  Through `mountMcp`: a 2025 client and a 2026-07-28 one without form
+  elicitation get `confirmation_required` and run nothing, run with the
+  token, and are asked again for a used, mismatched, forged or expired
+  token; an eliciting client gets `input_required` with the summary, runs
+  on `accept`, runs nothing on `decline` or `cancel`
+  (`confirmation_declined`), and is asked again for a replayed,
+  mismatched or unanswered `requestState` and for a `requestState` sent
+  as a token; replicas under one key with a shared store redeem each
+  other's tokens once; `mountMcp` refuses a missing or short key and a
+  tool that takes `confirmationToken`. `src/mcp-parity.test.ts` replays
+  the engine's corpus unchanged. A one-off run of the official MCP client
+  (`@modelcontextprotocol/client` 2.2.0, the engine's test dependency,
+  which the HTTP runtime does not take) against `mountMcp` found its
+  multi-round-trip driver asks its elicitation handler the summary and
+  retries, so `accept` runs the call and `decline` and `cancel` are
+  `confirmation_declined`, and its 2025 client, eliciting or not, gets
+  and redeems the token.
+- **The generated server.** `TestGeneratedMCPRuntime` runs fixture-mcp's
+  generated router: `update_order` (`ask`) answers a token, runs with it
+  once, and the router refuses to build without a key.
+  `TestTypeScriptMCPEndpointServes` runs a generated server over Postgres
+  whose entrypoint reads `AGENT_MCP_CONFIRMATION_KEY`, the field
+  `outputs.api.mcpConfirmationKey` names: a signed-in agent's `set_motto`
+  runs only with its token, once. `TestMCPToolsConfirmByTheBuildsPolicy`
+  confirms by an extension's policy and refuses the argument name;
+  `TestMCPRouterGolden` pins the `confirm` mark;
+  `TestAnAPIWhoseToolsAskHoldsItsConfirmationKey`,
+  `TestParseOutputsReadsTheMCPConfirmationKey` and
+  `TestToolInvocationPolicyConfirms` hold the key and the policy.
+- **The messages.** `TestValidateOperationDocs` (`ir`),
+  `TestInvalidOperationDocsIsALocatedSchemaError`,
+  `TestMCPToolsLeftOutAreWarnings` and
+  `TestAnAPIOnAnEncryptedDatabaseHoldsItsKey`.
+
+Left: confirmation on the engine's MCP endpoint; elicitation for 2025
+clients, which needs sessions a shared store keeps; a shared single-use
+store by default, through a memory store, which needs a reserved
+declaration of its own (D75); a summary the author words; MCP in the Go
+and Rust servers (D81). The rules are reversible until the first release.
+
+## D91. A stack's origins put a site and the APIs it calls on one origin in every environment: the site's load balancer or Worker serves each under /api/<service>, as stack dev's proxy does
+
+D82's proxy puts a site and the APIs it calls on one origin under `stack
+dev` alone, and left "a proxy for a site served by a deploy". Deployed,
+the site and each API sit on separate origins, a bucket behind a load
+balancer and Cloud Run on gcp, a Worker and another Worker on Cloudflare,
+so a cookie session needs `trustedOrigins`, CORS and both hosts under one
+registrable domain, or the page switches to bearer tokens. That is
+configuration per environment, and a failure only a deploy shows, since
+`stack dev` never meets it.
+
+This entry adds:
+- `origins` on `@stack`, a site and the APIs its origin serves, in the
+  Stack IR and its data forms, the TypeScript writer and
+  `@superschematic/stack`'s types;
+- resolution of an origin: the APIs on the resolved site, the site on
+  each API's server, the same-origin URL on the site edge, no CORS for
+  the site, and no exposure needed for a server on the site's provider;
+- `PlatformSpec.ServesOrigin`, and the local, gcp and cloudflare site
+  platforms that serve one;
+- `stack dev`'s proxy in front of a built site too.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@stack({ origins: [{ site, apis? }] })`: an origin names a Site service the stack deploys and the APIs its origin serves, each one the site calls; `apis` left out is every API the site calls, as D82's proxy serves them. A site has one origin; an API may sit on two sites' origins. It is the stack's, the same in every environment. | A setting per environment, under which a deploy and `stack dev` could differ, the failure this removes. `origin` in the Site's config, which says how a site builds, not where a stack runs it. A single `origin: { site, apis }`, which a stack with two sites could not use twice. |
+| The paths are D82's: `/api/<service>` and every path under it reach the API's server with that prefix taken off and the query kept, the browser's `Host` passed on, with `X-Forwarded-Prefix`, `-Host`, `-Proto` (and on Workers `-For`) set. Every other path is the site's: its files, its fallback, and its config at `/__superschematic/config.json`. | A prefix each API mounts its routes under, which would differ between an API on an origin and one on its own host. A path per target. |
+| The site edge to an API of the origin derives the same-origin URL, `ir.SiteOriginURL`: the site's public address and the path, a string or a concatenation, which resolution checks against what the connector derived (`checkOriginURLs`). The deploy writes it into the config as it writes any address; `stack dev`'s proxy answers it on the `Host` the page was opened on, as D82 does. So `loadApis()` hands the SDK its API's path on the page's own origin wherever the page runs. | A relative base URL, which D82 refused. A URL the Worker computes from each request, which gcp's config, an object in a bucket, cannot. |
+| An API of an origin needs no `expose` when its server runs on the site's provider: resolution skips `site-calls-unexposed` for it, the resolved site lists it (`ResolvedSite.Origin`, its service, server and path), and its server names the site (`ResolvedDeployable.Origins`). The server has no public address of its own unless the stack exposes it, which it does when other clients need one. A server on another provider is reached at its public address (`SiteEndpoint.Upstream`, the generic connector's), so it must be exposed (`cross-provider-unexposed`). | Requiring `expose`, as every API a site calls needs today: on gcp a second load balancer, host and certificate, and on Cloudflare a workers.dev address or a custom domain, for an API the page reaches through the site. Exposing the server at an address of its own implicitly, which puts a host on the internet the stack does not name. |
+| The site is left out of the API's CORS field (`siteEdgesTo` skips an origin's edges), so an API only origins call has no CORS field and answers none, and the generated entrypoint, which wires CORS for each API a site calls, loads an empty list. Another site that calls the API from its own origin stays in the field. | Keeping the site's origin in the field, a CORS answer to a request that never needs one. |
+| A site platform says it serves origins with `PlatformSpec.ServesOrigin`, which only a site platform sets; resolution refuses an origin on one without it (`unrealizable`). Its connector derives the same-origin URL and what the platform needs to reach the server: nothing on gcp, which knows Cloud Run's nodes, a service binding on Workers, the loopback URL locally. | Every site platform assumed to serve one, whose config would name paths a target that does not know origins serves 404. |
+| An origin forwards to the API's server, which answers every API it serves, as an exposed server does: exposure is per server. | Routing each API's own routes alone, which needs every operation's path at the edge. |
+| gcp: the site's load balancer, its one host and certificate, routes each API of the origin. Per API, a serverless network endpoint group of its Cloud Run service and a backend service over it with Cloud CDN off (`enableCdn: false`), in the site's rollout step after the server's; and two route rules ahead of the files' rule, `fullPathMatch: /api/<service>` and `prefixMatch: /api/<service>/`, each with `pathPrefixRewrite: /` and `headerAction` adding `X-Forwarded-Prefix`. Google's front end passes `Host` on and sets `X-Forwarded-Proto` and `X-Forwarded-For`. | An internet network endpoint group in front of the run.app URL, a public run.app and a second TLS hop. Cloud CDN on with bypass rules, where the backend's CDN off says it once. `customRequestHeaders` on the backend service, which works too; the rule keeps the header next to the path it names. |
+| gcp: with an origin, the fallback's custom error response sits on the files' two rules, `/` and the catch-all, and not on the path matcher, whose policy answers every 404 under it, an API's too, with the site's page at 200. A site without an origin keeps D55's. | One policy for both, which turns an API's 404 into the site's index. |
+| gcp: a server only an origin serves takes `INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER`, with its invoker check off, since a load balancer's request carries no ID token, with or without a domain, and has no load balancer of its own. `nothing-public-unless-exposed` allows that and nothing wider for it; a caller sends its ID token in `Service-Authorization` alone, as to an exposed server. | The run.app URL open to all, which the origin does not need. IAP or an ID token from the load balancer, which a serverless network endpoint group does not send. |
+| gcp without a domain: the origin is the load balancer's address over HTTP, as the site is (D55, amended), where a browser keeps no `Secure` cookie; a cookie session there needs a domain, and a bearer session works. | Turning `Secure` off, a session cookie in clear on the internet. Refusing an origin without a domain, which a bearer page uses. |
+| Cloudflare: the site's Worker forwards each API of its origin through a service binding of its version, `SITE_API_<API>`, which the site edge's connector derives as `binding: {name, worker}` and the platform renders as a binding. `SITE_ORIGIN` lists each API's path with its binding, and `runWorkerFirst` each path, so `site.js` sees them before the assets. The script forwards with any method, on a URL with the browser's host, and puts the prefix back on a redirect within the API's routes, as D82's proxy does. The API's Worker stays internal, with workers.dev off: the binding admits the site's Worker, which carries the browser's request and no service credential. It works at workers.dev and under a custom domain alike. | Workers routes on the zone, `<host>/api/<service>/*` to the API's Worker: a route needs a zone, so no workers.dev and no Preview without a domain; the API would see its prefix on every path, unlike under `stack dev`; and `nothing-public-unless-exposed` refuses a route. |
+| A site and an API on two providers: the generic site connector derives the same-origin URL and the server's public address as the upstream, and the site's Worker fetches it with the prefix taken off (`SITE_ORIGIN`'s `url`, a reference the provider writes in). gcp's site refuses one, since a serverless network endpoint group reaches Cloud Run alone. | An internet network endpoint group on gcp, left. |
+| `stack dev` serves a site with an origin from the proxy whether it runs a dev server or its build (`OriginProxy` in front of `SiteHandler`): the origin's APIs under their paths and every other API the site calls at its own address in the config, as a deploy serves them. A dev server's proxy for a site with no origin keeps D82's, every API the site calls. The summary names the origin's APIs. | D82's proxy narrowed to origins for every site, which would turn existing dev servers' APIs back into CORS calls. A built site left on its file server, which would not show what a deploy serves. |
+
+The identity runtime's check, Go's `net/http.CrossOriginProtection` and
+TypeScript's `crossOriginAllowed`, passes a same-origin login on either
+header: `Sec-Fetch-Site: same-origin`, which every browser sends, or,
+without it, an `Origin` whose host is the request's `Host`, which each
+front passes on. Its defaults serve the session: the `__Host-session`
+cookie, `Secure`, `Path=/` and with no `Domain`, is the site's host's
+alone. So neither `trustedOrigins` nor `cookie.domain` is set.
+
+Two answers differ from the request this entry answers:
+- It asked for the option to name the APIs; `apis` may be left out for
+  every API the site calls, D82's set.
+- On gcp, Google's load balancer rewrites no answer's header, so a
+  redirect an API answers with a path of its own routes does not get the
+  prefix back there, as the Worker and `stack dev`'s proxy give it. No
+  route the runtimes generate redirects.
+
+Status: built, proven offline.
+- **The model:** `internal/stack`'s
+  `TestOriginServesAnAPIOnTheSitesOrigin`,
+  `TestOriginWithoutAPIsServesEveryCall`, `TestOriginKeepsAnotherSitesCORS`,
+  `TestOriginAcrossProviders`, `TestOriginRefusals` and
+  `TestSiteOriginURL`; the registry's `TestStackDecoratorReadsOrigins`;
+  the writer's `TestTSWriterWritesOrigins`; `@superschematic/stack`'s
+  type checks; the schema-file JSON Schema and types written again.
+- **stack dev:** `TestOriginSiteWiring`,
+  `TestOriginProxyServesAnOriginAndNamesTheOtherAPIs`,
+  `TestABuiltSiteServesItsOriginBehindItsProxy`, which builds a site with
+  Bun and signs in through its proxy, and `TestPrintLocalSummaryNamesAnOrigin`.
+- **gcp:** `TestOriginOnGCP`, `TestOriginWithoutDomainOnGCP` and
+  `TestOriginRefusesAnAPIOnAnotherProvider` read the nodes, each checked
+  against its pinned type; `TestOriginGolden` holds OriginShop's Staging
+  and Preview, and `extensions/pulumi` renders its Staging
+  (`gcp-originshop-staging`). `TestDeployOriginOnGCP` deploys Staging over
+  the fakes and follows the rendered URL map as Google's reference
+  documents it, in front of the bucket's objects and a stand-in for the
+  API behind the standard library's check with no trusted origin: the
+  config names the API on the site's origin, the page and the fallback
+  are served, a cookie login with `Sec-Fetch-Site` or `Origin` alone
+  reaches the API at `/auth/login` with the site's `Host` and the prefix
+  header, one from another origin is refused, a cookie call keeps its
+  query, and the API's 404 reaches the page.
+- **Cloudflare:** `TestOriginGolden` (origin-web-stack), `TestOriginOnWorkers`
+  and `TestOriginAcrossProvidersOnWorkers`; `extensions/pulumi` renders
+  `cloudflare-origin-staging`. `TestSiteOriginUnderWorkerd` runs `site.js`
+  under the pinned workerd with the fixture's bindings, beside a stand-in
+  API Worker bundled from the TypeScript identity runtime's own config,
+  check and cookie over its defaults: a cookie login with either header
+  passes and sets the host-only `__Host-session`, one from another origin
+  is refused, a cookie call keeps its query, a redirect gets its prefix
+  back, the API's 404 and another provider's API, fetched at its public
+  address, reach the page, and a path of no API is the fallback.
+- **Cloudflare with D92 (F10's Cloudflare acceptance):**
+  `TestTypeScriptHyperdriveUnderWorkerd` puts the site's Worker, running
+  `site.js`, in front of D92's generated ledger API under the pinned
+  workerd, an API over the user model on Postgres through a hyperdrive
+  binding, reached through the site's service binding: with the identity
+  runtime's defaults, no CORS, no trusted origin and no cookie domain, a
+  cookie sign-in on the site's origin, with `Sec-Fetch-Site` or `Origin`
+  alone, sets the host-only `__Host-session`, and a call gated on a
+  permission answers 200 with it, and 403 to a member without the
+  permission; a sign-in or a cookie call from another origin, and the
+  page's sign-in sent to the API's own host, are refused.
+  `TestWorkerdLedgerFixtureHoldsTheGoldenBindings` holds the fixture's
+  site Worker to its version's bindings, and the API's to no CORS
+  origins and no identity config.
+- **The runtime:** the Go identity runtime's
+  `TestCookieSessionOnASitesOrigin` signs in with a cookie over its
+  defaults with the site's `Host` and the forwarded headers, calls the
+  API with the cookie, answers no CORS, and refuses the same login sent
+  to the API's own host from the site's page.
+
+Left, which only a live deploy proves: on gcp, that the load balancer
+passes the browser's `Host` to Cloud Run through a serverless network
+endpoint group, that a `fullPathMatch` rule's `pathPrefixRewrite` makes
+the whole path `/`, that the route rules' error response serves the
+fallback with none on the path matcher and passes the API's 404, and that
+`INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER` admits the site's load balancer;
+on Cloudflare, that `runWorkerFirst` takes the API's paths, that a
+service binding reaches a Worker with no workers.dev, what `Host` header
+and client address a binding's request carries, and that a request's
+body streams through it. Also left: a site on Cloudflare in front of an
+API on gcp, which resolves and renders, though no environment gives two
+targets' values and a mixed deploy is D63's Left; a cookie sign-in
+through the site's Worker on Cloudflare's runtime rather than the pinned
+workerd (D92's Left); an
+internet network endpoint group for an API of another provider behind a
+gcp site; the prefix on a redirect on gcp; acme-shop's stacks, which
+keep D82's proxy and their own addresses.
+
+## D92. On the cloudflare target a Postgres database outside Cloudflare is reached through Hyperdrive, a TypeScript queue worker drains its queue at each firing of a Cron Trigger, and an API over the user model signs its users in there (D50, D53, D64 amended)
+
+A finances app on Cloudflare needs what its schemas declare: a Postgres
+database with a pgvector column for embeddings, queues written in the
+transaction that causes them, and workers that embed and sync. The
+cloudflare target placed every database on D1, which refused a DB service
+that did not list `sqlite`, and placed no queue worker at all
+(`TargetSpec.Unplaced`, D64 amended): a worker's claim loop runs as long
+as its process, and a Worker runs per request or per firing. The finances
+API also signs its users in with the identity runtime (`@userSessions`,
+approval-gated registration, cookie sessions), which D64's `NoIdentity`
+refused on Workers: the runtime hashed passwords with `node:crypto`'s
+argon2, which workerd does not have. D64 left "Hyperdrive to Cloud SQL
+later". This entry adds:
+- `cloudflare.hyperdrive`, a database platform for a DB service that lists
+  postgres first, on a Postgres outside Cloudflare reached through a
+  Hyperdrive config, and its connectors from a server, a job and a worker;
+- `./hyperdrive` in the HTTP runtime, a `pg` Pool a Worker's `Deps.db` and
+  `Deps.orm` run on unchanged, and the Workers, Cron and drain entrypoints
+  over it;
+- the origin's migrations from the deploying machine and from CI, checked
+  against the config;
+- `cloudflare.drainer`, a TypeScript queue worker as a Worker that drains
+  its Postgres queue at each firing of a Cron Trigger, and its generated
+  `drain.ts`;
+- the identity runtime on Workers over a Postgres `authDb` on Hyperdrive,
+  with an argon2id of the runtime's own that writes `node:crypto`'s
+  hashes.
+
+### The database and its config
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The cloudflare target names `cloudflare.hyperdrive` as its database platform for `postgres` (`TargetSpec.DatabasePlatforms`, D64 amended), beside `cloudflare.d1` for the kind. A database whose DB services list postgres first goes on Hyperdrive with no setting; a setting may still place one on D1, which refuses it without `sqlite` as before. | A `platform` setting on every Postgres database, which every finances-like stack would repeat. Lifting D1's refusal, a sqlite database the Postgres-first service never asked for. |
+| The Hyperdrive config is outside the graph, as a Secrets Store secret's value is (section 18.4): the person makes it once per environment, `wrangler hyperdrive create ... --caching-disabled` or the dashboard, and names its id in the database's settings, `hyperdrive` (32 hex digits). A missing id is refused as unrealizable with that command in the message. The platform lowers to no node: the origin, its backups and its size are the person's. | A `hyperdriveConfig` node in the graph, whose `origin.password` is a required input: the password would be a stack secret the graph reads, which no target does today (secrets reach Workers as bindings, never the graph), and it would sit in the state, which the planner's token can decrypt. Bootstrap creating the config and recording its id as a `BootstrapValue`: a value per database, where `BootstrapValue` is flat per environment, and a bootstrap that must know the stack's databases before resolution has run. |
+| `caching` (boolean, `false` by default) says whether the config may cache reads. A cached read can return what the database held before the request's own write, which the generated repositories never expect, so the runner refuses a config that caches unless `caching: true`. | Taking the config as it is, and a stale read the first time a handler reads its own write. Setting the config's caching from the stack, which needs the config's write permission in every deploy. |
+| A parameterized environment's database on Hyperdrive is refused: its members would share the origin's database, where each member of every other platform gets its own. A database that hosts two DB services is refused: one config reaches one database. | A schema per member on the shared origin, a second naming scheme no runtime reads. |
+| A sql edge to it derives `hyperdrive: {binding, config}` (`ir.HyperdriveConnection`): `<FIELD>_HYPERDRIVE_BINDING` names the Worker's binding, the field's name, and `<FIELD>_HYPERDRIVE_CONFIG` the config's id. `cloudflare.workers-hyperdrive`, `cloudflare.cron-hyperdrive` and `cloudflare.drainer-hyperdrive` derive it; the Workers platform writes the version's `{type: "hyperdrive", name, id}` binding, which pulumi-cloudflare 6.22.0's `workerVersion` already pins. The Go and Rust config loaders refuse the two variables, which only a Worker reads (D64), and `stackconfig_parity.json` holds the three runtimes to it. | A connection string in a `plain_text` binding, which would put the password in the version. A `url` the runtime rewrites, which hides that the Worker reads a binding. |
+| The Worker connects as the config's user, who reads and writes the database, as a D1 binding is the grant. | A second, least-privilege config per API, which the person would make and name per edge; left until a stack asks for it. |
+
+### A Worker's pool
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `./hyperdrive` gives `hyperdrivePool(binding)`, a `HyperdrivePool` that extends `pg.Pool`, so `Deps.db` is still a Pool and the generated repositories, transactions, `nearest` and `enqueue` run unchanged. Its `query` and `connect` run on a pool of the current scope, which `withHyperdrive(run, waitUntil)` opens over the binding's `connectionString` when the scope first queries, at most 4 connections (`DEFAULT_MAX_CONNECTIONS`), and ends after the response, through `ctx.waitUntil`, bounded by 5 seconds. Outside a scope it throws `HyperdriveScopeError`, naming why. | One pool per isolate, which workerd refuses: a socket opened in one request may not be used in another. `maxUses: 1` on a module-scope pool, which still shares an idle client across requests. `Deps` built per request, which would change every generated entrypoint and every implementation that keeps `Deps`. |
+| The scope is `AsyncLocalStorage`, which `nodejs_als` gives every Worker already (D64 amended). `fetch.ts` wraps each request with a Postgres database in it, `scheduled.ts` each try, and `drain.ts` each firing. The close of a socket the scope ended is not logged as an error. | Passing the pool through each call, which the repositories' signatures do not have. |
+| node-postgres needs Node's `net`, `tls`, `dns`, `crypto` and `events`, which workerd gives from compatibility date 2026-08-04 with no flag; the extension's `CompatibilityDate` is later. A version that binds a Hyperdrive config under an earlier `compatibilityDate` names `nodejs_compat` too (`NodeModulesDate`), and no other version does. | `nodejs_compat` on every version, which workerd warns is redundant at the pinned date. A Postgres driver of its own over `cloudflare:sockets`, which the ORMs' `pg` types would not fit. |
+| The generated `bundle.ts`, for an API with a Postgres database, keeps every Node builtin as an external `node:` import and turns a CommonJS `require` of one into an import, through a Bun plugin: Bun's browser target otherwise empties or polyfills them. The bundle check still refuses `bun:` and foreign WebAssembly. | Bun's `node` target, whose output assumes Node's globals. Polyfills, which give `pg` a `net` that cannot connect. |
+| The generator plans a Workers server, a Cron job and a worker over a Postgres database (`NodeCompat`) where it refused them before; `fetch.ts` takes each Postgres database with `hyperdriveDatabase`, which refuses a `url`, a Cloud SQL configuration and a D1 binding, naming the variable, and `/readyz` pings each through Hyperdrive. | |
+
+### Migrations
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The migration runner migrates the origin from the deploying machine, as it migrates D1 (D64 amended), with the connection string the shell holds in `HYPERDRIVE_ORIGIN_<DB>` (`OriginEnv`). `PrepareMigrations` refuses a run without it before the deploy changes anything. | Migrating through Hyperdrive from a Worker, whose 30 seconds of CPU and per-request sockets fit no long DDL. A Cloud Run job, a second cloud for one step. |
+| Before it migrates, the runner reads the config (`Cloud.HyperdriveConfig`, with the deployer's new `Hyperdrive Read`) and refuses an origin whose host, port, database or user is not the config's, so a deploy never migrates one database while its Workers read another, and logs each plan's steps on "database <name> of <host:port> as <user>, through Hyperdrive config <id>". | Trusting the variable, and a migration of staging's database by production's deploy when a shell holds the wrong one. |
+| It writes each plan to a file of its own, readable by its owner alone, and runs `superschematic-migrate apply --plan <file> --phase <phase>` with the connection string in `DATABASE_URL` alone, so no file, argument or log holds the password. The plan creates pgvector's extension for a vector column (D84), as the origin's user, which Neon, Supabase and Cloud SQL let a database's owner do. | A job document with `databaseUrl`, which would write the password to disk. A separate migrator user, which the origin's provider sets up; left. |
+| The CI identity names `env.HYPERDRIVE_ORIGIN_<DB>` as a field whose value is the secret `HYPERDRIVE_ORIGIN_<DB>_<STACK>_<ENV>`, and `github` sets that variable in the job's `env` from the secret, beside the token and the passphrase. `stack bootstrap --github` sets it in the deployer's GitHub environment from the shell's variable, or says how to. A parameterized environment names none. | A second CI identity kind for the origin. A secret the person sets by hand with no reminder. |
+
+### Queue workers
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The queue stays a Postgres table, the source of truth (D53, D68, D80), so a message enqueued in a transaction commits with it, `@enqueueOnChange` enqueues whatever writes a row, and keys, `onDuplicate`, `serialize`, backoff, retention and dead messages are unchanged on Cloudflare. | Cloudflare Queues fed from an outbox, which delivers at least once with no key: `serialize` would need a Durable Object per key, `onDuplicate` a lookup per message, and a dead message a second store, three designs to keep one queue's behavior. Durable Object alarms, which hold no Postgres transaction. Containers, a long-lived process on a product not in the pinned provider. |
+| `cloudflare.drainer` runs each TypeScript worker as a Worker of its own, named as a server's is, workers.dev off, under a Cron Trigger firing every minute (`DrainSchedule`). The generated `drain.ts`'s `scheduled` handler builds the API's `Deps`, the database through Hyperdrive, and runs the runtime's `runWorker` over `postgresQueue` for a window, `WORKER_DRAIN_SECONDS` (`drainSeconds`, 50 by default, 1 to 900), then aborts as SIGTERM does: no more claims, the running handlers finish within the `@worker`'s grace, the rest are given back. Each message is a span when trace export is on. | A nudge from the enqueuing Worker after commit, a call per message and a second path that `@enqueueOnChange` cannot take. A firing that claims once and stops, which would leave a minute between a message and the next. A window of a whole minute, which would overlap the next firing's. |
+| A firing runs one claim loop, so `WORKER_CONCURRENCY` is what grows; `instances` over one and `maxInstances` are refused, and `instances: 0` leaves the Worker with no trigger. A window and grace over Cloudflare's 15 minutes for a scheduled run are refused. | Overlapping firings as instances, which Cloudflare does not promise. |
+| A worker whose queue is on D1 is still refused (`NoQueueClaims`), now saying that the drainer claims on Postgres through Hyperdrive. The generator refuses a worker on Workers over a sqlite-first database, and a Go or Rust worker does not resolve on the drainer. | Claims on D1, which has no interactive transaction for a claim's `FOR UPDATE SKIP LOCKED`. |
+| `stack init`'s `cloudflare-target.ts` types a database's settings as D1's or Hyperdrive's, the union of the kind's platform and each `DatabasePlatforms` entry, and gains a `worker` key, the drainer's. | |
+
+### The identity runtime on Workers (D64 amended)
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The runtime's `password.ts` derives argon2id's key through a seam, `argon2idDeriver()`: `node:crypto`'s argon2 where the runtime has one, as Node.js 24.7 and Bun 1.4.2 do, off the main thread, and otherwise `identity/argon2.ts`, the runtime's own argon2id (RFC 9106, version 0x13) in TypeScript, on the calling thread. Bun and Node keep `node:crypto`'s; a Worker, whose `node:crypto` has `randomBytes`, `timingSafeEqual` and `createHash` but no argon2, takes the portable one. `setArgon2idDeriver` sets it for a test. | An argon2id WebAssembly module bundled into the Worker: workerd compiles no WebAssembly from bytes at run time, so it would be a second module in every version beside superscalar's, which `bundle.ts`'s check, the bundle store and the version's modules would each learn, and a binary in the repository built by a toolchain it would pin. A WebAssembly package from npm, a dependency the lockfile would add. Choosing it by target in the generated entrypoint, which a test of the runtime alone could not reach. |
+| The portable argon2id writes `node:crypto`'s keys for the same inputs, so a user's PHC string verifies on either: `argon2.test.ts` holds it to RFC 9106's vector, to `node:crypto` across costs, lanes, tag lengths, secrets and associated data, and to `identity_parity.json`'s hashes and verifications, which the Go runtime wrote. A 64-bit word is two 32-bit halves; BlaMka's product is `Math.imul`'s low half and the 16-bit parts' high half. | BigInt arithmetic, an order of magnitude slower. |
+| At the default cost, 19456 KiB, 2 passes and 1 lane, a hash takes about 120 ms of CPU under the pinned workerd (V8) on an Apple-silicon laptop, and 270 ms under Bun (JavaScriptCore); `node:crypto`'s native one is several times faster. A sign-in, a registration and a password change each hash once, and each isolate hashes once more as it builds the identity service, for the fixed hash an unknown user's sign-in verifies against, so its first request takes about 120 ms more. That is within Workers Paid's CPU (30 s by default, `cpuMs` up to 300000) and over Workers Free's 10 ms, which the docs say. | Lowering the cost on Workers, which would weaken every hash a user moves with. |
+| A hash keeps its memory, one `Uint32Array` of 19 MiB at the default cost, for the next, up to 64 MiB (`REUSED_MEMORY_KIB`), and zeroes it after each: workerd's peak stayed at 61 MiB across eleven hashes, against 137 MiB when each allocated its own, within a Worker's 128 MB. The hash is synchronous, so two requests of one isolate never share it. | A new array per hash, which the collector frees late. |
+| `PlatformSpec.IdentityDatabases`, beside `NoIdentity`, names the database platforms over which a server platform does serve the user model; resolution places every deployable first, then refuses one whose `authDb` is elsewhere with `NoIdentity`'s reason (`checkIdentityDatabases`), and `Finalize` checks each name is a registered database platform. `cloudflare.workers` names `cloudflare.hyperdrive`; `NoIdentity` now says a Worker's identity store runs on Postgres through Hyperdrive and none on D1. A sqlite-first `authDb` stays refused everywhere (D50). | Dropping `NoIdentity` from Workers, which would leave the D1 case to the dialect check's message alone and the seam to no platform. A function on the platform, which no other field of `PlatformSpec` is for a refusal. |
+| The generator no longer refuses a Workers server over the user model; `fetch.ts` builds the identity store over the database's Hyperdrive pool, so it runs per request as the ORM does, the identity service from the identity config it reads from the string bindings (`identityConfig(field, values)`), and mounts it as `main.ts` does. The cookie is the runtime's default, `__Host-session`, Secure, `SameSite=Lax`, which a Worker's HTTPS takes; the Workers platform declares no identity config. | An identity config of the platform's, which would say what the defaults say. |
+
+Status: built.
+- **The model and the runtimes:** `TestDerivedValuesMeetTheirContract`,
+  `TestDerivedValuesThatBreakTheContract` and
+  `TestDerivedMembersNameTheVariables` for `hyperdrive`;
+  `stackconfig_parity.json`'s three new vectors in Go, Rust and
+  TypeScript; `hyperdrive.test.ts` (a scope's pool shared by its queries
+  and transactions and ended after it, concurrent scopes' own pools,
+  the refusals), on `SUPERSCHEMATIC_HTTP_RUNTIME_TEST_DATABASE_URL`; `worker.test.ts`'s
+  `workerDrainSeconds`. Over a `hyperdrivePool` within `withHyperdrive`,
+  as a Worker opens its ORM, tsgen's `actor.test.ts` stamps a request's
+  caller (D87), in a transaction of options, a savepoint and an upsert
+  only if changed (D89) too, and a firing's write as no one or as the
+  system actor, and `queries.test.ts` runs a declared query (D86) on the
+  scope's pool and in a savepoint.
+- **The generator:** `TestTypeScriptHyperdriveEntrypointGolden`, the
+  ledger fixture's `fetch.ts`, `bundle.ts`, both `drain.ts` and a worker's
+  package; `TestTypeScriptCronRefusals` and `TestTypeScriptWorkersRefusals`
+  for what plans now and what is still refused.
+- **Under workerd:** `TestTypeScriptHyperdriveUnderWorkerd` bundles the
+  ledger API and its two workers, applies the ledger's DDL to a database
+  of its own on pgvector's Postgres, and runs them under the pinned
+  workerd with real hyperdrive bindings to it
+  (`testdata/workerd/ledger`): the ORM's writes and reads, `nearest` by
+  cosine, an enqueue in a transaction that commits and one that rolls
+  back, `@enqueueOnChange`'s trigger with `replace`, a firing that embeds
+  every line item, retries and dead messages, and one claim per key under
+  `serialize` with concurrency 2. `TestWorkerdLedgerFixtureHoldsTheGoldenBindings`
+  holds the fixture to the target's Staging bindings.
+- **The target:** `TestHyperdriveGolden` resolves `ledger-stack`, an API,
+  two queues, two workers and a Postgres database with a vector column,
+  in Staging and Production, each node against its pinned type;
+  `TestWorkersBindTheirHyperdriveConfig`; `TestHyperdriveRefusals`;
+  `TestDeployTheLedgerOnWorkers` deploys it over the fake `Cloud` and
+  provisioner; `TestMigrateTheOriginThroughItsHyperdriveConfig` and
+  `TestMigrateTheOriginRefusals` with a stand-in `superschematic-migrate`;
+  `TestHyperdriveCIGolden` and `TestBootstrapGitHubSetsTheOriginSecrets`;
+  `TestTarget`, `TestD1Refusals` and `TestWorkersRefusals` updated;
+  `TestStackInitWritesACloudflareEnvironment` for the target's types.
+- **The identity runtime on Workers:** `argon2.test.ts` (RFC 9106's
+  vector, `node:crypto`'s keys, the parity corpus's hashes through the
+  portable argon2id, and the default cost's time); the ledger fixture
+  is an API over the user model with approval-gated registration, user
+  administration and a route that needs `ledger.close`, and
+  `TestTypeScriptHyperdriveUnderWorkerd` registers carol on Bun with
+  `node:crypto`'s argon2, then under workerd signs carol in with a
+  cookie, registers ada, the first user and the administrator, registers
+  bob, who waits, approves him, signs him in with a cookie, refuses him
+  the gated route until ada grants him her role, signs him out, and after
+  the run signs ada in on Bun; `TestAPlatformThatServesTheUserModelOverSomeDatabases`,
+  `TestStackSpecsFailAfterFinalize` and `TestRegisterPlatformRejects`
+  for `IdentityDatabases`; `TestWorkersServeTheUserModelOverHyperdrive`
+  and `TestHyperdriveRefusals`' identity store on D1;
+  `TestTypeScriptWorkersRefusals` for the plan.
+
+Left:
+- What only a live deploy proves: Cloudflare accepting the version's
+  hyperdrive binding and the deployer's `Hyperdrive Read`; a real
+  Hyperdrive connection, its TLS to Neon, Supabase or Cloud SQL, and
+  pgvector's extension created there by the origin's user; a Cron
+  firing's wall time and CPU under a 50-second window; the six
+  connections an invocation may hold, which the pool's four and a
+  handler's fetches share; node-postgres under Cloudflare's runtime rather
+  than the pinned workerd; and a destroy that leaves the config and the
+  origin.
+- A sign-in on Cloudflare's runtime rather than the pinned workerd: its
+  CPU time at the default cost, and the cookie through a custom domain and
+  through D91's site Worker, which the pinned workerd runs in
+  `TestTypeScriptHyperdriveUnderWorkerd` (D91's Status). Login's rate
+  limit is each isolate's own, as every rate limit on Workers is (section
+  18.15).
+- An identity store over D1 or SQLite (D50).
+- A database on Hyperdrive in a parameterized environment; a
+  least-privilege config per API; a separate migrator user.
+- A worker woken sooner than its next firing, and `instances` over one.
+- `stack queue` against a cloudflare environment's origin.
+- Hyperdrive to a Cloud SQL database the gcp target places, in one
+  environment with Workers (mixing targets).
+- Managing the config's caching, or the config itself, from the stack.

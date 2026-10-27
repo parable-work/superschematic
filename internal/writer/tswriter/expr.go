@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
@@ -341,6 +342,10 @@ func (e *emitter) defaultLiteral(fd *ir.FieldDef, owner string) string {
 		}
 		return value
 	case "string":
+		return quote(value)
+	}
+	// "now" on a date or time is the time of the insert (D88).
+	if !fd.TypeRef.IsArray && !fd.TypeRef.IsMap && codegen.IsDefaultNow(base, fd.Default) {
 		return quote(value)
 	}
 

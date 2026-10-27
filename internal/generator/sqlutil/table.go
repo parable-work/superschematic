@@ -360,10 +360,10 @@ var filterOps = map[FilterKind][]string{
 	FilterString:   {FilterEq, FilterIn, FilterILike, FilterIsNull},
 	FilterInt:      {FilterEq, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterIsNull},
 	FilterFloat:    {FilterEq, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterIsNull},
-	FilterDateTime: {FilterEq, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIsNull},
+	FilterDateTime: {FilterEq, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterIsNull},
 	FilterDate:     {FilterEq, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterIsNull},
 	FilterDuration: {FilterEq, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIsNull},
-	FilterBool:     {FilterEq, FilterIsNull},
+	FilterBool:     {FilterEq, FilterIn, FilterIsNull},
 	FilterPoint:    {FilterIsNull},
 	FilterJSON:     {FilterEq, FilterIn, FilterIsNull},
 	FilterDecimal:  {FilterEq, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterIsNull},
@@ -453,6 +453,12 @@ type TableModel struct {
 	// ReferencedBy are the to-one relations of other tables, and of this
 	// one, that point at the table, sorted by filter name.
 	ReferencedBy []Reference
+
+	// ToOne are the table's to-one relations to the tables of its schema,
+	// in column order, and ToMany its one-to-many relations, which a read
+	// includes and a filter reaches through (D90, attachRelations).
+	ToOne  []ToOne
+	ToMany []ToMany
 }
 
 // ColumnModel is a column of a table.
@@ -550,6 +556,15 @@ type UniqueKey struct {
 	Columns  []string
 	Conflict string
 	Keep     string
+
+	// Expression is a unique @index over an expression, whose rows an
+	// upsert cannot match to its inputs by their columns (D89).
+	Expression bool
+	// Rows reads the rows that hold the keys of the tuples %s, each of the
+	// key's columns in order, among the rows the key's index holds: the
+	// rows an upsert with OnlyIfChanged left as they were, which RETURNING
+	// leaves out (D89). Empty for an expression key.
+	Rows string
 }
 
 // Reference is a to-one relation of another table, Source, through its
@@ -664,6 +679,7 @@ func TablesOf(schema *ir.Schema, dependencies map[string]*ir.Schema) ([]TableMod
 		tables = append(tables, table)
 	}
 	attachReferences(tables)
+	attachRelations(tables)
 	return tables, nil
 }
 
@@ -911,9 +927,11 @@ func uniqueKeys(td *ir.TypeDef, table *TableModel) ([]UniqueKey, error) {
 		// @index's where and, on a soft-deletable table, the live rows
 		// alone (IndexPredicate).
 		key.Conflict = "(" + strings.Join(quoted, ", ") + ")"
+		key.Rows = "SELECT " + table.columnList() + " FROM " + table.Quoted + " WHERE " + key.Conflict + " IN (%s)"
 		if idx != nil {
 			if idx.Expression != "" {
 				key.Conflict = "((" + idx.Expression + "))"
+				key.Expression, key.Rows = true, ""
 			}
 			live := ""
 			if table.SoftDelete && !deletedAt {
@@ -921,6 +939,9 @@ func uniqueKeys(td *ir.TypeDef, table *TableModel) ([]UniqueKey, error) {
 			}
 			if predicate := IndexPredicate(idx.Where, live); predicate != "" {
 				key.Conflict += " WHERE " + predicate
+				if key.Rows != "" {
+					key.Rows += " AND (" + predicate + ")"
+				}
 			}
 		}
 		key.Keep = quoted[0] + " = EXCLUDED." + quoted[0]

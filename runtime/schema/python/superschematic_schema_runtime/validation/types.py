@@ -190,6 +190,9 @@ class TypeDef:
     fields: list[FieldDef] = field(default_factory=list)
     indexes: list[IndexDef] = field(default_factory=list)
     env_vars: bool = False
+    # @allowUnknownFields (D87): a strict parse or serialize accepts a key
+    # the type does not declare, and drops it.
+    allow_unknown_fields: bool = False
 
 
 @dataclass

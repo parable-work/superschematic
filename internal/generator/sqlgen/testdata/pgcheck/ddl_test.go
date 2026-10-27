@@ -17,6 +17,8 @@ import (
 //   - a raw INSERT that leaves out a column with a Default<T, V> takes V,
 //     and one with a value outside an enum or a Validate bound is refused
 //     by the column's CHECK;
+//   - one that leaves out a required timestamp is refused, unless it is an
+//     audit timestamp or declares Default<T, "now"> (D88);
 //   - deleting a category clears the nullable relations that SET NULL
 //     names, a child category's parent and a line's category, and keeps
 //     their rows;
@@ -46,12 +48,28 @@ func TestDDLOnPostgres(t *testing.T) {
 		t.Errorf("active = %v, sort_order = %v; want the defaults false and 0", active, sortOrder)
 	}
 	var memo string
-	if err := conn.QueryRow(ctx, `INSERT INTO line_item (category_id, amount_cents) VALUES ($1, 1250) RETURNING memo`, food).Scan(&memo); err != nil {
+	if err := conn.QueryRow(ctx, `INSERT INTO line_item (category_id, amount_cents, posted_at) VALUES ($1, 1250, now()) RETURNING memo`, food).Scan(&memo); err != nil {
 		t.Fatalf("a line that leaves out memo: %v", err)
 	}
 	if memo != "it's unexplained" {
 		t.Errorf("memo = %q, want the default", memo)
 	}
+
+	// The time of the insert (D88): a required timestamp with no
+	// Default<T, "now"> has no default, so a line that leaves out when it
+	// was posted is refused rather than posted now; the audit createdAt and
+	// enteredOn, declared Default<Temporal.Date, "now">, take the time and
+	// the day of the insert.
+	_, err := conn.Exec(ctx, `INSERT INTO line_item (amount_cents) VALUES (700)`)
+	var notNull *pgconn.PgError
+	if !errors.As(err, &notNull) || notNull.Code != "23502" || notNull.ColumnName != "posted_at" {
+		t.Errorf("a line that leaves out posted_at: got %v, want a not-null violation on posted_at", err)
+	}
+	var stamped bool
+	if err := conn.QueryRow(ctx, `INSERT INTO line_item (amount_cents, posted_at) VALUES (700, '2026-01-02T03:04:05Z') RETURNING created_at = now() AND entered_on = CURRENT_DATE AND posted_at = '2026-01-02T03:04:05Z'`).Scan(&stamped); err != nil || !stamped {
+		t.Errorf("a line that leaves out created_at and entered_on: stamped %v (%v), want the time and the day of the insert", stamped, err)
+	}
+	mustExec(t, ctx, conn, `DELETE FROM line_item WHERE amount_cents = 700`)
 
 	// Checks: an enum's other values and a Validate bound's outside are
 	// refused, each by its column's constraint.
@@ -62,7 +80,7 @@ func TestDDLOnPostgres(t *testing.T) {
 		{"an empty label", `INSERT INTO category (label, kind) VALUES ('', 'business')`, "ck_category_label"},
 		{"a label over 60 characters", `INSERT INTO category (label, kind) VALUES (repeat('x', 61), 'business')`, "ck_category_label"},
 		{"a sort order over 1000", `INSERT INTO category (label, kind, sort_order) VALUES ('Rent', 'business', 1001)`, "ck_category_sort_order"},
-		{"a confidence over 1", `INSERT INTO line_item (amount_cents, confidence) VALUES (1, 1.5)`, "ck_line_item_confidence"},
+		{"a confidence over 1", `INSERT INTO line_item (amount_cents, confidence, posted_at) VALUES (1, 1.5, now())`, "ck_line_item_confidence"},
 		{"a kind changed to one outside the enum", `UPDATE category SET kind = 'bogus'`, "ck_category_kind"},
 	} {
 		_, err := conn.Exec(ctx, tc.sql)
@@ -73,7 +91,7 @@ func TestDDLOnPostgres(t *testing.T) {
 	}
 	// NULL passes a check, and a label of 60 two-byte characters passes the
 	// length bound, which counts characters as every validator does.
-	if _, err := conn.Exec(ctx, `INSERT INTO line_item (amount_cents, confidence) VALUES (1, NULL)`); err != nil {
+	if _, err := conn.Exec(ctx, `INSERT INTO line_item (amount_cents, confidence, posted_at) VALUES (1, NULL, now())`); err != nil {
 		t.Errorf("a line with no confidence: %v", err)
 	}
 	if _, err := conn.Exec(ctx, `INSERT INTO category (label, kind) VALUES (repeat(chr(233), 60), 'accounting')`); err != nil {

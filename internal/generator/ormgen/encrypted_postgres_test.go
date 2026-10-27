@@ -25,9 +25,11 @@ const encryptedFixture = "fixture-vault-db"
 // the TypeScript repositories of fixture-vault-db to one another on the
 // Postgres at SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL (D85):
 //
-//   - each runs one script of creates, reads, updates, an upsert, a
-//     reencrypt and a delete in a schema of its own, recording every
-//     statement it sends, and the two are the same, call by call;
+//   - each runs one script of creates, reads, updates, upserts by the
+//     primary key and by itemId, one and many, which set the access token
+//     by a second statement sealed under the row's key (D89), a reencrypt
+//     and a delete in a schema of its own, recording every statement it
+//     sends, and the two are the same, call by call;
 //   - in one shared schema, Go writes a row, which is ciphertext there and
 //     plaintext through TypeScript's repository; TypeScript writes another,
 //     and rotates the key with reencrypt; and Go reads both under the new
@@ -128,6 +130,19 @@ func TestEncryptedFieldsAcrossGoAndTypeScriptOnPostgres(t *testing.T) {
 		if err := json.Unmarshal(data, &calls); err != nil {
 			t.Fatalf("read %s: %v", path, err)
 		}
+		// A transaction's BEGIN and COMMIT are left out, pgx writing them in
+		// lower case: an upsert that seals an update's field opens one (D89).
+		for i := range calls {
+			kept := calls[i].Statements[:0]
+			for _, st := range calls[i].Statements {
+				switch strings.ToUpper(strings.TrimSpace(st)) {
+				case "BEGIN", "COMMIT", "ROLLBACK":
+					continue
+				}
+				kept = append(kept, st)
+			}
+			calls[i].Statements = kept
+		}
 		return calls
 	}
 	goCalls, tsCalls := read(goOut), read(tsOut)
@@ -225,6 +240,20 @@ if (mode === 'parity') {
     await call('pageItems', () => orm.plaidItem.findPage(null, { limit: 2 }));
     await call('updateItem', () => orm.plaidItem.updateOne(first.id, { accessToken: 'access-1b', webhookSecret: null }));
     await call('upsertItem', () => orm.plaidItem.upsertOne({ id: first.id, itemId: 'item-1', institution: 'First Bank', accessToken: 'access-1c' }, ['id'], { accessToken: 'access-1c' }));
+    await call('upsertItemByItemId', () =>
+      orm.plaidItem.upsertOneResult({ itemId: 'item-1', institution: 'First Bank', accessToken: 'access-1d' }, ['itemId'], { accessToken: 'access-1d', institution: 'Renamed Bank' }, { onlyIfChanged: true })
+    );
+    await call('upsertItems', () =>
+      orm.plaidItem.upsertMany(
+        [
+          { itemId: 'item-2', institution: 'Second Bank', accessToken: 'access-2' },
+          { itemId: 'item-4', institution: 'Fourth Bank', accessToken: 'access-4' },
+        ],
+        ['itemId'],
+        ['institution', 'accessToken'],
+        { onlyIfChanged: true }
+      )
+    );
     await call('reencrypt', () => createOrm(pool, { fieldKeys: next + ',' + current }).plaidItem.reencrypt({ batch: 2 }));
     await call('deleteItem', () => orm.plaidItem.deleteOne(second!.id));
     writeFileSync(out!, JSON.stringify(calls, null, 2));
@@ -422,6 +451,16 @@ func TestVaultParity(t *testing.T) {
 	rec.call("upsertItem")
 	_, err = db.PlaidItem.UpsertOne(ctx, &types.PlaidItem{Id: first.Id, ItemId: "item-1", Institution: "First Bank", AccessToken: "access-1c"}, PlaidItemUniqueById, &PlaidItemUpdate{AccessToken: str("access-1c")})
 	must(err)
+	rec.call("upsertItemByItemId")
+	_, err = db.PlaidItem.UpsertOneResult(ctx, &types.PlaidItem{ItemId: "item-1", Institution: "First Bank", AccessToken: "access-1d"}, PlaidItemUniqueByItemId,
+		&PlaidItemUpdate{AccessToken: str("access-1d"), Institution: str("Renamed Bank")}, &UpsertOptions{OnlyIfChanged: true})
+	must(err)
+	rec.call("upsertItems")
+	_, err = db.PlaidItem.UpsertMany(ctx, []*types.PlaidItem{
+		{ItemId: "item-2", Institution: "Second Bank", AccessToken: "access-2"},
+		{ItemId: "item-4", Institution: "Fourth Bank", AccessToken: "access-4"},
+	}, PlaidItemUniqueByItemId, PlaidItemFields{Institution: true, AccessToken: true}, &UpsertOptions{OnlyIfChanged: true})
+	must(err)
 	rec.call("reencrypt")
 	_, err = rotated.PlaidItem.Reencrypt(ctx, 2)
 	must(err)
@@ -528,8 +567,14 @@ func TestVaultCross(t *testing.T) {
 		if _, err := db.PlaidItem.UpdateMany(ctx, nil, &PlaidItemUpdate{AccessToken: &token}); !errors.As(err, &refused) || refused.Field != "accessToken" {
 			t.Fatalf("UpdateMany of an encrypted field reads %v", err)
 		}
-		if _, err := db.PlaidItem.UpsertOne(ctx, &types.PlaidItem{ItemId: "go-item", Institution: "Go Bank", AccessToken: "x"}, PlaidItemUniqueByItemId, &PlaidItemUpdate{AccessToken: &token}); !errors.As(err, &refused) {
-			t.Fatalf("an upsert on itemId of an encrypted field reads %v", err)
+		// An upsert on itemId seals the token under the key of the row it
+		// updates, by a second statement (D89).
+		upserted, err := db.PlaidItem.UpsertOneResult(ctx, &types.PlaidItem{ItemId: "go-item", Institution: "Go Bank", AccessToken: "x"}, PlaidItemUniqueByItemId, &PlaidItemUpdate{AccessToken: &token}, nil)
+		if err != nil || upserted.Status != UpsertUpdated || *upserted.Row.Id != goID || upserted.Row.AccessToken != "other" {
+			t.Fatalf("an upsert on itemId of an encrypted field reads %+v, %v", upserted, err)
+		}
+		if again, err := db.PlaidItem.GetOne(ctx, goID, nil); err != nil || again.AccessToken != "other" {
+			t.Fatalf("the upserted token reads %+v, %v", again, err)
 		}
 		// MaskSecrets clears it, as it does a Secret<T>.
 		if masked := fromGo.MaskSecrets(); masked.AccessToken != "" || masked.WebhookSecret != "" {

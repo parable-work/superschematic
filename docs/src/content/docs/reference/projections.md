@@ -8,9 +8,11 @@ sidebar:
 A projection is a read-only relation over tables of the same DB schema,
 declared once as a class. The `sql` generator writes the Postgres view,
 the migration that creates it, and an Arrow schema and docs file for its
-readers, all from that declaration. A projection is never a table and
-never a language type: the table DDL, the ORM and the type generators do
-not emit it.
+readers, all from that declaration. A projection is never a table: the
+table DDL and the type generators do not emit it. The Go ORM and the
+TypeScript repositories read it through a read-only repository with a row
+type of its own ([Read a projection](#read-a-projection)), and an API
+view may take it as its `@source`.
 
 The three decorators come from `@superschematic/db` and are only allowed
 in DB schemas.
@@ -70,7 +72,7 @@ export abstract class AppPreference {
 | Part | Meaning |
 | --- | --- |
 | `@projection<Source>` | The table the view reads, addressed as `base` everywhere in the declaration. |
-| `pool`, `name` | The view is created as `"pool"."name"`, so readers address it as `pool.name`. Both are snake_case identifiers. |
+| `pool`, `name` | The view is created as `"pool"."name"`, so readers address it as `pool.name`. Both are snake_case identifiers. Without a `pool`, the view is created beside the service's tables, in `outputs.sql.sourceSchema` or the `search_path`'s schema, and takes no table's name: a plain view the ORMs read, which binds no setting unless its rules do. |
 | `migration` | The 14-digit version stamp of the generated migration. An applied migration is never rewritten: a changed declaration takes a new stamp. |
 | `where` | Row rules, all ANDed, in order. The forms are below. |
 | `collapse` | Keeps one row per key: `by` lists the `alias.field` columns of the key (`DISTINCT ON`), `order` ranks the rows that share it and the first wins. |
@@ -118,10 +120,10 @@ the table DDL in `<out>/sql/<service>/`:
 
 | File | What it is |
 | --- | --- |
-| `create.sql`, `drop.sql` | The view is created after the tables, in `CREATE SCHEMA IF NOT EXISTS "pool"`, and dropped before them. |
-| `<migrationsDir>/<stamp>_<pool>_<name>_projection.up.sql` | Creates the schema, drops the view if it exists and creates it. Re-runnable. |
+| `create.sql`, `drop.sql` | The view is created after the tables, in `CREATE SCHEMA IF NOT EXISTS "pool"` when it has a pool, and dropped before them. |
+| `<migrationsDir>/<stamp>_<pool>_<name>_projection.up.sql` | Creates the schema of a pool, drops the view if it exists and creates it. Re-runnable. A view without a pool is `<stamp>_<name>_projection`. |
 | `<migrationsDir>/<stamp>_<pool>_<name>_projection.down.sql` | Drops the view. |
-| `projections/<pool>.<name>.arrow.json` | The view's Arrow schema in arrow-rs serde form: one field per column with its Arrow type, nullability and metadata, and schema metadata naming the view and its settings. |
+| `projections/<pool>.<name>.arrow.json` | The view's Arrow schema in arrow-rs serde form: one field per column with its Arrow type, nullability and metadata, and schema metadata naming the view and its settings. `<name>.arrow.json` for a view without a pool. |
 | `projections/<pool>.<name>.docs.json` | The view's address, description, settings, collapse key and columns (source, scalar or enum, SQL and Arrow type, nullability, description), for a catalog page. |
 
 A [migration plan](/superschematic/reference/migrations/) creates,
@@ -167,6 +169,41 @@ Every key starts with the naming file's
 
 A reader sets every required setting (`SET LOCAL` or `set_config(name,
 value, true)` in the scan's transaction) before it reads the view.
+
+## Read a projection
+
+A projection whose columns include its source table's key, or the one
+column it collapses by, is read through a read-only repository in both
+ORMs (D90). That column is the view's key: what `getOne` reads by and a
+page's keyset places a row by, so it must identify a row, as a join on
+another table's key keeps it doing. A projection with neither has no
+repository.
+
+The row is the projection's class, its members the class's fields, typed
+as a table's fields are; the filter holds each column's conditions by its
+type, as a table's filter does, with `anyOf`, and a page sorts by the key
+or a column of one value of text, a number or a time that is never null.
+
+```ts
+const page = await deps.orm.transactionListRow.findPage(
+  { anyOf: [{ categoryId: { in: ids } }, { parentCategoryId: { in: ids } }], providerName: { eq: 'First Bank' } },
+  { sort: { field: 'date', desc: true }, limit: 50 }
+);
+```
+
+| | TypeScript | Go |
+| --- | --- | --- |
+| Row | `TransactionListRow`, in the types package's `./orm` entry | `orm.TransactionListRow`, a struct of the ORM's package |
+| Repository | `deps.orm.transactionListRow`, and `tx.transactionListRow` in a transaction | `db.TransactionListRow()`, and `orm.TransactionListRowIn(tx)` in a transaction |
+| Reads | `getOne`, `getManyByIds`, `findOne`, `findMany`, `findPage`; `select` too | `GetOne`, `FindOne`, `FindMany`, `FindPage` |
+
+Both run the same statements over the view. A reader of a view whose rules
+bind settings sets them first, in the transaction it reads in:
+`tx.exec("SELECT set_config('app.account_id', $1, true)", [id])`.
+
+An API view may take a projection as its `@source`, as it takes a table:
+each of its fields is held to the projection's column of its name and
+type.
 
 ## `outputs.sql`
 
@@ -214,7 +251,8 @@ gets the same answers:
   `base`, or a join whose condition never mentions its own alias;
 - a column whose type differs from its source, or one declared required
   over a nullable column or a left join;
-- a view name or migration stamp another projection already uses;
+- a view name or migration stamp another projection already uses, and a
+  view without a pool named as a table of the schema;
 - a rule that mixes forms, an `anyOf` with fewer than two bindings or with
   a guard inside one, a setting name without a dot, a function name that
   is not `schema.function`, a literal whose type does not match its

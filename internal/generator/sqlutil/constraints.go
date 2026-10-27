@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/codegen"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -75,12 +76,18 @@ func scalarColumn(field *ir.FieldDef, columnType string) bool {
 //     UUID, a time or a duration, whose stored form is not the form V is
 //     written in.
 //
-// An enum is text, so its member's value is a quoted literal.
+// An enum is text, so its member's value is a quoted literal. V "now" on
+// a date, time or timestamp (codegen.DefaultNow, D88) is the time of the
+// insert, NowDefault.
 func ColumnDefault(field *ir.FieldDef, columnType string) (string, bool) {
 	if field.Default == nil || !field.Required || field.Key || !scalarColumn(field, columnType) {
 		return "", false
 	}
 	v := *field.Default
+	if codegen.IsDefaultNow(field.TypeRef.Name, field.Default) {
+		now := NowDefault(columnType, field.TypeRef.Name)
+		return now, now != ""
+	}
 	switch {
 	case IsTextType(columnType):
 		return QuoteLiteral(v), true

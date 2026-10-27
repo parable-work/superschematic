@@ -1238,8 +1238,8 @@ func testUnreadableRowFailsAlone(t *testing.T) {
 			const good, bad = "6f1c2f2e-7d1a-4b4a-9d43-3c7a1b2c3d4e", "0c7a0e14-6a43-4f0e-8f1b-5d6c7e8f9a0b"
 			s.enqueue(orderJSON(good))
 			p.exec(p.dialectSQL(
-				"INSERT INTO order_placed_queue (order_id, priority, quantity, ship_to) VALUES ($1::uuid, 'low', 1, '\"no address\"')",
-				"INSERT INTO order_placed_queue (order_id, priority, quantity, ship_to) VALUES (?1, 'low', 1, '{not json')",
+				"INSERT INTO order_placed_queue (order_id, placed_at, priority, quantity, ship_to) VALUES ($1::uuid, '2026-10-14T12:00:00.000Z', 'low', 1, '\"no address\"')",
+				"INSERT INTO order_placed_queue (order_id, placed_at, priority, quantity, ship_to) VALUES (?1, '2026-10-14T12:00:00.000Z', 'low', 1, '{not json')",
 			), bad)
 			claims := s.claim(5)
 			if len(claims) != 1 || !sameMessage(claims[0].Message, order(good)) {

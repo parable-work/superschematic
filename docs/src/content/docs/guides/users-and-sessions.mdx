@@ -119,7 +119,12 @@ constructor hands the runtime how the API's `register` admits users
 server wires nothing for it. A stack's Go and TypeScript
 entrypoints build it for you, reading each API's config as JSON from
 `<API>_IDENTITY` (`SHOP_API_IDENTITY`); a job, which serves no request,
-builds none. The config, which the three runtimes read alike:
+builds none. On Cloudflare Workers a TypeScript server serves the user
+model when its `authDb` is a Postgres database on Hyperdrive, and hashes
+passwords with the runtime's own argon2id, which writes the same hashes
+as `node:crypto`'s
+([Databases on Hyperdrive](/superschematic/guides/stacks/#databases-on-hyperdrive)).
+The config, which the three runtimes read alike:
 
 | Member | Default | Meaning |
 | --- | --- | --- |
@@ -163,6 +168,23 @@ config does not trust is refused with 403 `cross_origin`, the check Go's
 server answers preflights from the trusted origins. A session has no
 refresh: after a 401, sign in again.
 
+### A site on the API's origin
+
+A browser app a stack deploys as a [site](/superschematic/guides/static-sites/)
+calls the API on another origin unless the stack puts them on one:
+`origins: [{ site: ShopWeb, apis: [ShopApi] }]` in `@stack` serves the API
+under `/api/shop-api` on the site's own address, in `stack dev` and on
+every target ([one origin](/superschematic/guides/static-sites/#one-origin)).
+The defaults then serve a cookie session: the API sees the browser's
+`Host`, so the cross-origin check passes a same-origin login with no
+trusted origin, and the `__Host-session` cookie, with no `Domain`, is the
+site's host's alone. Leave `trustedOrigins` and `cookie.domain` unset,
+and give `loadApis()`'s client `credentials: 'include'` or
+`'same-origin'`. Without an origin, a site on `app.example.com` calling an
+API on `api.example.com` needs `trustedOrigins: ["https://app.example.com"]`
+set per environment, and both hosts under one registrable domain for the
+`SameSite=Lax` cookie to travel with its calls.
+
 Every failed login is 401 `invalid_credentials`, whether the login is
 unknown, the password wrong or the user disabled, and an unknown login
 takes as long to refuse as a wrong password. The one exception is a user
@@ -197,7 +219,8 @@ export class Account {}
   routes' `IdentityUser` carries `pending` beside `disabled`.
 - **`defaultRoles`** names the roles each new user holds. Register creates
   a role no role has the name of, with no permissions, for an
-  administrator to fill in. Under approval the roles are granted with the
+  administrator to fill in, unless the `authDb` seeds it
+  ([Seed the roles](#seed-the-roles)). Under approval the roles are granted with the
   pending user, who can neither sign in nor hold a session, so they take
   effect at approval, and `approveUser` works from any API of the same
   `authDb`. Since approving gives the user those roles, the approver's
@@ -214,6 +237,43 @@ export class Account {}
 `defaultRoles` and `firstUser` need a `UserRole` table in the `authDb`.
 Open registration, the default, grants the default roles too, and its
 `register` keeps answering `LoginResult`.
+
+### Seed the roles
+
+A default role that register creates has no permissions, so a user an
+administrator approves can do nothing until someone fills the role in.
+`@seedRoles` on the `UserRole` table declares the roles every database
+holds from its first migration on
+([D88](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)):
+
+```ts
+@seedRoles([{ name: "member", permissions: ["finances.read", "finances.write"] }])
+export abstract class Role implements UserRole {
+  @key id: AutoGenerate<Identity.UUID>;
+  @unique name: Identity.Slug;
+  permissions: string[];
+}
+```
+
+`create.sql` inserts each role, so on an empty database the first
+registrant is the administrator (`firstUser`), the second waits, and once
+approved holds `member` and calls a `finances.read` route at once. A
+migration plan inserts a seed it adds, and gives a role of its name that
+has no permissions, as one an earlier registration created, the seed's;
+a role of its name with permissions keeps them. A seed whose permissions
+change is a `destructive` step, since it replaces whatever an
+administrator gave the role: in `expand` when the role only gains
+permissions, in `contract` when it loses one. A plan never deletes a role
+a seed no longer names.
+
+The seeds are the `authDb`'s, beside its tables, so every API of it
+shares them. An API whose `authDb` seeds roles checks them when it
+loads, and warns when a default role is not seeded, when a seeded
+permission covers none the API requires (a misspelling grants nothing),
+and, under approval, when the first administrator's role does not cover a
+default role's permissions, since `approveUser` needs the approver's to
+cover them. A seed of `firstUser`'s role holds over `firstUser`'s
+permissions.
 
 ## Roles and capabilities
 

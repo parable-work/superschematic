@@ -10,7 +10,9 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/sqlmigrate"
 	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -69,7 +71,27 @@ func TestUserRoutesServerServesTheSDK(t *testing.T) {
 		}
 	}
 	copyFile(filepath.Join(SQLDir(outputRoot, "fixture-user-model-db"), "create.sql"), filepath.Join(apiDir, "testdata", "create.sql"))
-	copyFile(filepath.Join(identityFixtureDir, SQLiteSubdir, "create.sql"), filepath.Join(apiDir, "testdata", SQLiteSubdir, "create.sql"))
+	// The SQLite DDL is the model's, as a build that lists sqlite writes it,
+	// so both dialects hold the role @seedRoles declares (D88), which the
+	// identity runtimes' own fixture leaves out.
+	userModel, err := loader.LoadService(filepath.Join(tsFixtures, "fixture-user-model-db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := sqlmigrate.BuildModel(userModel, sqlgen.Options{SchemaName: "fixture-user-model-db"}, sqlmigrate.SQLite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqliteSQL, err := sqlmigrate.CreateSQL(model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(apiDir, "testdata", SQLiteSubdir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(apiDir, "testdata", SQLiteSubdir, "create.sql"), []byte(sqliteSQL), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(apiDir, "identity_server_test.go"), []byte(userRoutesServerTest), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -93,13 +115,17 @@ func TestUserRoutesServerServesTheSDK(t *testing.T) {
 		}
 	}
 	t.Logf("generated API tests:\n%s", out)
-	for _, want := range []string{"--- PASS: TestServerOverTheUserModel/sqlite/sessions ", "--- PASS: TestServerOverTheUserModel/sqlite/administration ", "--- PASS: TestServerOverTheUserModel/sqlite/cookies "} {
+	for _, want := range []string{"--- PASS: TestServerOverTheUserModel/sqlite/sessions ", "--- PASS: TestServerOverTheUserModel/sqlite/administration ", "--- PASS: TestServerOverTheUserModel/sqlite/cookies ", "--- PASS: TestServerOverTheUserModel/sqlite/firstUser "} {
 		if !strings.Contains(string(out), want) {
 			t.Fatalf("the generated API module did not run %q", strings.TrimSpace(strings.TrimPrefix(want, "--- PASS: ")))
 		}
 	}
-	if os.Getenv(identityServerDatabaseEnv) != "" && !strings.Contains(string(out), "--- PASS: TestServerOverTheUserModel/postgres/cookies ") {
-		t.Fatal("the generated API module did not run on Postgres")
+	if os.Getenv(identityServerDatabaseEnv) != "" {
+		for _, want := range []string{"--- PASS: TestServerOverTheUserModel/postgres/cookies ", "--- PASS: TestServerOverTheUserModel/postgres/firstUser "} {
+			if !strings.Contains(string(out), want) {
+				t.Fatalf("the generated API module did not run %q on Postgres", strings.TrimSpace(strings.TrimPrefix(want, "--- PASS: ")))
+			}
+		}
 	}
 }
 
@@ -164,6 +190,30 @@ type server struct {
 
 func newServer(t *testing.T, dialect identity.Dialect, db *sql.DB) *server {
 	t.Helper()
+	s, cfg := newEmptyServer(t, dialect, db)
+	ctx := context.Background()
+	hash, err := identity.HashPassword(adminPassword, cfg.Argon2Params())
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := s.store.CreateUser(ctx, identity.NewUser{Login: adminLogin, Name: "Admin", PasswordHash: hash, At: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	role, err := s.store.CreateRole(ctx, "admin", []string{"identity"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.GrantRole(ctx, admin.ID, role.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// newEmptyServer is the generated routes over a store on db that holds no
+// user, and only the roles create.sql seeds.
+func newEmptyServer(t *testing.T, dialect identity.Dialect, db *sql.DB) (*server, identity.Config) {
+	t.Helper()
 	store, err := identity.NewSQLStore(db, dialect, []byte(dbtypes.IdentityDescriptor))
 	if err != nil {
 		t.Fatal(err)
@@ -187,24 +237,7 @@ func newServer(t *testing.T, dialect identity.Dialect, db *sql.DB) *server {
 	}
 	httpServer := httptest.NewServer(router)
 	t.Cleanup(httpServer.Close)
-
-	ctx := context.Background()
-	hash, err := identity.HashPassword(adminPassword, cfg.Argon2Params())
-	if err != nil {
-		t.Fatal(err)
-	}
-	admin, err := store.CreateUser(ctx, identity.NewUser{Login: adminLogin, Name: "Admin", PasswordHash: hash, At: time.Now()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	role, err := store.CreateRole(ctx, "admin", []string{"identity"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.GrantRole(ctx, admin.ID, role.ID, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	return &server{url: httpServer.URL, store: store}
+	return &server{url: httpServer.URL, store: store}, cfg
 }
 
 func (s *server) client(t *testing.T) *sdk.FixtureUserRoutesApiSDK {
@@ -350,8 +383,63 @@ func TestServerOverTheUserModel(t *testing.T) {
 			t.Run("sessions", func(t *testing.T) { testSessions(t, newServer(t, dialect, db(t))) })
 			t.Run("administration", func(t *testing.T) { testAdministration(t, newServer(t, dialect, db(t))) })
 			t.Run("cookies", func(t *testing.T) { testCookies(t, newServer(t, dialect, db(t))) })
+			t.Run("firstUser", func(t *testing.T) {
+				s, _ := newEmptyServer(t, dialect, db(t))
+				testFirstUser(t, s)
+			})
 		})
 	}
+}
+
+// testFirstUser: on an empty database, the first registrant is the
+// administrator, firstUser's role, active and signed in (D81). The second
+// waits until the administrator approves them, and then holds member,
+// which create.sql seeded with identity.roles.read (@seedRoles, D88): they
+// list the roles at once, a route that permission admits, with no
+// administrator's step before.
+func testFirstUser(t *testing.T, s *server) {
+	ctx := context.Background()
+	register := func(login, name string) types.RegisterResult {
+		t.Helper()
+		result, err := s.client(t).AccountNamespace.Register(ctx, types.RegisterInput{
+			Login:    types.ContactEmail(login),
+			Name:     types.InputField[types.IdentityName]{Set: true, Value: types.IdentityName(name)},
+			Password: types.AuthPassword(login + " password"),
+		})
+		if err != nil {
+			t.Fatalf("register %s: %v", login, err)
+		}
+		return result
+	}
+	first := register("first@example.com", "First")
+	if first.Pending || first.Token == "" {
+		t.Fatalf("the first registrant: %+v, want the administrator, signed in", first)
+	}
+	admin := s.client(t)
+	admin.SetToken(first.Token)
+	me, err := admin.AccountNamespace.Me(ctx)
+	if err != nil || !slices.ContainsFunc(me.Roles, func(r types.RoleRef) bool { return r.Name == "admin" }) {
+		t.Fatalf("the administrator's me: %+v, %v", me, err)
+	}
+
+	second := register("second@example.com", "Second")
+	if !second.Pending || second.Token != "" {
+		t.Fatalf("the second registrant: %+v, want them pending", second)
+	}
+	approved, err := admin.AccountAdminNamespace.ApproveUser(ctx, second.User.Id.String())
+	if err != nil || approved.Pending || len(approved.Roles) != 1 || approved.Roles[0].Name != "member" {
+		t.Fatalf("approveUser: %+v, %v", approved, err)
+	}
+	member := s.client(t)
+	login(t, member, "second@example.com", "second@example.com password")
+	roles, err := member.AccountAdminNamespace.ListRoles(ctx)
+	if err != nil || !slices.ContainsFunc(roles, func(r types.IdentityRole) bool {
+		return r.Name == "member" && slices.Equal(r.Permissions, []string{"identity.roles.read"})
+	}) {
+		t.Fatalf("listRoles as an approved member: %+v, %v (status %d)", roles, err, status(err))
+	}
+	_, err = member.AccountAdminNamespace.ListUsers(ctx, namespaces.AccountAdminListUsersInput{})
+	expect(t, "listUsers, which member's permissions do not admit", err, 403, "forbidden")
 }
 
 // testSessions: a user registers and waits for approval, as the fixture's
@@ -398,8 +486,9 @@ func testSessions(t *testing.T, s *server) {
 	_, err = s.client(t).AccountNamespace.Login(ctx, types.LoginInput{Login: "ada@example.com", Password: "not her password"})
 	expect(t, "login with a wrong password", err, 401, "invalid_credentials")
 
+	// member carries identity.roles.read, which create.sql seeds (D88).
 	me, err := ada.AccountNamespace.Me(ctx)
-	if err != nil || me.User.Id != registered.User.Id || me.User.Name != "Ada" || len(me.Roles) != 1 || me.Roles[0].Name != "member" || len(me.Permissions) != 0 {
+	if err != nil || me.User.Id != registered.User.Id || me.User.Name != "Ada" || len(me.Roles) != 1 || me.Roles[0].Name != "member" || !slices.Equal(me.Permissions, []string{"identity.roles.read"}) {
 		t.Fatalf("me: %+v, %v", me, err)
 	}
 	capabilities, err := ada.AccountNamespace.Capabilities(ctx)
@@ -411,6 +500,7 @@ func testSessions(t *testing.T, s *server) {
 		"AccountMeHandler":             true,
 		"AccountLoginHandler":          true,
 		"AccountAdminListUsersHandler": false,
+		"AccountAdminListRolesHandler": true,
 		"AccountAdminCreateRoleHandler": false,
 	} {
 		if got, ok := capabilities.Operations[operation]; !ok || got != want {

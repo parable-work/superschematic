@@ -11,15 +11,24 @@ createOrm(pool, { user, fieldKeys }) acts as a user and holds the keys
 of the Encrypted<T> fields (D85), whose rows hold each one's value in a
 SecretValue.
 A row holds each column by member, a to-one relation's key as <field>Id, a
-UUID in its base62 wire form; withUser(id) or as(ctx.principal) acts as a
-user, whom createdBy, updatedBy and deletedBy record; transaction(fn) runs
-fn in a transaction, whose query takes enqueue's statements too.
+UUID in its base62 wire form. createdBy, updatedBy and deletedBy record the
+acting user: in an operation the router runs, its caller (D87);
+withUser(id) or as(principal) acts as another, and asSystem() as the
+system actor, for a job's or a worker's writes. transaction(fn) runs fn in
+a transaction, whose query takes enqueue's statements too.
+
+A read's options select members and include relations (D90), and its rows
+hold what they name: include: { category: { include: { parent: true } } }
+loads each row's category, and its parent, in one statement per relation.
+A filter reaches through a to-one relation, { category: { parentId: {
+in: ids } } }, and anyOf ORs filters.
 
 Each table's definition also describes its rows for the runtime's
-decodeRow, so a raw query of its columns reads back as its row type.
+decodeRow, so a raw query of its columns reads back as its row type:
+query(text, values, { decode: <table>Table }) reads them so (D89).
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
-import type { BoolFilter, DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
+import type { BoolFilter, DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Related, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
 
 /**
@@ -46,7 +55,7 @@ export interface OrderCreate {
   id?: T.IdentityUUID | null;
   customerId: T.IdentityUUID;
   status?: T.OrderStatus | null;
-  placedAt: T.TemporalDateTime;
+  placedAt?: T.TemporalDateTime | null;
   shippingAddress: T.ShippingAddress;
   cancelReason?: string | null;
   checkoutId?: T.IdentityUUID | null;
@@ -77,6 +86,10 @@ export interface OrderFilter {
   totalCents?: NumberFilter<T.GenericInt64>;
   /** The rows a OrderLine row's order points at, or none does. */
   referencedByOrderLineOrder?: ReferencedByFilter;
+  /** The rows whose customer is among the User rows the filter finds (D90). */
+  customer?: UserFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly OrderFilter[];
 }
 
 /** The members findOne and findMany order rows of Order by. */
@@ -85,12 +98,18 @@ export type OrderOrderField = "createdAt" | "updatedAt" | "id" | "status" | "pla
 /** The members findPage orders rows of Order by (D60, amended); ties break by id. */
 export type OrderSortField = "id" | "createdAt" | "placedAt" | "totalCents";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type OrderUniqueKey = readonly ["id"] | readonly ["checkoutId"];
 
 /** The position of a row of Order in a findPage order: its id. */
 export interface OrderPageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of Order includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface OrderRelations {
+  readonly customer: Related<UserRow, UserRelations, 'one'>;
+  readonly lines: Related<OrderLineRow, OrderLineRelations, 'many'>;
 }
 
 /** The repository of Order. */
@@ -103,7 +122,8 @@ export type OrderRepository = Repository<
   OrderSortField,
   OrderUniqueKey,
   T.IdentityUUID,
-  OrderPageKey
+  OrderPageKey,
+  OrderRelations
 >;
 
 /** The "order" table, as the runtime reads and writes it. */
@@ -112,12 +132,12 @@ export const orderTable: TableDefinition = {
   table: "\"order\"",
   key: "id",
   columns: [
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "\"order\".created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "\"order\".updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "\"order\".created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "\"order\".updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
     { name: "id", column: "id", field: "id", qualified: "\"order\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "customerId", column: "customer_id", field: "customer", qualified: "\"order\".customer_id", uuid: true, required: true, relation: "User", filter: ["eq", "in", "isNull"] },
     { name: "status", column: "status", field: "status", qualified: "\"order\".status", required: true, default: "placed", filter: ["eq", "in", "ilike", "isNull"] },
-    { name: "placedAt", column: "placed_at", field: "placedAt", qualified: "\"order\".placed_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
+    { name: "placedAt", column: "placed_at", field: "placedAt", qualified: "\"order\".placed_at", timestamp: true, auto: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "shippingAddress", column: "shipping_address", field: "shippingAddress", qualified: "\"order\".shipping_address", json: true, required: true },
     { name: "cancelReason", column: "cancel_reason", field: "cancelReason", qualified: "\"order\".cancel_reason", filter: ["eq", "in", "ilike", "isNull"] },
     { name: "checkoutId", column: "checkout_id", field: "checkoutId", qualified: "\"order\".checkout_id", uuid: true, filter: ["eq", "in", "isNull"] },
@@ -126,7 +146,9 @@ export const orderTable: TableDefinition = {
   statements: {
     columns: "\"created_at\", \"updated_at\", \"id\", \"customer_id\", \"status\", \"placed_at\", \"shipping_address\", \"cancel_reason\", \"checkout_id\", \"total_cents\"",
     qualifiedColumns: "\"order\".\"created_at\", \"order\".\"updated_at\", \"order\".\"id\", \"order\".\"customer_id\", \"order\".\"status\", \"order\".\"placed_at\", \"order\".\"shipping_address\", \"order\".\"cancel_reason\", \"order\".\"checkout_id\", \"order\".\"total_cents\"",
+    selectColumn: "\"order\".\"%s\"",
     getOne: "SELECT \"created_at\", \"updated_at\", \"id\", \"customer_id\", \"status\", \"placed_at\", \"shipping_address\", \"cancel_reason\", \"checkout_id\", \"total_cents\" FROM \"order\" WHERE id = $1",
+    getOneFields: "SELECT %s FROM \"order\" WHERE id = $1",
     getMany: "SELECT \"created_at\", \"updated_at\", \"id\", \"customer_id\", \"status\", \"placed_at\", \"shipping_address\", \"cancel_reason\", \"checkout_id\", \"total_cents\" FROM \"order\" WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -147,18 +169,24 @@ export const orderTable: TableDefinition = {
     updateMany: "UPDATE \"order\" SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO \"order\" (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"created_at\", \"updated_at\", \"id\", \"customer_id\", \"status\", \"placed_at\", \"shipping_address\", \"cancel_reason\", \"checkout_id\", \"total_cents\"",
+    upsert: "INSERT INTO \"order\" (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"created_at\", \"updated_at\", \"id\", \"customer_id\", \"status\", \"placed_at\", \"shipping_address\", \"cancel_reason\", \"checkout_id\", \"total_cents\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM \"order\" WHERE id = $1",
     deleteMany: "DELETE FROM \"order\"%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "checkoutId": { conflict: "(checkout_id)", keep: "checkout_id = EXCLUDED.checkout_id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"customer_id\", \"status\", \"placed_at\", \"shipping_address\", \"cancel_reason\", \"checkout_id\", \"total_cents\" FROM \"order\" WHERE (id) IN (%s)" },
+    "checkoutId": { conflict: "(checkout_id)", keep: "checkout_id = EXCLUDED.checkout_id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"customer_id\", \"status\", \"placed_at\", \"shipping_address\", \"cancel_reason\", \"checkout_id\", \"total_cents\" FROM \"order\" WHERE (checkout_id) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByOrderLineOrder", probe: "SELECT 1 FROM order_line WHERE order_line.order_id = \"order\".id" },
+  ],
+  relations: [
+    { field: "customer", column: "customerId", target: "user", probe: "\"order\".customer_id IN (SELECT \"user\".id FROM \"user\"%s)" },
+  ],
+  many: [
+    { name: "lines", target: "orderLine", column: "orderId" },
   ],
 };
 
@@ -197,6 +225,12 @@ export interface OrderLineFilter {
   productId?: UuidFilter<T.IdentityUUID>;
   quantity?: NumberFilter<T.GenericInt64>;
   unitPriceCents?: NumberFilter<T.GenericInt64>;
+  /** The rows whose order is among the Order rows the filter finds (D90). */
+  order?: OrderFilter;
+  /** The rows whose product is among the Product rows the filter finds (D90). */
+  product?: ProductFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly OrderLineFilter[];
 }
 
 /** The members findOne and findMany order rows of OrderLine by. */
@@ -205,12 +239,18 @@ export type OrderLineOrderField = "id" | "quantity" | "unitPriceCents";
 /** The members findPage orders rows of OrderLine by (D60, amended); ties break by id. */
 export type OrderLineSortField = "id" | "quantity" | "unitPriceCents";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type OrderLineUniqueKey = readonly ["id"];
 
 /** The position of a row of OrderLine in a findPage order: its id. */
 export interface OrderLinePageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of OrderLine includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface OrderLineRelations {
+  readonly order: Related<OrderRow, OrderRelations, 'one'>;
+  readonly product: Related<ProductRow, ProductRelations, 'one'>;
 }
 
 /** The repository of OrderLine. */
@@ -223,7 +263,8 @@ export type OrderLineRepository = Repository<
   OrderLineSortField,
   OrderLineUniqueKey,
   T.IdentityUUID,
-  OrderLinePageKey
+  OrderLinePageKey,
+  OrderLineRelations
 >;
 
 /** The order_line table, as the runtime reads and writes it. */
@@ -241,7 +282,9 @@ export const orderLineTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"order_id\", \"product_id\", \"quantity\", \"unit_price_cents\"",
     qualifiedColumns: "\"order_line\".\"id\", \"order_line\".\"order_id\", \"order_line\".\"product_id\", \"order_line\".\"quantity\", \"order_line\".\"unit_price_cents\"",
+    selectColumn: "\"order_line\".\"%s\"",
     getOne: "SELECT \"id\", \"order_id\", \"product_id\", \"quantity\", \"unit_price_cents\" FROM order_line WHERE id = $1",
+    getOneFields: "SELECT %s FROM order_line WHERE id = $1",
     getMany: "SELECT \"id\", \"order_id\", \"product_id\", \"quantity\", \"unit_price_cents\" FROM order_line WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -262,15 +305,19 @@ export const orderLineTable: TableDefinition = {
     updateMany: "UPDATE order_line SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO order_line (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"order_id\", \"product_id\", \"quantity\", \"unit_price_cents\"",
+    upsert: "INSERT INTO order_line (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"order_id\", \"product_id\", \"quantity\", \"unit_price_cents\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM order_line WHERE id = $1",
     deleteMany: "DELETE FROM order_line%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"order_id\", \"product_id\", \"quantity\", \"unit_price_cents\" FROM order_line WHERE (id) IN (%s)" },
   },
+  relations: [
+    { field: "order", column: "orderId", target: "order", probe: "order_line.order_id IN (SELECT \"order\".id FROM \"order\"%s)" },
+    { field: "product", column: "productId", target: "product", probe: "order_line.product_id IN (SELECT product.id FROM product%s)" },
+  ],
 };
 
 /**
@@ -324,6 +371,8 @@ export interface ProductFilter {
   referencedByReviewProduct?: ReferencedByFilter;
   /** The rows whose search fields hold each word of the text, in any case (D62). */
   searchText?: string;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly ProductFilter[];
 }
 
 /** The members findOne and findMany order rows of Product by. */
@@ -332,12 +381,19 @@ export type ProductOrderField = "createdAt" | "updatedAt" | "id" | "sku" | "name
 /** The members findPage orders rows of Product by (D60, amended); ties break by id. */
 export type ProductSortField = "id" | "createdAt" | "sku" | "name" | "priceCents";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type ProductUniqueKey = readonly ["id"] | readonly ["sku"];
 
 /** The position of a row of Product in a findPage order: its id. */
 export interface ProductPageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of Product includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface ProductRelations {
+  readonly orderLines: Related<OrderLineRow, OrderLineRelations, 'many'>;
+  readonly restockRequests: Related<RestockRequestRow, RestockRequestRelations, 'many'>;
+  readonly reviews: Related<ReviewRow, ReviewRelations, 'many'>;
 }
 
 /** The repository of Product. */
@@ -350,7 +406,8 @@ export type ProductRepository = Repository<
   ProductSortField,
   ProductUniqueKey,
   T.IdentityUUID,
-  ProductPageKey
+  ProductPageKey,
+  ProductRelations
 >;
 
 /** The product table, as the runtime reads and writes it. */
@@ -359,19 +416,21 @@ export const productTable: TableDefinition = {
   table: "product",
   key: "id",
   columns: [
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "product.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "product.updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "product.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "product.updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
     { name: "id", column: "id", field: "id", qualified: "product.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "sku", column: "sku", field: "sku", qualified: "product.sku", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "name", column: "\"name\"", field: "name", qualified: "product.\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "priceCents", column: "price_cents", field: "priceCents", qualified: "product.price_cents", int64: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "inStock", column: "in_stock", field: "inStock", qualified: "product.in_stock", boolean: true, required: true, default: true, filter: ["eq", "isNull"] },
+    { name: "inStock", column: "in_stock", field: "inStock", qualified: "product.in_stock", boolean: true, required: true, default: true, filter: ["eq", "in", "isNull"] },
     { name: "imageObject", column: "image_object", field: "imageObject", qualified: "product.image_object", filter: ["eq", "in", "ilike", "isNull"] },
   ],
   statements: {
     columns: "\"created_at\", \"updated_at\", \"id\", \"sku\", \"name\", \"price_cents\", \"in_stock\", \"image_object\"",
     qualifiedColumns: "\"product\".\"created_at\", \"product\".\"updated_at\", \"product\".\"id\", \"product\".\"sku\", \"product\".\"name\", \"product\".\"price_cents\", \"product\".\"in_stock\", \"product\".\"image_object\"",
+    selectColumn: "\"product\".\"%s\"",
     getOne: "SELECT \"created_at\", \"updated_at\", \"id\", \"sku\", \"name\", \"price_cents\", \"in_stock\", \"image_object\" FROM product WHERE id = $1",
+    getOneFields: "SELECT %s FROM product WHERE id = $1",
     getMany: "SELECT \"created_at\", \"updated_at\", \"id\", \"sku\", \"name\", \"price_cents\", \"in_stock\", \"image_object\" FROM product WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -392,7 +451,7 @@ export const productTable: TableDefinition = {
     updateMany: "UPDATE product SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO product (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"created_at\", \"updated_at\", \"id\", \"sku\", \"name\", \"price_cents\", \"in_stock\", \"image_object\"",
+    upsert: "INSERT INTO product (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"created_at\", \"updated_at\", \"id\", \"sku\", \"name\", \"price_cents\", \"in_stock\", \"image_object\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM product WHERE id = $1",
@@ -400,13 +459,18 @@ export const productTable: TableDefinition = {
   },
   search: "product.search_text",
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "sku": { conflict: "(sku)", keep: "sku = EXCLUDED.sku" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"sku\", \"name\", \"price_cents\", \"in_stock\", \"image_object\" FROM product WHERE (id) IN (%s)" },
+    "sku": { conflict: "(sku)", keep: "sku = EXCLUDED.sku", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"sku\", \"name\", \"price_cents\", \"in_stock\", \"image_object\" FROM product WHERE (sku) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByOrderLineProduct", probe: "SELECT 1 FROM order_line WHERE order_line.product_id = product.id" },
     { filter: "referencedByRestockRequestProduct", probe: "SELECT 1 FROM restock_request WHERE restock_request.product_id = product.id" },
     { filter: "referencedByReviewProduct", probe: "SELECT 1 FROM review WHERE review.product_id = product.id", live: " AND review.deleted_at IS NULL" },
+  ],
+  many: [
+    { name: "orderLines", target: "orderLine", column: "productId" },
+    { name: "restockRequests", target: "restockRequest", column: "productId" },
+    { name: "reviews", target: "review", column: "productId" },
   ],
 };
 
@@ -458,6 +522,10 @@ export interface RestockRequestFilter {
   quantity?: NumberFilter<T.GenericInt64>;
   openProductId?: UuidFilter<T.IdentityUUID> & NullFilter;
   orderedAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  /** The rows whose product is among the Product rows the filter finds (D90). */
+  product?: ProductFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly RestockRequestFilter[];
 }
 
 /** The members findOne and findMany order rows of RestockRequest by. */
@@ -466,12 +534,17 @@ export type RestockRequestOrderField = "createdAt" | "updatedAt" | "id" | "statu
 /** The members findPage orders rows of RestockRequest by (D60, amended); ties break by id. */
 export type RestockRequestSortField = "id" | "createdAt" | "quantity";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type RestockRequestUniqueKey = readonly ["id"] | readonly ["openProductId"];
 
 /** The position of a row of RestockRequest in a findPage order: its id. */
 export interface RestockRequestPageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of RestockRequest includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface RestockRequestRelations {
+  readonly product: Related<ProductRow, ProductRelations, 'one'>;
 }
 
 /** The repository of RestockRequest. */
@@ -484,7 +557,8 @@ export type RestockRequestRepository = Repository<
   RestockRequestSortField,
   RestockRequestUniqueKey,
   T.IdentityUUID,
-  RestockRequestPageKey
+  RestockRequestPageKey,
+  RestockRequestRelations
 >;
 
 /** The restock_request table, as the runtime reads and writes it. */
@@ -493,19 +567,21 @@ export const restockRequestTable: TableDefinition = {
   table: "restock_request",
   key: "id",
   columns: [
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "restock_request.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "restock_request.updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "restock_request.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "restock_request.updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
     { name: "id", column: "id", field: "id", qualified: "restock_request.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "productId", column: "product_id", field: "product", qualified: "restock_request.product_id", uuid: true, required: true, relation: "Product", filter: ["eq", "in", "isNull"] },
     { name: "status", column: "status", field: "status", qualified: "restock_request.status", required: true, default: "open", filter: ["eq", "in", "ilike", "isNull"] },
     { name: "quantity", column: "quantity", field: "quantity", qualified: "restock_request.quantity", int64: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "openProductId", column: "open_product_id", field: "openProductId", qualified: "restock_request.open_product_id", uuid: true, filter: ["eq", "in", "isNull"] },
-    { name: "orderedAt", column: "ordered_at", field: "orderedAt", qualified: "restock_request.ordered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
+    { name: "orderedAt", column: "ordered_at", field: "orderedAt", qualified: "restock_request.ordered_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
   ],
   statements: {
     columns: "\"created_at\", \"updated_at\", \"id\", \"product_id\", \"status\", \"quantity\", \"open_product_id\", \"ordered_at\"",
     qualifiedColumns: "\"restock_request\".\"created_at\", \"restock_request\".\"updated_at\", \"restock_request\".\"id\", \"restock_request\".\"product_id\", \"restock_request\".\"status\", \"restock_request\".\"quantity\", \"restock_request\".\"open_product_id\", \"restock_request\".\"ordered_at\"",
+    selectColumn: "\"restock_request\".\"%s\"",
     getOne: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"status\", \"quantity\", \"open_product_id\", \"ordered_at\" FROM restock_request WHERE id = $1",
+    getOneFields: "SELECT %s FROM restock_request WHERE id = $1",
     getMany: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"status\", \"quantity\", \"open_product_id\", \"ordered_at\" FROM restock_request WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -526,16 +602,19 @@ export const restockRequestTable: TableDefinition = {
     updateMany: "UPDATE restock_request SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO restock_request (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"created_at\", \"updated_at\", \"id\", \"product_id\", \"status\", \"quantity\", \"open_product_id\", \"ordered_at\"",
+    upsert: "INSERT INTO restock_request (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"created_at\", \"updated_at\", \"id\", \"product_id\", \"status\", \"quantity\", \"open_product_id\", \"ordered_at\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM restock_request WHERE id = $1",
     deleteMany: "DELETE FROM restock_request%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "openProductId": { conflict: "(open_product_id)", keep: "open_product_id = EXCLUDED.open_product_id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"status\", \"quantity\", \"open_product_id\", \"ordered_at\" FROM restock_request WHERE (id) IN (%s)" },
+    "openProductId": { conflict: "(open_product_id)", keep: "open_product_id = EXCLUDED.open_product_id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"status\", \"quantity\", \"open_product_id\", \"ordered_at\" FROM restock_request WHERE (open_product_id) IN (%s)" },
   },
+  relations: [
+    { field: "product", column: "productId", target: "product", probe: "restock_request.product_id IN (SELECT product.id FROM product%s)" },
+  ],
 };
 
 /**
@@ -587,6 +666,12 @@ export interface ReviewFilter {
   body?: StringFilter<string>;
   /** The rows whose search fields hold each word of the text, in any case (D62). */
   searchText?: string;
+  /** The rows whose product is among the Product rows the filter finds (D90). */
+  product?: ProductFilter;
+  /** The rows whose author is among the User rows the filter finds (D90). */
+  author?: UserFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly ReviewFilter[];
 }
 
 /** The members findOne and findMany order rows of Review by. */
@@ -595,12 +680,18 @@ export type ReviewOrderField = "createdAt" | "updatedAt" | "id" | "rating" | "ti
 /** The members findPage orders rows of Review by (D60, amended); ties break by id. */
 export type ReviewSortField = "id" | "createdAt" | "rating" | "title" | "body";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type ReviewUniqueKey = readonly ["id"] | readonly ["product", "author"];
 
 /** The position of a row of Review in a findPage order: its id. */
 export interface ReviewPageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of Review includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface ReviewRelations {
+  readonly product: Related<ProductRow, ProductRelations, 'one'>;
+  readonly author: Related<UserRow, UserRelations, 'one'>;
 }
 
 /** The repository of Review. */
@@ -613,7 +704,8 @@ export type ReviewRepository = SoftDeleteRepository<
   ReviewSortField,
   ReviewUniqueKey,
   T.IdentityUUID,
-  ReviewPageKey
+  ReviewPageKey,
+  ReviewRelations
 >;
 
 /** The review table, as the runtime reads and writes it. */
@@ -622,8 +714,8 @@ export const reviewTable: TableDefinition = {
   table: "review",
   key: "id",
   columns: [
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "review.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "review.updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "review.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "review.updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
     { name: "id", column: "id", field: "id", qualified: "review.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "productId", column: "product_id", field: "product", qualified: "review.product_id", uuid: true, required: true, relation: "Product", filter: ["eq", "in", "isNull"] },
     { name: "authorId", column: "author_id", field: "author", qualified: "review.author_id", uuid: true, required: true, relation: "User", filter: ["eq", "in", "isNull"] },
@@ -636,7 +728,9 @@ export const reviewTable: TableDefinition = {
   statements: {
     columns: "\"created_at\", \"updated_at\", \"id\", \"product_id\", \"author_id\", \"rating\", \"title\", \"body\", \"deleted_at\", \"deleted_by\"",
     qualifiedColumns: "\"review\".\"created_at\", \"review\".\"updated_at\", \"review\".\"id\", \"review\".\"product_id\", \"review\".\"author_id\", \"review\".\"rating\", \"review\".\"title\", \"review\".\"body\", \"review\".\"deleted_at\", \"review\".\"deleted_by\"",
+    selectColumn: "\"review\".\"%s\"",
     getOne: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"author_id\", \"rating\", \"title\", \"body\", \"deleted_at\", \"deleted_by\" FROM review WHERE id = $1",
+    getOneFields: "SELECT %s FROM review WHERE id = $1",
     getMany: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"author_id\", \"rating\", \"title\", \"body\", \"deleted_at\", \"deleted_by\" FROM review WHERE id IN (%s)",
     live: " AND deleted_at IS NULL",
     liveWhere: " WHERE deleted_at IS NULL",
@@ -657,7 +751,7 @@ export const reviewTable: TableDefinition = {
     updateMany: "UPDATE review SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO review (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s WHERE review.deleted_at IS NULL RETURNING \"created_at\", \"updated_at\", \"id\", \"product_id\", \"author_id\", \"rating\", \"title\", \"body\", \"deleted_at\", \"deleted_by\"",
+    upsert: "INSERT INTO review (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"created_at\", \"updated_at\", \"id\", \"product_id\", \"author_id\", \"rating\", \"title\", \"body\", \"deleted_at\", \"deleted_by\", (xmax = 0) AS _inserted",
     softDelete: "UPDATE review SET deleted_at = $1, deleted_by = $2 WHERE id = $3 AND deleted_at IS NULL",
     softDeleteMany: "UPDATE review SET deleted_at = $1, deleted_by = $2%s",
     delete: "DELETE FROM review WHERE id = $1",
@@ -666,9 +760,13 @@ export const reviewTable: TableDefinition = {
   softDelete: true,
   search: "review.search_text",
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "product,author": { conflict: "(product_id, author_id) WHERE deleted_at IS NULL", keep: "product_id = EXCLUDED.product_id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"author_id\", \"rating\", \"title\", \"body\", \"deleted_at\", \"deleted_by\" FROM review WHERE (id) IN (%s)" },
+    "product,author": { conflict: "(product_id, author_id) WHERE deleted_at IS NULL", keep: "product_id = EXCLUDED.product_id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"author_id\", \"rating\", \"title\", \"body\", \"deleted_at\", \"deleted_by\" FROM review WHERE (product_id, author_id) IN (%s) AND (deleted_at IS NULL)" },
   },
+  relations: [
+    { field: "product", column: "productId", target: "product", probe: "review.product_id IN (SELECT product.id FROM product%s)" },
+    { field: "author", column: "authorId", target: "user", probe: "review.author_id IN (SELECT \"user\".id FROM \"user\"%s)" },
+  ],
 };
 
 /**
@@ -708,6 +806,8 @@ export interface RoleFilter {
   name?: StringFilter<T.IdentitySlug>;
   /** The rows a UserRoleGrant row's role points at, or none does. */
   referencedByUserRoleGrantRole?: ReferencedByFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly RoleFilter[];
 }
 
 /** The members findOne and findMany order rows of Role by. */
@@ -716,12 +816,17 @@ export type RoleOrderField = "createdAt" | "updatedAt" | "id" | "name" | "permis
 /** The members findPage orders rows of Role by (D60, amended); ties break by id. */
 export type RoleSortField = "id" | "createdAt" | "name";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type RoleUniqueKey = readonly ["id"] | readonly ["name"];
 
 /** The position of a row of Role in a findPage order: its id. */
 export interface RolePageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of Role includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface RoleRelations {
+  readonly userRoleGrants: Related<UserRoleGrantRow, UserRoleGrantRelations, 'many'>;
 }
 
 /** The repository of Role. */
@@ -734,7 +839,8 @@ export type RoleRepository = Repository<
   RoleSortField,
   RoleUniqueKey,
   T.IdentityUUID,
-  RolePageKey
+  RolePageKey,
+  RoleRelations
 >;
 
 /** The role table, as the runtime reads and writes it. */
@@ -743,8 +849,8 @@ export const roleTable: TableDefinition = {
   table: "role",
   key: "id",
   columns: [
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "role.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "role.updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "role.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "role.updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
     { name: "id", column: "id", field: "id", qualified: "role.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "name", column: "\"name\"", field: "name", qualified: "role.\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "permissions", column: "permissions", field: "permissions", qualified: "role.permissions", list: true, required: true },
@@ -752,7 +858,9 @@ export const roleTable: TableDefinition = {
   statements: {
     columns: "\"created_at\", \"updated_at\", \"id\", \"name\", \"permissions\"",
     qualifiedColumns: "\"role\".\"created_at\", \"role\".\"updated_at\", \"role\".\"id\", \"role\".\"name\", \"role\".\"permissions\"",
+    selectColumn: "\"role\".\"%s\"",
     getOne: "SELECT \"created_at\", \"updated_at\", \"id\", \"name\", \"permissions\" FROM role WHERE id = $1",
+    getOneFields: "SELECT %s FROM role WHERE id = $1",
     getMany: "SELECT \"created_at\", \"updated_at\", \"id\", \"name\", \"permissions\" FROM role WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -773,18 +881,21 @@ export const roleTable: TableDefinition = {
     updateMany: "UPDATE role SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO role (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"created_at\", \"updated_at\", \"id\", \"name\", \"permissions\"",
+    upsert: "INSERT INTO role (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"created_at\", \"updated_at\", \"id\", \"name\", \"permissions\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM role WHERE id = $1",
     deleteMany: "DELETE FROM role%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "name": { conflict: "(\"name\")", keep: "\"name\" = EXCLUDED.\"name\"" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"name\", \"permissions\" FROM role WHERE (id) IN (%s)" },
+    "name": { conflict: "(\"name\")", keep: "\"name\" = EXCLUDED.\"name\"", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"name\", \"permissions\" FROM role WHERE (\"name\") IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByUserRoleGrantRole", probe: "SELECT 1 FROM user_role_grant WHERE user_role_grant.role_id = role.id" },
+  ],
+  many: [
+    { name: "userRoleGrants", target: "userRoleGrant", column: "roleId" },
   ],
 };
 
@@ -829,6 +940,10 @@ export interface SessionFilter {
   expiresAt?: DateTimeFilter<T.TemporalDateTime>;
   lastSeenAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
   revokedAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  /** The rows whose user is among the User rows the filter finds (D90). */
+  user?: UserFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly SessionFilter[];
 }
 
 /** The members findOne and findMany order rows of Session by. */
@@ -837,12 +952,17 @@ export type SessionOrderField = "id" | "tokenHash" | "createdAt" | "expiresAt" |
 /** The members findPage orders rows of Session by (D60, amended); ties break by id. */
 export type SessionSortField = "id" | "tokenHash" | "createdAt" | "expiresAt";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type SessionUniqueKey = readonly ["id"] | readonly ["tokenHash"];
 
 /** The position of a row of Session in a findPage order: its id. */
 export interface SessionPageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of Session includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface SessionRelations {
+  readonly user: Related<UserRow, UserRelations, 'one'>;
 }
 
 /** The repository of Session. */
@@ -855,7 +975,8 @@ export type SessionRepository = Repository<
   SessionSortField,
   SessionUniqueKey,
   T.IdentityUUID,
-  SessionPageKey
+  SessionPageKey,
+  SessionRelations
 >;
 
 /** The "session" table, as the runtime reads and writes it. */
@@ -867,15 +988,17 @@ export const sessionTable: TableDefinition = {
     { name: "id", column: "id", field: "id", qualified: "\"session\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "userId", column: "user_id", field: "user", qualified: "\"session\".user_id", uuid: true, required: true, relation: "User", filter: ["eq", "in", "isNull"] },
     { name: "tokenHash", column: "token_hash", field: "tokenHash", qualified: "\"session\".token_hash", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "\"session\".created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
-    { name: "expiresAt", column: "expires_at", field: "expiresAt", qualified: "\"session\".expires_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
-    { name: "lastSeenAt", column: "last_seen_at", field: "lastSeenAt", qualified: "\"session\".last_seen_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
-    { name: "revokedAt", column: "revoked_at", field: "revokedAt", qualified: "\"session\".revoked_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "\"session\".created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "expiresAt", column: "expires_at", field: "expiresAt", qualified: "\"session\".expires_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "lastSeenAt", column: "last_seen_at", field: "lastSeenAt", qualified: "\"session\".last_seen_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "revokedAt", column: "revoked_at", field: "revokedAt", qualified: "\"session\".revoked_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\"",
     qualifiedColumns: "\"session\".\"id\", \"session\".\"user_id\", \"session\".\"token_hash\", \"session\".\"created_at\", \"session\".\"expires_at\", \"session\".\"last_seen_at\", \"session\".\"revoked_at\"",
+    selectColumn: "\"session\".\"%s\"",
     getOne: "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE id = $1",
+    getOneFields: "SELECT %s FROM \"session\" WHERE id = $1",
     getMany: "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -896,16 +1019,19 @@ export const sessionTable: TableDefinition = {
     updateMany: "UPDATE \"session\" SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO \"session\" (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\"",
+    upsert: "INSERT INTO \"session\" (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM \"session\" WHERE id = $1",
     deleteMany: "DELETE FROM \"session\"%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "tokenHash": { conflict: "(token_hash)", keep: "token_hash = EXCLUDED.token_hash" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE (id) IN (%s)" },
+    "tokenHash": { conflict: "(token_hash)", keep: "token_hash = EXCLUDED.token_hash", rows: "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE (token_hash) IN (%s)" },
   },
+  relations: [
+    { field: "user", column: "userId", target: "user", probe: "\"session\".user_id IN (SELECT \"user\".id FROM \"user\"%s)" },
+  ],
 };
 
 /**
@@ -953,6 +1079,8 @@ export interface UserFilter {
   referencedByUserCredentialUser?: ReferencedByFilter;
   /** The rows a UserRoleGrant row's user points at, or none does. */
   referencedByUserRoleGrantUser?: ReferencedByFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly UserFilter[];
 }
 
 /** The members findOne and findMany order rows of User by. */
@@ -961,12 +1089,21 @@ export type UserOrderField = "createdAt" | "updatedAt" | "id" | "email" | "name"
 /** The members findPage orders rows of User by (D60, amended); ties break by id. */
 export type UserSortField = "id" | "createdAt" | "email" | "name";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type UserUniqueKey = readonly ["id"] | readonly ["email"];
 
 /** The position of a row of User in a findPage order: its id. */
 export interface UserPageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of User includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface UserRelations {
+  readonly orders: Related<OrderRow, OrderRelations, 'many'>;
+  readonly reviews: Related<ReviewRow, ReviewRelations, 'many'>;
+  readonly sessions: Related<SessionRow, SessionRelations, 'many'>;
+  readonly userCredentials: Related<UserCredentialRow, UserCredentialRelations, 'many'>;
+  readonly userRoleGrants: Related<UserRoleGrantRow, UserRoleGrantRelations, 'many'>;
 }
 
 /** The repository of User. */
@@ -979,7 +1116,8 @@ export type UserRepository = Repository<
   UserSortField,
   UserUniqueKey,
   T.IdentityUUID,
-  UserPageKey
+  UserPageKey,
+  UserRelations
 >;
 
 /** The "user" table, as the runtime reads and writes it. */
@@ -988,8 +1126,8 @@ export const userTable: TableDefinition = {
   table: "\"user\"",
   key: "id",
   columns: [
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "\"user\".created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "\"user\".updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "\"user\".created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "\"user\".updated_at", timestamp: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
     { name: "id", column: "id", field: "id", qualified: "\"user\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "email", column: "email", field: "email", qualified: "\"user\".email", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "name", column: "\"name\"", field: "name", qualified: "\"user\".\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
@@ -997,7 +1135,9 @@ export const userTable: TableDefinition = {
   statements: {
     columns: "\"created_at\", \"updated_at\", \"id\", \"email\", \"name\"",
     qualifiedColumns: "\"user\".\"created_at\", \"user\".\"updated_at\", \"user\".\"id\", \"user\".\"email\", \"user\".\"name\"",
+    selectColumn: "\"user\".\"%s\"",
     getOne: "SELECT \"created_at\", \"updated_at\", \"id\", \"email\", \"name\" FROM \"user\" WHERE id = $1",
+    getOneFields: "SELECT %s FROM \"user\" WHERE id = $1",
     getMany: "SELECT \"created_at\", \"updated_at\", \"id\", \"email\", \"name\" FROM \"user\" WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -1018,15 +1158,15 @@ export const userTable: TableDefinition = {
     updateMany: "UPDATE \"user\" SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO \"user\" (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"created_at\", \"updated_at\", \"id\", \"email\", \"name\"",
+    upsert: "INSERT INTO \"user\" (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"created_at\", \"updated_at\", \"id\", \"email\", \"name\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM \"user\" WHERE id = $1",
     deleteMany: "DELETE FROM \"user\"%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "email": { conflict: "(email)", keep: "email = EXCLUDED.email" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"email\", \"name\" FROM \"user\" WHERE (id) IN (%s)" },
+    "email": { conflict: "(email)", keep: "email = EXCLUDED.email", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"email\", \"name\" FROM \"user\" WHERE (email) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByOrderCustomer", probe: "SELECT 1 FROM \"order\" WHERE \"order\".customer_id = \"user\".id" },
@@ -1034,6 +1174,13 @@ export const userTable: TableDefinition = {
     { filter: "referencedBySessionUser", probe: "SELECT 1 FROM \"session\" WHERE \"session\".user_id = \"user\".id" },
     { filter: "referencedByUserCredentialUser", probe: "SELECT 1 FROM user_credential WHERE user_credential.user_id = \"user\".id" },
     { filter: "referencedByUserRoleGrantUser", probe: "SELECT 1 FROM user_role_grant WHERE user_role_grant.user_id = \"user\".id" },
+  ],
+  many: [
+    { name: "orders", target: "order", column: "customerId" },
+    { name: "reviews", target: "review", column: "authorId" },
+    { name: "sessions", target: "session", column: "userId" },
+    { name: "userCredentials", target: "userCredential", column: "userId" },
+    { name: "userRoleGrants", target: "userRoleGrant", column: "userId" },
   ],
 };
 
@@ -1076,6 +1223,10 @@ export interface UserCredentialFilter {
   passwordChangedAt?: DateTimeFilter<T.TemporalDateTime>;
   disabledAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
   pendingAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  /** The rows whose user is among the User rows the filter finds (D90). */
+  user?: UserFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly UserCredentialFilter[];
 }
 
 /** The members findOne and findMany order rows of UserCredential by. */
@@ -1084,12 +1235,17 @@ export type UserCredentialOrderField = "id" | "passwordHash" | "passwordChangedA
 /** The members findPage orders rows of UserCredential by (D60, amended); ties break by id. */
 export type UserCredentialSortField = "id" | "passwordChangedAt";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type UserCredentialUniqueKey = readonly ["id"] | readonly ["user"];
 
 /** The position of a row of UserCredential in a findPage order: its id. */
 export interface UserCredentialPageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of UserCredential includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface UserCredentialRelations {
+  readonly user: Related<UserRow, UserRelations, 'one'>;
 }
 
 /** The repository of UserCredential. */
@@ -1102,7 +1258,8 @@ export type UserCredentialRepository = Repository<
   UserCredentialSortField,
   UserCredentialUniqueKey,
   T.IdentityUUID,
-  UserCredentialPageKey
+  UserCredentialPageKey,
+  UserCredentialRelations
 >;
 
 /** The user_credential table, as the runtime reads and writes it. */
@@ -1114,14 +1271,16 @@ export const userCredentialTable: TableDefinition = {
     { name: "id", column: "id", field: "id", qualified: "user_credential.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "userId", column: "user_id", field: "user", qualified: "user_credential.user_id", uuid: true, required: true, relation: "User", filter: ["eq", "in", "isNull"] },
     { name: "passwordHash", column: "password_hash", field: "passwordHash", qualified: "user_credential.password_hash", required: true, filter: ["eq", "in", "ilike", "isNull"] },
-    { name: "passwordChangedAt", column: "password_changed_at", field: "passwordChangedAt", qualified: "user_credential.password_changed_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
-    { name: "disabledAt", column: "disabled_at", field: "disabledAt", qualified: "user_credential.disabled_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
-    { name: "pendingAt", column: "pending_at", field: "pendingAt", qualified: "user_credential.pending_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
+    { name: "passwordChangedAt", column: "password_changed_at", field: "passwordChangedAt", qualified: "user_credential.password_changed_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "disabledAt", column: "disabled_at", field: "disabledAt", qualified: "user_credential.disabled_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "pendingAt", column: "pending_at", field: "pendingAt", qualified: "user_credential.pending_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\"",
     qualifiedColumns: "\"user_credential\".\"id\", \"user_credential\".\"user_id\", \"user_credential\".\"password_hash\", \"user_credential\".\"password_changed_at\", \"user_credential\".\"disabled_at\", \"user_credential\".\"pending_at\"",
+    selectColumn: "\"user_credential\".\"%s\"",
     getOne: "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE id = $1",
+    getOneFields: "SELECT %s FROM user_credential WHERE id = $1",
     getMany: "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -1142,16 +1301,19 @@ export const userCredentialTable: TableDefinition = {
     updateMany: "UPDATE user_credential SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO user_credential (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\"",
+    upsert: "INSERT INTO user_credential (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM user_credential WHERE id = $1",
     deleteMany: "DELETE FROM user_credential%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "user": { conflict: "(user_id)", keep: "user_id = EXCLUDED.user_id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE (id) IN (%s)" },
+    "user": { conflict: "(user_id)", keep: "user_id = EXCLUDED.user_id", rows: "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE (user_id) IN (%s)" },
   },
+  relations: [
+    { field: "user", column: "userId", target: "user", probe: "user_credential.user_id IN (SELECT \"user\".id FROM \"user\"%s)" },
+  ],
 };
 
 /**
@@ -1185,6 +1347,12 @@ export interface UserRoleGrantFilter {
   userId?: UuidFilter<T.IdentityUUID>;
   roleId?: UuidFilter<T.IdentityUUID>;
   grantedAt?: DateTimeFilter<T.TemporalDateTime>;
+  /** The rows whose user is among the User rows the filter finds (D90). */
+  user?: UserFilter;
+  /** The rows whose role is among the Role rows the filter finds (D90). */
+  role?: RoleFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly UserRoleGrantFilter[];
 }
 
 /** The members findOne and findMany order rows of UserRoleGrant by. */
@@ -1193,12 +1361,18 @@ export type UserRoleGrantOrderField = "id" | "grantedAt";
 /** The members findPage orders rows of UserRoleGrant by (D60, amended); ties break by id. */
 export type UserRoleGrantSortField = "id" | "grantedAt";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type UserRoleGrantUniqueKey = readonly ["id"] | readonly ["user", "role"];
 
 /** The position of a row of UserRoleGrant in a findPage order: its id. */
 export interface UserRoleGrantPageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of UserRoleGrant includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface UserRoleGrantRelations {
+  readonly user: Related<UserRow, UserRelations, 'one'>;
+  readonly role: Related<RoleRow, RoleRelations, 'one'>;
 }
 
 /** The repository of UserRoleGrant. */
@@ -1211,7 +1385,8 @@ export type UserRoleGrantRepository = Repository<
   UserRoleGrantSortField,
   UserRoleGrantUniqueKey,
   T.IdentityUUID,
-  UserRoleGrantPageKey
+  UserRoleGrantPageKey,
+  UserRoleGrantRelations
 >;
 
 /** The user_role_grant table, as the runtime reads and writes it. */
@@ -1223,12 +1398,14 @@ export const userRoleGrantTable: TableDefinition = {
     { name: "id", column: "id", field: "id", qualified: "user_role_grant.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "userId", column: "user_id", field: "user", qualified: "user_role_grant.user_id", uuid: true, required: true, relation: "User", filter: ["eq", "in", "isNull"] },
     { name: "roleId", column: "role_id", field: "role", qualified: "user_role_grant.role_id", uuid: true, required: true, relation: "Role", filter: ["eq", "in", "isNull"] },
-    { name: "grantedAt", column: "granted_at", field: "grantedAt", qualified: "user_role_grant.granted_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
+    { name: "grantedAt", column: "granted_at", field: "grantedAt", qualified: "user_role_grant.granted_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
   ],
   statements: {
     columns: "\"id\", \"user_id\", \"role_id\", \"granted_at\"",
     qualifiedColumns: "\"user_role_grant\".\"id\", \"user_role_grant\".\"user_id\", \"user_role_grant\".\"role_id\", \"user_role_grant\".\"granted_at\"",
+    selectColumn: "\"user_role_grant\".\"%s\"",
     getOne: "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE id = $1",
+    getOneFields: "SELECT %s FROM user_role_grant WHERE id = $1",
     getMany: "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -1249,16 +1426,20 @@ export const userRoleGrantTable: TableDefinition = {
     updateMany: "UPDATE user_role_grant SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO user_role_grant (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"user_id\", \"role_id\", \"granted_at\"",
+    upsert: "INSERT INTO user_role_grant (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"user_id\", \"role_id\", \"granted_at\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM user_role_grant WHERE id = $1",
     deleteMany: "DELETE FROM user_role_grant%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "user,role": { conflict: "(user_id, role_id)", keep: "user_id = EXCLUDED.user_id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE (id) IN (%s)" },
+    "user,role": { conflict: "(user_id, role_id)", keep: "user_id = EXCLUDED.user_id", rows: "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE (user_id, role_id) IN (%s)" },
   },
+  relations: [
+    { field: "user", column: "userId", target: "user", probe: "user_role_grant.user_id IN (SELECT \"user\".id FROM \"user\"%s)" },
+    { field: "role", column: "roleId", target: "role", probe: "user_role_grant.role_id IN (SELECT role.id FROM role%s)" },
+  ],
 };
 
 /** The repositories of shop-db, by table. */
@@ -1301,14 +1482,23 @@ export const shopDbOrm: OrmDefinition = {
     pageKey: "page_key.%s",
     placeholder: "$%d",
     default: "DEFAULT",
+    or: " OR ",
+    group: "(%s)",
     where: " WHERE ",
     and: " AND ",
     orderBy: " ORDER BY ",
     orderTerm: "%s %s",
     limit: " LIMIT %d",
     offset: " OFFSET %d",
+    setExcluded: "%s = EXCLUDED.%s",
+    excluded: "EXCLUDED.%s",
+    changed: "(%s) IS DISTINCT FROM (%s)",
+    never: "FALSE",
+    null: "NULL",
+    notIn: "%s NOT IN (%s)",
   },
   defaultLimit: 100,
+  manyLimit: 1000000,
   historyActorCTE: "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",
   clearHistoryActor: "SELECT set_config('superschematic.history_actor_id', '', true)",
   tables: {

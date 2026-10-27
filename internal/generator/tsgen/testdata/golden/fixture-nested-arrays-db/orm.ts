@@ -11,12 +11,21 @@ createOrm(pool, { user, fieldKeys }) acts as a user and holds the keys
 of the Encrypted<T> fields (D85), whose rows hold each one's value in a
 SecretValue.
 A row holds each column by member, a to-one relation's key as <field>Id, a
-UUID in its base62 wire form; withUser(id) or as(ctx.principal) acts as a
-user, whom createdBy, updatedBy and deletedBy record; transaction(fn) runs
-fn in a transaction, whose query takes enqueue's statements too.
+UUID in its base62 wire form. createdBy, updatedBy and deletedBy record the
+acting user: in an operation the router runs, its caller (D87);
+withUser(id) or as(principal) acts as another, and asSystem() as the
+system actor, for a job's or a worker's writes. transaction(fn) runs fn in
+a transaction, whose query takes enqueue's statements too.
+
+A read's options select members and include relations (D90), and its rows
+hold what they name: include: { category: { include: { parent: true } } }
+loads each row's category, and its parent, in one statement per relation.
+A filter reaches through a to-one relation, { category: { parentId: {
+in: ids } } }, and anyOf ORs filters.
 
 Each table's definition also describes its rows for the runtime's
-decodeRow, so a raw query of its columns reads back as its row type.
+decodeRow, so a raw query of its columns reads back as its row type:
+query(text, values, { decode: <table>Table }) reads them so (D89).
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
 import type { Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, Repository, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
@@ -53,6 +62,8 @@ export interface BoardUpdate {
 /** The rows of Board a read or a write finds: each member set is one condition, all of them ANDed. */
 export interface BoardFilter {
   id?: UuidFilter<T.IdentityUUID>;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly BoardFilter[];
 }
 
 /** The members findOne and findMany order rows of Board by. */
@@ -61,12 +72,16 @@ export type BoardOrderField = "id" | "labels" | "states" | "walls" | "scores";
 /** The members findPage orders rows of Board by (D60, amended); ties break by id. */
 export type BoardSortField = "id";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type BoardUniqueKey = readonly ["id"];
 
 /** The position of a row of Board in a findPage order: its id. */
 export interface BoardPageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of Board includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface BoardRelations {
 }
 
 /** The repository of Board. */
@@ -79,7 +94,8 @@ export type BoardRepository = Repository<
   BoardSortField,
   BoardUniqueKey,
   T.IdentityUUID,
-  BoardPageKey
+  BoardPageKey,
+  BoardRelations
 >;
 
 /** The board table, as the runtime reads and writes it. */
@@ -97,7 +113,9 @@ export const boardTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"labels\", \"states\", \"walls\", \"scores\"",
     qualifiedColumns: "\"board\".\"id\", \"board\".\"labels\", \"board\".\"states\", \"board\".\"walls\", \"board\".\"scores\"",
+    selectColumn: "\"board\".\"%s\"",
     getOne: "SELECT \"id\", \"labels\", \"states\", \"walls\", \"scores\" FROM board WHERE id = $1",
+    getOneFields: "SELECT %s FROM board WHERE id = $1",
     getMany: "SELECT \"id\", \"labels\", \"states\", \"walls\", \"scores\" FROM board WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -118,14 +136,14 @@ export const boardTable: TableDefinition = {
     updateMany: "UPDATE board SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO board (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"labels\", \"states\", \"walls\", \"scores\"",
+    upsert: "INSERT INTO board (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"labels\", \"states\", \"walls\", \"scores\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM board WHERE id = $1",
     deleteMany: "DELETE FROM board%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"labels\", \"states\", \"walls\", \"scores\" FROM board WHERE (id) IN (%s)" },
   },
 };
 
@@ -160,14 +178,23 @@ export const fixtureNestedArraysDbOrm: OrmDefinition = {
     pageKey: "page_key.%s",
     placeholder: "$%d",
     default: "DEFAULT",
+    or: " OR ",
+    group: "(%s)",
     where: " WHERE ",
     and: " AND ",
     orderBy: " ORDER BY ",
     orderTerm: "%s %s",
     limit: " LIMIT %d",
     offset: " OFFSET %d",
+    setExcluded: "%s = EXCLUDED.%s",
+    excluded: "EXCLUDED.%s",
+    changed: "(%s) IS DISTINCT FROM (%s)",
+    never: "FALSE",
+    null: "NULL",
+    notIn: "%s NOT IN (%s)",
   },
   defaultLimit: 100,
+  manyLimit: 1000000,
   historyActorCTE: "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",
   clearHistoryActor: "SELECT set_config('superschematic.history_actor_id', '', true)",
   tables: {

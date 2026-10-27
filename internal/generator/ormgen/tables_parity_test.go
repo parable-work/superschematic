@@ -29,9 +29,10 @@ type parityCall struct {
 }
 
 // hydratingCalls are the calls after whose statements the Go ORM hydrates
-// the to-one relations a full field selection names, with a statement or
-// two of its own per relation, which the TypeScript repositories leave to
-// getManyByIds: the TypeScript statements are the Go ones' prefix.
+// the to-one relations a full field selection names, with a statement of
+// its own per relation, which the TypeScript repositories load only when a
+// read includes them (D90): the TypeScript statements are the Go ones'
+// prefix.
 var hydratingCalls = map[string]bool{"findEntries": true, "pageEntries": true}
 
 // TestTableParityOfGoAndTypeScriptOnPostgres runs one script of repository
@@ -62,7 +63,9 @@ func TestTableParityOfGoAndTypeScriptOnPostgres(t *testing.T) {
 // requires the same statements, as TestTableParityOfGoAndTypeScriptOnPostgres
 // does: each metric, a filter, the live rows and deleted ones, an optional
 // vector field and the default k, and a table @table and @column name with
-// an Encrypted<T> field beside its vector (D85).
+// an Encrypted<T> field beside its vector (D85); and the index's settings,
+// in a transaction of nearest's own and in one already open, and the keys
+// it leaves out (D89).
 func TestNearestParityOfGoAndTypeScriptOnPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")

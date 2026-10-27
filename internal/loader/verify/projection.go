@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -62,11 +64,17 @@ func checkProjections(schema *ir.Schema, r *Result) {
 		checkProjectionClass(td, r)
 
 		checkProjectionIdentifiers(td, def, r)
-		relation := def.Pool + "." + def.Name
+		relation := def.Relation()
 		if other, dup := seenRelations[relation]; dup {
 			r.errorf(td.Owner, "%s: projection %s is already declared by %s", td.Name, relation, other)
 		}
 		seenRelations[relation] = td.Name
+		if def.Pool == "" {
+			// A view without a pool is created beside the tables (D90).
+			if table := projectionTableNamed(schema, def.Name); table != "" {
+				r.errorf(td.Owner, "%s: projection %s has no pool, so it is created beside the tables, and %s is the table of %s; name the view otherwise, or give it a pool", td.Name, def.Name, def.Name, table)
+			}
+		}
 		if other, dup := seenMigrations[def.Migration]; dup && def.Migration != "" {
 			r.errorf(td.Owner, "%s: migration stamp %s is already used by %s; every projection migration needs its own version", td.Name, def.Migration, other)
 		}
@@ -91,13 +99,30 @@ func checkProjectionClass(td *ir.TypeDef, r *Result) {
 		r.errorf(td.Owner, "%s: a @projection class cannot extend or implement anything; list its columns directly", td.Name)
 	}
 	if len(td.Indexes) > 0 || td.JsonField || td.Versioned || td.Optimistic || td.EnvVars || td.Source != nil ||
-		td.StrictJSON || td.DenyUnknownFields {
+		td.StrictJSON || td.DenyUnknownFields || td.AllowUnknownFields {
 		r.errorf(td.Owner, "%s: a @projection class carries only @projection and @join", td.Name)
 	}
 }
 
+// projectionTableNamed is the table type of schema whose table is name, or
+// "".
+func projectionTableNamed(schema *ir.Schema, name string) string {
+	bases := codegen.BaseTypeNames(schema)
+	for _, typeName := range sortedTypeNames(schema.Types) {
+		td := schema.Types[typeName]
+		if hasTable(td, bases) && sqlutil.TableName(td) == name {
+			return td.Name
+		}
+	}
+	return ""
+}
+
 func checkProjectionIdentifiers(td *ir.TypeDef, def *ir.ProjectionDef, r *Result) {
 	for _, part := range []struct{ key, value string }{{"pool", def.Pool}, {"name", def.Name}} {
+		if part.key == "pool" && part.value == "" {
+			// A view without a pool is created beside the tables (D90).
+			continue
+		}
 		if !projectionIdentifierPattern.MatchString(part.value) {
 			r.errorf(td.Owner, "%s: @projection %s must be a snake_case SQL identifier, got %q", td.Name, part.key, part.value)
 		}

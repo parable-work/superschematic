@@ -383,14 +383,13 @@ func TestWorkersRefusals(t *testing.T) {
 		_, errs := resolveOver(t, reg, s, services, "Staging")
 		refusedWith(t, errs, stack.CodeUnrealizable, "server shop-api is a GO server, and platform cloudflare.workers runs only TYPESCRIPT")
 	})
-	t.Run("a queue worker", func(t *testing.T) {
-		// D64, amended: the refusal says why and where a worker runs.
+	t.Run("a Go queue worker", func(t *testing.T) {
+		// D92: a worker is placed on the drainer, which runs TypeScript.
 		s := storefrontStack()
 		s.Deploy = []ir.ServiceRef{stacktest.ShopOrders}
 		s.Expose = nil
 		_, errs := resolveOver(t, reg, s, stacktest.AcmeShop(), "Staging")
-		refusedWith(t, errs, stack.CodeUnrealizable, "worker shop-orders-fulfil-orders: target cloudflare places no worker: a queue worker claims its queue's messages from Postgres or a SQLite file in a loop that lasts as long as its process (D53, amended), "+
-			"and a Worker runs only per request or per firing and reaches neither; run the stack's workers in an environment on the gcp target, whose gcp.cloudrunworker runs them, or under stack dev on the local target")
+		refusedWith(t, errs, stack.CodeUnrealizable, "worker shop-orders-fulfil-orders is a GO worker, and platform cloudflare.drainer runs only TYPESCRIPT")
 	})
 	t.Run("a deriver", func(t *testing.T) {
 		// D74: the refusal says why and where a deriver runs.
@@ -444,16 +443,6 @@ func TestWorkersRefusals(t *testing.T) {
 		if _, errs := resolveOver(t, reg, s, workersServices(), "Staging"); errs != nil {
 			t.Errorf("a 40-character name, 62 with the stack and the environment, without a parameter: %v", errs)
 		}
-	})
-	t.Run("an API over the user model", func(t *testing.T) {
-		services := stacktest.AcmeShop()
-		for i := range services {
-			if services[i].Name == "shop-storefront" {
-				services[i].Identity = true
-			}
-		}
-		_, errs := resolveOver(t, reg, storefrontStack(), services, "Staging")
-		refusedWith(t, errs, stack.CodeUnrealizable, "server shop-storefront serves shop-storefront, an API over the user model, which authenticates with the identity runtime (D50), and platform cloudflare.workers runs none: the TypeScript identity runtime hashes passwords with node:crypto's argon2")
 	})
 	t.Run("no workers.dev subdomain", func(t *testing.T) {
 		s := storefrontStack()

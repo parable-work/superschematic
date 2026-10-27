@@ -5,7 +5,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	"github.com/parable-work/superschematic/internal/loader/identity"
 	ir "github.com/parable-work/superschematic/ir"
@@ -132,6 +131,7 @@ func checkIdentityRoutes(schema *ir.Schema, in Input, r *Result) {
 	checkIdentityRouteNames(schema, r)
 	if schema.Kind == ir.SchemaKindAPI {
 		checkIdentityRoutesAuthDB(schema, in.AuthDB, sessions, admin, r)
+		checkSeededRoles(schema, in.AuthDB, sessions, in.Naming.OrDefault().IdentityPermissionPrefix, r)
 	}
 }
 
@@ -265,23 +265,24 @@ func checkIdentityRoutesAuthDB(schema, authDB *ir.Schema, sessions, admin *ir.Op
 // checkUserCreatable refuses a User table that a row cannot be written to
 // from its key, login and name alone, the fields the routes that create
 // users write (D50, v1): every other field must be optional, take a
-// default its column carries (D83), be generated, or be a timestamp sqlgen
-// defaults to now.
+// default its column carries (D83), be generated, or be an audit
+// timestamp sqlgen defaults to now (D88).
 func checkUserCreatable(db *ir.Schema, user *ir.TypeDef, creators, authDB string, r *Result) {
 	written := map[string]bool{user.User.Login: true, user.User.NameField(): true}
 	scalarTypes := sqlutil.ScalarSQLTypes(db)
 	for _, fd := range user.Fields {
-		if fd.Key || written[fd.Name] || !needsValueOnCreate(db, fd, scalarTypes) {
+		if fd.Key || written[fd.Name] || !needsValueOnCreate(db, user, fd, scalarTypes) {
 			continue
 		}
-		r.errorf("", "%s create users with their key, login and name alone, and %s.%s in the authDb %s is required and has no default its column carries; make it optional or give it a Default<T, V> whose V is text, a number, a boolean or an enum member", creators, user.Name, fd.Name, authDB)
+		r.errorf("", "%s create users with their key, login and name alone, and %s.%s in the authDb %s is required and has no default its column carries; make it optional or give it a Default<T, V> whose V is text, a number, a boolean or an enum member, or \"now\" for a date or time", creators, user.Name, fd.Name, authDB)
 	}
 }
 
-// needsValueOnCreate reports whether an insert must write fd: a required
-// column with no generated value and no default sqlgen gives it, from its
-// Default<T, V> (sqlutil.ColumnDefault) or its type.
-func needsValueOnCreate(db *ir.Schema, fd *ir.FieldDef, scalarTypes map[string]string) bool {
+// needsValueOnCreate reports whether an insert must write fd, a field of
+// the table td: a required column with no generated value and no default
+// sqlgen gives it, from its Default<T, V> (sqlutil.ColumnDefault) or, for
+// an audit timestamp, its type (sqlutil.ImpliedNowDefault).
+func needsValueOnCreate(db *ir.Schema, td *ir.TypeDef, fd *ir.FieldDef, scalarTypes map[string]string) bool {
 	if _, ok := sqlutil.ColumnDefault(fd, sqlutil.ColumnType(db, fd, scalarTypes)); ok {
 		return false
 	}
@@ -292,19 +293,16 @@ func needsValueOnCreate(db *ir.Schema, fd *ir.FieldDef, scalarTypes map[string]s
 		// The rows that hold the relation are another table's.
 		return false
 	}
-	return !sqlDefaultsToNow(db, fd, scalarTypes)
+	return !sqlDefaultsToNow(db, td, fd, scalarTypes)
 }
 
 // sqlDefaultsToNow reports whether sqlgen gives fd's required column the
-// CURRENT_TIMESTAMP, CURRENT_DATE or CURRENT_TIME default, as it does an
-// audit timestamp: a single date, time or timestamp column.
-func sqlDefaultsToNow(db *ir.Schema, fd *ir.FieldDef, scalarTypes map[string]string) bool {
-	if fd.JsonField || fd.TypeRef.IsArray || fd.TypeRef.IsMap || fd.Relation != nil {
+// CURRENT_TIMESTAMP, CURRENT_DATE or CURRENT_TIME default with no
+// Default<T, "now">: a single date, time or timestamp column that is an
+// audit timestamp (sqlutil.ImpliedNowDefault, D88).
+func sqlDefaultsToNow(db *ir.Schema, td *ir.TypeDef, fd *ir.FieldDef, scalarTypes map[string]string) bool {
+	if fd.JsonField || fd.TypeRef.IsArray || fd.TypeRef.IsMap || fd.Relation != nil || !sqlutil.ImpliedNowDefault(td, fd) {
 		return false
 	}
-	columnType := sqlutil.ColumnType(db, fd, scalarTypes)
-	traits := codegen.GuessScalarTraits(fd.TypeRef.Name)
-	return columnType == "TIMESTAMPTZ" || traits.IsDateTimeLike ||
-		columnType == "DATE" || traits.IsDateLike ||
-		columnType == "TIME" || traits.IsTimeLike
+	return sqlutil.NowDefault(sqlutil.ColumnType(db, fd, scalarTypes), fd.TypeRef.Name) != ""
 }

@@ -68,6 +68,42 @@ func TestSiteWiring(t *testing.T) {
 	}
 }
 
+// TestOriginSiteWiring: with shop-web serving shop-api on its origin
+// (D91) and shop-api in no expose, the site's config names shop-api under
+// /api/shop-api on the site's own loopback origin, its node holds shop-api's
+// loopback URL for its proxy to forward to, and shop-api's process sets no
+// CORS origins.
+func TestOriginSiteWiring(t *testing.T) {
+	reg := assemble(t)
+	s := stacktest.WithSite(shop())
+	s.Expose = nil
+	s.Origins = []*ir.Origin{{Site: stacktest.ShopWeb}}
+	dev := resolve(t, reg, s, stacktest.SiteShop(), "Dev")
+	site, api := dev.Deployable("shop-web"), dev.Deployable("shop-api")
+	if api.Exposed || api.PublicAddress != nil {
+		t.Fatalf("shop-api is exposed %v at %v, want reached through shop-web's origin alone", api.Exposed, api.PublicAddress)
+	}
+	var node *ir.Resource
+	for _, res := range dev.Resources.Resources {
+		if res.ID == "shop-web.site" {
+			node = res
+		}
+	}
+	if node == nil {
+		t.Fatal("shop-web has no node")
+	}
+	origin := site.PublicAddress.(string)
+	if !equalJSON(t, node.Properties["config"], map[string]any{"apis": map[string]any{"shop-api": map[string]any{"url": origin + "/api/shop-api"}}}) ||
+		!equalJSON(t, node.Properties["origin"], map[string]any{"shop-api": api.Address}) {
+		t.Fatalf("shop-web's node: config %s, origin %s; want shop-api on %s and its loopback URL %v", mustJSON(t, node.Properties["config"]), mustJSON(t, node.Properties["origin"]), origin, api.Address)
+	}
+	for _, b := range api.Bindings {
+		if b.CORSOf != "" {
+			t.Errorf("shop-api has the CORS field %s, though shop-web calls it from its own origin", b.Field)
+		}
+	}
+}
+
 func mustJSON(t *testing.T, v any) []byte {
 	t.Helper()
 	data, err := json.Marshal(v)

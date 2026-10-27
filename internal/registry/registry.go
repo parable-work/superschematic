@@ -549,7 +549,9 @@ func (r *Registry) ToolHooks() []ToolHook {
 // RegisterToolInvocationPolicy replaces the core's invocation policy
 // (apigen.DefaultToolInvocationPolicy) with an extension's: the key @mcp
 // reads a visible tool's policy from and every output writes it under, the
-// values it allows and the default a tool that omits it gets. It needs the
+// values it allows, the default a tool that omits it gets, and the values
+// whose tools an API's MCP endpoint confirms before it runs them (D93),
+// every value but the default unless it lists them. It needs the
 // registering Extension and a policy that passes Validate. One registry
 // holds one policy: a second registration is an error that names both
 // extensions, so two extensions that disagree fail at assembly.
@@ -568,6 +570,7 @@ func (r *Registry) RegisterToolInvocationPolicy(p ToolInvocationPolicy) error {
 		return fmt.Errorf("registry: tool invocation policy of extension %s: %w", p.Extension, err)
 	}
 	p.Values = append([]string(nil), p.Values...)
+	p.Confirm = append([]string(nil), p.Confirm...)
 	r.toolInvocation = &p
 	r.noteExtension(p.Extension)
 	return nil
@@ -581,6 +584,7 @@ func (r *Registry) ToolInvocationPolicy() ToolInvocationPolicy {
 	}
 	p := *r.toolInvocation
 	p.Values = append([]string(nil), p.Values...)
+	p.Confirm = append([]string(nil), p.Confirm...)
 	return p
 }
 

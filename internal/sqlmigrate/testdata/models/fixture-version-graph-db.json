@@ -1535,19 +1535,16 @@
           "type": "BIGINT"
         },
         {
-          "default": "CURRENT_DATE",
           "name": "tasted_on",
           "origin": "Tasting.tastedOn",
           "type": "DATE"
         },
         {
-          "default": "CURRENT_TIMESTAMP",
           "name": "tasted_at",
           "origin": "Tasting.tastedAt",
           "type": "TIMESTAMPTZ"
         },
         {
-          "default": "CURRENT_TIME",
           "name": "served_at",
           "origin": "Tasting.servedAt",
           "type": "TIME"

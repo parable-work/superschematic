@@ -348,10 +348,24 @@ export type EnvironmentOptions<T extends TargetName | undefined, S extends reado
 const noop: ClassDecorator = () => {};
 
 /**
+ * A site and the APIs it calls that it serves on its own origin (D91): each
+ * API under `/api/<service>` on the site's origin, in every environment, as
+ * `superschematic stack dev` serves it, so the page calls it with no CORS
+ * and a cookie session needs no trusted origin and no shared domain.
+ */
+export type Origin = {
+  /** The Site service whose origin it is. */
+  readonly site: ServiceHandle<"Site">;
+  /** The APIs the origin serves, each one the site calls; every API it calls unless set. */
+  readonly apis?: readonly ServiceHandle<"API">[];
+};
+
+/**
  * Declares the stack: its entry points and what is reachable from outside.
  * A site (a Site service's handle) is always exposed, named in `expose` or
- * not, and each API it calls must be exposed (D55). An app is exposed
- * beside its API's handle, `{ of: ShopStock, app: "Backoffice" }` (D78).
+ * not, and each API it calls must be exposed (D55), unless the site's
+ * origin serves it (`origins`, D91). An app is exposed beside its API's
+ * handle, `{ of: ShopStock, app: "Backoffice" }` (D78).
  */
 export function stack<const X extends readonly unknown[] = readonly []>(_options: {
   readonly deploy?: readonly ServiceHandle<"API" | "DB" | "Site">[];
@@ -360,6 +374,8 @@ export function stack<const X extends readonly unknown[] = readonly []>(_options
       ? ExposedApp<H>
       : ServiceHandle<"API" | "Site"> | DeployableClass;
   };
+  /** Sites that serve APIs they call on their own origin (D91). */
+  readonly origins?: readonly Origin[];
 }): ClassDecorator {
   return noop;
 }

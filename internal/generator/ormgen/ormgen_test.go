@@ -58,6 +58,8 @@ func TestWriteORMGolden(t *testing.T) {
 	common := []string{
 		"database.go", "interfaces.go", "query.go", "utils.go",
 		"go.mod", "README.md", "Makefile",
+		// An upsert's result and a transaction's options (D89).
+		"upsert.go", "transaction.go",
 	}
 	for _, tc := range []struct {
 		svc          string
@@ -85,6 +87,10 @@ func TestWriteORMGolden(t *testing.T) {
 		{"fixture-naming-db", []string{"queues.go", "repository_category.go", "repository_line_item.go", "repository_note.go", "search.go"}},
 		// Vectors and decimals, and Nearest (D84).
 		{"fixture-vectors-db", []string{"repository_chunk.go", "repository_ledger_line.go", "repository_passage.go", "repository_text_embedding.go", "nearest.go", "encrypted.go"}},
+		// A bank sync's upserts of many rows, only if changed (D89).
+		{"fixture-sync-db", []string{"repository_bank_account.go", "repository_line_item.go", "queues.go"}},
+		// Declared queries (D86): queries.go runs them.
+		{"fixture-queries-db", []string{"repository_account.go", "repository_category.go", "repository_line_item.go", "repository_transfer_group.go", "queries.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)
@@ -1607,14 +1613,15 @@ func TestRequiredEnumDefaultAppliesToLocalAndImportedEnums(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read repository: %v", err)
 	}
-	// CreateOne and UpsertOne bind the default as a value, and CreateMany as
-	// a row's cell. TestCreateBindsTheEnumDefaultWhenUnset in compile_test.go
-	// runs CreateOne and CreateMany.
+	// CreateOne and UpsertOne bind the default as a value, and CreateMany
+	// and UpsertMany (D89) as a row's cell.
+	// TestCreateBindsTheEnumDefaultWhenUnset in compile_test.go runs
+	// CreateOne and CreateMany.
 	for want, count := range map[string]int{
 		`values = append(values, types.OrderStatus("pending"))`:  2,
 		`values = append(values, types.OrderPriority("normal"))`: 2,
-		`cell.value = types.OrderStatus("pending")`:              1,
-		`cell.value = types.OrderPriority("normal")`:             1,
+		`cell.value = types.OrderStatus("pending")`:              2,
+		`cell.value = types.OrderPriority("normal")`:             2,
 	} {
 		if n := strings.Count(string(source), want); n != count {
 			t.Errorf("CreateOne, UpsertOne and CreateMany must each insert the default; found %d of %q, want %d", n, want, count)

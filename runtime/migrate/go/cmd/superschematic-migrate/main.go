@@ -7,6 +7,7 @@
 //	superschematic-migrate adopt --model model.json [--database-url URL]
 //	superschematic-migrate job --job job.json|gs://bucket/job.json
 //	superschematic-migrate queue --queue queue.json|gs://bucket/queue.json [--database-url URL | --cloud-sql INSTANCE --cloud-sql-user USER --database NAME] [--result gs://bucket/result.json|result.json]
+//	superschematic-migrate describe --statements statements.json [--database-url URL]
 //	superschematic-migrate version
 //
 // A d1:// database URL reads the API token from CLOUDFLARE_API_TOKEN. A job
@@ -51,6 +52,7 @@ const usage = `usage:
   superschematic-migrate job --job job.json|gs://bucket/job.json
   superschematic-migrate queue --queue queue.json [--database-url URL | --cloud-sql INSTANCE
       --cloud-sql-user USER --database NAME] [--result result.json|gs://bucket/result.json]
+  superschematic-migrate describe --statements statements.json [--database-url URL]
   superschematic-migrate version
 
 --database-url defaults to $DATABASE_URL. A postgres:// or postgresql://
@@ -78,6 +80,12 @@ database is one on a Cloud SQL instance, reached as a job's are. With
 --result it writes what it did to that object or file, which must not
 exist yet, in place of stdout, and prints only where it went: a listing
 holds the messages' bodies, which stay out of logs.
+
+describe runs a describe document, which superschematic queries verify
+writes: it creates a database of its own on the Postgres the URL names,
+applies the document's create.sql there, prepares each statement and
+prints what Postgres described of its parameters and result columns as
+JSON, then drops the database. The role must be able to create one.
 `
 
 func main() {
@@ -127,6 +135,8 @@ func runWith(ctx context.Context, args []string, o options) int {
 		err = job(ctx, args[1:], o)
 	case "queue":
 		err = queue(ctx, args[1:], o)
+	case "describe":
+		err = describe(ctx, args[1:], o)
 	case "help", "-h", "-help", "--help":
 		_, _ = fmt.Fprint(o.stdout, usage)
 		return exitOK

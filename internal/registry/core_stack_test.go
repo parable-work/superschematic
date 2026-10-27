@@ -194,6 +194,39 @@ func TestStackDecoratorsWriteTheirDeclarations(t *testing.T) {
 
 // TestStackDecoratorsRefuseWhatTheyCannotDeclare: each refusal names what
 // is wrong.
+// TestStackDecoratorReadsOrigins: @stack's origins name a site and the
+// APIs its origin serves, or none for every API it calls (D91); an origin
+// without a site, with an empty list of APIs or with a member it does not
+// have is refused.
+func TestStackDecoratorReadsOrigins(t *testing.T) {
+	shop := &ir.TypeDef{Name: "Shop"}
+	if err := applyStackDecorator(t, "stack", shop, map[string]any{
+		"deploy": []any{handle("shop-web", "Site")},
+		"origins": []any{
+			map[string]any{"site": handle("shop-web", "Site"), "apis": []any{handle("shop-api", "API")}},
+			map[string]any{"site": handle("shop-admin", "Site")},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	want := []*ir.Origin{
+		{Site: ir.ServiceRef{Name: "shop-web", Kind: ir.SchemaKindSite}, APIs: []ir.ServiceRef{{Name: "shop-api", Kind: ir.SchemaKindAPI}}},
+		{Site: ir.ServiceRef{Name: "shop-admin", Kind: ir.SchemaKindSite}},
+	}
+	if !reflect.DeepEqual(shop.Stack.Origins, want) {
+		t.Errorf("@stack wrote origins %+v, want %+v", shop.Stack.Origins, want)
+	}
+	for _, arg := range []map[string]any{
+		{"origins": []any{map[string]any{"apis": []any{handle("shop-api", "API")}}}},
+		{"origins": []any{map[string]any{"site": handle("shop-web", "Site"), "apis": []any{}}}},
+		{"origins": []any{map[string]any{"site": handle("shop-web", "Site"), "path": "/api"}}},
+	} {
+		if err := applyStackDecorator(t, "stack", &ir.TypeDef{Name: "C"}, arg); err == nil || !strings.Contains(err.Error(), "@stack argument") {
+			t.Errorf("@stack(%v) = %v, want a refusal of its argument", arg, err)
+		}
+	}
+}
+
 func TestStackDecoratorsRefuseWhatTheyCannotDeclare(t *testing.T) {
 	for _, tc := range []struct {
 		name      string

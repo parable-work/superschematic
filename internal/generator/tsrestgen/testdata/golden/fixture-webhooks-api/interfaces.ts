@@ -11,7 +11,9 @@ import type { OperationResult, RequestContext } from '@superschematic/http-runti
 import type { WebhookVerifier } from '@superschematic/http-runtime/hono';
 import type {
   EventReceipt,
+  LedgerEvent,
   PaymentEvent,
+  PlaidItemEvent,
 } from '@schemas/fixture-webhooks-api-types/types';
 
 /** What an implementation method resolves to: the view itself, or the view with a chosen status. */
@@ -37,6 +39,16 @@ export interface ReceiveGithubEventArgs {
   action: string;
 }
 
+/** Arguments of webhook.receiveLedgerEvent (POST /api/webhooks/ledger). */
+export interface ReceiveLedgerEventArgs {
+  input: LedgerEvent;
+}
+
+/** Arguments of webhook.receivePlaidEvent (POST /api/webhooks/plaid). */
+export interface ReceivePlaidEventArgs {
+  input: PlaidItemEvent;
+}
+
 /** Arguments of webhook.receiveStripeEvent (POST /api/webhooks/stripe). */
 export interface ReceiveStripeEventArgs {
   input: PaymentEvent;
@@ -51,6 +63,20 @@ export interface WebhookImplementation {
    * Requires a principal holding one of: webhooks.receive.
    */
   receiveGithubEvent(args: ReceiveGithubEventArgs, ctx: RequestContext): Promise<OperationOutcome<EventReceipt>>;
+  /**
+   * A ledger event, whose type refuses the keys it does not declare.
+   *
+   * POST /api/webhooks/ledger
+   * Public route: no authentication.
+   */
+  receiveLedgerEvent(args: ReceiveLedgerEventArgs, ctx: RequestContext): Promise<OperationOutcome<EventReceipt>>;
+  /**
+   * A Plaid event, unsigned in this fixture.
+   *
+   * POST /api/webhooks/plaid
+   * Public route: no authentication.
+   */
+  receivePlaidEvent(args: ReceivePlaidEventArgs, ctx: RequestContext): Promise<OperationOutcome<EventReceipt>>;
   /**
    * A Stripe event. Its signature is checked before the rate limit.
    *

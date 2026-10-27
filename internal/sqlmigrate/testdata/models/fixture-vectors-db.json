@@ -94,7 +94,6 @@
           "type": "NUMERIC"
         },
         {
-          "default": "CURRENT_TIMESTAMP",
           "name": "booked_at",
           "origin": "LedgerLine.bookedAt",
           "type": "TIMESTAMPTZ"

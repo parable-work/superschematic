@@ -36,6 +36,21 @@ func (e *emitter) emitStackDeclarations(def *ir.TypeDef) {
 			}
 			parts = append(parts, "expose: ["+strings.Join(refs, ", ")+"]")
 		}
+		if len(s.Origins) > 0 {
+			// A site and the APIs its origin serves (D91).
+			origins := make([]string, 0, len(s.Origins))
+			for _, origin := range s.Origins {
+				if origin == nil {
+					continue
+				}
+				members := []string{"site: " + e.handle(origin.Site)}
+				if len(origin.APIs) > 0 {
+					members = append(members, "apis: "+e.handles(origin.APIs))
+				}
+				origins = append(origins, objectLiteral(members))
+			}
+			parts = append(parts, "origins: ["+strings.Join(origins, ", ")+"]")
+		}
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("stack"), objectLiteral(parts))
 	}
 	if s := def.Server; s != nil {

@@ -417,6 +417,7 @@ function parseTypeDefinition(
     fields,
     indexes: parseIndexes(definition),
     envVars: asBoolean(definition["x-envVars"]),
+    ...(asBoolean(definition["x-allowUnknownFields"]) ? { allowUnknownFields: true } : {}),
   };
 }
 

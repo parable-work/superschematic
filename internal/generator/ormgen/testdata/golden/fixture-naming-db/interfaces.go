@@ -21,6 +21,8 @@ type CategoryRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.Category) (*types.Category, error)
 	CreateMany(ctx context.Context, inputs []*types.Category) ([]*types.Category, error)
 	UpsertOne(ctx context.Context, input *types.Category, on CategoryUniqueKey, update *CategoryUpdate) (*types.Category, error)
+	UpsertOneResult(ctx context.Context, input *types.Category, on CategoryUniqueKey, update *CategoryUpdate, opts *UpsertOptions) (UpsertResult[*types.Category], error)
+	UpsertMany(ctx context.Context, inputs []*types.Category, on CategoryUniqueKey, update CategoryFields, opts *UpsertOptions) ([]UpsertResult[*types.Category], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *CategoryUpdate) (*types.Category, error)
 	UpdateMany(ctx context.Context, filter *CategoryFilter, update *CategoryUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -37,6 +39,8 @@ type LineItemRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.LineItem) (*types.LineItem, error)
 	CreateMany(ctx context.Context, inputs []*types.LineItem) ([]*types.LineItem, error)
 	UpsertOne(ctx context.Context, input *types.LineItem, on LineItemUniqueKey, update *LineItemUpdate) (*types.LineItem, error)
+	UpsertOneResult(ctx context.Context, input *types.LineItem, on LineItemUniqueKey, update *LineItemUpdate, opts *UpsertOptions) (UpsertResult[*types.LineItem], error)
+	UpsertMany(ctx context.Context, inputs []*types.LineItem, on LineItemUniqueKey, update LineItemFields, opts *UpsertOptions) ([]UpsertResult[*types.LineItem], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *LineItemUpdate) (*types.LineItem, error)
 	UpdateMany(ctx context.Context, filter *LineItemFilter, update *LineItemUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -57,6 +61,8 @@ type NoteRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.Note) (*types.Note, error)
 	CreateMany(ctx context.Context, inputs []*types.Note) ([]*types.Note, error)
 	UpsertOne(ctx context.Context, input *types.Note, on NoteUniqueKey, update *NoteUpdate) (*types.Note, error)
+	UpsertOneResult(ctx context.Context, input *types.Note, on NoteUniqueKey, update *NoteUpdate, opts *UpsertOptions) (UpsertResult[*types.Note], error)
+	UpsertMany(ctx context.Context, inputs []*types.Note, on NoteUniqueKey, update NoteFields, opts *UpsertOptions) ([]UpsertResult[*types.Note], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *NoteUpdate) (*types.Note, error)
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *NoteUpdate) (*types.Note, error)
 	UpdateMany(ctx context.Context, filter *NoteFilter, update *NoteUpdate) (int, error)
@@ -68,6 +74,7 @@ type NoteRepositoryInterface interface {
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
+	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
 	Ping(ctx context.Context) error
 	Close()
 	GetCategoryRepository() CategoryRepositoryInterface
@@ -79,6 +86,7 @@ type DatabaseInterface interface {
 type TxInterface interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetCategoryRepository() CategoryRepositoryInterface
 	GetLineItemRepository() LineItemRepositoryInterface
 	GetNoteRepository() NoteRepositoryInterface
@@ -115,6 +123,17 @@ func NewNoOpDatabase() *NoOpDatabase {
 // Transaction executes the callback with a deterministic no-op transaction.
 func (db *NoOpDatabase) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(db.tx)
+}
+
+// TransactionWith executes the callback with a deterministic no-op
+// transaction, whatever its options.
+func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(TxInterface) error) error {
+	return fn(db.tx)
+}
+
+// Transaction executes the callback with the same no-op transaction.
+func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
+	return fn(tx)
 }
 
 // Ping always succeeds for no-op database.
@@ -191,6 +210,18 @@ func (r *NoOpCategoryRepository) UpsertOne(_ context.Context, input *types.Categ
 	return input, nil
 }
 
+func (r *NoOpCategoryRepository) UpsertOneResult(_ context.Context, input *types.Category, _ CategoryUniqueKey, _ *CategoryUpdate, _ *UpsertOptions) (UpsertResult[*types.Category], error) {
+	return UpsertResult[*types.Category]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpCategoryRepository) UpsertMany(_ context.Context, inputs []*types.Category, _ CategoryUniqueKey, _ CategoryFields, _ *UpsertOptions) ([]UpsertResult[*types.Category], error) {
+	results := make([]UpsertResult[*types.Category], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Category]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
 func (r *NoOpCategoryRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *CategoryUpdate) (*types.Category, error) {
 	return nil, ErrNotFound
 }
@@ -251,6 +282,18 @@ func (r *NoOpLineItemRepository) CreateMany(_ context.Context, inputs []*types.L
 
 func (r *NoOpLineItemRepository) UpsertOne(_ context.Context, input *types.LineItem, _ LineItemUniqueKey, _ *LineItemUpdate) (*types.LineItem, error) {
 	return input, nil
+}
+
+func (r *NoOpLineItemRepository) UpsertOneResult(_ context.Context, input *types.LineItem, _ LineItemUniqueKey, _ *LineItemUpdate, _ *UpsertOptions) (UpsertResult[*types.LineItem], error) {
+	return UpsertResult[*types.LineItem]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpLineItemRepository) UpsertMany(_ context.Context, inputs []*types.LineItem, _ LineItemUniqueKey, _ LineItemFields, _ *UpsertOptions) ([]UpsertResult[*types.LineItem], error) {
+	results := make([]UpsertResult[*types.LineItem], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.LineItem]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
 }
 
 func (r *NoOpLineItemRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *LineItemUpdate) (*types.LineItem, error) {
@@ -329,6 +372,18 @@ func (r *NoOpNoteRepository) CreateMany(_ context.Context, inputs []*types.Note)
 
 func (r *NoOpNoteRepository) UpsertOne(_ context.Context, input *types.Note, _ NoteUniqueKey, _ *NoteUpdate) (*types.Note, error) {
 	return input, nil
+}
+
+func (r *NoOpNoteRepository) UpsertOneResult(_ context.Context, input *types.Note, _ NoteUniqueKey, _ *NoteUpdate, _ *UpsertOptions) (UpsertResult[*types.Note], error) {
+	return UpsertResult[*types.Note]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpNoteRepository) UpsertMany(_ context.Context, inputs []*types.Note, _ NoteUniqueKey, _ NoteFields, _ *UpsertOptions) ([]UpsertResult[*types.Note], error) {
+	results := make([]UpsertResult[*types.Note], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Note]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
 }
 
 func (r *NoOpNoteRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *NoteUpdate) (*types.Note, error) {

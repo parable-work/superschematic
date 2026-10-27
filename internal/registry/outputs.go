@@ -87,6 +87,14 @@ type APIOutputConfig struct {
 	// /api/mcp (D81). A TypeScript API serves it; ParseOutputs refuses it
 	// on a Go or Rust API.
 	MCP bool `json:"mcp,omitempty"`
+
+	// MCPConfirmationKey is the @envVars Secret<string> the MCP endpoint
+	// signs its confirmations with (D93), by the type that declares the
+	// field and the field's name, as a stack names the secret and
+	// outputs.sql.encryption.key names its own: "McpKeys.MCP_CONFIRMATION_KEY".
+	// The API's @envVars class holds it. A build whose endpoint serves a
+	// tool that asks needs it; ParseOutputs refuses it without mcp.
+	MCPConfirmationKey string `json:"mcpConfirmationKey,omitempty"`
 }
 
 // APIMCPLanguages says which API servers serve outputs.api.mcp (D81), for
@@ -120,6 +128,55 @@ type SQLOutputConfig struct {
 	// Encryption names the key of the schema's Encrypted<T> fields (D85).
 	// Nil for a service without one; a schema with one needs it.
 	Encryption *SQLEncryptionConfig `json:"encryption,omitempty"`
+
+	// SystemActor is who the ORMs' asSystem (TypeScript) and AsSystem (Go)
+	// act as (D87). Nil acts as DefaultSystemActorID, named
+	// DefaultSystemActorName.
+	SystemActor *SQLSystemActorConfig `json:"systemActor,omitempty"`
+
+	// RequireUpdatedBy makes an update of a table with an updatedBy field
+	// need an acting user, as a create of a table with createdBy does
+	// (D87): the ORMs refuse one without a user where they would leave a
+	// nullable updatedBy as it was.
+	RequireUpdatedBy bool `json:"requireUpdatedBy,omitempty"`
+}
+
+// SQLSystemActorConfig is outputs.sql.systemActor (D87): the user ID the
+// ORMs stamp createdBy, updatedBy and deletedBy with for a write no
+// request's caller makes, a job's or a worker's, and the name an app shows
+// for it. The audit fields hold a user's ID with no foreign key, so the ID
+// needs no row of the user table.
+type SQLSystemActorConfig struct {
+	// ID is a UUID, hyphenated.
+	ID string `json:"id"`
+	// Name is DefaultSystemActorName when empty.
+	Name string `json:"name,omitempty"`
+}
+
+// The system actor the ORMs act as unless outputs.sql.systemActor names
+// another (D87): the fixed ID the generated Go APIs export as SystemUserID.
+const (
+	DefaultSystemActorID   = "00000000-0000-4000-8000-000000000000"
+	DefaultSystemActorName = "system"
+)
+
+// SystemActor is outputs.sql.systemActor with its unset members defaulted,
+// and whether the service sets it.
+func (o *Outputs) SystemActor() (actor SQLSystemActorConfig, set bool) {
+	actor = SQLSystemActorConfig{ID: DefaultSystemActorID, Name: DefaultSystemActorName}
+	if o == nil || o.SQL == nil || o.SQL.SystemActor == nil {
+		return actor, false
+	}
+	actor.ID = o.SQL.SystemActor.ID
+	if o.SQL.SystemActor.Name != "" {
+		actor.Name = o.SQL.SystemActor.Name
+	}
+	return actor, true
+}
+
+// RequireUpdatedBy is outputs.sql.requireUpdatedBy.
+func (o *Outputs) RequireUpdatedBy() bool {
+	return o != nil && o.SQL != nil && o.SQL.RequireUpdatedBy
 }
 
 // SQLEncryptionConfig is outputs.sql.encryption (D85): where the keys of a
@@ -160,6 +217,14 @@ func (o *Outputs) EncryptionKey() string {
 		return ""
 	}
 	return o.SQL.Encryption.Key
+}
+
+// MCPConfirmationKey is outputs.api.mcpConfirmationKey, or "" (D93).
+func (o *Outputs) MCPConfirmationKey() string {
+	if o == nil || o.API == nil {
+		return ""
+	}
+	return o.API.MCPConfirmationKey
 }
 
 // EngineOutputConfig configures a DB service's engine document (D58): the
@@ -371,6 +436,16 @@ func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 	// Only the TypeScript router serves the MCP endpoint yet (D81).
 	if outputs.APIEnabled() && outputs.API.MCP && (outputs.API.Language == APILanguageGo || outputs.API.Language == APILanguageRust) {
 		return nil, fmt.Errorf("outputs.api.mcp is on and the API's language is %s: %s; set outputs.api.language to TYPESCRIPT, or remove mcp (D81)", outputs.API.Language, APIMCPLanguages)
+	}
+	// The MCP endpoint's confirmation key names a secret as the encryption
+	// key does (D93).
+	if key := outputs.MCPConfirmationKey(); key != "" {
+		if !outputs.API.MCP {
+			return nil, fmt.Errorf("outputs.api.mcpConfirmationKey is set and outputs.api.mcp is off: only the MCP endpoint signs confirmations; turn mcp on, or remove the key (D93)")
+		}
+		if _, _, ok := SplitEncryptionKey(key); !ok {
+			return nil, fmt.Errorf("outputs.api.mcpConfirmationKey %q must name an @envVars Secret<string> by its declaring type and field, such as \"McpKeys.MCP_CONFIRMATION_KEY\" (D93)", key)
+		}
 	}
 
 	// outputs.sql is read strictly: a misspelt key would otherwise leave

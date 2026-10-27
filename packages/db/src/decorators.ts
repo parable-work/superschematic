@@ -121,9 +121,13 @@ export interface ProjectionCollapse {
 }
 
 export interface ProjectionOptions {
-  /** The Postgres schema the view is created in; readers address it as `pool.name`. */
-  readonly pool: string;
-  /** The view's name inside the pool. */
+  /**
+   * The Postgres schema the view is created in; readers address it as
+   * `pool.name`. Unset creates the view beside the service's tables, as a
+   * plain view the ORMs read (D90).
+   */
+  readonly pool?: string;
+  /** The view's name inside the pool, or beside the tables. */
   readonly name: string;
   /**
    * The 14-digit version stamp of the generated migration. An applied
@@ -145,7 +149,8 @@ export interface ProjectionOptions {
  * are the view's columns; each reads `base.<field>` unless `@column` says
  * otherwise. superschematic generates the Postgres view, its migration and
  * its Arrow schema from this one declaration. Only DB schemas declare
- * projections, and a projection is never a table or a language type.
+ * projections. A projection is never a table: the ORMs read it as a row
+ * type of its own, through a read-only repository (D90).
  */
 export function projection<TSource>(_options: ProjectionOptions): ClassDecorator {
   return noopClassDecorator;
@@ -382,6 +387,13 @@ export interface EnqueueOnChangeOptions<TMessage, TTable = any> {
   readonly when?: readonly EnqueueCondition<TTable>[];
   /** Each field of the message the trigger sets, and the table's field whose value it takes. */
   readonly message: { readonly [K in keyof TMessage]?: TableField<TTable> };
+  /**
+   * The migration step that creates the trigger on a table that has rows also enqueues one message for each row
+   * that meets `when`, as an insert of it would, under the queue's `onDuplicate`. Without it only writes after the
+   * trigger exists enqueue; `superschematic stack queue backfill` enqueues for the rows already there. Needs an
+   * insert or an update among `on`.
+   */
+  readonly backfill?: boolean;
 }
 
 /**
@@ -403,6 +415,72 @@ export function enqueueOnChange<TMessage, TTable = any>(
   _queue: abstract new (...args: never[]) => TMessage,
   _options: EnqueueOnChangeOptions<TMessage, TTable>,
 ): ClassDecorator {
+  return noopClassDecorator;
+}
+
+/** The fields of a type, as a query's options name its params' and row's fields. */
+export type QueryField<T> = Extract<keyof T, string>;
+
+/** A query's safe dynamic sort (@query's orderBy). */
+export interface QueryOrderBy<TParams> {
+  /** The parameter that picks the order: an enum field of the params, written in the SQL as :param where ORDER BY's terms go. */
+  readonly param: QueryField<TParams>;
+  /** Each value of the enum and its fixed ORDER BY fragment, such as `li."date" DESC, li.id DESC`. No caller text reaches the SQL. */
+  readonly options: Readonly<Record<string, string>>;
+  /** The option a null param picks; required when the param may be null. */
+  readonly default?: string;
+}
+
+/** A query's keyset paging (@query's page), as findPage pages a table (D60). */
+export interface QueryPage<TRow> {
+  /** The row fields the rows are ordered and paged by, which together tell every row apart: ["date", "id"]. */
+  readonly key: readonly QueryField<TRow>[];
+  /** Orders by the key descending. */
+  readonly desc?: boolean;
+}
+
+/** The options of a declared query (@query). */
+export interface QueryOptions<TParams, TRow> {
+  /** The query's function in the ORMs, orm.queries.<name>: a lower camel case identifier; the class's name, lower camel case, unless set. */
+  readonly name?: string;
+  /**
+   * One SQL statement, each parameter a params field written :field. Every
+   * field of the params is used and every :name is a field; a :: cast and a
+   * string literal are not parameters. Each result column is a row field,
+   * by the field's column name (snake case unless @column names it).
+   */
+  readonly sql: string;
+  /** Row fields the query vouches are never null, which Postgres cannot tell (an aggregate, a computed column); a `-- @notNull field` comment says the same. */
+  readonly notNull?: readonly QueryField<TRow>[];
+  /** An enum parameter that picks one of fixed ORDER BY fragments. */
+  readonly orderBy?: QueryOrderBy<TParams>;
+  /** Reads the rows a page at a time by a keyset of row fields. */
+  readonly page?: QueryPage<TRow>;
+  /** The dialects it runs on; unset is every dialect the service is built for. */
+  readonly dialects?: readonly ("postgres" | "sqlite")[];
+}
+
+/**
+ * A named SQL statement of the DB service, checked against the database
+ * model and generated as a typed function of both ORMs (D86):
+ * `orm.queries.<name>(params)` in TypeScript, `Queries.<Name>(ctx, params)`
+ * in Go. TParams and TRow are types of the schema, a class or an object
+ * type alias each, which are no tables. `superschematic queries verify`
+ * prepares the statement on Postgres and records what it described in the
+ * service's queries.lock.
+ *
+ * ```ts
+ * @query<CategoryTotalsParams, CategoryTotalsRow>({
+ *   name: "categoryTotals",
+ *   sql: `SELECT c.id AS category_id, SUM(li.amount)::bigint AS spent
+ *         FROM line_item li JOIN category c ON c.id = li.category_id
+ *         WHERE li."date" BETWEEN :start AND :end GROUP BY 1`,
+ *   notNull: ["spent"],
+ * })
+ * export abstract class CategoryTotals {}
+ * ```
+ */
+export function query<TParams, TRow>(_options: QueryOptions<TParams, TRow>): ClassDecorator {
   return noopClassDecorator;
 }
 

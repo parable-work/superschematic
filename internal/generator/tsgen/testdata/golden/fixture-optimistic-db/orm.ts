@@ -11,15 +11,24 @@ createOrm(pool, { user, fieldKeys }) acts as a user and holds the keys
 of the Encrypted<T> fields (D85), whose rows hold each one's value in a
 SecretValue.
 A row holds each column by member, a to-one relation's key as <field>Id, a
-UUID in its base62 wire form; withUser(id) or as(ctx.principal) acts as a
-user, whom createdBy, updatedBy and deletedBy record; transaction(fn) runs
-fn in a transaction, whose query takes enqueue's statements too.
+UUID in its base62 wire form. createdBy, updatedBy and deletedBy record the
+acting user: in an operation the router runs, its caller (D87);
+withUser(id) or as(principal) acts as another, and asSystem() as the
+system actor, for a job's or a worker's writes. transaction(fn) runs fn in
+a transaction, whose query takes enqueue's statements too.
+
+A read's options select members and include relations (D90), and its rows
+hold what they name: include: { category: { include: { parent: true } } }
+loads each row's category, and its parent, in one statement per relation.
+A filter reaches through a to-one relation, { category: { parentId: {
+in: ids } } }, and anyOf ORs filters.
 
 Each table's definition also describes its rows for the runtime's
-decodeRow, so a raw query of its columns reads back as its row type.
+decodeRow, so a raw query of its columns reads back as its row type:
+query(text, values, { decode: <table>Table }) reads them so (D89).
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
-import type { DateTimeFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
+import type { DateTimeFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Related, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
 
 /**
@@ -59,6 +68,8 @@ export interface ShelfFilter {
   _version?: NumberFilter<number>;
   /** The rows a Stock row's shelf points at, or none does. */
   referencedByStockShelf?: ReferencedByFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly ShelfFilter[];
 }
 
 /** The members findOne and findMany order rows of Shelf by. */
@@ -67,12 +78,17 @@ export type ShelfOrderField = "id" | "label" | "createdAt" | "createdBy" | "upda
 /** The members findPage orders rows of Shelf by (D60, amended); ties break by id. */
 export type ShelfSortField = "id" | "label" | "createdAt" | "updatedAt";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type ShelfUniqueKey = readonly ["id"];
 
 /** The position of a row of Shelf in a findPage order: its id. */
 export interface ShelfPageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of Shelf includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface ShelfRelations {
+  readonly stocks: Related<StockRow, StockRelations, 'many'>;
 }
 
 /** The repository of Shelf. */
@@ -85,7 +101,8 @@ export type ShelfRepository = SoftDeleteRepository<
   ShelfSortField,
   ShelfUniqueKey,
   T.IdentityUUID,
-  ShelfPageKey
+  ShelfPageKey,
+  ShelfRelations
 >;
 
 /** The shelf table, as the runtime reads and writes it. */
@@ -96,9 +113,9 @@ export const shelfTable: TableDefinition = {
   columns: [
     { name: "id", column: "id", field: "id", qualified: "shelf.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "label", column: "label", field: "label", qualified: "shelf.label", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "shelf.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "shelf.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "createdBy", column: "created_by", field: "createdBy", qualified: "shelf.created_by", uuid: true, required: true, audit: "createdBy" },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "shelf.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "shelf.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "updatedBy", column: "updated_by", field: "updatedBy", qualified: "shelf.updated_by", uuid: true, required: true, audit: "updatedBy" },
     { name: "deletedAt", column: "deleted_at", field: "deletedAt", qualified: "shelf.deleted_at", timestamp: true, audit: "deletedAt" },
     { name: "deletedBy", column: "deleted_by", field: "deletedBy", qualified: "shelf.deleted_by", uuid: true, audit: "deletedBy" },
@@ -107,7 +124,9 @@ export const shelfTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"label\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\", \"_version\"",
     qualifiedColumns: "\"shelf\".\"id\", \"shelf\".\"label\", \"shelf\".\"created_at\", \"shelf\".\"created_by\", \"shelf\".\"updated_at\", \"shelf\".\"updated_by\", \"shelf\".\"deleted_at\", \"shelf\".\"deleted_by\", \"shelf\".\"_version\"",
+    selectColumn: "\"shelf\".\"%s\"",
     getOne: "SELECT \"id\", \"label\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\", \"_version\" FROM shelf WHERE id = $1",
+    getOneFields: "SELECT %s FROM shelf WHERE id = $1",
     getMany: "SELECT \"id\", \"label\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\", \"_version\" FROM shelf WHERE id IN (%s)",
     live: " AND deleted_at IS NULL",
     liveWhere: " WHERE deleted_at IS NULL",
@@ -128,7 +147,7 @@ export const shelfTable: TableDefinition = {
     updateMany: "UPDATE shelf SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO shelf (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s WHERE shelf.deleted_at IS NULL RETURNING \"id\", \"label\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\", \"_version\"",
+    upsert: "INSERT INTO shelf (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"label\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\", \"_version\", (xmax = 0) AS _inserted",
     softDelete: "UPDATE shelf SET deleted_at = $1, deleted_by = $2 WHERE id = $3 AND deleted_at IS NULL",
     softDeleteMany: "UPDATE shelf SET deleted_at = $1, deleted_by = $2%s",
     delete: "DELETE FROM shelf WHERE id = $1",
@@ -136,10 +155,13 @@ export const shelfTable: TableDefinition = {
   },
   softDelete: true,
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"label\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\", \"_version\" FROM shelf WHERE (id) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByStockShelf", probe: "SELECT 1 FROM stock WHERE stock.shelf_id = shelf.id" },
+  ],
+  many: [
+    { name: "stocks", target: "stock", column: "shelfId" },
   ],
 };
 
@@ -176,6 +198,10 @@ export interface StockFilter {
   ingredient?: StringFilter<string>;
   quantity?: NumberFilter<T.GenericInt64>;
   _version?: NumberFilter<number>;
+  /** The rows whose shelf is among the live Shelf rows the filter finds (D90). */
+  shelf?: ShelfFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly StockFilter[];
 }
 
 /** The members findOne and findMany order rows of Stock by. */
@@ -184,12 +210,17 @@ export type StockOrderField = "id" | "ingredient" | "quantity" | "_version";
 /** The members findPage orders rows of Stock by (D60, amended); ties break by id. */
 export type StockSortField = "id" | "ingredient" | "quantity";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type StockUniqueKey = readonly ["id"];
 
 /** The position of a row of Stock in a findPage order: its id. */
 export interface StockPageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of Stock includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface StockRelations {
+  readonly shelf: Related<ShelfRow, ShelfRelations, 'optional'>;
 }
 
 /** The repository of Stock. */
@@ -202,7 +233,8 @@ export type StockRepository = Repository<
   StockSortField,
   StockUniqueKey,
   T.IdentityUUID,
-  StockPageKey
+  StockPageKey,
+  StockRelations
 >;
 
 /** The stock table, as the runtime reads and writes it. */
@@ -220,7 +252,9 @@ export const stockTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"shelf_id\", \"ingredient\", \"quantity\", \"_version\"",
     qualifiedColumns: "\"stock\".\"id\", \"stock\".\"shelf_id\", \"stock\".\"ingredient\", \"stock\".\"quantity\", \"stock\".\"_version\"",
+    selectColumn: "\"stock\".\"%s\"",
     getOne: "SELECT \"id\", \"shelf_id\", \"ingredient\", \"quantity\", \"_version\" FROM stock WHERE id = $1",
+    getOneFields: "SELECT %s FROM stock WHERE id = $1",
     getMany: "SELECT \"id\", \"shelf_id\", \"ingredient\", \"quantity\", \"_version\" FROM stock WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -241,15 +275,18 @@ export const stockTable: TableDefinition = {
     updateMany: "UPDATE stock SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO stock (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"shelf_id\", \"ingredient\", \"quantity\", \"_version\"",
+    upsert: "INSERT INTO stock (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"shelf_id\", \"ingredient\", \"quantity\", \"_version\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM stock WHERE id = $1",
     deleteMany: "DELETE FROM stock%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"shelf_id\", \"ingredient\", \"quantity\", \"_version\" FROM stock WHERE (id) IN (%s)" },
   },
+  relations: [
+    { field: "shelf", column: "shelfId", target: "shelf", probe: "stock.shelf_id IN (SELECT shelf.id FROM shelf%s)" },
+  ],
 };
 
 /** The repositories of fixture-optimistic-db, by table. */
@@ -284,14 +321,23 @@ export const fixtureOptimisticDbOrm: OrmDefinition = {
     pageKey: "page_key.%s",
     placeholder: "$%d",
     default: "DEFAULT",
+    or: " OR ",
+    group: "(%s)",
     where: " WHERE ",
     and: " AND ",
     orderBy: " ORDER BY ",
     orderTerm: "%s %s",
     limit: " LIMIT %d",
     offset: " OFFSET %d",
+    setExcluded: "%s = EXCLUDED.%s",
+    excluded: "EXCLUDED.%s",
+    changed: "(%s) IS DISTINCT FROM (%s)",
+    never: "FALSE",
+    null: "NULL",
+    notIn: "%s NOT IN (%s)",
   },
   defaultLimit: 100,
+  manyLimit: 1000000,
   historyActorCTE: "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",
   clearHistoryActor: "SELECT set_config('superschematic.history_actor_id', '', true)",
   tables: {

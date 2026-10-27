@@ -133,6 +133,15 @@ type TypeDef struct {
 	// this object only; a nested object type opts in on its own.
 	StrictJSON bool `json:"strictJSON,omitempty" yaml:"strictJSON,omitempty"`
 
+	// AllowUnknownFields (@allowUnknownFields) makes every decoder of this
+	// type, in Go, TypeScript, Python and Rust, the servers' input decoding
+	// and the schema runtimes' strict parse, accept a key the type does not
+	// declare and drop it, wherever the type is decoded: as an operation's
+	// input or nested in another type. The declared keys are checked as
+	// before. A type is never both this and StrictJSON or
+	// DenyUnknownFields (D87).
+	AllowUnknownFields bool `json:"allowUnknownFields,omitempty" yaml:"allowUnknownFields,omitempty"`
+
 	// Versioned marks a DB table for generated history tracking.
 	Versioned bool `json:"versioned,omitempty" yaml:"versioned,omitempty"`
 
@@ -171,6 +180,11 @@ type TypeDef struct {
 	// trait (D50). Nil for every other type. See [UserRoleTrait].
 	UserRole *UserRoleTrait `json:"userRole,omitempty" yaml:"userRole,omitempty"`
 
+	// SeedRoles are the roles a UserRole table's @seedRoles declares (D88),
+	// which create.sql inserts and a migration plan keeps in step. Empty
+	// for every other type. See [RoleSeed].
+	SeedRoles []*RoleSeed `json:"seedRoles,omitempty" yaml:"seedRoles,omitempty"`
+
 	// Origin names the declaration the loader expanded this type from:
 	// [OriginVersionGraph] for the graph tables a version graph adds.
 	// Empty for every authored type. The data forms have no key for it.
@@ -193,6 +207,11 @@ type TypeDef struct {
 	// a write to the table's rows (D80), at most one per queue. Empty for
 	// every other type. See [EnqueueOnChange].
 	EnqueueOnChange []*EnqueueOnChange `json:"enqueueOnChange,omitempty" yaml:"enqueueOnChange,omitempty"`
+
+	// Query is the @query declaration of a RoleQuery type: a named SQL
+	// statement of the DB service, with its params and row types (D86).
+	// Nil for every other type. See [QueryDef].
+	Query *QueryDef `json:"query,omitempty" yaml:"query,omitempty"`
 
 	// Stack, Server, Database and Environment are the declarations of a
 	// Stack schema's classes: @stack, @server, @database and @environment

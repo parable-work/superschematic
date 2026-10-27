@@ -23,7 +23,10 @@ const identityFixtureDir = "../../runtime/http/testdata/identity"
 // the identity runtimes read differ. It writes the DDL again under
 // defaults/ with a column the store's insert leaves out, a required
 // active: Default<boolean, false> on the User table, whose DEFAULT the
-// column carries (D83). Rewrite them with:
+// column carries (D83). The stores' tests create and grant their own
+// roles, so the DDL leaves out the role fixture-user-model-db's @seedRoles
+// declares (D88), which TestUserRoutesServerServesTheSDK serves. Rewrite
+// them with:
 //
 //	go test ./internal/generator -run TestIdentityStoreFixtureIsCurrent -update
 func TestIdentityStoreFixtureIsCurrent(t *testing.T) {
@@ -32,12 +35,14 @@ func TestIdentityStoreFixtureIsCurrent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load %s: %v", fixture, err)
 	}
+	withoutSeeds(t, schema)
 	checkIdentityFixture(t, fixture, schema, true)
 
 	withDefault, err := loader.LoadService(filepath.Join(tsFixtures, fixture))
 	if err != nil {
 		t.Fatalf("load %s: %v", fixture, err)
 	}
+	withoutSeeds(t, withDefault)
 	user := withDefault.UserTable()
 	if user == nil {
 		t.Fatalf("%s has no User table", fixture)
@@ -45,6 +50,16 @@ func TestIdentityStoreFixtureIsCurrent(t *testing.T) {
 	inactive := "false"
 	user.Fields = append(user.Fields, &ir.FieldDef{Name: "active", TypeRef: ir.TypeRef{Name: "boolean"}, Required: true, Default: &inactive})
 	checkIdentityFixture(t, fixture, withDefault, false)
+}
+
+// withoutSeeds drops the roles schema's UserRole table seeds.
+func withoutSeeds(t *testing.T, schema *ir.Schema) {
+	t.Helper()
+	roles := schema.UserRoleTable()
+	if roles == nil || len(roles.SeedRoles) == 0 {
+		t.Fatalf("%s seeds no role", schema.Name)
+	}
+	roles.SeedRoles = nil
 }
 
 // checkIdentityFixture compares schema's identity descriptor, when

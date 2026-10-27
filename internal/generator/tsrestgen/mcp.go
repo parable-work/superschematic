@@ -25,6 +25,10 @@ const (
 	// MCPPath is where the router serves the MCP endpoint, the runtime's
 	// MCP_PATH.
 	MCPPath = "/api/mcp"
+	// MCPConfirmationArgument is the tools/call argument a confirmation
+	// token comes back in (D93), the runtime's MCP_CONFIRMATION_ARGUMENT,
+	// so a tool that asks takes no argument of its name.
+	MCPConfirmationArgument = "confirmationToken"
 )
 
 // MCPInfo is the API's MCP endpoint (D81): the router serves its visible
@@ -42,6 +46,10 @@ type MCPInfo struct {
 	// RequiresAuth reports whether the endpoint needs a caller: the
 	// identity runtime authenticates the API, or a route of it needs one.
 	RequiresAuth bool
+	// Confirming are the handles of the tools it runs only once the person
+	// confirms the call (D93), whose confirmations it signs with the
+	// secret outputs.api.mcpConfirmationKey names.
+	Confirming []string
 }
 
 // MCPTool is one tool as mcp.ts declares it, the runtime's McpRouteTool:
@@ -49,7 +57,9 @@ type MCPInfo struct {
 // name, the @docs title and description, tools/schema.json's parameters as
 // the input schema, whether its @docs replay mode only reads, and its _meta
 // with the invocation policy), and the operation whose route a call runs
-// through, with where each argument goes in that route's request.
+// through, with where each argument goes in that route's request, and
+// whether a call runs only once the person confirms it: its policy is one
+// the build's policy confirms (D93).
 type MCPTool struct {
 	Name        string             `json:"name"`
 	Title       string             `json:"title"`
@@ -59,6 +69,7 @@ type MCPTool struct {
 	Meta        map[string]any     `json:"_meta"`
 	Operation   string             `json:"operation"`
 	Arguments   []MCPToolArgument  `json:"arguments"`
+	Confirm     bool               `json:"confirm,omitempty"`
 }
 
 // MCPToolAnnotations are a tool's MCP annotations.
@@ -170,6 +181,16 @@ func mcpInfo(output *APIOutput, apiOutput *apigen.APIOutput, clock codegen.Clock
 		mcpTool, err := routeTool(tool, endpoint)
 		if err != nil {
 			return nil, fmt.Errorf("tsrestgen: MCP tool %s of %s: %w", tool.MCP.Handle, output.SchemaName, err)
+		}
+		// A tool whose policy the build's policy confirms runs once the
+		// person confirms the call, whose token comes back in an argument
+		// of its own (D93).
+		if apiOutput.ToolInvocation.OrDefault().Confirms(tool.MCP.Invocation.Value) {
+			if slices.ContainsFunc(mcpTool.Arguments, func(a MCPToolArgument) bool { return a.Key == MCPConfirmationArgument }) {
+				return nil, fmt.Errorf("tsrestgen: MCP tool %s of %s asks the person before it runs (%s %q), and takes an argument %s, which carries the call's confirmation token (D93); rename the argument", tool.MCP.Handle, output.SchemaName, tool.MCP.Invocation.Key, tool.MCP.Invocation.Value, MCPConfirmationArgument)
+			}
+			mcpTool.Confirm = true
+			info.Confirming = append(info.Confirming, mcpTool.Name)
 		}
 		info.Tools = append(info.Tools, mcpTool)
 	}

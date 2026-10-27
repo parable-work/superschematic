@@ -25,7 +25,9 @@ const vectorsFixture = "fixture-vectors-db"
 // IVFFlat indexes; the module writes and reads signed amounts, decimals and
 // vectors through the repositories, and finds neighbours with Nearest by
 // each metric, through a filter and around a soft-deleted row, in a table
-// whose names @table and @column give and whose note is sealed (D85) too.
+// whose names @table and @column give and whose note is sealed (D85) too;
+// and a filtered Nearest through the HNSW index finds K rows with an
+// iterative scan where its first candidates hold none (D89).
 func TestVectorsAndDecimalsOnPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -101,7 +103,7 @@ func TestVectorsAndDecimalsOnPostgres(t *testing.T) {
 	}
 
 	out := runGeneratedORMModule(t, ormDir, filepath.Join(ddlDir, "create.sql"), "vectors_test.go", vectorsORMTest)
-	for _, test := range []string{"TestVectorsOnPostgres", "TestDecimalsOnPostgres", "TestANamedSealedTableOnPostgres"} {
+	for _, test := range []string{"TestVectorsOnPostgres", "TestDecimalsOnPostgres", "TestANamedSealedTableOnPostgres", "TestAnIterativeScanOnPostgres"} {
 		if !strings.Contains(out, "--- PASS: "+test) {
 			t.Fatalf("the generated ORM module did not run %s", test)
 		}
@@ -419,6 +421,72 @@ func TestANamedSealedTableOnPostgres(t *testing.T) {
 	}
 	if _, err := keyless.Chunk.Nearest(ctx, ChunkVectorEmbedding, query, &ChunkNearestOptions{K: 1, Metric: VectorL2}); err == nil {
 		t.Fatal("Nearest opened a sealed note without the keys")
+	}
+}
+
+// TestAnIterativeScanOnPostgres: 1990 common passages lie near the query
+// and ten rare ones opposite it, which the 40 candidates of hnsw's default
+// ef_search never reach, so a filtered Nearest through the index finds no
+// rare one; with IterativeScan the scan goes on until it has K (D89).
+func TestAnIterativeScanOnPostgres(t *testing.T) {
+	ctx, _, db := openVectors(t)
+	passages := make([]*types.Passage, 2000)
+	for i := range passages {
+		topic, x := "common", float32(1)
+		if i%200 == 0 {
+			topic, x = "rare", -1
+		}
+		passages[i] = &types.Passage{Title: fmt.Sprintf("p%d", i), Topic: topic, Embedding: types.EmbeddingVector{x, float32(math.Sin(float64(i)) * 0.3), float32(math.Cos(float64(i)) * 0.3)}}
+	}
+	if _, err := db.Passage.CreateMany(ctx, passages); err != nil {
+		t.Fatalf("CreateMany: %v", err)
+	}
+	query := types.EmbeddingVector{1, 0, 0}
+	rare := &PassageFilter{Topic: &StringFilter{Eq: func() *string { s := "rare"; return &s }()}}
+	// The index serves the order: no sequential scan and no sort.
+	indexed := func(opts *PassageNearestOptions) []PassageNeighbour {
+		t.Helper()
+		var found []PassageNeighbour
+		if err := db.Transaction(ctx, func(tx TxInterface) error {
+			for _, setting := range []string{"SET LOCAL enable_seqscan = off", "SET LOCAL enable_sort = off"} {
+				if _, err := tx.Exec(ctx, setting); err != nil {
+					return err
+				}
+			}
+			var err error
+			found, err = tx.GetPassageRepository().Nearest(ctx, PassageVectorEmbedding, query, opts)
+			return err
+		}); err != nil {
+			t.Fatalf("Nearest: %v", err)
+		}
+		return found
+	}
+	if found := indexed(&PassageNearestOptions{K: 5, Filter: rare}); len(found) != 0 {
+		t.Fatalf("Nearest without an iterative scan found %d rare passages; the test needs its candidates to hold none", len(found))
+	}
+	relaxed := indexed(&PassageNearestOptions{K: 5, Filter: rare, IterativeScan: IterativeScanRelaxed})
+	if len(relaxed) != 5 {
+		t.Fatalf("Nearest with a relaxed iterative scan found %d rare passages, want 5", len(relaxed))
+	}
+	for _, n := range relaxed {
+		if n.Row.Topic != "rare" {
+			t.Fatalf("Nearest kept %q", n.Row.Topic)
+		}
+	}
+	if strict := indexed(&PassageNearestOptions{K: 5, Filter: rare, IterativeScan: IterativeScanStrict, MaxScanTuples: 5000}); len(strict) != 5 {
+		t.Fatalf("Nearest with a strict iterative scan found %d rare passages, want 5", len(strict))
+	}
+	// Outside a transaction it opens one for its settings, and leaves out
+	// the keys it is told to.
+	own, err := db.Passage.Nearest(ctx, PassageVectorEmbedding, query, &PassageNearestOptions{K: 2, EfSearch: 100, IterativeScan: IterativeScanRelaxed, ExcludeIDs: []types.IdentityUUID{*relaxed[0].Row.Id}})
+	if err != nil || len(own) != 2 || *own[0].Row.Id == *relaxed[0].Row.Id || *own[1].Row.Id == *relaxed[0].Row.Id {
+		t.Fatalf("Nearest leaving out a key = %+v, %v", own, err)
+	}
+	if _, err := db.Passage.Nearest(ctx, PassageVectorEmbedding, query, &PassageNearestOptions{EfSearch: 1001}); err == nil || !strings.Contains(err.Error(), "EfSearch is a whole number from 1 to 1000") {
+		t.Fatalf("an ef_search of 1001 = %v", err)
+	}
+	if _, err := db.Passage.Nearest(ctx, PassageVectorEmbedding, query, &PassageNearestOptions{IterativeScan: "sideways"}); err == nil {
+		t.Fatal("a sideways iterative scan was not refused")
 	}
 }
 `

@@ -42,10 +42,18 @@ func suggestedFieldKeys(service string) string {
 	return "FieldKeys." + strings.ToUpper(codegen.ToSnakeCase(strings.ReplaceAll(service, "-", "_"))) + "_FIELD_KEYS"
 }
 
+// EncryptionKeyDocs is the docs section that says where the keys of
+// Encrypted<T> fields come from, which the key's errors point at.
+const EncryptionKeyDocs = "https://parable-work.github.io/superschematic/guides/database-tables/#encrypted-fields"
+
 // missingEncryptionKey is the error of a DB service with Encrypted<T>
-// fields whose config names no key.
+// fields whose config names no key. It says where the class that declares
+// the field lives, which the key alone does not: each API on the database
+// holds it in its @envVars, so it is declared in the API, or in a General
+// service whose @envVars class the API's extends.
 func missingEncryptionKey(service string) error {
-	return fmt.Errorf("generator: %s has Encrypted<T> fields, whose keys come from an @envVars Secret<string> its config names; set outputs.sql.encryption.key in %s's config to the field's declaring type and name, such as %q", service, service, suggestedFieldKeys(service))
+	return fmt.Errorf("generator: %s has Encrypted<T> fields, whose keys come from an @envVars Secret<string> its config names; set outputs.sql.encryption.key in %s's config to the field's declaring type and name, such as %q, and declare that @envVars class in each API on %s, or in a General service whose @envVars class each such API's extends (see %s)",
+		service, service, suggestedFieldKeys(service), service, EncryptionKeyDocs)
 }
 
 // checkEncryptionKey refuses the build of a DB schema with an Encrypted<T>
@@ -97,9 +105,20 @@ func (r run) fieldKeysField(db string, dbSchema *ir.Schema) (*ir.FieldDef, error
 	}
 	typeName, field, _ := registry.SplitEncryptionKey(key)
 	needs := fmt.Sprintf("%s opens the ORM of %s, whose Encrypted<T> fields take their keys from the secret %s (outputs.sql.encryption.key in %s's config)", r.Config.Name, db, key, db)
-	fix := fmt.Sprintf("declare %s: Secret<string> in a class %s, and make %s's @envVars class %s or extend it", field, typeName, r.Config.Name, typeName)
-	for _, name := range slices.Sorted(maps.Keys(r.Schema.Types)) {
-		td := r.Schema.Types[name]
+	fd, problem := envVarsSecret(r.Schema, typeName, field)
+	if fd == nil {
+		return nil, fmt.Errorf("generator: %s, and %s; %s", needs, problem, r.envVarsSecretFix(typeName, field, EncryptionKeyDocs))
+	}
+	return fd, nil
+}
+
+// envVarsSecret is the field of schema's @envVars classes that is the
+// secret typeName.field, as a stack names one, or why there is none: no
+// class holds a field of its name, the one that does is another class's
+// secret, or it is no required Secret<string>.
+func envVarsSecret(schema *ir.Schema, typeName, field string) (*ir.FieldDef, string) {
+	for _, name := range slices.Sorted(maps.Keys(schema.Types)) {
+		td := schema.Types[name]
 		if !td.EnvVars {
 			continue
 		}
@@ -113,12 +132,19 @@ func (r run) fieldKeysField(db string, dbSchema *ir.Schema) (*ir.FieldDef, error
 			}
 			switch {
 			case declared != typeName:
-				return nil, fmt.Errorf("generator: %s, and its @envVars field %s is declared by %s, so it is the secret %s.%s; %s", needs, field, declared, declared, field, fix)
+				return nil, fmt.Sprintf("its @envVars field %s is declared by %s, so it is the secret %s.%s", field, declared, declared, field)
 			case !fd.Secret || fd.TypeRef.Name != "string" || fd.TypeRef.IsArray || fd.TypeRef.IsMap || !fd.Required:
-				return nil, fmt.Errorf("generator: %s, and its @envVars field %s is no required Secret<string>; %s", needs, field, fix)
+				return nil, fmt.Sprintf("its @envVars field %s is no required Secret<string>", field)
 			}
-			return fd, nil
+			return fd, ""
 		}
 	}
-	return nil, fmt.Errorf("generator: %s, and its @envVars class holds no field %s; %s", needs, field, fix)
+	return nil, fmt.Sprintf("its @envVars class holds no field %s", field)
+}
+
+// envVarsSecretFix says how the API holds the secret typeName.field: where
+// the class that declares it lives, and the docs section that says more.
+func (r run) envVarsSecretFix(typeName, field, docs string) string {
+	return fmt.Sprintf("declare %s: Secret<string> in an @envVars class %s, in %s's schema or in a General service %s depends on, and make %s's @envVars class %s or extend it (see %s)",
+		field, typeName, r.Config.Name, r.Config.Name, r.Config.Name, typeName, docs)
 }

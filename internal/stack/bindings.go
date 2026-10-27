@@ -105,12 +105,25 @@ func (r *resolver) deriveEdges() {
 
 // deriveSiteEdges gives a site a site edge to the server of each API it
 // calls, which must be exposed: the browser reaches the API at its public
-// address (D55).
+// address (D55). An API the site serves on its own origin (D91) needs no
+// exposure when its server is on the site's provider, whose site platform
+// reaches it; on another provider the site's origin forwards to its public
+// address, so it must be exposed.
 func (r *resolver) deriveSiteEdges(d *deployable) {
 	for _, callee := range d.res.Calls {
 		server, ok := r.deployables[r.byService[callee.Name]]
 		if !ok {
 			continue // collectMembers reported it
+		}
+		origin := d.res.Site.OriginAPI(callee.Name) != nil
+		if origin && server.platform.Provider == d.platform.Provider {
+			r.addEdge(ir.EdgeSite, d, callee.Name)
+			continue
+		}
+		if origin && !server.res.Exposed {
+			r.fail(CodeCrossProviderUnexposed, "site %s on %s (%s) serves %s on its origin, whose server %s on %s (%s) the stack does not expose; the origin forwards to a server of another provider only at its public address, so add %s to @stack's expose",
+				d.res.Name, d.platform.Name, d.platform.Provider, callee.Name, server.res.Name, server.platform.Name, server.platform.Provider, callee.Name)
+			continue
 		}
 		if !server.res.Exposed {
 			r.fail(CodeSiteCallsUnexposed, "site %s calls %s, whose server %s the stack does not expose; a browser reaches only an exposed API, so add %s to @stack's expose", d.res.Name, callee.Name, server.res.Name, callee.Name)

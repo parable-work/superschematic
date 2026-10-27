@@ -96,6 +96,7 @@ kinds, decorators, documents, generators, auth providers and subcommands.`, name
 	root.AddCommand(newBuildCmd(a))
 	root.AddCommand(newBuildAllCmd(a))
 	root.AddCommand(newMigrateCmd(a))
+	root.AddCommand(newQueriesCmd(a))
 	root.AddCommand(newJSONSchemaCmd(a))
 	root.AddCommand(newFormatCmd(a))
 	root.AddCommand(newBehaviorsCmd(a))

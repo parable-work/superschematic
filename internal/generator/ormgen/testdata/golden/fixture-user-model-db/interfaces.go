@@ -20,6 +20,8 @@ type RoleRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.Role) (*types.Role, error)
 	CreateMany(ctx context.Context, inputs []*types.Role) ([]*types.Role, error)
 	UpsertOne(ctx context.Context, input *types.Role, on RoleUniqueKey, update *RoleUpdate) (*types.Role, error)
+	UpsertOneResult(ctx context.Context, input *types.Role, on RoleUniqueKey, update *RoleUpdate, opts *UpsertOptions) (UpsertResult[*types.Role], error)
+	UpsertMany(ctx context.Context, inputs []*types.Role, on RoleUniqueKey, update RoleFields, opts *UpsertOptions) ([]UpsertResult[*types.Role], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RoleUpdate) (*types.Role, error)
 	UpdateMany(ctx context.Context, filter *RoleFilter, update *RoleUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -36,6 +38,8 @@ type SessionRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.Session) (*types.Session, error)
 	CreateMany(ctx context.Context, inputs []*types.Session) ([]*types.Session, error)
 	UpsertOne(ctx context.Context, input *types.Session, on SessionUniqueKey, update *SessionUpdate) (*types.Session, error)
+	UpsertOneResult(ctx context.Context, input *types.Session, on SessionUniqueKey, update *SessionUpdate, opts *UpsertOptions) (UpsertResult[*types.Session], error)
+	UpsertMany(ctx context.Context, inputs []*types.Session, on SessionUniqueKey, update SessionFields, opts *UpsertOptions) ([]UpsertResult[*types.Session], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *SessionUpdate) (*types.Session, error)
 	UpdateMany(ctx context.Context, filter *SessionFilter, update *SessionUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -52,6 +56,8 @@ type UserRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.User) (*types.User, error)
 	CreateMany(ctx context.Context, inputs []*types.User) ([]*types.User, error)
 	UpsertOne(ctx context.Context, input *types.User, on UserUniqueKey, update *UserUpdate) (*types.User, error)
+	UpsertOneResult(ctx context.Context, input *types.User, on UserUniqueKey, update *UserUpdate, opts *UpsertOptions) (UpsertResult[*types.User], error)
+	UpsertMany(ctx context.Context, inputs []*types.User, on UserUniqueKey, update UserFields, opts *UpsertOptions) ([]UpsertResult[*types.User], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *UserUpdate) (*types.User, error)
 	UpdateMany(ctx context.Context, filter *UserFilter, update *UserUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -68,6 +74,8 @@ type UserCredentialRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.UserCredential) (*types.UserCredential, error)
 	CreateMany(ctx context.Context, inputs []*types.UserCredential) ([]*types.UserCredential, error)
 	UpsertOne(ctx context.Context, input *types.UserCredential, on UserCredentialUniqueKey, update *UserCredentialUpdate) (*types.UserCredential, error)
+	UpsertOneResult(ctx context.Context, input *types.UserCredential, on UserCredentialUniqueKey, update *UserCredentialUpdate, opts *UpsertOptions) (UpsertResult[*types.UserCredential], error)
+	UpsertMany(ctx context.Context, inputs []*types.UserCredential, on UserCredentialUniqueKey, update UserCredentialFields, opts *UpsertOptions) ([]UpsertResult[*types.UserCredential], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *UserCredentialUpdate) (*types.UserCredential, error)
 	UpdateMany(ctx context.Context, filter *UserCredentialFilter, update *UserCredentialUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -84,6 +92,8 @@ type UserRoleGrantRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.UserRoleGrant) (*types.UserRoleGrant, error)
 	CreateMany(ctx context.Context, inputs []*types.UserRoleGrant) ([]*types.UserRoleGrant, error)
 	UpsertOne(ctx context.Context, input *types.UserRoleGrant, on UserRoleGrantUniqueKey, update *UserRoleGrantUpdate) (*types.UserRoleGrant, error)
+	UpsertOneResult(ctx context.Context, input *types.UserRoleGrant, on UserRoleGrantUniqueKey, update *UserRoleGrantUpdate, opts *UpsertOptions) (UpsertResult[*types.UserRoleGrant], error)
+	UpsertMany(ctx context.Context, inputs []*types.UserRoleGrant, on UserRoleGrantUniqueKey, update UserRoleGrantFields, opts *UpsertOptions) ([]UpsertResult[*types.UserRoleGrant], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *UserRoleGrantUpdate) (*types.UserRoleGrant, error)
 	UpdateMany(ctx context.Context, filter *UserRoleGrantFilter, update *UserRoleGrantUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -93,6 +103,7 @@ type UserRoleGrantRepositoryInterface interface {
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
+	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
 	Ping(ctx context.Context) error
 	Close()
 	GetRoleRepository() RoleRepositoryInterface
@@ -106,6 +117,7 @@ type DatabaseInterface interface {
 type TxInterface interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetRoleRepository() RoleRepositoryInterface
 	GetSessionRepository() SessionRepositoryInterface
 	GetUserRepository() UserRepositoryInterface
@@ -152,6 +164,17 @@ func NewNoOpDatabase() *NoOpDatabase {
 // Transaction executes the callback with a deterministic no-op transaction.
 func (db *NoOpDatabase) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(db.tx)
+}
+
+// TransactionWith executes the callback with a deterministic no-op
+// transaction, whatever its options.
+func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(TxInterface) error) error {
+	return fn(db.tx)
+}
+
+// Transaction executes the callback with the same no-op transaction.
+func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
+	return fn(tx)
 }
 
 // Ping always succeeds for no-op database.
@@ -228,6 +251,18 @@ func (r *NoOpRoleRepository) UpsertOne(_ context.Context, input *types.Role, _ R
 	return input, nil
 }
 
+func (r *NoOpRoleRepository) UpsertOneResult(_ context.Context, input *types.Role, _ RoleUniqueKey, _ *RoleUpdate, _ *UpsertOptions) (UpsertResult[*types.Role], error) {
+	return UpsertResult[*types.Role]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpRoleRepository) UpsertMany(_ context.Context, inputs []*types.Role, _ RoleUniqueKey, _ RoleFields, _ *UpsertOptions) ([]UpsertResult[*types.Role], error) {
+	results := make([]UpsertResult[*types.Role], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Role]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
 func (r *NoOpRoleRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *RoleUpdate) (*types.Role, error) {
 	return nil, ErrNotFound
 }
@@ -288,6 +323,18 @@ func (r *NoOpSessionRepository) CreateMany(_ context.Context, inputs []*types.Se
 
 func (r *NoOpSessionRepository) UpsertOne(_ context.Context, input *types.Session, _ SessionUniqueKey, _ *SessionUpdate) (*types.Session, error) {
 	return input, nil
+}
+
+func (r *NoOpSessionRepository) UpsertOneResult(_ context.Context, input *types.Session, _ SessionUniqueKey, _ *SessionUpdate, _ *UpsertOptions) (UpsertResult[*types.Session], error) {
+	return UpsertResult[*types.Session]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpSessionRepository) UpsertMany(_ context.Context, inputs []*types.Session, _ SessionUniqueKey, _ SessionFields, _ *UpsertOptions) ([]UpsertResult[*types.Session], error) {
+	results := make([]UpsertResult[*types.Session], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Session]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
 }
 
 func (r *NoOpSessionRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *SessionUpdate) (*types.Session, error) {
@@ -352,6 +399,18 @@ func (r *NoOpUserRepository) UpsertOne(_ context.Context, input *types.User, _ U
 	return input, nil
 }
 
+func (r *NoOpUserRepository) UpsertOneResult(_ context.Context, input *types.User, _ UserUniqueKey, _ *UserUpdate, _ *UpsertOptions) (UpsertResult[*types.User], error) {
+	return UpsertResult[*types.User]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpUserRepository) UpsertMany(_ context.Context, inputs []*types.User, _ UserUniqueKey, _ UserFields, _ *UpsertOptions) ([]UpsertResult[*types.User], error) {
+	results := make([]UpsertResult[*types.User], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.User]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
 func (r *NoOpUserRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *UserUpdate) (*types.User, error) {
 	return nil, ErrNotFound
 }
@@ -414,6 +473,18 @@ func (r *NoOpUserCredentialRepository) UpsertOne(_ context.Context, input *types
 	return input, nil
 }
 
+func (r *NoOpUserCredentialRepository) UpsertOneResult(_ context.Context, input *types.UserCredential, _ UserCredentialUniqueKey, _ *UserCredentialUpdate, _ *UpsertOptions) (UpsertResult[*types.UserCredential], error) {
+	return UpsertResult[*types.UserCredential]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpUserCredentialRepository) UpsertMany(_ context.Context, inputs []*types.UserCredential, _ UserCredentialUniqueKey, _ UserCredentialFields, _ *UpsertOptions) ([]UpsertResult[*types.UserCredential], error) {
+	results := make([]UpsertResult[*types.UserCredential], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.UserCredential]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
 func (r *NoOpUserCredentialRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *UserCredentialUpdate) (*types.UserCredential, error) {
 	return nil, ErrNotFound
 }
@@ -474,6 +545,18 @@ func (r *NoOpUserRoleGrantRepository) CreateMany(_ context.Context, inputs []*ty
 
 func (r *NoOpUserRoleGrantRepository) UpsertOne(_ context.Context, input *types.UserRoleGrant, _ UserRoleGrantUniqueKey, _ *UserRoleGrantUpdate) (*types.UserRoleGrant, error) {
 	return input, nil
+}
+
+func (r *NoOpUserRoleGrantRepository) UpsertOneResult(_ context.Context, input *types.UserRoleGrant, _ UserRoleGrantUniqueKey, _ *UserRoleGrantUpdate, _ *UpsertOptions) (UpsertResult[*types.UserRoleGrant], error) {
+	return UpsertResult[*types.UserRoleGrant]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpUserRoleGrantRepository) UpsertMany(_ context.Context, inputs []*types.UserRoleGrant, _ UserRoleGrantUniqueKey, _ UserRoleGrantFields, _ *UpsertOptions) ([]UpsertResult[*types.UserRoleGrant], error) {
+	results := make([]UpsertResult[*types.UserRoleGrant], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.UserRoleGrant]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
 }
 
 func (r *NoOpUserRoleGrantRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *UserRoleGrantUpdate) (*types.UserRoleGrant, error) {

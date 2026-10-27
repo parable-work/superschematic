@@ -155,6 +155,8 @@ func TestEnqueueOnChangeOf(t *testing.T) {
 		{map[string]any{"on": []any{"insert"}, "when": []any{map[string]any{"field": "a", "isNull": false}}, "message": map[string]any{"a": "id"}}, "write isNull: true"},
 		{map[string]any{"on": []any{"insert"}, "when": []any{map[string]any{"field": "a", "equals": nil}}, "message": map[string]any{"a": "id"}}, "write isNull: true"},
 		{map[string]any{"on": []any{"insert"}, "message": map[string]any{"a": "id"}, "where": "x"}, `has no option "where"`},
+		{map[string]any{"on": []any{"insert"}, "message": map[string]any{"a": "id"}, "backfill": "yes"}, "backfill is true or false"},
+		{map[string]any{"on": []any{"delete"}, "message": map[string]any{"a": "id"}, "backfill": true}, "on names neither insert nor update"},
 	} {
 		_, err := enqueueOnChangeOf([]any{queue, tc.options})
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -163,5 +165,41 @@ func TestEnqueueOnChangeOf(t *testing.T) {
 	}
 	if _, err := enqueueOnChangeOf([]any{"EmbedLineItem", map[string]any{}}); err == nil || !strings.Contains(err.Error(), "takes the @queue class") {
 		t.Errorf("enqueueOnChangeOf of a string queue = %v", err)
+	}
+	backfill, err := enqueueOnChangeOf([]any{queue, map[string]any{"on": []any{"insert"}, "message": map[string]any{"a": "id"}, "backfill": true}})
+	if err != nil || !backfill.Backfill {
+		t.Errorf("enqueueOnChangeOf with backfill (D88) = %+v, %v", backfill, err)
+	}
+}
+
+// TestRoleSeedsOf reads @seedRoles's roles in order, an empty list of
+// permissions among them, and refuses each malformed one (D88).
+func TestRoleSeedsOf(t *testing.T) {
+	seeds, err := roleSeedsOf([]any{[]any{
+		map[string]any{"name": "member", "permissions": []any{"orders.read", "orders.write"}},
+		map[string]any{"name": "guest", "permissions": []any{}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seeds) != 2 || seeds[0].Name != "member" || strings.Join(seeds[0].Permissions, ",") != "orders.read,orders.write" ||
+		seeds[1].Name != "guest" || seeds[1].Permissions == nil || len(seeds[1].Permissions) != 0 {
+		t.Errorf("roleSeedsOf = %+v", seeds)
+	}
+	for _, tc := range []struct {
+		args []any
+		want string
+	}{
+		{nil, "takes one list of roles"},
+		{[]any{[]any{}}, "a list of one or more roles"},
+		{[]any{[]any{"member"}}, "write { name, permissions }"},
+		{[]any{[]any{map[string]any{"name": "member"}}}, "needs a name and permissions"},
+		{[]any{[]any{map[string]any{"name": 1.0, "permissions": []any{}}}}, "name is 1; it is a string"},
+		{[]any{[]any{map[string]any{"name": "member", "permissions": []any{1.0}}}}, "permissions: want a list of strings"},
+		{[]any{[]any{map[string]any{"name": "member", "permissions": []any{}, "grants": true}}}, `has no key "grants"`},
+	} {
+		if _, err := roleSeedsOf(tc.args); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("roleSeedsOf(%v) = %v, want %q", tc.args, err, tc.want)
+		}
 	}
 }

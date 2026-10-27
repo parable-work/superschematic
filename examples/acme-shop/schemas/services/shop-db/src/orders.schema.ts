@@ -58,7 +58,7 @@ export abstract class Order extends Auditable {
 
   status: Default<OrderStatus, OrderStatus.Placed>;
 
-  placedAt: Temporal.DateTime;
+  placedAt: Default<Temporal.DateTime, "now">;
 
   // Where the order ships.
   shippingAddress: ShippingAddress;

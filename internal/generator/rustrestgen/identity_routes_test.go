@@ -418,7 +418,8 @@ async fn bearer_session(implementations: Implementations) {
     let me = ada.account.me(None).await.unwrap();
     assert_eq!((me.user.login.as_str(), me.user.name.as_str()), ("ada@example.com", "Ada"));
     assert_eq!(me.roles.iter().map(|role| role.name.as_str()).collect::<Vec<_>>(), ["member"]);
-    assert!(me.permissions.is_empty(), "{me:?}");
+    // member carries identity.roles.read, which the DDL seeds (D88).
+    assert_eq!(me.permissions, ["identity.roles.read"], "{me:?}");
     assert_eq!(ada.greeting.greet(None).await.unwrap().message, "Hello, Ada");
     let capabilities = ada.account.capabilities(None).await.unwrap().operations;
     for (operation, admitted) in [
