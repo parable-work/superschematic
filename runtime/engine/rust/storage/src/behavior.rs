@@ -611,7 +611,15 @@ impl<'t, 'db> BehaviorSql<'t, 'db> {
                 let config = fulltext::config_name(self.prefix, name);
                 match unaccent {
                     fulltext::Unaccent::Required => {
-                        let extension = self.unaccent_schema()?;
+                        let extension = self.unaccent_schema()?.map_err(|failure| {
+                            Error::behavior(
+                                self.behavior,
+                                format!(
+                                    "full-text search on Postgres needs the unaccent extension, which the database does not have and the engine could not create in schema {} ({failure}); have an administrator run CREATE EXTENSION unaccent",
+                                    fulltext::EXTENSION_SCHEMA,
+                                ),
+                            )
+                        })?;
                         for statement in
                             fulltext::postgres_create(&table, &config, &extension, columns)
                         {
@@ -623,14 +631,19 @@ impl<'t, 'db> BehaviorSql<'t, 'db> {
                         // unaccent where the database has it or the engine
                         // may create it, and the role may use it; else
                         // simple alone. Each try in a savepoint, so a
-                        // refusal leaves the migration running.
-                        let mapped = match self.unaccent_schema() {
-                            Ok(extension) => self
-                                .tx
-                                .savepoint(|tx| {
-                                    tx.exec(fulltext::postgres_mapping(&config, Some(&extension)))
-                                })
-                                .is_ok(),
+                        // refusal leaves the migration running. Only a
+                        // refusal falls back: any other error (a lock or
+                        // statement timeout, a lost connection) is the
+                        // migration's, and fails it, rather than leave an
+                        // index made without unaccent for good.
+                        let mapped = match self.unaccent_schema()? {
+                            Ok(extension) => match self.tx.savepoint(|tx| {
+                                tx.exec(fulltext::postgres_mapping(&config, Some(&extension)))
+                            }) {
+                                Ok(_) => true,
+                                Err(error) if fulltext::unaccent_unavailable(&error) => false,
+                                Err(error) => return Err(error),
+                            },
                             Err(_) => false,
                         };
                         if !mapped {
@@ -704,36 +717,38 @@ impl<'t, 'db> BehaviorSql<'t, 'db> {
     // in, created in fulltext::EXTENSION_SCHEMA when it has none. Each
     // create runs in a savepoint: another engine creating it at the same
     // moment fails it as a duplicate, and leaves it there.
-    fn unaccent_schema(&self) -> Result<String> {
+    // unaccent_schema is the schema `unaccent` lives in, created in
+    // EXTENSION_SCHEMA when the database lacks it; `Ok(Err(failure))` when
+    // the database refuses the engine its create
+    // (fulltext::unaccent_unavailable), and any other error the
+    // migration's.
+    fn unaccent_schema(&self) -> Result<std::result::Result<String, String>> {
         let found = |tx: &Tx<'_>| -> Result<Option<String>> {
             tx.get(fulltext::UNACCENT_SCHEMA, &[])?
                 .map(|row| row.text("schema").map(str::to_owned))
                 .transpose()
         };
         if let Some(schema) = found(self.tx)? {
-            return Ok(schema);
+            return Ok(Ok(schema));
         }
         let mut failure = None;
         for statement in fulltext::unaccent_create() {
             if let Err(error) = self.tx.savepoint(|tx| tx.exec(statement.as_str())) {
                 let duplicate = matches!(error.sqlstate(), Some("23505" | "42P06" | "42710"));
-                if !duplicate {
-                    failure = Some(error.to_string());
-                    break;
+                if duplicate {
+                    continue;
                 }
+                if !fulltext::unaccent_unavailable(&error) {
+                    return Err(error);
+                }
+                failure = Some(error.to_string());
+                break;
             }
         }
-        match (found(self.tx)?, failure) {
+        Ok(match (found(self.tx)?, failure) {
             (Some(schema), _) => Ok(schema),
-            (None, failure) => Err(Error::behavior(
-                self.behavior,
-                format!(
-                    "full-text search on Postgres needs the unaccent extension, which the database does not have and the engine could not create in schema {} ({}); have an administrator run CREATE EXTENSION unaccent",
-                    fulltext::EXTENSION_SCHEMA,
-                    failure.unwrap_or_else(|| "it is still missing".to_owned())
-                ),
-            )),
-        }
+            (None, failure) => Err(failure.unwrap_or_else(|| "it is still missing".to_owned())),
+        })
     }
 
     fn writable(&self) -> Result<()> {

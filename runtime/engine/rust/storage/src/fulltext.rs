@@ -739,6 +739,27 @@ pub enum Unaccent {
     IfAvailable,
 }
 
+/// The SQLSTATEs that say the database will not give the engine
+/// `unaccent`, which [`Unaccent::IfAvailable`] answers with an index that
+/// folds case alone: `42501` insufficient_privilege (no `CREATE` on the
+/// database, the schema or the extension's objects), `0A000`
+/// feature_not_supported (Postgres 15 on: the extension is not
+/// installed), `58P01` undefined_file (before 15: no control file),
+/// `42704` undefined_object (no `unaccent` dictionary), `3F000`
+/// invalid_schema_name and `42883` undefined_function.
+pub(crate) const UNACCENT_UNAVAILABLE: [&str; 6] =
+    ["42501", "0A000", "58P01", "42704", "3F000", "42883"];
+
+/// Whether an error says `unaccent` is not available or not permitted
+/// ([`UNACCENT_UNAVAILABLE`]), rather than that the migration failed
+/// otherwise: a lock or statement timeout, a lost connection or any other
+/// error is the migration's, and propagates.
+pub(crate) fn unaccent_unavailable(error: &Error) -> bool {
+    error
+        .sqlstate()
+        .is_some_and(|state| UNACCENT_UNAVAILABLE.contains(&state))
+}
+
 /// The statement that finds the schema `unaccent` lives in (Postgres).
 pub(crate) const UNACCENT_SCHEMA: &str = "SELECT n.nspname::text AS schema
      FROM pg_catalog.pg_extension AS e
@@ -1085,6 +1106,37 @@ pub(crate) fn query_problems(query: &FullTextQuery<'_>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_refusal_of_unaccent_falls_back_to_simple() {
+        use crate::error::DbCode;
+        let postgres = |state: &str| Error::Database {
+            code: DbCode::Postgres(state.to_owned()),
+            message: state.to_owned(),
+        };
+        for state in UNACCENT_UNAVAILABLE {
+            assert!(unaccent_unavailable(&postgres(state)), "{state}");
+        }
+        // A lock or statement timeout, a deadlock, a serialization failure,
+        // a read-only transaction or a lost connection is the migration's
+        // own failure, never a reason to index without unaccent.
+        for state in [
+            "55P03", "57014", "40P01", "40001", "25006", "08006", "XX000",
+        ] {
+            assert!(!unaccent_unavailable(&postgres(state)), "{state}");
+        }
+        assert!(!unaccent_unavailable(&Error::Busy {
+            code: Some(DbCode::Postgres("55P03".into())),
+            message: "lock timeout".into(),
+        }));
+        assert!(!unaccent_unavailable(&Error::Connection {
+            message: "the server closed the connection".into(),
+        }));
+        assert!(!unaccent_unavailable(&Error::Database {
+            code: DbCode::Sqlite(1),
+            message: "no".into(),
+        }));
+    }
 
     fn translated(expression: &str) -> String {
         tsquery(expression).unwrap_or_else(|refusal| panic!("{expression}: {refusal}"))
