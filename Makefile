@@ -116,11 +116,13 @@ go-lint:
 
 # Rewrite every golden file from the generators, and the schema-file JSON
 # Schema and TypeScript types. Review the diff by eye. Each package's tests
-# run from the Go module that holds it.
+# run from the Go module that holds it, with an hour each: with the
+# TypeScript gates on, extensions/topcoat's alone outrun go test's ten
+# minutes.
 go-goldens: schema-file-types
 	@for p in $$(grep -rl 'flag.Bool("update"' --include='*_test.go' . | grep -v '^./third_party/' | xargs -n1 dirname | sort -u); do \
 		p=./$${p#./}; m=$$p; while [ ! -f $$m/go.mod ]; do m=$$(dirname $$m); done; \
-		(cd $$m && go test -count=1 .$${p#$$m} -update) || exit 1; done
+		(cd $$m && go test -count=1 -timeout 60m .$${p#$$m} -update) || exit 1; done
 
 # The TypeScript and Python scalar catalogs are written from the superscalar
 # Go package, the TypeScript one with each scalar's value class from the
