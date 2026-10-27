@@ -995,7 +995,7 @@ describe('acting for a subject (D77)', () => {
     await post('bob', { body: 'Looking.', thread: thread.id });
     // The agent holds actFor and the mount honors the header: the reply is
     // the agent's, written for Alice, mentioning her.
-    const reply = await post('agent', { body: 'The totals are off by one in March.', thread: thread.id, mentions: ['alice'] }, actingFor('alice'));
+    const reply = await post('agent', { body: 'Totals are off by one in March', thread: thread.id, mentions: ['alice'] }, actingFor('alice'));
     assert.deepEqual([reply.author, reply.for], ['agent', 'alice']);
     const [event] = engine.events.read(everything, { schema: 'Review', instanceId: 'r1', beside: true }).events.slice(-1);
     assert.deepEqual([event?.actor, event?.for], ['agent', 'alice']);
@@ -1007,12 +1007,18 @@ describe('acting for a subject (D77)', () => {
       claimed.items.filter((item) => item.message === reply.id).map((item) => [item.subject, item.reasons, item.author, item.for]),
       [['bob', ['reply'], 'agent', 'alice']]
     );
-    // searchMessages finds it, with whom it was for.
+    // searchMessages finds it, with whom it was for. (Its words match from
+    // its first to its last, so both databases write the same snippet.)
     const found = await data(call(app, 'POST', '/namespaces/default/behaviors/Comments/operations/searchMessages', { token: 'alice', body: { query: 'totals march' } }));
     assert.deepEqual(
       found.items.map((item: Record<string, unknown>) => [item.instanceId, item.message, item.thread, item.author, item.for, item.rank]),
       [['r1', reply.id, thread.id, 'agent', 'alice', 1]]
     );
+    assert.deepEqual(found.items[0].snippet, [
+      { text: 'Totals', match: true },
+      { text: ' are off by one in ', match: false },
+      { text: 'March', match: true },
+    ]);
     assert.equal(found.next, null);
   });
 
