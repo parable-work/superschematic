@@ -81,6 +81,14 @@
       "type": "string",
       "description": "Derived: a member of DEPS_DB_DATABASE, the database connection of deps-db, which the platform sets."
     },
+    "DEPS_DB_DATABASE_HYPERDRIVE_BINDING": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_DB_DATABASE, the database connection of deps-db, which the platform sets."
+    },
+    "DEPS_DB_DATABASE_HYPERDRIVE_CONFIG": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_DB_DATABASE, the database connection of deps-db, which the platform sets."
+    },
     "DEPS_DB_DATABASE_URL": {
       "type": "string",
       "description": "Derived: a member of DEPS_DB_DATABASE, the database connection of deps-db, which the platform sets."
@@ -175,7 +183,9 @@
           "DEPS_DB_DATABASE_CLOUD_SQL_DATABASE",
           "DEPS_DB_DATABASE_CLOUD_SQL_USER",
           "DEPS_DB_DATABASE_D1_BINDING",
-          "DEPS_DB_DATABASE_D1_DATABASE"
+          "DEPS_DB_DATABASE_D1_DATABASE",
+          "DEPS_DB_DATABASE_HYPERDRIVE_BINDING",
+          "DEPS_DB_DATABASE_HYPERDRIVE_CONFIG"
         ]
       },
       {

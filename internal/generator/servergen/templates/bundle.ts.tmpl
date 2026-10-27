@@ -18,6 +18,19 @@
 // ./workers-telemetry carries a span's context in AsyncLocalStorage, which
 // the Worker's nodejs_als compatibility flag gives (D64, amended).
 //
+{{- if .NodeCompat }}
+// The {{ .Kind }} reaches Postgres through Hyperdrive with node-postgres, which
+// imports Node's modules, by their bare names and through require (D92), so
+// its Worker runs with them: Node's modules come with the compatibility
+// date the extension pins, and the Worker's version names nodejs_compat
+// under an earlier one. Each Node module is kept external by its node:
+// name, and a require of one resolves to a module that imports it, since an
+// ES module has no require.
+//
+// Either way it fails on what a Worker cannot run, which it reads from the
+// build's metafile: a bun: module, a WebAssembly module other than
+// superscalar's, and a use of Bun's global.
+{{- else }}
 // Either way it fails on what a Worker without nodejs_compat cannot run,
 // which it reads from the build's metafile, since Bun's browser target
 // replaces a node: module with a polyfill or an empty one that leaves no
@@ -25,10 +38,15 @@
 // node:async_hooks, a Node builtin named without node: (async_hooks too,
 // which only its node: name keeps external), a bun: module, a WebAssembly module other than
 // superscalar's, and a use of Bun's global.
+{{- end }}
 
 import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
+{{- if .NodeCompat }}
+import { builtinModules } from 'node:module';
+import type { BunPlugin } from 'bun';
+{{- end }}
 
 /** The module the bundle runs, the Worker's entrypoint. */
 const ENTRY = {{ tsQuote .BundleEntry }};
@@ -49,9 +67,39 @@ const WASM = 'superscalar_wasm_bg.wasm';
  * passes.
  */
 const BUN_GLOBAL = '__superschematic_bun_global__';
+{{- if .NodeCompat }}
+
+/** Node's modules, by their names without node:, which the Worker runs with (D92). */
+const NODE_MODULES = new Set(builtinModules.map(name => name.replace(/^node:/, '')).filter(name => !name.startsWith('_')));
+
+/** The namespace of the module a require of a Node module resolves to, which imports it. */
+const REQUIRED_NODE_MODULE = 'superschematic-required-node-module';
+
+/**
+ * Keeps each Node module external by its node: name, imported by its bare
+ * name or its node: one, and resolves a require of one to a module that
+ * imports it and exports what it imported, as CommonJS reads it.
+ */
+const nodeModules: BunPlugin = {
+  name: 'node-modules',
+  setup(build) {
+    build.onResolve({ filter: /^(node:)?[a-z_]+(\/[a-z_]+)?$/ }, args => {
+      const name = args.path.replace(/^node:/, '');
+      if (!NODE_MODULES.has(name)) return undefined;
+      if (args.kind === 'require-call') return { path: name, namespace: REQUIRED_NODE_MODULE };
+      return { path: `node:${name}`, external: true };
+    });
+    build.onLoad({ filter: /.*/, namespace: REQUIRED_NODE_MODULE }, args => ({
+      contents: `import required from 'node:${args.path}';\nmodule.exports = required;\n`,
+      loader: 'js',
+    }));
+  },
+};
+{{- else }}
 
 /** The one node: module a Worker imports, which its nodejs_als compatibility flag gives. */
 const ASYNC_HOOKS = 'node:async_hooks';
+{{- end }}
 
 const args = process.argv.slice(2);
 const check = args.length === 1 && args[0] === '--check';
@@ -71,10 +119,15 @@ const result = await Bun.build({
   conditions: ['workerd', 'worker', 'browser'],
   minify: true,
   sourcemap: 'linked',
+{{- if .NodeCompat }}
+  external: ['cloudflare:*', '*.wasm', 'node:*'],
+  plugins: [nodeModules],
+{{- else }}
   // node:* rather than ASYNC_HOOKS alone: Bun's browser target swaps a
   // node: module that only its own name keeps external for an empty one;
   // every other node: import is refused below.
   external: ['cloudflare:*', '*.wasm', 'node:*'],
+{{- end }}
   define: { Bun: BUN_GLOBAL, 'globalThis.Bun': BUN_GLOBAL },
   metafile: true,
 });
@@ -89,12 +142,20 @@ const problems: string[] = [];
 let wasm: string | undefined;
 // The metafile names each input relative to the working directory.
 for (const [input, { imports = [] }] of Object.entries(result.metafile?.inputs ?? {})) {
+{{- if .NodeCompat }}
+  // A required Node module's module imports it, and nothing else.
+  if (input.startsWith(REQUIRED_NODE_MODULE + ':')) continue;
+{{- else }}
   // A polyfill Bun put in for a node: module imports more of them; the
   // module that imported the first is the one at fault.
   if (input.startsWith('node:')) continue;
+{{- end }}
   const importer = resolve(process.cwd(), input);
   const name = relative(import.meta.dir, importer);
   for (const { path, original } of imports as { path: string; original?: string }[]) {
+{{- if .NodeCompat }}
+    if (path.startsWith('bun:')) {
+{{- else }}
     if (path === ASYNC_HOOKS && original !== undefined && !original.startsWith('node:')) {
       // Bun names a bare builtin by its node: name, and swaps the bare
       // import, which no external pattern keeps, for an empty module.
@@ -102,6 +163,7 @@ for (const [input, { imports = [] }] of Object.entries(result.metafile?.inputs ?
     } else if (path.startsWith('node:') && path !== ASYNC_HOOKS) {
       problems.push(`${name} imports ${original ?? path}${original && original !== path ? ` (${path})` : ''}, which a Worker has only under nodejs_compat`);
     } else if (path.startsWith('bun:')) {
+{{- end }}
       problems.push(`${name} imports ${path}, which only Bun has`);
     } else if (path.endsWith('.wasm')) {
       if (basename(path) !== WASM || !path.startsWith('.')) {

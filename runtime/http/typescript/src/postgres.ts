@@ -196,12 +196,16 @@ async function cloudSqlPool(db: CloudSqlConnection, settings: PoolConfig, load: 
  * Opens a pool over db: pg over a connection string, or the Cloud SQL
  * connector with IAM database authentication over a Cloud SQL connector
  * configuration. Rejects for a Cloud SQL configuration when the connector
- * is not installed or cannot read the instance's settings, and for a D1
- * binding, which only a Worker reaches (D64).
+ * is not installed or cannot read the instance's settings, for a D1
+ * binding, which only a Worker reaches (D64), and for a Hyperdrive binding,
+ * which a Worker opens with ./hyperdrive's hyperdrivePool (D92).
  */
 export async function connectPostgres(db: DatabaseConnection, options: ConnectPostgresOptions = {}): Promise<Pool> {
   if ('d1' in db) {
     throw new Error(`D1 database ${db.d1.database} is no Postgres database: a Worker reaches it through its binding ${db.d1.binding} (D64)`);
+  }
+  if ('hyperdrive' in db) {
+    throw new Error(`Hyperdrive config ${db.hyperdrive.config} is reached through a Worker's binding ${db.hyperdrive.binding} alone (D92)`);
   }
   const settings: PoolConfig = { ...(options.pool ?? {}) };
   if (options.typeParsers !== false) settings.types = withTypeParsers(pg.types);
@@ -332,6 +336,10 @@ export type { Revealable } from './secret.js';
 // The generated repositories (D79): the tables a DB's types package
 // describes in its ./orm entry, whose createOrm calls ormOf over a pool.
 export { NoUserError, NotFoundError, ORM_MEMBERS, PageKeyError, fill, ormOf } from './orm.js';
+// A DB service's declared queries (D86), which its ./orm entry describes
+// and its ORM's queries member runs.
+export { queriesOf } from './queries.js';
+export type { QueryDefinition, QueryOrderDefinition, QueryPageDefinition, QueryPageOptions, QueryRun } from './queries.js';
 export type {
   Actor,
   EncryptedRepository,
@@ -341,9 +349,15 @@ export type {
   DateTimeFilter,
   DurationFilter,
   FindOptions,
+  IncludeOf,
+  IsolationLevel,
+  IterativeScan,
   JsonFilter,
+  Loaded,
+  ManyDefinition,
   NearestDefinition,
   NearestOptions,
+  NearestSettingDefinition,
   Neighbour,
   NullFilter,
   NumberFilter,
@@ -354,23 +368,40 @@ export type {
   OrmOptions,
   OrmPool,
   OrmQueryConfig,
+  OrmQueryOptions,
   OrmQueryResult,
   OrmQueryable,
   OrmTx,
   PageOptions,
   PageSortOf,
   PointFilter,
+  ReadOptions,
+  ReadRepository,
   ReferenceDefinition,
   ReferencedByFilter,
+  Related,
+  RelationDefinition,
   Repository,
   RowPage,
   SoftDeleteRepository,
+  Checked,
   StringFilter,
   TableColumn,
   TableDefinition,
   TableStatements,
+  TotalOf,
+  TransactionOptions,
   UniqueKeyDefinition,
+  UpsertField,
+  UpsertManyOptions,
+  UpsertOptions,
+  UpsertResult,
+  UpsertStatus,
   UuidFilter,
   VectorMetric,
   VectorRepository,
 } from './orm.js';
+// The system actor an ORM's asSystem() acts as, for a job's or a worker's
+// writes (D87).
+export { DEFAULT_SYSTEM_ACTOR, systemActorOf } from './orm.js';
+export type { SystemActor } from './orm.js';

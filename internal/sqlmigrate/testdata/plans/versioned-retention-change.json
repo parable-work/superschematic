@@ -1,7 +1,7 @@
 {
   "dialect": "postgres",
-  "from": "31212a21c0f0f5bd1dbeb697a04bf371066d8af2618ef60d69087d8fc60e7998",
-  "hash": "b1a0efc8a6462d6c9b11b78560fd23f30d258eba918742972b9606b7dccfdfe8",
+  "from": "65c32981f2cbf475a7d3b5295d77c4c706484e7eb442e0ceaa572d722ae2e854",
+  "hash": "8355a870a1ba0236785bceb58cb80b237a3aafb7b4571cb1efc8857186086730",
   "service": "shop-db",
   "steps": [
     {
@@ -15,7 +15,7 @@
       "transactional": true
     }
   ],
-  "to": "b0859cc3ebc7807fb0b510405650505bf5bdd5ef96dccf00a6b15339d08f76b9",
+  "to": "9764181c12c522948fa8ba5f8a5e1e531365d0431903c6a93b8e8f5814d71494",
   "toModel": null,
   "version": 1
 }

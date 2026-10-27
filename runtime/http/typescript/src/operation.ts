@@ -32,6 +32,22 @@ export interface OperationServiceCallers {
   readonly from: readonly string[];
 }
 
+/**
+ * A copy of value, a JSON object, with only the keys declared lists, which
+ * a router hands an input's parser when the input accepts the keys its type
+ * does not declare (D87): a @webhook's. Any other value is value itself,
+ * which the parser then refuses.
+ */
+export function declaredKeysOnly(value: unknown, declared: readonly string[]): unknown {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return value;
+  const object = value as Record<string, unknown>;
+  const kept: Record<string, unknown> = {};
+  for (const key of declared) {
+    if (Object.prototype.hasOwnProperty.call(object, key)) kept[key] = object[key];
+  }
+  return kept;
+}
+
 export interface OperationInput {
   /** The generated strict parser of the input type (parse<Input>FromJSON). */
   readonly parse: (value: unknown) => unknown;

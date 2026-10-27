@@ -35,7 +35,11 @@ export type ValidateConfig = {
  */
 export type Wrapped<T> = { readonly __wrapped: T };
 
-/** The decoders fill in `V` when a payload leaves the field out. */
+/**
+ * The decoders fill in `V` when a payload leaves the field out. On a required date, time or timestamp field of a
+ * DB table, `"now"` is the time of the insert: the column's DEFAULT is CURRENT_TIMESTAMP, CURRENT_DATE or
+ * CURRENT_TIME, and an ORM create may leave the field unset. No other such column has a default.
+ */
 export type Default<T, V> = T & Wrapped<T> & { readonly __default: V };
 export type PlatformDefault<T> = T & Wrapped<T> & { readonly __platformDefault: true };
 /** The field may be absent or null; `name?: T` means the same. */

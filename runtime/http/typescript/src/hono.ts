@@ -3,6 +3,7 @@ import { bearerAuth } from 'hono/bearer-auth';
 import { bodyLimit } from 'hono/body-limit';
 import { HTTPException } from 'hono/http-exception';
 import { authorize, type Authenticator, type PermissionMatcher } from './auth.js';
+import { withCaller } from './caller.js';
 import { OperationResult, envelopeResponse, requestIdOf } from './envelope.js';
 import type { OperationSpec, RequestContext } from './operation.js';
 import { decodeJsonParam, decodeParams } from './params.js';
@@ -23,6 +24,11 @@ import { MemoryRateLimitStore, clientIpOf, remoteAddressKey, type RateLimitOptio
 import { authorizeService, type ServiceAuthenticator } from './serviceauth.js';
 import { downloadResponse } from './download.js';
 import { decodeUploads, uploadBodyLimitBytes, type UploadedFiles } from './upload.js';
+
+// What an operation runs within: its caller, whom an ORM opened with no
+// user acts as (D87). A manual route's handler may run its writes within
+// one too.
+export { currentCaller, withCaller, type Caller } from './caller.js';
 
 // A built-in WebhookVerifier: a JWT carrying the body's SHA-256 (D81).
 export { INVALID_SIGNATURE_CODE, jwtBodyHashVerifier } from './webhook.js';
@@ -49,6 +55,11 @@ mountManualOperation: the webhook verifier, rate limit, body limit (when
 declared), service step, gate and timeout still run, then the service's own
 handler receives the Hono context (a streaming response cannot be expressed
 as a JSON result).
+
+mountOperation runs the implementation within its caller (withCaller,
+./caller), the principal the gate established, so an ORM opened with no
+user of its own, an API's Deps.orm, acts as that caller in the operation's
+writes (D87). A manual route's handler runs within no caller.
 
 The service step (D37) runs before the end-user step: with a service
 authenticator it verifies Service-Authorization on every route and puts the
@@ -614,7 +625,10 @@ export function mountOperation<E extends Env>(
     timeoutSeconds,
   };
   app.on(spec.method, honoPath(mount.path ?? spec.path), c =>
-    runRoute(c, spec, options, steps, async ctx => successResponse(await handler(ctx, await decode(ctx, spec)), ctx.requestId, spec))
+    runRoute(c, spec, options, steps, async ctx => {
+      const request = await decode(ctx, spec);
+      return successResponse(await withCaller(ctx.principal, () => handler(ctx, request)), ctx.requestId, spec);
+    })
   );
 }
 

@@ -84,6 +84,9 @@ func checkColumnName(schema *ir.Schema, td *ir.TypeDef, fd *ir.FieldDef, bases m
 		r.errorf(td.Owner, "%s: a projection column's @column names the alias.field it reads, such as base.%s", owner, fd.Name)
 	case td.Queue != nil:
 		// A message's field is a column of the queue's table.
+	case isQueryType(schema, td.Name):
+		// A query's row field reads the result column @column names
+		// (D86); checkQueries refuses one on a params field.
 	case overrideRefusal(td) != "":
 		r.errorf(td.Owner, "%s: @column names a column the ORMs keep, and %s: %s", owner, td.Name, overrideRefusal(td))
 	case !hasTable(td, bases) && !bases[td.Name]:
@@ -124,4 +127,15 @@ func checkColumnCollisions(schema *ir.Schema, td *ir.TypeDef, r *Result) {
 	if td.Versioned || td.Optimistic {
 		added(sqlutil.VersionColumn, "a @versioned or @optimistic table keeps its version in")
 	}
+}
+
+// isQueryType reports whether name is the params or row type of a query of
+// schema (D86).
+func isQueryType(schema *ir.Schema, name string) bool {
+	for _, td := range schema.Types {
+		if td.Query != nil && (td.Query.Params == name || td.Query.Row == name) {
+			return true
+		}
+	}
+	return false
 }

@@ -48,6 +48,10 @@ const (
 	// deployable's class, or an app beside its API's handle,
 	// `{of: <API handle>, app: "<app class>"}` (D78).
 	stackExposeSchema = `{"oneOf":[` + stackHandleSchema + `,{"type":"object","required":["class"],"additionalProperties":false,"properties":{"class":{"type":"string","minLength":1}}},{"type":"object","required":["of","app"],"additionalProperties":false,"properties":{"of":` + stackHandleSchema + `,"app":{"type":"string","minLength":1}}}]}`
+	// stackOriginSchema is what `origins` lists (D91): a site's handle and
+	// the handles of the APIs its origin serves, every API it calls when
+	// apis is left out.
+	stackOriginSchema = `{"type":"object","required":["site"],"additionalProperties":false,"properties":{"site":` + stackHandleSchema + `,"apis":{"type":"array","minItems":1,"items":` + stackHandleSchema + `}}}`
 )
 
 var (
@@ -56,7 +60,8 @@ var (
 		"additionalProperties": false,
 		"properties": {
 			"deploy": {"type": "array", "items": ` + stackHandleSchema + `},
-			"expose": {"type": "array", "items": ` + stackExposeSchema + `}
+			"expose": {"type": "array", "items": ` + stackExposeSchema + `},
+			"origins": {"type": "array", "items": ` + stackOriginSchema + `}
 		}
 	}`)
 	serverArgs = json.RawMessage(`{
@@ -180,16 +185,17 @@ func stackDeclaration(td *ir.TypeDef) string {
 	return ""
 }
 
-// applyStack reads @stack({ deploy, expose }).
+// applyStack reads @stack({ deploy, expose, origins }).
 func applyStack(td *ir.TypeDef, arg any) error {
 	var args struct {
-		Deploy []ir.ServiceRef `json:"deploy"`
-		Expose []any           `json:"expose"`
+		Deploy  []ir.ServiceRef `json:"deploy"`
+		Expose  []any           `json:"expose"`
+		Origins []*ir.Origin    `json:"origins"`
 	}
 	if err := DecodeArgs([]any{arg}, &args); err != nil {
 		return err
 	}
-	decl := &ir.StackDecl{Deploy: args.Deploy}
+	decl := &ir.StackDecl{Deploy: args.Deploy, Origins: args.Origins}
 	for i, v := range args.Expose {
 		ref, err := exposedRef(v)
 		if err != nil {

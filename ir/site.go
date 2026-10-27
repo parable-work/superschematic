@@ -17,6 +17,14 @@ import (
 // alone (SiteEndpoint), since the browser carries its end user's token,
 // and each API a site calls answers CORS for the origins of the sites that
 // call it, derived into the API's CORS field (CORSField, CORSPolicy).
+//
+// A stack's origins (Origin, D91) put a site and APIs it calls on one
+// origin: the site's platform serves each such API under
+// SiteDevAPIPath(service) on the site's own origin, as `stack dev`'s proxy
+// does (D82), and its site edge derives that same-origin URL
+// (SiteOriginURL). Such an API needs no exposure of its own and no CORS for
+// the site, and a cookie session needs no trusted origin and no shared
+// domain.
 
 // SiteConfig is a Site service's `site` config: how its code builds and
 // what it serves. Every member may be empty for its default.
@@ -72,16 +80,42 @@ const (
 )
 
 // SiteDevAPIPrefix begins the path on a site's origin under which its dev
-// proxy serves each API the site calls (D82): /api/<service>/<route>
-// reaches <route> on the API's server, with the prefix and the service's
-// name taken off.
+// proxy serves each API the site calls (D82), and a deployed site serves
+// each API of its origin (D91): /api/<service>/<route> reaches <route> on
+// the API's server, with the prefix and the service's name taken off.
 const SiteDevAPIPrefix = "/api/"
 
-// SiteDevAPIPath returns the path on a site's origin where its dev proxy
-// serves the API service named service: SiteDevAPIPrefix and the name
-// (`/api/shop-api`), with no trailing slash, the base path the site's
-// config gives the API's SDK.
+// SiteDevAPIPath returns the path on a site's origin where its dev proxy,
+// and a deployed site's origin (D91), serve the API service named service:
+// SiteDevAPIPrefix and the name (`/api/shop-api`), with no trailing slash,
+// the base path the site's config gives the API's SDK.
 func SiteDevAPIPath(service string) string { return SiteDevAPIPrefix + service }
+
+// SiteOriginURL returns the URL a site's config gives an API of the site's
+// origin (D91): the site's public address, a string or a reference, and
+// SiteDevAPIPath(service), joined into one string or one Concat. It is the
+// URL `stack dev`'s proxy hands a page opened at that address (D82), so the
+// SDK's code is the same in development and on a deploy.
+func SiteOriginURL(site any, service string) any {
+	path := SiteDevAPIPath(service)
+	switch site := site.(type) {
+	case string:
+		return strings.TrimSuffix(site, "/") + path
+	case Concat:
+		out := make(Concat, 0, len(site)+1)
+		out = append(out, site...)
+		if n := len(out); n > 0 {
+			if last, ok := out[n-1].(string); ok {
+				out[n-1] = strings.TrimSuffix(last, "/") + path
+				return out
+			}
+		}
+		return append(out, path)
+	case nil:
+		return nil
+	}
+	return Concat{site, path}
+}
 
 // SiteConfigPath is the path, on a site's origin, of the config the
 // deploy writes per environment and the site reads when it loads: each
@@ -246,6 +280,39 @@ type ResolvedSite struct {
 	// which the local target runs in place of the build (D82); nil without
 	// one. The other targets build the site.
 	Dev *SiteDevConfig `json:"dev,omitempty"`
+
+	// Origin lists the APIs the site serves on its own origin (D91), sorted
+	// by service: each under its Path, forwarded to the server that serves
+	// it with that prefix taken off, as `stack dev`'s proxy forwards it.
+	// Empty serves none, and the site's config gives each API it calls its
+	// own public address, which answers CORS for the site.
+	Origin []*SiteOriginAPI `json:"origin,omitempty"`
+}
+
+// SiteOriginAPI is one API a site serves on its own origin (D91).
+type SiteOriginAPI struct {
+	// Service is the API service; Server the deployable that serves it.
+	Service string `json:"service"`
+	Server  string `json:"server"`
+
+	// Path is where the site's origin serves it, SiteDevAPIPath(Service):
+	// the path and every path under it reach the server with Path taken
+	// off, the query kept.
+	Path string `json:"path"`
+}
+
+// OriginAPI returns the API service named service of the site's origin, or
+// nil when the origin does not serve it (D91).
+func (s *ResolvedSite) OriginAPI(service string) *SiteOriginAPI {
+	if s == nil {
+		return nil
+	}
+	for _, api := range s.Origin {
+		if api != nil && api.Service == service {
+			return api
+		}
+	}
+	return nil
 }
 
 // SiteDigestToken is what a site's platform writes, in a string property
@@ -305,18 +372,51 @@ func BundlePath(deployable, file string) string {
 // SiteEndpoint is what a site edge's connector derives: the public base
 // URL of an API the site calls, where a browser reaches it. It holds no
 // credential: the browser carries its end user's token (D55).
+//
+// For an API of the site's origin (D91), URL is the same-origin URL
+// (SiteOriginURL), and the endpoint says how the site's platform reaches
+// the API's server, when that platform does not know it from the
+// server's nodes: Upstream, a URL, or Binding, a Workers service binding.
 type SiteEndpoint struct {
-	// URL is the API's public base URL.
+	// URL is the API's public base URL, or for an API of the site's origin
+	// its same-origin URL.
 	URL any `json:"url"`
+
+	// Upstream is the base URL the site's origin forwards the API's paths
+	// to, with the prefix taken off: the server's loopback address under
+	// `stack dev`, or the public address of a server on another provider.
+	// Empty for an API outside the site's origin.
+	Upstream any `json:"upstream,omitempty"`
+
+	// Binding is the service binding through which a site's Worker
+	// forwards the API's paths to the API's Worker (D64), for an API of the
+	// site's origin on Workers.
+	Binding *ServiceBinding `json:"binding,omitempty"`
 }
 
-// checkSiteEndpoint checks a site edge's derived value.
+// checkSiteEndpoint checks a site edge's derived value: a url, and an
+// upstream or a binding, not both.
 func checkSiteEndpoint(v any) error {
-	m, err := members(v, "a site endpoint", "url")
+	m, err := members(v, "a site endpoint", "url", "upstream", "binding")
 	if err != nil {
 		return err
 	}
-	return requiredString(m, "", "url")
+	if err := requiredString(m, "", "url"); err != nil {
+		return err
+	}
+	upstream, hasUpstream := m["upstream"]
+	if hasUpstream {
+		if err := stringMember("upstream", upstream); err != nil {
+			return err
+		}
+	}
+	if binding, ok := m["binding"]; ok {
+		if hasUpstream {
+			return errors.New("a site endpoint sets upstream or binding, not both: the site's origin forwards to a URL, or through a Worker's binding")
+		}
+		return requiredStrings(binding, "binding", "name", "worker")
+	}
+	return nil
 }
 
 // CORSFieldSuffix is what the name of an API's CORS field adds to the

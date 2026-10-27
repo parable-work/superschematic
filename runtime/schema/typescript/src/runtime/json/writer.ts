@@ -380,6 +380,9 @@ function serializeSchemaDefinitions(schema: Schema): JsonObject {
     if (typeDef.envVars) {
       typeOut['x-envVars'] = true;
     }
+    if (typeDef.allowUnknownFields) {
+      typeOut['x-allowUnknownFields'] = true;
+    }
     output[typeName] = typeOut;
   }
 
@@ -412,6 +415,9 @@ function serializeSchemaDefinitions(schema: Schema): JsonObject {
     }
     if (inputDef.envVars) {
       inputOut['x-envVars'] = true;
+    }
+    if (inputDef.allowUnknownFields) {
+      inputOut['x-allowUnknownFields'] = true;
     }
     output[inputName] = inputOut;
   }

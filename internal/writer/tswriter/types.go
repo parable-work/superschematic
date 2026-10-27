@@ -123,6 +123,12 @@ func (e *emitter) emitType(def *ir.TypeDef) {
 			return
 		}
 		e.emitProjection(def)
+	case ir.RoleQuery:
+		if e.doc.Kind != "" && e.doc.Kind != ir.SchemaKindDB {
+			e.failf("type %s: role Query is only expressible in a DB schema (document kind %s)", def.Name, e.doc.Kind)
+			return
+		}
+		e.emitQuery(def)
 	default:
 		e.failf("type %s: role %s has no TypeScript authoring form", def.Name, def.Role)
 	}
@@ -137,7 +143,7 @@ func (e *emitter) emitTypeAlias(def *ir.TypeDef) {
 		def.User != nil || def.UserRole != nil ||
 		def.IsTrait || def.TraitConfig != nil || def.Source != nil ||
 		len(def.Indexes) > 0 || len(def.RawSQL) > 0 || def.JsonField || def.EnvVars || def.SQLName != "" ||
-		def.DenyUnknownFields || def.StrictJSON || len(def.Behaviors) > 0 || def.Display != nil {
+		def.DenyUnknownFields || def.StrictJSON || def.AllowUnknownFields || len(def.Behaviors) > 0 || def.Display != nil {
 		e.failf("%s: embedded structs in a DB schema render as type aliases and cannot carry heritage or decorators", owner)
 		return
 	}
@@ -243,6 +249,9 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 	if def.StrictJSON {
 		fmt.Fprintf(&e.body, "@%s\n", e.use("strictJSON"))
 	}
+	if def.AllowUnknownFields {
+		fmt.Fprintf(&e.body, "@%s\n", e.use("allowUnknownFields"))
+	}
 	if def.Versioned {
 		fmt.Fprintf(&e.body, "@%s%s\n", e.use("versioned"), versionedConfigArgs(def.VersionedConfig))
 	}
@@ -256,6 +265,9 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 		// The queue may be declared in another file of the schema.
 		e.recordHeritageImports(change.Queue)
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("enqueueOnChange"), enqueueOnChangeArgs(change))
+	}
+	if len(def.SeedRoles) > 0 {
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("seedRoles"), seedRolesArgs(def.SeedRoles))
 	}
 	if def.VersionGraph != nil {
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("versionGraph"), versionGraphArgs(def.VersionGraph))

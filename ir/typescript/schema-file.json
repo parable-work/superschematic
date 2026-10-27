@@ -3656,6 +3656,10 @@
     "EnqueueOnChange": {
       "additionalProperties": false,
       "properties": {
+        "backfill": {
+          "default": false,
+          "type": "boolean"
+        },
         "fields": {
           "default": [],
           "items": {
@@ -4826,6 +4830,25 @@
       ],
       "type": "object"
     },
+    "Origin": {
+      "additionalProperties": false,
+      "properties": {
+        "apis": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ServiceRef"
+          },
+          "type": "array"
+        },
+        "site": {
+          "$ref": "#/$defs/ServiceRef"
+        }
+      },
+      "required": [
+        "site"
+      ],
+      "type": "object"
+    },
     "ProjectionCollapse": {
       "additionalProperties": false,
       "properties": {
@@ -4884,6 +4907,7 @@
           "type": "string"
         },
         "pool": {
+          "default": "",
           "type": "string"
         },
         "predicates": {
@@ -4898,7 +4922,6 @@
         }
       },
       "required": [
-        "pool",
         "name",
         "migration",
         "source"
@@ -5086,6 +5109,92 @@
       ],
       "type": "object"
     },
+    "QueryDef": {
+      "additionalProperties": false,
+      "properties": {
+        "dialects": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "notNull": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "orderBy": {
+          "$ref": "#/$defs/QueryOrderBy"
+        },
+        "page": {
+          "$ref": "#/$defs/QueryPage"
+        },
+        "params": {
+          "type": "string"
+        },
+        "row": {
+          "type": "string"
+        },
+        "sql": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "params",
+        "row",
+        "sql"
+      ],
+      "type": "object"
+    },
+    "QueryOrderBy": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "default": "",
+          "type": "string"
+        },
+        "options": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "param": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "param",
+        "options"
+      ],
+      "type": "object"
+    },
+    "QueryPage": {
+      "additionalProperties": false,
+      "properties": {
+        "desc": {
+          "default": false,
+          "type": "boolean"
+        },
+        "key": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "type": "object"
+    },
     "QueueDef": {
       "additionalProperties": false,
       "properties": {
@@ -5215,6 +5324,25 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "RoleSeed": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "permissions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "permissions"
+      ],
       "type": "object"
     },
     "ScalarDef": {
@@ -5534,6 +5662,13 @@
             "$ref": "#/$defs/DeployableRef"
           },
           "type": "array"
+        },
+        "origins": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Origin"
+          },
+          "type": "array"
         }
       },
       "type": "object"
@@ -5570,6 +5705,10 @@
     "TypeDef": {
       "additionalProperties": false,
       "properties": {
+        "allowUnknownFields": {
+          "default": false,
+          "type": "boolean"
+        },
         "behaviors": {
           "default": [],
           "items": {
@@ -5668,6 +5807,9 @@
         "projection": {
           "$ref": "#/$defs/ProjectionDef"
         },
+        "query": {
+          "$ref": "#/$defs/QueryDef"
+        },
         "queue": {
           "$ref": "#/$defs/QueueDef"
         },
@@ -5689,9 +5831,17 @@
             "EmbeddedStruct",
             "APIOperationSet",
             "Trait",
-            "Projection"
+            "Projection",
+            "Query"
           ],
           "type": "string"
+        },
+        "seedRoles": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RoleSeed"
+          },
+          "type": "array"
         },
         "server": {
           "$ref": "#/$defs/ServerDecl"

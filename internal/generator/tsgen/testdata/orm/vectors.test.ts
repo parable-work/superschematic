@@ -4,10 +4,13 @@
 // filter compares numbers, a vector crosses as its numbers, and nearest
 // finds a row's neighbours by each metric, through a filter and around a
 // soft-deleted row, with the statement sqlutil writes; and in a table whose
-// names @table and @column give, beside a sealed note (D85).
+// names @table and @column give, beside a sealed note (D85). A filtered
+// nearest that an hnsw index serves finds k rows with an iterative scan,
+// where its first candidates hold none the filter keeps, and its settings
+// hold for a transaction of its own (D89).
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { decodeRow, uuidToDb } from '@superschematic/http-runtime/postgres';
-import { createOrm, ledgerLineTable, type FixtureVectorsDbOrm, type PassageRow } from './orm';
+import { createOrm, ledgerLineTable, type FixtureVectorsDbOrm, type FixtureVectorsDbTx, type PassageRow } from './orm';
 import type { FinanceCurrency, FinanceSignedMoney, GenericDecimal } from './types';
 import { alice, database, dsn, recording, type TestDatabase } from './harness';
 
@@ -126,5 +129,48 @@ describe.skipIf(dsn === '')('decimals and vectors under the repositories', () =>
         'passage.title_embedding <-> $2 AS _distance FROM passage WHERE passage.topic = $1 AND passage.deleted_at IS NULL AND passage.title_embedding IS NOT NULL ' +
         'ORDER BY passage.title_embedding <-> $2 LIMIT 2'
     );
+  });
+
+  test('a filtered nearest scans the hnsw index on, with iterativeScan, until it has k rows, where its first candidates hold none', async () => {
+    // A schema of its own: 1990 common passages near the query and ten rare
+    // ones opposite it, which ef_search's 40 candidates never reach.
+    const scan = await database('ts_orm_vectors_scan');
+    try {
+      const recorded = recording(scan.pool);
+      const vectors = createOrm(recorded.pool, alice);
+      const passages = Array.from({ length: 2000 }, (_, i) => {
+        const rare = i % 200 === 0;
+        return { title: `p${i}`, topic: rare ? 'rare' : 'common', embedding: [rare ? -1 : 1, Math.sin(i) * 0.3, Math.cos(i) * 0.3] };
+      });
+      await vectors.passage.createMany(passages);
+      const query = [1, 0, 0];
+      const options = { k: 5, filter: { topic: { eq: 'rare' } } };
+      // The index serves the order: no sequential scan and no sort.
+      const indexed = <T>(fn: (tx: FixtureVectorsDbTx) => Promise<T>): Promise<T> =>
+        vectors.transaction(async tx => {
+          await tx.exec('SET LOCAL enable_seqscan = off');
+          await tx.exec('SET LOCAL enable_sort = off');
+          return fn(tx);
+        });
+      expect(await indexed(tx => tx.passage.nearest('embedding', query, options))).toHaveLength(0);
+      const relaxed = await indexed(tx => tx.passage.nearest('embedding', query, { ...options, iterativeScan: 'relaxed_order' }));
+      expect(relaxed).toHaveLength(5);
+      expect(relaxed.every(n => n.row.topic === 'rare')).toBe(true);
+      expect(await indexed(tx => tx.passage.nearest('embedding', query, { ...options, iterativeScan: 'strict_order', maxScanTuples: 5000 }))).toHaveLength(5);
+      // Outside a transaction, nearest opens one for its settings.
+      recorded.statements.length = 0;
+      const own = await vectors.passage.nearest('embedding', query, { k: 2, efSearch: 100, iterativeScan: 'relaxed_order', excludeIds: [relaxed[0]!.row.id] });
+      expect(own.map(n => n.row.id)).not.toContain(relaxed[0]!.row.id);
+      expect(recorded.statements.slice(0, 2)).toEqual([
+        'BEGIN',
+        "SELECT set_config('hnsw.ef_search', $1, true), set_config('hnsw.iterative_scan', $2, true), set_config('ivfflat.iterative_scan', $3, true)",
+      ]);
+      expect(recorded.statements[2]).toContain('WHERE passage.id NOT IN ($1) AND passage.deleted_at IS NULL');
+      expect(recorded.statements.at(-1)).toBe('COMMIT');
+      await expect(vectors.passage.nearest('embedding', query, { efSearch: 0 })).rejects.toThrow(/efSearch is a whole number from 1 to 1000/);
+      await expect(vectors.passage.nearest('embedding', query, { iterativeScan: 'sideways' as never })).rejects.toThrow(/iterativeScan is off, relaxed_order, strict_order/);
+    } finally {
+      await scan.drop();
+    }
   });
 });

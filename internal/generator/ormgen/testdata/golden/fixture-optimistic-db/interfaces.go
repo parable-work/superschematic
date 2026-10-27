@@ -20,6 +20,8 @@ type ShelfRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.Shelf) (*types.Shelf, error)
 	CreateMany(ctx context.Context, inputs []*types.Shelf) ([]*types.Shelf, error)
 	UpsertOne(ctx context.Context, input *types.Shelf, on ShelfUniqueKey, update *ShelfUpdate) (*types.Shelf, error)
+	UpsertOneResult(ctx context.Context, input *types.Shelf, on ShelfUniqueKey, update *ShelfUpdate, opts *UpsertOptions) (UpsertResult[*types.Shelf], error)
+	UpsertMany(ctx context.Context, inputs []*types.Shelf, on ShelfUniqueKey, update ShelfFields, opts *UpsertOptions) ([]UpsertResult[*types.Shelf], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *ShelfUpdate) (*types.Shelf, error)
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *ShelfUpdate) (*types.Shelf, error)
 	UpdateMany(ctx context.Context, filter *ShelfFilter, update *ShelfUpdate) (int, error)
@@ -39,6 +41,8 @@ type StockRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.Stock) (*types.Stock, error)
 	CreateMany(ctx context.Context, inputs []*types.Stock) ([]*types.Stock, error)
 	UpsertOne(ctx context.Context, input *types.Stock, on StockUniqueKey, update *StockUpdate) (*types.Stock, error)
+	UpsertOneResult(ctx context.Context, input *types.Stock, on StockUniqueKey, update *StockUpdate, opts *UpsertOptions) (UpsertResult[*types.Stock], error)
+	UpsertMany(ctx context.Context, inputs []*types.Stock, on StockUniqueKey, update StockFields, opts *UpsertOptions) ([]UpsertResult[*types.Stock], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *StockUpdate) (*types.Stock, error)
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *StockUpdate) (*types.Stock, error)
 	UpdateMany(ctx context.Context, filter *StockFilter, update *StockUpdate) (int, error)
@@ -50,6 +54,7 @@ type StockRepositoryInterface interface {
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
+	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
 	Ping(ctx context.Context) error
 	Close()
 	GetShelfRepository() ShelfRepositoryInterface
@@ -60,6 +65,7 @@ type DatabaseInterface interface {
 type TxInterface interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetShelfRepository() ShelfRepositoryInterface
 	GetStockRepository() StockRepositoryInterface
 }
@@ -91,6 +97,17 @@ func NewNoOpDatabase() *NoOpDatabase {
 // Transaction executes the callback with a deterministic no-op transaction.
 func (db *NoOpDatabase) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(db.tx)
+}
+
+// TransactionWith executes the callback with a deterministic no-op
+// transaction, whatever its options.
+func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(TxInterface) error) error {
+	return fn(db.tx)
+}
+
+// Transaction executes the callback with the same no-op transaction.
+func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
+	return fn(tx)
 }
 
 // Ping always succeeds for no-op database.
@@ -167,6 +184,18 @@ func (r *NoOpShelfRepository) UpsertOne(_ context.Context, input *types.Shelf, _
 	return input, nil
 }
 
+func (r *NoOpShelfRepository) UpsertOneResult(_ context.Context, input *types.Shelf, _ ShelfUniqueKey, _ *ShelfUpdate, _ *UpsertOptions) (UpsertResult[*types.Shelf], error) {
+	return UpsertResult[*types.Shelf]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpShelfRepository) UpsertMany(_ context.Context, inputs []*types.Shelf, _ ShelfUniqueKey, _ ShelfFields, _ *UpsertOptions) ([]UpsertResult[*types.Shelf], error) {
+	results := make([]UpsertResult[*types.Shelf], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Shelf]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
 func (r *NoOpShelfRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *ShelfUpdate) (*types.Shelf, error) {
 	return nil, ErrNotFound
 }
@@ -239,6 +268,18 @@ func (r *NoOpStockRepository) CreateMany(_ context.Context, inputs []*types.Stoc
 
 func (r *NoOpStockRepository) UpsertOne(_ context.Context, input *types.Stock, _ StockUniqueKey, _ *StockUpdate) (*types.Stock, error) {
 	return input, nil
+}
+
+func (r *NoOpStockRepository) UpsertOneResult(_ context.Context, input *types.Stock, _ StockUniqueKey, _ *StockUpdate, _ *UpsertOptions) (UpsertResult[*types.Stock], error) {
+	return UpsertResult[*types.Stock]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpStockRepository) UpsertMany(_ context.Context, inputs []*types.Stock, _ StockUniqueKey, _ StockFields, _ *UpsertOptions) ([]UpsertResult[*types.Stock], error) {
+	results := make([]UpsertResult[*types.Stock], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Stock]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
 }
 
 func (r *NoOpStockRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *StockUpdate) (*types.Stock, error) {

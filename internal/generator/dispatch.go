@@ -29,6 +29,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	"github.com/parable-work/superschematic/internal/generator/typegen"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
+	"github.com/parable-work/superschematic/internal/queryverify"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/sqlmigrate"
 	ir "github.com/parable-work/superschematic/ir"
@@ -298,6 +299,7 @@ func (r run) generateTSTypes() error {
 			EngineDocument:     engineDocument,
 			SQLite:             r.Outputs.SQLDialect(registry.SQLDialectSQLite),
 			NoPostgres:         !r.Outputs.SQLDialect(registry.SQLDialectPostgres),
+			Actor:              r.ormActor(),
 			Clock:              r.Options.Clock,
 		})
 		return err
@@ -436,6 +438,13 @@ func (r run) generateSQL() error {
 		r.Skip("sql")
 		return nil
 	}
+	// A DB service's queries are the ones its queries.lock verified on
+	// Postgres (D86); the build reads the lock and runs no database.
+	if r.Options.ServicePath != "" {
+		if err := queryverify.CheckLock(r.Options.ServicePath, r.Schema); err != nil {
+			return fmt.Errorf("generator: sql for %s: %w", r.Config.Name, err)
+		}
+	}
 
 	dir := SQLDir(r.Options.OutputRoot, r.Config.Name)
 	if err := sqlgen.WriteDDL(output, dir); err != nil {
@@ -518,6 +527,7 @@ func (r run) generateORM() error {
 			Dependencies:  deps,
 			ModuleClosure: closure,
 			SQLite:        r.Outputs.SQLDialect(registry.SQLDialectSQLite),
+			Actor:         r.ormActor(),
 			Clock:         r.Options.Clock,
 		})
 		return err
@@ -733,6 +743,15 @@ func (r run) typeScriptAPI() (*tsrestgen.APIOutput, *envgen.ConfigOutput, error)
 		// Deps holds the engine of the API's engine database, which a server
 		// opens in the background (D58).
 		tsDeps.Engine = &tsrestgen.DepsEngine{Database: e.Database, Namespace: e.Namespace, Package: r.Options.Naming.EngineNpmPackage}
+	}
+	// The MCP endpoint signs the confirmations of the tools that ask with
+	// the secret the API's config names, which its @envVars holds (D93).
+	confirmationKey, err := r.mcpConfirmationKeyField(output.MCP)
+	if err != nil {
+		return nil, nil, err
+	}
+	if confirmationKey != nil {
+		tsDeps.MCPConfirmationKey = confirmationKey.Name
 	}
 	if err := output.SetDeps(tsDeps); err != nil {
 		return nil, nil, fmt.Errorf("generator: %w", err)

@@ -59,6 +59,12 @@ type walker struct {
 	// belong in Imports.
 	suppressRecording bool
 
+	// foreignClass is set while resolving the fields of a class another
+	// service declares (a cross-service @source target): its decorators
+	// answer to that service's kind, which that service's own load checks,
+	// so a DB table's or a projection's @column passes here (D90).
+	foreignClass bool
+
 	// identityTables records the class node of each type that takes a user
 	// model trait and stands where one may, for the base-class check once
 	// every file is walked (finishIdentityTraits).
@@ -173,7 +179,7 @@ func (w *walker) applyDecorator(d decoratorRef, target registry.DecoratorTarget,
 		return errorAtNode(d.node, "decorator @%s is not valid on %s", d.id.name, target)
 	}
 	kind := string(w.cfg.Kind)
-	if !spec.AllowsKind(kind) {
+	if !spec.AllowsKind(kind) && !w.foreignClass {
 		return errorAtNode(d.node, "%s", spec.KindError(kind))
 	}
 	if spec.Apply == nil {
@@ -186,7 +192,7 @@ func (w *walker) applyDecorator(d decoratorRef, target registry.DecoratorTarget,
 			return errorAtNode(d.node, "@%s takes exactly %d type argument(s) naming a schema class", d.id.name, n)
 		}
 		for _, typeArg := range typeArgNodes {
-			name, serr := w.classTypeArg(d, typeArg)
+			name, serr := w.classTypeArg(d, typeArg, spec.TypeArgAliases())
 			if serr != nil {
 				return serr
 			}
@@ -290,12 +296,16 @@ func decoratorTypeArgs(d decoratorRef) []*astNode {
 }
 
 // classTypeArg resolves one decorator type argument to the name of the
-// schema class it references.
-func (w *walker) classTypeArg(d decoratorRef, typeArg *astNode) (string, *SchemaError) {
+// schema class it references, or of an object type alias when aliases
+// says the decorator takes one (@query's params and row, D86).
+func (w *walker) classTypeArg(d decoratorRef, typeArg *astNode, aliases bool) (string, *SchemaError) {
 	if typeArg.Kind != kindTypeReference {
 		return "", errorAtNode(typeArg, "the @%s type argument must name a schema class", d.id.name)
 	}
 	id, ok := w.identityOf(typeArg.AsTypeReferenceNode().TypeName)
+	if ok && id.decl != nil && aliases && id.decl.Kind == kindTypeAliasDeclaration {
+		return id.name, nil
+	}
 	if !ok || id.decl == nil || id.decl.Kind != kindClassDeclaration {
 		return "", errorAtNode(typeArg, "cannot resolve the @%s type argument %q to a schema class", d.id.name, w.nodeText(typeArg))
 	}
@@ -1241,10 +1251,10 @@ func (w *walker) applySource(td *ir.TypeDef, src *decoratorRef) {
 		// verification data.
 	}
 
-	prevSuppress := w.suppressRecording
-	w.suppressRecording = true
+	prevSuppress, prevForeign := w.suppressRecording, w.foreignClass
+	w.suppressRecording, w.foreignClass = true, external
 	sourceFields, _ := w.resolveClassFieldDefs(id.decl)
-	w.suppressRecording = prevSuppress
+	w.suppressRecording, w.foreignClass = prevSuppress, prevForeign
 
 	target := targetService + "." + id.name
 	if external {

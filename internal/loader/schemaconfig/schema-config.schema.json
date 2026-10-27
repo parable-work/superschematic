@@ -26,6 +26,10 @@
           "description": "Serve the operations the mcp decorator makes visible tools over MCP at POST /api/mcp (D81): the caller authenticates as on the API's other routes, and each tools/call runs through the route of its operation. A TypeScript API serves it; the build refuses it on a Go or Rust API, where support follows. Unset is off.",
           "type": "boolean"
         },
+        "mcpConfirmationKey": {
+          "description": "The Secret<string> config field the MCP endpoint signs the confirmations of its ask tools with (D93), by the envVars class that declares it and the field's name, as a stack names the secret: \"McpKeys.MCP_CONFIRMATION_KEY\". The API's envVars class holds the field, its own or one it extends; its value is a random string of at least 32 bytes, one per environment. Required with mcp when a visible tool's invocation policy is ask.",
+          "type": "string"
+        },
         "scaffoldsOutputDir": {
           "type": "string"
         }
@@ -462,15 +466,43 @@
           "description": "Where the projection view migrations are written, relative to the service directory. Unset keeps them under <out>/sql/<service>/projections/migrations.",
           "type": "string"
         },
+        "requireUpdatedBy": {
+          "description": "An update of a table with an updatedBy field needs an acting user, as a create of a table with createdBy does: without one the ORMs refuse it (NoUserError in TypeScript, ErrNoUserInContext in Go) where they would leave a nullable updatedBy as it was (D87). Unset is false.",
+          "type": "boolean"
+        },
         "sourceSchema": {
           "description": "The Postgres schema that holds the tables the views read: each view selects <sourceSchema>.<table> for its source table and every joined table, so it does not depend on the migration runner's search_path. Unset leaves the tables unqualified.",
           "type": "string"
+        },
+        "systemActor": {
+          "$ref": "#/definitions/SqlSystemActorConfig",
+          "description": "Who the ORMs act as for a write no request's caller makes, a job's or a worker's: orm.asSystem() in TypeScript and orm.AsSystem(ctx) in Go stamp createdBy, updatedBy and deletedBy with its id (D87). The audit fields hold a user's id with no foreign key, so it needs no user row. Unset is { id: \"00000000-0000-4000-8000-000000000000\", name: \"system\" }."
         },
         "viewOwner": {
           "description": "The Postgres role the migrations create the views as: SET ROLE around the view DDL and RESET ROLE after it, so the schema's default privileges for that role apply. The migration runner must be a member of the role. Unset creates the views as the runner.",
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "SqlSystemActorConfig": {
+      "additionalProperties": false,
+      "description": "The system actor of a DB service's ORMs (D87).",
+      "properties": {
+        "id": {
+          "description": "The actor's user id: a UUID, hyphenated.",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+          "type": "string"
+        },
+        "name": {
+          "description": "The name an app shows for the actor. Unset is \"system\".",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
       "type": "object"
     },
     "TargetOutputConfig": {

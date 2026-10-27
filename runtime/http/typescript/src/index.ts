@@ -139,6 +139,7 @@ export type {
   SignedTokenSourceOptions,
   TokenFileSourceOptions,
 } from './credentials.js';
+export { declaredKeysOnly } from './operation.js';
 export type {
   OperationAuth,
   OperationDownload,
@@ -197,6 +198,7 @@ export type {
   D1Connection,
   Database,
   DatabaseConnection,
+  HyperdriveConnection,
   R2Credential,
   Service,
   ServiceBinding,

@@ -155,6 +155,24 @@ func TestHazardClasses(t *testing.T) {
 		{plan: "change-enqueue-on-change", op: "replaceTrigger", phase: Expand},
 		{plan: "drop-enqueue-on-change", op: "dropTrigger", phase: Contract},
 		{plan: "drop-enqueue-on-change", op: "dropFunction", phase: Contract},
+		// The backfill holds the new trigger's lock while it enqueues a
+		// message per row (D88).
+		{plan: "add-enqueue-on-change-backfill", op: "createTrigger", phase: Expand, want: []HazardClass{blockingClass},
+			reason: "stack queue backfill"},
+		{plan: "add-enqueue-on-change-backfill-per-key", op: "createTrigger", phase: Expand, want: []HazardClass{blockingClass}},
+
+		// A required timestamp's DEFAULT now is declared (D88): dropping
+		// the one a compiler before gave it, and adding a declared one,
+		// take no hazard.
+		{plan: "drop-implied-now-default", op: "dropDefault", phase: Contract},
+		{plan: "add-now-default", op: "setDefault", phase: Expand},
+
+		// The roles @seedRoles keeps (D88): an insert takes no hazard; an
+		// update replaces the role's permissions, in expand when it only
+		// gains and in contract when it loses one.
+		{plan: "add-seed-roles", op: "seedRole", phase: Expand},
+		{plan: "seed-roles-gain", op: "updateRole", phase: Expand, want: []HazardClass{destructive}, reason: "gains identity.users.write"},
+		{plan: "seed-roles-lose", op: "updateRole", phase: Contract, want: []HazardClass{destructive}, reason: "loses identity.users.write"},
 
 		{plan: "add-projection", op: "createView", phase: Expand},
 		{plan: "change-projection", op: "replaceView", phase: Expand, want: []HazardClass{apiBreaking}},

@@ -26,6 +26,13 @@ import (
 // build, or back to an earlier one, is one change to the URL map, which
 // the deploy pins as it pins a server's image (stackdeploy.PinSites).
 //
+// A site with an origin (D91) serves the APIs of it on the same load
+// balancer: each API's path, `/api/<service>` and every path under it,
+// goes to a serverless network endpoint group of its Cloud Run service,
+// without Cloud CDN, with the path taken off, so the page, its config and
+// its APIs share one host and one certificate, and a cookie session needs
+// no CORS, no trusted origin and no shared domain.
+//
 // A backend bucket reads only objects the public can read: Cloud CDN's own
 // account reads a private bucket for signed requests alone, and a
 // browser's are not signed. So the bucket grants allUsers object viewer,
@@ -101,8 +108,13 @@ func siteBucket(v values, d ir.ResolvedDeployable) any {
 //     404. A load balancer with backend buckets alone serves no custom
 //     error response, so the URL map also sends one reserved path to an
 //     anchor, a backend service with no backends, which answers it 503;
+//   - for each API the site serves on its origin (D91), the backend of its
+//     Cloud Run service and the URL map's rules that send its paths
+//     there (lowerOrigin), ahead of the files' rule; the fallback then
+//     sits on the files' rules alone;
 //   - the load balancer's frontend and DNS records (loadBalancer.frontend),
-//     its address in the infrastructure phase.
+//     its address in the infrastructure phase: one host, and one
+//     certificate for it, for the site and the APIs of its origin.
 func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 	d := ctx.Deployable
 	env := ctx.Environment
@@ -152,6 +164,7 @@ func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}
 	rules := []any{rewrite(1, map[string]any{"fullPathMatch": "/"}, prefix+"index.html")}
 	matcher := map[string]any{"name": "files", "defaultService": files}
+	var notFound func() map[string]any
 	if fallback := d.Site.Fallback; fallback != "" {
 		backends = append(backends, infrastructure(lb.node("anchor", TypeBackendService, "anchor", map[string]any{
 			"loadBalancingScheme": "EXTERNAL_MANAGED",
@@ -161,16 +174,36 @@ func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 			"matchRules": []any{map[string]any{"fullPathMatch": siteReservedPath}},
 			"service":    lb.out("anchor", "id"),
 		})
-		matcher["defaultCustomErrorResponsePolicy"] = map[string]any{
-			"errorService": files,
-			"errorResponseRules": []any{map[string]any{
-				"matchResponseCodes":   []any{"404"},
-				"path":                 prefix + fallback,
-				"overrideResponseCode": 200,
-			}},
+		notFound = func() map[string]any {
+			return map[string]any{
+				"errorService": files,
+				"errorResponseRules": []any{map[string]any{
+					"matchResponseCodes":   []any{"404"},
+					"path":                 prefix + fallback,
+					"overrideResponseCode": 200,
+				}},
+			}
 		}
 	}
-	matcher["routeRules"] = append(rules, rewrite(3, map[string]any{"prefixMatch": "/"}, prefix))
+	apis, apiRules, err := lowerOrigin(lb, v, d, 3)
+	if err != nil {
+		return registry.Lowered{}, err
+	}
+	backends = append(backends, apis...)
+	rules = append(rules, apiRules...)
+	rules = append(rules, rewrite(3+len(apiRules), map[string]any{"prefixMatch": "/"}, prefix))
+	switch {
+	case notFound == nil:
+	case len(apiRules) == 0:
+		matcher["defaultCustomErrorResponsePolicy"] = notFound()
+	default:
+		// The path matcher's policy would answer an API's 404 with the
+		// fallback too, so the files' two rules take it alone, and an API's
+		// 404 reaches the page as the API answered it (D91).
+		rules[0].(map[string]any)["customErrorResponsePolicy"] = notFound()
+		rules[len(rules)-1].(map[string]any)["customErrorResponsePolicy"] = notFound()
+	}
+	matcher["routeRules"] = rules
 	urlMap := lb.node("url-map", TypeURLMap, "lb", map[string]any{
 		"defaultService": files,
 		"hostRules":      []any{map[string]any{"hosts": []any{"*"}, "pathMatcher": "files"}},
@@ -190,10 +223,82 @@ func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 	return registry.Lowered{Resources: nodes, Records: records}, nil
 }
 
+// originPrefixHeader is the request header that names the path a site's
+// origin serves an API under (D91), as `stack dev`'s proxy sets it (D82).
+const originPrefixHeader = "X-Forwarded-Prefix"
+
+// lowerOrigin returns the nodes and route rules of the APIs a site serves
+// on its origin (D91), the rules' priorities from first, before the rule
+// that serves the site's files for every other path. For each API:
+//
+//   - a serverless network endpoint group of its Cloud Run service, and a
+//     backend service over it, without Cloud CDN, so no answer of an API
+//     is cached; both in the site's rollout step, after the server's;
+//   - two rules, one for the API's path and one for every path under it,
+//     that send the request there with the path taken off, its query
+//     kept, and X-Forwarded-Prefix the path, as `stack dev`'s proxy
+//     forwards it. The load balancer passes the browser's Host and sets
+//     X-Forwarded-Proto, so the identity runtime's cross-origin check sees
+//     the page's origin.
+//
+// An API whose server is on another provider, which the generic connector
+// reaches at its public address (ir.SiteEndpoint.Upstream), is refused: a
+// serverless network endpoint group reaches Cloud Run alone.
+func lowerOrigin(lb loadBalancer, v values, d ir.ResolvedDeployable, first int) ([]*ir.Resource, []any, error) {
+	var nodes []*ir.Resource
+	var rules []any
+	for _, api := range d.Site.Origin {
+		for _, b := range d.Bindings {
+			if value, _ := b.Value.(map[string]any); b.Field == api.Service && value["upstream"] != nil {
+				return nil, nil, registry.Unrealizable("site %s serves %s on its origin, and %s's server %s is on another provider; the site's load balancer reaches an API of its origin through a serverless network endpoint group of its Cloud Run service, so place %s on Cloud Run or leave it out of the origin", d.Name, api.Service, api.Service, api.Server, api.Server)
+			}
+		}
+		service := kebab(api.Service)
+		for _, suffix := range []string{"-neg", "-api"} {
+			if err := checkLength("the load balancer's "+suffix[1:]+" of "+api.Service+" on site "+d.Name, join(d.ResourceName, "-", service, suffix), 1, 63, "the site or the API"); err != nil {
+				return nil, nil, err
+			}
+		}
+		part := "api." + api.Service + "."
+		group := lb.node(part+"endpoint-group", TypeEndpointGroup, service+"-neg", map[string]any{
+			"region":              v.region,
+			"networkEndpointType": "SERVERLESS",
+			"cloudRun":            map[string]any{"service": ir.Output{Resource: api.Server + ".service", Name: "name"}},
+		})
+		backend := lb.node(part+"backend", TypeBackendService, service+"-api", map[string]any{
+			"loadBalancingScheme": "EXTERNAL_MANAGED",
+			"backends":            []any{map[string]any{"group": lb.out(part+"endpoint-group", "id")}},
+			"enableCdn":           false,
+		})
+		group.Phase, backend.Phase = ir.PhaseRollout, ir.PhaseRollout
+		nodes = append(nodes, group, backend)
+		route := func(priority int, match map[string]any) map[string]any {
+			return map[string]any{
+				"priority":    priority,
+				"matchRules":  []any{match},
+				"service":     lb.out(part+"backend", "id"),
+				"routeAction": map[string]any{"urlRewrite": map[string]any{"pathPrefixRewrite": "/"}},
+				"headerAction": map[string]any{"requestHeadersToAdds": []any{map[string]any{
+					"headerName": originPrefixHeader, "headerValue": api.Path, "replace": true,
+				}}},
+			}
+		}
+		rules = append(rules, route(first, map[string]any{"fullPathMatch": api.Path}), route(first+1, map[string]any{"prefixMatch": api.Path + "/"}))
+		first += 2
+	}
+	return nodes, rules, nil
+}
+
 // connectSite realizes a site edge to a Cloud Run server (D55): the site's
 // config holds the server's public address (servicePublicAddress). The
-// server needs no grant: it is exposed, and its invoker check is off.
+// server needs no grant: it is exposed, and its invoker check is off. For
+// an API the site serves on its origin (D91), the config holds the API's
+// path on the site's own origin (ir.SiteOriginURL), which the site's load
+// balancer routes to the server (lowerOrigin), exposed or not.
 func connectSite(ctx registry.ConnectorContext) (registry.Connected, error) {
+	if ctx.From.Site.OriginAPI(ctx.Edge.Service.Name) != nil {
+		return registry.Connected{Value: ir.SiteEndpoint{URL: ir.SiteOriginURL(ctx.From.PublicAddress, ctx.Edge.Service.Name)}}, nil
+	}
 	return registry.Connected{Value: ir.SiteEndpoint{URL: ctx.To.PublicAddress}}, nil
 }
 

@@ -144,9 +144,14 @@
           "type": "REAL"
         },
         {
-          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
           "name": "posted_at",
           "origin": "LineItem.postedAt",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%d', 'now'))",
+          "name": "entered_on",
+          "origin": "LineItem.enteredOn",
           "type": "TEXT"
         },
         {
@@ -160,6 +165,12 @@
           "name": "merchant",
           "nullable": true,
           "origin": "LineItem.merchant",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "origin": "LineItem.createdAt",
           "type": "TEXT"
         }
       ],

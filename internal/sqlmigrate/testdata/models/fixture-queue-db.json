@@ -21,7 +21,6 @@
           "type": "UUID"
         },
         {
-          "default": "CURRENT_TIMESTAMP",
           "name": "placed_at",
           "origin": "Order.placedAt",
           "type": "TIMESTAMPTZ"
@@ -267,7 +266,6 @@
           "type": "UUID"
         },
         {
-          "default": "CURRENT_TIMESTAMP",
           "name": "placed_at",
           "origin": "OrderPlaced.placedAt",
           "type": "TIMESTAMPTZ"

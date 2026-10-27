@@ -11,7 +11,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE "order" (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
-  placed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
+  placed_at TIMESTAMPTZ NOT NULL
 );
 
 COMMENT ON TABLE "order" IS 'An order of the shop.';
@@ -57,7 +57,7 @@ waits, and the worker handles one order''s changes at a time.';
 CREATE TABLE order_placed_queue (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
   order_id UUID NOT NULL,
-  placed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  placed_at TIMESTAMPTZ NOT NULL,
   priority TEXT DEFAULT 'low' NOT NULL,
   quantity BIGINT NOT NULL,
   note TEXT,

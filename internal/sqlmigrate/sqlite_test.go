@@ -102,6 +102,9 @@ func refusedSchemas(t *testing.T) []struct {
 			dimensions := 3
 			addField(s, "Label", &ir.FieldDef{Name: "embedding", TypeRef: ir.TypeRef{Name: ir.VectorScalarName}, ValidateDimensions: &dimensions})
 		}), `column label.embedding (Label.embedding) is vector(3), an Embedding.Vector, which the sqlite dialect has no storage for: build the service for postgres alone (outputs.sql.dialects: ["postgres"])`},
+		{"a declared query", shop(func(s *ir.Schema) {
+			s.Types["Report"] = &ir.TypeDef{Name: "Report", Role: ir.RoleQuery, Query: &ir.QueryDef{Name: "report", Params: "Order", Row: "Order", SQL: "SELECT 1"}}
+		}), `query report runs on the sqlite dialect, which no query is verified or run on yet: limit it to postgres (dialects: ["postgres"])`},
 	}
 }
 

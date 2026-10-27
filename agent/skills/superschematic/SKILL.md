@@ -18,6 +18,12 @@ does. You never write, edit or duplicate:
 
 - SQL DDL or migrations: the DB schema is the table; `migrate plan` diffs
   two versions of it.
+- Report SQL as raw strings on the pool: an aggregate, a time series or a
+  joined list is a `@query<Params, Row>({ sql })` in the DB schema, which
+  both ORMs run as a typed function (`orm.queries.<name>(params)`), its
+  rows decoded. Run `superschematic queries verify schemas/services/<db>`
+  after changing one, or a table one reads: it prepares each on Postgres
+  and writes `queries.lock`, which `check` and `build` require current.
 - Validation: a field's scalar type and `Validate<T, {...}>` are checked
   by every generated decoder, server and SDK alike. Never re-check in a
   handler what a constraint can say.
@@ -29,6 +35,13 @@ does. You never write, edit or duplicate:
   Dockerfiles, deploy scripts, CI.
 - Anything under the output root, `<schemas-root>/dist/`: it is rewritten
   on every build.
+- Joins to read related rows, or stitching them together in code: a
+  repository read includes relations (`include: { category: { include:
+  { parent: true } } }`, Go's nested `Fields`), selects members, and a
+  filter reaches through a to-one relation (`{ category: { parentId: {
+  in: ids } } }`, `anyOf` for an OR); a flat list is a `@projection`,
+  which both ORMs read through a repository of its own
+  (`deps.orm.transactionListRow.findPage(...)`).
 
 You do write:
 
@@ -55,7 +68,7 @@ The **kind** decides what a class means:
 | Kind | A class is | Imports | Generates |
 | --- | --- | --- | --- |
 | `General` | a plain type shared by services; with `@envVars`, a service's settings | `@superschematic/schema`, `superscalar` | types, env loader |
-| `DB` | a table | `+ @superschematic/db` | SQL, Go ORM, types |
+| `DB` | a table | `+ @superschematic/db` | SQL, Go ORM, TypeScript repositories, types |
 | `API` | a request or response type; with `@source(Table)` a view of a table; a class of methods is an operation set | `+ @superschematic/api` | types, server, OpenAPI, SDKs |
 | `Stack` | the stack, a server, a database or an environment | `@superschematic/stack` | entrypoints, `environment.json`, CI |
 | `MemoryStore` | with `@channel` or `@key`, a channel or a key of a Redis or Valkey store that replicas share and can lose; its fields are the name's parts | `@superschematic/memory-store`, `superscalar` | typed definitions per language |
@@ -101,8 +114,11 @@ path for when the store is unavailable.
    whole stack locally, with Postgres in Docker and migrations applied. A
    site whose config names `site.dev` runs its dev server there, with its
    APIs under `/api/<service>` on the site's origin; `--build-sites`
-   builds it as a deploy does. Run the language's own tests against the
-   generated SDKs.
+   builds it as a deploy does. For a deploy to serve a site and its APIs
+   on one origin too, as a cookie session wants, add `origins: [{ site,
+   apis }]` to `@stack` rather than setting `trustedOrigins`, CORS or
+   `cookie.domain`. Run the language's own tests against the generated
+   SDKs.
 7. **Changing a table that holds data?** `superschematic migrate plan
    schemas/services/<db> --from-ref origin/main` plans expand and contract
    steps with their hazards. Show the hazards to the user.
@@ -120,14 +136,36 @@ path for when the store is unavailable.
 - **Permissions on the operation.** `extends Authenticated`, `@auth`,
   `@requirePermission([...])`, `@publicRoute`. For users and sign-in, turn
   on the user model (`implements User<{ login }>` on a DB table,
-  `@userSessions` on an API class) instead of writing auth.
+  `@userSessions` on an API class) instead of writing auth. Seed the
+  roles new users get with `@seedRoles([{ name, permissions }])` on the
+  `UserRole` table, so an approved user can act with no admin step.
 - **Background work is declared.** `@job` for schedules, `@queue` on a DB
   class plus `@worker` on an API class for messages written in the same
   transaction as the change that causes them; `key` with `onDuplicate` or
   `serialize` for one waiting or one running message per key;
-  `@enqueueOnChange` on a table to enqueue whatever writes its rows; and
+  `@enqueueOnChange` on a table to enqueue whatever writes its rows, with
+  `backfill: true` (or `stack queue backfill`) for the rows already there; and
   `@deriver` on an API class to fill an engine type's Derived fields from
   a model.
+- **Syncs and imports upsert by a unique key, in batches.** The generated
+  repositories' `upsertMany(inputs, on, fields, { onlyIfChanged: true })`
+  (Go `UpsertMany`) writes a batch in one statement and reports each row
+  `inserted`, `updated` or `unchanged`; an unchanged row is not rewritten,
+  so it keeps its `updatedAt` and fires no `@enqueueOnChange`. Use it, or
+  `upsertOneResult`, rather than a loop of `upsertOne` or a find then a
+  create, which races; an upsert sets an `Encrypted<T>` field on any
+  unique key. `nearest(..., { iterativeScan: 'relaxed_order' })` keeps
+  finding neighbours a selective filter keeps.
+- **The caller wrote the row.** `createdBy`, `updatedBy` and `deletedBy`
+  are stamped with each operation's caller: write through `Deps.orm`
+  (TypeScript) or with the route's `ctx` (Go), never
+  `.as(ctx.principal)` or `WithUserID` by hand. A job or a worker has no
+  caller, so it writes as `deps.orm.asSystem()` or `orm.AsSystem(ctx)`,
+  the system actor `outputs.sql.systemActor` names; don't invent a user
+  row for it.
+- **Payloads you don't control gain keys.** A `@webhook`'s input drops the
+  keys its type does not declare; mark any other such type
+  `@allowUnknownFields`, rather than a manual route to read the body.
 - **Your own HTTP program is an app.** Pages or a back office over a Rust
   API is `@app` on an empty API class: the stack runs the crate at
   `[implementation_paths] rust_app` (`apps/{app}`), whose `serve(parts)`
@@ -144,6 +182,14 @@ path for when the store is unavailable.
   the need is workflow, comments, revisions, approvals and the like, the
   engine runs a schema with no generated code: types compose behaviors
   with `@behavior("Workflow", {...})` (`superschematic catalog behaviors`).
+- **Tools for agents are declared too.** `@mcp` with `@docs` makes an
+  operation an MCP tool, and `outputs.api.mcp` serves the tools from a
+  TypeScript API. Mark a tool that moves money or changes data in bulk
+  `@mcp({ invocationPolicy: "ask" })`: the endpoint then runs it only once
+  the person confirms the call, by elicitation or a two-step
+  `confirmationToken`, and the API's config names the `@envVars` secret
+  that signs confirmations, `outputs.api.mcpConfirmationKey`. Never pass a
+  `confirmationToken` the person has not confirmed.
 - **Outputs must line up.** A server or SDK in a language needs
   `outputs.types` in that language, and a DB always needs Go types; the
   config fails to load and says so otherwise.
@@ -162,8 +208,13 @@ Most are load errors; knowing them saves a build round-trip:
 - A DB schema cannot import `@superschematic/api`, and an API schema
   cannot import `@superschematic/db`.
 - Every plain class in a DB schema is a table; give each one a `@key`.
-  A `@jsonField` class, a `@queue` message, a `@projection` and a type
-  that composes a behavior are not tables.
+  A `@jsonField` class, a `@queue` message, a `@projection`, a `@query`
+  class and the params and row types it names, and a type that composes
+  a behavior are not tables.
+- A required date or time column has no default unless it is `createdAt`
+  or `updatedAt`: a posting date an import leaves out fails `NOT NULL`.
+  Declare `Default<Temporal.DateTime, "now">` (or `Temporal.Date`) where
+  the time of the insert is the right value.
 
 ## Starting a project
 
@@ -203,6 +254,17 @@ APIs exist, `superschematic stack init` writes the Stack service.
 set`, `stack deploy` and `stack destroy` act on cloud accounts and cost
 money. Run `stack plan <environment>` and show it to the user, and run
 those commands only when the user asks for that environment.
+
+On the cloudflare target, a DB service that lists `postgres` first is a
+Postgres outside Cloudflare (Neon, Supabase, Cloud SQL) that Workers reach
+through a Hyperdrive config: the user makes the config, names its id in
+the environment's `settings` (`{ of: FinancesDb, hyperdrive: "<id>" }`),
+and keeps the database's connection string in `HYPERDRIVE_ORIGIN_<DB>`
+for the deploy's migration. Don't make the config or handle the
+connection string yourself. Queue workers there must be TypeScript; each
+drains its queue once a minute under a Cron Trigger. An API over the user
+model signs users in there when its `authDb` is that Postgres; each
+password hash takes about 120 ms of CPU, so it needs Workers Paid.
 
 ## Reference
 

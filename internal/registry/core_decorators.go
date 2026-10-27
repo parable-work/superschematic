@@ -104,6 +104,7 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	flag(TargetType, "jsonField", []string{pkgDB, pkgSchema}, func(n Node) { n.Type.JsonField = true })
 	flag(TargetType, "denyUnknownFields", []string{pkgSchema}, func(n Node) { n.Type.DenyUnknownFields = true })
 	flag(TargetType, "strictJSON", []string{pkgSchema}, func(n Node) { n.Type.StrictJSON = true })
+	flag(TargetType, "allowUnknownFields", []string{pkgSchema}, func(n Node) { n.Type.AllowUnknownFields = true })
 	specs = append(specs, DecoratorSpec{
 		Name: "index", Packages: []string{pkgDB}, Target: TargetType,
 		Apply: func(n Node, args []any, _ Site) error {
@@ -162,6 +163,13 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// that enqueue a queue's message on a write to a table
 	// (core_enqueue.go, D80).
 	specs = append(specs, queueDecorator(), workerDecorator(), enqueueOnChangeDecorator())
+
+	// A DB service's declared queries, a class each (core_queries.go, D86).
+	specs = append(specs, queryDecorator())
+
+	// The roles a UserRole table holds from its first migration on
+	// (core_seed_roles.go, D88).
+	specs = append(specs, seedRolesDecorator())
 
 	// An API service's derivers, which fill the Derived fields of its
 	// engine database's types (core_derivers.go, D74).

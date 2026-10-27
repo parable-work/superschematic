@@ -65,7 +65,9 @@ func servicePublicAddress(ctx registry.PlatformContext) any {
 //     only and keeps Cloud Run's invoker check, which admits the callers
 //     its edges grant. An exposed one turns the check off, since browsers
 //     call it, and with a domain takes traffic from the load balancer
-//     only; without one, the run.app URL is its public address. Every
+//     only; without one, the run.app URL is its public address. One that
+//     only a site's origin serves (D91) turns the check off too and takes
+//     traffic from load balancers only, the site's among them. Every
 //     service lists its full resource name as a custom audience, the
 //     audience of its callers' ID tokens (serviceAudience).
 //   - for an exposed server under a domain, a load balancer and a
@@ -141,9 +143,14 @@ func lowerRunService(ctx registry.PlatformContext, probes func(container map[str
 	}
 	template["containers"] = []any{container}
 
+	// A server that a site's origin serves (D91) and the stack does not
+	// expose takes traffic from load balancers alone, the site's among
+	// them, whose requests carry no ID token: its invoker check is off,
+	// and its run.app URL is not public.
+	origin := len(d.Origins) > 0
 	ingress := ingressInternal
 	switch {
-	case d.Exposed && env.Domain != "":
+	case d.Exposed && env.Domain != "", !d.Exposed && origin:
 		ingress = ingressLoadBalancer
 	case d.Exposed:
 		ingress = ingressAll
@@ -153,7 +160,7 @@ func lowerRunService(ctx registry.PlatformContext, probes func(container map[str
 		"location":           v.region,
 		"name":               d.ResourceName,
 		"ingress":            ingress,
-		"invokerIamDisabled": d.Exposed,
+		"invokerIamDisabled": d.Exposed || origin,
 		"customAudiences":    []any{serviceAudience(v, d.ResourceName)},
 		"deletionProtection": false,
 		"template":           template,

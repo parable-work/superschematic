@@ -20,7 +20,12 @@ const ORDER = '00000000-0000-4000-8000-000000000001';
 // canonical form; an input's fields keep the form the caller sent.
 const ORDER_ID = parseIdentityUUID(ORDER);
 
+// The key the endpoint signs the confirmations of update_order, whose
+// policy is ask, with (D93); the router needs one.
+const CONFIRMATION_KEY = 'a random key of at least thirty-two bytes';
+
 function app(options: Record<string, unknown> = {}) {
+  options = { ...options, mcp: { confirmationKey: CONFIRMATION_KEY, ...(options.mcp as object | undefined) } };
   const echo = (name: string) => async (args: Record<string, unknown>) => ({ id: ORDER, status: 'open', revision: 1, totalCents: 0, echo: { name, args } });
   const root = new Hono();
   root.route(
@@ -102,6 +107,8 @@ describe('the MCP endpoint', () => {
     expect(byName.get_order._meta).toMatchObject({ ui: { resourceUri: 'ui://orders/detail' }, invocationPolicy: 'auto' });
     expect(byName.get_order._meta['superschematic/operation-guidance'].useWhen).toBe('Use when you have an order identifier.');
     expect(byName.update_order).toMatchObject({ annotations: { readOnlyHint: false }, _meta: { invocationPolicy: 'ask' } });
+    expect(byName.update_order.inputSchema.properties.confirmationToken).toMatchObject({ type: 'string' });
+    expect(byName.get_order.inputSchema.properties.confirmationToken).toBeUndefined();
     expect(byName.list_orders.inputSchema.required).toEqual(['statuses']);
   });
 
@@ -123,8 +130,21 @@ describe('the MCP endpoint', () => {
     const opened = await call(app(), 'open_return', { requestId: ORDER, orderId: ORDER, reason: 'Too small', pickup, labels: { size: 'S' } });
     expect(opened.structuredContent.echo.args.input).toEqual({ requestId: ORDER, orderId: ORDER, reason: 'Too small', pickup, labels: { size: 'S' } });
 
-    const updated = await call(app(), 'update_order', { id: ORDER, revision: 2, note: null });
+    // update_order asks: its first call runs nothing and answers a token,
+    // and the same call with the token runs, once (D93).
+    const root = app();
+    const asked = await call(root, 'update_order', { id: ORDER, revision: 2, note: null });
+    expect(asked).toMatchObject({ isError: true, structuredContent: { status: 428, code: 'confirmation_required', details: { tool: 'update_order' } } });
+    expect(asked.structuredContent.details.summary).toBe(`Update an order (update_order) with {"id":"${ORDER}","note":null,"revision":2}`);
+    const confirmationToken = asked.structuredContent.details.confirmationToken;
+    const updated = await call(root, 'update_order', { id: ORDER, revision: 2, note: null, confirmationToken });
     expect(updated.structuredContent.echo.args).toEqual({ id: ORDER_ID, input: { revision: 2, note: null } });
+    const again = await call(root, 'update_order', { id: ORDER, revision: 2, note: null, confirmationToken });
+    expect(again.structuredContent).toMatchObject({ code: 'confirmation_required', details: { refused: 'used' } });
+  });
+
+  test('a tool that asks needs the confirmation key', () => {
+    expect(() => buildRouter({ order: {} }, {})).toThrow('mountMcp: tool update_order runs only once the person confirms it, so options.mcp.confirmationKey is required');
   });
 
   test("the route's rules refuse a call as they refuse a request, as a tool error", async () => {

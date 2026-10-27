@@ -21,6 +21,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/behaviortypes"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -142,6 +143,11 @@ type TypeInfo struct {
 	// key and validates nested object fields, and parse<Type>FromJSON runs
 	// the strict JSON parser.
 	StrictJSON bool
+
+	// AllowUnknownFields is set by @allowUnknownFields (D87): every parser
+	// of the type drops the keys it does not declare, where parse<Type>Json
+	// would refuse them.
+	AllowUnknownFields bool
 
 	// HasDefaults is true when at least one field has a usable
 	// DefaultLiteral. Templates use this flag to decide whether to emit a
@@ -438,6 +444,10 @@ type Options struct {
 	// alone (D79).
 	NoPostgres bool
 
+	// Actor is the DB service's system actor and whether an update needs
+	// an acting user (D87), which orm.ts's definition carries.
+	Actor sqlutil.Actor
+
 	// Clock stamps the generated output.
 	Clock codegen.Clock
 }
@@ -540,7 +550,10 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		return nil, err
 	}
 	if !opts.NoPostgres {
-		if output.ORM, err = typeScriptORM(schema, opts, output); err != nil {
+		// A projection's row is the ORM's type alone (D90): its fields'
+		// types are written as a table's are, and no ./types entry holds it.
+		projections := convertTypes(codegen.ExtractTypes(schema, codegenScalars, extraction, ir.RoleProjection), output.Scalars, enumLookup, unionNames)
+		if output.ORM, err = typeScriptORM(schema, opts, output, projections); err != nil {
 			return nil, err
 		}
 	}
@@ -726,13 +739,14 @@ func convertTypes(codegenTypes []codegen.TypeInfo, scalars []ScalarInfo, enumLoo
 			}
 		}
 		types[i] = TypeInfo{
-			Name:        t.Name,
-			Owner:       t.Owner,
-			Role:        t.Role,
-			Doc:         t.Doc(),
-			Fields:      fields,
-			StrictJSON:  t.StrictJSON,
-			HasDefaults: hasDefaults,
+			Name:               t.Name,
+			Owner:              t.Owner,
+			Role:               t.Role,
+			Doc:                t.Doc(),
+			Fields:             fields,
+			StrictJSON:         t.StrictJSON,
+			AllowUnknownFields: t.AllowUnknownFields,
+			HasDefaults:        hasDefaults,
 		}
 	}
 	return types

@@ -11,12 +11,21 @@ createOrm(pool, { user, fieldKeys }) acts as a user and holds the keys
 of the Encrypted<T> fields (D85), whose rows hold each one's value in a
 SecretValue.
 A row holds each column by member, a to-one relation's key as <field>Id, a
-UUID in its base62 wire form; withUser(id) or as(ctx.principal) acts as a
-user, whom createdBy, updatedBy and deletedBy record; transaction(fn) runs
-fn in a transaction, whose query takes enqueue's statements too.
+UUID in its base62 wire form. createdBy, updatedBy and deletedBy record the
+acting user: in an operation the router runs, its caller (D87);
+withUser(id) or as(principal) acts as another, and asSystem() as the
+system actor, for a job's or a worker's writes. transaction(fn) runs fn in
+a transaction, whose query takes enqueue's statements too.
+
+A read's options select members and include relations (D90), and its rows
+hold what they name: include: { category: { include: { parent: true } } }
+loads each row's category, and its parent, in one statement per relation.
+A filter reaches through a to-one relation, { category: { parentId: {
+in: ids } } }, and anyOf ORs filters.
 
 Each table's definition also describes its rows for the runtime's
-decodeRow, so a raw query of its columns reads back as its row type.
+decodeRow, so a raw query of its columns reads back as its row type:
+query(text, values, { decode: <table>Table }) reads them so (D89).
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
 import type { DateTimeFilter, EncryptedRepository, NullFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, Repository, SecretValue, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
@@ -52,6 +61,8 @@ export interface ApiCredentialFilter {
   id?: UuidFilter<T.IdentityUUID>;
   service?: StringFilter<string>;
   rotatedAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly ApiCredentialFilter[];
 }
 
 /** The members findOne and findMany order rows of ApiCredential by. */
@@ -60,12 +71,16 @@ export type ApiCredentialOrderField = "id" | "service" | "rotatedAt";
 /** The members findPage orders rows of ApiCredential by (D60, amended); ties break by id. */
 export type ApiCredentialSortField = "id" | "service";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type ApiCredentialUniqueKey = readonly ["id"] | readonly ["service"];
 
 /** The position of a row of ApiCredential in a findPage order: its id. */
 export interface ApiCredentialPageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of ApiCredential includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface ApiCredentialRelations {
 }
 
 /** The repository of ApiCredential. */
@@ -78,7 +93,8 @@ export type ApiCredentialRepository = Repository<
   ApiCredentialSortField,
   ApiCredentialUniqueKey,
   T.IdentityUUID,
-  ApiCredentialPageKey
+  ApiCredentialPageKey,
+  ApiCredentialRelations
 > & EncryptedRepository;
 
 /** The api_credential table, as the runtime reads and writes it. */
@@ -90,12 +106,14 @@ export const apiCredentialTable: TableDefinition = {
     { name: "id", column: "id", field: "id", qualified: "api_credential.id", uuid: true, key: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "service", column: "service", field: "service", qualified: "api_credential.service", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "secret", column: "secret", field: "secret", qualified: "api_credential.secret", required: true, encrypted: true },
-    { name: "rotatedAt", column: "rotated_at", field: "rotatedAt", qualified: "api_credential.rotated_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
+    { name: "rotatedAt", column: "rotated_at", field: "rotatedAt", qualified: "api_credential.rotated_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"service\", \"secret\", \"rotated_at\"",
     qualifiedColumns: "\"api_credential\".\"id\", \"api_credential\".\"service\", \"api_credential\".\"secret\", \"api_credential\".\"rotated_at\"",
+    selectColumn: "\"api_credential\".\"%s\"",
     getOne: "SELECT \"id\", \"service\", \"secret\", \"rotated_at\" FROM api_credential WHERE id = $1",
+    getOneFields: "SELECT %s FROM api_credential WHERE id = $1",
     getMany: "SELECT \"id\", \"service\", \"secret\", \"rotated_at\" FROM api_credential WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -116,7 +134,7 @@ export const apiCredentialTable: TableDefinition = {
     updateMany: "UPDATE api_credential SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO api_credential (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"service\", \"secret\", \"rotated_at\"",
+    upsert: "INSERT INTO api_credential (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"service\", \"secret\", \"rotated_at\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM api_credential WHERE id = $1",
@@ -125,8 +143,8 @@ export const apiCredentialTable: TableDefinition = {
     reseal: "UPDATE api_credential SET secret = $1 WHERE id = $2 AND secret IS NOT DISTINCT FROM $3",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "service": { conflict: "(service)", keep: "service = EXCLUDED.service" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"service\", \"secret\", \"rotated_at\" FROM api_credential WHERE (id) IN (%s)" },
+    "service": { conflict: "(service)", keep: "service = EXCLUDED.service", rows: "SELECT \"id\", \"service\", \"secret\", \"rotated_at\" FROM api_credential WHERE (service) IN (%s)" },
   },
 };
 
@@ -170,6 +188,8 @@ export interface PlaidItemFilter {
   updatedAt?: DateTimeFilter<T.TemporalDateTime>;
   /** The rows whose search fields hold each word of the text, in any case (D62). */
   searchText?: string;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly PlaidItemFilter[];
 }
 
 /** The members findOne and findMany order rows of PlaidItem by. */
@@ -178,12 +198,16 @@ export type PlaidItemOrderField = "id" | "itemId" | "institution" | "createdAt" 
 /** The members findPage orders rows of PlaidItem by (D60, amended); ties break by id. */
 export type PlaidItemSortField = "id" | "itemId" | "institution" | "createdAt" | "updatedAt";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type PlaidItemUniqueKey = readonly ["id"] | readonly ["itemId"];
 
 /** The position of a row of PlaidItem in a findPage order: its id. */
 export interface PlaidItemPageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of PlaidItem includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface PlaidItemRelations {
 }
 
 /** The repository of PlaidItem. */
@@ -196,7 +220,8 @@ export type PlaidItemRepository = SoftDeleteRepository<
   PlaidItemSortField,
   PlaidItemUniqueKey,
   T.IdentityUUID,
-  PlaidItemPageKey
+  PlaidItemPageKey,
+  PlaidItemRelations
 > & EncryptedRepository;
 
 /** The plaid_item table, as the runtime reads and writes it. */
@@ -210,14 +235,16 @@ export const plaidItemTable: TableDefinition = {
     { name: "institution", column: "institution", field: "institution", qualified: "plaid_item.institution", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "accessToken", column: "access_token", field: "accessToken", qualified: "plaid_item.access_token", required: true, encrypted: true },
     { name: "webhookSecret", column: "webhook_secret", field: "webhookSecret", qualified: "plaid_item.webhook_secret", encrypted: true },
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "plaid_item.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "plaid_item.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "plaid_item.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "plaid_item.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "deletedAt", column: "deleted_at", field: "deletedAt", qualified: "plaid_item.deleted_at", timestamp: true, audit: "deletedAt" },
   ],
   statements: {
     columns: "\"id\", \"item_id\", \"institution\", \"access_token\", \"webhook_secret\", \"created_at\", \"updated_at\", \"deleted_at\"",
     qualifiedColumns: "\"plaid_item\".\"id\", \"plaid_item\".\"item_id\", \"plaid_item\".\"institution\", \"plaid_item\".\"access_token\", \"plaid_item\".\"webhook_secret\", \"plaid_item\".\"created_at\", \"plaid_item\".\"updated_at\", \"plaid_item\".\"deleted_at\"",
+    selectColumn: "\"plaid_item\".\"%s\"",
     getOne: "SELECT \"id\", \"item_id\", \"institution\", \"access_token\", \"webhook_secret\", \"created_at\", \"updated_at\", \"deleted_at\" FROM plaid_item WHERE id = $1",
+    getOneFields: "SELECT %s FROM plaid_item WHERE id = $1",
     getMany: "SELECT \"id\", \"item_id\", \"institution\", \"access_token\", \"webhook_secret\", \"created_at\", \"updated_at\", \"deleted_at\" FROM plaid_item WHERE id IN (%s)",
     live: " AND deleted_at IS NULL",
     liveWhere: " WHERE deleted_at IS NULL",
@@ -238,7 +265,7 @@ export const plaidItemTable: TableDefinition = {
     updateMany: "UPDATE plaid_item SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO plaid_item (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s WHERE plaid_item.deleted_at IS NULL RETURNING \"id\", \"item_id\", \"institution\", \"access_token\", \"webhook_secret\", \"created_at\", \"updated_at\", \"deleted_at\"",
+    upsert: "INSERT INTO plaid_item (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"item_id\", \"institution\", \"access_token\", \"webhook_secret\", \"created_at\", \"updated_at\", \"deleted_at\", (xmax = 0) AS _inserted",
     softDelete: "UPDATE plaid_item SET deleted_at = $1 WHERE id = $2 AND deleted_at IS NULL",
     softDeleteMany: "UPDATE plaid_item SET deleted_at = $1%s",
     delete: "DELETE FROM plaid_item WHERE id = $1",
@@ -249,8 +276,8 @@ export const plaidItemTable: TableDefinition = {
   softDelete: true,
   search: "plaid_item.search_text",
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "itemId": { conflict: "(item_id)", keep: "item_id = EXCLUDED.item_id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"item_id\", \"institution\", \"access_token\", \"webhook_secret\", \"created_at\", \"updated_at\", \"deleted_at\" FROM plaid_item WHERE (id) IN (%s)" },
+    "itemId": { conflict: "(item_id)", keep: "item_id = EXCLUDED.item_id", rows: "SELECT \"id\", \"item_id\", \"institution\", \"access_token\", \"webhook_secret\", \"created_at\", \"updated_at\", \"deleted_at\" FROM plaid_item WHERE (item_id) IN (%s)" },
   },
 };
 
@@ -286,14 +313,23 @@ export const fixtureVaultDbOrm: OrmDefinition = {
     pageKey: "page_key.%s",
     placeholder: "$%d",
     default: "DEFAULT",
+    or: " OR ",
+    group: "(%s)",
     where: " WHERE ",
     and: " AND ",
     orderBy: " ORDER BY ",
     orderTerm: "%s %s",
     limit: " LIMIT %d",
     offset: " OFFSET %d",
+    setExcluded: "%s = EXCLUDED.%s",
+    excluded: "EXCLUDED.%s",
+    changed: "(%s) IS DISTINCT FROM (%s)",
+    never: "FALSE",
+    null: "NULL",
+    notIn: "%s NOT IN (%s)",
   },
   defaultLimit: 100,
+  manyLimit: 1000000,
   historyActorCTE: "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",
   clearHistoryActor: "SELECT set_config('superschematic.history_actor_id', '', true)",
   tables: {

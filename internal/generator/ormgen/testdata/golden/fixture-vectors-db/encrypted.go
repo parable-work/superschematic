@@ -15,9 +15,10 @@ import (
 The schema's Encrypted<T> fields (D85). Each column holds its value's
 envelope, which a write seals and a read opens with the keys the Database
 holds (WithFieldKeys), bound to the table, the field and the row's key: a
-create of such a table generates a UUID key the input leaves unset, and
-Reencrypt reseals the envelopes of an older key under the current one, as
-the TypeScript repositories do. A read or a write of such a field without
+create of such a table generates a UUID key the input leaves unset, an
+upsert seals its update's under the key of the row it updates, by a second
+statement (D89), and Reencrypt reseals the envelopes of an older key under
+the current one, as the TypeScript repositories do. A read or a write of such a field without
 the keys fails with an error that wraps fieldcrypt.ErrNoKeys; one sealed
 under a key the Database does not hold, fieldcrypt.ErrUnknownKey. A value
 is the field's plain Go type, which MaskSecrets clears, as it does a
@@ -61,8 +62,8 @@ func applyOptions(db *Database, options []Option) error {
 
 // EncryptedWriteError is a write that cannot set an Encrypted<T> field:
 // each row's envelope is bound to its own key, so one statement cannot set
-// it on many rows, and an upsert on another key than the primary key does
-// not know the key of the row it updates.
+// it on many rows. An upsert sets one by a second statement, an UpdateOne
+// of the row it updates, under that row's key (D89).
 type EncryptedWriteError struct {
 	Table string
 	Field string

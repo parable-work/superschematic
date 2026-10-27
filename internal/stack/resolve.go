@@ -254,11 +254,13 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	r.applySettings()
 	r.disableDeployables()
 	r.place()
+	r.checkIdentityDatabases()
 	r.expose()
 	r.dropUnplaced()
 	r.resolveCalls()
 	r.resolveBuckets()
 	r.resolveMemoryStores()
+	r.resolveOrigins()
 	r.checkCalls()
 	r.scheduleJobs()
 	r.runWorkers()
@@ -279,6 +281,7 @@ func (r *resolver) resolve() *ir.ResolvedEnvironment {
 	}
 	out := r.output()
 	r.connectEdges()
+	r.checkOriginURLs()
 	if r.failed() {
 		return nil
 	}
@@ -1012,7 +1015,9 @@ func (r *resolver) placeServer(d *deployable) {
 		}
 		r.fail(CodeUnrealizable, "%s", msg)
 	}
-	if reason := d.platform.NoIdentity; reason != "" && (d.res.Kind == ir.DeployableServer || d.res.Kind == ir.DeployableApp) {
+	// A platform that serves the user model over some database platforms
+	// alone is checked once every database is placed (checkIdentityDatabases).
+	if reason := d.platform.NoIdentity; reason != "" && len(d.platform.IdentityDatabases) == 0 && (d.res.Kind == ir.DeployableServer || d.res.Kind == ir.DeployableApp) {
 		for _, served := range d.res.Services {
 			if svc := r.services[served.Name]; svc != nil && svc.Identity {
 				r.fail(CodeUnrealizable, "%s %s serves %s, an API over the user model, which authenticates with the identity runtime (D50), and platform %s runs none: %s", d.res.Kind, d.res.Name, svc.Name, d.platform.Name, reason)
@@ -1359,6 +1364,7 @@ func cloneDeployable(d *ir.ResolvedDeployable) ir.ResolvedDeployable {
 	c.Calls = slices.Clone(d.Calls)
 	c.Buckets = slices.Clone(d.Buckets)
 	c.MemoryStores = slices.Clone(d.MemoryStores)
+	c.Origins = slices.Clone(d.Origins)
 	if d.Settings != nil {
 		c.Settings = deepCopy(d.Settings).(map[string]any)
 	}
@@ -1374,6 +1380,11 @@ func cloneDeployable(d *ir.ResolvedDeployable) ir.ResolvedDeployable {
 		if site.Dev != nil {
 			dev := *site.Dev
 			site.Dev = &dev
+		}
+		site.Origin = nil
+		for _, api := range d.Site.Origin {
+			copied := *api
+			site.Origin = append(site.Origin, &copied)
 		}
 		c.Site = &site
 	}

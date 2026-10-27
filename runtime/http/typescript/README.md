@@ -97,8 +97,15 @@ Its entry points:
   streamable HTTP transport over any tool set, and `mountMcp` mounts it at
   `POST /api/mcp` behind the router's auth gate, listing the tools whose
   routes the caller may call and running each `tools/call` in process
-  through its operation's route. `src/mcp-parity.test.ts` replays the
-  engine's MCP corpus through the transport.
+  through its operation's route. A tool marked `confirm`, whose invocation
+  policy is ask, runs only once the person confirms the call (D93): a
+  2026-07-28 client that elicits forms is asked with `elicitation/create`
+  in an `input_required` result, any other gets a `confirmation_required`
+  tool error with a `confirmationToken` to call again with;
+  `McpConfirmations` (`src/mcpconfirm.ts`) signs and redeems both under
+  `confirmationKey`. `src/mcp-parity.test.ts` replays the engine's MCP
+  corpus through the transport, and `src/mcpconfirm.test.ts` holds the
+  confirmations.
 - `@superschematic/http-runtime/postgres`, a `pg` Pool over a derived
   database connection, the Postgres value codec, the generated
   repositories' runtime, and a queue's enqueue and claims (below). It is

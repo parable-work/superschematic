@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	types "{{ .TypesModule }}"
 )
 
@@ -40,6 +41,65 @@ var vectorDistances = map[VectorMetric]string{
 	{{- range .NearestMetrics }}
 	{{ printf "%q" .Name }}: {{ goRawString .Distance }},
 	{{- end }}
+}
+
+// VectorIterativeScan is how a vector index's scan goes on past the
+// candidates it reads first (pgvector 0.8 and later, D89).
+type VectorIterativeScan string
+
+const (
+	// IterativeScanOff reads EfSearch candidates, or an ivfflat index's
+	// Probes lists, and keeps those the filter keeps, so a filter that keeps
+	// few rows may leave fewer than K: pgvector's default.
+	IterativeScanOff VectorIterativeScan = "off"
+	// IterativeScanRelaxed scans on until it has K rows or has read
+	// MaxScanTuples tuples (MaxProbes lists), in an order a little out of
+	// the distance's.
+	IterativeScanRelaxed VectorIterativeScan = "relaxed_order"
+	// IterativeScanStrict scans on in the distance's order; an hnsw index
+	// alone takes it.
+	IterativeScanStrict VectorIterativeScan = "strict_order"
+)
+
+// vectorSettings is the statement that sets, for the transaction, the
+// settings of a vector index's scan the options name (sqlutil's
+// NearestSettings), and its values, or "" when they name none (D89). A zero
+// option is unset.
+func vectorSettings(efSearch int, iterativeScan VectorIterativeScan, maxScanTuples, probes, maxProbes int) (string, []any, error) {
+	switch iterativeScan {
+	case "", IterativeScanOff, IterativeScanRelaxed, IterativeScanStrict:
+	default:
+		return "", nil, fmt.Errorf("orm: Nearest's IterativeScan is %s, %s or %s, not %q", IterativeScanOff, IterativeScanRelaxed, IterativeScanStrict, string(iterativeScan))
+	}
+	var calls []string
+	var values []any
+	whole := func(option string, value, min, max int) error {
+		if value < min || value > max {
+			return fmt.Errorf("orm: Nearest's %s is a whole number from %d to %d, not %d", option, min, max, value)
+		}
+		return nil
+	}
+	{{- range .NearestSettings }}
+	{{- if .Values }}
+	switch iterativeScan {
+	case {{ range $i, $v := .Values }}{{ if $i }}, {{ end }}{{ printf "%q" $v }}{{ end }}:
+		values = append(values, string(iterativeScan))
+		calls = append(calls, fmt.Sprintf({{ goRawString .SQL }}, len(values)))
+	}
+	{{- else }}
+	if {{ .Option }} != 0 {
+		if err := whole({{ printf "%q" (toGoName .Option) }}, {{ .Option }}, {{ .Min }}, {{ .Max }}); err != nil {
+			return "", nil, err
+		}
+		values = append(values, strconv.Itoa({{ .Option }}))
+		calls = append(calls, fmt.Sprintf({{ goRawString .SQL }}, len(values)))
+	}
+	{{- end }}
+	{{- end }}
+	if len(calls) == 0 {
+		return "", nil, nil
+	}
+	return fmt.Sprintf({{ goRawString .NearestSettingsStatement }}, strings.Join(calls, ", ")), values, nil
 }
 
 // vectorText writes v in pgvector's text form, each number the shortest
@@ -172,6 +232,23 @@ type {{ .TypeName }}NearestOptions struct {
 	// IncludeDeleted reads soft-deleted rows too.
 	IncludeDeleted bool
 	{{- end }}
+	// ExcludeIDs leaves out the rows of these keys: the row whose vector is
+	// asked for, say (D89).
+	ExcludeIDs []{{ .PrimaryKeyType }}
+	// The settings of the vector index's scan (D89), which Nearest sets for
+	// its transaction, in a transaction of its own when none is open, and
+	// which in a transaction already open hold until it ends, as SET
+	// LOCAL's do; zero leaves one as it is. EfSearch is hnsw's ef_search,
+	// the candidates a scan reads, 1 to 1000 (40 unless set); MaxScanTuples
+	// the tuples an iterative scan reads at most (20000); Probes ivfflat's
+	// lists a scan reads, 1 to 32768 (1); MaxProbes the lists an iterative
+	// one reads at most. IterativeScan sets both indexes' iterative scan,
+	// ivfflat's but to IterativeScanStrict, which it has not.
+	EfSearch      int
+	IterativeScan VectorIterativeScan
+	MaxScanTuples int
+	Probes        int
+	MaxProbes     int
 }
 
 // {{ .TypeName }}Neighbour is a row Nearest read and its distance from the vector,
@@ -223,11 +300,24 @@ func (r *{{ .Name }}) Nearest(ctx context.Context, field {{ .TypeName }}VectorFi
 	}
 	selectFields := buildSelectFieldsTyped(fieldStrings, "{{ .TableName }}")
 
-	// The filter's conditions, each qualified by the table{{ if .HasSoftDelete }}, then the
-	// soft-delete condition{{ end }}, then a vector that may be null's presence;
-	// the vector is the last parameter.
+	settings, settingValues, err := vectorSettings(opts.EfSearch, opts.IterativeScan, opts.MaxScanTuples, opts.Probes, opts.MaxProbes)
+	if err != nil {
+		return nil, err
+	}
+
+	// The filter's conditions, each qualified by the table, then the keys it
+	// leaves out{{ if .HasSoftDelete }}, then the soft-delete condition{{ end }}, then a vector
+	// that may be null's presence; the vector is the last parameter.
 	var args []interface{}
 	conditions := opts.Filter.conditions(&args, 0)
+	if len(opts.ExcludeIDs) > 0 {
+		placeholders := make([]string, len(opts.ExcludeIDs))
+		for i, id := range opts.ExcludeIDs {
+			args = append(args, id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }})
+			placeholders[i] = fmt.Sprintf({{ goRawString $.Clauses.Placeholder }}, len(args))
+		}
+		conditions = append(conditions, fmt.Sprintf({{ goRawString $.Clauses.NotIn }}, {{ goRawString .QualifiedKey }}, strings.Join(placeholders, ", ")))
+	}
 	{{- if .HasSoftDelete }}
 	if !opts.IncludeDeleted {
 		conditions = append(conditions, {{ goRawString .SQL.LiveCondition }})
@@ -244,16 +334,31 @@ func (r *{{ .Name }}) Nearest(ctx context.Context, field {{ .TypeName }}VectorFi
 	distanceSQL := fmt.Sprintf(distance, column.sql, len(args))
 	query := fmt.Sprintf({{ goRawString .SQL.Nearest }}, selectFields, distanceSQL, whereClause, distanceSQL, k)
 
-	var distances []float64
-	rows, err := r.findRows(ctx, "Nearest", query, args, fieldStrings, fields, &distances)
-	if err != nil {
-		return nil, err
+	read := func(repo *{{ .Name }}) ([]{{ .TypeName }}Neighbour, error) {
+		if settings != "" {
+			if _, err := repo.tx.Exec(ctx, settings, settingValues...); err != nil {
+				return nil, fmt.Errorf("failed to set the vector index's settings: %w", err)
+			}
+		}
+		var distances []float64
+		rows, err := repo.findRows(ctx, "Nearest", query, args, fieldStrings, fields, &distances)
+		if err != nil {
+			return nil, err
+		}
+		neighbours := make([]{{ .TypeName }}Neighbour, len(rows))
+		for i, row := range rows {
+			neighbours[i] = {{ .TypeName }}Neighbour{Row: row, Distance: distances[i]}
+		}
+		return neighbours, nil
 	}
-	neighbours := make([]{{ .TypeName }}Neighbour, len(rows))
-	for i, row := range rows {
-		neighbours[i] = {{ .TypeName }}Neighbour{Row: row, Distance: distances[i]}
+	if settings == "" {
+		return read(r)
 	}
-	return neighbours, nil
+	// The index's settings hold for the transaction the read runs in, one of
+	// its own when none is open (D89).
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]{{ .TypeName }}Neighbour, error) {
+		return read(&{{ .Name }}{tx: tx, txDB: r.database()})
+	})
 }
 {{- end }}
 {{- end }}

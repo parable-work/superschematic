@@ -1,5 +1,5 @@
 import { Generic, Identity, Temporal } from "superscalar";
-import { Nullable, Validate } from "@superschematic/schema";
+import { Default, Nullable, Validate } from "@superschematic/schema";
 import { AutoGenerate, Relation, column, enqueueOnChange, index, key, queue, searchField, table, versioned } from "@superschematic/db";
 
 // What a category is for.
@@ -41,7 +41,9 @@ export abstract class LinePosted {
 // keep their camel-case names, its category's foreign key among them, and
 // the bank's id of a line is unique among its category's. A line from the
 // bank enqueues a LinePosted when it is written and when its amount
-// changes; the trigger is named after both tables.
+// changes; the trigger is named after both tables, and the plan that adds
+// it enqueues the lines from the bank already there. A line written
+// without the day it was posted on is posted on the day it is written.
 @table("lineItem")
 @index<LineItem>(["postedOn"])
 @enqueueOnChange<LinePosted, LineItem>(LinePosted, {
@@ -49,6 +51,7 @@ export abstract class LinePosted {
   fields: ["amountCents"],
   when: [{ field: "externalId", notNull: true }],
   message: { lineId: "id", amountCents: "amountCents" },
+  backfill: true,
 })
 @index<LineItem>(["category", "externalId"], { unique: true, name: "external" })
 export abstract class LineItem {
@@ -59,7 +62,7 @@ export abstract class LineItem {
   amountCents: Generic.Int64;
 
   @column("postedOn")
-  postedOn: Temporal.Date;
+  postedOn: Default<Temporal.Date, "now">;
 
   @searchField
   memo: Nullable<string>;

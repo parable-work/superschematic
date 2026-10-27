@@ -55,7 +55,7 @@ export type DocsConfig = {
   readonly title: string;
   /** The OpenAPI description; it replaces the operation's comment there. */
   readonly description: string;
-  /** Stable dotted identifier, at least two lowercase segments: "orders.returns.create". */
+  /** Stable dotted identifier, at least two segments of lowercase letters, digits and hyphens (never underscores): "orders.returns.create", "finances.line-items.list". */
   readonly capability: string;
   /** deprecated and retired mark the OpenAPI operation deprecated. */
   readonly lifecycle: DocsLifecycle;

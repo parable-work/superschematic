@@ -522,7 +522,8 @@ func (r *LedgerLineRepository) FindOne(ctx context.Context, filter *LedgerLineFi
 	return result, nil
 }
 
-// FindMany retrieves multiple LedgerLine records matching the filter
+// FindMany retrieves multiple LedgerLine records matching the filter, and how
+// many it matches in all, -1 when the options skip the count
 func (r *LedgerLineRepository) FindMany(ctx context.Context, filter *LedgerLineFilter, opts *LedgerLineFindOptions) ([]*types.LedgerLine, int, error) {
 	if opts == nil || opts.Fields.IsZero() {
 		return nil, 0, fmt.Errorf("fields must be specified in FindOptions for performance")
@@ -555,18 +556,20 @@ func (r *LedgerLineRepository) FindMany(ctx context.Context, filter *LedgerLineF
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM ledger_line%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
 
-	// Get total count
-	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM ledger_line%s`, whereClause)
+	// Get total count, unless the options skip it (D89)
+	totalCount := -1
+	if !opts.SkipCount {
+		countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM ledger_line%s`, whereClause)
 
-	var totalCount int
-	var countRow pgx.Row
-	if r.tx != nil {
-		countRow = r.tx.QueryRow(ctx, countQuery, args...)
-	} else {
-		countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
-	}
-	if err := countRow.Scan(&totalCount); err != nil {
-		return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		var countRow pgx.Row
+		if r.tx != nil {
+			countRow = r.tx.QueryRow(ctx, countQuery, args...)
+		} else {
+			countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
+		}
+		if err := countRow.Scan(&totalCount); err != nil {
+			return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		}
 	}
 
 	results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
@@ -574,6 +577,30 @@ func (r *LedgerLineRepository) FindMany(ctx context.Context, filter *LedgerLineF
 		return nil, 0, err
 	}
 	return results, totalCount, nil
+}
+
+// findRelated reads the rows filter finds as FindMany reads them, with no
+// count: the read that loads a relation's rows for the rows of another
+// table's read (D90), which counts nothing, as the TypeScript
+// repositories' include does.
+func (r *LedgerLineRepository) findRelated(ctx context.Context, filter *LedgerLineFilter, opts *LedgerLineFindOptions) ([]*types.LedgerLine, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in FindOptions for performance")
+	}
+	fieldStrings := ledgerLineFieldStrings(opts.Fields)
+	if err := validateFields(fieldStrings, LedgerLineAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "ledger_line")
+	if selectFields == "" {
+		return nil, fmt.Errorf("no valid fields specified")
+	}
+	var args []interface{}
+	whereClause := filter.buildWhereClause(&args, 0)
+	orderByClause := buildLedgerLineOrderByClause(opts.OrderBy, `ledger_line`)
+	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
+	query := fmt.Sprintf(`SELECT %s FROM ledger_line%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
+	return r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
 }
 
 // ledgerLineFieldStrings are the columns fields selects, in OrderedMembers
@@ -940,9 +967,85 @@ func (r *LedgerLineRepository) CreateOne(ctx context.Context, input *types.Ledge
 
 // ledgerLineUniqueKeys are the conflict targets of LedgerLine's unique keys, and
 // the assignment an upsert that sets nothing writes, so the row it
-// conflicts with is returned (sqlutil.UniqueKey, D79).
-var ledgerLineUniqueKeys = map[LedgerLineUniqueKey]struct{ conflict, keep string }{
-	LedgerLineUniqueById: {`(id)`, `id = EXCLUDED.id`},
+// conflicts with is returned (sqlutil.UniqueKey, D79); the read of the rows
+// that hold keys, which an upsert only if changed reads back, empty for a
+// key over an expression, and the key's columns as a batch insert's cells
+// name them (D89).
+var ledgerLineUniqueKeys = map[LedgerLineUniqueKey]struct {
+	conflict, keep, rows string
+	columns              []string
+}{
+	LedgerLineUniqueById: {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "amount", "currency", "rate", "confidence", "quantity", "booked_at" FROM ledger_line WHERE (id) IN (%s)`, []string{`id`}},
+}
+
+// ledgerLineKeyOf is the text of row's values of the unique key on, as
+// UpsertMany matches the rows a statement returns to its inputs, or false
+// when the insert leaves one of them to the database (D89).
+func ledgerLineKeyOf(on LedgerLineUniqueKey, row *types.LedgerLine) (string, bool) {
+	switch on {
+	case LedgerLineUniqueById:
+		return upsertKeyText(upsertKeyValue(row.Id, false))
+	}
+	return "", false
+}
+
+// database is the Database the repository runs on.
+func (r *LedgerLineRepository) database() *Database {
+	if r.txDB != nil {
+		return r.txDB
+	}
+	return r.db
+}
+
+// scanReturned scans a row of every column of LedgerLine, as a write returns
+// it, and, with inserted, the flag an upsert returns after them (D89).
+func (r *LedgerLineRepository) scanReturned(row pgx.Row, inserted *bool) (*types.LedgerLine, error) {
+	result := &types.LedgerLine{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	var tempConfidence *types.GenericDecimal
+	var tempQuantity *types.GenericDecimal
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+
+	// Scan all fields in schema order (matches DDL column order)
+	dest := []any{
+
+		&result.Id,
+
+		&result.Amount,
+
+		&result.Currency,
+
+		&result.Rate,
+
+		&tempConfidence,
+
+		&tempQuantity,
+
+		&result.BookedAt,
+	}
+	if inserted != nil {
+		dest = append(dest, inserted)
+	}
+	if err := row.Scan(dest...); err != nil {
+		return nil, err
+	}
+
+	// Copy nullable fields when present
+
+	if tempConfidence != nil {
+		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+		result.Confidence = tempConfidence
+	}
+	if tempQuantity != nil {
+		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+		result.Quantity = tempQuantity
+	}
+
+	// Set relationship IDs from scanned FK values
+
+	return result, nil
 }
 
 // UpsertOne inserts input, or, when a row already holds its value of the
@@ -951,13 +1054,54 @@ var ledgerLineUniqueKeys = map[LedgerLineUniqueKey]struct{ conflict, keep string
 // UpdateOne writes, updated_at and updated_by among it, but an update that
 // sets no field leaves the row as it is.
 func (r *LedgerLineRepository) UpsertOne(ctx context.Context, input *types.LedgerLine, on LedgerLineUniqueKey, update *LedgerLineUpdate) (*types.LedgerLine, error) {
+	result, err := r.UpsertOneResult(ctx, input, on, update, nil)
+	if err != nil {
+		return nil, err
+	}
+	return result.Row, nil
+}
+
+// UpsertOneResult is UpsertOne, and what it did with the row: inserted it,
+// updated the row that held the key, or left that row as it was (D89).
+// With opts.OnlyIfChanged it updates the row only when a field the update
+// sets differs from what the row holds, which it reads back otherwise. A write that
+// may take more than one statement runs in a transaction of its own when
+// none is open.
+func (r *LedgerLineRepository) UpsertOneResult(ctx context.Context, input *types.LedgerLine, on LedgerLineUniqueKey, update *LedgerLineUpdate, opts *UpsertOptions) (UpsertResult[*types.LedgerLine], error) {
+	var none UpsertResult[*types.LedgerLine]
 	key, ok := ledgerLineUniqueKeys[on]
 	if !ok {
-		return nil, fmt.Errorf("orm: LedgerLine has no unique key %q", string(on))
+		return none, fmt.Errorf("orm: LedgerLine has no unique key %q", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if opts.OnlyIfChanged && key.rows == "" {
+		return none, upsertExpressionKey("UpsertOneResult", "LedgerLine", string(on))
 	}
 	if update == nil {
 		update = &LedgerLineUpdate{}
 	}
+	write := func(repo *LedgerLineRepository) (UpsertResult[*types.LedgerLine], error) {
+		result, err := repo.upsertRow(ctx, input, on, update, opts.OnlyIfChanged)
+		if err != nil {
+			return none, err
+		}
+		return *result, nil
+	}
+	if !opts.OnlyIfChanged {
+		return write(r)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (UpsertResult[*types.LedgerLine], error) {
+		return write(&LedgerLineRepository{tx: tx, txDB: r.database()})
+	})
+}
+
+// upsertRow is UpsertOneResult on the repository's connection: the upsert,
+// a read of the row it left as it was, only if changed, and the second
+// statement of an encrypted field.
+func (r *LedgerLineRepository) upsertRow(ctx context.Context, input *types.LedgerLine, on LedgerLineUniqueKey, update *LedgerLineUpdate, onlyIfChanged bool) (*UpsertResult[*types.LedgerLine], error) {
+	key := ledgerLineUniqueKeys[on]
 	// Set audit fields
 
 	// Build INSERT query
@@ -1021,20 +1165,26 @@ func (r *LedgerLineRepository) UpsertOne(ctx context.Context, input *types.Ledge
 
 	// Build the update of the row the key conflicts with, its placeholders
 	// numbered after the insert's
-	var setClauses []string
+	var setClauses, compareCurrent, compareNext []string
 	if update.Amount != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`amount = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `ledger_line.amount`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.Amount)
 	}
 	if update.Currency != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`currency = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `ledger_line.currency`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.Currency)
 	}
 	if update.Rate != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`rate = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `ledger_line.rate`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.Rate)
 	}
 	if update.Confidence != nil && update.ConfidenceSetNull {
@@ -1042,9 +1192,13 @@ func (r *LedgerLineRepository) UpsertOne(ctx context.Context, input *types.Ledge
 	}
 	if update.ConfidenceSetNull {
 		setClauses = append(setClauses, `confidence = NULL`)
+		compareCurrent = append(compareCurrent, `ledger_line.confidence`)
+		compareNext = append(compareNext, `NULL`)
 	} else if update.Confidence != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`confidence = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `ledger_line.confidence`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.Confidence)
 	}
 	if update.Quantity != nil && update.QuantitySetNull {
@@ -1052,18 +1206,25 @@ func (r *LedgerLineRepository) UpsertOne(ctx context.Context, input *types.Ledge
 	}
 	if update.QuantitySetNull {
 		setClauses = append(setClauses, `quantity = NULL`)
+		compareCurrent = append(compareCurrent, `ledger_line.quantity`)
+		compareNext = append(compareNext, `NULL`)
 	} else if update.Quantity != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`quantity = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `ledger_line.quantity`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, *update.Quantity)
 	}
 	if update.BookedAt != nil {
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`booked_at = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `ledger_line.booked_at`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, time.Time(*update.BookedAt))
 	}
 
-	if len(setClauses) == 0 {
+	assigned := len(setClauses)
+	if assigned == 0 {
 		// An update that sets no field leaves the row as it is, stamps and
 		// all, and returns it.
 		setClauses = append(setClauses, key.keep)
@@ -1075,11 +1236,12 @@ func (r *LedgerLineRepository) UpsertOne(ctx context.Context, input *types.Ledge
 	}
 
 	query := fmt.Sprintf(
-		`INSERT INTO ledger_line (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING "id", "amount", "currency", "rate", "confidence", "quantity", "booked_at"`,
+		`INSERT INTO ledger_line (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "amount", "currency", "rate", "confidence", "quantity", "booked_at", (xmax = 0) AS _inserted`,
 		strings.Join(fields, ", "),
-		strings.Join(placeholders, ", "),
+		"("+strings.Join(placeholders, ", ")+")",
 		key.conflict,
 		strings.Join(setClauses, ", "),
+		upsertWhere(``, compareCurrent, compareNext, onlyIfChanged),
 	)
 
 	// Execute query
@@ -1089,54 +1251,340 @@ func (r *LedgerLineRepository) UpsertOne(ctx context.Context, input *types.Ledge
 	} else {
 		row = r.db.pool.QueryRow(ctx, query, values...)
 	}
-
-	// Scan result
-	result := &types.LedgerLine{}
-	// Create temporary variables for nullable fields that need pointer scanning
-
-	var tempConfidence *types.GenericDecimal
-	var tempQuantity *types.GenericDecimal
-
-	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
-
-	// Scan all fields in schema order (matches DDL column order)
-	if err := row.Scan(
-
-		&result.Id,
-
-		&result.Amount,
-
-		&result.Currency,
-
-		&result.Rate,
-
-		&tempConfidence,
-
-		&tempQuantity,
-
-		&result.BookedAt,
-	); err != nil {
-		if err == pgx.ErrNoRows {
-			// The row the key conflicts with is soft-deleted.
-			return nil, ErrNotFound
+	var inserted bool
+	scanned, err := r.scanReturned(row, &inserted)
+	var upserted *UpsertResult[*types.LedgerLine]
+	switch {
+	case err == nil:
+		status := UpsertUnchanged
+		if inserted {
+			status = UpsertInserted
+		} else if assigned > 0 {
+			status = UpsertUpdated
 		}
+		upserted = &UpsertResult[*types.LedgerLine]{Row: scanned, Status: status}
+	case err != pgx.ErrNoRows:
 		return nil, fmt.Errorf("failed to scan result: %w", err)
+	case !onlyIfChanged:
+		// The row the key conflicts with is soft-deleted.
+		return nil, ErrNotFound
+	default:
+		// The row the key conflicts with already held the update's values.
+		keyValues, ok := upsertCellValues(upsertCells(fields, values), key.columns)
+		if !ok {
+			return nil, fmt.Errorf("no LedgerLine row holds an unset %s: %w", string(on), ErrNotFound)
+		}
+		found, err := r.rowsOfKeys(ctx, on, [][]any{keyValues}, []*types.LedgerLine{input})
+		if err != nil {
+			return nil, err
+		}
+		upserted = &UpsertResult[*types.LedgerLine]{Row: found[0], Status: UpsertUnchanged}
+	}
+	return upserted, nil
+}
+
+// UpsertMany inserts each input, or, when a row already holds its value of
+// the unique key on, sets each field update names of that row to the value
+// the input would have inserted, and returns each input's row and what it
+// did with it, in the inputs' order (D89). One statement writes a batch of
+// rows, opts.Batch or as many as Postgres binds the parameters of, and more
+// rows take a statement per batch, in one transaction; a write that may
+// take more than one statement runs in a transaction of its own when none
+// is open. An update that names no field leaves each row that holds a key
+// as it is. Two inputs of one batch that hold one key fail
+// the statement, and a key over an expression, whose rows the statement's
+// cannot be matched to the inputs by, is refused.
+func (r *LedgerLineRepository) UpsertMany(ctx context.Context, inputs []*types.LedgerLine, on LedgerLineUniqueKey, update LedgerLineFields, opts *UpsertOptions) ([]UpsertResult[*types.LedgerLine], error) {
+	key, ok := ledgerLineUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: LedgerLine has no unique key %q", string(on))
+	}
+	if key.rows == "" {
+		return nil, upsertExpressionKey("UpsertMany", "LedgerLine", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if update.Id {
+		return nil, fmt.Errorf("orm: UpsertMany of LedgerLine sets the fields an update sets, not id")
+	}
+	batch, err := upsertBatch("LedgerLine", opts.Batch, 9361)
+	if err != nil {
+		return nil, err
+	}
+	if len(inputs) == 0 {
+		return []UpsertResult[*types.LedgerLine]{}, nil
+	}
+	if len(inputs) <= batch && !opts.OnlyIfChanged {
+		return r.upsertBatches(ctx, inputs, on, update, batch, false)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]UpsertResult[*types.LedgerLine], error) {
+		return (&LedgerLineRepository{tx: tx, txDB: r.database()}).upsertBatches(ctx, inputs, on, update, batch, opts.OnlyIfChanged)
+	})
+}
+
+// upsertBatches is UpsertMany on the repository's connection, a batch at a
+// time: each batch's statement, a read of the rows it left as they were,
+// only if changed, and the second statement of each encrypted field.
+func (r *LedgerLineRepository) upsertBatches(ctx context.Context, inputs []*types.LedgerLine, on LedgerLineUniqueKey, update LedgerLineFields, batch int, onlyIfChanged bool) ([]UpsertResult[*types.LedgerLine], error) {
+	key := ledgerLineUniqueKeys[on]
+
+	// Set audit fields
+
+	// Each field update names takes the value the input would have
+	// inserted, which an upsert only if changed compares with the row's.
+	var setClauses, compareCurrent, compareNext []string
+	if update.Amount {
+		setClauses = append(setClauses, `amount = EXCLUDED.amount`)
+		compareCurrent = append(compareCurrent, `ledger_line.amount`)
+		compareNext = append(compareNext, `EXCLUDED.amount`)
+	}
+	if update.Currency {
+		setClauses = append(setClauses, `currency = EXCLUDED.currency`)
+		compareCurrent = append(compareCurrent, `ledger_line.currency`)
+		compareNext = append(compareNext, `EXCLUDED.currency`)
+	}
+	if update.Rate {
+		setClauses = append(setClauses, `rate = EXCLUDED.rate`)
+		compareCurrent = append(compareCurrent, `ledger_line.rate`)
+		compareNext = append(compareNext, `EXCLUDED.rate`)
+	}
+	if update.Confidence {
+		setClauses = append(setClauses, `confidence = EXCLUDED.confidence`)
+		compareCurrent = append(compareCurrent, `ledger_line.confidence`)
+		compareNext = append(compareNext, `EXCLUDED.confidence`)
+	}
+	if update.Quantity {
+		setClauses = append(setClauses, `quantity = EXCLUDED.quantity`)
+		compareCurrent = append(compareCurrent, `ledger_line.quantity`)
+		compareNext = append(compareNext, `EXCLUDED.quantity`)
+	}
+	if update.BookedAt {
+		setClauses = append(setClauses, `booked_at = EXCLUDED.booked_at`)
+		compareCurrent = append(compareCurrent, `ledger_line.booked_at`)
+		compareNext = append(compareNext, `EXCLUDED.booked_at`)
 	}
 
-	// Copy nullable fields when present
+	results := make([]UpsertResult[*types.LedgerLine], 0, len(inputs))
+	for start := 0; start < len(inputs); start += batch {
+		chunk := inputs[start:min(start+batch, len(inputs))]
+		prepared := chunk
 
-	if tempConfidence != nil {
-		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
-		result.Confidence = tempConfidence
+		// The batch's rows, as CreateMany writes them.
+		rows := make([][]batchInsertCell, 0, len(prepared))
+		for _, input := range prepared {
+			var row []batchInsertCell
+			// Primary key: id. Schema-owned identities may supply a stable
+			// UUID, matching CreateOne; a row without one takes the generated default.
+			{
+				cell := batchInsertCell{column: `id`}
+				var zeroPrimaryKey types.IdentityUUID
+				if primaryKey, ok := ledgerLineUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+					cell.value, cell.set = primaryKey.ToUUID(), true
+				}
+				row = append(row, cell)
+			}
+			// Required field: amount
+			{
+				cell := batchInsertCell{column: `amount`, set: true}
+				cell.value = input.Amount
+				row = append(row, cell)
+			}
+			// Required field: currency
+			{
+				cell := batchInsertCell{column: `currency`, set: true}
+				cell.value = input.Currency
+				row = append(row, cell)
+			}
+			// Required field: rate
+			{
+				cell := batchInsertCell{column: `rate`, set: true}
+				cell.value = input.Rate
+				row = append(row, cell)
+			}
+			// Optional field: confidence
+			{
+				cell := batchInsertCell{column: `confidence`}
+				if input.Confidence != nil {
+					// Dereference pointer for database value (nullable complex types, enums, and scalars are pointers)
+					cell.value = *input.Confidence
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
+			// Optional field: quantity
+			{
+				cell := batchInsertCell{column: `quantity`}
+				if input.Quantity != nil {
+					// Dereference pointer for database value (nullable complex types, enums, and scalars are pointers)
+					cell.value = *input.Quantity
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
+			// Required field: bookedAt
+			{
+				cell := batchInsertCell{column: `booked_at`, set: true}
+				cell.value = time.Time(input.BookedAt)
+				row = append(row, cell)
+			}
+
+			// Relationship foreign key columns, matching CreateOne
+			rows = append(rows, row)
+		}
+		fieldNames, valuePlaceholders, values := buildBatchInsert(rows)
+		assignments := append([]string(nil), setClauses...)
+		if len(setClauses) == 0 {
+			// An update that names no field leaves each row as it is.
+			assignments = append(assignments, key.keep)
+		} else {
+		}
+		query := fmt.Sprintf(
+			`INSERT INTO ledger_line (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "amount", "currency", "rate", "confidence", "quantity", "booked_at", (xmax = 0) AS _inserted`,
+			strings.Join(fieldNames, ", "),
+			strings.Join(valuePlaceholders, ", "),
+			key.conflict,
+			strings.Join(assignments, ", "),
+			upsertWhere(``, compareCurrent, compareNext, onlyIfChanged),
+		)
+		returned, inserted, err := r.upsertReturned(ctx, query, values)
+		if err != nil {
+			return nil, err
+		}
+
+		// A row is its input's by the key's values; an input that sets none
+		// of them, whose key the database generates, takes the next row whose
+		// key no input holds, as the rows come back in the inputs' order.
+		keys := make([]string, len(prepared))
+		set := make([]bool, len(prepared))
+		for i, input := range prepared {
+			keys[i], set[i] = ledgerLineKeyOf(on, input)
+		}
+		matcher := newUpsertMatcher(keys, set)
+		matched := make([]*UpsertResult[*types.LedgerLine], len(prepared))
+		for n, row := range returned {
+			text, ok := ledgerLineKeyOf(on, row)
+			i := matcher.take(text, ok)
+			if i < 0 {
+				return nil, fmt.Errorf("orm: UpsertMany of LedgerLine wrote a row whose %s no input holds", string(on))
+			}
+			status := UpsertUnchanged
+			if inserted[n] {
+				status = UpsertInserted
+			} else if len(setClauses) > 0 {
+				status = UpsertUpdated
+			}
+			matched[i] = &UpsertResult[*types.LedgerLine]{Row: row, Status: status}
+		}
+
+		// A row it did not return is one it left as it was, only if changed,
+		// which it reads back by its key, or a deleted one.
+		var left []int
+		for i := range matched {
+			if matched[i] == nil {
+				left = append(left, i)
+			}
+		}
+		if len(left) > 0 {
+			if !onlyIfChanged {
+				return nil, fmt.Errorf("the LedgerLine row that holds the %s of input %d is deleted: %w", string(on), start+left[0], ErrNotFound)
+			}
+			keyValues := make([][]any, len(left))
+			wanted := make([]*types.LedgerLine, len(left))
+			for n, i := range left {
+				cells, ok := upsertCellValues(rows[i], key.columns)
+				if !ok {
+					return nil, fmt.Errorf("no LedgerLine row holds an unset %s: %w", string(on), ErrNotFound)
+				}
+				keyValues[n], wanted[n] = cells, prepared[i]
+			}
+			found, err := r.rowsOfKeys(ctx, on, keyValues, wanted)
+			if err != nil {
+				return nil, err
+			}
+			for n, i := range left {
+				matched[i] = &UpsertResult[*types.LedgerLine]{Row: found[n], Status: UpsertUnchanged}
+			}
+		}
+		for _, result := range matched {
+			results = append(results, *result)
+		}
 	}
-	if tempQuantity != nil {
-		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
-		result.Quantity = tempQuantity
+	return results, nil
+}
+
+// upsertReturned runs an upsert's statement, query with values, and scans
+// each row it returns and whether it inserted it.
+func (r *LedgerLineRepository) upsertReturned(ctx context.Context, query string, values []any) ([]*types.LedgerLine, []bool, error) {
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
 	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to execute upsert: %w", err)
+	}
+	defer rows.Close()
+	var returned []*types.LedgerLine
+	var inserted []bool
+	for rows.Next() {
+		var flag bool
+		row, err := r.scanReturned(rows, &flag)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		returned = append(returned, row)
+		inserted = append(inserted, flag)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	return returned, inserted, nil
+}
 
-	// Set relationship IDs from scanned FK values
-
-	return result, nil
+// rowsOfKeys reads the rows that hold keys, each the values of the unique
+// key on an input's insert binds, among the rows the key's index holds, in
+// the inputs' order: the rows an upsert only if changed left as they were
+// (D89). A key no live row holds is ErrNotFound.
+func (r *LedgerLineRepository) rowsOfKeys(ctx context.Context, on LedgerLineUniqueKey, keys [][]any, inputs []*types.LedgerLine) ([]*types.LedgerLine, error) {
+	tuples, values := upsertKeyTuples(keys)
+	query := fmt.Sprintf(ledgerLineUniqueKeys[on].rows, strings.Join(tuples, ", "))
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the rows the upsert left: %w", err)
+	}
+	defer rows.Close()
+	found := map[string]*types.LedgerLine{}
+	for rows.Next() {
+		row, err := r.scanReturned(rows, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		if text, ok := ledgerLineKeyOf(on, row); ok {
+			found[text] = row
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	out := make([]*types.LedgerLine, len(inputs))
+	for i, input := range inputs {
+		text, _ := ledgerLineKeyOf(on, input)
+		row := found[text]
+		if row == nil {
+			return nil, fmt.Errorf("the LedgerLine row that holds the key %s is deleted: %w", string(on), ErrNotFound)
+		}
+		out[i] = row
+	}
+	return out, nil
 }
 
 // CreateMany inserts multiple LedgerLine records in a single statement

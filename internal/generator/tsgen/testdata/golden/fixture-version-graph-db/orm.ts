@@ -11,15 +11,24 @@ createOrm(pool, { user, fieldKeys }) acts as a user and holds the keys
 of the Encrypted<T> fields (D85), whose rows hold each one's value in a
 SecretValue.
 A row holds each column by member, a to-one relation's key as <field>Id, a
-UUID in its base62 wire form; withUser(id) or as(ctx.principal) acts as a
-user, whom createdBy, updatedBy and deletedBy record; transaction(fn) runs
-fn in a transaction, whose query takes enqueue's statements too.
+UUID in its base62 wire form. createdBy, updatedBy and deletedBy record the
+acting user: in an operation the router runs, its caller (D87);
+withUser(id) or as(principal) acts as another, and asSystem() as the
+system actor, for a job's or a worker's writes. transaction(fn) runs fn in
+a transaction, whose query takes enqueue's statements too.
+
+A read's options select members and include relations (D90), and its rows
+hold what they name: include: { category: { include: { parent: true } } }
+loads each row's category, and its parent, in one statement per relation.
+A filter reaches through a to-one relation, { category: { parentId: {
+in: ids } } }, and anyOf ORs filters.
 
 Each table's definition also describes its rows for the runtime's
-decodeRow, so a raw query of its columns reads back as its row type.
+decodeRow, so a raw query of its columns reads back as its row type:
+query(text, values, { decode: <table>Table }) reads them so (D89).
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
-import type { BoolFilter, DateFilter, DateTimeFilter, DurationFilter, JsonFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
+import type { BoolFilter, DateFilter, DateTimeFilter, DurationFilter, JsonFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Related, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
 
 /**
@@ -63,6 +72,12 @@ export interface CoverFilter {
   refId?: UuidFilter<T.IdentityUUID>;
   deletedOnRef?: BoolFilter;
   _version?: NumberFilter<number>;
+  /** The rows whose recipe is among the Recipe rows the filter finds (D90). */
+  recipe?: RecipeFilter;
+  /** The rows whose ref is among the live RecipeRef rows the filter finds (D90). */
+  ref?: RecipeRefFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly CoverFilter[];
 }
 
 /** The members findOne and findMany order rows of Cover by. */
@@ -71,12 +86,18 @@ export type CoverOrderField = "id" | "photoUrl" | "entityKey" | "deletedOnRef" |
 /** The members findPage orders rows of Cover by (D60, amended); ties break by id. */
 export type CoverSortField = "id" | "photoUrl" | "entityKey";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type CoverUniqueKey = readonly ["id"] | readonly ["entityKey", "ref"];
 
 /** The position of a row of Cover in a findPage order: its id. */
 export interface CoverPageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of Cover includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface CoverRelations {
+  readonly recipe: Related<RecipeRow, RecipeRelations, 'one'>;
+  readonly ref: Related<RecipeRefRow, RecipeRefRelations, 'optional'>;
 }
 
 /** The repository of Cover. */
@@ -89,7 +110,8 @@ export type CoverRepository = Repository<
   CoverSortField,
   CoverUniqueKey,
   T.IdentityUUID,
-  CoverPageKey
+  CoverPageKey,
+  CoverRelations
 >;
 
 /** The cover table, as the runtime reads and writes it. */
@@ -103,13 +125,15 @@ export const coverTable: TableDefinition = {
     { name: "photoUrl", column: "photo_url", field: "photoUrl", qualified: "cover.photo_url", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "entityKey", column: "entity_key", field: "entityKey", qualified: "cover.entity_key", uuid: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "refId", column: "ref_id", field: "ref", qualified: "cover.ref_id", uuid: true, required: true, relation: "RecipeRef", filter: ["eq", "in", "isNull"] },
-    { name: "deletedOnRef", column: "deleted_on_ref", field: "deletedOnRef", qualified: "cover.deleted_on_ref", boolean: true, required: true, default: false, filter: ["eq", "isNull"] },
+    { name: "deletedOnRef", column: "deleted_on_ref", field: "deletedOnRef", qualified: "cover.deleted_on_ref", boolean: true, required: true, default: false, filter: ["eq", "in", "isNull"] },
     { name: "_version", column: "_version", field: "_version", qualified: "cover._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"recipe_id\", \"photo_url\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\"",
     qualifiedColumns: "\"cover\".\"id\", \"cover\".\"recipe_id\", \"cover\".\"photo_url\", \"cover\".\"entity_key\", \"cover\".\"ref_id\", \"cover\".\"deleted_on_ref\", \"cover\".\"_version\"",
+    selectColumn: "\"cover\".\"%s\"",
     getOne: "SELECT \"id\", \"recipe_id\", \"photo_url\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM cover WHERE id = $1",
+    getOneFields: "SELECT %s FROM cover WHERE id = $1",
     getMany: "SELECT \"id\", \"recipe_id\", \"photo_url\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM cover WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -130,16 +154,20 @@ export const coverTable: TableDefinition = {
     updateMany: "UPDATE cover SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO cover (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"recipe_id\", \"photo_url\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\"",
+    upsert: "INSERT INTO cover (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"recipe_id\", \"photo_url\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM cover WHERE id = $1",
     deleteMany: "DELETE FROM cover%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = EXCLUDED.entity_key" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"recipe_id\", \"photo_url\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM cover WHERE (id) IN (%s)" },
+    "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = EXCLUDED.entity_key", rows: "SELECT \"id\", \"recipe_id\", \"photo_url\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM cover WHERE (entity_key, ref_id) IN (%s)" },
   },
+  relations: [
+    { field: "recipe", column: "recipeId", target: "recipe", probe: "cover.recipe_id IN (SELECT recipe.id FROM recipe%s)" },
+    { field: "ref", column: "refId", target: "recipeRef", probe: "cover.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)" },
+  ],
 };
 
 /**
@@ -191,6 +219,12 @@ export interface IngredientFilter {
   refId?: UuidFilter<T.IdentityUUID>;
   deletedOnRef?: BoolFilter;
   _version?: NumberFilter<number>;
+  /** The rows whose recipe is among the Recipe rows the filter finds (D90). */
+  recipe?: RecipeFilter;
+  /** The rows whose ref is among the live RecipeRef rows the filter finds (D90). */
+  ref?: RecipeRefFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly IngredientFilter[];
 }
 
 /** The members findOne and findMany order rows of Ingredient by. */
@@ -199,12 +233,18 @@ export type IngredientOrderField = "id" | "stepKey" | "quantity" | "substitutes"
 /** The members findPage orders rows of Ingredient by (D60, amended); ties break by id. */
 export type IngredientSortField = "id" | "stepKey" | "quantity" | "entityKey";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type IngredientUniqueKey = readonly ["id"] | readonly ["entityKey", "ref"];
 
 /** The position of a row of Ingredient in a findPage order: its id. */
 export interface IngredientPageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of Ingredient includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface IngredientRelations {
+  readonly recipe: Related<RecipeRow, RecipeRelations, 'one'>;
+  readonly ref: Related<RecipeRefRow, RecipeRefRelations, 'optional'>;
 }
 
 /** The repository of Ingredient. */
@@ -217,7 +257,8 @@ export type IngredientRepository = Repository<
   IngredientSortField,
   IngredientUniqueKey,
   T.IdentityUUID,
-  IngredientPageKey
+  IngredientPageKey,
+  IngredientRelations
 >;
 
 /** The ingredient table, as the runtime reads and writes it. */
@@ -233,13 +274,15 @@ export const ingredientTable: TableDefinition = {
     { name: "substitutes", column: "substitutes", field: "substitutes", qualified: "ingredient.substitutes", json: true, required: true, filter: ["eq", "in", "isNull"] },
     { name: "entityKey", column: "entity_key", field: "entityKey", qualified: "ingredient.entity_key", uuid: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "refId", column: "ref_id", field: "ref", qualified: "ingredient.ref_id", uuid: true, required: true, relation: "RecipeRef", filter: ["eq", "in", "isNull"] },
-    { name: "deletedOnRef", column: "deleted_on_ref", field: "deletedOnRef", qualified: "ingredient.deleted_on_ref", boolean: true, required: true, default: false, filter: ["eq", "isNull"] },
+    { name: "deletedOnRef", column: "deleted_on_ref", field: "deletedOnRef", qualified: "ingredient.deleted_on_ref", boolean: true, required: true, default: false, filter: ["eq", "in", "isNull"] },
     { name: "_version", column: "_version", field: "_version", qualified: "ingredient._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"recipe_id\", \"step_key\", \"quantity\", \"substitutes\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\"",
     qualifiedColumns: "\"ingredient\".\"id\", \"ingredient\".\"recipe_id\", \"ingredient\".\"step_key\", \"ingredient\".\"quantity\", \"ingredient\".\"substitutes\", \"ingredient\".\"entity_key\", \"ingredient\".\"ref_id\", \"ingredient\".\"deleted_on_ref\", \"ingredient\".\"_version\"",
+    selectColumn: "\"ingredient\".\"%s\"",
     getOne: "SELECT \"id\", \"recipe_id\", \"step_key\", \"quantity\", \"substitutes\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM ingredient WHERE id = $1",
+    getOneFields: "SELECT %s FROM ingredient WHERE id = $1",
     getMany: "SELECT \"id\", \"recipe_id\", \"step_key\", \"quantity\", \"substitutes\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM ingredient WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -260,16 +303,20 @@ export const ingredientTable: TableDefinition = {
     updateMany: "UPDATE ingredient SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO ingredient (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"recipe_id\", \"step_key\", \"quantity\", \"substitutes\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\"",
+    upsert: "INSERT INTO ingredient (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"recipe_id\", \"step_key\", \"quantity\", \"substitutes\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM ingredient WHERE id = $1",
     deleteMany: "DELETE FROM ingredient%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = EXCLUDED.entity_key" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"recipe_id\", \"step_key\", \"quantity\", \"substitutes\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM ingredient WHERE (id) IN (%s)" },
+    "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = EXCLUDED.entity_key", rows: "SELECT \"id\", \"recipe_id\", \"step_key\", \"quantity\", \"substitutes\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM ingredient WHERE (entity_key, ref_id) IN (%s)" },
   },
+  relations: [
+    { field: "recipe", column: "recipeId", target: "recipe", probe: "ingredient.recipe_id IN (SELECT recipe.id FROM recipe%s)" },
+    { field: "ref", column: "refId", target: "recipeRef", probe: "ingredient.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)" },
+  ],
 };
 
 /**
@@ -317,6 +364,12 @@ export interface NoteFilter {
   refId?: UuidFilter<T.IdentityUUID>;
   deletedOnRef?: BoolFilter;
   _version?: NumberFilter<number>;
+  /** The rows whose recipe is among the Recipe rows the filter finds (D90). */
+  recipe?: RecipeFilter;
+  /** The rows whose ref is among the live RecipeRef rows the filter finds (D90). */
+  ref?: RecipeRefFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly NoteFilter[];
 }
 
 /** The members findOne and findMany order rows of Note by. */
@@ -325,12 +378,18 @@ export type NoteOrderField = "id" | "replyTo" | "body" | "entityKey" | "deletedO
 /** The members findPage orders rows of Note by (D60, amended); ties break by id. */
 export type NoteSortField = "id" | "body" | "entityKey";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type NoteUniqueKey = readonly ["id"] | readonly ["entityKey", "ref"];
 
 /** The position of a row of Note in a findPage order: its id. */
 export interface NotePageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of Note includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface NoteRelations {
+  readonly recipe: Related<RecipeRow, RecipeRelations, 'one'>;
+  readonly ref: Related<RecipeRefRow, RecipeRefRelations, 'optional'>;
 }
 
 /** The repository of Note. */
@@ -343,7 +402,8 @@ export type NoteRepository = Repository<
   NoteSortField,
   NoteUniqueKey,
   T.IdentityUUID,
-  NotePageKey
+  NotePageKey,
+  NoteRelations
 >;
 
 /** The note table, as the runtime reads and writes it. */
@@ -358,13 +418,15 @@ export const noteTable: TableDefinition = {
     { name: "body", column: "body", field: "body", qualified: "note.body", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "entityKey", column: "entity_key", field: "entityKey", qualified: "note.entity_key", uuid: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "refId", column: "ref_id", field: "ref", qualified: "note.ref_id", uuid: true, required: true, relation: "RecipeRef", filter: ["eq", "in", "isNull"] },
-    { name: "deletedOnRef", column: "deleted_on_ref", field: "deletedOnRef", qualified: "note.deleted_on_ref", boolean: true, required: true, default: false, filter: ["eq", "isNull"] },
+    { name: "deletedOnRef", column: "deleted_on_ref", field: "deletedOnRef", qualified: "note.deleted_on_ref", boolean: true, required: true, default: false, filter: ["eq", "in", "isNull"] },
     { name: "_version", column: "_version", field: "_version", qualified: "note._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"recipe_id\", \"reply_to\", \"body\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\"",
     qualifiedColumns: "\"note\".\"id\", \"note\".\"recipe_id\", \"note\".\"reply_to\", \"note\".\"body\", \"note\".\"entity_key\", \"note\".\"ref_id\", \"note\".\"deleted_on_ref\", \"note\".\"_version\"",
+    selectColumn: "\"note\".\"%s\"",
     getOne: "SELECT \"id\", \"recipe_id\", \"reply_to\", \"body\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM note WHERE id = $1",
+    getOneFields: "SELECT %s FROM note WHERE id = $1",
     getMany: "SELECT \"id\", \"recipe_id\", \"reply_to\", \"body\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM note WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -385,16 +447,20 @@ export const noteTable: TableDefinition = {
     updateMany: "UPDATE note SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO note (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"recipe_id\", \"reply_to\", \"body\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\"",
+    upsert: "INSERT INTO note (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"recipe_id\", \"reply_to\", \"body\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM note WHERE id = $1",
     deleteMany: "DELETE FROM note%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = EXCLUDED.entity_key" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"recipe_id\", \"reply_to\", \"body\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM note WHERE (id) IN (%s)" },
+    "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = EXCLUDED.entity_key", rows: "SELECT \"id\", \"recipe_id\", \"reply_to\", \"body\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM note WHERE (entity_key, ref_id) IN (%s)" },
   },
+  relations: [
+    { field: "recipe", column: "recipeId", target: "recipe", probe: "note.recipe_id IN (SELECT recipe.id FROM recipe%s)" },
+    { field: "ref", column: "refId", target: "recipeRef", probe: "note.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)" },
+  ],
 };
 
 /**
@@ -441,6 +507,8 @@ export interface RecipeFilter {
   referencedByTastingRecipe?: ReferencedByFilter;
   /** The rows a Utensil row's recipe points at, or none does. */
   referencedByUtensilRecipe?: ReferencedByFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly RecipeFilter[];
 }
 
 /** The members findOne and findMany order rows of Recipe by. */
@@ -449,12 +517,25 @@ export type RecipeOrderField = "id" | "title" | "createdAt" | "createdBy";
 /** The members findPage orders rows of Recipe by (D60, amended); ties break by id. */
 export type RecipeSortField = "id" | "title" | "createdAt";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type RecipeUniqueKey = readonly ["id"];
 
 /** The position of a row of Recipe in a findPage order: its id. */
 export interface RecipePageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of Recipe includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface RecipeRelations {
+  readonly covers: Related<CoverRow, CoverRelations, 'many'>;
+  readonly ingredients: Related<IngredientRow, IngredientRelations, 'many'>;
+  readonly notes: Related<NoteRow, NoteRelations, 'many'>;
+  readonly recipeCommits: Related<RecipeCommitRow, RecipeCommitRelations, 'many'>;
+  readonly recipeRefs: Related<RecipeRefRow, RecipeRefRelations, 'many'>;
+  readonly recipeReleases: Related<RecipeReleaseRow, RecipeReleaseRelations, 'many'>;
+  readonly steps: Related<StepRow, StepRelations, 'many'>;
+  readonly tastings: Related<TastingRow, TastingRelations, 'many'>;
+  readonly utensils: Related<UtensilRow, UtensilRelations, 'many'>;
 }
 
 /** The repository of Recipe. */
@@ -467,7 +548,8 @@ export type RecipeRepository = Repository<
   RecipeSortField,
   RecipeUniqueKey,
   T.IdentityUUID,
-  RecipePageKey
+  RecipePageKey,
+  RecipeRelations
 >;
 
 /** The recipe table, as the runtime reads and writes it. */
@@ -478,13 +560,15 @@ export const recipeTable: TableDefinition = {
   columns: [
     { name: "id", column: "id", field: "id", qualified: "recipe.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "title", column: "title", field: "title", qualified: "recipe.title", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "recipe.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "recipe.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "createdBy", column: "created_by", field: "createdBy", qualified: "recipe.created_by", uuid: true, required: true, audit: "createdBy" },
   ],
   statements: {
     columns: "\"id\", \"title\", \"created_at\", \"created_by\"",
     qualifiedColumns: "\"recipe\".\"id\", \"recipe\".\"title\", \"recipe\".\"created_at\", \"recipe\".\"created_by\"",
+    selectColumn: "\"recipe\".\"%s\"",
     getOne: "SELECT \"id\", \"title\", \"created_at\", \"created_by\" FROM recipe WHERE id = $1",
+    getOneFields: "SELECT %s FROM recipe WHERE id = $1",
     getMany: "SELECT \"id\", \"title\", \"created_at\", \"created_by\" FROM recipe WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -505,14 +589,14 @@ export const recipeTable: TableDefinition = {
     updateMany: "UPDATE recipe SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO recipe (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"title\", \"created_at\", \"created_by\"",
+    upsert: "INSERT INTO recipe (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"title\", \"created_at\", \"created_by\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM recipe WHERE id = $1",
     deleteMany: "DELETE FROM recipe%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"title\", \"created_at\", \"created_by\" FROM recipe WHERE (id) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByCoverRecipe", probe: "SELECT 1 FROM cover WHERE cover.recipe_id = recipe.id" },
@@ -524,6 +608,17 @@ export const recipeTable: TableDefinition = {
     { filter: "referencedByStepRecipe", probe: "SELECT 1 FROM step WHERE step.recipe_id = recipe.id" },
     { filter: "referencedByTastingRecipe", probe: "SELECT 1 FROM tasting WHERE tasting.recipe_id = recipe.id" },
     { filter: "referencedByUtensilRecipe", probe: "SELECT 1 FROM utensil WHERE utensil.recipe_id = recipe.id" },
+  ],
+  many: [
+    { name: "covers", target: "cover", column: "recipeId" },
+    { name: "ingredients", target: "ingredient", column: "recipeId" },
+    { name: "notes", target: "note", column: "recipeId" },
+    { name: "recipeCommits", target: "recipeCommit", column: "rootId" },
+    { name: "recipeRefs", target: "recipeRef", column: "rootId" },
+    { name: "recipeReleases", target: "recipeRelease", column: "rootId" },
+    { name: "steps", target: "step", column: "recipeId" },
+    { name: "tastings", target: "tasting", column: "recipeId" },
+    { name: "utensils", target: "utensil", column: "recipeId" },
   ],
 };
 
@@ -589,6 +684,14 @@ export interface RecipeCommitFilter {
   referencedByRecipeReleaseCommit?: ReferencedByFilter;
   /** The rows a RecipeSnapshotEntry row's commit points at, or none does. */
   referencedByRecipeSnapshotEntryCommit?: ReferencedByFilter;
+  /** The rows whose root is among the Recipe rows the filter finds (D90). */
+  root?: RecipeFilter;
+  /** The rows whose ref is among the live RecipeRef rows the filter finds (D90). */
+  ref?: RecipeRefFilter;
+  /** The rows whose parentCommit is among the RecipeCommit rows the filter finds; a row whose parentCommit is null is not among them (D90). */
+  parentCommit?: RecipeCommitFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly RecipeCommitFilter[];
 }
 
 /** The members findOne and findMany order rows of RecipeCommit by. */
@@ -597,12 +700,25 @@ export type RecipeCommitOrderField = "id" | "message" | "schemaEpoch" | "content
 /** The members findPage orders rows of RecipeCommit by (D60, amended); ties break by id. */
 export type RecipeCommitSortField = "id" | "schemaEpoch" | "contentHash" | "createdAt";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type RecipeCommitUniqueKey = readonly ["id"] | readonly ["root", "sequence"];
 
 /** The position of a row of RecipeCommit in a findPage order: its id. */
 export interface RecipeCommitPageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of RecipeCommit includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface RecipeCommitRelations {
+  readonly root: Related<RecipeRow, RecipeRelations, 'one'>;
+  readonly ref: Related<RecipeRefRow, RecipeRefRelations, 'optional'>;
+  readonly parentCommit: Related<RecipeCommitRow, RecipeCommitRelations, 'optional'>;
+  readonly recipeCommits: Related<RecipeCommitRow, RecipeCommitRelations, 'many'>;
+  readonly recipePatches: Related<RecipePatchRow, RecipePatchRelations, 'many'>;
+  readonly recipeRefsByBaseCommit: Related<RecipeRefRow, RecipeRefRelations, 'many'>;
+  readonly recipeRefsByHeadCommit: Related<RecipeRefRow, RecipeRefRelations, 'many'>;
+  readonly recipeReleases: Related<RecipeReleaseRow, RecipeReleaseRelations, 'many'>;
+  readonly recipeSnapshotEntries: Related<RecipeSnapshotEntryRow, RecipeSnapshotEntryRelations, 'many'>;
 }
 
 /** The repository of RecipeCommit. */
@@ -615,7 +731,8 @@ export type RecipeCommitRepository = Repository<
   RecipeCommitSortField,
   RecipeCommitUniqueKey,
   T.IdentityUUID,
-  RecipeCommitPageKey
+  RecipeCommitPageKey,
+  RecipeCommitRelations
 >;
 
 /** The recipe_commit table, as the runtime reads and writes it. */
@@ -632,13 +749,15 @@ export const recipeCommitTable: TableDefinition = {
     { name: "schemaEpoch", column: "schema_epoch", field: "schemaEpoch", qualified: "recipe_commit.schema_epoch", int64: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "contentHash", column: "content_hash", field: "contentHash", qualified: "recipe_commit.content_hash", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "sequence", column: "\"sequence\"", field: "sequence", qualified: "recipe_commit.\"sequence\"", int64: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "recipe_commit.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "recipe_commit.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "createdBy", column: "created_by", field: "createdBy", qualified: "recipe_commit.created_by", uuid: true, required: true, audit: "createdBy" },
   ],
   statements: {
     columns: "\"id\", \"root_id\", \"ref_id\", \"parent_commit_id\", \"message\", \"schema_epoch\", \"content_hash\", \"sequence\", \"created_at\", \"created_by\"",
     qualifiedColumns: "\"recipe_commit\".\"id\", \"recipe_commit\".\"root_id\", \"recipe_commit\".\"ref_id\", \"recipe_commit\".\"parent_commit_id\", \"recipe_commit\".\"message\", \"recipe_commit\".\"schema_epoch\", \"recipe_commit\".\"content_hash\", \"recipe_commit\".\"sequence\", \"recipe_commit\".\"created_at\", \"recipe_commit\".\"created_by\"",
+    selectColumn: "\"recipe_commit\".\"%s\"",
     getOne: "SELECT \"id\", \"root_id\", \"ref_id\", \"parent_commit_id\", \"message\", \"schema_epoch\", \"content_hash\", \"sequence\", \"created_at\", \"created_by\" FROM recipe_commit WHERE id = $1",
+    getOneFields: "SELECT %s FROM recipe_commit WHERE id = $1",
     getMany: "SELECT \"id\", \"root_id\", \"ref_id\", \"parent_commit_id\", \"message\", \"schema_epoch\", \"content_hash\", \"sequence\", \"created_at\", \"created_by\" FROM recipe_commit WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -659,15 +778,15 @@ export const recipeCommitTable: TableDefinition = {
     updateMany: "UPDATE recipe_commit SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO recipe_commit (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"root_id\", \"ref_id\", \"parent_commit_id\", \"message\", \"schema_epoch\", \"content_hash\", \"sequence\", \"created_at\", \"created_by\"",
+    upsert: "INSERT INTO recipe_commit (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"root_id\", \"ref_id\", \"parent_commit_id\", \"message\", \"schema_epoch\", \"content_hash\", \"sequence\", \"created_at\", \"created_by\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM recipe_commit WHERE id = $1",
     deleteMany: "DELETE FROM recipe_commit%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "root,sequence": { conflict: "(root_id, \"sequence\")", keep: "root_id = EXCLUDED.root_id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"root_id\", \"ref_id\", \"parent_commit_id\", \"message\", \"schema_epoch\", \"content_hash\", \"sequence\", \"created_at\", \"created_by\" FROM recipe_commit WHERE (id) IN (%s)" },
+    "root,sequence": { conflict: "(root_id, \"sequence\")", keep: "root_id = EXCLUDED.root_id", rows: "SELECT \"id\", \"root_id\", \"ref_id\", \"parent_commit_id\", \"message\", \"schema_epoch\", \"content_hash\", \"sequence\", \"created_at\", \"created_by\" FROM recipe_commit WHERE (root_id, \"sequence\") IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByRecipeCommitParentCommit", probe: "SELECT 1 FROM recipe_commit WHERE recipe_commit.parent_commit_id = recipe_commit.id" },
@@ -676,6 +795,19 @@ export const recipeCommitTable: TableDefinition = {
     { filter: "referencedByRecipeRefHeadCommit", probe: "SELECT 1 FROM recipe_ref WHERE recipe_ref.head_commit_id = recipe_commit.id", live: " AND recipe_ref.deleted_at IS NULL" },
     { filter: "referencedByRecipeReleaseCommit", probe: "SELECT 1 FROM recipe_release WHERE recipe_release.commit_id = recipe_commit.id" },
     { filter: "referencedByRecipeSnapshotEntryCommit", probe: "SELECT 1 FROM recipe_snapshot_entry WHERE recipe_snapshot_entry.commit_id = recipe_commit.id" },
+  ],
+  relations: [
+    { field: "root", column: "rootId", target: "recipe", probe: "recipe_commit.root_id IN (SELECT recipe.id FROM recipe%s)" },
+    { field: "ref", column: "refId", target: "recipeRef", probe: "recipe_commit.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)" },
+    { field: "parentCommit", column: "parentCommitId", target: "recipeCommit", probe: "recipe_commit.parent_commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)" },
+  ],
+  many: [
+    { name: "recipeCommits", target: "recipeCommit", column: "parentCommitId" },
+    { name: "recipePatches", target: "recipePatch", column: "commitId" },
+    { name: "recipeRefsByBaseCommit", target: "recipeRef", column: "baseCommitId" },
+    { name: "recipeRefsByHeadCommit", target: "recipeRef", column: "headCommitId" },
+    { name: "recipeReleases", target: "recipeRelease", column: "commitId" },
+    { name: "recipeSnapshotEntries", target: "recipeSnapshotEntry", column: "commitId" },
   ],
 };
 
@@ -722,6 +854,10 @@ export interface RecipePatchFilter {
   entityId?: UuidFilter<T.IdentityUUID>;
   entityVersion?: NumberFilter<T.GenericInt64>;
   operation?: StringFilter<T.RecipePatchOperation>;
+  /** The rows whose commit is among the RecipeCommit rows the filter finds (D90). */
+  commit?: RecipeCommitFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly RecipePatchFilter[];
 }
 
 /** The members findOne and findMany order rows of RecipePatch by. */
@@ -730,12 +866,17 @@ export type RecipePatchOrderField = "id" | "entityKind" | "entityKey" | "entityI
 /** The members findPage orders rows of RecipePatch by (D60, amended); ties break by id. */
 export type RecipePatchSortField = "id" | "entityKey" | "entityId" | "entityVersion";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type RecipePatchUniqueKey = readonly ["id"] | readonly ["commit", "entityKind", "entityKey"];
 
 /** The position of a row of RecipePatch in a findPage order: its id. */
 export interface RecipePatchPageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of RecipePatch includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface RecipePatchRelations {
+  readonly commit: Related<RecipeCommitRow, RecipeCommitRelations, 'one'>;
 }
 
 /** The repository of RecipePatch. */
@@ -748,7 +889,8 @@ export type RecipePatchRepository = Repository<
   RecipePatchSortField,
   RecipePatchUniqueKey,
   T.IdentityUUID,
-  RecipePatchPageKey
+  RecipePatchPageKey,
+  RecipePatchRelations
 >;
 
 /** The recipe_patch table, as the runtime reads and writes it. */
@@ -768,7 +910,9 @@ export const recipePatchTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\", \"operation\"",
     qualifiedColumns: "\"recipe_patch\".\"id\", \"recipe_patch\".\"commit_id\", \"recipe_patch\".\"entity_kind\", \"recipe_patch\".\"entity_key\", \"recipe_patch\".\"entity_id\", \"recipe_patch\".\"entity_version\", \"recipe_patch\".\"operation\"",
+    selectColumn: "\"recipe_patch\".\"%s\"",
     getOne: "SELECT \"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\", \"operation\" FROM recipe_patch WHERE id = $1",
+    getOneFields: "SELECT %s FROM recipe_patch WHERE id = $1",
     getMany: "SELECT \"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\", \"operation\" FROM recipe_patch WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -789,16 +933,19 @@ export const recipePatchTable: TableDefinition = {
     updateMany: "UPDATE recipe_patch SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO recipe_patch (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\", \"operation\"",
+    upsert: "INSERT INTO recipe_patch (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\", \"operation\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM recipe_patch WHERE id = $1",
     deleteMany: "DELETE FROM recipe_patch%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "commit,entityKind,entityKey": { conflict: "(commit_id, entity_kind, entity_key)", keep: "commit_id = EXCLUDED.commit_id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\", \"operation\" FROM recipe_patch WHERE (id) IN (%s)" },
+    "commit,entityKind,entityKey": { conflict: "(commit_id, entity_kind, entity_key)", keep: "commit_id = EXCLUDED.commit_id", rows: "SELECT \"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\", \"operation\" FROM recipe_patch WHERE (commit_id, entity_kind, entity_key) IN (%s)" },
   },
+  relations: [
+    { field: "commit", column: "commitId", target: "recipeCommit", probe: "recipe_patch.commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)" },
+  ],
 };
 
 /**
@@ -872,6 +1019,16 @@ export interface RecipeRefFilter {
   referencedByTastingRef?: ReferencedByFilter;
   /** The rows a Utensil row's ref points at, or none does. */
   referencedByUtensilRef?: ReferencedByFilter;
+  /** The rows whose root is among the Recipe rows the filter finds (D90). */
+  root?: RecipeFilter;
+  /** The rows whose parentRef is among the live RecipeRef rows the filter finds; a row whose parentRef is null is not among them (D90). */
+  parentRef?: RecipeRefFilter;
+  /** The rows whose baseCommit is among the RecipeCommit rows the filter finds; a row whose baseCommit is null is not among them (D90). */
+  baseCommit?: RecipeCommitFilter;
+  /** The rows whose headCommit is among the RecipeCommit rows the filter finds; a row whose headCommit is null is not among them (D90). */
+  headCommit?: RecipeCommitFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly RecipeRefFilter[];
 }
 
 /** The members findOne and findMany order rows of RecipeRef by. */
@@ -880,12 +1037,28 @@ export type RecipeRefOrderField = "id" | "name" | "sealedAt" | "createdAt" | "cr
 /** The members findPage orders rows of RecipeRef by (D60, amended); ties break by id. */
 export type RecipeRefSortField = "id" | "name" | "createdAt" | "updatedAt";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type RecipeRefUniqueKey = readonly ["id"] | readonly ["root", "name"];
 
 /** The position of a row of RecipeRef in a findPage order: its id. */
 export interface RecipeRefPageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of RecipeRef includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface RecipeRefRelations {
+  readonly root: Related<RecipeRow, RecipeRelations, 'one'>;
+  readonly parentRef: Related<RecipeRefRow, RecipeRefRelations, 'optional'>;
+  readonly baseCommit: Related<RecipeCommitRow, RecipeCommitRelations, 'optional'>;
+  readonly headCommit: Related<RecipeCommitRow, RecipeCommitRelations, 'optional'>;
+  readonly covers: Related<CoverRow, CoverRelations, 'many'>;
+  readonly ingredients: Related<IngredientRow, IngredientRelations, 'many'>;
+  readonly notes: Related<NoteRow, NoteRelations, 'many'>;
+  readonly recipeCommits: Related<RecipeCommitRow, RecipeCommitRelations, 'many'>;
+  readonly recipeRefs: Related<RecipeRefRow, RecipeRefRelations, 'many'>;
+  readonly steps: Related<StepRow, StepRelations, 'many'>;
+  readonly tastings: Related<TastingRow, TastingRelations, 'many'>;
+  readonly utensils: Related<UtensilRow, UtensilRelations, 'many'>;
 }
 
 /** The repository of RecipeRef. */
@@ -898,7 +1071,8 @@ export type RecipeRefRepository = SoftDeleteRepository<
   RecipeRefSortField,
   RecipeRefUniqueKey,
   T.IdentityUUID,
-  RecipeRefPageKey
+  RecipeRefPageKey,
+  RecipeRefRelations
 >;
 
 /** The recipe_ref table, as the runtime reads and writes it. */
@@ -913,10 +1087,10 @@ export const recipeRefTable: TableDefinition = {
     { name: "baseCommitId", column: "base_commit_id", field: "baseCommit", qualified: "recipe_ref.base_commit_id", uuid: true, relation: "RecipeCommit", filter: ["eq", "in", "isNull"] },
     { name: "headCommitId", column: "head_commit_id", field: "headCommit", qualified: "recipe_ref.head_commit_id", uuid: true, relation: "RecipeCommit", filter: ["eq", "in", "isNull"] },
     { name: "name", column: "\"name\"", field: "name", qualified: "recipe_ref.\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "sealedAt", column: "sealed_at", field: "sealedAt", qualified: "recipe_ref.sealed_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"] },
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "recipe_ref.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
+    { name: "sealedAt", column: "sealed_at", field: "sealedAt", qualified: "recipe_ref.sealed_at", timestamp: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "recipe_ref.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "createdBy", column: "created_by", field: "createdBy", qualified: "recipe_ref.created_by", uuid: true, required: true, audit: "createdBy" },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "recipe_ref.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "recipe_ref.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "updatedBy", column: "updated_by", field: "updatedBy", qualified: "recipe_ref.updated_by", uuid: true, required: true, audit: "updatedBy" },
     { name: "deletedAt", column: "deleted_at", field: "deletedAt", qualified: "recipe_ref.deleted_at", timestamp: true, audit: "deletedAt" },
     { name: "deletedBy", column: "deleted_by", field: "deletedBy", qualified: "recipe_ref.deleted_by", uuid: true, audit: "deletedBy" },
@@ -925,7 +1099,9 @@ export const recipeRefTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"root_id\", \"parent_ref_id\", \"base_commit_id\", \"head_commit_id\", \"name\", \"sealed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\", \"_version\"",
     qualifiedColumns: "\"recipe_ref\".\"id\", \"recipe_ref\".\"root_id\", \"recipe_ref\".\"parent_ref_id\", \"recipe_ref\".\"base_commit_id\", \"recipe_ref\".\"head_commit_id\", \"recipe_ref\".\"name\", \"recipe_ref\".\"sealed_at\", \"recipe_ref\".\"created_at\", \"recipe_ref\".\"created_by\", \"recipe_ref\".\"updated_at\", \"recipe_ref\".\"updated_by\", \"recipe_ref\".\"deleted_at\", \"recipe_ref\".\"deleted_by\", \"recipe_ref\".\"_version\"",
+    selectColumn: "\"recipe_ref\".\"%s\"",
     getOne: "SELECT \"id\", \"root_id\", \"parent_ref_id\", \"base_commit_id\", \"head_commit_id\", \"name\", \"sealed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\", \"_version\" FROM recipe_ref WHERE id = $1",
+    getOneFields: "SELECT %s FROM recipe_ref WHERE id = $1",
     getMany: "SELECT \"id\", \"root_id\", \"parent_ref_id\", \"base_commit_id\", \"head_commit_id\", \"name\", \"sealed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\", \"_version\" FROM recipe_ref WHERE id IN (%s)",
     live: " AND deleted_at IS NULL",
     liveWhere: " WHERE deleted_at IS NULL",
@@ -946,7 +1122,7 @@ export const recipeRefTable: TableDefinition = {
     updateMany: "UPDATE recipe_ref SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO recipe_ref (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s WHERE recipe_ref.deleted_at IS NULL RETURNING \"id\", \"root_id\", \"parent_ref_id\", \"base_commit_id\", \"head_commit_id\", \"name\", \"sealed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\", \"_version\"",
+    upsert: "INSERT INTO recipe_ref (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"root_id\", \"parent_ref_id\", \"base_commit_id\", \"head_commit_id\", \"name\", \"sealed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\", \"_version\", (xmax = 0) AS _inserted",
     softDelete: "UPDATE recipe_ref SET deleted_at = $1, deleted_by = $2 WHERE id = $3 AND deleted_at IS NULL",
     softDeleteMany: "UPDATE recipe_ref SET deleted_at = $1, deleted_by = $2%s",
     delete: "DELETE FROM recipe_ref USING history_actor WHERE id = $2",
@@ -955,8 +1131,8 @@ export const recipeRefTable: TableDefinition = {
   softDelete: true,
   historyActor: true,
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "root,name": { conflict: "(root_id, \"name\") WHERE deleted_at IS NULL", keep: "root_id = EXCLUDED.root_id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"root_id\", \"parent_ref_id\", \"base_commit_id\", \"head_commit_id\", \"name\", \"sealed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\", \"_version\" FROM recipe_ref WHERE (id) IN (%s)" },
+    "root,name": { conflict: "(root_id, \"name\") WHERE deleted_at IS NULL", keep: "root_id = EXCLUDED.root_id", rows: "SELECT \"id\", \"root_id\", \"parent_ref_id\", \"base_commit_id\", \"head_commit_id\", \"name\", \"sealed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\", \"_version\" FROM recipe_ref WHERE (root_id, \"name\") IN (%s) AND (deleted_at IS NULL)" },
   },
   referencedBy: [
     { filter: "referencedByCoverRef", probe: "SELECT 1 FROM cover WHERE cover.ref_id = recipe_ref.id" },
@@ -967,6 +1143,22 @@ export const recipeRefTable: TableDefinition = {
     { filter: "referencedByStepRef", probe: "SELECT 1 FROM step WHERE step.ref_id = recipe_ref.id" },
     { filter: "referencedByTastingRef", probe: "SELECT 1 FROM tasting WHERE tasting.ref_id = recipe_ref.id" },
     { filter: "referencedByUtensilRef", probe: "SELECT 1 FROM utensil WHERE utensil.ref_id = recipe_ref.id" },
+  ],
+  relations: [
+    { field: "root", column: "rootId", target: "recipe", probe: "recipe_ref.root_id IN (SELECT recipe.id FROM recipe%s)" },
+    { field: "parentRef", column: "parentRefId", target: "recipeRef", probe: "recipe_ref.parent_ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)" },
+    { field: "baseCommit", column: "baseCommitId", target: "recipeCommit", probe: "recipe_ref.base_commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)" },
+    { field: "headCommit", column: "headCommitId", target: "recipeCommit", probe: "recipe_ref.head_commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)" },
+  ],
+  many: [
+    { name: "covers", target: "cover", column: "refId" },
+    { name: "ingredients", target: "ingredient", column: "refId" },
+    { name: "notes", target: "note", column: "refId" },
+    { name: "recipeCommits", target: "recipeCommit", column: "refId" },
+    { name: "recipeRefs", target: "recipeRef", column: "parentRefId" },
+    { name: "steps", target: "step", column: "refId" },
+    { name: "tastings", target: "tasting", column: "refId" },
+    { name: "utensils", target: "utensil", column: "refId" },
   ],
 };
 
@@ -1007,6 +1199,12 @@ export interface RecipeReleaseFilter {
   createdAt?: DateTimeFilter<T.TemporalDateTime>;
   updatedAt?: DateTimeFilter<T.TemporalDateTime>;
   _version?: NumberFilter<number>;
+  /** The rows whose root is among the Recipe rows the filter finds (D90). */
+  root?: RecipeFilter;
+  /** The rows whose commit is among the RecipeCommit rows the filter finds (D90). */
+  commit?: RecipeCommitFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly RecipeReleaseFilter[];
 }
 
 /** The members findOne and findMany order rows of RecipeRelease by. */
@@ -1015,12 +1213,18 @@ export type RecipeReleaseOrderField = "id" | "createdAt" | "createdBy" | "update
 /** The members findPage orders rows of RecipeRelease by (D60, amended); ties break by id. */
 export type RecipeReleaseSortField = "id" | "createdAt" | "updatedAt";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type RecipeReleaseUniqueKey = readonly ["id"] | readonly ["root"];
 
 /** The position of a row of RecipeRelease in a findPage order: its id. */
 export interface RecipeReleasePageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of RecipeRelease includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface RecipeReleaseRelations {
+  readonly root: Related<RecipeRow, RecipeRelations, 'one'>;
+  readonly commit: Related<RecipeCommitRow, RecipeCommitRelations, 'one'>;
 }
 
 /** The repository of RecipeRelease. */
@@ -1033,7 +1237,8 @@ export type RecipeReleaseRepository = Repository<
   RecipeReleaseSortField,
   RecipeReleaseUniqueKey,
   T.IdentityUUID,
-  RecipeReleasePageKey
+  RecipeReleasePageKey,
+  RecipeReleaseRelations
 >;
 
 /** The recipe_release table, as the runtime reads and writes it. */
@@ -1045,16 +1250,18 @@ export const recipeReleaseTable: TableDefinition = {
     { name: "id", column: "id", field: "id", qualified: "recipe_release.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "rootId", column: "root_id", field: "root", qualified: "recipe_release.root_id", uuid: true, required: true, relation: "Recipe", filter: ["eq", "in", "isNull"] },
     { name: "commitId", column: "commit_id", field: "commit", qualified: "recipe_release.commit_id", uuid: true, required: true, relation: "RecipeCommit", filter: ["eq", "in", "isNull"] },
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "recipe_release.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "recipe_release.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "createdBy", column: "created_by", field: "createdBy", qualified: "recipe_release.created_by", uuid: true, required: true, audit: "createdBy" },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "recipe_release.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "recipe_release.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "updatedBy", column: "updated_by", field: "updatedBy", qualified: "recipe_release.updated_by", uuid: true, required: true, audit: "updatedBy" },
     { name: "_version", column: "_version", field: "_version", qualified: "recipe_release._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"root_id\", \"commit_id\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"_version\"",
     qualifiedColumns: "\"recipe_release\".\"id\", \"recipe_release\".\"root_id\", \"recipe_release\".\"commit_id\", \"recipe_release\".\"created_at\", \"recipe_release\".\"created_by\", \"recipe_release\".\"updated_at\", \"recipe_release\".\"updated_by\", \"recipe_release\".\"_version\"",
+    selectColumn: "\"recipe_release\".\"%s\"",
     getOne: "SELECT \"id\", \"root_id\", \"commit_id\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"_version\" FROM recipe_release WHERE id = $1",
+    getOneFields: "SELECT %s FROM recipe_release WHERE id = $1",
     getMany: "SELECT \"id\", \"root_id\", \"commit_id\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"_version\" FROM recipe_release WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -1075,7 +1282,7 @@ export const recipeReleaseTable: TableDefinition = {
     updateMany: "UPDATE recipe_release SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO recipe_release (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"root_id\", \"commit_id\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"_version\"",
+    upsert: "INSERT INTO recipe_release (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"root_id\", \"commit_id\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"_version\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM recipe_release USING history_actor WHERE id = $2",
@@ -1083,9 +1290,13 @@ export const recipeReleaseTable: TableDefinition = {
   },
   historyActor: true,
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "root": { conflict: "(root_id)", keep: "root_id = EXCLUDED.root_id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"root_id\", \"commit_id\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"_version\" FROM recipe_release WHERE (id) IN (%s)" },
+    "root": { conflict: "(root_id)", keep: "root_id = EXCLUDED.root_id", rows: "SELECT \"id\", \"root_id\", \"commit_id\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"_version\" FROM recipe_release WHERE (root_id) IN (%s)" },
   },
+  relations: [
+    { field: "root", column: "rootId", target: "recipe", probe: "recipe_release.root_id IN (SELECT recipe.id FROM recipe%s)" },
+    { field: "commit", column: "commitId", target: "recipeCommit", probe: "recipe_release.commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)" },
+  ],
 };
 
 /**
@@ -1127,6 +1338,10 @@ export interface RecipeSnapshotEntryFilter {
   entityKey?: UuidFilter<T.IdentityUUID>;
   entityId?: UuidFilter<T.IdentityUUID>;
   entityVersion?: NumberFilter<T.GenericInt64>;
+  /** The rows whose commit is among the RecipeCommit rows the filter finds (D90). */
+  commit?: RecipeCommitFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly RecipeSnapshotEntryFilter[];
 }
 
 /** The members findOne and findMany order rows of RecipeSnapshotEntry by. */
@@ -1135,12 +1350,17 @@ export type RecipeSnapshotEntryOrderField = "id" | "entityKind" | "entityKey" | 
 /** The members findPage orders rows of RecipeSnapshotEntry by (D60, amended); ties break by id. */
 export type RecipeSnapshotEntrySortField = "id" | "entityKey" | "entityId" | "entityVersion";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type RecipeSnapshotEntryUniqueKey = readonly ["id"] | readonly ["commit", "entityKind", "entityKey"];
 
 /** The position of a row of RecipeSnapshotEntry in a findPage order: its id. */
 export interface RecipeSnapshotEntryPageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of RecipeSnapshotEntry includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface RecipeSnapshotEntryRelations {
+  readonly commit: Related<RecipeCommitRow, RecipeCommitRelations, 'one'>;
 }
 
 /** The repository of RecipeSnapshotEntry. */
@@ -1153,7 +1373,8 @@ export type RecipeSnapshotEntryRepository = Repository<
   RecipeSnapshotEntrySortField,
   RecipeSnapshotEntryUniqueKey,
   T.IdentityUUID,
-  RecipeSnapshotEntryPageKey
+  RecipeSnapshotEntryPageKey,
+  RecipeSnapshotEntryRelations
 >;
 
 /** The recipe_snapshot_entry table, as the runtime reads and writes it. */
@@ -1172,7 +1393,9 @@ export const recipeSnapshotEntryTable: TableDefinition = {
   statements: {
     columns: "\"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\"",
     qualifiedColumns: "\"recipe_snapshot_entry\".\"id\", \"recipe_snapshot_entry\".\"commit_id\", \"recipe_snapshot_entry\".\"entity_kind\", \"recipe_snapshot_entry\".\"entity_key\", \"recipe_snapshot_entry\".\"entity_id\", \"recipe_snapshot_entry\".\"entity_version\"",
+    selectColumn: "\"recipe_snapshot_entry\".\"%s\"",
     getOne: "SELECT \"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\" FROM recipe_snapshot_entry WHERE id = $1",
+    getOneFields: "SELECT %s FROM recipe_snapshot_entry WHERE id = $1",
     getMany: "SELECT \"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\" FROM recipe_snapshot_entry WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -1193,16 +1416,19 @@ export const recipeSnapshotEntryTable: TableDefinition = {
     updateMany: "UPDATE recipe_snapshot_entry SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO recipe_snapshot_entry (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\"",
+    upsert: "INSERT INTO recipe_snapshot_entry (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM recipe_snapshot_entry WHERE id = $1",
     deleteMany: "DELETE FROM recipe_snapshot_entry%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "commit,entityKind,entityKey": { conflict: "(commit_id, entity_kind, entity_key)", keep: "commit_id = EXCLUDED.commit_id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\" FROM recipe_snapshot_entry WHERE (id) IN (%s)" },
+    "commit,entityKind,entityKey": { conflict: "(commit_id, entity_kind, entity_key)", keep: "commit_id = EXCLUDED.commit_id", rows: "SELECT \"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\" FROM recipe_snapshot_entry WHERE (commit_id, entity_kind, entity_key) IN (%s)" },
   },
+  relations: [
+    { field: "commit", column: "commitId", target: "recipeCommit", probe: "recipe_snapshot_entry.commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)" },
+  ],
 };
 
 /**
@@ -1266,6 +1492,12 @@ export interface StepFilter {
   refId?: UuidFilter<T.IdentityUUID>;
   deletedOnRef?: BoolFilter;
   _version?: NumberFilter<number>;
+  /** The rows whose recipe is among the Recipe rows the filter finds (D90). */
+  recipe?: RecipeFilter;
+  /** The rows whose ref is among the live RecipeRef rows the filter finds (D90). */
+  ref?: RecipeRefFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly StepFilter[];
 }
 
 /** The members findOne and findMany order rows of Step by. */
@@ -1274,12 +1506,18 @@ export type StepOrderField = "id" | "position" | "instruction" | "timings" | "sc
 /** The members findPage orders rows of Step by (D60, amended); ties break by id. */
 export type StepSortField = "id" | "position" | "instruction" | "createdAt" | "updatedAt" | "entityKey";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type StepUniqueKey = readonly ["id"] | readonly ["entityKey", "ref"];
 
 /** The position of a row of Step in a findPage order: its id. */
 export interface StepPageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of Step includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface StepRelations {
+  readonly recipe: Related<RecipeRow, RecipeRelations, 'one'>;
+  readonly ref: Related<RecipeRefRow, RecipeRefRelations, 'optional'>;
 }
 
 /** The repository of Step. */
@@ -1292,7 +1530,8 @@ export type StepRepository = Repository<
   StepSortField,
   StepUniqueKey,
   T.IdentityUUID,
-  StepPageKey
+  StepPageKey,
+  StepRelations
 >;
 
 /** The step table, as the runtime reads and writes it. */
@@ -1307,19 +1546,21 @@ export const stepTable: TableDefinition = {
     { name: "instruction", column: "instruction", field: "instruction", qualified: "step.instruction", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "timings", column: "timings", field: "timings", qualified: "step.timings", json: true, required: true, filter: ["eq", "in", "isNull"] },
     { name: "scratch", column: "scratch", field: "scratch", qualified: "step.scratch", filter: ["eq", "in", "ilike", "isNull"] },
-    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "step.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "step.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "createdBy", column: "created_by", field: "createdBy", qualified: "step.created_by", uuid: true, required: true, audit: "createdBy" },
-    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "step.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
+    { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "step.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "updatedBy", column: "updated_by", field: "updatedBy", qualified: "step.updated_by", uuid: true, required: true, audit: "updatedBy" },
     { name: "entityKey", column: "entity_key", field: "entityKey", qualified: "step.entity_key", uuid: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "refId", column: "ref_id", field: "ref", qualified: "step.ref_id", uuid: true, required: true, relation: "RecipeRef", filter: ["eq", "in", "isNull"] },
-    { name: "deletedOnRef", column: "deleted_on_ref", field: "deletedOnRef", qualified: "step.deleted_on_ref", boolean: true, required: true, default: false, filter: ["eq", "isNull"] },
+    { name: "deletedOnRef", column: "deleted_on_ref", field: "deletedOnRef", qualified: "step.deleted_on_ref", boolean: true, required: true, default: false, filter: ["eq", "in", "isNull"] },
     { name: "_version", column: "_version", field: "_version", qualified: "step._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"recipe_id\", \"position\", \"instruction\", \"timings\", \"scratch\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\"",
     qualifiedColumns: "\"step\".\"id\", \"step\".\"recipe_id\", \"step\".\"position\", \"step\".\"instruction\", \"step\".\"timings\", \"step\".\"scratch\", \"step\".\"created_at\", \"step\".\"created_by\", \"step\".\"updated_at\", \"step\".\"updated_by\", \"step\".\"entity_key\", \"step\".\"ref_id\", \"step\".\"deleted_on_ref\", \"step\".\"_version\"",
+    selectColumn: "\"step\".\"%s\"",
     getOne: "SELECT \"id\", \"recipe_id\", \"position\", \"instruction\", \"timings\", \"scratch\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM step WHERE id = $1",
+    getOneFields: "SELECT %s FROM step WHERE id = $1",
     getMany: "SELECT \"id\", \"recipe_id\", \"position\", \"instruction\", \"timings\", \"scratch\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM step WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -1340,7 +1581,7 @@ export const stepTable: TableDefinition = {
     updateMany: "UPDATE step SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO step (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"recipe_id\", \"position\", \"instruction\", \"timings\", \"scratch\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\"",
+    upsert: "INSERT INTO step (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"recipe_id\", \"position\", \"instruction\", \"timings\", \"scratch\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM step USING history_actor WHERE id = $2",
@@ -1348,9 +1589,13 @@ export const stepTable: TableDefinition = {
   },
   historyActor: true,
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = EXCLUDED.entity_key" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"recipe_id\", \"position\", \"instruction\", \"timings\", \"scratch\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM step WHERE (id) IN (%s)" },
+    "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = EXCLUDED.entity_key", rows: "SELECT \"id\", \"recipe_id\", \"position\", \"instruction\", \"timings\", \"scratch\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM step WHERE (entity_key, ref_id) IN (%s)" },
   },
+  relations: [
+    { field: "recipe", column: "recipeId", target: "recipe", probe: "step.recipe_id IN (SELECT recipe.id FROM recipe%s)" },
+    { field: "ref", column: "refId", target: "recipeRef", probe: "step.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)" },
+  ],
 };
 
 /**
@@ -1440,6 +1685,12 @@ export interface TastingFilter {
   refId?: UuidFilter<T.IdentityUUID>;
   deletedOnRef?: BoolFilter;
   _version?: NumberFilter<number>;
+  /** The rows whose recipe is among the Recipe rows the filter finds (D90). */
+  recipe?: RecipeFilter;
+  /** The rows whose ref is among the live RecipeRef rows the filter finds (D90). */
+  ref?: RecipeRefFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly TastingFilter[];
 }
 
 /** The members findOne and findMany order rows of Tasting by. */
@@ -1448,12 +1699,18 @@ export type TastingOrderField = "id" | "taster" | "salty" | "score" | "servings"
 /** The members findPage orders rows of Tasting by (D60, amended); ties break by id. */
 export type TastingSortField = "id" | "taster" | "score" | "servings" | "tastedOn" | "tastedAt" | "servedAt" | "rested" | "entityKey";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type TastingUniqueKey = readonly ["id"] | readonly ["entityKey", "ref"];
 
 /** The position of a row of Tasting in a findPage order: its id. */
 export interface TastingPageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of Tasting includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface TastingRelations {
+  readonly recipe: Related<RecipeRow, RecipeRelations, 'one'>;
+  readonly ref: Related<RecipeRefRow, RecipeRefRelations, 'optional'>;
 }
 
 /** The repository of Tasting. */
@@ -1466,7 +1723,8 @@ export type TastingRepository = Repository<
   TastingSortField,
   TastingUniqueKey,
   T.IdentityUUID,
-  TastingPageKey
+  TastingPageKey,
+  TastingRelations
 >;
 
 /** The tasting table, as the runtime reads and writes it. */
@@ -1478,11 +1736,11 @@ export const tastingTable: TableDefinition = {
     { name: "id", column: "id", field: "id", qualified: "tasting.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "recipeId", column: "recipe_id", field: "recipe", qualified: "tasting.recipe_id", uuid: true, required: true, relation: "Recipe", filter: ["eq", "in", "isNull"] },
     { name: "taster", column: "taster", field: "taster", qualified: "tasting.taster", uuid: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
-    { name: "salty", column: "salty", field: "salty", qualified: "tasting.salty", boolean: true, required: true, filter: ["eq", "isNull"] },
+    { name: "salty", column: "salty", field: "salty", qualified: "tasting.salty", boolean: true, required: true, filter: ["eq", "in", "isNull"] },
     { name: "score", column: "score", field: "score", qualified: "tasting.score", required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "servings", column: "servings", field: "servings", qualified: "tasting.servings", int64: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "tastedOn", column: "tasted_on", field: "tastedOn", qualified: "tasting.tasted_on", date: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "tastedAt", column: "tasted_at", field: "tastedAt", qualified: "tasting.tasted_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
+    { name: "tastedAt", column: "tasted_at", field: "tastedAt", qualified: "tasting.tasted_at", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "servedAt", column: "served_at", field: "servedAt", qualified: "tasting.served_at", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "rested", column: "rested", field: "rested", qualified: "tasting.rested", interval: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
     { name: "verdict", column: "verdict", field: "verdict", qualified: "tasting.verdict", required: true, filter: ["eq", "in", "ilike", "isNull"] },
@@ -1492,13 +1750,15 @@ export const tastingTable: TableDefinition = {
     { name: "bites", column: "bites", field: "bites", qualified: "tasting.bites", json: true, required: true },
     { name: "entityKey", column: "entity_key", field: "entityKey", qualified: "tasting.entity_key", uuid: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "refId", column: "ref_id", field: "ref", qualified: "tasting.ref_id", uuid: true, required: true, relation: "RecipeRef", filter: ["eq", "in", "isNull"] },
-    { name: "deletedOnRef", column: "deleted_on_ref", field: "deletedOnRef", qualified: "tasting.deleted_on_ref", boolean: true, required: true, default: false, filter: ["eq", "isNull"] },
+    { name: "deletedOnRef", column: "deleted_on_ref", field: "deletedOnRef", qualified: "tasting.deleted_on_ref", boolean: true, required: true, default: false, filter: ["eq", "in", "isNull"] },
     { name: "_version", column: "_version", field: "_version", qualified: "tasting._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"recipe_id\", \"taster\", \"salty\", \"score\", \"servings\", \"tasted_on\", \"tasted_at\", \"served_at\", \"rested\", \"verdict\", \"remarks\", \"tags\", \"helpers\", \"bites\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\"",
     qualifiedColumns: "\"tasting\".\"id\", \"tasting\".\"recipe_id\", \"tasting\".\"taster\", \"tasting\".\"salty\", \"tasting\".\"score\", \"tasting\".\"servings\", \"tasting\".\"tasted_on\", \"tasting\".\"tasted_at\", \"tasting\".\"served_at\", \"tasting\".\"rested\", \"tasting\".\"verdict\", \"tasting\".\"remarks\", \"tasting\".\"tags\", \"tasting\".\"helpers\", \"tasting\".\"bites\", \"tasting\".\"entity_key\", \"tasting\".\"ref_id\", \"tasting\".\"deleted_on_ref\", \"tasting\".\"_version\"",
+    selectColumn: "\"tasting\".\"%s\"",
     getOne: "SELECT \"id\", \"recipe_id\", \"taster\", \"salty\", \"score\", \"servings\", \"tasted_on\", \"tasted_at\", \"served_at\", \"rested\", \"verdict\", \"remarks\", \"tags\", \"helpers\", \"bites\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM tasting WHERE id = $1",
+    getOneFields: "SELECT %s FROM tasting WHERE id = $1",
     getMany: "SELECT \"id\", \"recipe_id\", \"taster\", \"salty\", \"score\", \"servings\", \"tasted_on\", \"tasted_at\", \"served_at\", \"rested\", \"verdict\", \"remarks\", \"tags\", \"helpers\", \"bites\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM tasting WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -1519,16 +1779,20 @@ export const tastingTable: TableDefinition = {
     updateMany: "UPDATE tasting SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO tasting (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"recipe_id\", \"taster\", \"salty\", \"score\", \"servings\", \"tasted_on\", \"tasted_at\", \"served_at\", \"rested\", \"verdict\", \"remarks\", \"tags\", \"helpers\", \"bites\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\"",
+    upsert: "INSERT INTO tasting (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"recipe_id\", \"taster\", \"salty\", \"score\", \"servings\", \"tasted_on\", \"tasted_at\", \"served_at\", \"rested\", \"verdict\", \"remarks\", \"tags\", \"helpers\", \"bites\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM tasting WHERE id = $1",
     deleteMany: "DELETE FROM tasting%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = EXCLUDED.entity_key" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"recipe_id\", \"taster\", \"salty\", \"score\", \"servings\", \"tasted_on\", \"tasted_at\", \"served_at\", \"rested\", \"verdict\", \"remarks\", \"tags\", \"helpers\", \"bites\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM tasting WHERE (id) IN (%s)" },
+    "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = EXCLUDED.entity_key", rows: "SELECT \"id\", \"recipe_id\", \"taster\", \"salty\", \"score\", \"servings\", \"tasted_on\", \"tasted_at\", \"served_at\", \"rested\", \"verdict\", \"remarks\", \"tags\", \"helpers\", \"bites\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM tasting WHERE (entity_key, ref_id) IN (%s)" },
   },
+  relations: [
+    { field: "recipe", column: "recipeId", target: "recipe", probe: "tasting.recipe_id IN (SELECT recipe.id FROM recipe%s)" },
+    { field: "ref", column: "refId", target: "recipeRef", probe: "tasting.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)" },
+  ],
 };
 
 /**
@@ -1573,6 +1837,12 @@ export interface UtensilFilter {
   refId?: UuidFilter<T.IdentityUUID>;
   deletedOnRef?: BoolFilter;
   _version?: NumberFilter<number>;
+  /** The rows whose recipe is among the Recipe rows the filter finds (D90). */
+  recipe?: RecipeFilter;
+  /** The rows whose ref is among the live RecipeRef rows the filter finds (D90). */
+  ref?: RecipeRefFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly UtensilFilter[];
 }
 
 /** The members findOne and findMany order rows of Utensil by. */
@@ -1581,12 +1851,18 @@ export type UtensilOrderField = "id" | "name" | "entityKey" | "deletedOnRef" | "
 /** The members findPage orders rows of Utensil by (D60, amended); ties break by id. */
 export type UtensilSortField = "id" | "name" | "entityKey";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type UtensilUniqueKey = readonly ["id"] | readonly ["entityKey", "ref"];
 
 /** The position of a row of Utensil in a findPage order: its id. */
 export interface UtensilPageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of Utensil includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface UtensilRelations {
+  readonly recipe: Related<RecipeRow, RecipeRelations, 'one'>;
+  readonly ref: Related<RecipeRefRow, RecipeRefRelations, 'optional'>;
 }
 
 /** The repository of Utensil. */
@@ -1599,7 +1875,8 @@ export type UtensilRepository = Repository<
   UtensilSortField,
   UtensilUniqueKey,
   T.IdentityUUID,
-  UtensilPageKey
+  UtensilPageKey,
+  UtensilRelations
 >;
 
 /** The utensil table, as the runtime reads and writes it. */
@@ -1613,13 +1890,15 @@ export const utensilTable: TableDefinition = {
     { name: "name", column: "\"name\"", field: "name", qualified: "utensil.\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "entityKey", column: "entity_key", field: "entityKey", qualified: "utensil.entity_key", uuid: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "refId", column: "ref_id", field: "ref", qualified: "utensil.ref_id", uuid: true, required: true, relation: "RecipeRef", filter: ["eq", "in", "isNull"] },
-    { name: "deletedOnRef", column: "deleted_on_ref", field: "deletedOnRef", qualified: "utensil.deleted_on_ref", boolean: true, required: true, default: false, filter: ["eq", "isNull"] },
+    { name: "deletedOnRef", column: "deleted_on_ref", field: "deletedOnRef", qualified: "utensil.deleted_on_ref", boolean: true, required: true, default: false, filter: ["eq", "in", "isNull"] },
     { name: "_version", column: "_version", field: "_version", qualified: "utensil._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"recipe_id\", \"name\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\"",
     qualifiedColumns: "\"utensil\".\"id\", \"utensil\".\"recipe_id\", \"utensil\".\"name\", \"utensil\".\"entity_key\", \"utensil\".\"ref_id\", \"utensil\".\"deleted_on_ref\", \"utensil\".\"_version\"",
+    selectColumn: "\"utensil\".\"%s\"",
     getOne: "SELECT \"id\", \"recipe_id\", \"name\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM utensil WHERE id = $1",
+    getOneFields: "SELECT %s FROM utensil WHERE id = $1",
     getMany: "SELECT \"id\", \"recipe_id\", \"name\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM utensil WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -1640,16 +1919,20 @@ export const utensilTable: TableDefinition = {
     updateMany: "UPDATE utensil SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO utensil (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"recipe_id\", \"name\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\"",
+    upsert: "INSERT INTO utensil (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"recipe_id\", \"name\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM utensil WHERE id = $1",
     deleteMany: "DELETE FROM utensil%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = EXCLUDED.entity_key" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"recipe_id\", \"name\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM utensil WHERE (id) IN (%s)" },
+    "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = EXCLUDED.entity_key", rows: "SELECT \"id\", \"recipe_id\", \"name\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM utensil WHERE (entity_key, ref_id) IN (%s)" },
   },
+  relations: [
+    { field: "recipe", column: "recipeId", target: "recipe", probe: "utensil.recipe_id IN (SELECT recipe.id FROM recipe%s)" },
+    { field: "ref", column: "refId", target: "recipeRef", probe: "utensil.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)" },
+  ],
 };
 
 /** The repositories of fixture-version-graph-db, by table. */
@@ -1694,14 +1977,23 @@ export const fixtureVersionGraphDbOrm: OrmDefinition = {
     pageKey: "page_key.%s",
     placeholder: "$%d",
     default: "DEFAULT",
+    or: " OR ",
+    group: "(%s)",
     where: " WHERE ",
     and: " AND ",
     orderBy: " ORDER BY ",
     orderTerm: "%s %s",
     limit: " LIMIT %d",
     offset: " OFFSET %d",
+    setExcluded: "%s = EXCLUDED.%s",
+    excluded: "EXCLUDED.%s",
+    changed: "(%s) IS DISTINCT FROM (%s)",
+    never: "FALSE",
+    null: "NULL",
+    notIn: "%s NOT IN (%s)",
   },
   defaultLimit: 100,
+  manyLimit: 1000000,
   historyActorCTE: "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",
   clearHistoryActor: "SELECT set_config('superschematic.history_actor_id', '', true)",
   tables: {

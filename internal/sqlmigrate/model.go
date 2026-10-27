@@ -60,6 +60,30 @@ type Model struct {
 	// RawSQL is the raw SQL the schema declares for the dialect (@rawSql,
 	// D83), in the order it runs, which the schema alone decides.
 	RawSQL []*RawSQL `json:"rawSql,omitempty"`
+
+	// Roles are the roles a UserRole table's @seedRoles keeps in it
+	// (D88), by table and name.
+	Roles []*RoleSeed `json:"roles,omitempty"`
+}
+
+// RoleSeed is a role @seedRoles declares: a row of a UserRole table the
+// model keeps there. A plan inserts a new one and sets the permissions of
+// one whose declaration changes; it never deletes one, since users may
+// hold it.
+type RoleSeed struct {
+	Table string `json:"table"`
+	Name  string `json:"name"`
+	// Permissions are the role's permissions, in declaration order.
+	Permissions []string `json:"permissions"`
+	// Origin is the table's type.
+	Origin string `json:"origin,omitempty"`
+	// Insert adds the role when the table holds none of its name, and
+	// gives one of its name with no permissions the seed's, as a role the
+	// first registration created before the seed existed has (D81).
+	// Update sets the permissions of the role of its name. Each is one
+	// statement in the model's dialect, without a trailing semicolon.
+	Insert string `json:"insert"`
+	Update string `json:"update"`
 }
 
 // TableKind says what declared a table.
@@ -291,11 +315,19 @@ type Trigger struct {
 	// semicolon.
 	Definition string `json:"definition"`
 	Origin     string `json:"origin,omitempty"`
+	// Backfill is the statement an @enqueueOnChange({ backfill: true })
+	// runs where a plan creates its trigger on a table the previous model
+	// has (D88): a message for each row that meets the conditions. On
+	// SQLite the declaration's first trigger holds it. Empty for every
+	// other trigger.
+	Backfill string `json:"backfill,omitempty"`
 }
 
 // View is a projection view.
 type View struct {
-	// Schema is the view's pool; Name its name inside it.
+	// Schema is the view's pool; Name its name inside it. A view without a
+	// pool is created beside the tables (D90), in outputs.sql.sourceSchema
+	// or, empty, the search_path's schema.
 	Schema string `json:"schema"`
 	Name   string `json:"name"`
 	// Owner is the role the view is created as (outputs.sql.viewOwner);

@@ -44,6 +44,8 @@ var corpus = []roundtripFixture{
 	// Type-level decode decorators: the TS writer emits both.
 	{name: "fixture-deny-unknown-fields", dir: tsFixtures + "/fixture-deny-unknown-fields", native: FormatTS},
 	{name: "fixture-strict-json", dir: tsFixtures + "/fixture-strict-json", native: FormatTS},
+	// @allowUnknownFields, and @webhook inputs (D87).
+	{name: "fixture-webhooks-api", dir: tsFixtures + "/fixture-webhooks-api", native: FormatTS},
 	// Operation @docs records in the data forms.
 	{name: "fixture-docs", dir: tsFixtures + "/fixture-docs", native: FormatTS},
 	// An API's @job classes (D52), which every form writes as the
@@ -65,6 +67,9 @@ var corpus = []roundtripFixture{
 	// SQL projection views: every row rule form, joins, @column in both
 	// forms of the source and the collapse.
 	{name: "fixture-projection", dir: tsFixtures + "/fixture-projection", native: FormatTS},
+	// A projection without a pool, beside the tables (D90), over joins
+	// through a joined table.
+	{name: "fixture-finances-db", dir: tsFixtures + "/fixture-finances-db", native: FormatTS},
 	// Arrays of arrays (T[][]) in a General type, a DB table and an API's
 	// request body, argument and response.
 	{name: "fixture-nested-arrays", dir: tsFixtures + "/fixture-nested-arrays", native: FormatTS},

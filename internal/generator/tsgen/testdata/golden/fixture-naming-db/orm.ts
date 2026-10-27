@@ -11,15 +11,24 @@ createOrm(pool, { user, fieldKeys }) acts as a user and holds the keys
 of the Encrypted<T> fields (D85), whose rows hold each one's value in a
 SecretValue.
 A row holds each column by member, a to-one relation's key as <field>Id, a
-UUID in its base62 wire form; withUser(id) or as(ctx.principal) acts as a
-user, whom createdBy, updatedBy and deletedBy record; transaction(fn) runs
-fn in a transaction, whose query takes enqueue's statements too.
+UUID in its base62 wire form. createdBy, updatedBy and deletedBy record the
+acting user: in an operation the router runs, its caller (D87);
+withUser(id) or as(principal) acts as another, and asSystem() as the
+system actor, for a job's or a worker's writes. transaction(fn) runs fn in
+a transaction, whose query takes enqueue's statements too.
+
+A read's options select members and include relations (D90), and its rows
+hold what they name: include: { category: { include: { parent: true } } }
+loads each row's category, and its parent, in one statement per relation.
+A filter reaches through a to-one relation, { category: { parentId: {
+in: ids } } }, and anyOf ORs filters.
 
 Each table's definition also describes its rows for the runtime's
-decodeRow, so a raw query of its columns reads back as its row type.
+decodeRow, so a raw query of its columns reads back as its row type:
+query(text, values, { decode: <table>Table }) reads them so (D89).
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
-import type { DateFilter, DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
+import type { DateFilter, DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Related, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
 
 /**
@@ -54,6 +63,8 @@ export interface CategoryFilter {
   createdAt?: DateTimeFilter<T.TemporalDateTime>;
   /** The rows a LineItem row's category points at, or none does. */
   referencedByLineItemCategory?: ReferencedByFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly CategoryFilter[];
 }
 
 /** The members findOne and findMany order rows of Category by. */
@@ -62,12 +73,17 @@ export type CategoryOrderField = "id" | "name" | "kind" | "createdAt";
 /** The members findPage orders rows of Category by (D60, amended); ties break by id. */
 export type CategorySortField = "id" | "name" | "createdAt";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type CategoryUniqueKey = readonly ["id"];
 
 /** The position of a row of Category in a findPage order: its id. */
 export interface CategoryPageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of Category includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface CategoryRelations {
+  readonly lineItems: Related<LineItemRow, LineItemRelations, 'many'>;
 }
 
 /** The repository of Category. */
@@ -80,7 +96,8 @@ export type CategoryRepository = Repository<
   CategorySortField,
   CategoryUniqueKey,
   T.IdentityUUID,
-  CategoryPageKey
+  CategoryPageKey,
+  CategoryRelations
 >;
 
 /** The "budgetCategory" table, as the runtime reads and writes it. */
@@ -92,12 +109,14 @@ export const categoryTable: TableDefinition = {
     { name: "id", column: "id", field: "id", qualified: "\"budgetCategory\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "name", column: "\"displayName\"", field: "name", qualified: "\"budgetCategory\".\"displayName\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
     { name: "kind", column: "kind", field: "kind", qualified: "\"budgetCategory\".kind", required: true, filter: ["eq", "in", "ilike", "isNull"] },
-    { name: "createdAt", column: "\"createdAt\"", field: "createdAt", qualified: "\"budgetCategory\".\"createdAt\"", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
+    { name: "createdAt", column: "\"createdAt\"", field: "createdAt", qualified: "\"budgetCategory\".\"createdAt\"", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
   ],
   statements: {
     columns: "\"id\", \"displayName\", \"kind\", \"createdAt\"",
     qualifiedColumns: "\"budgetCategory\".\"id\", \"budgetCategory\".\"displayName\", \"budgetCategory\".\"kind\", \"budgetCategory\".\"createdAt\"",
+    selectColumn: "\"budgetCategory\".\"%s\"",
     getOne: "SELECT \"id\", \"displayName\", \"kind\", \"createdAt\" FROM \"budgetCategory\" WHERE id = $1",
+    getOneFields: "SELECT %s FROM \"budgetCategory\" WHERE id = $1",
     getMany: "SELECT \"id\", \"displayName\", \"kind\", \"createdAt\" FROM \"budgetCategory\" WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -118,17 +137,20 @@ export const categoryTable: TableDefinition = {
     updateMany: "UPDATE \"budgetCategory\" SET %s%s",
     updatedAt: "updated_at = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO \"budgetCategory\" (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"displayName\", \"kind\", \"createdAt\"",
+    upsert: "INSERT INTO \"budgetCategory\" (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"displayName\", \"kind\", \"createdAt\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM \"budgetCategory\" WHERE id = $1",
     deleteMany: "DELETE FROM \"budgetCategory\"%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"displayName\", \"kind\", \"createdAt\" FROM \"budgetCategory\" WHERE (id) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByLineItemCategory", probe: "SELECT 1 FROM \"lineItem\" WHERE \"lineItem\".\"categoryId\" = \"budgetCategory\".id", live: " AND \"lineItem\".\"deletedAt\" IS NULL" },
+  ],
+  many: [
+    { name: "lineItems", target: "lineItem", column: "categoryId" },
   ],
 };
 
@@ -137,7 +159,9 @@ export const categoryTable: TableDefinition = {
  * keep their camel-case names, its category's foreign key among them, and
  * the bank's id of a line is unique among its category's. A line from the
  * bank enqueues a LinePosted when it is written and when its amount
- * changes; the trigger is named after both tables.
+ * changes; the trigger is named after both tables, and the plan that adds
+ * it enqueues the lines from the bank already there. A line written
+ * without the day it was posted on is posted on the day it is written.
  */
 export interface LineItemRow {
   id: T.IdentityUUID;
@@ -155,7 +179,7 @@ export interface LineItemRow {
 export interface LineItemCreate {
   id?: T.IdentityUUID | null;
   amountCents: T.GenericInt64;
-  postedOn: T.TemporalDate;
+  postedOn?: T.TemporalDate | null;
   memo?: string | null;
   externalId?: string | null;
   categoryId?: T.IdentityUUID | null;
@@ -182,6 +206,10 @@ export interface LineItemFilter {
   updatedAt?: DateTimeFilter<T.TemporalDateTime>;
   /** The rows whose search fields hold each word of the text, in any case (D62). */
   searchText?: string;
+  /** The rows whose category is among the Category rows the filter finds; a row whose category is null is not among them (D90). */
+  category?: CategoryFilter;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly LineItemFilter[];
 }
 
 /** The members findOne and findMany order rows of LineItem by. */
@@ -190,12 +218,17 @@ export type LineItemOrderField = "id" | "amountCents" | "postedOn" | "memo" | "e
 /** The members findPage orders rows of LineItem by (D60, amended); ties break by id. */
 export type LineItemSortField = "id" | "amountCents" | "postedOn" | "createdAt" | "updatedAt";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type LineItemUniqueKey = readonly ["id"] | readonly ["category", "externalId"];
 
 /** The position of a row of LineItem in a findPage order: its id. */
 export interface LineItemPageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of LineItem includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface LineItemRelations {
+  readonly category: Related<CategoryRow, CategoryRelations, 'optional'>;
 }
 
 /** The repository of LineItem. */
@@ -208,7 +241,8 @@ export type LineItemRepository = SoftDeleteRepository<
   LineItemSortField,
   LineItemUniqueKey,
   T.IdentityUUID,
-  LineItemPageKey
+  LineItemPageKey,
+  LineItemRelations
 >;
 
 /** The "lineItem" table, as the runtime reads and writes it. */
@@ -219,18 +253,20 @@ export const lineItemTable: TableDefinition = {
   columns: [
     { name: "id", column: "id", field: "id", qualified: "\"lineItem\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "amountCents", column: "\"amountCents\"", field: "amountCents", qualified: "\"lineItem\".\"amountCents\"", int64: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "postedOn", column: "\"postedOn\"", field: "postedOn", qualified: "\"lineItem\".\"postedOn\"", date: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "postedOn", column: "\"postedOn\"", field: "postedOn", qualified: "\"lineItem\".\"postedOn\"", date: true, auto: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "memo", column: "memo", field: "memo", qualified: "\"lineItem\".memo", filter: ["eq", "in", "ilike", "isNull"] },
     { name: "externalId", column: "\"externalId\"", field: "externalId", qualified: "\"lineItem\".\"externalId\"", filter: ["eq", "in", "ilike", "isNull"] },
     { name: "categoryId", column: "\"categoryId\"", field: "category", qualified: "\"lineItem\".\"categoryId\"", uuid: true, relation: "Category", filter: ["eq", "in", "isNull"] },
-    { name: "createdAt", column: "\"createdAt\"", field: "createdAt", qualified: "\"lineItem\".\"createdAt\"", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
-    { name: "updatedAt", column: "\"updatedAt\"", field: "updatedAt", qualified: "\"lineItem\".\"updatedAt\"", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
+    { name: "createdAt", column: "\"createdAt\"", field: "createdAt", qualified: "\"lineItem\".\"createdAt\"", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "updatedAt", column: "\"updatedAt\"", field: "updatedAt", qualified: "\"lineItem\".\"updatedAt\"", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "deletedAt", column: "\"deletedAt\"", field: "deletedAt", qualified: "\"lineItem\".\"deletedAt\"", timestamp: true, audit: "deletedAt" },
   ],
   statements: {
     columns: "\"id\", \"amountCents\", \"postedOn\", \"memo\", \"externalId\", \"categoryId\", \"createdAt\", \"updatedAt\", \"deletedAt\"",
     qualifiedColumns: "\"lineItem\".\"id\", \"lineItem\".\"amountCents\", \"lineItem\".\"postedOn\", \"lineItem\".\"memo\", \"lineItem\".\"externalId\", \"lineItem\".\"categoryId\", \"lineItem\".\"createdAt\", \"lineItem\".\"updatedAt\", \"lineItem\".\"deletedAt\"",
+    selectColumn: "\"lineItem\".\"%s\"",
     getOne: "SELECT \"id\", \"amountCents\", \"postedOn\", \"memo\", \"externalId\", \"categoryId\", \"createdAt\", \"updatedAt\", \"deletedAt\" FROM \"lineItem\" WHERE id = $1",
+    getOneFields: "SELECT %s FROM \"lineItem\" WHERE id = $1",
     getMany: "SELECT \"id\", \"amountCents\", \"postedOn\", \"memo\", \"externalId\", \"categoryId\", \"createdAt\", \"updatedAt\", \"deletedAt\" FROM \"lineItem\" WHERE id IN (%s)",
     live: " AND \"deletedAt\" IS NULL",
     liveWhere: " WHERE \"deletedAt\" IS NULL",
@@ -251,7 +287,7 @@ export const lineItemTable: TableDefinition = {
     updateMany: "UPDATE \"lineItem\" SET %s%s",
     updatedAt: "\"updatedAt\" = $%d",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO \"lineItem\" (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s WHERE \"lineItem\".\"deletedAt\" IS NULL RETURNING \"id\", \"amountCents\", \"postedOn\", \"memo\", \"externalId\", \"categoryId\", \"createdAt\", \"updatedAt\", \"deletedAt\"",
+    upsert: "INSERT INTO \"lineItem\" (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"amountCents\", \"postedOn\", \"memo\", \"externalId\", \"categoryId\", \"createdAt\", \"updatedAt\", \"deletedAt\", (xmax = 0) AS _inserted",
     softDelete: "UPDATE \"lineItem\" SET \"deletedAt\" = $1 WHERE id = $2 AND \"deletedAt\" IS NULL",
     softDeleteMany: "UPDATE \"lineItem\" SET \"deletedAt\" = $1%s",
     delete: "DELETE FROM \"lineItem\" WHERE id = $1",
@@ -260,9 +296,12 @@ export const lineItemTable: TableDefinition = {
   softDelete: true,
   search: "\"lineItem\".search_text",
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
-    "category,externalId": { conflict: "(\"categoryId\", \"externalId\") WHERE \"deletedAt\" IS NULL", keep: "\"categoryId\" = EXCLUDED.\"categoryId\"" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"amountCents\", \"postedOn\", \"memo\", \"externalId\", \"categoryId\", \"createdAt\", \"updatedAt\", \"deletedAt\" FROM \"lineItem\" WHERE (id) IN (%s)" },
+    "category,externalId": { conflict: "(\"categoryId\", \"externalId\") WHERE \"deletedAt\" IS NULL", keep: "\"categoryId\" = EXCLUDED.\"categoryId\"", rows: "SELECT \"id\", \"amountCents\", \"postedOn\", \"memo\", \"externalId\", \"categoryId\", \"createdAt\", \"updatedAt\", \"deletedAt\" FROM \"lineItem\" WHERE (\"categoryId\", \"externalId\") IN (%s) AND (\"deletedAt\" IS NULL)" },
   },
+  relations: [
+    { field: "category", column: "categoryId", target: "category", probe: "\"lineItem\".\"categoryId\" IN (SELECT \"budgetCategory\".id FROM \"budgetCategory\"%s)" },
+  ],
 };
 
 /**
@@ -296,6 +335,8 @@ export interface NoteFilter {
   body?: StringFilter<string>;
   updatedAt?: DateTimeFilter<T.TemporalDateTime>;
   _version?: NumberFilter<number>;
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly NoteFilter[];
 }
 
 /** The members findOne and findMany order rows of Note by. */
@@ -304,12 +345,16 @@ export type NoteOrderField = "id" | "body" | "updatedAt" | "updatedBy" | "_versi
 /** The members findPage orders rows of Note by (D60, amended); ties break by id. */
 export type NoteSortField = "id" | "body" | "updatedAt";
 
-/** The unique keys upsertOne is keyed by, by their fields. */
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type NoteUniqueKey = readonly ["id"];
 
 /** The position of a row of Note in a findPage order: its id. */
 export interface NotePageKey {
   readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of Note includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface NoteRelations {
 }
 
 /** The repository of Note. */
@@ -322,7 +367,8 @@ export type NoteRepository = Repository<
   NoteSortField,
   NoteUniqueKey,
   T.IdentityUUID,
-  NotePageKey
+  NotePageKey,
+  NoteRelations
 >;
 
 /** The "ledgerNote" table, as the runtime reads and writes it. */
@@ -333,14 +379,16 @@ export const noteTable: TableDefinition = {
   columns: [
     { name: "id", column: "id", field: "id", qualified: "\"ledgerNote\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "body", column: "\"bodyText\"", field: "body", qualified: "\"ledgerNote\".\"bodyText\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
-    { name: "updatedAt", column: "\"updatedAt\"", field: "updatedAt", qualified: "\"ledgerNote\".\"updatedAt\"", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "isNull"], sortable: true },
+    { name: "updatedAt", column: "\"updatedAt\"", field: "updatedAt", qualified: "\"ledgerNote\".\"updatedAt\"", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "updatedBy", column: "\"updatedBy\"", field: "updatedBy", qualified: "\"ledgerNote\".\"updatedBy\"", uuid: true, required: true, audit: "updatedBy" },
     { name: "_version", column: "_version", field: "_version", qualified: "\"ledgerNote\"._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"] },
   ],
   statements: {
     columns: "\"id\", \"bodyText\", \"updatedAt\", \"updatedBy\", \"_version\"",
     qualifiedColumns: "\"ledgerNote\".\"id\", \"ledgerNote\".\"bodyText\", \"ledgerNote\".\"updatedAt\", \"ledgerNote\".\"updatedBy\", \"ledgerNote\".\"_version\"",
+    selectColumn: "\"ledgerNote\".\"%s\"",
     getOne: "SELECT \"id\", \"bodyText\", \"updatedAt\", \"updatedBy\", \"_version\" FROM \"ledgerNote\" WHERE id = $1",
+    getOneFields: "SELECT %s FROM \"ledgerNote\" WHERE id = $1",
     getMany: "SELECT \"id\", \"bodyText\", \"updatedAt\", \"updatedBy\", \"_version\" FROM \"ledgerNote\" WHERE id IN (%s)",
     live: "",
     liveWhere: "",
@@ -361,7 +409,7 @@ export const noteTable: TableDefinition = {
     updateMany: "UPDATE \"ledgerNote\" SET %s%s",
     updatedAt: "\"updatedAt\" = $%d",
     updatedBy: "\"updatedBy\" = $%d",
-    upsert: "INSERT INTO \"ledgerNote\" (%s) VALUES (%s) ON CONFLICT %s DO UPDATE SET %s RETURNING \"id\", \"bodyText\", \"updatedAt\", \"updatedBy\", \"_version\"",
+    upsert: "INSERT INTO \"ledgerNote\" (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"bodyText\", \"updatedAt\", \"updatedBy\", \"_version\", (xmax = 0) AS _inserted",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM \"ledgerNote\" USING history_actor WHERE id = $2",
@@ -369,7 +417,7 @@ export const noteTable: TableDefinition = {
   },
   historyActor: true,
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id" },
+    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"bodyText\", \"updatedAt\", \"updatedBy\", \"_version\" FROM \"ledgerNote\" WHERE (id) IN (%s)" },
   },
 };
 
@@ -406,14 +454,23 @@ export const fixtureNamingDbOrm: OrmDefinition = {
     pageKey: "page_key.%s",
     placeholder: "$%d",
     default: "DEFAULT",
+    or: " OR ",
+    group: "(%s)",
     where: " WHERE ",
     and: " AND ",
     orderBy: " ORDER BY ",
     orderTerm: "%s %s",
     limit: " LIMIT %d",
     offset: " OFFSET %d",
+    setExcluded: "%s = EXCLUDED.%s",
+    excluded: "EXCLUDED.%s",
+    changed: "(%s) IS DISTINCT FROM (%s)",
+    never: "FALSE",
+    null: "NULL",
+    notIn: "%s NOT IN (%s)",
   },
   defaultLimit: 100,
+  manyLimit: 1000000,
   historyActorCTE: "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",
   clearHistoryActor: "SELECT set_config('superschematic.history_actor_id', '', true)",
   tables: {

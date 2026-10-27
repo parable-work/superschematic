@@ -99,6 +99,15 @@ func TestProjectionWithoutRowRulesPassesVerification(t *testing.T) {
 	}
 }
 
+// TestProjectionWithoutPoolPassesVerification: a plain view beside the
+// tables, with no pool and no row rule, which the ORMs read (D90).
+func TestProjectionWithoutPoolPassesVerification(t *testing.T) {
+	schema := projectionSchema(func(_ *ir.Schema, td *ir.TypeDef) { td.Projection.Pool, td.Projection.Predicates = "", nil })
+	if errs := projectionErrors(t, schema); len(errs) != 0 {
+		t.Fatalf("expected no errors, got %v", errs)
+	}
+}
+
 func TestComputedProjectionColumnValidation(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -165,7 +174,12 @@ func TestProjectionRefusals(t *testing.T) {
 		{"join without a condition", func(_ *ir.Schema, td *ir.TypeDef) { td.Projection.Joins[0].On = nil }, "needs at least one alias.field equality"},
 		{"bad migration stamp", func(_ *ir.Schema, td *ir.TypeDef) { td.Projection.Migration = "v2" }, "14-digit"},
 		{"bad view name", func(_ *ir.Schema, td *ir.TypeDef) { td.Projection.Name = "Preferences" }, "snake_case SQL identifier"},
-		{"bad pool", func(_ *ir.Schema, td *ir.TypeDef) { td.Projection.Pool = "" }, "@projection pool must be a snake_case SQL identifier"},
+		{"bad pool", func(_ *ir.Schema, td *ir.TypeDef) { td.Projection.Pool = "App" }, "@projection pool must be a snake_case SQL identifier"},
+		// A view without a pool is created beside the tables (D90), so it
+		// takes no table's name.
+		{"no pool, a table's name", func(_ *ir.Schema, td *ir.TypeDef) {
+			td.Projection.Pool, td.Projection.Name = "", "preference"
+		}, "is the table of Preference"},
 		{"no columns", func(_ *ir.Schema, td *ir.TypeDef) { td.Fields = nil }, "at least one column"},
 		{"column decorator outside a projection", func(schema *ir.Schema, _ *ir.TypeDef) {
 			schema.Types["Channel"].Fields[1].ProjectedFrom = "base.name"

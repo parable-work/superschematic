@@ -123,6 +123,21 @@ const (
 	// as BundlePlatform's, for a job. CronD1Connector reaches from it.
 	CronPlatform = "fake.cron"
 
+	// DrainPlatform runs TypeScript workers whose artifact is a bundle, as
+	// the cloudflare target runs a worker's Worker under a Cron Trigger
+	// that drains its queue (D92): the same script as BundlePlatform's,
+	// for a worker. DrainHyperdriveConnector reaches from it.
+	DrainPlatform = "fake.drain"
+
+	// BundleHyperdriveConnector, CronHyperdriveConnector and
+	// DrainHyperdriveConnector connect a server on BundlePlatform, a job
+	// on CronPlatform and a worker on DrainPlatform to a database on
+	// SQLPlatform as a Worker reaches Postgres through Hyperdrive (D92):
+	// through a binding named after the field, of a config's id.
+	BundleHyperdriveConnector = "fake.bundle-hyperdrive"
+	CronHyperdriveConnector   = "fake.cron-hyperdrive"
+	DrainHyperdriveConnector  = "fake.drain-hyperdrive"
+
 	// WorkerSQLConnector, WorkerHTTPConnector and WorkerBucketConnector
 	// connect a worker, whose edges are its API's, as a job's connectors
 	// do.
@@ -336,6 +351,16 @@ func (e *Extension) Register(r *registry.Registry) error {
 			AddressOf: func(registry.PlatformContext) any { return nil },
 			Lower:     lowerBundle,
 		},
+		{
+			Name:      DrainPlatform,
+			Extension: Name,
+			Kind:      ir.DeployableWorker,
+			Languages: []string{registry.APILanguageTypeScript},
+			Artifact:  ir.ArtifactBundle,
+			NameOf:    serverName,
+			AddressOf: func(registry.PlatformContext) any { return nil },
+			Lower:     lowerBundle,
+		},
 		database(SQLPlatform, registry.SQLDialectPostgres),
 		database(LitePlatform, registry.SQLDialectSQLite),
 		{
@@ -357,7 +382,8 @@ func (e *Extension) Register(r *registry.Registry) error {
 			PublicAddressOf: func(ctx registry.PlatformContext) any {
 				return publicAddress(ctx, ctx.Deployable.Name+".site")
 			},
-			Lower: lowerSite,
+			ServesOrigin: true,
+			Lower:        lowerSite,
 		},
 		{
 			Name:      BucketPlatform,
@@ -457,6 +483,9 @@ func (e *Extension) Register(r *registry.Registry) error {
 		{Name: JobLiteConnector, Extension: Name, Edge: ir.EdgeSQL, From: JobPlatform, To: LitePlatform, Connect: connectLite},
 		{Name: WorkerLiteConnector, Extension: Name, Edge: ir.EdgeSQL, From: WorkerPlatform, To: LitePlatform, Connect: connectLite},
 		{Name: CronD1Connector, Extension: Name, Edge: ir.EdgeSQL, From: CronPlatform, To: LitePlatform, Connect: connectD1},
+		{Name: BundleHyperdriveConnector, Extension: Name, Edge: ir.EdgeSQL, From: BundlePlatform, To: SQLPlatform, Connect: connectHyperdrive},
+		{Name: CronHyperdriveConnector, Extension: Name, Edge: ir.EdgeSQL, From: CronPlatform, To: SQLPlatform, Connect: connectHyperdrive},
+		{Name: DrainHyperdriveConnector, Extension: Name, Edge: ir.EdgeSQL, From: DrainPlatform, To: SQLPlatform, Connect: connectHyperdrive},
 		{Name: BundleHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: BundlePlatform, To: BundlePlatform, Connect: connectBundleHTTP},
 		{Name: RunnerSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: RunnerPlatform, To: SQLPlatform, Connect: connectSQL},
 		{Name: DeriverSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: DeriverPlatform, To: SQLPlatform, Connect: connectSQL},
@@ -629,7 +658,9 @@ var resourceTypes = map[string]string{
 	  "additionalProperties": false}`,
 	TypeSite: `{"type": "object", "required": ["name", "prefix", "public"],
 	  "properties": {
-	    "name": {"type": "string"}, "prefix": {"type": "string"}, "fallback": {"type": "string"}, "public": {"type": "boolean"}
+	    "name": {"type": "string"}, "prefix": {"type": "string"}, "fallback": {"type": "string"}, "public": {"type": "boolean"},
+	    "routes": {"type": "array", "items": {"type": "object", "required": ["path", "upstream"],
+	      "properties": {"path": {"type": "string"}, "upstream": {}}, "additionalProperties": false}}
 	  },
 	  "additionalProperties": false}`,
 	TypeSchedule: `{"type": "object", "required": ["name", "schedule", "timeZone", "job", "account"],
@@ -871,8 +902,9 @@ func publicAddress(ctx registry.PlatformContext, id string) any {
 
 // lowerSite lowers a site (D55) to its storage, public, serving its files
 // under the prefix of their digest, which the deploy pins, with the
-// single-page fallback, and under the environment's domain a route and a
-// CNAME record, as an exposed server's.
+// single-page fallback, the routes of its origin (D91), each API's path
+// and the upstream its site edge derives, and under the environment's
+// domain a route and a CNAME record, as an exposed server's.
 func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 	d := ctx.Deployable
 	if d.Site == nil {
@@ -882,6 +914,17 @@ func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 	props := map[string]any{"name": d.ResourceName, "prefix": "/" + ir.SiteDigestToken + "/", "public": true}
 	if d.Site.Fallback != "" {
 		props["fallback"] = d.Site.Fallback
+	}
+	var routes []any
+	for _, api := range d.Site.Origin {
+		for _, b := range d.Bindings {
+			if value, _ := b.Value.(map[string]any); b.Field == api.Service && value["upstream"] != nil {
+				routes = append(routes, map[string]any{"path": api.Path, "upstream": value["upstream"]})
+			}
+		}
+	}
+	if len(routes) > 0 {
+		props["routes"] = routes
 	}
 	out := registry.Lowered{Resources: []*ir.Resource{{ID: id, Type: TypeSite, Properties: props}}}
 	if ctx.Environment.Domain != "" {
@@ -903,8 +946,13 @@ func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 
 // connectSite derives the public address of the server whose API a site
 // calls (D55). The browser carries its end user's token, so the edge
-// grants nothing.
+// grants nothing. For an API of the site's origin (D91) it derives the
+// same-origin URL, and the server's address as the upstream the site
+// forwards to, exposed or not.
 func connectSite(ctx registry.ConnectorContext) (registry.Connected, error) {
+	if ctx.From.Site.OriginAPI(ctx.Edge.Service.Name) != nil {
+		return registry.Connected{Value: ir.SiteEndpoint{URL: ir.SiteOriginURL(ctx.From.PublicAddress, ctx.Edge.Service.Name), Upstream: ctx.To.Address}}, nil
+	}
 	return registry.Connected{Value: ir.SiteEndpoint{URL: ctx.To.PublicAddress}}, nil
 }
 
@@ -1051,6 +1099,16 @@ func connectD1(ctx registry.ConnectorContext) (registry.Connected, error) {
 	return registry.Connected{Value: ir.DatabaseConnection{D1: &ir.D1Connection{
 		Binding:  ctx.Edge.Field,
 		Database: ir.Output{Resource: ctx.To.Name + ".database." + ctx.Edge.Service.Name, Name: "id"},
+	}}}, nil
+}
+
+// connectHyperdrive derives the Hyperdrive binding a Worker reaches a
+// Postgres database through (D92): named after the field, of a config's
+// id, an output of the schema's database.
+func connectHyperdrive(ctx registry.ConnectorContext) (registry.Connected, error) {
+	return registry.Connected{Value: ir.DatabaseConnection{Hyperdrive: &ir.HyperdriveConnection{
+		Binding: ctx.Edge.Field,
+		Config:  ir.Output{Resource: ctx.To.Name + ".database." + ctx.Edge.Service.Name, Name: "id"},
 	}}}, nil
 }
 

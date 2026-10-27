@@ -20,6 +20,8 @@ type ApiCredentialRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.ApiCredential) (*types.ApiCredential, error)
 	CreateMany(ctx context.Context, inputs []*types.ApiCredential) ([]*types.ApiCredential, error)
 	UpsertOne(ctx context.Context, input *types.ApiCredential, on ApiCredentialUniqueKey, update *ApiCredentialUpdate) (*types.ApiCredential, error)
+	UpsertOneResult(ctx context.Context, input *types.ApiCredential, on ApiCredentialUniqueKey, update *ApiCredentialUpdate, opts *UpsertOptions) (UpsertResult[*types.ApiCredential], error)
+	UpsertMany(ctx context.Context, inputs []*types.ApiCredential, on ApiCredentialUniqueKey, update ApiCredentialFields, opts *UpsertOptions) ([]UpsertResult[*types.ApiCredential], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *ApiCredentialUpdate) (*types.ApiCredential, error)
 	UpdateMany(ctx context.Context, filter *ApiCredentialFilter, update *ApiCredentialUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -37,6 +39,8 @@ type PlaidItemRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.PlaidItem) (*types.PlaidItem, error)
 	CreateMany(ctx context.Context, inputs []*types.PlaidItem) ([]*types.PlaidItem, error)
 	UpsertOne(ctx context.Context, input *types.PlaidItem, on PlaidItemUniqueKey, update *PlaidItemUpdate) (*types.PlaidItem, error)
+	UpsertOneResult(ctx context.Context, input *types.PlaidItem, on PlaidItemUniqueKey, update *PlaidItemUpdate, opts *UpsertOptions) (UpsertResult[*types.PlaidItem], error)
+	UpsertMany(ctx context.Context, inputs []*types.PlaidItem, on PlaidItemUniqueKey, update PlaidItemFields, opts *UpsertOptions) ([]UpsertResult[*types.PlaidItem], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *PlaidItemUpdate) (*types.PlaidItem, error)
 	UpdateMany(ctx context.Context, filter *PlaidItemFilter, update *PlaidItemUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -48,6 +52,7 @@ type PlaidItemRepositoryInterface interface {
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
+	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
 	Ping(ctx context.Context) error
 	Close()
 	GetApiCredentialRepository() ApiCredentialRepositoryInterface
@@ -58,6 +63,7 @@ type DatabaseInterface interface {
 type TxInterface interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetApiCredentialRepository() ApiCredentialRepositoryInterface
 	GetPlaidItemRepository() PlaidItemRepositoryInterface
 }
@@ -89,6 +95,17 @@ func NewNoOpDatabase() *NoOpDatabase {
 // Transaction executes the callback with a deterministic no-op transaction.
 func (db *NoOpDatabase) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(db.tx)
+}
+
+// TransactionWith executes the callback with a deterministic no-op
+// transaction, whatever its options.
+func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(TxInterface) error) error {
+	return fn(db.tx)
+}
+
+// Transaction executes the callback with the same no-op transaction.
+func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
+	return fn(tx)
 }
 
 // Ping always succeeds for no-op database.
@@ -165,6 +182,18 @@ func (r *NoOpApiCredentialRepository) UpsertOne(_ context.Context, input *types.
 	return input, nil
 }
 
+func (r *NoOpApiCredentialRepository) UpsertOneResult(_ context.Context, input *types.ApiCredential, _ ApiCredentialUniqueKey, _ *ApiCredentialUpdate, _ *UpsertOptions) (UpsertResult[*types.ApiCredential], error) {
+	return UpsertResult[*types.ApiCredential]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpApiCredentialRepository) UpsertMany(_ context.Context, inputs []*types.ApiCredential, _ ApiCredentialUniqueKey, _ ApiCredentialFields, _ *UpsertOptions) ([]UpsertResult[*types.ApiCredential], error) {
+	results := make([]UpsertResult[*types.ApiCredential], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.ApiCredential]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
 func (r *NoOpApiCredentialRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *ApiCredentialUpdate) (*types.ApiCredential, error) {
 	return nil, ErrNotFound
 }
@@ -229,6 +258,18 @@ func (r *NoOpPlaidItemRepository) CreateMany(_ context.Context, inputs []*types.
 
 func (r *NoOpPlaidItemRepository) UpsertOne(_ context.Context, input *types.PlaidItem, _ PlaidItemUniqueKey, _ *PlaidItemUpdate) (*types.PlaidItem, error) {
 	return input, nil
+}
+
+func (r *NoOpPlaidItemRepository) UpsertOneResult(_ context.Context, input *types.PlaidItem, _ PlaidItemUniqueKey, _ *PlaidItemUpdate, _ *UpsertOptions) (UpsertResult[*types.PlaidItem], error) {
+	return UpsertResult[*types.PlaidItem]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpPlaidItemRepository) UpsertMany(_ context.Context, inputs []*types.PlaidItem, _ PlaidItemUniqueKey, _ PlaidItemFields, _ *UpsertOptions) ([]UpsertResult[*types.PlaidItem], error) {
+	results := make([]UpsertResult[*types.PlaidItem], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.PlaidItem]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
 }
 
 func (r *NoOpPlaidItemRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *PlaidItemUpdate) (*types.PlaidItem, error) {

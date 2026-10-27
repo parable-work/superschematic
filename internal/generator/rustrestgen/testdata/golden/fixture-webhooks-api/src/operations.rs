@@ -52,6 +52,34 @@ pub const WEBHOOK_RECEIVE_RAW_GITHUB_EVENT: OperationInfo = OperationInfo {
     service: None,
 };
 
+/// webhook.receiveLedgerEvent (`POST /api/webhooks/ledger`).
+pub const WEBHOOK_RECEIVE_LEDGER_EVENT: OperationInfo = OperationInfo {
+    namespace: "webhook",
+    name: "receiveLedgerEvent",
+    method: "POST",
+    path: "/api/webhooks/ledger",
+    requires_auth: false,
+    permissions: &[],
+    require_ownership: false,
+    manual: false,
+    rate_limit: None,
+    service: None,
+};
+
+/// webhook.receivePlaidEvent (`POST /api/webhooks/plaid`).
+pub const WEBHOOK_RECEIVE_PLAID_EVENT: OperationInfo = OperationInfo {
+    namespace: "webhook",
+    name: "receivePlaidEvent",
+    method: "POST",
+    path: "/api/webhooks/plaid",
+    requires_auth: false,
+    permissions: &[],
+    require_ownership: false,
+    manual: false,
+    rate_limit: None,
+    service: None,
+};
+
 /// webhook.receiveStripeEvent (`POST /api/webhooks/stripe`).
 pub const WEBHOOK_RECEIVE_STRIPE_EVENT: OperationInfo = OperationInfo {
     namespace: "webhook",
@@ -71,5 +99,7 @@ pub const ALL: &[OperationInfo] = &[
     EVENT_GET_EVENT,
     WEBHOOK_RECEIVE_GITHUB_EVENT,
     WEBHOOK_RECEIVE_RAW_GITHUB_EVENT,
+    WEBHOOK_RECEIVE_LEDGER_EVENT,
+    WEBHOOK_RECEIVE_PLAID_EVENT,
     WEBHOOK_RECEIVE_STRIPE_EVENT,
 ];

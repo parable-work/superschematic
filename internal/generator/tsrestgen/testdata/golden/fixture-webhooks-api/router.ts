@@ -5,9 +5,12 @@
 // operation table below is the schema's declaration of paths, parameters,
 // strict body parsers, auth requirements, and the @bodyLimit, @rateLimit
 // and @timeout directives, applied by @superschematic/http-runtime.
+// A @webhook's input drops the keys its type does not declare before its
+// parser reads it (D87), since a provider adds keys to its payloads over
+// time; every other input refuses them.
 
 import { Hono, type Env } from 'hono';
-import type { OperationSpec } from '@superschematic/http-runtime';
+import { declaredKeysOnly, type OperationSpec } from '@superschematic/http-runtime';
 import {
   mountManualOperation,
   mountOperation,
@@ -16,11 +19,17 @@ import {
 } from '@superschematic/http-runtime/hono';
 import { mountOpenAPI, type OpenAPIOptions } from '@superschematic/http-runtime/openapi';
 import type {
+  LedgerEvent,
   PaymentEvent,
+  PlaidItemEvent,
 } from '@schemas/fixture-webhooks-api-types/types';
 import {
+  parseLedgerEventFromJSON,
+  parseLedgerEventJson,
   parsePaymentEventFromJSON,
   parsePaymentEventJson,
+  parsePlaidItemEventFromJSON,
+  parsePlaidItemEventJson,
 } from '@schemas/fixture-webhooks-api-types/validators';
 import type { Implementations } from './interfaces';
 import { openAPIJSON } from './openapi';
@@ -29,6 +38,8 @@ export type OperationName =
   | 'getEvent'
   | 'receiveGithubEvent'
   | 'receiveRawGithubEvent'
+  | 'receiveLedgerEvent'
+  | 'receivePlaidEvent'
   | 'receiveStripeEvent';
 
 /** The operation table: what the schema declares about each route. */
@@ -68,6 +79,30 @@ export const operationSpecs = {
     webhookProvider: 'github',
     manual: true,
   },
+  receiveLedgerEvent: {
+    name: 'receiveLedgerEvent',
+    namespace: 'webhook',
+    method: 'POST',
+    path: '/api/webhooks/ledger',
+    pathParams: [],
+    queryParams: [],
+    bodyParams: [],
+    input: { parse: (value: unknown) => parseLedgerEventFromJSON(parseLedgerEventJson(value)), required: true },
+    auth: { public: true, required: false, permissions: [] },
+    manual: false,
+  },
+  receivePlaidEvent: {
+    name: 'receivePlaidEvent',
+    namespace: 'webhook',
+    method: 'POST',
+    path: '/api/webhooks/plaid',
+    pathParams: [],
+    queryParams: [],
+    bodyParams: [],
+    input: { parse: (value: unknown) => parsePlaidItemEventFromJSON(parsePlaidItemEventJson(declaredKeysOnly(value, ['webhook_type', 'webhook_code', 'item_id', 'error']))), required: true },
+    auth: { public: true, required: false, permissions: [] },
+    manual: false,
+  },
   receiveStripeEvent: {
     name: 'receiveStripeEvent',
     namespace: 'webhook',
@@ -76,7 +111,7 @@ export const operationSpecs = {
     pathParams: [],
     queryParams: [],
     bodyParams: [],
-    input: { parse: (value: unknown) => parsePaymentEventFromJSON(parsePaymentEventJson(value)), required: true },
+    input: { parse: (value: unknown) => parsePaymentEventFromJSON(parsePaymentEventJson(declaredKeysOnly(value, ['id', 'type']))), required: true },
     auth: { public: true, required: false, permissions: [] },
     rateLimitPerMinute: 1,
     webhookProvider: 'stripe',
@@ -157,6 +192,40 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     timeoutSeconds: options.timeouts?.receiveRawGithubEvent,
     webhookVerifier: implementations.webhookVerifiers['github'],
   });
+  mountOperation(
+    router,
+    operationSpecs.receiveLedgerEvent,
+    (ctx, request) =>
+      implementations.webhook.receiveLedgerEvent(
+        {
+          input: request.input as LedgerEvent,
+        },
+        ctx
+      ),
+    options,
+    {
+      bodyLimitBytes: options.bodyLimits?.receiveLedgerEvent,
+      rateLimitPerMinute: options.rateLimits?.receiveLedgerEvent,
+      timeoutSeconds: options.timeouts?.receiveLedgerEvent,
+    }
+  );
+  mountOperation(
+    router,
+    operationSpecs.receivePlaidEvent,
+    (ctx, request) =>
+      implementations.webhook.receivePlaidEvent(
+        {
+          input: request.input as PlaidItemEvent,
+        },
+        ctx
+      ),
+    options,
+    {
+      bodyLimitBytes: options.bodyLimits?.receivePlaidEvent,
+      rateLimitPerMinute: options.rateLimits?.receivePlaidEvent,
+      timeoutSeconds: options.timeouts?.receivePlaidEvent,
+    }
+  );
   mountOperation(
     router,
     operationSpecs.receiveStripeEvent,

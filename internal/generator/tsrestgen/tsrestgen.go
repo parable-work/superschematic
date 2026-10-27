@@ -96,6 +96,12 @@ type EndpointInfo struct {
 	InputValidator string
 	InputParser    string
 	InputRequired  bool
+	// InputDeclaredKeys are the input type's keys when the router drops the
+	// others before the validator sees them (D87): a @webhook's input whose
+	// type is neither @strictJSON nor @denyUnknownFields, nor
+	// @allowUnknownFields, whose own parser drops them. Nil for every other
+	// input, whose undeclared key the validator refuses.
+	InputDeclaredKeys []string
 	// Uploads are the input's file parts (D81), in field order, nil for an
 	// input without one: the operation table carries their limits, the
 	// router reads the multipart body and hands the method the files in
@@ -179,6 +185,11 @@ func (e EndpointInfo) UploadsLiteral() string {
 			tsString(upload.Name), upload.Required, upload.MaxBytes, tsStringList(upload.ContentTypes), tsStringList(upload.Extensions)))
 	}
 	return "[" + strings.Join(uploads, ", ") + "]"
+}
+
+// InputDeclaredKeysLiteral is InputDeclaredKeys as a list literal.
+func (e EndpointInfo) InputDeclaredKeysLiteral() string {
+	return tsStringList(e.InputDeclaredKeys)
 }
 
 // DownloadLiteral is the operation table's download, its OperationDownload.
@@ -417,6 +428,17 @@ type APIOutput struct {
 func (o *APIOutput) HasUploads() bool {
 	for _, endpoint := range o.Endpoints {
 		if len(endpoint.Uploads) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// DropsUndeclaredKeys reports whether the router drops an input's
+// undeclared keys itself for any endpoint (InputDeclaredKeys, D87).
+func (o *APIOutput) DropsUndeclaredKeys() bool {
+	for _, endpoint := range o.Endpoints {
+		if endpoint.InputDeclaredKeys != nil {
 			return true
 		}
 	}
@@ -730,6 +752,13 @@ func (b *builder) endpoint(ep apigen.EndpointInfo) (EndpointInfo, error) {
 		}
 		endpoint.InputValidator = "parse" + ep.InputType + "Json"
 		endpoint.InputParser = "parse" + ep.InputType + "FromJSON"
+		if ep.InputAllowsUnknownFields {
+			if input := b.findType(ep.InputType); input != nil && !input.AllowUnknownFields {
+				for _, field := range input.Fields {
+					endpoint.InputDeclaredKeys = append(endpoint.InputDeclaredKeys, field.Name)
+				}
+			}
+		}
 		b.addImport(b.typeImports, pkg, ep.InputType)
 		b.addImport(b.routerTypeImports, pkg, ep.InputType)
 		b.addImport(b.validatorImports, pkg, endpoint.InputValidator)
@@ -1056,6 +1085,20 @@ func (b *builder) ownerPackage(name string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// findType returns the type named name, the schema's own or a
+// dependency's, or nil.
+func (b *builder) findType(name string) *ir.TypeDef {
+	if typeDef := b.schema.Types[name]; typeDef != nil {
+		return typeDef
+	}
+	for _, depName := range b.depNames {
+		if dep := b.opts.Dependencies[depName]; dep != nil && dep.Types[name] != nil {
+			return dep.Types[name]
+		}
+	}
+	return nil
 }
 
 // declares reports whether schema declares name as a type, an enum or a

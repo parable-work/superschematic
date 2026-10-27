@@ -174,10 +174,15 @@
           "type": "DOUBLE PRECISION"
         },
         {
-          "default": "CURRENT_TIMESTAMP",
           "name": "posted_at",
           "origin": "LineItem.postedAt",
           "type": "TIMESTAMPTZ"
+        },
+        {
+          "default": "CURRENT_DATE",
+          "name": "entered_on",
+          "origin": "LineItem.enteredOn",
+          "type": "DATE"
         },
         {
           "name": "external_id",
@@ -190,9 +195,15 @@
           "nullable": true,
           "origin": "LineItem.merchant",
           "type": "JSONB"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "origin": "LineItem.createdAt",
+          "type": "TIMESTAMPTZ"
         }
       ],
-      "comment": "A line of spending. Deleting its category leaves the line uncategorized.\nThe dashboard reads each category's total from a materialized view the\nraw SQL keeps, keyed by its category so it refreshes concurrently. Lines\nare read by when they were posted; a migration builds that index inside\nits step, as the table is small. A line a bank import posted holds the\nbank's id for it, unique among such lines, which the import upserts by.",
+      "comment": "A line of spending. Deleting its category leaves the line uncategorized.\nThe dashboard reads each category's total from a materialized view the\nraw SQL keeps, keyed by its category so it refreshes concurrently. Lines\nare read by when they were posted; a migration builds that index inside\nits step, as the table is small. A line a bank import posted holds the\nbank's id for it, unique among such lines, which the import upserts by.\nA line has no default posting time, so an import that leaves it out\nfails; the day it was entered on defaults to the day of the insert, and\nits createdAt, an audit timestamp, to the time of it.",
       "foreignKeys": [
         {
           "columns": [

@@ -7,8 +7,10 @@
 // bootstrap that makes both and the CI's account tokens, the generated
 // CI's sign-in with those tokens, TypeScript servers as Workers that call
 // each other through service bindings, the R2 store of the bundles they
-// run, buckets on R2, databases on D1 with their migrations from the
-// deploying machine, TypeScript jobs as Workers under Cron Triggers, and
+// run, buckets on R2, databases on D1 and on a Postgres outside Cloudflare
+// through Hyperdrive, with their migrations from the deploying machine,
+// TypeScript jobs as Workers under Cron Triggers, TypeScript queue workers
+// as Workers that drain their queues at each firing of a Cron Trigger, and
 // sites as Workers with static assets, whose files it keeps in R2.
 //
 // It registers through the public registry package alone, as any
@@ -135,7 +137,9 @@ func (e Extension) Register(r *registry.Registry) error {
 		if err := r.RegisterPlatform(spec); err != nil {
 			return err
 		}
-		platforms[spec.Kind] = spec.Name
+		if spec.Name != HyperdrivePlatform {
+			platforms[spec.Kind] = spec.Name
+		}
 	}
 	for _, spec := range connectors() {
 		spec.Extension = Name
@@ -147,11 +151,14 @@ func (e Extension) Register(r *registry.Registry) error {
 		Name:          Target,
 		Extension:     Name,
 		Platforms:     platforms,
-		Unplaced:      map[ir.DeployableKind]string{ir.DeployableWorker: noWorkers, ir.DeployableDeriver: noDerivers, ir.DeployableApp: noApps},
+		Unplaced:      map[ir.DeployableKind]string{ir.DeployableDeriver: noDerivers, ir.DeployableApp: noApps},
 		Values:        json.RawMessage(targetValues),
 		DNS:           DNS,
 		Provisioner:   Provisioner,
 		ResourceTypes: types,
+		// A database whose DB services list postgres first is on a Postgres
+		// outside Cloudflare, through Hyperdrive (D92); every other on D1.
+		DatabasePlatforms: map[string]string{registry.SQLDialectPostgres: HyperdrivePlatform},
 		Policies: []registry.PolicyRule{
 			{Name: PolicyDomainOnCloudflare, Check: checkDomainOnCloudflare},
 			{Name: PolicyNothingPublic, Check: checkNothingPublic},
@@ -169,11 +176,6 @@ func (e Extension) Register(r *registry.Registry) error {
 	})
 }
 
-// noWorkers is why the target places no queue worker (D53 amended, D64),
-// which resolution says when it refuses one.
-const noWorkers = "a queue worker claims its queue's messages from Postgres or a SQLite file in a loop that lasts as long as its process (D53, amended), and a Worker runs only per request or per firing and reaches neither; " +
-	"run the stack's workers in an environment on the gcp target, whose gcp.cloudrunworker runs them, or under stack dev on the local target"
-
 // noDerivers is why the target places no deriver (D74), which resolution
 // says when it refuses one.
 const noDerivers = "a deriver fills Derived fields in a loop that lasts as long as its process, over its API's engine, a native addon, and a Worker runs only per request or per firing and loads no native code; " +
@@ -188,16 +190,21 @@ const noApps = "an app is the project's own Rust program, which serves HTTP unti
 // places; the target names each for its kind. Each gets the extension
 // and the provider when it registers: Workers for servers (workers.go),
 // R2 for buckets (r2.go), D1 for databases (d1.go), Cron for jobs
-// (cron.go) and sites (sites.go) (section 18.2).
+// (cron.go), sites (sites.go) (section 18.2), and the drainer for queue
+// workers (drainer.go, D92). Hyperdrive places a database whose DB
+// services list postgres first (hyperdrive.go, D92), which the target
+// names by its dialect.
 func (e Extension) platforms() []registry.PlatformSpec {
-	return []registry.PlatformSpec{workersPlatform(), r2Platform(), d1Platform(), cronPlatform(), sitesPlatform()}
+	return []registry.PlatformSpec{workersPlatform(), r2Platform(), d1Platform(), cronPlatform(), sitesPlatform(), drainerPlatform(), hyperdrivePlatform()}
 }
 
 // connectors are the target's connectors, each between two of its
 // platforms; each gets the extension when it registers: a Worker's calls
 // to another Worker (calls.go), its edges to a bucket (r2.go) and its sql
-// edges to a D1 database (d1.go), a job's the same from Cron, whose
-// connectors read nothing of the caller's platform (cron.go), and a site's
+// edges to a D1 database (d1.go) or a database on Hyperdrive
+// (hyperdrive.go), a job's the same from Cron and a worker's from the
+// drainer, but to D1, on which no worker claims, whose connectors read
+// nothing of the caller's platform (cron.go, drainer.go), and a site's
 // edge to a server on Workers (sites.go).
 func connectors() []registry.ConnectorSpec {
 	return []registry.ConnectorSpec{
@@ -208,6 +215,11 @@ func connectors() []registry.ConnectorSpec {
 		{Name: CronR2Connector, Edge: ir.EdgeBucket, From: Cron, To: R2, Connect: connectR2},
 		{Name: CronD1Connector, Edge: ir.EdgeSQL, From: Cron, To: D1Platform, Connect: connectD1},
 		{Name: SiteConnector, Edge: ir.EdgeSite, From: Sites, To: Workers, Connect: connectSite},
+		{Name: HyperdriveConnector, Edge: ir.EdgeSQL, From: Workers, To: HyperdrivePlatform, Connect: connectHyperdrive},
+		{Name: CronHyperdriveConnector, Edge: ir.EdgeSQL, From: Cron, To: HyperdrivePlatform, Connect: connectHyperdrive},
+		{Name: DrainerHyperdriveConnector, Edge: ir.EdgeSQL, From: Drainer, To: HyperdrivePlatform, Connect: connectHyperdrive},
+		{Name: DrainerHTTPConnector, Edge: ir.EdgeHTTP, From: Drainer, To: Workers, Connect: connectWorkers},
+		{Name: DrainerR2Connector, Edge: ir.EdgeBucket, From: Drainer, To: R2, Connect: connectR2},
 	}
 }
 

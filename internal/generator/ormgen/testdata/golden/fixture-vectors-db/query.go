@@ -83,6 +83,9 @@ type FloatRange struct {
 // BoolFilter provides filtering operations for boolean fields
 type BoolFilter struct {
 	Eq *bool
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In []bool
 	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
 	IsNull *bool
 }
@@ -95,7 +98,10 @@ type DateTimeFilter struct {
 	Lt      *time.Time
 	Lte     *time.Time
 	Between *DateTimeRange
-	IsNull  *bool // true for IS NULL, false for IS NOT NULL
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In     []time.Time
+	IsNull *bool // true for IS NULL, false for IS NOT NULL
 }
 
 // DateTimeRange represents a range for DateTime values
@@ -311,6 +317,9 @@ type ChunkFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // ChunkSortField is a field FindPage orders Chunk rows by, by its
@@ -342,9 +351,9 @@ func ParseChunkSort(text string) (ChunkSort, error) {
 	return ChunkSort{}, fmt.Errorf("orm: Chunk sorts by id and text, not %q", text)
 }
 
-// ChunkUniqueKey names a unique key of Chunk that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// ChunkUniqueKey names a unique key of Chunk that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type ChunkUniqueKey string
 
 const (
@@ -517,6 +526,9 @@ type LedgerLineFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // LedgerLineSortField is a field FindPage orders LedgerLine rows by, by its
@@ -551,9 +563,9 @@ func ParseLedgerLineSort(text string) (LedgerLineSort, error) {
 	return LedgerLineSort{}, fmt.Errorf("orm: LedgerLine sorts by id, amount, currency, rate and bookedAt, not %q", text)
 }
 
-// LedgerLineUniqueKey names a unique key of LedgerLine that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// LedgerLineUniqueKey names a unique key of LedgerLine that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type LedgerLineUniqueKey string
 
 const (
@@ -725,6 +737,9 @@ type PassageFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // PassageSortField is a field FindPage orders Passage rows by, by its
@@ -756,9 +771,9 @@ func ParsePassageSort(text string) (PassageSort, error) {
 	return PassageSort{}, fmt.Errorf("orm: Passage sorts by id and title, not %q", text)
 }
 
-// PassageUniqueKey names a unique key of Passage that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// PassageUniqueKey names a unique key of Passage that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type PassageUniqueKey string
 
 const (
@@ -903,6 +918,9 @@ type TextEmbeddingFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // TextEmbeddingSortField is a field FindPage orders TextEmbedding rows by, by its
@@ -934,9 +952,9 @@ func ParseTextEmbeddingSort(text string) (TextEmbeddingSort, error) {
 	return TextEmbeddingSort{}, fmt.Errorf("orm: TextEmbedding sorts by id and text, not %q", text)
 }
 
-// TextEmbeddingUniqueKey names a unique key of TextEmbedding that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// TextEmbeddingUniqueKey names a unique key of TextEmbedding that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type TextEmbeddingUniqueKey string
 
 const (
@@ -1001,6 +1019,11 @@ type ChunkFilter struct {
 	Id   *UUIDFilter
 	Text *StringFilter
 	Note *StringFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []ChunkFilter
 }
 
 // ChunkUpdate provides fields that can be updated
@@ -1134,6 +1157,30 @@ func (f *ChunkFilter) conditions(args *[]interface{}, paramOffset int) []string 
 		}
 	}
 
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
 	return conditions
 }
 
@@ -1146,6 +1193,11 @@ type LedgerLineFilter struct {
 	Confidence *DecimalFilter
 	Quantity   *DecimalFilter
 	BookedAt   *DateTimeFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []LedgerLineFilter
 }
 
 // LedgerLineUpdate provides fields that can be updated
@@ -1533,12 +1585,45 @@ func (f *LedgerLineFilter) conditions(args *[]interface{}, paramOffset int) []st
 			conditions = append(conditions, fmt.Sprintf(`ledger_line.booked_at <= $%d`, paramNum))
 			*args = append(*args, f.BookedAt.Between.End)
 		}
+		if len(f.BookedAt.In) > 0 {
+			placeholders := make([]string, len(f.BookedAt.In))
+			for i, value := range f.BookedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`ledger_line.booked_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
 		if f.BookedAt.IsNull != nil {
 			if *f.BookedAt.IsNull {
 				conditions = append(conditions, `ledger_line.booked_at IS NULL`)
 			} else {
 				conditions = append(conditions, `ledger_line.booked_at IS NOT NULL`)
 			}
+		}
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
 		}
 	}
 
@@ -1551,6 +1636,11 @@ type PassageFilter struct {
 	Title *StringFilter
 	Topic *StringFilter
 	Rates *ArrayStringFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []PassageFilter
 }
 
 // PassageUpdate provides fields that can be updated
@@ -1736,6 +1826,30 @@ func (f *PassageFilter) conditions(args *[]interface{}, paramOffset int) []strin
 		}
 	}
 
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
 	return conditions
 }
 
@@ -1743,6 +1857,11 @@ func (f *PassageFilter) conditions(args *[]interface{}, paramOffset int) []strin
 type TextEmbeddingFilter struct {
 	Id   *UUIDFilter
 	Text *StringFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []TextEmbeddingFilter
 }
 
 // TextEmbeddingUpdate provides fields that can be updated
@@ -1856,6 +1975,30 @@ func (f *TextEmbeddingFilter) conditions(args *[]interface{}, paramOffset int) [
 			} else {
 				conditions = append(conditions, `text_embedding.text IS NOT NULL`)
 			}
+		}
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
 		}
 	}
 

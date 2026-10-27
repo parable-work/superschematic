@@ -529,7 +529,8 @@ func runStackDev(cmd *cobra.Command, a *app, flags *stackDevFlags, dir string) e
 // printLocalSummary prints where each server, site and database of a
 // running local environment is reached, when each job runs, and what each
 // worker handles. With devSites, a site with a dev server says so, and
-// where its APIs are on its origin (D82).
+// where its APIs are on its origin (D82); a built site with an origin
+// says where the APIs of it are (D91).
 func printLocalSummary(w io.Writer, env *ir.ResolvedEnvironment, stateDir string, devSites bool) {
 	var lines []string
 	for _, d := range env.Deployables {
@@ -550,10 +551,25 @@ func printLocalSummary(w io.Writer, env *ir.ResolvedEnvironment, stateDir string
 			lines = append(lines, fmt.Sprintf("  job      %-24s on demand: superschematic stack run %s %s", d.Name, env.Environment, d.Name))
 		case d.Kind == ir.DeployableSite:
 			address, ok := d.PublicAddress.(string)
+			// A site with an origin serves the APIs of it under their paths,
+			// built or on its dev server (D91); a dev server's proxy without
+			// one serves every API the site calls (D82).
+			apis := "its APIs"
+			var origin []string
+			if d.Site != nil {
+				for _, api := range d.Site.Origin {
+					origin = append(origin, api.Service)
+				}
+			}
+			if len(origin) > 0 {
+				apis = strings.Join(origin, ", ")
+			}
 			switch {
 			case !ok:
 			case devSites && d.Site != nil && d.Site.Dev != nil:
-				lines = append(lines, fmt.Sprintf("  site     %-24s %s, its dev server (bun run %s) and its APIs under %s<service>", d.Name, address, d.Site.Dev.Command, ir.SiteDevAPIPrefix))
+				lines = append(lines, fmt.Sprintf("  site     %-24s %s, its dev server (bun run %s) and %s under %s<service>", d.Name, address, d.Site.Dev.Command, apis, ir.SiteDevAPIPrefix))
+			case len(origin) > 0:
+				lines = append(lines, fmt.Sprintf("  site     %-24s %s, its build and %s under %s<service>", d.Name, address, apis, ir.SiteDevAPIPrefix))
 			default:
 				lines = append(lines, fmt.Sprintf("  site     %-24s %s", d.Name, address))
 			}

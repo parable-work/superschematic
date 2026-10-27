@@ -1,8 +1,8 @@
 {
   "dialect": "postgres",
-  "expanded": "56316a0b570a36f1f34e000bd31c11180f12e53d7abcaa5d5ca0786cb0cb70c5",
-  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
-  "hash": "08c76915336648363b8caefb8e912cca09e8b23759392bb256f1584e07207237",
+  "expanded": "3ba78e168316999166197cdf73b2bfbad7ffd3d21b633e35f9010778f8bd8ef4",
+  "from": "c6787cdef058267033f38e38e6c4e788b8fc54fcc00776b78d8b4db345c93d96",
+  "hash": "e41b3d9e16894fa49b039ea0f3df72fcb66320080a3d6d3b99eeca24ca650cf7",
   "renames": [
     "order.customer_id=order.buyer_id"
   ],
@@ -68,7 +68,7 @@
       "transactional": true
     }
   ],
-  "to": "f0c4990703f8053995ed111db299af776caaa59b8670f6ddaabd5f6ddcad258d",
+  "to": "455210b3acc1609891beb90538c1b12aa72eba07d10c3f1378db84f5480443dc",
   "toModel": null,
   "version": 1
 }

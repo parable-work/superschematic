@@ -38,13 +38,20 @@ try {
   };
   const orm = createOrm(pool, { user: 'TKbHsHDO6x9RCjbs5c2u4', fieldKeys: 'AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=' });
   const east = await call('createEast', () => orm.passage.createOne({ title: 'east', topic: 'maps', embedding: [1, 0, 0] }));
-  await call('createUp', () => orm.passage.createOne({ title: 'up', topic: 'sky', embedding: [0, 0, 1], titleEmbedding: [0, 1, 0] }));
+  const up = await call('createUp', () => orm.passage.createOne({ title: 'up', topic: 'sky', embedding: [0, 0, 1], titleEmbedding: [0, 1, 0] }));
   await call('nearestCosine', () => orm.passage.nearest('embedding', [1, 0.5, 0], { k: 2 }));
   await call('nearestL2', () => orm.passage.nearest('embedding', [1, 0.5, 0], { k: 1, metric: 'l2' }));
   await call('nearestIPFiltered', () => orm.passage.nearest('embedding', [1, 0.5, 0], { metric: 'ip', filter: { topic: { in: ['maps', 'sky'] }, title: { ilike: 'e' } } }));
   await call('deleteEast', () => orm.passage.deleteOne(east.id));
   await call('nearestWithDeleted', () => orm.passage.nearest('embedding', [1, 0.5, 0], { k: 3, includeDeleted: true }));
   await call('nearestTitle', () => orm.passage.nearest('titleEmbedding', [0, 1, 0]));
+  // The index's settings, set for a transaction of its own, and the keys
+  // it leaves out (D89).
+  await call('nearestTuned', () =>
+    orm.passage.nearest('embedding', [1, 0.5, 0], { k: 2, efSearch: 64, iterativeScan: 'relaxed_order', maxScanTuples: 5000, excludeIds: [up.id] })
+  );
+  await call('nearestIvfflat', () => orm.passage.nearest('embedding', [1, 0.5, 0], { metric: 'l2', probes: 2, maxProbes: 4, iterativeScan: 'strict_order' }));
+  await call('nearestInTransaction', () => orm.transaction(tx => tx.passage.nearest('embedding', [1, 0.5, 0], { efSearch: 100 })));
   const wide = Array.from({ length: 1024 }, (_, i) => (i === 3 ? 0.5 : 0));
   await call('createText', () => orm.textEmbedding.createOne({ text: 'three', embedding: wide }));
   await call('nearestText', () => orm.textEmbedding.nearest('embedding', wide, { k: 1 }));
@@ -168,7 +175,7 @@ func TestNearestParity(t *testing.T) {
 	must(err)
 	rec.call("createUp")
 	title := types.EmbeddingVector{0, 1, 0}
-	_, err = db.Passage.CreateOne(ctx, &types.Passage{Title: "up", Topic: "sky", Embedding: types.EmbeddingVector{0, 0, 1}, TitleEmbedding: &title})
+	up, err := db.Passage.CreateOne(ctx, &types.Passage{Title: "up", Topic: "sky", Embedding: types.EmbeddingVector{0, 0, 1}, TitleEmbedding: &title})
 	must(err)
 	rec.call("nearestCosine")
 	_, err = db.Passage.Nearest(ctx, PassageVectorEmbedding, query, &PassageNearestOptions{K: 2})
@@ -188,6 +195,17 @@ func TestNearestParity(t *testing.T) {
 	rec.call("nearestTitle")
 	_, err = db.Passage.Nearest(ctx, PassageVectorTitleEmbedding, title, nil)
 	must(err)
+	rec.call("nearestTuned")
+	_, err = db.Passage.Nearest(ctx, PassageVectorEmbedding, query, &PassageNearestOptions{K: 2, EfSearch: 64, IterativeScan: IterativeScanRelaxed, MaxScanTuples: 5000, ExcludeIDs: []types.IdentityUUID{*up.Id}})
+	must(err)
+	rec.call("nearestIvfflat")
+	_, err = db.Passage.Nearest(ctx, PassageVectorEmbedding, query, &PassageNearestOptions{Metric: VectorL2, Probes: 2, MaxProbes: 4, IterativeScan: IterativeScanStrict})
+	must(err)
+	rec.call("nearestInTransaction")
+	must(db.Transaction(ctx, func(tx TxInterface) error {
+		_, err := tx.GetPassageRepository().Nearest(ctx, PassageVectorEmbedding, query, &PassageNearestOptions{EfSearch: 100})
+		return err
+	}))
 	wide := make(types.EmbeddingVector, 1024)
 	wide[3] = 0.5
 	rec.call("createText")

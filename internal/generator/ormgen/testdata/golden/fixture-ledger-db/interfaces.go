@@ -20,6 +20,8 @@ type AccountRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.Account) (*types.Account, error)
 	CreateMany(ctx context.Context, inputs []*types.Account) ([]*types.Account, error)
 	UpsertOne(ctx context.Context, input *types.Account, on AccountUniqueKey, update *AccountUpdate) (*types.Account, error)
+	UpsertOneResult(ctx context.Context, input *types.Account, on AccountUniqueKey, update *AccountUpdate, opts *UpsertOptions) (UpsertResult[*types.Account], error)
+	UpsertMany(ctx context.Context, inputs []*types.Account, on AccountUniqueKey, update AccountFields, opts *UpsertOptions) ([]UpsertResult[*types.Account], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *AccountUpdate) (*types.Account, error)
 	UpdateMany(ctx context.Context, filter *AccountFilter, update *AccountUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -36,6 +38,8 @@ type EntryRepositoryInterface interface {
 	CreateOne(ctx context.Context, input *types.Entry) (*types.Entry, error)
 	CreateMany(ctx context.Context, inputs []*types.Entry) ([]*types.Entry, error)
 	UpsertOne(ctx context.Context, input *types.Entry, on EntryUniqueKey, update *EntryUpdate) (*types.Entry, error)
+	UpsertOneResult(ctx context.Context, input *types.Entry, on EntryUniqueKey, update *EntryUpdate, opts *UpsertOptions) (UpsertResult[*types.Entry], error)
+	UpsertMany(ctx context.Context, inputs []*types.Entry, on EntryUniqueKey, update EntryFields, opts *UpsertOptions) ([]UpsertResult[*types.Entry], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *EntryUpdate) (*types.Entry, error)
 	UpdateMany(ctx context.Context, filter *EntryFilter, update *EntryUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -46,6 +50,7 @@ type EntryRepositoryInterface interface {
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
+	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
 	Ping(ctx context.Context) error
 	Close()
 	GetAccountRepository() AccountRepositoryInterface
@@ -56,6 +61,7 @@ type DatabaseInterface interface {
 type TxInterface interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetAccountRepository() AccountRepositoryInterface
 	GetEntryRepository() EntryRepositoryInterface
 }
@@ -87,6 +93,17 @@ func NewNoOpDatabase() *NoOpDatabase {
 // Transaction executes the callback with a deterministic no-op transaction.
 func (db *NoOpDatabase) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(db.tx)
+}
+
+// TransactionWith executes the callback with a deterministic no-op
+// transaction, whatever its options.
+func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(TxInterface) error) error {
+	return fn(db.tx)
+}
+
+// Transaction executes the callback with the same no-op transaction.
+func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
+	return fn(tx)
 }
 
 // Ping always succeeds for no-op database.
@@ -163,6 +180,18 @@ func (r *NoOpAccountRepository) UpsertOne(_ context.Context, input *types.Accoun
 	return input, nil
 }
 
+func (r *NoOpAccountRepository) UpsertOneResult(_ context.Context, input *types.Account, _ AccountUniqueKey, _ *AccountUpdate, _ *UpsertOptions) (UpsertResult[*types.Account], error) {
+	return UpsertResult[*types.Account]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpAccountRepository) UpsertMany(_ context.Context, inputs []*types.Account, _ AccountUniqueKey, _ AccountFields, _ *UpsertOptions) ([]UpsertResult[*types.Account], error) {
+	results := make([]UpsertResult[*types.Account], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Account]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
 func (r *NoOpAccountRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *AccountUpdate) (*types.Account, error) {
 	return nil, ErrNotFound
 }
@@ -223,6 +252,18 @@ func (r *NoOpEntryRepository) CreateMany(_ context.Context, inputs []*types.Entr
 
 func (r *NoOpEntryRepository) UpsertOne(_ context.Context, input *types.Entry, _ EntryUniqueKey, _ *EntryUpdate) (*types.Entry, error) {
 	return input, nil
+}
+
+func (r *NoOpEntryRepository) UpsertOneResult(_ context.Context, input *types.Entry, _ EntryUniqueKey, _ *EntryUpdate, _ *UpsertOptions) (UpsertResult[*types.Entry], error) {
+	return UpsertResult[*types.Entry]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpEntryRepository) UpsertMany(_ context.Context, inputs []*types.Entry, _ EntryUniqueKey, _ EntryFields, _ *UpsertOptions) ([]UpsertResult[*types.Entry], error) {
+	results := make([]UpsertResult[*types.Entry], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Entry]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
 }
 
 func (r *NoOpEntryRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *EntryUpdate) (*types.Entry, error) {

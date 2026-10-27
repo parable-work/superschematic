@@ -35,6 +35,25 @@ func TestTSWriterWritesDeriverAndRunnerSettings(t *testing.T) {
 	}
 }
 
+// TestTSWriterWritesOrigins: @stack's origins are written with each site's
+// handle and the APIs its origin serves, as the reader reads them back
+// (D91).
+func TestTSWriterWritesOrigins(t *testing.T) {
+	api := ir.ServiceRef{Name: "shop-api", Kind: ir.SchemaKindAPI}
+	web := ir.ServiceRef{Name: "shop-web", Kind: ir.SchemaKindSite}
+	admin := ir.ServiceRef{Name: "shop-admin", Kind: ir.SchemaKindSite}
+	schema := ir.NewSchema("shop-stack", ir.SchemaKindStack)
+	schema.Types["Shop"] = &ir.TypeDef{Name: "Shop", Role: ir.RoleEmbeddedStruct, Stack: &ir.StackDecl{
+		Deploy:  []ir.ServiceRef{web, admin},
+		Origins: []*ir.Origin{{Site: web, APIs: []ir.ServiceRef{api}}, {Site: admin}},
+	}}
+	schema.Types["Dev"] = &ir.TypeDef{Name: "Dev", Role: ir.RoleEmbeddedStruct, Environment: &ir.EnvironmentDecl{Target: "local"}}
+	source := writtenSource(t, schema, FormatTS)
+	if want := `origins: [{ site: ShopWeb, apis: [ShopApi] }, { site: ShopAdmin }]`; !strings.Contains(source, want) {
+		t.Errorf("written TypeScript lacks %s:\n%s", want, source)
+	}
+}
+
 // TestTSWriterWritesApps: an app is exposed, and set in an environment's
 // settings, beside its API's handle (D78), as the reader reads it back.
 func TestTSWriterWritesApps(t *testing.T) {

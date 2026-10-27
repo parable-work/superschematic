@@ -57,6 +57,17 @@ type EnqueueTrigger struct {
 	// for a queue that appends.
 	Conflict       string
 	SQLiteConflict string
+
+	// Backfill is the declaration's backfill (D88): the migration step
+	// that creates the trigger on a table with rows also runs
+	// BackfillSQL, or SQLiteBackfillSQL.
+	Backfill bool
+	// SourceKey is the table's quoted primary key column.
+	SourceKey string
+	// ReplaceKey is the index in Columns of the message's key on a queue
+	// that replaces the ready message of a key, -1 when the message
+	// leaves the key to its column's default, and -2 for any other queue.
+	ReplaceKey int
 }
 
 // EnqueueWhen is one condition of an EnqueueTrigger on the row's quoted
@@ -176,7 +187,77 @@ func enqueueTrigger(td *ir.TypeDef, def *ir.EnqueueOnChange, source *Table, queu
 	spec := sqlutil.QueueSpecOf(queueDef, queue.QuotedName, columns, true)
 	t.Conflict = sqlutil.PostgresQueueStatements(spec).Conflict
 	t.SQLiteConflict = sqlutil.SQLiteQueueStatements(spec).Conflict
+	t.Backfill, t.SourceKey, t.ReplaceKey = def.Backfill, source.PrimaryKey, -2
+	if q := queueDef.Queue; q.Key != "" && q.OnDuplicate == ir.QueueOnDuplicateReplace {
+		t.ReplaceKey = -1
+		if key := queueColumnOf(queue, queueDef.Name, q.Key); key != nil {
+			t.ReplaceKey = slices.Index(t.Columns, key.QuotedName)
+		}
+	}
 	return t, nil
+}
+
+// BackfillSQL is the backfill's statement on Postgres (D88): one insert
+// of a message for each row of the table that meets the conditions, as
+// the trigger's insert of the row would write it, ending with the
+// queue's Conflict. Under replace it takes one row of each key, the first
+// by the table's key, since one statement's ON CONFLICT DO UPDATE changes
+// a row once; a message keyed by the table's own key needs none.
+func (t EnqueueTrigger) BackfillSQL() string {
+	identity := func(c string) string { return c }
+	return t.backfillSQL(identity, t.QuotedTable, t.QuotedQueueTable, "TRUE", "FALSE", t.Conflict, true)
+}
+
+// SQLiteBackfillSQL is the backfill's statement on SQLite, its
+// identifiers quoted by quote. SQLite's upsert changes a row as often as
+// the select returns its key, so under replace a key's last row wins. The
+// select always has a WHERE, which SQLite needs to read the ON CONFLICT
+// that follows it as the upsert's.
+func (t EnqueueTrigger) SQLiteBackfillSQL(quote func(string) string) string {
+	unquote := func(c string) string { return quote(strings.Trim(c, `"`)) }
+	return t.backfillSQL(unquote, quote(t.Table), quote(t.QueueTable), "1", "0", t.SQLiteConflict, false)
+}
+
+// backfillSQL renders a backfill: quote quotes a column, table and queue
+// are quoted, yes and no are the dialect's booleans, and distinct takes
+// one row per key under replace with DISTINCT ON.
+func (t EnqueueTrigger) backfillSQL(quote func(string) string, table, queue, yes, no, conflict string, distinct bool) string {
+	const row = "src"
+	columns := make([]string, len(t.Columns))
+	values := make([]string, len(t.Values))
+	for i := range t.Columns {
+		columns[i] = quote(t.Columns[i])
+		values[i] = t.Values[i]
+		if !t.Literal[i] {
+			values[i] = row + "." + quote(t.Values[i])
+		}
+	}
+	conds := []string{yes}
+	if len(t.When) > 0 {
+		conds = conds[:0]
+		for _, w := range t.When {
+			conds = append(conds, w.sql(row+"."+quote(w.Column), yes, no))
+		}
+	}
+	selectList := strings.Join(values, ", ")
+	order := ""
+	switch {
+	case !distinct || t.ReplaceKey == -2:
+	case t.ReplaceKey >= 0 && values[t.ReplaceKey] == row+"."+quote(t.SourceKey):
+		// The table's key is the message's: each row is its own key.
+	case t.ReplaceKey == -1:
+		order = "\nORDER BY " + row + "." + quote(t.SourceKey) + "\nLIMIT 1"
+	default:
+		key := values[t.ReplaceKey]
+		selectList = "DISTINCT ON (" + key + ") " + selectList
+		order = "\nORDER BY " + key + ", " + row + "." + quote(t.SourceKey)
+	}
+	s := "INSERT INTO " + queue + " (" + strings.Join(columns, ", ") + ")\nSELECT " + selectList +
+		"\nFROM " + table + " AS " + row + "\nWHERE " + strings.Join(conds, " AND ") + order
+	if conflict != "" {
+		s += "\n" + conflict
+	}
+	return s
 }
 
 // queueColumnOf is the column of a queue's table that stores the message's

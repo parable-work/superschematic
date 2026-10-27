@@ -127,6 +127,8 @@ fn mount(
             Arc::clone(&state.implementations.webhook_verifiers["github"]),
         ),
     );
+    router = router.route("/api/webhooks/ledger", post(handle_webhook_receive_ledger_event));
+    router = router.route("/api/webhooks/plaid", post(handle_webhook_receive_plaid_event));
     let route = RouteControls::new()
         .rate_limiter(limits.of(&crate::operations::WEBHOOK_RECEIVE_STRIPE_EVENT))
         .apply(post(handle_webhook_receive_stripe_event));
@@ -303,11 +305,113 @@ async fn handle_webhook_receive_github_event(
     operation_response(result, request_id.as_deref())
 }
 
+/// Decodes the arguments of webhook.receiveLedgerEvent in the order the TypeScript
+/// router reads them: path, query, input, then body fields.
+fn decode_webhook_receive_ledger_event(body: Option<Value>) -> Result<WebhookReceiveLedgerEventArgs, ApiError> {
+    Ok(WebhookReceiveLedgerEventArgs {
+        input: required_input(body, types::validators::parse_ledger_event)?,
+    })
+}
+
+impl WebhookReceiveLedgerEventArgs {
+    /// Checks arguments a caller built, in-process rather than in a
+    /// request, as the router checks a request's: each by its parameter's
+    /// rules, then the input by its type's, a refusal the 400 the router
+    /// answers.
+    pub fn check(&self) -> Result<(), ApiError> {
+        check_input(&self.input, types::validators::prepare_ledger_event)?;
+        Ok(())
+    }
+}
+
+async fn handle_webhook_receive_ledger_event(
+    State(state): State<Arc<RouterState>>,
+    headers: HeaderMap,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    let request_id = request_id_from_headers(&headers);
+    let query = match query_values(query) {
+        Ok(query) => query,
+        Err(err) => return error_response(err),
+    };
+    // The body is JSON whatever its Content-Type, as the Go and TypeScript
+    // servers read it; an empty body is none.
+    let body = match json_body(body) {
+        Ok(body) => body,
+        Err(err) => return error_response(err),
+    };
+    let args = match decode_webhook_receive_ledger_event(body) {
+        Ok(args) => args,
+        Err(err) => return error_response(err),
+    };
+    let mut ctx = RequestContext::new(method_from_str("post"), "/api/webhooks/ledger".to_string());
+    ctx.headers = headers_to_map(&headers);
+    ctx.query_params = query.last_values();
+    let result = state
+        .implementations
+        .webhook
+        .receive_ledger_event(ctx, args)
+        .await;
+    operation_response(result, request_id.as_deref())
+}
+
+/// Decodes the arguments of webhook.receivePlaidEvent in the order the TypeScript
+/// router reads them: path, query, input, then body fields.
+fn decode_webhook_receive_plaid_event(body: Option<Value>) -> Result<WebhookReceivePlaidEventArgs, ApiError> {
+    Ok(WebhookReceivePlaidEventArgs {
+        input: required_input(body, |value, _| types::validators::parse_plaid_item_event(value, schema::UnknownFields::Allow))?,
+    })
+}
+
+impl WebhookReceivePlaidEventArgs {
+    /// Checks arguments a caller built, in-process rather than in a
+    /// request, as the router checks a request's: each by its parameter's
+    /// rules, then the input by its type's, a refusal the 400 the router
+    /// answers.
+    pub fn check(&self) -> Result<(), ApiError> {
+        check_input(&self.input, types::validators::prepare_plaid_item_event)?;
+        Ok(())
+    }
+}
+
+async fn handle_webhook_receive_plaid_event(
+    State(state): State<Arc<RouterState>>,
+    headers: HeaderMap,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    let request_id = request_id_from_headers(&headers);
+    let query = match query_values(query) {
+        Ok(query) => query,
+        Err(err) => return error_response(err),
+    };
+    // The body is JSON whatever its Content-Type, as the Go and TypeScript
+    // servers read it; an empty body is none.
+    let body = match json_body(body) {
+        Ok(body) => body,
+        Err(err) => return error_response(err),
+    };
+    let args = match decode_webhook_receive_plaid_event(body) {
+        Ok(args) => args,
+        Err(err) => return error_response(err),
+    };
+    let mut ctx = RequestContext::new(method_from_str("post"), "/api/webhooks/plaid".to_string());
+    ctx.headers = headers_to_map(&headers);
+    ctx.query_params = query.last_values();
+    let result = state
+        .implementations
+        .webhook
+        .receive_plaid_event(ctx, args)
+        .await;
+    operation_response(result, request_id.as_deref())
+}
+
 /// Decodes the arguments of webhook.receiveStripeEvent in the order the TypeScript
 /// router reads them: path, query, input, then body fields.
 fn decode_webhook_receive_stripe_event(body: Option<Value>) -> Result<WebhookReceiveStripeEventArgs, ApiError> {
     Ok(WebhookReceiveStripeEventArgs {
-        input: required_input(body, types::validators::parse_payment_event)?,
+        input: required_input(body, |value, _| types::validators::parse_payment_event(value, schema::UnknownFields::Allow))?,
     })
 }
 

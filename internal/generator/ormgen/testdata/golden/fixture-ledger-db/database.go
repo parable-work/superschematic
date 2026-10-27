@@ -4,6 +4,7 @@ package orm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	types "example.com/schemas/types/go/fixture-ledger-db"
@@ -29,7 +30,11 @@ type Database struct {
 
 // Tx represents a database transaction with repositories
 type Tx struct {
-	tx      pgx.Tx
+	tx pgx.Tx
+	// db is the Database the transaction runs on, and depth the savepoints
+	// it is nested in, 0 for a transaction of its own (D89).
+	db      *Database
+	depth   int
 	Account *AccountRepository
 	Entry   *EntryRepository
 }
@@ -119,7 +124,7 @@ func (db *Database) Transaction(ctx context.Context, fn func(TxInterface) error)
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 
-	txWrapper := &Tx{tx: tx}
+	txWrapper := &Tx{tx: tx, db: db}
 
 	// Initialize transaction repositories with parent database reference
 	txWrapper.Account = &AccountRepository{tx: tx, txDB: db}
@@ -179,6 +184,60 @@ func GetUserID(ctx context.Context) types.IdentityUUID {
 func HasUserID(ctx context.Context) bool {
 	_, ok := ctx.Value(userContextKey).(types.IdentityUUID)
 	return ok
+}
+
+// WithCaller returns ctx acting as the caller of a request, the principal
+// whose ID is id, as a generated route binds the context of each operation
+// it runs (D87): a write the implementation makes with ctx stamps
+// createdBy, updatedBy and deletedBy with the caller. ctx keeps a user it
+// already has, and an id that is not a user ID binds no one.
+func WithCaller(ctx context.Context, id string) context.Context {
+	if id == "" || HasUserID(ctx) {
+		return ctx
+	}
+	userID, err := ParseUserID(id)
+	if err != nil {
+		return ctx
+	}
+	return WithUserID(ctx, userID)
+}
+
+// ParseUserID reads a user ID from its text, as a principal's ID holds it:
+// a UUID's base62 wire form, or hyphenated.
+func ParseUserID(text string) (types.IdentityUUID, error) {
+	var userID types.IdentityUUID
+	quoted, err := json.Marshal(text)
+	if err != nil {
+		return userID, err
+	}
+	if err := json.Unmarshal(quoted, &userID); err != nil {
+		return userID, fmt.Errorf("user ID %q: %w", text, err)
+	}
+	return userID, nil
+}
+
+// SystemActorID is the user AsSystem acts as (D87): the DB service's
+// outputs.sql.systemActor names none, so it is the ID the generated Go APIs
+// export as SystemUserID. An audit field holds a user's ID with no foreign
+// key, so it needs no row of the user table.
+var SystemActorID = mustParseUserID("00000000-0000-4000-8000-000000000000")
+
+// SystemActorName is the name an app shows for SystemActorID.
+const SystemActorName = "system"
+
+// AsSystem returns ctx acting as the system actor, SystemActorID, for a
+// write no request's caller makes, a job's or a worker's: it stamps
+// createdBy, updatedBy and deletedBy with SystemActorID (D87).
+func AsSystem(ctx context.Context) context.Context {
+	return WithUserID(ctx, SystemActorID)
+}
+
+func mustParseUserID(text string) types.IdentityUUID {
+	userID, err := ParseUserID(text)
+	if err != nil {
+		panic(err)
+	}
+	return userID
 }
 
 // Ping checks if the database connection is alive

@@ -83,6 +83,9 @@ type FloatRange struct {
 // BoolFilter provides filtering operations for boolean fields
 type BoolFilter struct {
 	Eq *bool
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In []bool
 	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
 	IsNull *bool
 }
@@ -95,7 +98,10 @@ type DateTimeFilter struct {
 	Lt      *time.Time
 	Lte     *time.Time
 	Between *DateTimeRange
-	IsNull  *bool // true for IS NULL, false for IS NOT NULL
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In     []time.Time
+	IsNull *bool // true for IS NULL, false for IS NOT NULL
 }
 
 // DateTimeRange represents a range for DateTime values
@@ -277,6 +283,9 @@ type RoleFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // RoleSortField is a field FindPage orders Role rows by, by its
@@ -308,9 +317,9 @@ func ParseRoleSort(text string) (RoleSort, error) {
 	return RoleSort{}, fmt.Errorf("orm: Role sorts by id and name, not %q", text)
 }
 
-// RoleUniqueKey names a unique key of Role that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// RoleUniqueKey names a unique key of Role that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type RoleUniqueKey string
 
 const (
@@ -487,6 +496,9 @@ type SessionFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // SessionSortField is a field FindPage orders Session rows by, by its
@@ -520,9 +532,9 @@ func ParseSessionSort(text string) (SessionSort, error) {
 	return SessionSort{}, fmt.Errorf("orm: Session sorts by id, tokenHash, createdAt and expiresAt, not %q", text)
 }
 
-// SessionUniqueKey names a unique key of Session that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// SessionUniqueKey names a unique key of Session that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type SessionUniqueKey string
 
 const (
@@ -675,6 +687,9 @@ type UserFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // UserSortField is a field FindPage orders User rows by, by its
@@ -708,9 +723,9 @@ func ParseUserSort(text string) (UserSort, error) {
 	return UserSort{}, fmt.Errorf("orm: User sorts by id, email, displayName and createdAt, not %q", text)
 }
 
-// UserUniqueKey names a unique key of User that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// UserUniqueKey names a unique key of User that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type UserUniqueKey string
 
 const (
@@ -881,6 +896,9 @@ type UserCredentialFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // UserCredentialSortField is a field FindPage orders UserCredential rows by, by its
@@ -912,9 +930,9 @@ func ParseUserCredentialSort(text string) (UserCredentialSort, error) {
 	return UserCredentialSort{}, fmt.Errorf("orm: UserCredential sorts by id and passwordChangedAt, not %q", text)
 }
 
-// UserCredentialUniqueKey names a unique key of UserCredential that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// UserCredentialUniqueKey names a unique key of UserCredential that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type UserCredentialUniqueKey string
 
 const (
@@ -1075,6 +1093,9 @@ type UserRoleGrantFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // UserRoleGrantSortField is a field FindPage orders UserRoleGrant rows by, by its
@@ -1106,9 +1127,9 @@ func ParseUserRoleGrantSort(text string) (UserRoleGrantSort, error) {
 	return UserRoleGrantSort{}, fmt.Errorf("orm: UserRoleGrant sorts by id and grantedAt, not %q", text)
 }
 
-// UserRoleGrantUniqueKey names a unique key of UserRoleGrant that UpsertOne is keyed by
-// (D79): its primary key, a @unique field, or a unique @index, by its fields
-// joined by ",".
+// UserRoleGrantUniqueKey names a unique key of UserRoleGrant that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
 type UserRoleGrantUniqueKey string
 
 const (
@@ -1177,6 +1198,11 @@ type RoleFilter struct {
 	// ReferencedByUserRoleGrantRole filters on the presence or absence of a
 	// UserRoleGrant whose role points at this row.
 	ReferencedByUserRoleGrantRole *ReferencedByFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []RoleFilter
 }
 
 // RoleUpdate provides fields that can be updated
@@ -1301,6 +1327,30 @@ func (f *RoleFilter) conditions(args *[]interface{}, paramOffset int) []string {
 		}
 	}
 
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
 	return conditions
 }
 
@@ -1314,6 +1364,15 @@ type SessionFilter struct {
 	RevokedAt  *DateTimeFilter
 	// UserID allows filtering by foreign key
 	UserID *UUIDFilter
+	// User keeps the rows whose user is among the User rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	User *UserFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []SessionFilter
 }
 
 // SessionUpdate provides fields that can be updated
@@ -1492,6 +1551,15 @@ func (f *SessionFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`"session".created_at <= $%d`, paramNum))
 			*args = append(*args, f.CreatedAt.Between.End)
 		}
+		if len(f.CreatedAt.In) > 0 {
+			placeholders := make([]string, len(f.CreatedAt.In))
+			for i, value := range f.CreatedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`"session".created_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
 		if f.CreatedAt.IsNull != nil {
 			if *f.CreatedAt.IsNull {
 				conditions = append(conditions, `"session".created_at IS NULL`)
@@ -1533,6 +1601,15 @@ func (f *SessionFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`"session".expires_at <= $%d`, paramNum))
 			*args = append(*args, f.ExpiresAt.Between.End)
+		}
+		if len(f.ExpiresAt.In) > 0 {
+			placeholders := make([]string, len(f.ExpiresAt.In))
+			for i, value := range f.ExpiresAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`"session".expires_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
 		if f.ExpiresAt.IsNull != nil {
 			if *f.ExpiresAt.IsNull {
@@ -1576,6 +1653,15 @@ func (f *SessionFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`"session".last_seen_at <= $%d`, paramNum))
 			*args = append(*args, f.LastSeenAt.Between.End)
 		}
+		if len(f.LastSeenAt.In) > 0 {
+			placeholders := make([]string, len(f.LastSeenAt.In))
+			for i, value := range f.LastSeenAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`"session".last_seen_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
 		if f.LastSeenAt.IsNull != nil {
 			if *f.LastSeenAt.IsNull {
 				conditions = append(conditions, `"session".last_seen_at IS NULL`)
@@ -1618,6 +1704,15 @@ func (f *SessionFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			conditions = append(conditions, fmt.Sprintf(`"session".revoked_at <= $%d`, paramNum))
 			*args = append(*args, f.RevokedAt.Between.End)
 		}
+		if len(f.RevokedAt.In) > 0 {
+			placeholders := make([]string, len(f.RevokedAt.In))
+			for i, value := range f.RevokedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`"session".revoked_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
 		if f.RevokedAt.IsNull != nil {
 			if *f.RevokedAt.IsNull {
 				conditions = append(conditions, `"session".revoked_at IS NULL`)
@@ -1649,6 +1744,40 @@ func (f *SessionFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			}
 		}
 	}
+	if f.User != nil {
+		before := len(*args)
+		through := f.User.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`"session".user_id IN (SELECT "user".id FROM "user"%s)`, where))
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
 
 	return conditions
 }
@@ -1668,6 +1797,11 @@ type UserFilter struct {
 	// ReferencedByUserRoleGrantUser filters on the presence or absence of a
 	// UserRoleGrant whose user points at this row.
 	ReferencedByUserRoleGrantUser *ReferencedByFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []UserFilter
 }
 
 // UserUpdate provides fields that can be updated
@@ -1845,6 +1979,15 @@ func (f *UserFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			conditions = append(conditions, fmt.Sprintf(`"user".created_at <= $%d`, paramNum))
 			*args = append(*args, f.CreatedAt.Between.End)
 		}
+		if len(f.CreatedAt.In) > 0 {
+			placeholders := make([]string, len(f.CreatedAt.In))
+			for i, value := range f.CreatedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`"user".created_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
 		if f.CreatedAt.IsNull != nil {
 			if *f.CreatedAt.IsNull {
 				conditions = append(conditions, `"user".created_at IS NULL`)
@@ -1878,6 +2021,30 @@ func (f *UserFilter) conditions(args *[]interface{}, paramOffset int) []string {
 		}
 	}
 
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
 	return conditions
 }
 
@@ -1890,6 +2057,15 @@ type UserCredentialFilter struct {
 	PendingAt         *DateTimeFilter
 	// UserID allows filtering by foreign key
 	UserID *UUIDFilter
+	// User keeps the rows whose user is among the User rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	User *UserFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []UserCredentialFilter
 }
 
 // UserCredentialUpdate provides fields that can be updated
@@ -2068,6 +2244,15 @@ func (f *UserCredentialFilter) conditions(args *[]interface{}, paramOffset int) 
 			conditions = append(conditions, fmt.Sprintf(`user_credential.password_changed_at <= $%d`, paramNum))
 			*args = append(*args, f.PasswordChangedAt.Between.End)
 		}
+		if len(f.PasswordChangedAt.In) > 0 {
+			placeholders := make([]string, len(f.PasswordChangedAt.In))
+			for i, value := range f.PasswordChangedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`user_credential.password_changed_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
 		if f.PasswordChangedAt.IsNull != nil {
 			if *f.PasswordChangedAt.IsNull {
 				conditions = append(conditions, `user_credential.password_changed_at IS NULL`)
@@ -2109,6 +2294,15 @@ func (f *UserCredentialFilter) conditions(args *[]interface{}, paramOffset int) 
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`user_credential.disabled_at <= $%d`, paramNum))
 			*args = append(*args, f.DisabledAt.Between.End)
+		}
+		if len(f.DisabledAt.In) > 0 {
+			placeholders := make([]string, len(f.DisabledAt.In))
+			for i, value := range f.DisabledAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`user_credential.disabled_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
 		if f.DisabledAt.IsNull != nil {
 			if *f.DisabledAt.IsNull {
@@ -2152,6 +2346,15 @@ func (f *UserCredentialFilter) conditions(args *[]interface{}, paramOffset int) 
 			conditions = append(conditions, fmt.Sprintf(`user_credential.pending_at <= $%d`, paramNum))
 			*args = append(*args, f.PendingAt.Between.End)
 		}
+		if len(f.PendingAt.In) > 0 {
+			placeholders := make([]string, len(f.PendingAt.In))
+			for i, value := range f.PendingAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`user_credential.pending_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
 		if f.PendingAt.IsNull != nil {
 			if *f.PendingAt.IsNull {
 				conditions = append(conditions, `user_credential.pending_at IS NULL`)
@@ -2183,6 +2386,40 @@ func (f *UserCredentialFilter) conditions(args *[]interface{}, paramOffset int) 
 			}
 		}
 	}
+	if f.User != nil {
+		before := len(*args)
+		through := f.User.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`user_credential.user_id IN (SELECT "user".id FROM "user"%s)`, where))
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
 
 	return conditions
 }
@@ -2195,6 +2432,19 @@ type UserRoleGrantFilter struct {
 	UserID *UUIDFilter
 	// RoleID allows filtering by foreign key
 	RoleID *UUIDFilter
+	// User keeps the rows whose user is among the User rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	User *UserFilter
+	// Role keeps the rows whose role is among the Role rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Role *RoleFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []UserRoleGrantFilter
 }
 
 // UserRoleGrantUpdate provides fields that can be updated
@@ -2321,6 +2571,15 @@ func (f *UserRoleGrantFilter) conditions(args *[]interface{}, paramOffset int) [
 			conditions = append(conditions, fmt.Sprintf(`user_role_grant.granted_at <= $%d`, paramNum))
 			*args = append(*args, f.GrantedAt.Between.End)
 		}
+		if len(f.GrantedAt.In) > 0 {
+			placeholders := make([]string, len(f.GrantedAt.In))
+			for i, value := range f.GrantedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`user_role_grant.granted_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
 		if f.GrantedAt.IsNull != nil {
 			if *f.GrantedAt.IsNull {
 				conditions = append(conditions, `user_role_grant.granted_at IS NULL`)
@@ -2373,6 +2632,50 @@ func (f *UserRoleGrantFilter) conditions(args *[]interface{}, paramOffset int) [
 			} else {
 				conditions = append(conditions, `user_role_grant.role_id IS NOT NULL`)
 			}
+		}
+	}
+	if f.User != nil {
+		before := len(*args)
+		through := f.User.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`user_role_grant.user_id IN (SELECT "user".id FROM "user"%s)`, where))
+	}
+	if f.Role != nil {
+		before := len(*args)
+		through := f.Role.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`user_role_grant.role_id IN (SELECT role.id FROM role%s)`, where))
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
 		}
 	}
 

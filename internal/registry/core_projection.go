@@ -99,8 +99,10 @@ func applyProjection(td *ir.TypeDef, args []any) error {
 			return ArgErrorf(1, "@projection options has unknown key %q", key)
 		}
 	}
+	// pool is optional: a view without one is created beside the
+	// service's tables (D90).
 	for _, required := range []struct{ key, value string }{
-		{"pool", def.Pool}, {"name", def.Name}, {"migration", def.Migration},
+		{"name", def.Name}, {"migration", def.Migration},
 	} {
 		if required.value == "" {
 			return ArgErrorf(1, "@projection requires a non-empty %s", required.key)

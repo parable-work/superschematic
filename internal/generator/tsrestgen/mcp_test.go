@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -168,6 +169,15 @@ func TestMCPToolsAreTheToolDocuments(t *testing.T) {
 	if operations["update_order"] != "updateOrder" {
 		t.Errorf("update_order runs through %q, want updateOrder", operations["update_order"])
 	}
+	// update_order's policy is ask, which the core's policy confirms (D93).
+	for _, tool := range tools {
+		if tool.Confirm != (tool.Name == "update_order") {
+			t.Errorf("%s confirm = %v", tool.Name, tool.Confirm)
+		}
+	}
+	if !slices.Equal(output.MCP.Confirming, []string{"update_order"}) {
+		t.Errorf("Confirming = %v, want update_order", output.MCP.Confirming)
+	}
 	for _, absent := range []string{"delete_order", "exportOrders"} {
 		if _, ok := arguments[absent]; ok {
 			t.Errorf("%s, which is no visible tool, is served", absent)
@@ -238,6 +248,67 @@ func TestMCPEndpointPathIsTheEndpoints(t *testing.T) {
 	})
 	_, err := Generate(fixture.schema, fixture.endpoints, Options{SchemaName: fixture.name, Clock: fixedClock, MCP: true})
 	if want := "is routed at POST /api/mcp, where outputs.api.mcp serves the MCP endpoint (D81)"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("Generate = %v, want it refused saying %q", err, want)
+	}
+}
+
+// TestMCPToolsConfirmByTheBuildsPolicy: which tools the endpoint confirms
+// is the build's invocation policy's to say (D93): under an extension's
+// policy that confirms always, update_order (always) confirms and the
+// others (never) do not; a tool that confirms and takes an argument named
+// confirmationToken, which carries its confirmation, is refused.
+func TestMCPToolsConfirmByTheBuildsPolicy(t *testing.T) {
+	policy := apigen.ToolInvocationPolicy{Extension: "acme", Key: "confirm", Values: []string{"never", "always"}, Default: "never", Confirm: []string{"always"}}
+	rewrite := func(schema *ir.Schema) {
+		for _, set := range schema.OperationSets {
+			for _, op := range set.Operations {
+				if op.MCP != nil && !op.MCP.Hidden {
+					value := "never"
+					if op.MCP.Invocation.Value == apigen.ToolInvocationAsk {
+						value = "always"
+					}
+					op.MCP.Invocation = ir.MCPInvocation{Key: "confirm", Value: value}
+				}
+			}
+		}
+	}
+	generate := func(rewrites ...func(*ir.Schema)) (*APIOutput, error) {
+		schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-mcp"))
+		if err != nil {
+			t.Fatalf("load fixture-mcp: %v", err)
+		}
+		for _, rewrite := range rewrites {
+			rewrite(schema)
+		}
+		endpoints, err := apigen.Generate(schema, apigen.Options{Provider: sessionauth.Provider{}, SchemaName: "fixture-mcp", Clock: fixedClock, ToolInvocation: policy})
+		if err != nil {
+			t.Fatalf("apigen.Generate: %v", err)
+		}
+		return Generate(schema, endpoints, Options{SchemaName: "fixture-mcp", Clock: fixedClock, MCP: true})
+	}
+	output, err := generate(rewrite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(output.MCP.Confirming, []string{"update_order"}) {
+		t.Errorf("under confirm: always, Confirming = %v, want update_order", output.MCP.Confirming)
+	}
+
+	_, err = generate(rewrite, func(schema *ir.Schema) {
+		for _, set := range schema.OperationSets {
+			for _, op := range set.Operations {
+				if op.Name == "updateOrder" {
+					for _, arg := range op.Arguments {
+						if arg.Name == "id" {
+							arg.Name = MCPConfirmationArgument
+						}
+					}
+					op.RestPath = "orders/{" + MCPConfirmationArgument + "}"
+				}
+			}
+		}
+	})
+	if want := `MCP tool update_order of fixture-mcp asks the person before it runs (confirm "always"), and takes an argument confirmationToken, which carries the call's confirmation token (D93); rename the argument`; err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("Generate = %v, want it refused saying %q", err, want)
 	}
 }

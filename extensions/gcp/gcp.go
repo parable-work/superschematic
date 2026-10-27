@@ -275,7 +275,10 @@ func (e Extension) Register(r *registry.Registry) error {
 			NameOf:          serviceName,
 			AddressOf:       sitePublicAddress,
 			PublicAddressOf: sitePublicAddress,
-			Lower:           lowerSite,
+			// The site's load balancer routes its origin's APIs to their
+			// Cloud Run services (D91).
+			ServesOrigin: true,
+			Lower:        lowerSite,
 		},
 		{
 			Name:      Storage,

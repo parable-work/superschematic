@@ -1,8 +1,8 @@
 {
   "dialect": "sqlite",
-  "expanded": "69604a587c2744f29dddbb0f35f67e82f29f97df00d90c87932162d95a0473ce",
-  "from": "17bd156134f9bc031e491f427775ca4c6089cbdfb136747219a92c639979d53a",
-  "hash": "4b4c2ec34d2b2dc85f1cff8ccd8759075e0e71e8b64e3cfda4be76952ca11029",
+  "expanded": "bd3cb2ed540ea9a69eb2dd65cf78f1e41a5f00d00b1d9f269c0d1ead563c7853",
+  "from": "d9697f8b128d88e9877145068feef31d9bdfa8a6c367bd3cdbd76a76318119f0",
+  "hash": "f8c40a2e9788212605680a49fdaf01f128602aedc158af3b12b3b495c1aeb4a4",
   "service": "shop-db",
   "steps": [
     {
@@ -37,7 +37,7 @@
       "phase": "expand",
       "statements": [
         "PRAGMA defer_foreign_keys = ON",
-        "CREATE TABLE \"_new_order\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"customer_id\" TEXT NOT NULL,\n  \"total\" REAL NOT NULL,\n  \"reference\" TEXT,\n  \"note\" TEXT,\n  \"placed_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),\n  \"shipped_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  \"discount\" INTEGER,\n  \"code\" TEXT,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"customer_id\") REFERENCES \"customer\" (\"id\") ON DELETE RESTRICT\n)",
+        "CREATE TABLE \"_new_order\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"customer_id\" TEXT NOT NULL,\n  \"total\" REAL NOT NULL,\n  \"reference\" TEXT,\n  \"note\" TEXT,\n  \"placed_at\" TEXT,\n  \"shipped_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  \"discount\" INTEGER,\n  \"code\" TEXT,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"customer_id\") REFERENCES \"customer\" (\"id\") ON DELETE RESTRICT\n)",
         "CREATE TABLE \"_new_order_label\" (\n  \"order_id\" TEXT NOT NULL,\n  \"label_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"order_id\", \"label_id\"),\n  FOREIGN KEY (\"label_id\") REFERENCES \"label\" (\"id\") ON DELETE CASCADE,\n  FOREIGN KEY (\"order_id\") REFERENCES \"_new_order\" (\"id\") ON DELETE CASCADE\n)",
         "CREATE TABLE \"_new_order_line\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"sku\" TEXT NOT NULL,\n  \"quantity\" INTEGER NOT NULL,\n  \"order_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"order_id\") REFERENCES \"_new_order\" (\"id\") ON DELETE CASCADE\n)",
         "INSERT INTO \"_new_order\" (\"id\", \"customer_id\", \"total\", \"reference\", \"note\", \"placed_at\", \"code\")\nSELECT \"id\", \"customer_id\", CAST(\"total\" AS REAL), \"reference\", \"note\", \"placed_at\", \"code\"\nFROM \"order\"",
@@ -78,7 +78,7 @@
         {
           "class": "copy-table",
           "id": "copy-table:table/order",
-          "reason": "SQLite's ALTER TABLE cannot make note NOT NULL and drop the default of placed_at, so the step rebuilds order with the tables that reference it, directly or through another table: order_label and order_line. It copies the rows of each table it keeps into a new table, drops the old tables and renames the new ones.",
+          "reason": "SQLite's ALTER TABLE cannot make note NOT NULL, so the step rebuilds order with the tables that reference it, directly or through another table: order_label and order_line. It copies the rows of each table it keeps into a new table, drops the old tables and renames the new ones.",
           "subject": "table/order"
         }
       ],
