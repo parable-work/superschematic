@@ -13,7 +13,11 @@
 // stands and markRead, the unread field and readUpTo, follow, the
 // deliveries a standing message makes, and the namespace operations
 // inbox, claimDeliveries and settleDeliveries through
-// engine.behaviors.invoke.
+// engine.behaviors.invoke. Batch 4, acting for a subject: the message's
+// for, the subject's follow, its deliveries left out and its unread, the
+// agent's own author checks and state. Batch 5: code blocks and
+// moveAnchor, attachments held to the config, listPinned, and the
+// namespace operation searchMessages across the schemas a caller may read.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
@@ -770,6 +774,165 @@ for (const driver of drivers) {
         [['mention', 1]]
       );
       assert.equal(thrown(() => invoke(carol, 'inbox', { cursor: 'nope' }), OperationParamsError).issues[0]?.path, '/cursor');
+    });
+
+    test('a message written for someone records it, and the subject follows, hears nothing of it and finds it unread', () => {
+      const agent: Principal = { subject: 'agent:reviewer', permissions: [], actingFor: { subject: 'alice' } };
+      const agentForBob: Principal = { subject: 'agent:reviewer', permissions: [], actingFor: { subject: 'bob' } };
+      const engine = published({ deliverPermission: 'comments.notify' }, { clock: () => 1000 });
+      const notifier: Principal = { subject: 'notifier', permissions: ['comments.notify'] };
+      const invoke = (who: Principal, operation: string, params: Record<string, unknown> = {}) =>
+        engine.behaviors.invoke(who, { behavior: 'Comments', operation, params }) as Record<string, any>;
+      const thread = (on(engine, bob, 'post', { body: 'Thread.' }) as Message).id;
+      on(engine, alice, 'markRead', { upTo: thread });
+      on(engine, alice, 'follow', { thread, on: true });
+      const reply = on(engine, agent, 'post', { body: 'Found two issues.', thread, mentions: ['alice', 'carol'] }) as Message;
+      assert.deepEqual([reply.author, reply.for], ['agent:reviewer', 'alice']);
+      assert.deepEqual(Object.keys(reply).slice(0, 5), ['id', 'thread', 'author', 'for', 'state']);
+      const top = (on(engine, agent, 'post', { body: 'Summary for Alice.' }) as Message).id;
+      // Alice hears of neither; Bob of the reply as a follower, Carol as
+      // mentioned, each claim naming whom it was for.
+      const claimed = invoke(notifier, 'claimDeliveries', { limit: 10 });
+      assert.deepEqual(
+        claimed.items.map((item: Record<string, unknown>) => [item.subject, item.message, item.author, item.for]),
+        [
+          ['bob', reply.id, 'agent:reviewer', 'alice'],
+          ['carol', reply.id, 'agent:reviewer', 'alice'],
+        ]
+      );
+      // She follows, and finds them unread: the thread's reply, the top-level message.
+      const unread = (who: Principal) => (engine.instances.get(who, 'Review', 'r1')?.behaviors.Comments as { unread: number }).unread;
+      assert.deepEqual([unread(alice), unread(agent)], [1, 0]);
+      assert.deepEqual(
+        invoke(alice, 'inbox').items.map((item: Record<string, unknown>) => [item.kind, item.message, item.author, item.for, item.unread]),
+        [
+          ['thread', reply.id, 'agent:reviewer', 'alice', 1],
+          ['conversation', top, 'agent:reviewer', 'alice', 1],
+        ]
+      );
+      // Acting for her grants nothing: neither passes the other's author check.
+      const hers = (on(engine, alice, 'post', { body: 'Mine.' }) as Message).id;
+      assert.deepEqual(vetoed(() => on(engine, agent, 'edit', { message: hers, body: 'No.' })), ['not_author', { message: hers, author: 'alice' }]);
+      assert.deepEqual(vetoed(() => on(engine, alice, 'edit', { message: top, body: 'No.' })), ['not_author', { message: top, author: 'agent:reviewer' }]);
+      // An edit, a reaction and a resolve record their caller's for.
+      assert.equal((on(engine, agentForBob, 'edit', { message: top, body: 'Summary, again.' }) as Message).for, 'alice');
+      assert.deepEqual((on(engine, alice, 'listEdits', { message: top }) as { items: Array<Record<string, unknown>> }).items.map((item) => [item.by, item.for]), [['agent:reviewer', 'bob']]);
+      const reacted = on(engine, agent, 'react', { message: top, emoji: 'eyes' }) as Message;
+      assert.deepEqual(reacted.reactions, { eyes: { count: 1, mine: true } });
+      assert.deepEqual(vetoed(() => on(engine, agentForBob, 'react', { message: top, emoji: 'eyes' })), ['already_reacted', { message: top, emoji: 'eyes' }]);
+      assert.deepEqual((on(engine, alice, 'listReactions', { message: top, emoji: 'eyes' }) as { items: unknown[] }).items, [{ subject: 'agent:reviewer', for: 'alice', at: 1000 }]);
+      assert.deepEqual((on(engine, agentForBob, 'resolve', { thread: top }) as Message).resolved, { by: 'agent:reviewer', for: 'bob', at: 1000 });
+      const events = engine.events.read(alice, { schema: 'Review', instanceId: 'r1', beside: true }).events;
+      assert.deepEqual(
+        events.slice(-4).map((event) => [(event.change as { operation: string }).operation, event.actor, event.for]),
+        [
+          ['post', 'alice', undefined],
+          ['edit', 'agent:reviewer', 'bob'],
+          ['react', 'agent:reviewer', 'alice'],
+          ['resolve', 'agent:reviewer', 'bob'],
+        ]
+      );
+    });
+
+    test('a code block moves with moveAnchor without an edit, an attachment is held to the config, and listPinned lists the pins', () => {
+      let now = 1000;
+      const engine = published(
+        { anchorPermission: 'comments.anchor', editWindowMs: 60000, attachments: { schemes: ['https', 'bucket'], mediaTypes: ['image/*'], maxBytes: 1000 } },
+        { clock: () => now }
+      );
+      const code = { kind: 'code', repo: 'github.com/acme/shop', path: 'src/orders.rs', revision: '9c1f2e7', lines: [40, 48], snippet: 'fn place() {' };
+      const shot = { kind: 'attachment', uri: 'bucket:uploads/a.png', name: 'shot.png', mediaType: 'image/png', bytes: 1000, sha256: '0'.repeat(64) };
+      const id = (on(engine, alice, 'post', { body: 'Off by one.', blocks: [code, shot] }) as Message).id;
+      assert.equal(thrown(() => on(engine, alice, 'post', { body: 'x', blocks: [{ ...code, lines: [9, 1] }] }), OperationParamsError).issues[0]?.path, '/blocks/0/lines');
+      assert.deepEqual(
+        thrown(() => on(engine, alice, 'post', { body: 'x', blocks: [{ ...code, path: 'a/../b' }] }), OperationParamsError).issues.map((issue) => issue.message),
+        ['must be a relative path: no leading or trailing /, no \\, and no empty, . or .. part']
+      );
+      assert.equal(thrown(() => on(engine, alice, 'post', { body: 'x', blocks: [{ ...shot, uri: 'https://' }] }), OperationParamsError).issues[0]?.path, '/blocks/0/uri');
+      assert.deepEqual(vetoed(() => on(engine, alice, 'post', { body: 'x', blocks: [{ ...shot, mediaType: 'text/plain' }] })), [
+        'attachment_not_allowed',
+        { block: 0, member: 'mediaType', value: 'text/plain', allowed: ['image/*'] },
+      ]);
+      assert.deepEqual(vetoed(() => on(engine, alice, 'post', { body: 'x', blocks: [{ ...shot, bytes: 1001 }] })), ['attachment_not_allowed', { block: 0, member: 'bytes', value: 1001, allowed: 1000 }]);
+      // moveAnchor: the author, then a holder of anchorPermission past the edit window.
+      assert.deepEqual(vetoed(() => on(engine, bob, 'moveAnchor', { message: id, block: 0, revision: 'e41b07c', lines: [41, 49] })), ['not_author', { message: id, author: 'alice' }]);
+      assert.deepEqual(vetoed(() => on(engine, alice, 'moveAnchor', { message: id, block: 1, revision: 'e41b07c', lines: [41, 49] })), ['not_code', { message: id, block: 1, kind: 'attachment' }]);
+      assert.deepEqual(vetoed(() => on(engine, alice, 'moveAnchor', { message: id, block: 2, revision: 'e41b07c', lines: [41, 49] })), ['no_block', { message: id, block: 2, blocks: 2 }]);
+      assert.deepEqual(vetoed(() => on(engine, alice, 'moveAnchor', { message: id, block: 0, revision: '9c1f2e7', lines: [40, 48] })), [
+        'anchor_unchanged',
+        { message: id, block: 0, revision: '9c1f2e7', lines: [40, 48] },
+      ]);
+      on(engine, alice, 'moveAnchor', { message: id, block: 0, revision: '9c1f2e7', lines: [41, 49] });
+      now = 100_000;
+      const bot: Principal = { subject: 'bot', permissions: ['comments.anchor'] };
+      const moved = on(engine, bot, 'moveAnchor', { message: id, block: 0, revision: 'e41b07c', lines: [44, 52] }) as Message & { blocks: unknown[] };
+      assert.deepEqual(moved.blocks[0], {
+        ...code,
+        revision: 'e41b07c',
+        lines: [44, 52],
+        original: { revision: '9c1f2e7', lines: [40, 48] },
+        moves: 2,
+        movedAt: 100_000,
+        movedBy: 'bot',
+      });
+      assert.deepEqual([moved.edits, moved.editedAt], [0, undefined]);
+      // listPinned: pinned messages of every level, by id.
+      const reply = (on(engine, bob, 'post', { body: 'Agreed.', thread: id }) as Message).id;
+      const later = (on(engine, bob, 'post', { body: 'Later.' }) as Message).id;
+      for (const message of [later, reply]) {
+        on(engine, alice, 'pin', { message });
+      }
+      const pinned = on(engine, alice, 'listPinned', { limit: 1 }) as { items: Message[]; next: string | null };
+      assert.deepEqual(pinned.items.map((item) => item.id), [reply]);
+      assert.deepEqual((on(engine, alice, 'listPinned', { cursor: pinned.next }) as { items: Message[] }).items.map((item) => item.id), [later]);
+    });
+
+    test('searchMessages finds the standing bodies of every schema the caller may read', () => {
+      const engine = published(
+        { moderatePermission: 'comments.moderate' },
+        { clock: () => 1000, policy: (request) => !(request.principal.subject === 'rita' && request.schema === 'Memo') }
+      );
+      const memo = schemaDocument('Memo', [{ name: 'title', typeRef: { name: 'string' }, required: true }]) as { types: { Memo: Record<string, unknown> } };
+      memo.types.Memo.behaviors = [{ name: 'Comments' }];
+      engine.schemas.define(alice, memo);
+      engine.schemas.publish(alice, 'Memo');
+      engine.instances.create(alice, 'Memo', { title: 'Memo' }, { id: 'm1' });
+      const search = (who: Principal, params: Record<string, unknown>) =>
+        engine.behaviors.invoke(who, { behavior: 'Comments', operation: 'searchMessages', params }) as { items: Array<Record<string, unknown>>; next: string | null };
+      const found = (who: Principal, params: Record<string, unknown>) =>
+        search(who, params)
+          .items.map((item) => `${item.schema}/${item.instanceId}/${item.message}`)
+          .sort();
+      const top = (on(engine, alice, 'post', { body: 'The walnut desk shipped.' }) as Message).id;
+      on(engine, bob, 'post', { body: 'Walnut stain looks great.', thread: top });
+      const draft = (on(engine, carol, 'begin') as Message).id;
+      on(engine, carol, 'appendDraft', { message: draft, text: 'walnut draft' });
+      const gone = (on(engine, carol, 'post', { body: 'walnut gone' }) as Message).id;
+      on(engine, carol, 'deleteMessage', { message: gone });
+      const edited = (on(engine, alice, 'post', { body: 'walnut before' }) as Message).id;
+      on(engine, alice, 'edit', { message: edited, body: 'maple after' });
+      on(engine, alice, 'post', { body: 'walnut elsewhere' }, 'r2');
+      engine.instances.invoke(alice, 'Memo', 'm1', 'post', { body: 'walnut memo' });
+      assert.deepEqual(found(alice, { query: 'WALNUT' }), ['Memo/m1/1', 'Review/r1/1', 'Review/r1/2', 'Review/r2/1']);
+      assert.deepEqual(found(alice, { query: 'walnut', schema: 'Review', instanceId: 'r1', thread: top }), ['Review/r1/1', 'Review/r1/2']);
+      assert.deepEqual(found(alice, { query: 'before' }), []);
+      assert.deepEqual(found({ subject: 'rita', permissions: [] }, { query: 'walnut' }), ['Review/r1/1', 'Review/r1/2', 'Review/r2/1']);
+      assert.deepEqual(found({ subject: 'rita', permissions: [] }, { query: 'walnut', schema: 'Memo' }), []);
+      const hit = search(alice, { query: 'desk shipped' }).items[0];
+      assert.deepEqual(Object.keys(hit ?? {}), ['schema', 'instanceId', 'message', 'author', 'state', 'postedAt', 'rank', 'snippet']);
+      assert.deepEqual(hit?.snippet, [
+        { text: 'The walnut ', match: false },
+        { text: 'desk', match: true },
+        { text: ' ', match: false },
+        { text: 'shipped', match: true },
+        { text: '.', match: false },
+      ]);
+      const first = search(alice, { query: 'walnut', limit: 2 });
+      assert.deepEqual(first.items.map((item) => item.rank), [1, 2]);
+      assert.deepEqual(search(alice, { query: 'walnut', limit: 2, cursor: first.next }).items.map((item) => item.rank), [3, 4]);
+      assert.equal(thrown(() => search(alice, { query: 'walnut', thread: 1 }), OperationParamsError).issues[0]?.path, '/thread');
+      engine.instances.delete(alice, 'Review', 'r2');
+      assert.deepEqual(found(alice, { query: 'elsewhere' }), []);
     });
   });
 }
