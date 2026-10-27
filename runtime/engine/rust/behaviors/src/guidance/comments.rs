@@ -2,8 +2,9 @@
 //! and one level of replies, every write beside the instance, so it never
 //! moves the instance's ETag and an active lease does not stop it. What it
 //! says follows the config: the longest body, the edit window, the block
-//! kinds allowed, who moderates, pins and resolves, and how long a
-//! streamed message's author may pause and how many it may write at once.
+//! kinds allowed, who moderates, pins and resolves, how long a streamed
+//! message's author may pause and how many it may write at once, and who
+//! claims the deliveries of its messages.
 
 use superschematic_engine::behaviors::{BehaviorGuidance, DescribeTarget, OperationGuidance};
 
@@ -159,8 +160,12 @@ pub(crate) fn guidance(config: &CommentsConfig, target: &DescribeTarget) -> Beha
     let pinner = config.pin_permission.as_deref().map(|permission| {
         format!(" It needs permission {permission}, else the call is forbidden.")
     });
+    let deliver = match config.deliver_permission.as_deref() {
+        Some(permission) => format!(" Each message that comes to stand records a delivery for each subject it mentions and each follower of its thread, which a caller with permission {permission} claims with Comments.claimDeliveries and settles with Comments.settleDeliveries."),
+        None => " Each message that comes to stand records a delivery for each subject it mentions and each follower of its thread, which the inbox reads; this type names no deliverPermission, so nobody claims them.".to_owned(),
+    };
     let summary = format!(
-        "Each {type_name} holds a conversation: messages, each top-level or a reply in the thread of a top-level one (one level deep), with {body}, {kinds} and mentions. A message is posted whole with post, or streamed as it is written: begin, appendDraft, then finish; one whose author appends nothing for {timeout} is interrupted, keeping what was written. Every write is beside the instance, so its seq and ETag do not move and a lease held by another does not stop it. behaviors.Comments.messages counts the posted and interrupted messages, lastMessageAt says when the latest came to stand, threads counts the open and resolved threads, and composing names who is writing a message; none of them moves in an event, so read the instance for them."
+        "Each {type_name} holds a conversation: messages, each top-level or a reply in the thread of a top-level one (one level deep), with {body}, {kinds} and mentions. A message is posted whole with post, or streamed as it is written: begin, appendDraft, then finish; one whose author appends nothing for {timeout} is interrupted, keeping what was written. Every write is beside the instance, so its seq and ETag do not move and a lease held by another does not stop it. behaviors.Comments.messages counts the posted and interrupted messages, lastMessageAt says when the latest came to stand, threads counts the open and resolved threads, composing names who is writing a message, and unread counts the caller's unread top-level messages of others; none of them moves in an event, so read the instance for them. A caller follows each thread it posts in or is mentioned in; markRead moves its read marker and follow its follows, and the namespace operation Comments.inbox lists its mentions, followed threads and read conversations.{deliver}"
     );
     BehaviorGuidance {
         summary,
@@ -320,6 +325,24 @@ pub(crate) fn guidance(config: &CommentsConfig, target: &DescribeTarget) -> Beha
                     text("Use to read the conversation a page at a time, in ascending id order: the top-level messages, or with thread a thread's replies and its top-level message as root. With no anchor it reads the latest page; before reads older, after newer, around a page about one message. A composing message is in its place, its body the draft so far."),
                     text("Do not page through it for one message; call getMessage."),
                     text("Returns items, before and after; pass before as before for the older page and after as after for the newer, each null at its end."),
+                    vec![no_message(), not_a_thread()],
+                ),
+            ),
+            (
+                "markRead".to_owned(),
+                said(
+                    text("Use to mark the conversation's top-level messages read, or with thread that thread's replies, up to the message id upTo the caller has shown; a streamed message that comes to stand later stays unread. The marker never moves back. It writes only the caller's read state, appends no event and needs only read."),
+                    None,
+                    text("Returns readUpTo, the marker, and unread, how many messages of others in the listing stand above it."),
+                    vec![no_message(), not_a_thread()],
+                ),
+            ),
+            (
+                "follow".to_owned(),
+                said(
+                    text("Use to follow a thread, named by its top-level message, so each reply in it records a delivery for the caller and the inbox lists it; on false stops until the caller next posts in it or is mentioned in it. It writes only the caller's state, appends no event and needs only read."),
+                    None,
+                    text("Returns thread and following, whether the caller follows it now."),
                     vec![no_message(), not_a_thread()],
                 ),
             ),

@@ -66,6 +66,12 @@ func checkTypeBehaviors(td *ir.TypeDef, reg *registry.Registry, r *Result) {
 			}
 		}
 		for _, op := range behavior.Operations {
+			// A namespace operation (D77) is called by its behavior's
+			// name, not on the type, so it shares no name with the type's
+			// operations, as the engine composes them.
+			if op.Scope == registry.OperationScopeNamespace {
+				continue
+			}
 			if prev, taken := opOwner[op.Name]; taken {
 				r.errorf(td.Owner, "type %s: behaviors %s and %s both add operation %s", td.Name, prev, behavior.Name, op.Name)
 				continue

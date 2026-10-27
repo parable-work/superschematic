@@ -37,7 +37,7 @@ import { DEFAULT_NAMESPACE, type NamespaceRecord } from '../types/namespaces.js'
 import type { Page } from '../types/paging.js';
 import type { PruneResult, RunnerPass, RunnerStatus, SubscriptionKey, SubscriptionStatus } from '../types/runner.js';
 import type { ComposedBehavior, DefineOptions, PublishResult, SchemaCapabilities, SchemaRecord, SchemaSummary, SchemaTarget, ValidateOptions } from '../types/schemas.js';
-import type { SendSignalInput } from '../types/signals.js';
+import type { NamespaceOperationInput, SendSignalInput } from '../types/signals.js';
 import type { Row, RunResult, SqlValue } from '../types/storage.js';
 import type { BehaviorDocument, BehaviorSummary, DescribeDocument, ToolFilter, ToolManifest, ToolSummary, ToolTarget } from '../types/tools.js';
 import type { StoredValue, ValueTarget } from '../types/values.js';
@@ -879,6 +879,19 @@ class EngineBehaviors {
 
   declaration(name: string): BehaviorDeclaration | undefined {
     return deepFreeze(this.calls.sync('behaviors.declaration', undefined, [name]) as BehaviorDeclaration | undefined);
+  }
+
+  /**
+   * invoke calls a behavior's namespace operation (D77), one its
+   * declaration gives `scope: "namespace"`, which runs on the behavior's
+   * tables across every schema of the namespace that composes it: not_found
+   * for a behavior the engine does not run or an operation it does not
+   * declare with that scope, forbidden when the policy refuses `{ principal,
+   * action, namespace, behavior, operation }`, invalid_argument for
+   * parameters its paramsSchema refuses. It returns the operation's result.
+   */
+  invoke(principal: Principal, input: NamespaceOperationInput): unknown {
+    return this.calls.sync('behaviors.invoke', principal, [input]);
   }
 
   lookup(): never {

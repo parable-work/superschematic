@@ -2,9 +2,11 @@
 //
 // Typed wrappers over the engine's client: each schema's instances, create
 // input and patches, and its behaviors' create parameters, preconditions,
-// operations, signals and veto codes, as their configs narrow them.
+// operations, signals and veto codes, as their configs narrow them; then
+// each composed behavior's namespace operations, which belong to no schema.
 //
 // Schema notes: NotesClient, notesClient.
+// Behavior Comments, across a namespace: CommentsNamespaceClient, commentsNamespaceClient.
 
 import { isVeto } from '@superschematic/engine/client';
 import type { CallOptions, CreateOptions, EngineClient, EngineSignal, EngineVeto, Instance, InstancePage, JSONObject, ListOptions, OperationOutcome, SignalMessage, StreamMessage, WriteOptions } from '@superschematic/engine/client';
@@ -41,6 +43,8 @@ export type NoteBehaviors = {
     readonly threads: { open: number; resolved: number };
     /** The subjects writing a message now: each subject with a composing message on the instance, once, in the order of its earliest composing message's id; empty while nobody is. */
     readonly composing: string[];
+    /** The caller's: how many posted and interrupted top-level messages of others came to stand after the caller's read marker on the conversation. 0 until the caller first reads the conversation with markRead or posts in it top-level, so a conversation nobody opened is unread for nobody. Replies are read thread by thread, in the inbox, and not counted here. */
+    readonly unread: number;
   };
   readonly Revisions: {
     /** The number of the instance's latest revision. */
@@ -121,6 +125,8 @@ export type NoteCommentMessage = {
     at: number;
     by: string;
   };
+  /** The message's place in the order the conversation's messages came to stand: 1, 2, 3, ... on the instance, given when it is posted, finished or interrupted and never changed. A streamed reply that began early and finished late stands after the messages posted meanwhile, so a reader compares it, not the id, with its read marker. Absent while composing, and on a message deleted while composing. */
+  stand?: number;
   /** composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text. */
   state: 'composing' | 'posted' | 'interrupted' | 'deleted';
   /** For a reply, the id of the top-level message whose thread it is in; absent on a top-level message. */
@@ -313,6 +319,38 @@ export type NoteReopenParams = {
 /** The top-level message, open. */
 export type NoteReopenResult = NoteCommentMessage;
 
+/** The parameters of Comments' markRead: Moves the caller's read marker past the messages it has read: on the conversation's top-level messages, or with thread on that thread's replies. upTo is the greatest message id the caller has shown; every posted or interrupted message of the listing with an id up to it is read, and a streamed reply that comes to stand later is not. The marker never moves back. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it. */
+export type NoteMarkReadParams = {
+  /** The id of a top-level message: the marker moved is the caller's on its thread's replies, whether the caller follows it or not. The conversation's when absent. */
+  thread?: number;
+  /** The greatest id of the messages read: a bound, which need not name a message. */
+  upTo: number;
+};
+
+/** The caller's marker after the call. */
+export type NoteMarkReadResult = {
+  /** The marker: the greatest stand of the messages read; 0 when none is. */
+  readUpTo: number;
+  /** How many posted or interrupted messages of others in the listing stand above the marker. */
+  unread: number;
+};
+
+/** The parameters of Comments' follow: Follows a thread, so each reply that comes to stand in it records a delivery for the caller and the inbox lists it, or with on false stops. A caller follows each thread it posts in and each it is mentioned in without asking, again after it stopped. Following counts the thread's replies from the latest message of the conversation. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it. */
+export type NoteFollowParams = {
+  /** true to follow, false to stop. */
+  on: boolean;
+  /** The id of the thread's top-level message. */
+  thread: number;
+};
+
+/** What Comments' follow returns. */
+export type NoteFollowResult = {
+  /** Whether the caller follows it now. */
+  following: boolean;
+  /** The id of the thread's top-level message. */
+  thread: number;
+};
+
 /** The parameters of Comments' listMessages: Lists a page of the conversation's top-level messages, or with thread a page of that thread's replies, composing and deleted ones included, a composing one with its draft so far as its body, in ascending id order: the latest page when no anchor is given, the page before or after a message id, or the page around a message of the listing. Each page says where the next older and newer ones start. */
 export type NoteListMessagesParams = {
   /** The page is the earliest messages with a higher id. */
@@ -334,6 +372,8 @@ export type NoteListMessagesResult = {
   /** The id to pass as before for the page of older messages: the first item's, when the listing has an older message; null when it has none or the page is empty. */
   before: number | null;
   items: NoteCommentMessage[];
+  /** The caller's read marker on the listing, the conversation's or with thread the thread's: a message of another whose stand is above it is unread. Absent while the caller has none. */
+  readUpTo?: number;
   /** With thread, the thread's top-level message. */
   root?: NoteCommentMessage;
 };
@@ -579,6 +619,8 @@ export type NoteOperations = {
   unpin: { scope: 'instance'; params: NoteUnpinParams; result: NoteUnpinResult };
   resolve: { scope: 'instance'; params: NoteResolveParams; result: NoteResolveResult };
   reopen: { scope: 'instance'; params: NoteReopenParams; result: NoteReopenResult };
+  markRead: { scope: 'instance'; params: NoteMarkReadParams; result: NoteMarkReadResult };
+  follow: { scope: 'instance'; params: NoteFollowParams; result: NoteFollowResult };
   listMessages: { scope: 'instance'; params: NoteListMessagesParams; result: NoteListMessagesResult };
   getMessage: { scope: 'instance'; params: NoteGetMessageParams; result: NoteGetMessageResult };
   listEdits: { scope: 'instance'; params: NoteListEditsParams; result: NoteListEditsResult };
@@ -592,12 +634,12 @@ export type NoteOperations = {
 };
 
 /** The name of an operation on one Note. */
-export type NoteInstanceOperation = 'transition' | 'post' | 'begin' | 'appendDraft' | 'finish' | 'interrupt' | 'edit' | 'deleteMessage' | 'purge' | 'react' | 'unreact' | 'pin' | 'unpin' | 'resolve' | 'reopen' | 'listMessages' | 'getMessage' | 'listEdits' | 'listReactions' | 'listRevisions' | 'getRevision' | 'propose' | 'approve' | 'reject' | 'listProposals';
+export type NoteInstanceOperation = 'transition' | 'post' | 'begin' | 'appendDraft' | 'finish' | 'interrupt' | 'edit' | 'deleteMessage' | 'purge' | 'react' | 'unreact' | 'pin' | 'unpin' | 'resolve' | 'reopen' | 'markRead' | 'follow' | 'listMessages' | 'getMessage' | 'listEdits' | 'listReactions' | 'listRevisions' | 'getRevision' | 'propose' | 'approve' | 'reject' | 'listProposals';
 
 /** The codes the vetoes of a Note's behaviors carry, by behavior: what a refused call's details.code holds. */
 export type NoteVetoes = {
   Workflow: 'already_in_state' | 'terminal_state' | 'transition_not_allowed' | 'no_status';
-  Comments: 'no_message' | 'not_a_thread' | 'not_in_thread' | 'deleted' | 'composing' | 'not_composing' | 'not_author' | 'edit_window_passed' | 'too_many_edits' | 'already_reacted' | 'not_reacted' | 'too_many_reactions' | 'already_pinned' | 'not_pinned' | 'already_resolved' | 'not_resolved' | 'block_not_allowed' | 'ref_not_found' | 'not_idle' | 'too_many_drafts' | 'draft_too_long' | 'not_configured';
+  Comments: 'no_message' | 'not_a_thread' | 'not_in_thread' | 'deleted' | 'composing' | 'not_composing' | 'not_author' | 'edit_window_passed' | 'too_many_edits' | 'already_reacted' | 'not_reacted' | 'too_many_reactions' | 'already_pinned' | 'not_pinned' | 'already_resolved' | 'not_resolved' | 'block_not_allowed' | 'ref_not_found' | 'not_idle' | 'too_many_drafts' | 'draft_too_long' | 'not_configured' | 'unknown_delivery' | 'token_stale' | 'not_claimed';
   Revisions: 'no_review' | 'not_pending';
 };
 
@@ -700,6 +742,10 @@ export interface NotesClient {
   resolve(id: string, params: NoteResolveParams, options?: NoteWriteOptions): Promise<NoteResolveResult>;
   /** Comments' reopen: Reopens a resolved thread: its top-level message's author may, or a caller holding resolvePermission. */
   reopen(id: string, params: NoteReopenParams, options?: NoteWriteOptions): Promise<NoteReopenResult>;
+  /** Comments' markRead: Moves the caller's read marker past the messages it has read: on the conversation's top-level messages, or with thread on that thread's replies. upTo is the greatest message id the caller has shown; every posted or interrupted message of the listing with an id up to it is read, and a streamed reply that comes to stand later is not. The marker never moves back. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it. */
+  markRead(id: string, params: NoteMarkReadParams, options?: NoteWriteOptions): Promise<NoteMarkReadResult>;
+  /** Comments' follow: Follows a thread, so each reply that comes to stand in it records a delivery for the caller and the inbox lists it, or with on false stops. A caller follows each thread it posts in and each it is mentioned in without asking, again after it stopped. Following counts the thread's replies from the latest message of the conversation. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it. */
+  follow(id: string, params: NoteFollowParams, options?: NoteWriteOptions): Promise<NoteFollowResult>;
   /** Comments' listMessages: Lists a page of the conversation's top-level messages, or with thread a page of that thread's replies, composing and deleted ones included, a composing one with its draft so far as its body, in ascending id order: the latest page when no anchor is given, the page before or after a message id, or the page around a message of the listing. Each page says where the next older and newer ones start. */
   listMessages(id: string, params?: NoteListMessagesParams, options?: NoteWriteOptions): Promise<NoteListMessagesResult>;
   /** Comments' getMessage: Reads one message of the conversation, a deleted one included; a composing one's body is its draft so far, from which a reader follows the draft signals. NoteDraftSignal says how a reader follows a draft. */
@@ -792,6 +838,12 @@ export function notesClient(client: EngineClient): NotesClient {
     reopen(id, params, options) {
       return client.instances.invoke<NoteReopenResult>('notes', id, 'reopen', params, options);
     },
+    markRead(id, params, options) {
+      return client.instances.invoke<NoteMarkReadResult>('notes', id, 'markRead', params, options);
+    },
+    follow(id, params, options) {
+      return client.instances.invoke<NoteFollowResult>('notes', id, 'follow', params, options);
+    },
     listMessages(id, params, options) {
       return client.instances.invoke<NoteListMessagesResult>('notes', id, 'listMessages', params ?? {}, options);
     },
@@ -827,6 +879,171 @@ export function notesClient(client: EngineClient): NotesClient {
     },
     sendViewing(id, data, options) {
       return client.signals.send({ schema: 'notes', instanceId: id, behavior: 'Comments', name: 'viewing', data: data ?? {} }, options);
+    },
+  };
+}
+
+// The Comments behavior's namespace operations.
+
+/** An item of Comments' inbox: a message that mentions the caller, a thread it follows by its latest reply of another, or a conversation it has read by its latest top-level message of another, with how many of them it has not read. One with none unread is done. */
+export type CommentsInboxItem = {
+  /** The message's author. */
+  author: string;
+  /** The message's body with each run of white space made one space, at most 200 code points, ending with an ellipsis when cut. */
+  excerpt: string;
+  /** The instance's id. */
+  instanceId: string;
+  /** mention, a message that mentions the caller; thread, a thread the caller follows, by its latest reply of another; conversation, a conversation the caller has read, by its latest top-level message of another. */
+  kind: 'mention' | 'thread' | 'conversation';
+  /** The id of the message the item shows. */
+  message: number;
+  /** When the message came to stand, in epoch milliseconds: the item's place in the inbox. */
+  postedAt: number;
+  /** The instance's schema. */
+  schema: string;
+  /** The id of the thread's top-level message, when the message is a reply; on a thread item, the thread followed. */
+  thread?: number;
+  /** On a mention, 1 while the caller has not read the message and 0 after; on a thread or a conversation, how many messages of others stand above the caller's marker. 0 makes the item done. */
+  unread: number;
+};
+
+/** The parameters of Comments' inbox, across the schemas of a namespace that compose it: The caller's inbox across every schema of the namespace that composes Comments and that the caller may read, newest first: the messages that mention it, the threads it follows that have replies of others, and the conversations it has read that have top-level messages of others. Each item names the latest such message and how many of them the caller has not read; an item with none unread is done. A mention is read once the caller's marker on the conversation, for a top-level message, or on its thread, for a reply, passes it. Mentions reach back as far as the config's deliveryRetentionMs. */
+export type CommentsInboxParams = {
+  /** The next of the previous page. */
+  cursor?: string;
+  /** The kinds of item to list; every kind when absent. */
+  kinds?: Array<'mention' | 'thread' | 'conversation'>;
+  /** At most this many items; 50 when absent. */
+  limit?: number;
+  /** true lists only items with unread messages, false only done ones; both when absent. */
+  unread?: boolean;
+};
+
+/** What Comments' inbox returns. */
+export type CommentsInboxResult = {
+  items: CommentsInboxItem[];
+  /** The cursor of the next page; null after the last. */
+  next: string | null;
+};
+
+/** A delivery claimDeliveries claimed: one message and one subject that should hear of it, with why and what a notifier needs to send it with no other read. Settle it by its id under the claim's token. */
+export type CommentsDelivery = {
+  /** Which claim of the delivery this is: 1 for the first. */
+  attempt: number;
+  /** The message's author. */
+  author: string;
+  /** The message's body as it is now, Markdown, at most its first 4000 code points. */
+  body: string;
+  /** The delivery's id, which settleDeliveries takes: opaque, and the same at each claim. */
+  id: string;
+  /** The instance's id. */
+  instanceId: string;
+  /** The id of the message. */
+  message: number;
+  /** When the message came to stand, in epoch milliseconds. */
+  postedAt: number;
+  /** Why: mention, the message mentions the subject; reply, the subject follows the thread. Both, in that order, when both hold. */
+  reasons: Array<'mention' | 'reply'>;
+  /** The instance's schema. */
+  schema: string;
+  /** The message's: posted, or interrupted when its author stopped before finishing it. */
+  state: 'posted' | 'interrupted';
+  /** Who should hear of it: a person's, an agent's or a group's (role:<name>) subject, as the message gave it; a notifier expands a group. */
+  subject: string;
+  /** The id of the thread's top-level message, when the message is a reply. */
+  thread?: number;
+  /** Whether body was cut. */
+  truncated: boolean;
+  /** The deployable of the service whose call posted or began the message (D37). */
+  via?: string;
+};
+
+/** The parameters of Comments' claimDeliveries, across the schemas of a namespace that compose it: Claims deliveries that are due, at most limit, oldest due first, under one new token that lapses after ttlMs, so two notifiers never send one twice: each pending one, each failed one whose next attempt has come, and each claimed one whose claim lapsed. Only deliveries of schemas the caller may read whose config names a deliverPermission the caller holds; with subjects or prefix, only theirs. A due delivery whose message no longer stands, or whose subject has read it, is dropped and not returned. Each delivery carries what a notifier needs to act with no other read. */
+export type CommentsClaimDeliveriesParams = {
+  /** At most this many deliveries; 20 when absent. */
+  limit?: number;
+  /** Only deliveries to subjects that start with it, agent: say; not with subjects. */
+  prefix?: string;
+  /** Only deliveries to these subjects. */
+  subjects?: string[];
+  /** How long the claim holds, in milliseconds; 60000 when absent. A delivery not settled by then is due again. */
+  ttlMs?: number;
+};
+
+/** What Comments' claimDeliveries returns. */
+export type CommentsClaimDeliveriesResult = {
+  /** When the claim lapses, in epoch milliseconds; null when nothing was claimed. */
+  expiresAt: number | null;
+  items: CommentsDelivery[];
+  /** The claim's token, which settleDeliveries takes; null when nothing was claimed. */
+  token: string | null;
+};
+
+/** A delivery as settleDeliveries left it: its state, its claims so far, and when a failed one is due again. */
+export type CommentsSettledDelivery = {
+  /** How many times it has been claimed. */
+  attempts: number;
+  id: string;
+  /** When a failed one is due again, in epoch milliseconds. */
+  nextAttemptAt?: number;
+  /** sent, failed or dropped: a failure on its last attempt is dropped. */
+  state: 'sent' | 'failed' | 'dropped';
+};
+
+/** The parameters of Comments' settleDeliveries, across the schemas of a namespace that compose it: Settles deliveries the caller claimed under token: sent; failed, which makes each due again after a backoff until the config's maxAttempts claims, then drops it; or dropped. Needs the deliverPermission of each delivery's schema. Every id must be held under the token, or nothing is settled. */
+export type CommentsSettleDeliveriesParams = {
+  /** Why it failed or was dropped, kept on the delivery; not with sent. */
+  error?: string;
+  /** The ids of the deliveries to settle. */
+  ids: string[];
+  /** sent, failed or dropped. */
+  outcome: 'sent' | 'failed' | 'dropped';
+  /** The token claimDeliveries returned. */
+  token: string;
+};
+
+/** What Comments' settleDeliveries returns. */
+export type CommentsSettleDeliveriesResult = {
+  /** Each delivery, in the order of ids. */
+  items: CommentsSettledDelivery[];
+};
+
+/** Each namespace operation Comments adds: its scope, parameters and result. None is a type's: CommentsNamespaceClient calls them. */
+export type CommentsNamespaceOperations = {
+  inbox: { scope: 'namespace'; params: CommentsInboxParams; result: CommentsInboxResult };
+  claimDeliveries: { scope: 'namespace'; params: CommentsClaimDeliveriesParams; result: CommentsClaimDeliveriesResult };
+  settleDeliveries: { scope: 'namespace'; params: CommentsSettleDeliveriesParams; result: CommentsSettleDeliveriesResult };
+};
+
+/** The codes Comments' vetoes carry: what a refused call's details.code holds. */
+export type CommentsVetoCode = 'no_message' | 'not_a_thread' | 'not_in_thread' | 'deleted' | 'composing' | 'not_composing' | 'not_author' | 'edit_window_passed' | 'too_many_edits' | 'already_reacted' | 'not_reacted' | 'too_many_reactions' | 'already_pinned' | 'not_pinned' | 'already_resolved' | 'not_resolved' | 'block_not_allowed' | 'ref_not_found' | 'not_idle' | 'too_many_drafts' | 'draft_too_long' | 'not_configured' | 'unknown_delivery' | 'token_stale' | 'not_claimed';
+
+/** isCommentsNamespaceVeto is isVeto with Comments and its codes, for a refusal of one of its namespace operations. */
+export function isCommentsNamespaceVeto(error: unknown, codes?: CommentsVetoCode | ReadonlyArray<CommentsVetoCode>): error is EngineVeto {
+  return isVeto(error, 'Comments', codes);
+}
+
+/** Comments' namespace operations in one namespace, typed: each runs on its tables across the schemas of the namespace that compose it and that the caller may read, and the policy is asked of the behavior and the operation, not of a schema (D77). */
+export interface CommentsNamespaceClient {
+  /** Comments' inbox: The caller's inbox across every schema of the namespace that composes Comments and that the caller may read, newest first: the messages that mention it, the threads it follows that have replies of others, and the conversations it has read that have top-level messages of others. Each item names the latest such message and how many of them the caller has not read; an item with none unread is done. A mention is read once the caller's marker on the conversation, for a top-level message, or on its thread, for a reply, passes it. Mentions reach back as far as the config's deliveryRetentionMs. */
+  inbox(params?: CommentsInboxParams, options?: Omit<CallOptions, 'namespace'>): Promise<CommentsInboxResult>;
+  /** Comments' claimDeliveries: Claims deliveries that are due, at most limit, oldest due first, under one new token that lapses after ttlMs, so two notifiers never send one twice: each pending one, each failed one whose next attempt has come, and each claimed one whose claim lapsed. Only deliveries of schemas the caller may read whose config names a deliverPermission the caller holds; with subjects or prefix, only theirs. A due delivery whose message no longer stands, or whose subject has read it, is dropped and not returned. Each delivery carries what a notifier needs to act with no other read. */
+  claimDeliveries(params?: CommentsClaimDeliveriesParams, options?: Omit<CallOptions, 'namespace'>): Promise<CommentsClaimDeliveriesResult>;
+  /** Comments' settleDeliveries: Settles deliveries the caller claimed under token: sent; failed, which makes each due again after a backoff until the config's maxAttempts claims, then drops it; or dropped. Needs the deliverPermission of each delivery's schema. Every id must be held under the token, or nothing is settled. */
+  settleDeliveries(params: CommentsSettleDeliveriesParams, options?: Omit<CallOptions, 'namespace'>): Promise<CommentsSettleDeliveriesResult>;
+}
+
+/** commentsNamespaceClient binds an EngineClient to a namespace, the client's own when none is given, for Comments' namespace operations. */
+export function commentsNamespaceClient(client: EngineClient, namespace?: string): CommentsNamespaceClient {
+  return {
+    inbox(params, options) {
+      return client.behaviors.invoke<CommentsInboxResult>('Comments', 'inbox', params ?? {}, namespace === undefined ? options : { ...options, namespace });
+    },
+    claimDeliveries(params, options) {
+      return client.behaviors.invoke<CommentsClaimDeliveriesResult>('Comments', 'claimDeliveries', params ?? {}, namespace === undefined ? options : { ...options, namespace });
+    },
+    settleDeliveries(params, options) {
+      return client.behaviors.invoke<CommentsSettleDeliveriesResult>('Comments', 'settleDeliveries', params, namespace === undefined ? options : { ...options, namespace });
     },
   };
 }

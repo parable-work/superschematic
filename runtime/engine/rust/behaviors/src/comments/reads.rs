@@ -71,6 +71,9 @@ pub(super) fn list_messages(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
         ("before", before.map_or(Value::Null, Value::from)),
         ("after", after.map_or(Value::Null, Value::from)),
     ];
+    if let Some(marker) = super::follows::read_up_to(cx, thread)? {
+        members.push(("readUpTo", Value::from(marker)));
+    }
     if let Some(root) = root {
         members.push(("root", record_of(cx, &root)?));
     }

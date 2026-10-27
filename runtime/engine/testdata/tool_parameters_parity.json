@@ -4580,6 +4580,21 @@
       "input": "claimNext",
       "kebab": "claim-next",
       "snake": "claim_next"
+    },
+    {
+      "input": "Comments",
+      "kebab": "comments",
+      "snake": "comments"
+    },
+    {
+      "input": "acme-Rating",
+      "kebab": "acme-rating",
+      "snake": "acme_rating"
+    },
+    {
+      "input": "claimDeliveries",
+      "kebab": "claim-deliveries",
+      "snake": "claim_deliveries"
     }
   ],
   "handles": [

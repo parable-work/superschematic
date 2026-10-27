@@ -427,3 +427,29 @@ func TestTheSignalRouteAndAStreamWithSignals(t *testing.T) {
 	}
 	until(`"instanceId":"n2"`)
 }
+
+// The namespace operation route (D77), over the core's archive, whose
+// behaviors declare no namespace operation: the route answers the engine's
+// refusal of an operation of another scope and of a behavior it does not
+// run, and behaviors.invoke by name too. The test kit's Rust suites run one
+// that does (behavior_namespace.rs).
+func TestTheNamespaceOperationRoute(t *testing.T) {
+	e := openNotes(t)
+	server := httptest.NewServer(enginehttp.Handler(e, enginehttp.Options{Caller: bearer}))
+	defer server.Close()
+	route := server.URL + "/namespaces/default/behaviors/Comments/operations/post"
+	response, body := send(t, "POST", route, `{}`, "Authorization", "Bearer bob", "Content-Type", "application/json")
+	if response.StatusCode != 404 || !strings.Contains(body, `"code":"not_found"`) || !strings.Contains(body, "Comments's post is an instance operation") {
+		t.Fatalf("an instance operation called on the namespace: %d %s", response.StatusCode, body)
+	}
+	response, body = send(t, "POST", server.URL+"/namespaces/default/behaviors/acme.Nothing/operations/inbox", "", "Authorization", "Bearer bob")
+	if response.StatusCode != 404 || !strings.Contains(body, "this engine runs no behavior acme.Nothing") {
+		t.Fatalf("a behavior the engine does not run: %d %s", response.StatusCode, body)
+	}
+	_, err := e.Call(context.Background(), "behaviors.invoke", &engine.Principal{Subject: "bob"},
+		map[string]any{"behavior": "Comments", "operation": "post", "params": map[string]any{}})
+	var refused *engine.Error
+	if !errors.As(err, &refused) || refused.Code != engine.CodeNotFound {
+		t.Fatalf("behaviors.invoke: %v", err)
+	}
+}

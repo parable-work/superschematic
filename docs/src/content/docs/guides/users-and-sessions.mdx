@@ -322,7 +322,10 @@ An engine server takes `identity` in place of `authenticate`, and serves
 the session routes under `/auth`. A behavior's permission, such as a
 Workflow transition's, is then a role's like any other, and the opt-in
 `permissionPolicy()` allows an action to a caller holding
-`<schema>.<action>`. See the engine README's Users section.
+`<schema>.<action>`, a behavior's namespace operation that reads to any
+caller, since its rows are only those of schemas the caller may read, and
+one that writes to a caller holding `<behavior>.<operation>`
+(`Comments.claimDeliveries`). See the engine README's Users section.
 
 ## Pages with Topcoat
 

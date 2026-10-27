@@ -232,7 +232,7 @@ fn it_runs_the_document_the_core_binary_builds_with_all_three_composed_on_one_ty
             Value::Object(created.behaviors.clone()),
             json!({
                 "Workflow": {"status": "draft", "enteredAt": created.created_at},
-                "Comments": {"messages": 0, "threads": {"open": 0, "resolved": 0}, "composing": []},
+                "Comments": {"messages": 0, "threads": {"open": 0, "resolved": 0}, "composing": [], "unread": 0},
                 "Revisions": {"revision": 1, "pendingProposals": 0}
             })
         );
@@ -309,7 +309,7 @@ fn it_runs_the_document_the_core_binary_builds_with_all_three_composed_on_one_ty
             Value::Object(record.behaviors.clone()),
             json!({
                 "Workflow": {"status": "published", "enteredAt": log[6].at},
-                "Comments": {"messages": 2, "lastMessageAt": log[5].at, "threads": {"open": 1, "resolved": 0}, "composing": []},
+                "Comments": {"messages": 2, "lastMessageAt": log[5].at, "threads": {"open": 1, "resolved": 0}, "composing": [], "unread": 0},
                 "Revisions": {"revision": 2, "pendingProposals": 0}
             })
         );
@@ -333,6 +333,8 @@ fn it_runs_the_document_the_core_binary_builds_with_all_three_composed_on_one_ty
         assert_eq!(
             changes,
             [
+                // Comments' unread is the reader's (perReader): no event
+                // records it.
                 json!(["create", "wes", {
                     "data": {"title": "Launch plan"},
                     "behaviors": {"Workflow": {"status": "draft", "enteredAt": log[0].at}, "Comments": {"messages": 0, "threads": {"open": 0, "resolved": 0}, "composing": []}, "Revisions": {"revision": 1, "pendingProposals": 0}}
@@ -346,7 +348,8 @@ fn it_runs_the_document_the_core_binary_builds_with_all_three_composed_on_one_ty
             ]
         );
         // The log replays, a merge patch at a time, to the instance a read
-        // returns, but for the volatile fields beside events move.
+        // returns, but for the volatile fields beside events move, and the
+        // reader's own unread, which no event records.
         let mut replayed = json!({});
         for event in log.iter().filter(|event| !event.beside) {
             let patch = if event.kind == "create" {
@@ -440,7 +443,7 @@ fn it_runs_the_document_the_core_binary_builds_with_all_three_composed_on_one_ty
             Value::Object(retracted.behaviors),
             json!({
                 "Workflow": {"status": "retracted", "enteredAt": events("doc-1")[7].at},
-                "Comments": {"messages": 2, "lastMessageAt": log[5].at, "threads": {"open": 1, "resolved": 0}, "composing": []},
+                "Comments": {"messages": 2, "lastMessageAt": log[5].at, "threads": {"open": 1, "resolved": 0}, "composing": [], "unread": 0},
                 "Revisions": {"revision": 3, "pendingProposals": 0}
             })
         );

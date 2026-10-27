@@ -899,9 +899,26 @@
                     "minimum": 5000,
                     "type": "integer"
                   },
+                  "deliverPermission": {
+                    "description": "The permission a notifier or an agent dispatcher needs to claim and settle the deliveries of this type's messages, beside the policy's Comments.claimDeliveries and Comments.settleDeliveries. Absent, nobody claims them, and they serve only the inbox.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "deliveryRetentionMs": {
+                    "description": "How long a delivery is kept from when it was made, in milliseconds, whatever its state but a live claim; the inbox's mentions reach back as far. 2592000000, 30 days, when absent.",
+                    "maximum": 31536000000,
+                    "minimum": 86400000,
+                    "type": "integer"
+                  },
                   "editWindowMs": {
                     "description": "How long after a message's postedAt its author may edit it, in milliseconds; no limit when absent. A caller holding moderatePermission is not held to it.",
                     "minimum": 1000,
+                    "type": "integer"
+                  },
+                  "maxAttempts": {
+                    "description": "How many times a delivery is claimed before a failure, or a claim that lapses, drops it; 5 when absent.",
+                    "maximum": 20,
+                    "minimum": 1,
                     "type": "integer"
                   },
                   "maxBodyLength": {
@@ -930,6 +947,12 @@
                     "description": "The permission that lets a caller resolve and reopen another's thread. Absent, only a thread's author does.",
                     "minLength": 1,
                     "type": "string"
+                  },
+                  "retryBackoffMs": {
+                    "description": "How long after its first failure a delivery is due again, in milliseconds, doubled after each later failure up to an hour; 30000 when absent.",
+                    "maximum": 3600000,
+                    "minimum": 1000,
+                    "type": "integer"
                   }
                 },
                 "type": "object"

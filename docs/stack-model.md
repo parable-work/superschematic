@@ -77,6 +77,7 @@ environments   a target (gcp, local, ...) and the values only a person can decid
 | memoryStore | one MemoryStore schema | channels, counters and claims that every replica shares and can lose | nothing (D75, section 8.12) |
 | site | one Site schema | static files over HTTPS, with a config per environment | the public address of each API it calls (D55) |
 | runner | one engine database: a DB schema whose types compose behaviors | the engine's runner, which runs reactions, schedules, Timers' deadlines and retention, one process at a time under the runner's lock | a connection to its database (D58) |
+| deriver | one `@deriver` of a TypeScript or Rust API schema | a loop that fills the Derived fields of its API's engine types, waking on the engine's commits, until stopped | its API's needs; its API's engine database (D74, section 8.8) |
 | app | one `@app` of a Rust API schema | the project's own HTTP program over its API's `Deps`, implementations, identity and engine, at an address a server's platform gives it | its API's needs (D78, section 8.6) |
 
 A queue is not a deployable: it lives in the database of the DB schema
@@ -100,9 +101,10 @@ deployable is declared only to change that:
 A declared deployable only groups. It declares no needs: a server's edges
 are the union of its APIs' edges, so grouping APIs never restates one.
 
-Each `@app` of an API service is one app too, named `<api>-<app>` as a
-job is (D78). An app is never declared in the stack: the API declares it,
-and the stack exposes it or turns it off.
+Each `@deriver` of an API service is one deriver, named `<api>-<deriver>`
+as a worker is (D74). Each `@app` of an API service is one app too, named
+`<api>-<app>` as a job is (D78). An app is never declared in the stack:
+the API declares it, and the stack exposes it or turns it off.
 
 ### 3.3 Edges
 

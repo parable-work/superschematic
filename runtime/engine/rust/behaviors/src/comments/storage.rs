@@ -3,8 +3,11 @@
 //! creates the conversation's four tables, moves v1's comments into the
 //! first and drops `comments`; migration 3, `drafts`, which adds a
 //! composing message's columns, their two indexes and the table of its
-//! draft's chunks (batch 2); the row a message is read from, and the
-//! counts a write keeps (`comments-contract.md`, "Storage", "Migration 3").
+//! draft's chunks (batch 2); migration 4, `inbox`, which adds each
+//! message's stand, the conversation's last stand, and the tables of read
+//! markers, follows and deliveries (batch 3); the row a message is read
+//! from, and the counts a write keeps (`comments-contract.md`, "Storage",
+//! "Migration 3", "Migration 4").
 //!
 //! Every statement is the same on SQLite and Postgres (D58): each
 //! parameter's type is the column's it is compared with or written to.
@@ -30,9 +33,16 @@ pub(super) const REACTIONS: &str = "comment_reactions";
 pub(super) const CONVERSATIONS: &str = "comment_conversations";
 /// A composing message's draft, one row per non-empty append.
 pub(super) const DRAFTS: &str = "comment_drafts";
+/// Each subject's conversation marker on an instance.
+pub(super) const READS: &str = "comment_reads";
+/// Each subject's state on a thread: whether it follows, and its thread
+/// marker.
+pub(super) const FOLLOWS: &str = "comment_follows";
+/// One row per message and subject that should hear of it.
+pub(super) const DELIVERIES: &str = "comment_deliveries";
 
 /// A message row's columns, as [`Message::of`] reads them.
-pub(super) const MESSAGE_COLUMNS: &str = "message, thread, quotes, author, via, state, body, blocks, mentions, created_at, posted_at, edited_at, edits, pinned, client_id, resolved_by, resolved_at, draft_length, last_append_at";
+pub(super) const MESSAGE_COLUMNS: &str = "message, thread, quotes, author, via, state, body, blocks, mentions, created_at, posted_at, edited_at, edits, pinned, client_id, resolved_by, resolved_at, draft_length, last_append_at, stand";
 
 /// The states a message is in.
 pub(super) const COMPOSING: &str = "composing";
@@ -43,7 +53,7 @@ pub(super) const DELETED: &str = "deleted";
 /// The condition on a message row that it stands: posted or interrupted.
 pub(super) const STANDS: &str = "state IN ('posted', 'interrupted')";
 
-/// Comments' migrations: 1 as shipped, then 2 and 3.
+/// Comments' migrations: 1 as shipped, then 2, 3 and 4.
 pub(super) fn migrations() -> Vec<BehaviorMigration> {
     vec![
         BehaviorMigration::new(1, "comments")
@@ -139,7 +149,110 @@ pub(super) fn migrations() -> Vec<BehaviorMigration> {
                     .primary_key(&["namespace", "schema", "id", "message", "chunk_offset"]),
             )
             .up(add_drafts),
+        BehaviorMigration::new(4, "inbox")
+            .table(
+                instance_columns(TableSpec::new(READS))
+                    .column("subject", ColumnSpec::text().not_null())
+                    .column("up_to", ColumnSpec::integer().not_null())
+                    .column("read_at", ColumnSpec::integer().not_null())
+                    .primary_key(&["namespace", "schema", "id", "subject"])
+                    .index(IndexSpec::new(
+                        "comment_reads_subject",
+                        &["namespace", "subject"],
+                    )),
+            )
+            .table(
+                instance_columns(TableSpec::new(FOLLOWS))
+                    .column("thread", ColumnSpec::integer().not_null())
+                    .column("subject", ColumnSpec::text().not_null())
+                    .column("followed", ColumnSpec::integer().not_null())
+                    .column("read_up_to", ColumnSpec::integer().not_null())
+                    .column("updated_at", ColumnSpec::integer().not_null())
+                    .primary_key(&["namespace", "schema", "id", "thread", "subject"])
+                    .index(
+                        IndexSpec::new("comment_follows_subject", &["namespace", "subject"])
+                            .filter("followed = 1"),
+                    ),
+            )
+            .table(
+                instance_columns(TableSpec::new(DELIVERIES))
+                    .column("message", ColumnSpec::integer().not_null())
+                    .column("subject", ColumnSpec::text().not_null())
+                    .column("mention", ColumnSpec::integer().not_null().default(0))
+                    .column("reply", ColumnSpec::integer().not_null().default(0))
+                    .column("state", ColumnSpec::text().not_null())
+                    .column("due_at", ColumnSpec::integer())
+                    .column("token", ColumnSpec::text())
+                    .column("claimed_by", ColumnSpec::text())
+                    .column("attempts", ColumnSpec::integer().not_null().default(0))
+                    .column("error", ColumnSpec::text())
+                    .column("created_at", ColumnSpec::integer().not_null())
+                    .column("settled_at", ColumnSpec::integer())
+                    .primary_key(&["namespace", "schema", "id", "message", "subject"])
+                    .index(
+                        IndexSpec::new(
+                            "comment_deliveries_due",
+                            &["namespace", "due_at", "schema", "id", "message", "subject"],
+                        )
+                        .filter("due_at IS NOT NULL"),
+                    )
+                    .index(
+                        IndexSpec::new("comment_deliveries_mentions", &["namespace", "subject"])
+                            .filter("mention = 1"),
+                    )
+                    .index(
+                        IndexSpec::new("comment_deliveries_token", &["namespace", "token"])
+                            .filter("token IS NOT NULL"),
+                    )
+                    .index(IndexSpec::new(
+                        "comment_deliveries_created",
+                        &["namespace", "schema", "created_at"],
+                    )),
+            )
+            .up(add_stands),
     ]
+}
+
+// add_stands adds each message's stand and the conversation's last stand,
+// and the index on the stands: a message that stood before the migration
+// has its id as its stand, which keeps every later stand above it, and the
+// conversation's last stand is its last id.
+fn add_stands(sql: &BehaviorSql<'_, '_>) -> superschematic_engine::storage::Result<()> {
+    let messages = sql.table(MESSAGES)?;
+    let conversations = sql.table(CONVERSATIONS)?;
+    sql.run(
+        format!(
+            "ALTER TABLE {messages} ADD COLUMN stand {}",
+            ColumnSpec::integer().definition(sql.dialect())?
+        ),
+        &[],
+    )?;
+    sql.run(
+        format!(
+            "ALTER TABLE {conversations} ADD COLUMN last_stand {}",
+            ColumnSpec::integer()
+                .not_null()
+                .default(0)
+                .definition(sql.dialect())?
+        ),
+        &[],
+    )?;
+    sql.run(
+        format!(
+            "CREATE INDEX {} ON {messages} (namespace, schema, id, thread, stand) WHERE stand IS NOT NULL",
+            sql.table("comment_messages_stand")?
+        ),
+        &[],
+    )?;
+    sql.run(
+        format!("UPDATE {messages} SET stand = message WHERE posted_at IS NOT NULL"),
+        &[],
+    )?;
+    sql.run(
+        format!("UPDATE {conversations} SET last_stand = last_message"),
+        &[],
+    )?;
+    Ok(())
 }
 
 // add_drafts adds a composing message's columns to comment_messages, and
@@ -335,6 +448,9 @@ pub(super) struct Message {
     pub draft_length: Option<i64>,
     /// The `now` of its begin or latest appendDraft, while composing.
     pub last_append_at: Option<i64>,
+    /// Its place in the order the conversation's messages came to stand;
+    /// `None` while composing and on a message that never stood.
+    pub stand: Option<i64>,
 }
 
 impl Message {
@@ -358,6 +474,7 @@ impl Message {
             resolved_at: row.opt_i64("resolved_at")?,
             draft_length: row.opt_i64("draft_length")?,
             last_append_at: row.opt_i64("last_append_at")?,
+            stand: row.opt_i64("stand")?,
         })
     }
 
@@ -408,6 +525,8 @@ pub(super) struct Conversation {
     pub last_message_at: Option<i64>,
     pub open_threads: i64,
     pub resolved_threads: i64,
+    /// The greatest stand given.
+    pub last_stand: i64,
 }
 
 /// The instance's conversation row, `None` before its first message.
@@ -416,7 +535,7 @@ pub(super) fn conversation<C>(view: &InstanceView<'_, C>) -> Result<Option<Conve
     view.sql()
         .get(
             format!(
-                "SELECT last_message, last_reaction, last_message_at, open_threads, resolved_threads FROM {table}
+                "SELECT last_message, last_reaction, last_message_at, open_threads, resolved_threads, last_stand FROM {table}
                  WHERE namespace = ? AND schema = ? AND id = ?"
             ),
             &key(view),
@@ -428,6 +547,7 @@ pub(super) fn conversation<C>(view: &InstanceView<'_, C>) -> Result<Option<Conve
                 last_message_at: row.opt_i64("last_message_at")?,
                 open_threads: row.i64("open_threads")?,
                 resolved_threads: row.i64("resolved_threads")?,
+                last_stand: row.i64("last_stand")?,
             })
         })
         .transpose()
@@ -449,13 +569,14 @@ pub(super) fn save_conversation<C>(
             .map_or(SqlValue::Null, SqlValue::Integer),
         SqlValue::Integer(conversation.open_threads),
         SqlValue::Integer(conversation.resolved_threads),
+        SqlValue::Integer(conversation.last_stand),
     ];
     if existed {
         let mut params = values.to_vec();
         params.extend(key(cx));
         cx.sql().run(
             format!(
-                "UPDATE {table} SET last_message = ?, last_reaction = ?, last_message_at = ?, open_threads = ?, resolved_threads = ?
+                "UPDATE {table} SET last_message = ?, last_reaction = ?, last_message_at = ?, open_threads = ?, resolved_threads = ?, last_stand = ?
                  WHERE namespace = ? AND schema = ? AND id = ?"
             ),
             &params,
@@ -463,8 +584,8 @@ pub(super) fn save_conversation<C>(
     } else {
         cx.sql().run(
             format!(
-                "INSERT INTO {table} (namespace, schema, id, last_message, last_reaction, last_message_at, open_threads, resolved_threads)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+                "INSERT INTO {table} (namespace, schema, id, last_message, last_reaction, last_message_at, open_threads, resolved_threads, last_stand)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
             ),
             &keyed(cx, values),
         )?;

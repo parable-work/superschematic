@@ -53,3 +53,19 @@ export const DEFAULT_SIGNALS_PER_SECOND = 20;
 
 /** The most a signal's data may be, in bytes of JSON. */
 export const MAX_SIGNAL_DATA_BYTES = 4096;
+
+/**
+ * A call of a behavior's namespace operation (D77, engine.behaviors.invoke):
+ * an operation its declaration gives `scope: "namespace"`, which runs on
+ * the behavior's tables across every schema of the namespace that
+ * composes it.
+ */
+export interface NamespaceOperationInput {
+  /** The namespace; default when absent. */
+  namespace?: string;
+  /** The behavior that declares the operation. */
+  behavior: string;
+  operation: string;
+  /** What its paramsSchema accepts; {} when absent. */
+  params?: unknown;
+}

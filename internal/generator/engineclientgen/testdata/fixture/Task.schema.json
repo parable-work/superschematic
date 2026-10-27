@@ -33,7 +33,7 @@
             "outcomes": { "failed": "failure" }
           }
         },
-        { "name": "Comments", "config": { "blocks": ["action"], "maxBodyLength": 2000, "resolvePermission": "tasks.resolve" } },
+        { "name": "Comments", "config": { "blocks": ["action"], "maxBodyLength": 2000, "resolvePermission": "tasks.resolve", "deliverPermission": "tasks.deliver" } },
         {
           "name": "Links",
           "config": {

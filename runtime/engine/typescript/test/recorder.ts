@@ -513,6 +513,7 @@ const PRINCIPAL_FIRST = new Set([
   'tools.describe',
   'tools.manifest',
   'tools.call',
+  'behaviors.invoke',
   'search',
 ]);
 
@@ -520,7 +521,7 @@ const COMPONENTS = new Set(['namespaces', 'schemas', 'instances', 'events', 'too
 // What a test may call on storage and the behavior registry that the
 // corpus records; the rest passes through unrecorded.
 const STORAGE_CALLS = new Set(['exec', 'run', 'get', 'all', 'transaction']);
-const BEHAVIOR_CALLS = new Set(['register', 'has', 'names', 'declaration']);
+const BEHAVIOR_CALLS = new Set(['register', 'has', 'names', 'declaration', 'invoke']);
 
 function engineProxy(raw: Engine, engine: EngineRecord): Engine {
   const components = new Map<string, object>();
@@ -1297,8 +1298,14 @@ function writeFiles(): void {
   }
 }
 
-/** The most JSON text, in characters, of a case the corpus writes (before its shared values are taken out). */
-const MAX_CASE_CHARS = 125_000;
+/**
+ * The most JSON text, in characters, of a case the corpus writes (before
+ * its shared values are taken out). It only keeps a file's size in bounds:
+ * a case past it is not replayed. A case that opens an engine carries the
+ * whole meta-schema, which grows with each behavior's config, so the limit
+ * leaves room for that growth.
+ */
+const MAX_CASE_CHARS = 200_000;
 
 // The members of a step whose own members, not they, are shared.
 const OPENED = new Set(['args', 'request', 'response']);

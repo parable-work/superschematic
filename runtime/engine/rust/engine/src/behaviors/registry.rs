@@ -61,8 +61,29 @@ pub(crate) struct OperationSpec {
     /// Whether it appends an event: false only for a beside operation that
     /// declares `"log": false`.
     pub log: bool,
+    /// Whether the policy is asked `read` for it though it writes (D77,
+    /// `"asks": "read"`).
+    pub asks_read: bool,
     pub params: AjvSchema,
     pub result: AjvSchema,
+}
+
+impl OperationSpec {
+    /// What the policy is asked for a call of it: `write` for one that
+    /// writes, unless it asks `read` (D77), and `read` otherwise.
+    pub fn asks(&self) -> crate::access::SchemaAction {
+        if self.writes && !self.asks_read {
+            crate::access::SchemaAction::Write
+        } else {
+            crate::access::SchemaAction::Read
+        }
+    }
+
+    /// Whether an archived namespace refuses it: one that writes, unless it
+    /// asks `read`.
+    pub fn refused_when_archived(&self) -> bool {
+        self.writes && !self.asks_read
+    }
 }
 
 /// One declared signal with its compiled schema (D77).
@@ -110,13 +131,6 @@ pub(crate) struct RegisteredBehavior {
 }
 
 impl RegisteredBehavior {
-    /// The operation of a name.
-    pub fn operation(&self, name: &str) -> Option<&OperationSpec> {
-        self.operations
-            .iter()
-            .find(|operation| operation.name == name)
-    }
-
     /// The signal of a name.
     pub fn signal(&self, name: &str) -> Option<&SignalSpec> {
         self.signals.iter().find(|signal| signal.name == name)
@@ -316,6 +330,7 @@ fn compile(
                 scope: operation.scope,
                 beside: operation.beside,
                 log: operation.log,
+                asks_read: operation.asks_read,
                 params,
                 result,
             });
@@ -353,6 +368,12 @@ fn compile(
         "schemaOperations",
         &hooks.schema_operations,
         &scoped(OperationScope::Schema),
+        &mut problems,
+    );
+    match_names(
+        "namespaceOperations",
+        &hooks.namespace_operations,
+        &scoped(OperationScope::Namespace),
         &mut problems,
     );
     let fields: Vec<String> = declaration

@@ -140,10 +140,17 @@ impl<'t, 'db> Reach<'t, 'db> {
             }
             Some((index, position)) => {
                 access.require(principal, SchemaAction::Read, namespace, schema)?;
-                let name = &runtime.composition.behaviors[index].behavior.operations[position].name;
+                let bound = &runtime.composition.behaviors[index];
+                let found = &bound.behavior.operations[position];
+                let name = &found.name;
                 Err(EngineError::new(
                     EngineErrorCode::NotFound,
-                    if schema_level {
+                    if found.scope == OperationScope::Namespace {
+                        format!(
+                            "{schema}'s {name} is a namespace operation of {}: call it on the namespace, with no schema",
+                            bound.behavior.name
+                        )
+                    } else if schema_level {
                         format!("{schema}'s {name} is an instance operation: call it on an instance")
                     } else {
                         format!("{schema}'s {name} is a schema-level operation: call it on the schema, with no instance")
@@ -236,11 +243,7 @@ impl<'t, 'db> Reach<'t, 'db> {
         }
         self.engine.access.require_operation(
             &self.chain.principal,
-            if spec.writes {
-                SchemaAction::Write
-            } else {
-                SchemaAction::Read
-            },
+            spec.asks(),
             self.namespace(),
             schema,
             Some(&spec.name),

@@ -76,13 +76,15 @@ pub mod tools;
 mod values;
 
 pub use access::{
-    covers, has_any_permission, AccessPolicy, AccessRequest, Decision, DottedPermissions,
-    ListingAction, NamespaceOperation, PermissionMatcher, PermissionTemplate, Policy, PolicyAction,
-    PolicyConfig, PolicyRule, PolicyShorthand, RulePolicy, SchemaAction, ServiceMatch,
+    covers, has_any_permission, AccessPolicy, AccessRequest, BehaviorMatch, Decision,
+    DottedPermissions, ListingAction, NamespaceOperation, PermissionMatcher, PermissionTemplate,
+    Policy, PolicyAction, PolicyConfig, PolicyRule, PolicyShorthand, RulePolicy, SchemaAction,
+    ServiceMatch,
 };
 pub use behaviors::{
     json_config, Behavior, BehaviorSet, Behaviors, ConfigTarget, GuardRequest, Hooks,
-    InstanceChange, InstanceCx, InstanceView, OperationCx, SchemaCx, ValidationRequest,
+    InstanceChange, InstanceCx, InstanceView, NamespaceCall, NamespaceCx, OperationCx, SchemaCx,
+    ValidationRequest,
 };
 pub use deploy::Deployed;
 pub use engine::{

@@ -58,7 +58,7 @@ small enough to review (about 4 MB):
 - the client's tests (`client*.test.ts`) drive the HTTP API, which `../http`
   records from the HTTP tests.
 
-A scenario whose JSON is longer than 100,000 characters (one that creates
+A scenario whose JSON is longer than 200,000 characters (one that creates
 hundreds of instances to reach a limit) is not written; its file names it in
 `omitted`.
 
@@ -170,7 +170,7 @@ with, and a refund instance asked, approved and settled.
 | `name` | The test file's name without `.test.ts`, and the file's. |
 | `description` | The test file's leading comment: what its tests cover. |
 | `source` | The test file, from the repository's root. |
-| `omitted` | The names of the scenarios past 100,000 characters, in the test file's order; absent when none. |
+| `omitted` | The names of the scenarios past 200,000 characters, in the test file's order; absent when none. |
 | `shared` | Values that appear more than once in the file's scenarios, each written once (below); absent when none. |
 | `scenarios` | One per test that called the engine, in the order the tests ran. |
 

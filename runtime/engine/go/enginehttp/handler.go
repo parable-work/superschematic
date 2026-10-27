@@ -53,14 +53,15 @@ const manualBodyLimitBytes = 16 << 20
 // bodyRoutes are the routes whose spec declares a body: the body limit
 // applies to them, not to the manual routes (the event stream, MCP).
 var bodyRoutes = map[string]bool{
-	"createNamespace":       true,
-	"defineSchema":          true,
-	"createInstance":        true,
-	"updateInstance":        true,
-	"invokeOperation":       true,
-	"invokeSchemaOperation": true,
-	"searchSchemas":         true,
-	"sendSignal":            true,
+	"createNamespace":          true,
+	"defineSchema":             true,
+	"createInstance":           true,
+	"updateInstance":           true,
+	"invokeOperation":          true,
+	"invokeSchemaOperation":    true,
+	"invokeNamespaceOperation": true,
+	"searchSchemas":            true,
+	"sendSignal":               true,
 }
 
 // Serve is which of the engine's routes a handler serves.
