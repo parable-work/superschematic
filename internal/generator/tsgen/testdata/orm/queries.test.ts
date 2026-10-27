@@ -142,5 +142,8 @@ describe.skipIf(dsn === '')('declared queries', () => {
     expect(rows.map(r => r.id)).toEqual([ids.groceries!]);
     expect(statements.slice(before)).toEqual(['BEGIN', fill(fixtureQueriesDbQueries.budgets!.text), 'COMMIT']);
     expect(fixtureQueriesDbQueries.budgets!.text).toContain('($1::uuid IS NULL OR c.parent_id = $1)');
+    // A transaction of options and a savepoint nested in it hold the queries too (D89).
+    const nested = await orm.transaction(tx => tx.transaction(inner => inner.queries.budgets({ parentId: ids.food! })), { readOnly: true });
+    expect(nested.map(r => r.id)).toEqual([ids.groceries!]);
   });
 });

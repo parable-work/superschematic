@@ -12029,7 +12029,7 @@ This entry adds:
 | Decision | Alternatives not taken |
 |----------|------------------------|
 | TypeScript: `orm.ts` declares `<Db>Queries`, a typed function per query over the params and row types of `./types`, `<Name>QueryPageKey` for a paged one, and the queries as data (`<db>Queries`: the statement, the codec's descriptor of each parameter and row field, the order, the page). `<Db>Repositories` holds them as `queries`, so `deps.orm.queries` and `tx.queries` are typed through `Orm<R>` and `OrmTx<R>` unchanged. The runtime's `queriesOf` (`./postgres`) runs them over the ORM's runner, with its type parsers, in the transaction when there is one. `queries` joins `ORM_MEMBERS`. | A member of `Orm` itself, a type parameter on every ORM type. Generated code per query, beside a runtime that already runs a table's statements as data (D79). |
-| Go: `queries.go` gives `Queries` a method per query, `db.Queries` and `tx.Queries` (and `GetQueries()` on both interfaces, the no-op ones answering no rows), and `<Name>PageKey`, `<Name>Page` and `QueryPageOptions[K]` for a paged one. | |
+| Go: `queries.go` gives `Queries` a method per query, `db.Queries` and `tx.Queries` (and `GetQueries()` on both interfaces, the no-op ones answering no rows), every transaction's, a `TransactionWith`'s and a savepoint's (D89) among them, and `<Name>PageKey`, `<Name>Page` and `QueryPageOptions[K]` for a paged one. | |
 | `TestQueriesParityOfGoAndTypeScriptOnPostgres` holds the two to the same statements, call by call. | |
 
 Status: built.
@@ -12038,9 +12038,10 @@ Status: built.
   list, an enum-ordered list, budgets with decimals and dates, and the
   transfer candidates as `@query`. `TestRepositoriesOnPostgres/fixture-queries-db`
   (`queries.test.ts`) runs each from TypeScript with typed params and
-  rows, on the pool and in a transaction, and refuses an order no option
-  names before a statement is sent; `TestDeclaredQueriesOnPostgres`
-  (ormgen) runs each from Go; `TestQueriesParityOfGoAndTypeScriptOnPostgres`
+  rows, on the pool and in a transaction, a savepoint nested in one of
+  options (D89) among them, and refuses an order no option names before a
+  statement is sent; `TestDeclaredQueriesOnPostgres` (ormgen) runs each
+  from Go, in `TransactionWith` and a savepoint too; `TestQueriesParityOfGoAndTypeScriptOnPostgres`
   holds the two to one set of statements.
   `TestQueriesVerifyAndARenamedColumn` (cli) verifies the fixture into the
   lock it commits, then renames `line_item.amount`: `check` and `build`

@@ -62,13 +62,14 @@ func (o TxOptions) begin() (string, error) {
 }
 
 // txOf is a Tx over tx, nested depth savepoints deep, with the
-// repositories bound to it.
+// repositories and the declared queries (D86) bound to it.
 func (db *Database) txOf(tx pgx.Tx, depth int) *Tx {
 	wrapped := &Tx{tx: tx, db: db, depth: depth}
 	wrapped.Account = &AccountRepository{tx: tx, txDB: db}
 	wrapped.Category = &CategoryRepository{tx: tx, txDB: db}
 	wrapped.LineItem = &LineItemRepository{tx: tx, txDB: db}
 	wrapped.TransferGroup = &TransferGroupRepository{tx: tx, txDB: db}
+	wrapped.Queries = &Queries{runner: tx}
 	return wrapped
 }
 

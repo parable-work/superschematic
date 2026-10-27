@@ -267,6 +267,23 @@ func TestDeclaredQueriesOnPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// And in a transaction of options and a savepoint nested in it (D89),
+	// whose Tx holds the queries too.
+	err = db.TransactionWith(ctx, TxOptions{ReadOnly: true}, func(tx TxInterface) error {
+		if _, err := tx.GetQueries().Budgets(ctx, types.BudgetsParams{}); err != nil {
+			return err
+		}
+		return tx.Transaction(ctx, func(nested TxInterface) error {
+			rows, err := nested.GetQueries().Budgets(ctx, types.BudgetsParams{ParentId: food.Id})
+			if err == nil && (len(rows) != 1 || rows[0].Id != *groceries.Id) {
+				err = fmt.Errorf("budgets of food in a savepoint = %+v", rows)
+			}
+			return err
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 // TestDeclaredQueriesNoOp: the no-op database's queries read no rows.
