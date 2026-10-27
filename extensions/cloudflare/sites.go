@@ -38,18 +38,27 @@ import (
 //     8.10, each API the site calls with its public address, which the
 //     target composes from names alone (workerPublicAddress), so the graph
 //     carries it and no publish writes it; and SITE_FALLBACK, the fallback's
-//     path in the build, when the site has one.
+//     path in the build, when the site has one;
+//   - for a site with an origin (D91), SITE_ORIGIN, a plain_text binding
+//     with the path of each API of it and how the script reaches the API's
+//     server: a service binding to its Worker, which the version holds
+//     beside it, or for a server of another provider its public address;
+//     and the script first for each API's path, which it forwards there
+//     with the prefix taken off (siteOrigin).
 //
 // A site is always exposed: under a domain at a custom domain,
 // `<label>.<domain>`, in the exposure step, else at workers.dev, which needs
 // the subdomain bootstrap records. Its public address is its origin, which
-// the CORS field of each API it calls lists.
+// the CORS field of each API it calls lists, unless the site serves the
+// API on its own origin.
 
 // Sites serves static sites as Workers with static assets.
 const Sites = "cloudflare.sites"
 
 // SiteConnector derives a site edge to a server on Workers: the server's
-// public address, which the site's config names.
+// public address, which the site's config names, or for an API of the
+// site's origin (D91) its same-origin URL and a service binding to the
+// server's Worker.
 const SiteConnector = "cloudflare.site-workers"
 
 // The script module of a site's Worker, and the bindings it reads.
@@ -58,7 +67,14 @@ const (
 	SiteAssetsBinding   = "ASSETS"
 	SiteConfigBinding   = "SITE_CONFIG"
 	SiteFallbackBinding = "SITE_FALLBACK"
+	SiteOriginBinding   = "SITE_ORIGIN"
 )
+
+// SiteAPIBinding returns the name of the service binding through which a
+// site's Worker forwards the paths of an API of its origin to the API's
+// Worker (D91): SITE_API_ and the API's name in upper snake case
+// (`SITE_API_SHOP_API`).
+func SiteAPIBinding(service string) string { return "SITE_API_" + ir.EnvName(service) }
 
 // The assets' config of a site's version (section 18.8).
 const (
@@ -90,7 +106,9 @@ func sitesPlatform() registry.PlatformSpec {
 		NameOf:          workerName,
 		AddressOf:       workerPublicAddress,
 		PublicAddressOf: workerPublicAddress,
-		Lower:           lowerSite,
+		// The site's script forwards its origin's APIs (D91).
+		ServesOrigin: true,
+		Lower:        lowerSite,
 	}
 }
 
@@ -98,7 +116,10 @@ func sitesPlatform() registry.PlatformSpec {
 // without a domain, whose version serves the site's files with the
 // embedded script, and under a domain its custom domain. A site without a
 // domain needs the account's workers.dev subdomain, which bootstrap
-// records.
+// records. A site with an origin (D91) holds SITE_ORIGIN and a service
+// binding to the Worker of each API of it on Workers, runs its script
+// first for each API's path, and its Worker waits for each Worker it
+// binds, so a destroy removes the site first.
 func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 	d := ctx.Deployable
 	env := ctx.Environment
@@ -124,6 +145,18 @@ func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 	if fallback := d.Site.Fallback; fallback != "" {
 		bindings = append(bindings, map[string]any{"type": bindingPlainText, "name": SiteFallbackBinding, "text": strings.TrimPrefix(path.Clean("/"+fallback), "/")})
 	}
+	workerFirst := []any{siteWorkerFirst}
+	if len(d.Site.Origin) > 0 {
+		origin, services, err := siteOrigin(d)
+		if err != nil {
+			return registry.Lowered{}, err
+		}
+		bindings = append(bindings, map[string]any{"type": bindingPlainText, "name": SiteOriginBinding, "text": origin})
+		bindings = append(bindings, services...)
+		for _, api := range d.Site.Origin {
+			workerFirst = append(workerFirst, api.Path, api.Path+"/*")
+		}
+	}
 	version := map[string]any{
 		"mainModule": SiteModule,
 		"modules": []any{map[string]any{
@@ -137,12 +170,15 @@ func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 			"config": map[string]any{
 				"htmlHandling":     siteHTMLHandling,
 				"notFoundHandling": siteNotFoundHandling,
-				"runWorkerFirst":   []any{siteWorkerFirst},
+				"runWorkerFirst":   workerFirst,
 			},
 		},
 		"bindings": bindings,
 	}
 	out := registry.Lowered{Resources: workerNodes(d, v, workersDev, true, version)}
+	// The site's Worker waits for each API's Worker its service bindings
+	// name, as a server's does (calls.go).
+	out.Resources[0].DependsOn = bindingDependencies(d)
 	if env.Domain != "" {
 		out.Resources = append(out.Resources, customDomain(d, v, env))
 	}
@@ -197,6 +233,74 @@ func siteConfig(d ir.ResolvedDeployable) (any, error) {
 	return join(parts...), nil
 }
 
+// siteOrigin returns the text of a site's SITE_ORIGIN binding and the
+// service bindings it names (D91). The text is a JSON list of the APIs of
+// the site's origin, by service, each with its path and how the site's
+// script reaches it: `binding`, the name of a service binding to its
+// Worker, which the site edge's connector derives
+// (`[{"path":"/api/shop-api","binding":"SITE_API_SHOP_API"}]`); or `url`,
+// the public address of a server on another provider, which the generic
+// connector derives as the upstream, a string or a reference the provider
+// writes in.
+func siteOrigin(d ir.ResolvedDeployable) (any, []any, error) {
+	parts := []any{"["}
+	var services []any
+	for i, api := range d.Site.Origin {
+		var value map[string]any
+		for _, b := range d.Bindings {
+			if b.Field == api.Service {
+				value, _ = b.Value.(map[string]any)
+			}
+		}
+		if i > 0 {
+			parts = append(parts, ",")
+		}
+		apiPath, err := json.Marshal(api.Path)
+		if err != nil {
+			return nil, nil, err
+		}
+		parts = append(parts, `{"path":`+string(apiPath)+`,`)
+		switch {
+		case value["binding"] != nil:
+			binding, err := resourceBinding(api.Service, value)
+			if err != nil {
+				return nil, nil, fmt.Errorf("site %s: %w", d.Name, err)
+			}
+			name, err := json.Marshal(binding["name"])
+			if err != nil {
+				return nil, nil, err
+			}
+			parts = append(parts, `"binding":`+string(name)+`}`)
+			services = append(services, binding)
+		case value["upstream"] != nil:
+			pieces := []any{value["upstream"]}
+			if c, ok := value["upstream"].(ir.Concat); ok {
+				pieces = c
+			}
+			parts = append(parts, `"url":"`)
+			for _, piece := range pieces {
+				switch piece := piece.(type) {
+				case string:
+					quoted, err := json.Marshal(piece)
+					if err != nil {
+						return nil, nil, err
+					}
+					parts = append(parts, string(quoted[1:len(quoted)-1]))
+				case ir.Parameter, ir.Output:
+					parts = append(parts, piece)
+				default:
+					return nil, nil, fmt.Errorf("site %s: the upstream of %s holds %v, not a string or a reference", d.Name, api.Service, piece)
+				}
+			}
+			parts = append(parts, `"}`)
+		default:
+			return nil, nil, fmt.Errorf("site %s serves %s on its origin, and its site edge derives neither a service binding to its Worker nor an upstream to forward to", d.Name, api.Service)
+		}
+	}
+	parts = append(parts, "]")
+	return join(parts...), services, nil
+}
+
 // siteURL is the URL a site edge's derived value gives.
 func siteURL(value any) (any, error) {
 	switch v := value.(type) {
@@ -214,8 +318,23 @@ func siteURL(value any) (any, error) {
 
 // connectSite realizes a site edge to a server on Workers (D55): the
 // site's config holds the server's public address. The server needs no
-// grant: it is exposed, and a browser carries its end user's token.
+// grant: it is exposed, and a browser carries its end user's token. For an
+// API of the site's origin (D91), the config holds the API's path on the
+// site's own origin (ir.SiteOriginURL), and the site's Worker reaches the
+// server's, exposed or not, through a service binding named after the API
+// (SiteAPIBinding), which admits it as a caller's binding does
+// (calls.go). It carries the browser's request, with no service
+// credential: the API answers the end user's.
 func connectSite(ctx registry.ConnectorContext) (registry.Connected, error) {
+	if ctx.From.Site.OriginAPI(ctx.Edge.Service.Name) != nil {
+		return registry.Connected{Value: ir.SiteEndpoint{
+			URL: ir.SiteOriginURL(ctx.From.PublicAddress, ctx.Edge.Service.Name),
+			Binding: &ir.ServiceBinding{
+				Name:   SiteAPIBinding(ctx.Edge.Service.Name),
+				Worker: ir.Output{Resource: workerID(ctx.To.Name), Name: "name"},
+			},
+		}}, nil
+	}
 	return registry.Connected{Value: ir.SiteEndpoint{URL: ctx.To.PublicAddress}}, nil
 }
 

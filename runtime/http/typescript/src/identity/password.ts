@@ -1,5 +1,6 @@
 import * as nodeCrypto from 'node:crypto';
 import { backend } from 'superscalar/backend';
+import { argon2id as portableArgon2id } from './argon2.js';
 import { argon2ParamsProblem, type Argon2Params } from './config.js';
 
 /*
@@ -8,7 +9,8 @@ other's hashes (D50), and Auth.Password's rule, which the catalog scalar
 carries and superscalar's binding checks, so every server and SDK checks one
 rule. The hash is node:crypto's argon2, which Node.js 24.7 and Bun 1.4.2
 have (Bun 1.4.0's throws ERR_CRYPTO_ARGON2_NOT_SUPPORTED); it runs off the
-main thread.
+main thread. Where node:crypto has none, as under workerd, it is ./argon2's,
+which writes the same keys on the calling thread (D92).
 
 A PHC string is read only in the one form this module writes:
 
@@ -42,31 +44,42 @@ interface Argon2Options {
 
 type Argon2 = (algorithm: 'argon2id', options: Argon2Options, callback: (error: Error | null, key: Uint8Array) => void) => void;
 
-/** node:crypto's argon2, which @types/node 22 does not declare. */
-function argon2Of(): Argon2 {
+/** How a runtime derives argon2id's key of a password's UTF-8 bytes at a cost, length bytes long. */
+export type Argon2idDeriver = (password: Uint8Array, salt: Uint8Array, params: Argon2Params, length: number) => Promise<Uint8Array>;
+
+/** node:crypto's argon2, which @types/node 22 does not declare, off the main thread; undefined where node:crypto has none. */
+function nodeArgon2idDeriver(): Argon2idDeriver | undefined {
   const argon2 = (nodeCrypto as unknown as { argon2?: Argon2 }).argon2;
-  if (typeof argon2 !== 'function') {
-    throw new Error('identity: node:crypto has no argon2 here; the identity runtime needs Node.js 24.7 or later, or Bun 1.4.2 or later');
-  }
-  return argon2;
+  if (typeof argon2 !== 'function') return undefined;
+  return (password, salt, params, length) =>
+    new Promise((resolve, reject) => {
+      argon2(
+        'argon2id',
+        { message: password, nonce: salt, parallelism: params.parallelism, tagLength: length, memory: params.memoryKiB, passes: params.iterations },
+        (error, key) => (error ? reject(error) : resolve(key))
+      );
+    });
+}
+
+/** ./argon2's argon2id, on the calling thread, which writes node:crypto's keys (D92). */
+export const portableArgon2idDeriver: Argon2idDeriver = async (password, salt, params, length) =>
+  portableArgon2id({ password, salt, memoryKiB: params.memoryKiB, iterations: params.iterations, parallelism: params.parallelism, tagLength: length });
+
+let deriver: Argon2idDeriver | undefined;
+
+/** The deriver the runtime hashes with: node:crypto's where it has one, else the portable one, as under workerd (D92). */
+export function argon2idDeriver(): Argon2idDeriver {
+  deriver ??= nodeArgon2idDeriver() ?? portableArgon2idDeriver;
+  return deriver;
+}
+
+/** Sets the deriver the runtime hashes with, for a test; undefined goes back to argon2idDeriver's choice. */
+export function setArgon2idDeriver(next: Argon2idDeriver | undefined): void {
+  deriver = next;
 }
 
 function deriveKey(password: string, salt: Uint8Array, params: Argon2Params, length: number): Promise<Uint8Array> {
-  const argon2 = argon2Of();
-  return new Promise((resolve, reject) => {
-    argon2(
-      'argon2id',
-      {
-        message: new TextEncoder().encode(password),
-        nonce: salt,
-        parallelism: params.parallelism,
-        tagLength: length,
-        memory: params.memoryKiB,
-        passes: params.iterations,
-      },
-      (error, key) => (error ? reject(error) : resolve(key))
-    );
-  });
+  return argon2idDeriver()(new TextEncoder().encode(password), salt, params, length);
 }
 
 /**

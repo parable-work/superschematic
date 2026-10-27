@@ -42,7 +42,9 @@ var publicMembers = []string{"allUsers", "allAuthenticatedUsers"}
 // allUsers pass:
 //
 //   - a Cloud Run service of an internal server that takes traffic from
-//     outside, or whose invoker check is off;
+//     outside, or whose invoker check is off. A server a site's origin
+//     serves (D91) may take traffic from load balancers with its check
+//     off, and nothing else from outside;
 //   - a load balancer's address or forwarding rule;
 //   - an IAM grant to allUsers or allAuthenticatedUsers;
 //   - a Cloud SQL instance that authorizes connections from anywhere.
@@ -53,6 +55,12 @@ func checkNothingPublic(env *ir.ResolvedEnvironment) []string {
 			return d != nil && d.Exposed
 		})
 	}
+	inOrigin := func(res *ir.Resource) bool {
+		return slices.ContainsFunc(res.Owners, func(owner string) bool {
+			d := env.Deployable(owner)
+			return d != nil && len(d.Origins) > 0
+		})
+	}
 	var out []string
 	for _, res := range env.Resources.Resources {
 		if exposed(res) {
@@ -61,7 +69,12 @@ func checkNothingPublic(env *ir.ResolvedEnvironment) []string {
 		owners := strings.Join(res.Owners, ", ")
 		switch res.Type {
 		case TypeService:
-			if ingress := res.Properties["ingress"]; ingress != ingressInternal {
+			if ingress := res.Properties["ingress"]; inOrigin(res) {
+				if ingress != ingressLoadBalancer {
+					out = append(out, fmt.Sprintf("Cloud Run service %s of %s takes %v, but %s is reached through a site's origin alone, from its load balancer", res.ID, owners, ingress, owners))
+				}
+				continue
+			} else if ingress != ingressInternal {
 				out = append(out, fmt.Sprintf("Cloud Run service %s of %s takes %v, but %s is not exposed", res.ID, owners, ingress, owners))
 			}
 			if res.Properties["invokerIamDisabled"] == true {

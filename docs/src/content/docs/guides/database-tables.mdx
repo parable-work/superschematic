@@ -374,7 +374,13 @@ it reads.
 service of the stack has a vector column and the environment names no
 `postgresImage`. On Cloud SQL for PostgreSQL, which ships pgvector, the
 migration job creates the extension: its user holds `cloudsqlsuperuser`,
-which may run `CREATE EXTENSION vector`.
+which may run `CREATE EXTENSION vector`. On the cloudflare target a
+Postgres database is outside Cloudflare, on Neon, Supabase, Cloud SQL or
+your own, which Workers reach through Hyperdrive
+([Databases on Hyperdrive](/superschematic/guides/stacks/#databases-on-hyperdrive)):
+the deploy's migration creates the extension there too, as the user the
+origin's connection string names, which those providers let create it,
+and `nearest` runs through Hyperdrive unchanged.
 
 ## Text search
 

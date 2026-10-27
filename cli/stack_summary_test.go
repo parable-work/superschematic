@@ -74,6 +74,28 @@ func TestPrintLocalSummaryNamesADevSite(t *testing.T) {
 	}
 }
 
+// TestPrintLocalSummaryNamesAnOrigin: a site with an origin names the APIs
+// of it under their paths, behind its dev server or its build (D91).
+func TestPrintLocalSummaryNamesAnOrigin(t *testing.T) {
+	origin := []*ir.SiteOriginAPI{{Service: "shop-api", Server: "shop-api", Path: "/api/shop-api"}, {Service: "shop-cart", Server: "shop-cart", Path: "/api/shop-cart"}}
+	env := &ir.ResolvedEnvironment{Stack: "shop-stack", Environment: "Dev", Resources: &ir.ResourceGraph{}, Deployables: []*ir.ResolvedDeployable{
+		{Name: "shop-web", Kind: ir.DeployableSite, PublicAddress: "http://127.0.0.1:20001", Site: &ir.ResolvedSite{Dev: &ir.SiteDevConfig{Command: "dev"}, Origin: origin}},
+	}}
+	for _, tc := range []struct {
+		devSites bool
+		want     string
+	}{
+		{true, "  site     shop-web                 http://127.0.0.1:20001, its dev server (bun run dev) and shop-api, shop-cart under /api/<service>\n"},
+		{false, "  site     shop-web                 http://127.0.0.1:20001, its build and shop-api, shop-cart under /api/<service>\n"},
+	} {
+		var out bytes.Buffer
+		printLocalSummary(&out, env, "/state", tc.devSites)
+		if !strings.Contains(out.String(), tc.want) {
+			t.Errorf("devSites %v: the summary lacks %q:\n%s", tc.devSites, tc.want, out.String())
+		}
+	}
+}
+
 // TestPrintLocalSummaryNamesTheApps: an app's line gives its address and
 // the app class and API it is, or says it is off when the environment
 // turns it off (D78).

@@ -287,7 +287,7 @@ func TestPrepareMigrations(t *testing.T) {
 	}
 	run := f.request(t, "Staging", nil, ir.MigrationExpand).Run
 	log := new(bytes.Buffer)
-	if err := preparer.PrepareMigrations(context.Background(), run, log); err != nil || !strings.Contains(log.String(), "the D1 migrations run "+runnerPath+" on this machine") {
+	if err := preparer.PrepareMigrations(context.Background(), run, log); err != nil || !strings.Contains(log.String(), "the migrations run "+runnerPath+" on this machine") {
 		t.Errorf("PrepareMigrations = %v: %s", err, log)
 	}
 	delete(f.shell, cloudflare.MigrateEnv)

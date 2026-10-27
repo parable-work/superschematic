@@ -270,6 +270,52 @@ func TestSiteProxyServesTheSiteAndItsAPIsOnOneOrigin(t *testing.T) {
 	}
 }
 
+// TestOriginProxyServesAnOriginAndNamesTheOtherAPIs: the proxy of a site's
+// origin (D91) in front of the site's own handler answers the config with
+// shop-api, of its origin, on the page's origin and shop-orders, outside
+// it, at its own URL; forwards shop-api's routes; and leaves shop-orders'
+// path, and the site's, to the handler.
+func TestOriginProxyServesAnOriginAndNamesTheOtherAPIs(t *testing.T) {
+	api, apiSeen := sessionAPI(t)
+	files := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "file "+r.URL.Path)
+	})
+	proxy := httptest.NewServer(local.OriginProxy("shop-web", files, map[string]*url.URL{"shop-api": mustURL(t, api.URL)}, map[string]string{"shop-orders": "https://shop-orders.acme.dev"}))
+	t.Cleanup(proxy.Close)
+	if got, want := httpBody(t, proxy.URL+ir.SiteConfigPath), `{"apis":{"shop-api":{"url":"`+proxy.URL+`/api/shop-api"},"shop-orders":{"url":"https://shop-orders.acme.dev"}}}`; got != want {
+		t.Fatalf("the config = %s, want %s", got, want)
+	}
+	if got := httpBody(t, proxy.URL+"/api/shop-orders/orders"); got != "file /api/shop-orders/orders" {
+		t.Fatalf("shop-orders' path = %q, want the site's handler's", got)
+	}
+	if got := httpBody(t, proxy.URL+"/products/42"); got != "file /products/42" {
+		t.Fatalf("a page = %q, want the site's handler's", got)
+	}
+	resp, err := http.Get(proxy.URL + "/api/shop-api/api/me?x=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if served := apiSeen.last(); resp.StatusCode != http.StatusUnauthorized || served.URL.Path != "/api/me" || served.URL.RawQuery != "x=1" {
+		t.Fatalf("shop-api's route: %d, shop-api saw %s?%s", resp.StatusCode, served.URL.Path, served.URL.RawQuery)
+	}
+}
+
+// httpBody reads the body of a GET of url, whatever its status.
+func httpBody(t *testing.T, url string) string {
+	t.Helper()
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
+}
+
 // TestSiteProxyPassesWebSocketUpgrades: an upgrade to a WebSocket reaches
 // the dev server through the proxy, which answers 101 and then carries the
 // socket's bytes both ways, as a dev server's hot reload needs (D82).

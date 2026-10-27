@@ -4807,6 +4807,25 @@
       ],
       "type": "object"
     },
+    "Origin": {
+      "additionalProperties": false,
+      "properties": {
+        "apis": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ServiceRef"
+          },
+          "type": "array"
+        },
+        "site": {
+          "$ref": "#/$defs/ServiceRef"
+        }
+      },
+      "required": [
+        "site"
+      ],
+      "type": "object"
+    },
     "ProjectionCollapse": {
       "additionalProperties": false,
       "properties": {
@@ -5618,6 +5637,13 @@
           "default": [],
           "items": {
             "$ref": "#/$defs/DeployableRef"
+          },
+          "type": "array"
+        },
+        "origins": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Origin"
           },
           "type": "array"
         }

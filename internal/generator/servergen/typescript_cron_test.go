@@ -273,28 +273,38 @@ func TestTypeScriptCronD1(t *testing.T) {
 }
 
 // TestTypeScriptCronRefusals: a job on Workers whose API's database lists
-// postgres first is refused, since a Worker reaches a database through D1
-// alone, and a worker on a bundle platform is refused, since a worker is a
-// process that claims until it is stopped, which no Worker runs (D64, D53
-// amended).
+// postgres first opens it through Hyperdrive, so its bundle runs with Node's
+// modules, and so does a worker on a bundle platform, whose Workers
+// entrypoint is drain.ts; a worker on Workers over a database that lists
+// sqlite first is refused, since its claims run on Postgres alone there
+// (D92, D53 amended).
 func TestTypeScriptCronRefusals(t *testing.T) {
 	in := cronInput(t, func(o *tsrestgen.APIOutput, c *envgen.ConfigOutput) {
 		o.Deps.Database = "shop-db"
 		c.Derived = append(c.Derived, envgen.DerivedField{Key: "SHOP_DB_DATABASE", Kind: ir.EdgeSQL, Service: "shop-db"})
 	})
-	want := "stack edge-stack: job shop-api-reindex of shop-api, whose database shop-db lists postgres first, runs on Cloudflare's Cron Triggers in an environment, which reaches a database through a D1 binding alone"
-	if _, err := servergen.PlanTypeScript(in); err == nil || !strings.Contains(err.Error(), want) {
-		t.Errorf("PlanTypeScript = %v, want it to say %q", err, want)
+	s, err := servergen.PlanTypeScript(in)
+	if err != nil || len(s.PostgresDatabases()) != 1 || !s.NodeCompat() || s.BundleEntry() != servergen.TypeScriptScheduledFile {
+		t.Errorf("a job on Workers over a Postgres database = %+v, %v; want it planned through Hyperdrive, with Node's modules", s, err)
 	}
-	in = cronInput(t, func(o *tsrestgen.APIOutput, _ *envgen.ConfigOutput) {
-		o.Workers = []tsrestgen.WorkerInfo{{Name: "Remind", Method: "remind", Queue: "CartAbandoned"}}
-		o.Deps.Database = "shop-db"
-		o.Deps.DatabaseTypesPackage = "@schemas/shop-db-types"
-	})
-	in.Job = nil
-	in.Worker = &servergen.WorkerInput{Name: "Remind"}
-	want = "stack edge-stack: worker shop-api-reindex runs on a platform whose artifact is a bundle, and a Workers entrypoint is built for a server or a job alone"
-	if _, err := servergen.PlanTypeScript(in); err == nil || !strings.Contains(err.Error(), want) {
+	worker := func(dialect string) servergen.TypeScriptInput {
+		in := cronInput(t, func(o *tsrestgen.APIOutput, c *envgen.ConfigOutput) {
+			o.Workers = []tsrestgen.WorkerInfo{{Name: "Remind", Method: "remind", Queue: "CartAbandoned"}}
+			o.Deps.Database = "shop-db"
+			o.Deps.Dialect = dialect
+			o.Deps.DatabaseTypesPackage = "@schemas/shop-db-types"
+			c.Derived = append(c.Derived, envgen.DerivedField{Key: "SHOP_DB_DATABASE", Kind: ir.EdgeSQL, Service: "shop-db"})
+		})
+		in.Job = nil
+		in.Worker = &servergen.WorkerInput{Name: "Remind"}
+		return in
+	}
+	s, err = servergen.PlanTypeScript(worker(""))
+	if err != nil || !s.NodeCompat() || s.BundleEntry() != servergen.TypeScriptDrainFile {
+		t.Errorf("a worker on Workers over a Postgres database = %+v, %v; want drain.ts, with Node's modules", s, err)
+	}
+	want := "stack edge-stack: worker shop-api-reindex of shop-api claims the queue of shop-db, which lists sqlite first, and an environment places the worker on Cloudflare Workers, whose drain.ts claims on Postgres through Hyperdrive alone"
+	if _, err := servergen.PlanTypeScript(worker("sqlite")); err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("PlanTypeScript = %v, want it to say %q", err, want)
 	}
 }

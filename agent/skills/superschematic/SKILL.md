@@ -114,8 +114,11 @@ path for when the store is unavailable.
    whole stack locally, with Postgres in Docker and migrations applied. A
    site whose config names `site.dev` runs its dev server there, with its
    APIs under `/api/<service>` on the site's origin; `--build-sites`
-   builds it as a deploy does. Run the language's own tests against the
-   generated SDKs.
+   builds it as a deploy does. For a deploy to serve a site and its APIs
+   on one origin too, as a cookie session wants, add `origins: [{ site,
+   apis }]` to `@stack` rather than setting `trustedOrigins`, CORS or
+   `cookie.domain`. Run the language's own tests against the generated
+   SDKs.
 7. **Changing a table that holds data?** `superschematic migrate plan
    schemas/services/<db> --from-ref origin/main` plans expand and contract
    steps with their hazards. Show the hazards to the user.
@@ -251,6 +254,17 @@ APIs exist, `superschematic stack init` writes the Stack service.
 set`, `stack deploy` and `stack destroy` act on cloud accounts and cost
 money. Run `stack plan <environment>` and show it to the user, and run
 those commands only when the user asks for that environment.
+
+On the cloudflare target, a DB service that lists `postgres` first is a
+Postgres outside Cloudflare (Neon, Supabase, Cloud SQL) that Workers reach
+through a Hyperdrive config: the user makes the config, names its id in
+the environment's `settings` (`{ of: FinancesDb, hyperdrive: "<id>" }`),
+and keeps the database's connection string in `HYPERDRIVE_ORIGIN_<DB>`
+for the deploy's migration. Don't make the config or handle the
+connection string yourself. Queue workers there must be TypeScript; each
+drains its queue once a minute under a Cron Trigger. An API over the user
+model signs users in there when its `authDb` is that Postgres; each
+password hash takes about 120 ms of CPU, so it needs Workers Paid.
 
 ## Reference
 

@@ -168,6 +168,29 @@ function openDatabase(service: string, field: string, db: DatabaseConnection): S
 }
 {{- end }}
 
+{{- define "ts-hyperdrive" -}}
+/**
+ * The pool of the database field named field, whose DB service lists
+ * postgres first: over the hyperdrive binding its value names, which the
+ * Worker's platform writes beside the field's variables (D92). It connects
+ * within a scope withHyperdrive runs alone, a request or a firing, and the
+ * scope's end ends its connections. A connection string, a Cloud SQL
+ * configuration and a D1 binding are refused: a Worker reaches a Postgres
+ * database through Hyperdrive alone.
+ */
+function hyperdriveDatabase(service: string, field: string, db: DatabaseConnection): Pool {
+  if (!('hyperdrive' in db)) {
+    const what = 'url' in db ? 'a connection string' : 'cloudSql' in db ? 'a Cloud SQL connector configuration' : 'a D1 binding';
+    throw new Error(
+      `${field} is ${what}, and a Worker reaches database ${service} through a Hyperdrive binding alone: set ${field}_HYPERDRIVE_BINDING and ${field}_HYPERDRIVE_CONFIG`
+    );
+  }
+  return hyperdrivePool(binding(env, db.hyperdrive.binding, 'hyperdrive'), {
+    onIdleError: error => logger.warn('an idle database connection failed', { database: service, error }),
+  });
+}
+{{- end }}
+
 {{- define "ts-loopback" }}
 {{- if .Loopback }}
 

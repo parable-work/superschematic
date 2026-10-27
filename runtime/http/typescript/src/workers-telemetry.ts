@@ -1,8 +1,8 @@
 /*
-OpenTelemetry trace export for a stack's TypeScript server or job on
-Cloudflare Workers (D67, D64 amended; section 18.5 of
+OpenTelemetry trace export for a stack's TypeScript server, job or worker
+on Cloudflare Workers (D67, D64 amended, D92; section 18.5 of
 docs/stack-model.md), the runtime's ./workers-telemetry entry, the twin of
-./telemetry on Bun. The generated fetch.ts and scheduled.ts call
+./telemetry on Bun. The generated fetch.ts, scheduled.ts and drain.ts call
 startWorkersTelemetry once per isolate, at module scope, with the Worker's
 env, and everything else comes from OpenTelemetry's own variables, which a
 Worker reads as its string bindings:
@@ -53,9 +53,10 @@ import {
   type TelemetryConfig,
   type TelemetryDefaults,
   type TelemetryEnv,
+  type TracedMessage,
 } from './telemetry-core.js';
 
-export { JOB_ATTRIBUTE, KIND_ATTRIBUTE, OTLP_PROTOCOL, type Fetch, type TelemetryDefaults } from './telemetry-core.js';
+export { JOB_ATTRIBUTE, KIND_ATTRIBUTE, OTLP_PROTOCOL, type Fetch, type TelemetryDefaults, type TracedMessage } from './telemetry-core.js';
 
 /** The compatibility flag a Worker that bundles this entry runs under: AsyncLocalStorage, and no more of Node. */
 export const WORKERS_COMPATIBILITY_FLAG = 'nodejs_als';
@@ -76,6 +77,8 @@ export interface WorkersTelemetry {
   traced(base: Fetch): Fetch;
   /** Runs a job's method in a span named after its @job class. */
   job<T>(name: string, run: () => Promise<T>): Promise<T>;
+  /** Runs a worker's handler on a message of queue in a span, process <queue>, as ./telemetry's does (D92). */
+  message<T>(queue: string, message: TracedMessage, handle: () => Promise<T>): Promise<T>;
   /** Sends the spans ended since the last flush; never throws. */
   flush(): Promise<void>;
 }
@@ -86,6 +89,7 @@ const off: WorkersTelemetry = {
   middleware: () => (_c, next) => next(),
   traced: base => base,
   job: (_name, run) => run(),
+  message: (_queue, _message, handle) => handle(),
   flush: async () => undefined,
 };
 
@@ -115,7 +119,7 @@ export function startWorkersTelemetry(env: Readonly<Record<string, unknown>>, de
   });
   const hooks = installTelemetry(provider, new StorageContextManager(), config);
   logger?.info('exporting traces', { endpoint: loggedEndpoint(config.endpoint), protocol: OTLP_PROTOCOL });
-  return { enabled: true, middleware: hooks.middleware, traced: hooks.traced, job: hooks.job, flush: () => processor.forceFlush() };
+  return { enabled: true, middleware: hooks.middleware, traced: hooks.traced, job: hooks.job, message: hooks.message, flush: () => processor.forceFlush() };
 }
 
 /** The string bindings of env, as the variables OpenTelemetry reads. */

@@ -20,6 +20,9 @@ import (
 // page and the APIs share one origin, so a session cookie, SameSite=Lax or
 // Strict, travels with each call, and the identity runtime's cross-origin
 // check sees a same-origin request: no CORS and no trusted origin to set.
+// A site with an origin (D91) is served from the same proxy, OriginProxy,
+// in front of its dev server or its build, with its origin's APIs alone,
+// as a deploy serves them.
 
 // SiteProxy returns the handler of a site's origin under stack dev (D82):
 //
@@ -39,7 +42,21 @@ import (
 // Answers stream as they come, so a server-sent stream reaches the page as
 // it is written. An upstream that does not answer is 502, naming it.
 func SiteProxy(site string, dev *url.URL, apis map[string]*url.URL) http.Handler {
-	toDev := devProxy(site, dev)
+	return OriginProxy(site, devProxy(site, dev), apis, nil)
+}
+
+// OriginProxy returns the handler of a site's origin in front of next,
+// which serves the site itself, its dev server's proxy (SiteProxy, D82) or
+// its build's file server (SiteHandler) for a site with an origin (D91):
+//
+//   - GET or HEAD of ir.SiteConfigPath answers the site's config,
+//     uncached: each API of apis on the origin the request names
+//     (http://<Host>/api/<service>), and each API of direct at the URL it
+//     maps to, its own, which answers CORS for the site;
+//   - /api/<service> and every path under it, for a service in apis,
+//     reaches the API's server at apis[service] as SiteProxy says;
+//   - any other path reaches next.
+func OriginProxy(site string, next http.Handler, apis map[string]*url.URL, direct map[string]string) http.Handler {
 	toAPI := make(map[string]http.Handler, len(apis))
 	for service, target := range apis {
 		toAPI[service] = apiProxy(site, service, target)
@@ -49,7 +66,7 @@ func SiteProxy(site string, dev *url.URL, apis map[string]*url.URL) http.Handler
 	// dot segment.
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == ir.SiteConfigPath {
-			serveSiteDevConfig(w, r, apis)
+			serveSiteDevConfig(w, r, apis, direct)
 			return
 		}
 		if rest, ok := strings.CutPrefix(r.URL.Path, ir.SiteDevAPIPrefix); ok {
@@ -59,18 +76,18 @@ func SiteProxy(site string, dev *url.URL, apis map[string]*url.URL) http.Handler
 				return
 			}
 		}
-		toDev.ServeHTTP(w, r)
+		next.ServeHTTP(w, r)
 	})
 }
 
 // serveSiteDevConfig answers a GET or HEAD of the site's config.
-func serveSiteDevConfig(w http.ResponseWriter, r *http.Request, apis map[string]*url.URL) {
+func serveSiteDevConfig(w http.ResponseWriter, r *http.Request, apis map[string]*url.URL, direct map[string]string) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	body, err := siteDevConfig(r.Host, apis)
+	body, err := siteDevConfig(r.Host, apis, direct)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -83,9 +100,10 @@ func serveSiteDevConfig(w http.ResponseWriter, r *http.Request, apis map[string]
 	}
 }
 
-// siteDevConfig is the config the proxy serves a page on host: each API at
-// the path the proxy serves it under, on the page's own origin.
-func siteDevConfig(host string, apis map[string]*url.URL) ([]byte, error) {
+// siteDevConfig is the config the proxy serves a page on host: each API of
+// apis at the path the proxy serves it under, on the page's own origin,
+// and each API of direct at its own URL.
+func siteDevConfig(host string, apis map[string]*url.URL, direct map[string]string) ([]byte, error) {
 	if host == "" {
 		return nil, fmt.Errorf("the request names no host, which the APIs' URLs are on")
 	}
@@ -95,6 +113,9 @@ func siteDevConfig(host string, apis map[string]*url.URL) ([]byte, error) {
 	}
 	sort.Strings(names)
 	config := map[string]map[string]map[string]string{"apis": {}}
+	for service, u := range direct {
+		config["apis"][service] = map[string]string{"url": u}
+	}
 	for _, service := range names {
 		config["apis"][service] = map[string]string{"url": "http://" + host + ir.SiteDevAPIPath(service)}
 	}

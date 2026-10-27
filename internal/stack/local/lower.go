@@ -988,13 +988,18 @@ func SiteDevPort(env registry.StackEnvironment, d ir.ResolvedDeployable) int {
 // derives. The provisioner builds it once and serves it until the
 // environment stops. A site with a dev server (D82) holds its command and
 // the port it listens on too: the provisioner runs it in place of the
-// build, and serves the site's port from a proxy in front of it.
+// build, and serves the site's port from a proxy in front of it. A site
+// with an origin (D91) holds the loopback URL of each API of it, the
+// upstream its site edge derives, which the provisioner's proxy serves
+// under the API's path, in front of the site's dev server or its build;
+// the config names the API on the site's own origin.
 func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 	d := ctx.Deployable
 	if d.Site == nil {
 		return registry.Lowered{}, fmt.Errorf("site %s says nothing of how it builds", d.Name)
 	}
 	apis := map[string]any{}
+	origin := map[string]any{}
 	for _, b := range d.Bindings {
 		value, _ := b.Value.(map[string]any)
 		url, ok := value["url"].(string)
@@ -1002,6 +1007,14 @@ func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 			return registry.Lowered{}, fmt.Errorf("site %s: binding %s holds no URL of the local target's", d.Name, b.Field)
 		}
 		apis[b.Field] = map[string]any{"url": url}
+		if d.Site.OriginAPI(b.Field) == nil {
+			continue
+		}
+		upstream, ok := value["upstream"].(string)
+		if !ok {
+			return registry.Lowered{}, fmt.Errorf("site %s: binding %s holds no loopback URL of %s for the site's origin to forward to", d.Name, b.Field, b.Field)
+		}
+		origin[b.Field] = upstream
 	}
 	props := map[string]any{
 		"name":   d.ResourceName,
@@ -1010,6 +1023,9 @@ func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 		"output": d.Site.Output,
 		"port":   ServerPort(ctx.Environment, d),
 		"config": map[string]any{"apis": apis},
+	}
+	if len(origin) > 0 {
+		props["origin"] = origin
 	}
 	if d.Site.Fallback != "" {
 		props["fallback"] = d.Site.Fallback
@@ -1031,7 +1047,13 @@ func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 // connectSite derives the public address of the server whose API a site
 // calls: on this machine, its loopback URL (D55). The edge needs no
 // resource: the server answers the site's origin through its CORS field.
+// For an API of the site's origin (D91) the page's URL is on the site's own
+// origin (ir.SiteOriginURL), and the server's loopback URL, exposed or
+// not, is the upstream the site's proxy forwards to.
 func connectSite(ctx registry.ConnectorContext) (registry.Connected, error) {
+	if ctx.From.Site.OriginAPI(ctx.Edge.Service.Name) != nil {
+		return registry.Connected{Value: ir.SiteEndpoint{URL: ir.SiteOriginURL(ctx.From.PublicAddress, ctx.Edge.Service.Name), Upstream: ctx.To.Address}}, nil
+	}
 	return registry.Connected{Value: ir.SiteEndpoint{URL: ctx.To.PublicAddress}}, nil
 }
 

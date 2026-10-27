@@ -72,6 +72,12 @@ const (
 // (docs/stack-model.md, section 18.9, D64).
 const TypeScriptScheduledFile = "scheduled.ts"
 
+// TypeScriptDrainFile is the Workers entrypoint of a TypeScript worker some
+// environment places on Cloudflare Workers, under a Cron Trigger every
+// minute, which its package holds beside main.ts, and which its bundle.ts
+// bundles (D92).
+const TypeScriptDrainFile = "drain.ts"
+
 // The versions of the third-party packages main.ts imports beside Hono,
 // which the API packages pin: pg, within the HTTP runtime's and the API
 // packages' peer range, and the Cloud SQL Node connector the runtime's
@@ -217,7 +223,7 @@ type TypeScriptInput struct {
 	// on a platform whose artifact is a bundle, Cloudflare Workers (D64):
 	// its package gets fetch.ts and bundle.ts beside main.ts, which stack
 	// dev still runs on Bun; a job's gets scheduled.ts in place of
-	// fetch.ts, for Cron Triggers.
+	// fetch.ts, for Cron Triggers, and a worker's drain.ts (D92).
 	Workers bool
 
 	// Runner, when set, plans the entrypoint of an engine's runner (D58):
@@ -261,8 +267,10 @@ type TypeScriptServer struct {
 
 	// Workers is true for a server some environment places on Cloudflare
 	// Workers, whose package holds fetch.ts and bundle.ts beside main.ts,
-	// and for a job some environment places on Cron Triggers, whose
-	// package holds scheduled.ts and bundle.ts (D64).
+	// for a job some environment places on Cron Triggers, whose package
+	// holds scheduled.ts and bundle.ts (D64), and for a worker some
+	// environment places on Workers, whose package holds drain.ts and
+	// bundle.ts (D92).
 	Workers bool
 
 	// Runner is what an engine's runner's entrypoint runs, nil for every
@@ -636,6 +644,9 @@ var tsReserved = []string{
 	// scheduled.ts's, a job's on Cron Triggers (D64).
 	"ScheduledController", "TIMEOUT_MS", "TRIES", "tryOnce", "untilAborted", "controller", "attempt", "last",
 	"timer", "deadline", "failure",
+	// A database on Hyperdrive's, and drain.ts's, a worker's on Workers (D92).
+	"hyperdrivePool", "withHyperdrive", "hyperdriveDatabase", "pingPool", "respond", "GRACE_MS",
+	"drainSeconds", "workerDrainSeconds",
 	"openEngineInBackground", "engineApp", "engineMcp", "engineRouteSpecs", "AsyncEngine", "EngineBackground",
 	"EngineHttpOptions", "EngineOptions", "Principal", "Logger", "cloudSqlSocket", "loadDatabase",
 	"openEngine", "engineURL", "deployEngine", "startRunner", "engineReady", "mountEngine", "engineStreams", "engines",
@@ -738,11 +749,12 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 	}
 	background := s.Background()
 	if in.Workers {
-		// A server's Workers entrypoint is fetch.ts and a job's
-		// scheduled.ts; a worker is a process that claims until it is
-		// stopped, which no Worker runs (D53, amended, D64).
-		if s.Worker != nil || s.Deriver != nil {
-			return nil, fmt.Errorf("stack %s: %s %s runs on a platform whose artifact is a bundle, and a Workers entrypoint is built for a server or a job alone (D64)", in.Stack, s.Kind, in.Server)
+		// A server's Workers entrypoint is fetch.ts, a job's scheduled.ts
+		// and a worker's drain.ts, which claims for a window at each firing
+		// of a Cron Trigger (D92); a deriver fills its fields in a loop
+		// over the engine, a native addon no Worker loads (D74).
+		if s.Deriver != nil {
+			return nil, fmt.Errorf("stack %s: %s %s runs on a platform whose artifact is a bundle, and a Workers entrypoint is built for a server, a job or a worker alone (D64, D92)", in.Stack, s.Kind, in.Server)
 		}
 		s.Workers = true
 	}
@@ -812,9 +824,6 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 		if o.HasManualRoutes() && !background {
 			api.ManualRoutes = taken.take(stem + "ManualRoutes")
 		}
-		if o.Identity != nil && s.Workers {
-			return nil, fmt.Errorf("stack %s: server %s serves %s, which authenticates with the identity runtime over the user model (D50), and an environment places the server on Cloudflare Workers, where the identity runtime does not run: it hashes passwords with node:crypto's argon2 (D64)", in.Stack, in.Server, o.SchemaName)
-		}
 		if o.Identity != nil && !background {
 			api.Identity = taken.take(stem + "Identity")
 			api.IdentityField = ir.IdentityConfigField(o.SchemaName)
@@ -833,11 +842,11 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 		if a.Routes != nil && a.Routes.Engine != nil && s.Workers {
 			return nil, fmt.Errorf("stack %s: %s %s serves %s, whose database %s is an engine database whose engine the entrypoint opens (D58), and an environment places the %s on a platform whose artifact is a bundle, Cloudflare Workers, which cannot load the engine: it is a native addon, the Rust engine through Node-API (D64); place the %s on a platform that builds an image", in.Stack, s.Kind, in.Server, o.SchemaName, a.Routes.Engine.Database, s.Kind, s.Kind)
 		}
-		if db := o.Deps.Database; db != "" && s.Workers && !o.DepsSQLite() && s.Job != nil {
-			return nil, fmt.Errorf("stack %s: job %s of %s, whose database %s lists postgres first, runs on Cloudflare's Cron Triggers in an environment, which reaches a database through a D1 binding alone; list sqlite first in %s's outputs.sql.dialects, so Deps.db is a SqlDatabase (D64)", in.Stack, in.Server, o.SchemaName, db, db)
-		}
-		if db := o.Deps.Database; db != "" && s.Workers && !o.DepsSQLite() {
-			return nil, fmt.Errorf("stack %s: server %s serves %s, whose database %s lists postgres first, and an environment places the server on Cloudflare Workers, which reaches a database through a D1 binding alone; list sqlite first in %s's outputs.sql.dialects, so Deps.db is a SqlDatabase (D64)", in.Stack, in.Server, o.SchemaName, db, db)
+		if db := o.Deps.Database; db != "" && s.Workers && o.DepsSQLite() && s.Worker != nil {
+			// A worker on Workers claims on Postgres through Hyperdrive; D1
+			// is reached through a binding, and no claim loop runs on it
+			// (D53, amended, D92).
+			return nil, fmt.Errorf("stack %s: worker %s of %s claims the queue of %s, which lists sqlite first, and an environment places the worker on Cloudflare Workers, whose drain.ts claims on Postgres through Hyperdrive alone; list postgres first in %s's outputs.sql.dialects, or place the worker where a SQLite file is its database, as under stack dev (D92)", in.Stack, in.Server, o.SchemaName, db, db)
 		}
 		if db := o.Deps.Database; db != "" {
 			d := databases[db]
@@ -1174,12 +1183,49 @@ func (s *TypeScriptServer) SQLiteDatabases() []*TypeScriptDatabase {
 }
 
 // BundleEntry is the module a Workers server's bundle.ts bundles: its
-// fetch.ts, or a job's scheduled.ts (D64).
+// fetch.ts, a job's scheduled.ts (D64), or a worker's drain.ts (D92).
 func (s *TypeScriptServer) BundleEntry() string {
-	if s.Job != nil {
+	switch {
+	case s.Job != nil:
 		return TypeScriptScheduledFile
+	case s.Worker != nil:
+		return TypeScriptDrainFile
 	}
 	return TypeScriptFetchFile
+}
+
+// NodeCompat reports whether the Workers bundle runs with Node's modules:
+// it opens a Postgres database through Hyperdrive with node-postgres, which
+// imports them (D92), so bundle.ts keeps them external.
+func (s *TypeScriptServer) NodeCompat() bool {
+	return s.Workers && len(s.PostgresDatabases()) > 0
+}
+
+// DrainSeconds is how long each firing of a worker's drain.ts claims unless
+// its Worker's WORKER_DRAIN_SECONDS binding says otherwise (D92).
+func (s *TypeScriptServer) DrainSeconds() int { return ir.DefaultWorkerDrainSeconds }
+
+// WorkersRuntimeImports are the names a Workers entrypoint imports from the
+// HTTP runtime's main entry: main.ts's, with a Postgres database's
+// connection read as any DatabaseConnection, which a Hyperdrive binding is
+// (D92), in place of the Database a pool opens over, and the string
+// bindings' type for an identity config.
+func (s *TypeScriptServer) WorkersRuntimeImports() []string {
+	var out []string
+	for _, name := range s.RuntimeImports() {
+		if name == "type Database" {
+			name = "type DatabaseConnection"
+		}
+		if !slices.Contains(out, name) {
+			out = append(out, name)
+		}
+	}
+	if s.Identity() {
+		// identityConfig reads the identity config field from the string
+		// bindings (D92).
+		out = append(out, "type StackEnv")
+	}
+	return out
 }
 
 // WorkflowClass is the class a job's scheduled.ts exports, which the
@@ -1195,9 +1241,11 @@ func (s *TypeScriptServer) APIsWithConfig() bool {
 }
 
 // ReadsBindings reports whether fetch.ts reads the Worker's string and
-// secret bindings when it builds the server: for an API's config, or the
-// origins its CORS field lists.
-func (s *TypeScriptServer) ReadsBindings() bool { return s.APIsWithConfig() || s.AnyCORS() }
+// secret bindings when it builds the server: for an API's config, the
+// origins its CORS field lists, or its identity config (D92).
+func (s *TypeScriptServer) ReadsBindings() bool {
+	return s.APIsWithConfig() || s.AnyCORS() || s.Identity()
+}
 
 // SecretBindings are the Secret<T> fields of every API's config, sorted:
 // the Secrets Store secret bindings fetch.ts awaits once per isolate
@@ -1233,17 +1281,19 @@ func (s *TypeScriptServer) CallsInProcess() bool {
 // database.
 func (s *TypeScriptServer) WorkersImports() []string {
 	var out []string
-	if s.BindsServices() || len(s.Buckets) > 0 || len(s.SQLiteDatabases()) > 0 {
+	if s.BindsServices() || len(s.Buckets) > 0 || len(s.Databases) > 0 {
 		out = append(out, "binding")
 	}
-	if s.Job == nil {
-		// A job's scheduled.ts builds per run and serves no request.
+	if s.Job == nil && s.Worker == nil {
+		// A job's scheduled.ts and a worker's drain.ts build per firing and
+		// serve no request.
 		out = append(out, "perIsolate", "requestIP")
 	}
 	if s.BindsServices() {
 		out = append(out, "serviceFetch")
 	}
-	if s.ReadsBindings() {
+	if s.ReadsBindings() || s.Worker != nil {
+		// drain.ts reads its concurrency and its window from the bindings.
 		out = append(out, "stackEnvOf")
 	}
 	if len(s.SecretBindings()) > 0 {
@@ -1521,7 +1571,8 @@ func ImplementationPackage(n naming.Naming, service, dir string) (string, error)
 // Workers entrypoint, bundle.ts, which bundles it, and workers.d.ts,
 // which declares the cloudflare:workers module fetch.ts imports; a job
 // some environment places on Cron Triggers gets scheduled.ts in place of
-// fetch.ts (D64).
+// fetch.ts (D64), and a worker some environment places on Workers drain.ts
+// (D92).
 func WriteTypeScript(s *TypeScriptServer, dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("servergen: %w", err)
@@ -1549,6 +1600,14 @@ func WriteTypeScript(s *TypeScriptServer, dir string) error {
 		// A job's Workers entrypoint runs on its Cron Trigger (D64).
 		files = append(files,
 			struct{ template, name string }{"scheduled.ts.tmpl", TypeScriptScheduledFile},
+			struct{ template, name string }{"bundle.ts.tmpl", TypeScriptBundleFile},
+			struct{ template, name string }{"workers.d.ts.tmpl", TypeScriptWorkersTypesFile},
+		)
+	} else if s.Workers && s.Worker != nil {
+		// A worker's claims for a window at each firing of its Cron
+		// Trigger (D92).
+		files = append(files,
+			struct{ template, name string }{"drain.ts.tmpl", TypeScriptDrainFile},
 			struct{ template, name string }{"bundle.ts.tmpl", TypeScriptBundleFile},
 			struct{ template, name string }{"workers.d.ts.tmpl", TypeScriptWorkersTypesFile},
 		)
