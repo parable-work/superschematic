@@ -917,6 +917,9 @@ func (r *run) mount(e *engine.Engine, prefix, kind string, options *object) *mou
 		handlerOptions.MCP.ServerInfo = &engine.ServerInfo{Name: textOf(member(server, "name")), Version: textOf(member(server, "version"))}
 	}
 	handlerOptions.MCP.Instructions = textOf(member(options, "instructions"))
+	if honors, ok := member(options, "actingFor").(bool); ok && honors {
+		handlerOptions.ActingFor = enginehttp.HonorActingFor
+	}
 	if limit, ok := integer(member(options, "bodyLimitBytes")); ok {
 		handlerOptions.BodyLimitBytes = limit
 	}

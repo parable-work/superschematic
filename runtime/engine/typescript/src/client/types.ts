@@ -147,6 +147,8 @@ export interface EngineEvent {
   actor: string;
   /** The deployable of the service whose call made the change (D37). */
   service?: string;
+  /** The subject the principal that made the change acted for (D77). */
+  for?: string;
   at: number;
   /**
    * The instance for a create, `{ data, behaviors }`; a merge patch of that

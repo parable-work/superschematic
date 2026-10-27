@@ -31,6 +31,13 @@ With the runtime's `authenticateService`, a calling service is verified
 on every route and reaches the engine beside the end user, or standing in
 for one (callers.ts, D37).
 
+With `actingFor`, the routes honor the `Acting-For` request header (D77):
+its value is the subject the caller acts for, which the engine's principal
+carries as `actingFor` and every event it writes records as `for`. The
+default, false, ignores the header: a request that carries it is answered
+as if it did not. true honors it for any caller the runtime authenticated,
+and the access policy decides; a function decides per request.
+
 With `identity`, the HTTP runtime's identity service (identity.ts, D50),
 the service authenticates every route in place of `authenticate`, which is
 refused beside it, its credentialed CORS answers the trusted origins on
@@ -41,6 +48,8 @@ administration routes under /auth/admin when the store has roles.
 */
 
 import type { RouterRuntimeOptions } from '@superschematic/http-runtime/hono';
+
+import type { Principal } from '../access.js';
 import type { IdentityService } from '@superschematic/http-runtime/identity';
 import type { Hono } from 'hono';
 
@@ -89,7 +98,24 @@ export interface EngineHttpOptions extends RouterRuntimeOptions {
    * openEngineAsync serves without one.
    */
   tools?: ToolFilter;
+  /**
+   * Whether the routes honor the Acting-For header (D77), whose value is the
+   * subject the caller acts for: false (the default) ignores it, true
+   * honors it for any authenticated caller and leaves the rest to the
+   * access policy, and a function decides per request, given the engine's
+   * principal for the caller, the subject and the request.
+   */
+  actingFor?: ActingForOption;
 }
+
+/**
+ * Whether a mount honors the Acting-For header (D77): false ignores it, true
+ * honors it, and a function decides per request.
+ */
+export type ActingForOption = boolean | ((principal: Principal, subject: string, request: Request) => boolean | Promise<boolean>);
+
+/** The request header that names the subject a caller acts for (D77). */
+export const ACTING_FOR_HEADER = 'Acting-For';
 
 /** The media type of a JSON body. */
 export const JSON_MEDIA_TYPE = 'application/json';

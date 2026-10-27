@@ -1474,6 +1474,7 @@ fn event_of(value: &Value) -> EngineEvent {
         version: value["version"].as_i64(),
         actor: value["actor"].as_str().unwrap_or_default().to_owned(),
         service: None,
+        for_subject: None,
         at: value["at"].as_i64().unwrap_or_default(),
         change: value["change"].clone(),
         cause: None,

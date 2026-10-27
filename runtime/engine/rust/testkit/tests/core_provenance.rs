@@ -193,6 +193,60 @@ fn a_callers_write_and_another_behaviors_are_recorded_by_source_principal_and_co
 }
 
 #[test]
+fn a_write_acting_for_a_subject_records_for_beside_by() {
+    for target in targets("a_write_acting_for_a_subject_records_for") {
+        let engine = opened(
+            &target,
+            &[
+                derived(),
+                provenance(),
+                json!({"name": "Workflow", "config": flow()}),
+            ],
+        );
+        // An agent acting for bob (D77): Provenance records both.
+        let agent = Principal::new("agent:triage", Vec::<String>::new()).acting_for("bob");
+        engine
+            .instances()
+            .update(
+                &agent,
+                "Ticket",
+                "t1",
+                &json!({"body": "Refused twice."}),
+                WriteOptions::default(),
+            )
+            .expect("update");
+        let fields = records(&engine);
+        assert_eq!(
+            fields["body"],
+            json!({"source": "caller", "by": "agent:triage", "for": "bob", "at": 1_000_000})
+        );
+        assert_eq!(
+            fields["subject"],
+            json!({"source": "caller", "by": "alice", "at": 1_000_000}),
+            "a write acting for no one records no for"
+        );
+        // A reviewer's reject acting for someone records it too.
+        settle(&engine, &[("priority", "high", 0.5)]);
+        invoke(
+            &engine,
+            &Principal::new("rae", ["tickets.review"]).acting_for("lead"),
+            "reject",
+            json!({"fields": ["priority"]}),
+        )
+        .expect("reject");
+        let priority = &records(&engine)["priority"];
+        assert_eq!(
+            (
+                &priority["by"],
+                &priority["for"],
+                &priority["review"]["state"]
+            ),
+            (&json!("rae"), &json!("lead"), &json!("rejected"))
+        );
+    }
+}
+
+#[test]
 fn a_sources_write_is_proposed_below_the_threshold_accepted_at_it_and_a_list_filters_on_in_review()
 {
     for target in targets("a_sources_write_is_proposed_below_the_threshold") {

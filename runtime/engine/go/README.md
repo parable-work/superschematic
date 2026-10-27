@@ -163,6 +163,7 @@ the event stream's frames, and MCP's JSON-RPC.
 | `Stream`, `MCP` | The event stream's page size and heartbeat; the MCP endpoint's server info and instructions. |
 | `Serve` | `ServeAll` (the default), `ServeAPI` or `ServeMCP`. |
 | `Done` | Closed when the host stops serving: every event stream ends then, so a server's shutdown waits for none (`http.Server.RegisterOnShutdown`). |
+| `ActingFor` | Whether a request's `Acting-For` header is honored (D77): given the engine's principal for the caller, the subject and the request. Nil, the default, ignores the header; `HonorActingFor` honors it for every caller, and the access policy decides. |
 
 `enginehttp.Background(b, options)` serves the routes of a `Background`
 engine: every request under the prefix is 503 `unavailable` ("The engine

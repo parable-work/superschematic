@@ -13,6 +13,7 @@
 //! request's path, prefix and all), 404 for a path under the prefix that
 //! names no route, the service-caller rule of D37 (a verified service with
 //! no end user stands in for one) and 401 when there is no caller, the
+//! `Acting-For` header when the mount honors it (D77, [`ActingForHeader`]), the
 //! event stream's every byte, and MCP's JSON-RPC. The host owns
 //! authentication (D50, D37), request ids, body and rate limits, timeouts
 //! and CORS: a request it refuses never reaches the engine, or reaches it
@@ -35,7 +36,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::engine::Engine;
-use crate::principal::{Principal, PrincipalService};
+use crate::principal::{ActingFor, Principal, PrincipalService};
 use crate::tools::ToolFilter;
 
 pub use mcp::{McpOptions, MCP_DISCOVER_VERSIONS, MCP_INITIALIZE_VERSIONS, MCP_SERVER_NAME};
@@ -155,14 +156,15 @@ impl Response {
 }
 
 /// How the engine serves its routes: the event stream's page size and
-/// heartbeat, the MCP endpoint's server info and instructions, and the
+/// heartbeat, the MCP endpoint's server info and instructions, the
 /// mount's tool filter, which narrows the tools document and MCP's tools
-/// per caller.
+/// per caller, and whether it honors the `Acting-For` header (D77).
 #[derive(Clone, Default)]
 pub struct ApiOptions {
     pub stream: StreamOptions,
     pub mcp: McpOptions,
     pub tools: Option<Arc<dyn ToolFilter>>,
+    pub acting_for: ActingForHeader,
 }
 
 impl std::fmt::Debug for ApiOptions {
@@ -171,7 +173,71 @@ impl std::fmt::Debug for ApiOptions {
             .field("stream", &self.stream)
             .field("mcp", &self.mcp)
             .field("tools", &self.tools.is_some())
+            .field("acting_for", &self.acting_for)
             .finish()
+    }
+}
+
+/// The request header that names the subject a caller acts for (D77).
+pub const ACTING_FOR_HEADER: &str = "acting-for";
+
+/// Decides, per request, whether a caller may act for the subject its
+/// `Acting-For` header names: the principal the engine established, the
+/// subject, and the request.
+pub type ActingForDecision = dyn Fn(&Principal, &str, &Request) -> bool + Send + Sync;
+
+/// Whether a mount honors the `Acting-For` header (D77), whose value is the
+/// subject the caller acts for. Ignored by default: a request carrying it
+/// is answered as if it did not. Honored, it sets the principal's
+/// `actingFor` for any caller the host authenticated, and the access policy
+/// decides; a decision says per request.
+#[derive(Clone, Default)]
+pub enum ActingForHeader {
+    /// The header is ignored.
+    #[default]
+    Ignore,
+    /// The header is honored for every caller.
+    Honor,
+    /// The header is honored when the function says so.
+    Decide(Arc<ActingForDecision>),
+}
+
+impl ActingForHeader {
+    /// A mount that honors the header when `decide` says so.
+    pub fn decide(
+        decide: impl Fn(&Principal, &str, &Request) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        ActingForHeader::Decide(Arc::new(decide))
+    }
+
+    /// The subject a request's caller acts for: its `Acting-For` header,
+    /// trimmed, when the mount honors it for this principal; `None` when
+    /// it is absent or empty, or the mount ignores it.
+    pub fn subject(&self, principal: &Principal, request: &Request) -> Option<String> {
+        if matches!(self, ActingForHeader::Ignore) {
+            return None;
+        }
+        let subject = request.header(ACTING_FOR_HEADER)?.trim();
+        if subject.is_empty() {
+            return None;
+        }
+        match self {
+            ActingForHeader::Ignore => None,
+            ActingForHeader::Honor => Some(subject.to_owned()),
+            ActingForHeader::Decide(decide) => {
+                decide(principal, subject, request).then(|| subject.to_owned())
+            }
+        }
+    }
+}
+
+impl std::fmt::Debug for ActingForHeader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            ActingForHeader::Ignore => "Ignore",
+            ActingForHeader::Honor => "Honor",
+            ActingForHeader::Decide(_) => "Decide(..)",
+        })
     }
 }
 
@@ -429,7 +495,7 @@ pub fn handle(engine: &Engine, options: &ApiOptions, request: &Request) -> Respo
             .unwrap_or_else(|| problems::default_detail(&refused.code).to_owned());
         return Problem::new(refused.status, detail, &refused.code).response(request_id);
     }
-    let Some(principal) = principal_of(request) else {
+    let Some(principal) = principal_with(request, &options.acting_for) else {
         return Problem::unauthorized().response(request_id);
     };
     // A route that captured a path parameter refuses a path that does not
@@ -488,6 +554,18 @@ pub fn principal_of(request: &Request) -> Option<Principal> {
             ))
         }
     }
+}
+
+/// The engine's principal for a request ([`principal_of`]), acting for the
+/// subject its `Acting-For` header names when the mount honors it (D77).
+/// The engine's call checks it: a subject that is the caller's own, or one
+/// beside the end user a service brings, is `invalid_argument`.
+pub fn principal_with(request: &Request, acting_for: &ActingForHeader) -> Option<Principal> {
+    let mut principal = principal_of(request)?;
+    if let Some(subject) = acting_for.subject(&principal, request) {
+        principal.acting_for = Some(ActingFor { subject });
+    }
+    Some(principal)
 }
 
 /// The JSON a JSON body holds: `None` for an empty body, a problem for one

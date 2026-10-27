@@ -8,6 +8,10 @@
 //! service that brings no end user stands in for one: its subject names the
 //! service (`service:<deployable>`) and it holds no permissions.
 //!
+//! A principal may act for a subject (D77): the person an agent or a
+//! service works for, which its writes record as `for` beside `actor`. It
+//! adds no permissions; the access policy sees it and may refuse it.
+//!
 //! [`Principal::system`] is the engine's own principal (D58), which a server
 //! publishes its schemas as when it starts: the access policy allows it
 //! everything. No request can be it: the mark is private, a principal read
@@ -33,6 +37,10 @@ pub struct Principal {
     /// for, or standing in for one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service: Option<PrincipalService>,
+    /// The subject the caller acts for (D77): the person an agent or a
+    /// service works for. It adds no permissions.
+    #[serde(rename = "actingFor", default, skip_serializing_if = "Option::is_none")]
+    pub acting_for: Option<ActingFor>,
     /// Whether this is the engine's own principal; never set by a request.
     #[serde(skip)]
     system: bool,
@@ -53,6 +61,13 @@ pub struct PrincipalService {
     pub stands_in: bool,
 }
 
+/// Whom a principal acts for (D77).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActingFor {
+    /// The subject the principal acts for: never its own.
+    pub subject: String,
+}
+
 /// The prefix of a service's subject when it stands in for an end user.
 pub const SERVICE_SUBJECT_PREFIX: &str = "service:";
 
@@ -71,6 +86,7 @@ impl Principal {
             permissions: permissions.into_iter().map(Into::into).collect(),
             claims: None,
             service: None,
+            acting_for: None,
             system: false,
         }
     }
@@ -87,6 +103,21 @@ impl Principal {
         self
     }
 
+    /// The principal acting for a subject (D77).
+    pub fn acting_for(mut self, subject: impl Into<String>) -> Self {
+        self.acting_for = Some(ActingFor {
+            subject: subject.into(),
+        });
+        self
+    }
+
+    /// The subject the principal acts for, if it acts for one (D77).
+    pub fn acting_for_subject(&self) -> Option<&str> {
+        self.acting_for
+            .as_ref()
+            .map(|acting| acting.subject.as_str())
+    }
+
     /// The principal of a service that brings no end user and so stands in
     /// for one (D37): its subject is `service:<deployable>` and it holds no
     /// permissions.
@@ -101,6 +132,7 @@ impl Principal {
                 subject: subject.to_owned(),
                 stands_in: true,
             }),
+            acting_for: None,
             system: false,
         }
     }
@@ -113,6 +145,7 @@ impl Principal {
             permissions: Vec::new(),
             claims: None,
             service: None,
+            acting_for: None,
             system: true,
         }
     }
@@ -131,13 +164,27 @@ impl Principal {
 }
 
 /// Refuses a principal with no subject, one whose service has no
-/// deployable, and a service standing in for an end user that holds
-/// permissions.
+/// deployable, a service standing in for an end user that holds
+/// permissions, and one acting for a subject (D77) that is empty or its
+/// own, or acting for one beside the end user a service brings.
 pub fn check_principal(principal: &Principal) -> Result<(), EngineError> {
     if principal.subject.is_empty() {
         return Err(EngineError::invalid_argument(
             "an engine call needs a principal with a subject",
         ));
+    }
+    if let Some(acting) = &principal.acting_for {
+        if acting.subject.is_empty() {
+            return Err(EngineError::invalid_argument(
+                "a principal's actingFor is { subject }, a subject that is not empty",
+            ));
+        }
+        if acting.subject == principal.subject {
+            return Err(EngineError::invalid_argument(format!(
+                "{} cannot act for itself: actingFor names another subject",
+                principal.subject
+            )));
+        }
     }
     let Some(service) = &principal.service else {
         return Ok(());
@@ -153,15 +200,27 @@ pub fn check_principal(principal: &Principal) -> Result<(), EngineError> {
             service.deployable
         )));
     }
+    if !service.stands_in {
+        if let Some(acting) = &principal.acting_for {
+            // The call already acts for the end user the service brings,
+            // who is its actor: a third subject has no place in it (D77).
+            return Err(EngineError::invalid_argument(format!(
+                "service {} brings end user {}, so the call cannot act for {} too: only a service standing in acts for a subject",
+                service.deployable, principal.subject, acting.subject
+            )));
+        }
+    }
     Ok(())
 }
 
-/// Who a write records as making it: the principal's subject and, for a
-/// service's call, its deployable.
+/// Who a write records as making it: the principal's subject, for a
+/// service's call its deployable, and the subject it acts for (D77).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Actor {
     pub actor: String,
     pub service: Option<String>,
+    /// The subject the principal acts for, which an event records as `for`.
+    pub for_subject: Option<String>,
 }
 
 /// The actor a principal's writes record.
@@ -172,6 +231,7 @@ pub fn actor_of(principal: &Principal) -> Actor {
             .service
             .as_ref()
             .map(|service| service.deployable.clone()),
+        for_subject: principal.acting_for_subject().map(str::to_owned),
     }
 }
 
@@ -201,9 +261,51 @@ mod tests {
             actor_of(&standing),
             Actor {
                 actor: "service:billing".into(),
-                service: Some("billing".into())
+                service: Some("billing".into()),
+                for_subject: None,
             }
         );
+    }
+
+    #[test]
+    fn a_principal_acting_for_a_subject_is_checked() {
+        let agent = Principal::new("agent:reviewer", ["tickets"]).acting_for("alice");
+        assert!(check_principal(&agent).is_ok());
+        assert_eq!(actor_of(&agent).for_subject.as_deref(), Some("alice"));
+        assert_eq!(
+            check_principal(&Principal::new("agent:reviewer", ["tickets"]).acting_for(""))
+                .unwrap_err()
+                .message(),
+            "a principal's actingFor is { subject }, a subject that is not empty"
+        );
+        assert_eq!(
+            check_principal(&Principal::new("alice", ["tickets"]).acting_for("alice"))
+                .unwrap_err()
+                .message(),
+            "alice cannot act for itself: actingFor names another subject"
+        );
+        let standing =
+            Principal::service("billing", &["api".into()], "sa@issuer").acting_for("alice");
+        assert!(check_principal(&standing).is_ok());
+        let with_user = Principal::new("bob", ["tickets"])
+            .with_service(PrincipalService {
+                deployable: "billing".into(),
+                serves: vec!["api".into()],
+                subject: "sa@issuer".into(),
+                stands_in: false,
+            })
+            .acting_for("alice");
+        assert_eq!(
+            check_principal(&with_user).unwrap_err().message(),
+            "service billing brings end user bob, so the call cannot act for alice too: only a service standing in acts for a subject"
+        );
+        let written = serde_json::to_value(&agent).unwrap();
+        assert_eq!(
+            written,
+            serde_json::json!({"subject": "agent:reviewer", "permissions": ["tickets"], "actingFor": {"subject": "alice"}})
+        );
+        let read: Principal = serde_json::from_value(written).unwrap();
+        assert_eq!(read, agent);
     }
 
     #[test]
