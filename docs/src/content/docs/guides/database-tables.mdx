@@ -31,9 +31,9 @@ quoted: the `Order` class is the `"order"` table.
   `UUID DEFAULT gen_random_uuid()`, so the ORM leaves a zero id out of an
   insert and the row type holds the id as a pointer until then.
 - A class that other tables extend, like `Auditable`, is not a table: its
-  fields become columns of each table that extends it. A required
-  `Temporal.DateTime` column defaults to `CURRENT_TIMESTAMP`, and the ORM's
-  `UpdateOne` sets `updatedAt`.
+  fields become columns of each table that extends it. `createdAt` and
+  `updatedAt` are audit timestamps: a required one defaults to
+  `CURRENT_TIMESTAMP`, and the ORM's `UpdateOne` sets `updatedAt`.
 - `@unique` on a field adds a unique constraint on its column.
 - The class comment becomes `COMMENT ON TABLE`.
 
@@ -74,6 +74,16 @@ held to them:
   the ORMs write for an unset value; a UUID, a time or a JSON value keeps
   its default in the decoders alone, since `V` is written in the wire
   form.
+- A required date, time or timestamp has no default, so an import or a
+  script that leaves out a posting date fails `NOT NULL` rather than
+  record today. Its column takes the time of the insert only when it is an
+  audit timestamp (`createdAt`, `updatedAt`), a timestamp of the tables
+  the user model adds, or the field declares it with `Default<T, "now">`:
+  `Default<Temporal.DateTime, "now">` is `DEFAULT CURRENT_TIMESTAMP`,
+  `Default<Temporal.Date, "now">` `CURRENT_DATE` and
+  `Default<Temporal.Time, "now">` `CURRENT_TIME`, on Postgres and SQLite.
+  A create through either ORM may leave such a field unset (Go: its zero
+  value), and the database fills it in; no decoder does.
 - An enum column has a `CHECK` that its members' values hold it to:
   `CONSTRAINT ck_order_status CHECK (status IN ('placed', 'fulfilled',
   'shipped', 'cancelled'))`.

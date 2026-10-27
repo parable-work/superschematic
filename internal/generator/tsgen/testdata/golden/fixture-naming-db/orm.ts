@@ -159,7 +159,9 @@ export const categoryTable: TableDefinition = {
  * keep their camel-case names, its category's foreign key among them, and
  * the bank's id of a line is unique among its category's. A line from the
  * bank enqueues a LinePosted when it is written and when its amount
- * changes; the trigger is named after both tables.
+ * changes; the trigger is named after both tables, and the plan that adds
+ * it enqueues the lines from the bank already there. A line written
+ * without the day it was posted on is posted on the day it is written.
  */
 export interface LineItemRow {
   id: T.IdentityUUID;
@@ -177,7 +179,7 @@ export interface LineItemRow {
 export interface LineItemCreate {
   id?: T.IdentityUUID | null;
   amountCents: T.GenericInt64;
-  postedOn: T.TemporalDate;
+  postedOn?: T.TemporalDate | null;
   memo?: string | null;
   externalId?: string | null;
   categoryId?: T.IdentityUUID | null;
@@ -251,7 +253,7 @@ export const lineItemTable: TableDefinition = {
   columns: [
     { name: "id", column: "id", field: "id", qualified: "\"lineItem\".id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
     { name: "amountCents", column: "\"amountCents\"", field: "amountCents", qualified: "\"lineItem\".\"amountCents\"", int64: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
-    { name: "postedOn", column: "\"postedOn\"", field: "postedOn", qualified: "\"lineItem\".\"postedOn\"", date: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "postedOn", column: "\"postedOn\"", field: "postedOn", qualified: "\"lineItem\".\"postedOn\"", date: true, auto: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
     { name: "memo", column: "memo", field: "memo", qualified: "\"lineItem\".memo", filter: ["eq", "in", "ilike", "isNull"] },
     { name: "externalId", column: "\"externalId\"", field: "externalId", qualified: "\"lineItem\".\"externalId\"", filter: ["eq", "in", "ilike", "isNull"] },
     { name: "categoryId", column: "\"categoryId\"", field: "category", qualified: "\"lineItem\".\"categoryId\"", uuid: true, relation: "Category", filter: ["eq", "in", "isNull"] },

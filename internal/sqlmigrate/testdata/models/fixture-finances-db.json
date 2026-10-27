@@ -230,7 +230,6 @@
           "type": "UUID"
         },
         {
-          "default": "CURRENT_TIMESTAMP",
           "name": "date",
           "origin": "LineItem.date",
           "type": "TIMESTAMPTZ"

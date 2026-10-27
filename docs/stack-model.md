@@ -3557,7 +3557,10 @@ export abstract class FulfilOrders {}
   named, or every dead message with `--all`, ready, due now, with no
   attempts and no claim, its last error kept; and `drop` deletes them,
   `--all` taking `--yes`. A retry or a drop that names a message that is
-  not dead changes none and says what each such ID is. The statements are
+  not dead changes none and says what each such ID is. `stack queue
+  backfill` (D88) enqueues a message for each row each `@enqueueOnChange`
+  of the queue would enqueue one for, with the trigger's insert as a
+  statement per table, and prints how many. The statements are
   `sqlutil.PostgresQueueOperatorStatements`, beside the claims', each
   taking IDs as one text-array parameter. The compiler holds no driver
   (D27), so the command writes them into a queue document

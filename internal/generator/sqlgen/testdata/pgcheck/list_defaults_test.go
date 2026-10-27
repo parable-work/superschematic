@@ -11,7 +11,8 @@ import (
 
 // TestListDefaultsOnPostgres applies create.sql for the
 // fixture-list-defaults-db service, whose tasting table has a required
-// Temporal.DateTime, Temporal.Date and Temporal.Time column, a required list
+// Temporal.DateTime, Temporal.Date and Temporal.Time column, each declared
+// Default<T, "now"> (D88), a required list
 // of each, an auto-generated list, and three JSONB columns (a list of lists,
 // a map and a JSON field) that hold them. The script applies. A row that
 // names only the JSONB columns takes the current timestamp, date and time

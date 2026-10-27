@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/parable-work/superschematic/internal/generator/sqlgen"
+	"github.com/parable-work/superschematic/internal/loader"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden documents")
@@ -65,6 +68,54 @@ func TestGoldenDocuments(t *testing.T) {
 	}
 }
 
+// TestBackfillDocument writes the document of a backfill of
+// fixture-queue-db's OrderChanged (D88), which OrderLine's trigger
+// enqueues, and compares it with testdata/golden/backfill.json, which the
+// runner's tests run: one statement, the trigger's insert for every line
+// that names a product, one per order under replace, which returns how
+// many it enqueued. A queue no trigger enqueues has no statement, and a
+// name that is no queue is refused.
+func TestBackfillDocument(t *testing.T) {
+	schema, err := loader.LoadService(filepath.Join("..", "loader", "tsreader", "testdata", "services", "fixture-queue-db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := sqlgen.Options{SchemaName: "fixture-queue-db"}
+	statements, err := BackfillStatements(schema, opts, "OrderChanged")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(statements) != 1 || !strings.Contains(statements[0], "SELECT DISTINCT ON (src.order_id)") || !strings.Contains(statements[0], "WHERE src.product_id IS NOT NULL") ||
+		!strings.HasSuffix(statements[0], "RETURNING 1\n)\nSELECT count(*) FROM enqueued") {
+		t.Fatalf("the backfill of OrderChanged:\n%s", strings.Join(statements, "\n---\n"))
+	}
+	if none, err := BackfillStatements(schema, opts, "StockChecked"); err != nil || len(none) != 0 {
+		t.Fatalf("StockChecked, which no trigger enqueues: %q, %v", none, err)
+	}
+	if _, err := BackfillStatements(schema, opts, "Order"); err == nil || !strings.Contains(err.Error(), "declares no queue Order") {
+		t.Fatalf("Order, which is no queue: %v", err)
+	}
+
+	got, err := Document(Request{Service: "fixture-queue-db", Queue: "OrderChanged", Operation: Backfill, Backfills: statements, Key: "order_id"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join("testdata", "golden", "backfill.json")
+	if *update {
+		if err := os.WriteFile(path, got, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("%v (go test ./internal/queueops -run TestBackfillDocument -update writes it)", err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("%s differs from what Document writes; -update rewrites it:\n%s", path, got)
+	}
+}
+
 // TestDocumentRefuses holds Document to what each operation takes.
 func TestDocumentRefuses(t *testing.T) {
 	for name, tc := range map[string]struct {
@@ -77,7 +128,10 @@ func TestDocumentRefuses(t *testing.T) {
 		"retry nothing":   {Request{Service: "shop-db", Queue: "OrderPlaced", Operation: Retry}, "retry takes the IDs of dead messages, or all of them"},
 		"drop both":       {Request{Service: "shop-db", Queue: "OrderPlaced", Operation: Drop, All: true, IDs: []string{deadID}}, "drop takes the IDs of dead messages, or all of them"},
 		"upper-case id":   {Request{Service: "shop-db", Queue: "OrderPlaced", Operation: Drop, IDs: []string{strings.ToUpper("0000000a-0000-4000-8000-000000000001")}}, "not a message's ID in lower case"},
-		"other operation": {Request{Service: "shop-db", Queue: "OrderPlaced", Operation: "prune"}, `operation "prune" is not dead, retry or drop`},
+		"other operation": {Request{Service: "shop-db", Queue: "OrderPlaced", Operation: "prune"}, `operation "prune" is not dead, retry, drop or backfill`},
+		"nothing to fill": {Request{Service: "shop-db", Queue: "OrderPlaced", Operation: Backfill}, "no @enqueueOnChange of shop-db enqueues OrderPlaced"},
+		"backfill all":    {Request{Service: "shop-db", Queue: "OrderPlaced", Operation: Backfill, All: true, Backfills: []string{"SELECT 1"}}, "a backfill takes no limit, no IDs and no all"},
+		"retry backfills": {Request{Service: "shop-db", Queue: "OrderPlaced", Operation: Retry, All: true, Backfills: []string{"SELECT 1"}}, "retry takes no backfill statements"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := Document(tc.req); err == nil || !strings.Contains(err.Error(), tc.want) {

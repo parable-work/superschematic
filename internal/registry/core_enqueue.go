@@ -35,7 +35,7 @@ func enqueueOnChangeDecorator() DecoratorSpec {
 }
 
 // enqueueOnChangeOf reads @enqueueOnChange(Queue, { on, fields, when,
-// message }).
+// message, backfill }).
 func enqueueOnChangeOf(args []any) (*ir.EnqueueOnChange, error) {
 	if len(args) != 2 {
 		return nil, fmt.Errorf("@enqueueOnChange takes the @queue class and an options object: @enqueueOnChange(Queue, { on, fields, when, message })")
@@ -78,8 +78,14 @@ func enqueueOnChangeOf(args []any) (*ir.EnqueueOnChange, error) {
 				}
 				def.Message[field] = s
 			}
+		case "backfill":
+			b, ok := value.(bool)
+			if !ok {
+				return nil, ArgErrorf(1, "@enqueueOnChange backfill is true or false; got %v", value)
+			}
+			def.Backfill = b
 		default:
-			return nil, ArgErrorf(1, "@enqueueOnChange has no option %q; it takes on, fields, when and message", key)
+			return nil, ArgErrorf(1, "@enqueueOnChange has no option %q; it takes on, fields, when, message and backfill", key)
 		}
 	}
 	if err := CheckEnqueueOnChange(def); err != nil {
@@ -94,8 +100,9 @@ func enqueueOnChangeOf(args []any) (*ir.EnqueueOnChange, error) {
 
 // CheckEnqueueOnChange checks an @enqueueOnChange's shape in every form: a
 // queue, writes that are insert, update or delete, each once, fields only
-// with an update, each condition one of isNull, notNull and equals, and a
-// message that maps at least one field. Whether the fields name the
+// with an update, backfill only with an insert or an update (D88), each
+// condition one of isNull, notNull and equals, and a message that maps at
+// least one field. Whether the fields name the
 // table's, and the message's fields line up with the queue's, is
 // verification's to check.
 func CheckEnqueueOnChange(def *ir.EnqueueOnChange) error {
@@ -117,6 +124,9 @@ func CheckEnqueueOnChange(def *ir.EnqueueOnChange) error {
 	}
 	if len(def.Fields) > 0 && !seen[ir.EnqueueOnUpdate] {
 		return fmt.Errorf("fields names the fields whose change makes an update enqueue, and on names no update")
+	}
+	if def.Backfill && !seen[ir.EnqueueOnInsert] && !seen[ir.EnqueueOnUpdate] {
+		return fmt.Errorf("backfill enqueues for the rows already there as an insert of each would, and on names neither insert nor update")
 	}
 	fields := map[string]bool{}
 	for _, f := range def.Fields {

@@ -62,7 +62,7 @@ var sqliteOnlyCases = []planCase{
 	// A NOT NULL column whose default is not a constant: ADD COLUMN cannot
 	// add it, and the copy fills each row from the default.
 	{name: "rebuild-add-column-volatile-default", after: func(s *ir.Schema) {
-		addField(s, "Order", &ir.FieldDef{Name: "shippedAt", TypeRef: ir.TypeRef{Name: "Temporal.DateTime"}, Required: true})
+		addField(s, "Order", &ir.FieldDef{Name: "shippedAt", TypeRef: ir.TypeRef{Name: "Temporal.DateTime"}, Required: true, Default: nowDefault()})
 	}},
 	// A nullable column with a default that is not a constant.
 	{name: "rebuild-add-uuid-column", after: func(s *ir.Schema) {
@@ -73,7 +73,7 @@ var sqliteOnlyCases = []planCase{
 	{name: "rebuild-batched", after: func(s *ir.Schema) {
 		fieldNamed(s, "Order", "total").TypeRef = ir.TypeRef{Name: "number"}
 		fieldNamed(s, "Order", "placedAt").Required = false
-		addField(s, "Order", &ir.FieldDef{Name: "shippedAt", TypeRef: ir.TypeRef{Name: "Temporal.DateTime"}, Required: true})
+		addField(s, "Order", &ir.FieldDef{Name: "shippedAt", TypeRef: ir.TypeRef{Name: "Temporal.DateTime"}, Required: true, Default: nowDefault()})
 		addField(s, "Order", &ir.FieldDef{Name: "discount", TypeRef: int64Ref})
 		typeNamed(s, "Order").Indexes = append(typeNamed(s, "Order").Indexes, ir.IndexDef{Keys: []string{"reference"}})
 		fieldNamed(s, "Order", "note").Required = true

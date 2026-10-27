@@ -109,6 +109,9 @@ func (postgresDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, er
 		if err != nil {
 			return nil, err
 		}
+		if e.Backfill {
+			trigger.Backfill = e.BackfillSQL()
+		}
 		m.Triggers = append(m.Triggers, trigger)
 	}
 
@@ -132,9 +135,21 @@ func (postgresDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, er
 	}
 	m.Graphs = graphs
 	m.RawSQL = modelRawSQL(out.RawSQL)
+	for _, s := range out.RoleSeeds {
+		m.Roles = append(m.Roles, modelRole(s, s.InsertSQL(), s.UpdateSQL()))
+	}
 
 	m.sort()
 	return m, nil
+}
+
+// modelRole is a @seedRoles role with its statements in the model's
+// dialect (D88).
+func modelRole(s sqlgen.RoleSeed, insert, update string) *RoleSeed {
+	return &RoleSeed{
+		Table: s.Table, Name: s.Name, Permissions: append([]string{}, s.Permissions...), Origin: s.Origin,
+		Insert: insert, Update: update,
+	}
 }
 
 // queueKeyOf is the key of the queue whose table t is, or nil for a table
@@ -412,4 +427,10 @@ func (m *Model) sort() {
 	for _, g := range m.Graphs {
 		sort.Slice(g.Members, func(i, j int) bool { return g.Members[i].Table < g.Members[j].Table })
 	}
+	sort.SliceStable(m.Roles, func(i, j int) bool {
+		if m.Roles[i].Table != m.Roles[j].Table {
+			return m.Roles[i].Table < m.Roles[j].Table
+		}
+		return m.Roles[i].Name < m.Roles[j].Name
+	})
 }

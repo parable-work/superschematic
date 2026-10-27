@@ -1,8 +1,8 @@
 {
   "dialect": "postgres",
-  "expanded": "cbe56646b6fe67f661824cbec793448b8dc5d34a98d950fdc4ab788dbc6786e0",
-  "from": "c2b1cc76b277f27b233d923d3ad91e0e00e493dd36f5164946ef90feb769f7b8",
-  "hash": "1f9abbc416d18a76de1e40d21667898efc126b7c10f860c10c6e19d8acbdd1d9",
+  "expanded": "acd5d37a525a1b4134d233b3a7e3444a945a7f586c83265eb6fc70e7f8e4a84f",
+  "from": "4ea2be8513125a17bb188a74fd72132a5c1c26ce71c8699c063fc207c0dfa8de",
+  "hash": "ef62703a583e7cc13f6951672a084654f9e537ec58e24e513185c89b660926ff",
   "service": "shop-db",
   "steps": [
     {
@@ -29,7 +29,7 @@
       "transactional": true
     }
   ],
-  "to": "c0fa0f3f193ab0cc275c1d61956942d067b3e6d8232b126229f47a71609e4333",
+  "to": "4e387ecee5268861fb5b1c222b574773d7a90d549e3bfeea9562f16f24c75198",
   "toModel": null,
   "version": 1
 }

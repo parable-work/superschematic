@@ -21,7 +21,9 @@ import (
 //     previous model contract drops or replaces;
 //   - the version graphs of both models (expandedGraphs);
 //   - the new model's raw SQL, then the previous model's pieces contract
-//     undoes, in the order they ran (D83).
+//     undoes, in the order they ran (D83);
+//   - the new model's seeded roles, a role contract takes permissions
+//     from with its previous permissions (D88).
 //
 // Diff sets it on a plan with contract steps only.
 func (d *differ) expandedModel() (*Model, error) {
@@ -111,6 +113,24 @@ func (d *differ) expandedModel() (*Model, error) {
 		if !declared[p.ID] {
 			m.RawSQL = append(m.RawSQL, p)
 		}
+	}
+
+	// A role contract takes permissions from holds the previous ones until
+	// then (D88).
+	contractRoles := map[string]*RoleSeed{}
+	for _, c := range d.changes {
+		if c.phase == Contract && c.op == opUpdateRole {
+			contractRoles[c.role.Table+"/"+c.role.Name] = c.oldRole
+		}
+	}
+	for _, r := range d.to.Roles {
+		if old := contractRoles[r.Table+"/"+r.Name]; old != nil {
+			kept := *r
+			kept.Permissions = old.Permissions
+			kept.Insert, kept.Update = old.Insert, old.Update
+			r = &kept
+		}
+		m.Roles = append(m.Roles, r)
 	}
 
 	m.sort()

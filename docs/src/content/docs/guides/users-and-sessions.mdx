@@ -197,7 +197,8 @@ export class Account {}
   routes' `IdentityUser` carries `pending` beside `disabled`.
 - **`defaultRoles`** names the roles each new user holds. Register creates
   a role no role has the name of, with no permissions, for an
-  administrator to fill in. Under approval the roles are granted with the
+  administrator to fill in, unless the `authDb` seeds it
+  ([Seed the roles](#seed-the-roles)). Under approval the roles are granted with the
   pending user, who can neither sign in nor hold a session, so they take
   effect at approval, and `approveUser` works from any API of the same
   `authDb`. Since approving gives the user those roles, the approver's
@@ -214,6 +215,43 @@ export class Account {}
 `defaultRoles` and `firstUser` need a `UserRole` table in the `authDb`.
 Open registration, the default, grants the default roles too, and its
 `register` keeps answering `LoginResult`.
+
+### Seed the roles
+
+A default role that register creates has no permissions, so a user an
+administrator approves can do nothing until someone fills the role in.
+`@seedRoles` on the `UserRole` table declares the roles every database
+holds from its first migration on
+([D88](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)):
+
+```ts
+@seedRoles([{ name: "member", permissions: ["finances.read", "finances.write"] }])
+export abstract class Role implements UserRole {
+  @key id: AutoGenerate<Identity.UUID>;
+  @unique name: Identity.Slug;
+  permissions: string[];
+}
+```
+
+`create.sql` inserts each role, so on an empty database the first
+registrant is the administrator (`firstUser`), the second waits, and once
+approved holds `member` and calls a `finances.read` route at once. A
+migration plan inserts a seed it adds, and gives a role of its name that
+has no permissions, as one an earlier registration created, the seed's;
+a role of its name with permissions keeps them. A seed whose permissions
+change is a `destructive` step, since it replaces whatever an
+administrator gave the role: in `expand` when the role only gains
+permissions, in `contract` when it loses one. A plan never deletes a role
+a seed no longer names.
+
+The seeds are the `authDb`'s, beside its tables, so every API of it
+shares them. An API whose `authDb` seeds roles checks them when it
+loads, and warns when a default role is not seeded, when a seeded
+permission covers none the API requires (a misspelling grants nothing),
+and, under approval, when the first administrator's role does not cover a
+default role's permissions, since `approveUser` needs the approver's to
+cover them. A seed of `firstUser`'s role holds over `firstUser`'s
+permissions.
 
 ## Roles and capabilities
 

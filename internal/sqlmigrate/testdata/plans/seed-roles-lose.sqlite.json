@@ -1,0 +1,30 @@
+{
+  "dialect": "sqlite",
+  "expanded": "69a88cde313d5d4397465807a0cf0edb2f3ed7a7a96ae5e2a6881c359a074457",
+  "from": "69a88cde313d5d4397465807a0cf0edb2f3ed7a7a96ae5e2a6881c359a074457",
+  "hash": "b5c9824773ba2680122911919537ec6c47a563b5a9dce6fe15f4b4cbe1a8f1ee",
+  "service": "fixture-user-model-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:role/role/member",
+          "reason": "The role member gains identity.roles.read and loses identity.users.read, identity.users.write: the step sets its permissions to the seed's (identity.roles.read), replacing any an administrator gave it since it was seeded.",
+          "subject": "role/role/member"
+        }
+      ],
+      "index": 1,
+      "op": "updateRole",
+      "phase": "contract",
+      "statements": [
+        "UPDATE \"role\" SET \"permissions\" = '[\"identity.roles.read\"]' WHERE \"name\" = 'member'"
+      ],
+      "subject": "role/role/member",
+      "transactional": true
+    }
+  ],
+  "to": "f7e84ea694670e6241c12fcade6f5f053891cc1cf445717ac060cf90ed3178b7",
+  "toModel": null,
+  "version": 1
+}

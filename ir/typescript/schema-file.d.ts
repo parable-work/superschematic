@@ -165,6 +165,7 @@ export interface EnqueueCondition {
 }
 
 export interface EnqueueOnChange {
+  backfill?: boolean;
   fields?: string[];
   message: { [key: string]: string };
   on: string[];
@@ -603,6 +604,11 @@ export interface RelationDef {
   type?: string;
 }
 
+export interface RoleSeed {
+  name: string;
+  permissions: string[];
+}
+
 export interface ScalarDef {
   caseInsensitive?: boolean;
   comment?: string;
@@ -722,6 +728,7 @@ export interface TypeDef {
   rawHeritage?: RawHeritage;
   rawSql?: RawSQLDef[];
   role: 'DBTable' | 'APIView' | 'APIInput' | 'EmbeddedStruct' | 'APIOperationSet' | 'Trait' | 'Projection' | 'Query';
+  seedRoles?: RoleSeed[];
   server?: ServerDecl;
   source?: SourceRef;
   sqlName?: string;

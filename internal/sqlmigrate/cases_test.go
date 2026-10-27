@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/loader"
 	ir "github.com/parable-work/superschematic/ir"
@@ -547,6 +548,44 @@ var planCases = []planCase{
 	{name: "drop-enqueue-on-change",
 		before: func(s *ir.Schema) { shipQueue(s, shipKey); enqueueShip(s, []string{"insert", "update"}, "note") },
 		after:  func(s *ir.Schema) { shipQueue(s, shipKey) }},
+	// backfill: true (D88): the step that creates the trigger enqueues one
+	// message for each order that meets when, so the orders with a note
+	// wait once each and the one with none does not.
+	{name: "add-enqueue-on-change-backfill",
+		before: func(s *ir.Schema) { shipQueue(s, shipKey) },
+		after: func(s *ir.Schema) {
+			shipQueue(s, shipKey)
+			enqueueShip(s, []string{"insert", "update"}, "note")
+			def := typeNamed(s, "Order").EnqueueOnChange[0]
+			def.Backfill, def.When = true, []*ir.EnqueueCondition{{Field: "note", NotNull: true}}
+		}, rows: backfilledOrders},
+	// A queue keyed by customer that replaces: the backfill leaves one
+	// waiting message per customer, however many orders each has.
+	{name: "add-enqueue-on-change-backfill-per-key",
+		before: customerQueue,
+		after: func(s *ir.Schema) {
+			customerQueue(s)
+			typeNamed(s, "Order").EnqueueOnChange = []*ir.EnqueueOnChange{{
+				Queue: "CustomerOrdered", On: []string{"insert"}, Backfill: true,
+				Message: map[string]string{"customerId": "customer", "note": "note"},
+			}}
+		}, rows: backfilledCustomers},
+
+	// Required timestamps default to now only when declared (D88): a plan
+	// from a database a compiler before D88 built drops the default it
+	// gave every required timestamp, with no hazard.
+	{name: "drop-implied-now-default",
+		before: func(s *ir.Schema) { fieldNamed(s, "Order", "placedAt").Default = nowDefault() }},
+	{name: "add-now-default",
+		after: func(s *ir.Schema) { fieldNamed(s, "Order", "placedAt").Default = nowDefault() }},
+
+	// The roles a UserRole table seeds (D88): a new seed is inserted, and
+	// fills a role of its name with no permissions, as the first
+	// registration makes one before a seed exists; one that gains a
+	// permission is updated in expand, and one that loses one in contract.
+	{name: "add-seed-roles", base: userModelDir, before: func(s *ir.Schema) { s.UserRoleTable().SeedRoles = nil }, rows: unseededMember},
+	{name: "seed-roles-gain", base: userModelDir, after: memberSeed("identity.users.read", "identity.users.write")},
+	{name: "seed-roles-lose", base: userModelDir, before: memberSeed("identity.users.read", "identity.users.write")},
 	// @table names the queue's table and @column its key's column (D85):
 	// the plan renames both, with the key's indexes, and replaces the
 	// trigger, which is named after the queue's table.
@@ -632,6 +671,76 @@ var waitingTwice = extraRows{
 			SQL: `SELECT count(*) = 1 FROM "order_shipped_queue" WHERE "order_id" = 'a0000000-0000-4000-8000-00000000000a' AND "state" = 'ready' AND "note" = 'second'`},
 		{Name: "the earlier message of the order is done",
 			SQL: `SELECT count(*) = 1 FROM "order_shipped_queue" WHERE "order_id" = 'a0000000-0000-4000-8000-00000000000a' AND "state" = 'done' AND "note" = 'first' AND "last_error" LIKE 'another ready message of its key%'`},
+	},
+}
+
+// backfilledOrders are two more orders, one with a note and one without,
+// besides the seeded one, whose note is set: the backfill (D88) enqueues
+// a message for each order with a note, and none for the other.
+var backfilledOrders = extraRows{
+	seed: []string{
+		`INSERT INTO "order" ("code", "customer_id", "total", "note", "placed_at") SELECT 'gift', "id", 1, 'gift wrap', '2026-01-01T00:00:00.000Z' FROM "customer"`,
+		`INSERT INTO "order" ("code", "customer_id", "total", "placed_at") SELECT 'plain', "id", 2, '2026-01-01T00:00:00.000Z' FROM "customer"`,
+	},
+	checks: []seedCheck{
+		{Name: "each order with a note waits once",
+			SQL: `SELECT count(*) = 2 AND count(DISTINCT q."order_id") = 2 FROM "order_shipped_queue" q JOIN "order" o ON q."order_id" = o."id" WHERE q."state" = 'ready' AND q."note" = o."note"`},
+		{Name: "the order with no note waits not at all",
+			SQL: `SELECT count(*) = 0 FROM "order_shipped_queue" q JOIN "order" o ON q."order_id" = o."id" WHERE o."code" = 'plain'`},
+	},
+}
+
+// customerQueue adds the queue CustomerOrdered, a message of a customer
+// and a note, keyed by customer, whose newer message replaces the one that
+// waits.
+func customerQueue(s *ir.Schema) {
+	s.Types["CustomerOrdered"] = &ir.TypeDef{Name: "CustomerOrdered", Role: ir.RoleEmbeddedStruct,
+		Queue: &ir.QueueDef{Key: "customerId", OnDuplicate: ir.QueueOnDuplicateReplace},
+		Fields: []*ir.FieldDef{
+			{Name: "customerId", TypeRef: uuidRef, Required: true},
+			{Name: "note", TypeRef: stringRef},
+		}}
+}
+
+// backfilledCustomers are two more orders of the seeded customer, which
+// already has one: the backfill leaves the customer one waiting message.
+var backfilledCustomers = extraRows{
+	seed: []string{
+		`INSERT INTO "order" ("code", "customer_id", "total", "note", "placed_at") SELECT 'second', "id", 1, 'second', '2026-01-01T00:00:00.000Z' FROM "customer"`,
+		`INSERT INTO "order" ("code", "customer_id", "total", "note", "placed_at") SELECT 'third', "id", 2, 'third', '2026-01-01T00:00:00.000Z' FROM "customer"`,
+	},
+	checks: []seedCheck{
+		{Name: "the customer of three orders waits once",
+			SQL: `SELECT count(*) = 1 FROM "customer_ordered_queue" q JOIN "customer" c ON q."customer_id" = c."id" WHERE q."state" = 'ready'`},
+	},
+}
+
+// nowDefault is Default<T, "now"> (D88).
+func nowDefault() *string {
+	now := codegen.DefaultNow
+	return &now
+}
+
+// userModelDir is the user model's fixture, whose Role table seeds member
+// (D88).
+var userModelDir = filepath.Join(sqlgenFixtures, "fixture-user-model-db")
+
+// memberSeed seeds member with the permissions given.
+func memberSeed(permissions ...string) func(*ir.Schema) {
+	return func(s *ir.Schema) {
+		s.UserRoleTable().SeedRoles = []*ir.RoleSeed{{Name: "member", Permissions: permissions}}
+	}
+}
+
+// unseededMember is a member role with no permissions, as the first
+// registration creates a default role before a seed exists (D81), copied
+// from the seeded role, which has none: the plan that seeds member gives
+// it the seed's.
+var unseededMember = extraRows{
+	seed: []string{`INSERT INTO "role" ("name", "permissions") SELECT 'member', "permissions" FROM "role"`},
+	checks: []seedCheck{
+		{Name: "member holds the seed's permissions",
+			SQL: `SELECT count(*) = 1 FROM "role" m WHERE m."name" = 'member' AND m."permissions" <> (SELECT r."permissions" FROM "role" r WHERE r."name" <> 'member')`},
 	},
 }
 

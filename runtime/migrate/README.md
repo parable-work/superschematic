@@ -370,11 +370,11 @@ dialect is refused before the runner connects.
 | `version` | integer | `1`. |
 | `service` | string | The DB service that declares the queue. |
 | `queue` | string | The queue's `@queue` class. |
-| `operation` | string | `dead`, `retry` or `drop`. |
+| `operation` | string | `dead`, `retry`, `drop` or `backfill`. |
 | `limit` | integer | `dead` only: how many dead messages to list at most, one or more. |
 | `ids` | array | `retry` and `drop`: the IDs of the dead messages to take, UUIDs in lower case, each once. |
 | `all` | boolean | `retry` and `drop`, in place of `ids`: every dead message. |
-| `statements` | object | `dead`, `states`, `retry`, `retryAll`, `drop` and `dropAll`: the queue's statements. Each that takes messages by ID takes them as `$1`, a text array. |
+| `statements` | object | `dead`, `states`, `retry`, `retryAll`, `drop` and `dropAll`: the queue's statements. Each that takes messages by ID takes them as `$1`, a text array. `backfill`, for `backfill` alone: one statement per table whose `@enqueueOnChange` enqueues the queue, each of which enqueues its messages and returns one row, how many (D88). |
 
 `dead` lists the oldest deaths first, in a read-only transaction. `retry`
 makes each message ready again, due now, with no attempts and no claim,
@@ -382,15 +382,18 @@ its last error kept until its next failure replaces it; `drop` deletes
 each. Both run in one transaction, which changes every message the
 document names or, when one of them is no dead message, none, and the
 runner says what each such ID is (`ready`, `claimed`, `done`, or not in
-the queue). The runner prints what it did as one JSON object:
+the queue). `backfill` runs each of its statements in one transaction.
+The runner prints what it did as one JSON object:
 
 ```json
 {"version": 1, "service": "shop-db", "queue": "OrderPlaced", "operation": "dead", "total": 1,
  "messages": [{"id": "...", "attempts": 6, "lastError": "...", "diedAt": "2026-10-19T12:00:00Z", "message": {"order_id": "..."}}]}
 {"version": 1, "service": "shop-db", "queue": "OrderPlaced", "operation": "retry", "ids": ["..."]}
+{"version": 1, "service": "shop-db", "queue": "OrderPlaced", "operation": "backfill", "total": 12}
 ```
 
-`total` counts every dead message, `diedAt` is RFC 3339 in UTC to the
+A backfill's `total` counts the messages it enqueued, or made fresh under
+`replace`. A dead listing's `total` counts every dead message, `diedAt` is RFC 3339 in UTC to the
 second, and `message` holds the message's columns by their names. Exit
 codes are the job's.
 

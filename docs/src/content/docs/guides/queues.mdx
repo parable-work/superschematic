@@ -24,14 +24,14 @@ schema's instances into claimable work, are another thing.
 | `@queue` on a DB service's message class; its table in every dialect the service lists, which the migration plan carries | |
 | a backoff that doubles with each failure up to a maximum, and done messages removed after a retention | |
 | a message's `key`: one waiting message per key (`onDuplicate`), one claim per key (`serialize`), in every language, on Postgres and SQLite | a key over several fields; a delay on enqueue |
-| `@enqueueOnChange` on a table: a trigger, on Postgres and SQLite, that enqueues a message whatever writes the row | |
+| `@enqueueOnChange` on a table: a trigger, on Postgres and SQLite, that enqueues a message whatever writes the row; its `backfill` in the migration step that adds it, and `stack queue backfill` | `stack queue backfill` on SQLite |
 | the Go ORM's `Enqueue<Queue>` in your transaction, and its claims on Postgres; its `Enqueue<Queue>SQLite` and claims on SQLite, which the TypeScript and Rust runtimes run too | claims on D1, and `stack queue` on SQLite |
 | the TypeScript types' `./queues` entry and the HTTP runtime's `enqueue`, in a transaction of the generated repositories (`Deps.orm`, D79), and `postgresQueue`, which run the Go ORM's statements; the Rust types' `queues` module and the Rust HTTP runtime's `queue::enqueue` and `PostgresQueue`, which run them too; a location (`POINT`) and a duration (`INTERVAL`) in a message, in every language | a list of locations or durations (`POINT[]`, `INTERVAL[]`) in a queue's message |
 | `@worker` on an API, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers`, Rust's `Workers` and `create_workers`, the `worker` deployable, its entrypoint and image | |
 | `stack dev`'s worker processes, a TypeScript one on the environment's SQLite file too; on gcp a Cloud Run worker pool; a worker's `maxInstances` | scaling a worker with its queue's depth, which `maxInstances` sets the ceiling for |
 | `stack queue dead`, `retry` and `drop` on a local environment's queues, and on gcp through the migration job | the same on another cloud target |
 
-D53, D68 and D80 in `docs/DECISIONS.md` record the decisions, and section 8.8 of
+D53, D68, D80 and D88 in `docs/DECISIONS.md` record the decisions, and section 8.8 of
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md)
 the design.
 
@@ -163,6 +163,7 @@ acme shop, an order put back to placed is fulfilled again:
 | `fields` | the fields whose change makes an update enqueue, compared with `IS DISTINCT FROM`; every update enqueues unless set. A relation is its key's column |
 | `when` | conditions the row must meet, all of them: `{ field, isNull: true }`, `{ field, notNull: true }` or `{ field, equals: literal }`, the literal an enum's member, a text, a number or a boolean |
 | `message` | each field of the message the trigger sets, and the table's field whose value it takes |
+| `backfill` | `true` makes the migration step that adds the trigger also enqueue a message for each row the table already holds that meets `when`, as an insert of the row would ([Backfill](#backfill)); needs `insert` or `update` in `on` |
 
 An update that changes nothing is still a write, which a trigger without
 `fields` enqueues for. An upsert with `onlyIfChanged` writes no row whose
@@ -176,9 +177,11 @@ its field, and each field of the message takes a table's field of its
 type, or of a relation's key. A required field of the message takes a
 value the row always has, so one from a nullable field needs a `notNull`
 condition on it, and every required field it leaves out has its
-column's default: a list, a time, a `Default<T, V>` the column carries
+column's default: a list, a `Default<T, V>` the column carries
 ([Columns](/superschematic/guides/database-tables/#columns)), or an enum's
-schema default, which the trigger writes. `when` names fields rather
+schema default, which the trigger writes. A required time the message
+leaves out has none: map it from the table's (a queue's own `created_at`
+holds when a message was enqueued). `when` names fields rather
 than SQL, since the trigger is written for Postgres and SQLite alike. An
 [`Encrypted<T>`](/superschematic/guides/database-tables/#encrypted-fields)
 field's column holds an envelope the trigger cannot open, sealed anew on
@@ -194,7 +197,41 @@ the queue's `ON CONFLICT`, so with `replace` or `skip` repeated changes
 of a row keep one waiting message, and the trigger's and your code's
 messages dedupe against each other. A migration plan adds, replaces and
 drops the trigger with the declaration; the rows a table holds when the
-trigger is added enqueue nothing until they change.
+trigger is added enqueue nothing until they change, unless the
+declaration backfills.
+
+### Backfill
+
+After an import, the rows already there need the work the trigger does
+for new ones: an embedding per categorized line item, say. With
+`backfill: true`
+([D88](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)),
+the step that creates the trigger on a table the database already has
+also inserts one message for each row that meets `when`, written as the
+trigger's insert of the row would write it and ending with the queue's
+`ON CONFLICT`. A queue that appends gets a message per row; one that
+replaces or skips keeps one waiting message per key, so a table of N
+qualifying rows leaves N ready messages, or one per key. On Postgres the
+backfill runs in the trigger's transaction, under the lock `CREATE
+TRIGGER` takes, so no write is missed or enqueued twice; the step is
+`blocking`, since that lock keeps writes to the table out for as long as
+the insert takes. A table the plan creates is empty and gets no backfill,
+and a plan that only changes a trigger backfills nothing.
+
+For a table too large to backfill inside a migration, add the trigger
+without `backfill`, deploy, and enqueue the messages afterwards:
+
+```sh
+superschematic stack queue backfill Dev shop-db.OrderPlaced
+```
+
+`stack queue backfill` runs the same insert for each table whose
+`@enqueueOnChange` names the queue, whatever its `backfill` says, in one
+transaction that takes no lock on the tables, and says how many messages
+it enqueued. A row written while it runs may be enqueued by its trigger
+too, which a queue that appends then holds twice. It runs where the other
+`stack queue` commands run ([Dead messages](#dead-messages)): on Postgres,
+with the migration runner.
 
 ## Enqueue a message
 

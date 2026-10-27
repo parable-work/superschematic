@@ -113,11 +113,18 @@ func (p postgresDialect) render(c *change) (rendered, error) {
 		}
 		return one(stepFor(c, c.function.Definition)), nil
 	case opCreateTrigger:
+		if c.backfill {
+			return one(backfillStep(stepFor(c, c.trigger.Definition, c.trigger.Backfill), c)), nil
+		}
 		return one(stepFor(c, c.trigger.Definition)), nil
 	case opReplaceTrigger:
 		return one(stepFor(c, "DROP TRIGGER "+q(c.trigger.Name)+" ON "+q(c.table), c.trigger.Definition)), nil
 	case opSeedHistory:
 		return one(p.seedHistory(c)), nil
+	case opSeedRole:
+		return one(stepFor(c, c.role.Insert)), nil
+	case opUpdateRole:
+		return one(stepFor(c, c.role.Update)), nil
 	case opCreateView:
 		return one(stepFor(c, createViewSQL(c.view)...)), nil
 	case opReplaceView:
@@ -458,6 +465,19 @@ func (postgresDialect) seedHistory(c *change) *Step {
 	step := stepFor(c, statements...)
 	blocking(step, fmt.Sprintf("Seeding %s writes one image of every row of %s while the new triggers' lock blocks writes to it.",
 		s.history.Name, s.source.Name))
+	return step
+}
+
+// backfillStep marks step, which creates c's @enqueueOnChange trigger and
+// then enqueues a message for each row of its table that meets the
+// trigger's conditions (D88), blocking: the trigger's lock keeps every
+// write out until the transaction commits, so no row is missed or
+// enqueued twice, and the insert takes time that grows with the table.
+// On SQLite the step holds the database's write lock as long.
+func backfillStep(step *Step, c *change) *Step {
+	blocking(step, fmt.Sprintf(
+		"Backfilling %s enqueues a message for every row of %s that meets its conditions while the new trigger's lock blocks writes to %s; for a large table, add the trigger without backfill and run stack queue backfill.",
+		c.trigger.Name, c.table, c.table))
 	return step
 }
 

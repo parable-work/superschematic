@@ -11309,7 +11309,7 @@ queue of the same schema after a write to the table's rows.
 | On Postgres it is a plpgsql function `<table>_enqueue_<queue>` and the trigger `trg_<table>_enqueue_<queue>`, `AFTER INSERT OR UPDATE OR DELETE ... FOR EACH ROW`, as a @versioned table's capture function and triggers are (D17), so create.sql and the planner's model take them from one renderer, and the planner creates, replaces in place (`CREATE OR REPLACE`), renames and drops them as it does those. A change of `fields`, `when` or `message` replaces the function; one of `on`, the trigger. | A trigger with a WHEN clause per write, which the planner's trigger model does not read. |
 | SQLite gets triggers too: one per write, `trg_<table>_enqueue_<queue>_<write>`, each holding its insert and, in its WHEN, the comparison and the conditions. The SQLite model holds triggers for the first time: the planner creates them, replaces them (DROP IF EXISTS and CREATE, SQLite having no functions), and drops them. A table SQLite rebuilds loses its triggers with its old copy, so the rebuild creates the triggers the phase leaves on each table it keeps, the new model's and, in expand, the previous model's that contract drops. A trigger that inserts into a rebuilt table needs nothing: SQLite resolves the name when the trigger runs. | Refusing @enqueueOnChange on SQLite, which the same app runs locally. |
 | The trigger's insert ends with the queue's Conflict, so under replace or skip repeated writes keep one ready message per key, and the trigger and an application's enqueue dedupe against each other. | |
-| A trigger enqueues for writes after it exists; the plan that adds it enqueues nothing for the rows already there. | Seeding a message per row, as a new history table is seeded, which for a large table is a burst of work nobody asked for. |
+| A trigger enqueues for writes after it exists; the plan that adds it enqueues nothing for the rows already there, unless the declaration asks with `backfill: true` (D88, amended). | Seeding a message per row, as a new history table is seeded, which for a large table is a burst of work nobody asked for. |
 
 Status: built.
 - **Dedupe and serialization:** `internal/generator/sqlutil/queuesql_test.go`
@@ -11395,7 +11395,7 @@ This entry adds:
 |----------|------------------------|
 | Under `registration: "approval"` register creates the user with `pendingAt` set and answers `RegisterResult`: 202 `{ pending: true, user }` with no session and no cookie, or 200 with a session for the first administrator. Open registration keeps `LoginResult`. | `disabledAt` for pending, which an administrator cannot tell from a disabled user; always answering 200, which an SDK reads as signed in; changing open registration's result, which breaks every SDK that calls it |
 | A pending user's login is 403 `pending_approval`, and only once the password verifies; every other failure stays 401 `invalid_credentials`. A pending user's session, should one exist, does not authenticate. | 401 `invalid_credentials`, which leaves a sign-in page unable to say why; answering before the password, which tells anyone which logins are pending |
-| `defaultRoles` are granted when register creates the user, under approval too, and a role no role has the name of is created with no permissions. A pending user can neither sign in nor hold a session, so the roles take effect at approval. | Granting at approval, the requirements' wording: `approveUser` belongs to `@userAdministration`, which may sit in another API than the `@userSessions` that names the roles, so it would not know them; failing a registration whose role is missing |
+| `defaultRoles` are granted when register creates the user, under approval too, and a role no role has the name of is created with no permissions, unless the authDb's `@seedRoles` holds it from the first migration (D88, amended). A pending user can neither sign in nor hold a session, so the roles take effect at approval. | Granting at approval, the requirements' wording: `approveUser` belongs to `@userAdministration`, which may sit in another API than the `@userSessions` that names the roles, so it would not know them; failing a registration whose role is missing |
 | `approveUser` needs `users.write`, and the approver's permissions must cover the user's, the default roles' included, as for `enableUser` (D50, amended). Approving a user who is not pending is 409 `not_pending`. | `enableUser` as approval, which mixes the two states; approval as an implicit grant no one's permissions are checked against |
 | `firstUser: { role, permissions }` makes the registration that finds no role grant, the state `identity bootstrap` runs in, the first administrator: active, signed in, holding the role, created with its permissions when missing. A store reads the grants without a lock first, so only an empty database's registrations take Postgres's `LOCK TABLE ... IN SHARE ROW EXCLUSIVE MODE`, Bootstrap's lock; SQLite lets one transaction write at a time. | "the table has no user", which bootstrap and the registration would read apart; a role holding every permission the API names, which misses the ones added later; an advisory lock, whose key a deployment would have to keep apart from its own |
 | The generated wiring hands the runtime the registration (`IdentityRegistration`, `identityRegistration`, `registration()`), and only for an API whose register declares any; others build as before. | The identity config's JSON, which would let an environment open what the schema closed |
@@ -12191,3 +12191,111 @@ manual route's handler, which may run its writes within `withCaller`
 itself; a missing required string, which the Go route still reads as
 `""` (D14, amended), so a Go webhook accepts one the TypeScript and Rust
 servers refuse. The rules are reversible until the first release.
+
+## D88. A required time defaults to now only when declared, a UserRole table seeds its roles, and @enqueueOnChange backfills the rows already there (D80, D81 and D83 amended)
+
+Porting a household finance app to superschematic left three gaps in what
+its database said:
+- **Every required date and time defaulted to now.** sqlgen gave each
+  required `Temporal.DateTime`, `Temporal.Date` and `Temporal.Time` column
+  `DEFAULT CURRENT_TIMESTAMP` (`CURRENT_DATE`, `CURRENT_TIME`), so a
+  ledger's `"date" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL` let an
+  import, an ETL or a raw insert that forgot the posting date record today
+  instead of failing. For financial data that is wrong data, silently.
+- **A default role had no permissions.** `@userSessions({ defaultRoles:
+  ["member"] })` creates a missing role with none (D81), and an
+  approver's permissions must cover the role's. A fresh install needed an
+  administrator's step, or a hand-written `@rawSql INSERT ... ON
+  CONFLICT`, before an approved member could do anything.
+- **A new trigger enqueued nothing for the rows already there.** After an
+  import, every categorized line item needed a hand-written enqueue to
+  build its embedding, since `@enqueueOnChange` enqueues for writes after
+  it exists (D80).
+
+This entry adds:
+- **`Default<T, "now">`**, the only way a required date, time or
+  timestamp column other than an audit timestamp gets a default;
+- **`@seedRoles([{ name, permissions }])`** on the UserRole table, which
+  `create.sql` inserts and a plan keeps in step;
+- **`@enqueueOnChange(Q, { ..., backfill: true })`**, and `stack queue
+  backfill` for a table too large to backfill in a migration.
+
+### The time of the insert
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A required date, time or timestamp column takes the time of the insert only where something says so (`sqlutil.ImpliedNowDefault`, `NowDefault`): an audit timestamp, `createdAt` or `updatedAt`, on any table, which the repositories leave to the database; every timestamp of a table or field the loader adds, for the user model (Session, UserCredential, UserRoleGrant, D50) or a version graph, whose runtimes write rows without some of them; and a field declared `Default<T, "now">`. Every other such column has no default. | Keeping the implicit default and adding an opt-out, which leaves wrong data the default for everyone who does not know to opt out. Defaulting by a list of names beyond the audit fields (`postedAt`), a guess the schema does not state. |
+| `"now"` is a literal V of `Default<T, V>`: on a required, single `Temporal.DateTime`, `Temporal.Date` or `Temporal.Time` field of a DB table (a date or time by the scalar's traits, as the implicit default read them), it is `CURRENT_TIMESTAMP`, `CURRENT_DATE` or `CURRENT_TIME` (`sqlutil.ColumnDefault`), which Postgres and SQLite both read. The IR keeps `default: "now"`, so the data forms and the writer carry it as they carry any default, and `codegen.IsDefaultNow` reads it. On `string`, `"now"` stays its text. | A field flag (`defaultNow`), an IR member the JSON Schema, the writer and every form would learn for what the authored form already says. `AutoGenerate<Temporal.DateTime>`, which gives the same column default but makes the field a pointer in the Go types and optional to every decoder. A function name (`"CURRENT_TIMESTAMP"`), which would be SQL in a type. |
+| No decoder fills `"now"` in: `ClassifyDefault` gives it no literal in any language and `ReadRequired` keeps the field required, since the time of a write is the database's. The loader does not check it against the scalar, and verification refuses it on a payload's field, an optional or list field, an `Encrypted<T>` field, an engine type and a queue's message (whose enqueues write every required field), each saying why. | Decoders that fill in the current time, a second clock in four languages that would disagree with the database's. |
+| Both ORMs let a create leave such a field unset and leave it to the database: the TypeScript repositories mark the column `auto`, and the Go ORM's `CreateOne`, `CreateMany`, `UpsertOne`, `UpsertOneResult` and `UpsertMany` (D89) leave its zero value out of the insert, as they do an `AutoGenerate` field's, without making it a pointer; `UpsertMany` matches a returned row to its input as if such a field of the key were unset. A required timestamp without one is still required: the TypeScript create refuses it unset, and the Go ORM writes what it holds. | Leaving the ORMs to write the zero time, which a create that relied on the column default would store as year 1. |
+| A required timestamp of a queue's message that a trigger leaves out has no default now, so verification asks that the message map it (D80's check counted a time as defaulted). The queue's own `created_at`, `updated_at` and `due_at` keep theirs, which sqlgen writes apart from the message. The User table's `createdAt` keeps its default; any other required timestamp of it needs `Default<T, "now">`, since registration writes the key, login and name alone. | Keeping the implicit default on queue tables, which would make a message's time mean two things by where it is declared. |
+| A plan from a database a compiler before D88 built drops each default it no longer gives, in `contract`, with no hazard (the plan case `drop-implied-now-default`); SQLite rebuilds the table to do it (`copy-table`), as it does for any default. | Keeping the old defaults on existing databases, under which a new database and an upgraded one would take different inserts. |
+
+### Seeded roles
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@seedRoles([{ name, permissions }])` from `@superschematic/db`, on the UserRole table, once, in any form (`TypeDef.SeedRoles`). The seeds are the authDb's: `create.sql` and the plans are the DB service's, and every API of one authDb shares its roles. | `defaultRoles: [{ name, permissions }]` on `@userSessions`, the API's decorator: the DB's `create.sql` and plans would then depend on the APIs that name it as their authDb, and two APIs of one authDb could seed one role two ways. |
+| Verification of the DB holds each role to a name, named once, and permissions of a permission's form, each listed once, and the table to a row its insert can write from a name and permissions alone (every other field optional, generated or defaulted by its column). The loader holds each name to the name field's scalar and `Validate` rules, as it does a default. | |
+| An API checks its authDb's seeds against its own permissions where it knows them (`checkSeededRoles`), and warns rather than refuses, since another API of the same authDb may require what this one does not: a default role no seed holds; a seeded permission that covers none of the API's operations' permissions or the administration routes' (a misspelling grants nothing); a seed of `firstUser`'s role, whose permissions hold over `firstUser`'s; and, under approval, a default role whose permissions the first administrator's do not cover, so that administrator could approve no one. | Errors, which would refuse a schema whose other API needs the permission. Checking only in `build-all`, which no single service's `check` would run. |
+| `create.sql` inserts each role after every other object. The insert is `INSERT ... ON CONFLICT (name) DO UPDATE SET permissions = EXCLUDED.permissions WHERE` the role has none (`cardinality` on Postgres, `json_array_length` on SQLite), or `DO NOTHING` for a seed with none: a role of the name keeps the permissions an administrator gave it, and one an earlier registration created empty (D81) takes the seed's. | `DO NOTHING` always, which leaves the empty role a registration made before the seed existed, the very install this entry fixes. Overwriting the role, which an insert of a seed that is already there should never do. |
+| The model holds each seed with its two statements in its dialect (`Model.Roles`), only for a schema that seeds, so every other model and its hash stay as they were. A plan inserts a new seed in `expand` with no hazard (`seedRole`), and updates one whose permissions change (`updateRole`): in `expand` when it only gains permissions, in `contract` when it loses one, since a server of the previous version may still serve a route the permission admits. The update is `destructive`: it replaces whatever permissions the role holds. A seed's step names no table, so a SQLite rebuild never takes it in. A removed seed changes nothing. | A new hazard class for seeds, which every gate would learn for a step `destructive` already describes. Deleting a role no seed declares, which strips it from every user who holds it. Diffing permissions into the update (removing what the seed dropped, adding what it gained), which would keep an administrator's own changes, but which SQLite's JSON list has no short statement for. |
+| The identity runtimes do not change: a seeded role exists, so registration grants it as it finds it. | Seeding at registration in the runtimes, which no plan would show and which every language would implement. |
+
+### Backfill
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@enqueueOnChange(Q, { ..., backfill: true })` (`EnqueueOnChange.Backfill`) needs an insert or an update among `on`: a backfill enqueues for each row that exists as an insert of it would. | Backfilling a delete-only trigger, for which no existing row was deleted. |
+| The backfill is one `INSERT INTO <queue> (...) SELECT ... FROM <table> AS src WHERE <when>` with the trigger's columns and values and the queue's `ON CONFLICT` (`EnqueueTrigger.BackfillSQL`, `SQLiteBackfillSQL`), so a queue that appends gets a message per row and one that replaces or skips one waiting message per key. On Postgres a replacing queue's backfill takes one row of each key (`DISTINCT ON`, the first by the table's key), since one statement's `ON CONFLICT DO UPDATE` changes a row once; SQLite's upsert takes the rows in turn, so a key's last row wins. The select always has a `WHERE`, which SQLite needs to read the `ON CONFLICT` after it. | A message per row with `ON CONFLICT` left to fail on Postgres at a key's second row. |
+| The step that creates the trigger on a table the previous model has runs the backfill after `CREATE TRIGGER`, in its transaction: the trigger's lock keeps every write out until it commits, so no row is missed and none is enqueued twice, as a new history table is seeded (D17). The step is `blocking`: the insert holds that lock for time that grows with the table. On SQLite the declaration's first trigger (the insert's or the update's) holds the backfill, and a rebuild that creates the trigger runs it after the triggers. A table the plan creates is empty and gets none, and a plan that changes an existing trigger backfills nothing: the model holds the statement on the trigger (`Trigger.Backfill`, only when declared), which the planner's comparison of triggers does not read. | `data-dependent`, the requirements' word, which D27 defines as a step that fails on rows that violate it, and a backfill fails on none. The trigger in one step and the backfill in a later one, which takes no long lock but enqueues twice, on an appending queue, the rows written between them. A backfill in `create.sql`, whose tables are empty. |
+| For a table too large to backfill inside a migration, `stack queue backfill <environment> <db>.<Queue>` runs the backfill of every `@enqueueOnChange` of the queue, whatever its `backfill`, as a queue document (`queueops.Backfill`, `migrate.QueueBackfill`) the migration runner runs in one transaction that takes no lock on the tables, and prints how many messages it enqueued, from `WITH enqueued AS (... RETURNING 1) SELECT count(*)`. A row written while it runs may be enqueued by its trigger too, which an appending queue then holds twice. It runs where the other `stack queue` commands run: on Postgres, locally or through the target's queue runner. | A flag on `superschematic-migrate apply`, which runs plans and nothing else. Locking the tables, which is what the command exists to avoid. |
+
+Status: built.
+- **The time of the insert:** sqlgen's goldens, where `fixture-ddl-db`'s
+  `posted_at` has no default while its `created_at` and `entered_on`
+  (`Default<Temporal.Date, "now">`) do, and `fixture-list-defaults-db`
+  declares the three; `TestDDLOnPostgres` (pgcheck), where a raw insert
+  without `posted_at` fails `NOT NULL` on it and one with it stamps
+  `created_at` and `entered_on`; `TestListDefaultsOnPostgres`;
+  `TestDefaultNowOnPostgres` (the Go ORM's `CreateOne` and `CreateMany`,
+  with the fields unset and set, and a raw insert refused);
+  `TestRepositoriesOnPostgres`'s `ddl.test.ts` (TypeScript);
+  `TestNowDefaults`, `TestDefaultNowIsNoDecodersDefault`,
+  `TestDefaultNowRefusedInIR`, `TestUnmappedTimestampNeedsDefaultNow`; the
+  plan cases `drop-implied-now-default` and `add-now-default` in both
+  dialects; `TestDDLRoundTrips` and `TestEncryptedAndNamedFieldsRoundTrip`
+  for the forms.
+- **Seeded roles:** `TestRoleSeedsOf`, `TestSeedRolesRefusedInIR`,
+  `TestSeededRolesWarnings`, `TestRoleSeedSQL`; sqlgen's golden
+  `fixture-user-model-db`, whose `Role` seeds `member` with
+  `identity.roles.read`; the plan cases `add-seed-roles`, which fills a
+  `member` an earlier registration created empty, `seed-roles-gain` and
+  `seed-roles-lose`, in both dialects, applied by the convergence tests;
+  `TestUserRoutesServerServesTheSDK`'s `firstUser`, on SQLite and
+  Postgres: on an empty database the first registrant is the
+  administrator, the second waits, is approved, and at once lists the
+  roles, a route `identity.roles.read` admits, and not the users;
+  `user_routes_runtime.test.ts` (TypeScript) and
+  `TestRustSDKCallsTheUserModelRoutes` (Rust), whose approved member holds
+  the seeded permission; `TestTSWriterRoundTripsUserTraits` and the
+  reader's golden of `fixture-users-db`. The identity runtimes' store
+  fixture leaves the seeds out (`TestIdentityStoreFixtureIsCurrent`),
+  since their tests make their own roles.
+- **Backfill:** `TestEnqueueOnChangeOf`, `TestBackfillSQL`; the plan cases
+  `add-enqueue-on-change-backfill`, where the two orders with a note wait
+  once each and the one without waits not at all, and
+  `add-enqueue-on-change-backfill-per-key`, where a customer of three
+  orders waits once, applied on Postgres and SQLite by the convergence
+  tests; `TestBackfillDocument`, `TestReadsTheBackfillDocument`,
+  `TestQueueBackfillOnPostgres` (the runner: two ready messages for three
+  orders, one without a product, and none more on a second run) and
+  `TestStackQueueBackfillOnACloudEnvironment`; `fixture-naming-db`'s
+  trigger in the forms' round trip.
+
+Left: `Default<T, "now">` on a queue's message, which the enqueues of all
+three languages would have to leave out when unset; decoders that fill in
+the current time; seeds of rows other than roles; `stack queue backfill`
+on SQLite, with the other operator statements (D68); a backfill when a
+plan changes an existing trigger's `when`, which the declaration would
+have to ask for. The rules are reversible until the first release.

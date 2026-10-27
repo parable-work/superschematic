@@ -29,7 +29,7 @@ sub-category''s totals up to it. A budget is exact, and starts on a day.';
 
 CREATE TABLE line_item (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
-  "date" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  "date" TIMESTAMPTZ NOT NULL,
   "name" TEXT NOT NULL,
   amount BIGINT NOT NULL,
   account_id UUID NOT NULL,

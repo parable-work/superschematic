@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "service": "fixture-queue-db",
+  "queue": "OrderChanged",
+  "operation": "backfill",
+  "statements": {
+    "dead": "SELECT q.id::text, q.attempts::bigint, COALESCE(q.last_error, ''),\n  to_char(q.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'),\n  (to_jsonb(q) - ARRAY['id', 'state', 'attempts', 'due_at', 'claim_expires_at', 'claim_token', 'last_error', 'created_at', 'updated_at']::text[])::text,\n  count(*) OVER ()\nFROM order_changed_queue AS q\nWHERE q.state = 'dead'\nORDER BY q.updated_at, q.id\nLIMIT $1",
+    "states": "SELECT q.id::text, CASE WHEN q.state = 'dead' AND EXISTS (SELECT 1 FROM order_changed_queue AS p WHERE p.order_id = q.order_id AND p.state = 'ready')\n  THEN 'dead, and a ready message holds its key' ELSE q.state END FROM order_changed_queue AS q WHERE q.id = ANY($1::text[]::uuid[])",
+    "retry": "UPDATE order_changed_queue SET state = 'ready', attempts = 0, due_at = now(), claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE state = 'dead' AND id = ANY($1::text[]::uuid[])\n  AND NOT EXISTS (SELECT 1 FROM order_changed_queue AS p WHERE p.order_id = order_changed_queue.order_id AND p.state = 'ready')\n  AND id IN (SELECT DISTINCT ON (order_id) id FROM order_changed_queue WHERE state = 'dead' AND id = ANY($1::text[]::uuid[]) ORDER BY order_id, updated_at DESC, id)\nRETURNING id::text",
+    "retryAll": "UPDATE order_changed_queue SET state = 'ready', attempts = 0, due_at = now(), claim_token = NULL, claim_expires_at = NULL, updated_at = now()\nWHERE state = 'dead'\n  AND NOT EXISTS (SELECT 1 FROM order_changed_queue AS p WHERE p.order_id = order_changed_queue.order_id AND p.state = 'ready')\n  AND id IN (SELECT DISTINCT ON (order_id) id FROM order_changed_queue WHERE state = 'dead' ORDER BY order_id, updated_at DESC, id)\nRETURNING id::text",
+    "drop": "DELETE FROM order_changed_queue\nWHERE state = 'dead' AND id = ANY($1::text[]::uuid[])\nRETURNING id::text",
+    "dropAll": "DELETE FROM order_changed_queue\nWHERE state = 'dead'\nRETURNING id::text",
+    "backfill": [
+      "WITH enqueued AS (\nINSERT INTO order_changed_queue (order_id, line_id, priority)\nSELECT DISTINCT ON (src.order_id) src.order_id, src.id, 'low'\nFROM order_line AS src\nWHERE src.product_id IS NOT NULL\nORDER BY src.order_id, src.id\nON CONFLICT (order_id) WHERE state = 'ready' DO UPDATE SET line_id = excluded.line_id, priority = excluded.priority, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = now()\nRETURNING 1\n)\nSELECT count(*) FROM enqueued"
+    ]
+  }
+}

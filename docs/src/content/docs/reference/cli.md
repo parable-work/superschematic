@@ -1059,10 +1059,11 @@ It takes the flags of the commands below, `--stack`, `--naming`,
 | --- | --- | --- |
 | `--out` | `<schemas-root>/dist` | the output root the build wrote, `stack dev`'s `--out`: where `run` reads a local environment and the job's entrypoint module |
 
-## `stack queue dead|retry|drop <environment> <queue>`
+## `stack queue dead|retry|drop|backfill <environment> <queue>`
 
 List, retry and drop the dead messages of a queue a DB service declares
-([Dead messages](/superschematic/guides/queues/#dead-messages)). `<queue>`
+([Dead messages](/superschematic/guides/queues/#dead-messages)), and
+backfill it ([Backfill](/superschematic/guides/queues/#backfill)). `<queue>`
 is the DB service and its `@queue` class, `shop-db.OrderPlaced`. The design
 is section 8.8 of
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md).
@@ -1071,6 +1072,7 @@ is section 8.8 of
 superschematic stack queue dead Dev shop-db.OrderPlaced [--limit 100]
 superschematic stack queue retry Dev shop-db.OrderPlaced <id>... | --all
 superschematic stack queue drop Dev shop-db.OrderPlaced <id>... | --all --yes
+superschematic stack queue backfill Dev shop-db.OrderPlaced
 superschematic stack queue dead Preview shop-db.OrderPlaced --param pr=123
 ```
 
@@ -1082,6 +1084,12 @@ superschematic stack queue dead Preview shop-db.OrderPlaced --param pr=123
   kept until the next failure replaces it.
 - `drop` deletes the dead messages named, or every one with `--all`,
   which takes `--yes`.
+- `backfill` enqueues a message for each row of each table whose
+  `@enqueueOnChange` names the queue that meets the trigger's `when`, as
+  the trigger's insert of the row would, under the queue's `onDuplicate`,
+  in one transaction that locks no table, and says how many it enqueued
+  (D88). A queue no trigger enqueues is refused. The runner must be a
+  release that reads a backfill.
 
 An ID is a message's UUID, in either case. A `retry` or a `drop` that
 names a message that is not dead changes none of them, and says what each
