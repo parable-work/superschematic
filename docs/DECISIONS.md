@@ -12155,9 +12155,13 @@ Status: built.
   (`actor.test.ts`) holds the TypeScript rules: the caller across awaits
   and a transaction, the explicit users and null, a subject that is no
   UUID, the default and a named system actor, a malformed one, and
-  `requireUpdatedBy` over `updateOne`, `updateMany` and `upsertOne`.
+  `requireUpdatedBy` over `updateOne`, `updateMany`, `upsertOne` and
+  `upsertOneResult`; D89's writes act as the caller too, `upsertMany`'s
+  insert and update, an upsert only if changed, which opens a transaction
+  of its own, and a savepoint.
   `TestGeneratedORMActsAsTheCallerAndTheSystem` (ormgen) holds the Go
-  ORM's, with and without `requireUpdatedBy`, and fixture-api-session's
+  ORM's, with and without `requireUpdatedBy`, `UpsertMany`,
+  `UpsertOneResult` and a savepoint among them, and fixture-api-session's
   golden `caller.go` and `routes.go` the Go routes. Acme's shop-orders
   drops its `actingUser`.
 - **Unknown keys:** `TestAllowUnknownFieldsGeneratedDecoders` (parity)

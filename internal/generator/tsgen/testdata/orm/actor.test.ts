@@ -37,6 +37,23 @@ describe.skipIf(dsn === '')('the acting user', () => {
     expect(updated.updatedBy).toBe(alice);
     const edited = await withCaller({ subject: bob }, () => orm.transaction(tx => tx.note.updateOne(created.id, { text: "bob's edit" })));
     expect(edited).toMatchObject({ createdBy: alice, updatedBy: bob });
+    // D89's writes act as the caller too: upsertMany's insert and update, an
+    // upsert only if changed, which opens a transaction of its own, and a
+    // savepoint.
+    const [kept, added] = await withCaller({ subject: alice }, () =>
+      orm.note.upsertMany([{ id: created.id, text: "alice's upsert" }, { text: "alice's new note" }], ['id'], ['text'])
+    );
+    expect(kept).toMatchObject({ status: 'updated', row: { createdBy: alice, updatedBy: alice } });
+    expect(added).toMatchObject({ status: 'inserted', row: { createdBy: alice, updatedBy: alice } });
+    const changed = await withCaller({ subject: bob }, () =>
+      orm.note.upsertOneResult({ id: created.id, text: "bob's upsert" }, ['id'], { text: "bob's upsert" }, { onlyIfChanged: true })
+    );
+    expect(changed).toMatchObject({ status: 'updated', row: { updatedBy: bob } });
+    const nested = await withCaller({ subject: alice }, () =>
+      orm.transaction(tx => tx.transaction(inner => inner.note.updateOne(created.id, { text: "alice's savepoint edit" })))
+    );
+    expect(nested.updatedBy).toBe(alice);
+    await withCaller({ subject: bob }, () => orm.note.updateOne(created.id, { text: "bob's edit" }));
     // Outside an operation, an update with no user leaves the nullable
     // updatedBy as it was.
     const untouched = await orm.note.updateOne(created.id, { text: "nobody's edit" });
@@ -94,6 +111,7 @@ describe.skipIf(dsn === '')('the acting user', () => {
     await expect(strict.note.updateOne(note.id, { text: "nobody's edit" })).rejects.toBeInstanceOf(NoUserError);
     await expect(strict.note.updateMany({ id: { eq: note.id } }, { text: "nobody's edits" })).rejects.toBeInstanceOf(NoUserError);
     await expect(strict.note.upsertOne({ id: note.id, text: 'upserted' }, ['id'], { text: 'upserted' })).rejects.toBeInstanceOf(NoUserError);
+    await expect(strict.note.upsertOneResult({ id: note.id, text: 'upserted' }, ['id'], { text: 'upserted' }, { onlyIfChanged: true })).rejects.toBeInstanceOf(NoUserError);
     const edited = await withCaller({ subject: bob }, () => strict.note.updateOne(note.id, { text: "bob's edit" }));
     expect(edited.updatedBy).toBe(bob);
     expect((await strict.asSystem().note.updateOne(note.id, { text: "the system's edit" })).updatedBy).toBe(systemActorOf(fixtureActorDbOrm).id);

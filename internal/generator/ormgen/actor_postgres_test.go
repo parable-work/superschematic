@@ -21,7 +21,8 @@ const actorFixture = "fixture-actor-db"
 // system actor the DB service names, as a job's or a worker's write acts;
 // and an update with no user leaves the nullable updatedBy as it was. The
 // module is generated again with requireUpdatedBy, under which that update
-// refuses, by UpdateOne, UpdateMany and UpsertOne alike.
+// refuses, by UpdateOne, UpdateMany and UpsertOne alike. UpsertMany,
+// UpsertOneResult and a savepoint (D89) stamp the caller too.
 func TestGeneratedORMActsAsTheCallerAndTheSystem(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -186,6 +187,39 @@ func TestActorOnPostgres(t *testing.T) {
 		if unattributed.UpdatedBy == nil || *unattributed.UpdatedBy != system {
 			t.Fatalf("an update with no user changed updatedBy to %v", unattributed.UpdatedBy)
 		}
+	}
+
+	// UpsertMany (D89) stamps as a create and an update do, the caller in
+	// the nullable updatedBy's pointer, and refuses with no user, as the
+	// required createdBy needs one; UpsertOneResult only if changed, which
+	// runs in a transaction of its own, and a savepoint act as the caller.
+	byBob := WithCaller(ctx, "6f1d2c3b-4a5e-4f60-8172-93a4b5c6d7e8")
+	results, err := db.Note.UpsertMany(byBob, []*types.Note{{Id: jobs.Id, Text: "bob's upsert"}, {Text: "bob's new note"}}, NoteUniqueById, NoteFields{Text: true}, nil)
+	if err != nil {
+		t.Fatalf("UpsertMany as bob: %v", err)
+	}
+	if len(results) != 2 || results[0].Status != UpsertUpdated || results[0].Row.UpdatedBy == nil || *results[0].Row.UpdatedBy != bob ||
+		results[1].Status != UpsertInserted || results[1].Row.CreatedBy != bob || results[1].Row.UpdatedBy == nil || *results[1].Row.UpdatedBy != bob {
+		t.Fatalf("UpsertMany as bob = %+v", results)
+	}
+	if _, err := db.Note.UpsertMany(ctx, []*types.Note{{Id: jobs.Id, Text: "nobody's upsert"}}, NoteUniqueById, NoteFields{Text: true}, nil); !errors.Is(err, ErrNoUserInContext) {
+		t.Fatalf("UpsertMany with no user = %v, want ErrNoUserInContext", err)
+	}
+	changed, err := db.Note.UpsertOneResult(byAlice, &types.Note{Id: jobs.Id, Text: "alice's upsert"}, NoteUniqueById, &NoteUpdate{Text: text("alice's upsert")}, &UpsertOptions{OnlyIfChanged: true})
+	if err != nil || changed.Status != UpsertUpdated || changed.Row.UpdatedBy == nil || *changed.Row.UpdatedBy != alice {
+		t.Fatalf("UpsertOneResult only if changed as alice = %+v, %v", changed, err)
+	}
+	err = db.TransactionWith(byBob, TxOptions{}, func(tx TxInterface) error {
+		return tx.Transaction(byBob, func(nested TxInterface) error {
+			edited, err := nested.GetNoteRepository().UpdateOne(byBob, *jobs.Id, &NoteUpdate{Text: text("bob's savepoint edit")})
+			if err == nil && (edited.UpdatedBy == nil || *edited.UpdatedBy != bob) {
+				err = fmt.Errorf("an update in a savepoint as bob recorded updatedBy %v", edited.UpdatedBy)
+			}
+			return err
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	// A soft delete stamps deletedBy with the actor.
