@@ -6,6 +6,7 @@
 // an enum picks, budgets with exact decimals and dates, and the transfer
 // matcher's candidates.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { hyperdrivePool, withHyperdrive } from '@superschematic/http-runtime/hyperdrive';
 import { fill } from '@superschematic/http-runtime/postgres';
 import { createOrm, fixtureQueriesDbQueries, type FixtureQueriesDbOrm, type TransactionListQueryPageKey } from './orm';
 import type { BucketUnit, FinanceSignedMoney, GenericDecimal, GenericInt64, IdentityName, IdentityUUID, LineOrder, TemporalDate } from './types';
@@ -145,5 +146,16 @@ describe.skipIf(dsn === '')('declared queries', () => {
     // A transaction of options and a savepoint nested in it hold the queries too (D89).
     const nested = await orm.transaction(tx => tx.transaction(inner => inner.queries.budgets({ parentId: ids.food! })), { readOnly: true });
     expect(nested.map(r => r.id)).toEqual([ids.groceries!]);
+    // And over a Hyperdrive pool, as a Worker opens its ORM (D92): on the
+    // scope's pool and in a savepoint of a transaction of options.
+    const url = new URL(dsn);
+    url.searchParams.set('options', `-c search_path=${db.schema},public`);
+    const worker = createOrm(hyperdrivePool({ connectionString: url.toString() }));
+    const overHyperdrive = await withHyperdrive(async () => {
+      const onPool = await worker.queries.budgets({ parentId: ids.food! });
+      const inSavepoint = await worker.transaction(tx => tx.transaction(inner => inner.queries.budgets({ parentId: ids.food! })), { readOnly: true });
+      return [...onPool, ...inSavepoint];
+    });
+    expect(overHyperdrive.map(r => r.id)).toEqual([ids.groceries!, ids.groceries!]);
   });
 });

@@ -129,6 +129,7 @@ var repositoryCases = []repositoryCase{
 		"withUser, as and asSystem act as whom they name wherever they run, and a transaction as its ORM",
 		"asSystem acts as the DB service's system actor, the default one unless it names another",
 		"requireUpdatedBy refuses an update with no user that would leave updatedBy as it was",
+		"over a Hyperdrive pool, a request acts as its caller and a drain firing as no one or as the system actor",
 	}},
 	{fixture: "fixture-vault-db", files: []string{"vault.test.ts"}, tests: []string{
 		"a write seals each encrypted field into an envelope of its row, and a read opens it into a SecretValue",

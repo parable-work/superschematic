@@ -660,3 +660,9 @@ the six connections a Worker's invocation may hold open at once, which
 its database's and its fetches share. `enabled: false`, or `instances: 0`,
 leaves the Worker with no Cron Trigger. A Go or Rust worker does not
 resolve, and neither does one whose queue is on D1.
+
+A deploy migrates the database from the deploying machine
+([Databases on Hyperdrive](/superschematic/guides/stacks/#databases-on-hyperdrive)),
+so a trigger's `backfill: true` runs in the plan's step there as anywhere.
+`stack queue`, `backfill` among its commands, does not reach a cloudflare
+environment's database yet (D92).

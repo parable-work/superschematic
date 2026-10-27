@@ -12612,7 +12612,12 @@ Status: built.
   TypeScript; `hyperdrive.test.ts` (a scope's pool shared by its queries
   and transactions and ended after it, concurrent scopes' own pools,
   the refusals), on `SUPERSCHEMATIC_HTTP_RUNTIME_TEST_DATABASE_URL`; `worker.test.ts`'s
-  `workerDrainSeconds`.
+  `workerDrainSeconds`. Over a `hyperdrivePool` within `withHyperdrive`,
+  as a Worker opens its ORM, tsgen's `actor.test.ts` stamps a request's
+  caller (D87), in a transaction of options, a savepoint and an upsert
+  only if changed (D89) too, and a firing's write as no one or as the
+  system actor, and `queries.test.ts` runs a declared query (D86) on the
+  scope's pool and in a savepoint.
 - **The generator:** `TestTypeScriptHyperdriveEntrypointGolden`, the
   ledger fixture's `fetch.ts`, `bundle.ts`, both `drain.ts` and a worker's
   package; `TestTypeScriptCronRefusals` and `TestTypeScriptWorkersRefusals`

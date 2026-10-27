@@ -2,9 +2,12 @@
 // as the caller of the operation it runs in, which a router binds with
 // withCaller, and as no one outside one; withUser, as and asSystem act as
 // whom they name wherever they run; asSystem acts as the DB service's
-// system actor; and requireUpdatedBy refuses an update with no user.
+// system actor; requireUpdatedBy refuses an update with no user; and over
+// a Hyperdrive pool, as a Worker's Deps.orm is opened (D92), a request acts
+// as its caller and a drain firing as no one or as the system actor.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { currentCaller, withCaller } from '@superschematic/http-runtime/hono';
+import { hyperdrivePool, withHyperdrive } from '@superschematic/http-runtime/hyperdrive';
 import { DEFAULT_SYSTEM_ACTOR, NoUserError, ormOf, systemActorOf, uuidFromDb, uuidToDb } from '@superschematic/http-runtime/postgres';
 import { createOrm, fixtureActorDbOrm, type FixtureActorDbOrm, type FixtureActorDbRepositories } from './orm';
 import { alice, aliceHyphenated, bob, database, dsn, type TestDatabase } from './harness';
@@ -115,6 +118,39 @@ describe.skipIf(dsn === '')('the acting user', () => {
     const edited = await withCaller({ subject: bob }, () => strict.note.updateOne(note.id, { text: "bob's edit" }));
     expect(edited.updatedBy).toBe(bob);
     expect((await strict.asSystem().note.updateOne(note.id, { text: "the system's edit" })).updatedBy).toBe(systemActorOf(fixtureActorDbOrm).id);
+  });
+
+  test('over a Hyperdrive pool, a request acts as its caller and a drain firing as no one or as the system actor', async () => {
+    // A Worker opens Deps.orm over hyperdrivePool with no user (D92), and
+    // runs each request and each firing within withHyperdrive; the router
+    // binds the request's caller within it (D87). The binding's
+    // connection string is this test's database, in its schema.
+    const url = new URL(dsn);
+    url.searchParams.set('options', `-c search_path=${db.schema},public`);
+    const worker = createOrm(hyperdrivePool({ connectionString: url.toString() }));
+    const created = await withHyperdrive(() => withCaller({ subject: alice }, () => worker.note.createOne({ text: "alice's, through Hyperdrive" })));
+    expect(created).toMatchObject({ createdBy: alice, updatedBy: alice });
+    // A transaction of options and a savepoint in it (D89) on the scope's
+    // pool act as the caller too, and so does an upsert only if changed,
+    // which opens a transaction of its own.
+    const nested = await withHyperdrive(() =>
+      withCaller({ subject: bob }, () =>
+        worker.transaction(tx => tx.transaction(inner => inner.note.updateOne(created.id, { text: "bob's savepoint edit" })), { isolation: 'serializable' })
+      )
+    );
+    expect(nested).toMatchObject({ createdBy: alice, updatedBy: bob });
+    const [upserted] = await withHyperdrive(() =>
+      withCaller({ subject: alice }, () => worker.note.upsertMany([{ id: created.id, text: "alice's upsert" }], ['id'], ['text'], { onlyIfChanged: true }))
+    );
+    expect(upserted).toMatchObject({ status: 'updated', row: { updatedBy: alice } });
+    // A drain firing runs within no caller: a write that needs a user
+    // refuses, and asSystem() writes as the database's system actor.
+    const system = systemActorOf(fixtureActorDbOrm).id;
+    await withHyperdrive(async () => {
+      await expect(worker.note.createOne({ text: "a firing's, as no one" })).rejects.toBeInstanceOf(NoUserError);
+      const bySystem = await worker.asSystem().transaction(tx => tx.note.createOne({ text: "a firing's, as the system" }));
+      expect(bySystem).toMatchObject({ createdBy: system, updatedBy: system });
+    });
   });
 });
 
