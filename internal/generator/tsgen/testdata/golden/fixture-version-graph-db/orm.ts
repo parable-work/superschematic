@@ -11,9 +11,11 @@ createOrm(pool, { user, fieldKeys }) acts as a user and holds the keys
 of the Encrypted<T> fields (D85), whose rows hold each one's value in a
 SecretValue.
 A row holds each column by member, a to-one relation's key as <field>Id, a
-UUID in its base62 wire form; withUser(id) or as(ctx.principal) acts as a
-user, whom createdBy, updatedBy and deletedBy record; transaction(fn) runs
-fn in a transaction, whose query takes enqueue's statements too.
+UUID in its base62 wire form. createdBy, updatedBy and deletedBy record the
+acting user: in an operation the router runs, its caller (D87);
+withUser(id) or as(principal) acts as another, and asSystem() as the
+system actor, for a job's or a worker's writes. transaction(fn) runs fn in
+a transaction, whose query takes enqueue's statements too.
 
 A read's options select members and include relations (D90), and its rows
 hold what they name: include: { category: { include: { parent: true } } }

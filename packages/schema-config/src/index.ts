@@ -151,6 +151,32 @@ export type SqlOutputConfig = {
    * Where the keys of the schema's Encrypted<T> fields come from (D85). A schema with one needs it.
    */
   readonly encryption?: SqlEncryptionConfig;
+  /**
+   * Who the ORMs act as for a write no request's caller makes, a job's or a worker's: orm.asSystem() in TypeScript and orm.AsSystem(ctx) in Go stamp createdBy, updatedBy and deletedBy with its id (D87). The audit fields hold a user's id with no foreign key, so it needs no user row. Unset is { id: "00000000-0000-4000-8000-000000000000", name: "system" }.
+   */
+  readonly systemActor?: SqlSystemActorConfig;
+  /**
+   * An update of a table with an updatedBy field needs an acting user, as a create of a table with createdBy does: without one the ORMs refuse it (NoUserError in TypeScript, ErrNoUserInContext in Go) where they would leave a nullable updatedBy as it was (D87). Unset is false.
+   */
+  readonly requireUpdatedBy?: boolean;
+};
+
+/**
+ * The system actor of a DB service's ORMs (D87).
+ */
+export type SqlSystemActorConfig = {
+  /**
+   * The actor's user id: a UUID, hyphenated.
+   *
+   * @pattern ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
+   */
+  readonly id: string;
+  /**
+   * The name an app shows for the actor. Unset is "system".
+   *
+   * @minLength 1
+   */
+  readonly name?: string;
 };
 
 /**

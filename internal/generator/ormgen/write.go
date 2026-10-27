@@ -20,6 +20,10 @@ type RepositoryOutput struct {
 	Timestamp    string
 	UUIDGoType   string
 	UserIDGoType string
+
+	// RequireUpdatedBy is outputs.sql.requireUpdatedBy (D87): a write that
+	// would leave a nullable updatedBy as it was refuses one without a user.
+	RequireUpdatedBy bool
 }
 
 // VersionGraphOutput wraps one version graph with module-level metadata for
@@ -166,6 +170,7 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 				UUIDGoType:   output.UUIDGoType,
 				UserIDGoType: output.UserIDGoType,
 			}
+			repoOutput.RequireUpdatedBy = output.Actor.RequireUpdatedBy
 			if err := generateFile(generator, "repository.tmpl", filepath.Join(outputDir, filename), repoOutput); err != nil {
 				return fmt.Errorf("failed to write %s: %w", filename, err)
 			}

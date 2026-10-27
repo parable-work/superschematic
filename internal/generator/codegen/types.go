@@ -279,6 +279,11 @@ type TypeInfo struct {
 	// decoder rejects an undeclared key and an absent or null required field.
 	StrictJSON bool
 
+	// AllowUnknownFields indicates the type carries @allowUnknownFields:
+	// every generated decoder accepts a key the type does not declare and
+	// drops it (D87).
+	AllowUnknownFields bool
+
 	// EnvVars indicates the type declares the service's environment-variable
 	// configuration surface.
 	EnvVars bool

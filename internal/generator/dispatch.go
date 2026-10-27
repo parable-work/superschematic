@@ -299,6 +299,7 @@ func (r run) generateTSTypes() error {
 			EngineDocument:     engineDocument,
 			SQLite:             r.Outputs.SQLDialect(registry.SQLDialectSQLite),
 			NoPostgres:         !r.Outputs.SQLDialect(registry.SQLDialectPostgres),
+			Actor:              r.ormActor(),
 			Clock:              r.Options.Clock,
 		})
 		return err
@@ -526,6 +527,7 @@ func (r run) generateORM() error {
 			Dependencies:  deps,
 			ModuleClosure: closure,
 			SQLite:        r.Outputs.SQLDialect(registry.SQLDialectSQLite),
+			Actor:         r.ormActor(),
 			Clock:         r.Options.Clock,
 		})
 		return err

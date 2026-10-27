@@ -44,8 +44,9 @@ type repositoryCase struct {
 // filter through a relation, anyOf, select and include, and a projection's
 // repository; fixture-queries-db's declared queries (D86);
 // fixture-vault-db's Encrypted<T> fields (D85), sealed, opened,
-// refused and resealed; and fixture-vectors-db's decimals, vectors and
-// nearest (D84), on the Postgres with pgvector.
+// refused and resealed; fixture-actor-db's acting user, the caller of the
+// operation being run and the system actor (D87); and fixture-vectors-db's
+// decimals, vectors and nearest (D84), on the Postgres with pgvector.
 var repositoryCases = []repositoryCase{
 	{fixture: "fixture-ledger-db", files: []string{"ledger.test.ts"}, tests: []string{
 		"createOne and getOne read a row as the types hold it, its key base62 and its user stamped",
@@ -121,6 +122,12 @@ var repositoryCases = []repositoryCase{
 		"budgets read an exact decimal and a date as the wire holds them, and an optional parent",
 		"transferCandidates finds the other side of a move within the window",
 		"a query runs in a transaction, and sends the statement sqlutil writes, its parameters positional",
+	}},
+	{fixture: "fixture-actor-db", files: []string{"actor.test.ts"}, tests: []string{
+		"an ORM opened with no user acts as the caller of the operation it runs in, and as no one outside one",
+		"withUser, as and asSystem act as whom they name wherever they run, and a transaction as its ORM",
+		"asSystem acts as the DB service's system actor, the default one unless it names another",
+		"requireUpdatedBy refuses an update with no user that would leave updatedBy as it was",
 	}},
 	{fixture: "fixture-vault-db", files: []string{"vault.test.ts"}, tests: []string{
 		"a write seals each encrypted field into an envelope of its row, and a read opens it into a SecretValue",

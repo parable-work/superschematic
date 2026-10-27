@@ -120,6 +120,55 @@ type SQLOutputConfig struct {
 	// Encryption names the key of the schema's Encrypted<T> fields (D85).
 	// Nil for a service without one; a schema with one needs it.
 	Encryption *SQLEncryptionConfig `json:"encryption,omitempty"`
+
+	// SystemActor is who the ORMs' asSystem (TypeScript) and AsSystem (Go)
+	// act as (D87). Nil acts as DefaultSystemActorID, named
+	// DefaultSystemActorName.
+	SystemActor *SQLSystemActorConfig `json:"systemActor,omitempty"`
+
+	// RequireUpdatedBy makes an update of a table with an updatedBy field
+	// need an acting user, as a create of a table with createdBy does
+	// (D87): the ORMs refuse one without a user where they would leave a
+	// nullable updatedBy as it was.
+	RequireUpdatedBy bool `json:"requireUpdatedBy,omitempty"`
+}
+
+// SQLSystemActorConfig is outputs.sql.systemActor (D87): the user ID the
+// ORMs stamp createdBy, updatedBy and deletedBy with for a write no
+// request's caller makes, a job's or a worker's, and the name an app shows
+// for it. The audit fields hold a user's ID with no foreign key, so the ID
+// needs no row of the user table.
+type SQLSystemActorConfig struct {
+	// ID is a UUID, hyphenated.
+	ID string `json:"id"`
+	// Name is DefaultSystemActorName when empty.
+	Name string `json:"name,omitempty"`
+}
+
+// The system actor the ORMs act as unless outputs.sql.systemActor names
+// another (D87): the fixed ID the generated Go APIs export as SystemUserID.
+const (
+	DefaultSystemActorID   = "00000000-0000-4000-8000-000000000000"
+	DefaultSystemActorName = "system"
+)
+
+// SystemActor is outputs.sql.systemActor with its unset members defaulted,
+// and whether the service sets it.
+func (o *Outputs) SystemActor() (actor SQLSystemActorConfig, set bool) {
+	actor = SQLSystemActorConfig{ID: DefaultSystemActorID, Name: DefaultSystemActorName}
+	if o == nil || o.SQL == nil || o.SQL.SystemActor == nil {
+		return actor, false
+	}
+	actor.ID = o.SQL.SystemActor.ID
+	if o.SQL.SystemActor.Name != "" {
+		actor.Name = o.SQL.SystemActor.Name
+	}
+	return actor, true
+}
+
+// RequireUpdatedBy is outputs.sql.requireUpdatedBy.
+func (o *Outputs) RequireUpdatedBy() bool {
+	return o != nil && o.SQL != nil && o.SQL.RequireUpdatedBy
 }
 
 // SQLEncryptionConfig is outputs.sql.encryption (D85): where the keys of a

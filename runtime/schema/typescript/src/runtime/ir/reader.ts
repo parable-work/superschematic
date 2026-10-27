@@ -232,6 +232,7 @@ function parseIRType(name: string, raw: unknown, path: string): TypeDef {
     fields: fieldsRaw.map((field, index) => parseIRField(field, `${path}.fields[${index}]`)),
     indexes: parseIRIndexes(definition.indexes),
     envVars: asBoolean(definition.envVars),
+    ...(asBoolean(definition.allowUnknownFields) ? { allowUnknownFields: true } : {}),
   };
 }
 

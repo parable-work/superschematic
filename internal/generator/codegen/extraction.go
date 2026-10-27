@@ -141,20 +141,21 @@ func ExtractTypes(schema *ir.Schema, scalars []ScalarInfo, config ExtractionConf
 		}
 
 		typeInfo := TypeInfo{
-			Name:              typeDef.Name,
-			Owner:             typeDef.Owner,
-			Role:              typeDef.Role,
-			Description:       typeDef.Description,
-			Comment:           typeDef.Comment,
-			Extends:           typeDef.Extends,
-			Fields:            make([]FieldInfo, 0, len(typeDef.Fields)),
-			JsonField:         typeDef.JsonField,
-			DenyUnknownFields: typeDef.DenyUnknownFields,
-			StrictJSON:        typeDef.StrictJSON,
-			EnvVars:           typeDef.EnvVars,
-			Versioned:         typeDef.Versioned,
-			VersionedConfig:   typeDef.VersionedConfig,
-			Optimistic:        typeDef.Optimistic,
+			Name:               typeDef.Name,
+			Owner:              typeDef.Owner,
+			Role:               typeDef.Role,
+			Description:        typeDef.Description,
+			Comment:            typeDef.Comment,
+			Extends:            typeDef.Extends,
+			Fields:             make([]FieldInfo, 0, len(typeDef.Fields)),
+			JsonField:          typeDef.JsonField,
+			DenyUnknownFields:  typeDef.DenyUnknownFields,
+			StrictJSON:         typeDef.StrictJSON,
+			AllowUnknownFields: typeDef.AllowUnknownFields,
+			EnvVars:            typeDef.EnvVars,
+			Versioned:          typeDef.Versioned,
+			VersionedConfig:    typeDef.VersionedConfig,
+			Optimistic:         typeDef.Optimistic,
 		}
 
 		for _, field := range typeDef.Fields {

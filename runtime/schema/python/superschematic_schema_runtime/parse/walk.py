@@ -419,7 +419,9 @@ def walk_type_def(
         key = field_key(field)
         known.add(key)
         _walk_field(ctx, field, raw, result, errors)
-    if ctx.strict:
+    # A type that is @allowUnknownFields accepts the keys it does not
+    # declare, in strict mode too, and the result holds only its own (D87).
+    if ctx.strict and not td.allow_unknown_fields:
         for k in raw.keys():
             if k in known:
                 continue

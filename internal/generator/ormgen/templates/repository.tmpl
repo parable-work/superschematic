@@ -2377,7 +2377,19 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 	input.CreatedBy = GetUserID(ctx)
 	{{- end }}
 	{{- if eq .Name "updatedBy" }}
+	{{- if .IsRequired }}
 	input.UpdatedBy = GetUserID(ctx)
+	{{- else }}
+	{{- if $.RequireUpdatedBy }}
+	if !HasUserID(ctx) {
+		return nil, ErrNoUserInContext
+	}
+	{{- end }}
+	if HasUserID(ctx) {
+		userID := GetUserID(ctx)
+		input.UpdatedBy = &userID
+	}
+	{{- end }}
 	{{- end }}
 	{{- end }}
 	{{- if .EncryptedFields }}
@@ -2774,7 +2786,19 @@ func (r *{{ .Name }}) upsertRow(ctx context.Context, input *types.{{ .TypeName }
 	input.CreatedBy = GetUserID(ctx)
 	{{- end }}
 	{{- if eq .Name "updatedBy" }}
+	{{- if .IsRequired }}
 	input.UpdatedBy = GetUserID(ctx)
+	{{- else }}
+	{{- if $.RequireUpdatedBy }}
+	if !HasUserID(ctx) {
+		return nil, ErrNoUserInContext
+	}
+	{{- end }}
+	if HasUserID(ctx) {
+		userID := GetUserID(ctx)
+		input.UpdatedBy = &userID
+	}
+	{{- end }}
 	{{- end }}
 	{{- end }}
 	{{- if .EncryptedFields }}
@@ -3036,7 +3060,9 @@ func (r *{{ .Name }}) upsertRow(ctx context.Context, input *types.{{ .TypeName }
 			paramNum++
 			setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedBy }}, paramNum))
 			values = append(values, GetUserID(ctx))
-		}
+		}{{ if $.RequireUpdatedBy }} else {
+			return nil, ErrNoUserInContext
+		}{{ end }}
 		{{- end }}
 		{{- end }}
 
@@ -3164,9 +3190,23 @@ func (r *{{ .Name }}) upsertBatches(ctx context.Context, inputs []*types.{{ .Typ
 	}
 	{{- end }}
 	{{- if eq .Name "updatedBy" }}
+	{{- if .IsRequired }}
 	for _, input := range inputs {
 		input.UpdatedBy = GetUserID(ctx)
 	}
+	{{- else }}
+	{{- if $.RequireUpdatedBy }}
+	if !HasUserID(ctx) {
+		return nil, ErrNoUserInContext
+	}
+	{{- end }}
+	if HasUserID(ctx) {
+		for _, input := range inputs {
+			userID := GetUserID(ctx)
+			input.UpdatedBy = &userID
+		}
+	}
+	{{- end }}
 	{{- end }}
 	{{- end }}
 
@@ -3475,9 +3515,23 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 	}
 	{{- end }}
 	{{- if eq .Name "updatedBy" }}
+	{{- if .IsRequired }}
 	for _, input := range inputs {
 		input.UpdatedBy = GetUserID(ctx)
 	}
+	{{- else }}
+	{{- if $.RequireUpdatedBy }}
+	if !HasUserID(ctx) {
+		return nil, ErrNoUserInContext
+	}
+	{{- end }}
+	if HasUserID(ctx) {
+		for _, input := range inputs {
+			userID := GetUserID(ctx)
+			input.UpdatedBy = &userID
+		}
+	}
+	{{- end }}
 	{{- end }}
 	{{- end }}
 
@@ -3728,7 +3782,9 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedBy }}, paramNum))
 		values = append(values, GetUserID(ctx))
-	}
+	}{{ if $.RequireUpdatedBy }} else {
+		return nil, ErrNoUserInContext
+	}{{ end }}
 	{{- end }}
 	{{- end }}
 
@@ -3930,7 +3986,9 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedBy }}, paramNum))
 		values = append(values, GetUserID(ctx))
-	}
+	}{{ if $.RequireUpdatedBy }} else {
+		return 0, ErrNoUserInContext
+	}{{ end }}
 	{{- end }}
 	{{- end }}
 

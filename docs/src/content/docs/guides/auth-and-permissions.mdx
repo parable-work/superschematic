@@ -137,10 +137,11 @@ tests build the service the same way, over a store in memory:
 the identity middleware and authenticates the caller itself, usually by
 wrapping `Identity.Middleware`; the stack's entrypoint sets none.
 
-The ORM keeps its own idea of the acting user, which a soft delete records.
-The orders service hands it the caller in each method that writes rows:
-
-<Snippet file="go/shop-orders/orders.go" symbol="actingUser" />
+Each route runs its operation with a context that also tells the ORM who
+the caller is, so `createdBy`, `updatedBy` and `deletedBy` record them
+with nothing in the method; a TypeScript operation's `deps.orm` acts as
+its caller the same way
+([Who wrote a row](/superschematic/guides/database-tables/#who-wrote-a-row)).
 
 ## Say who the caller is: TypeScript
 

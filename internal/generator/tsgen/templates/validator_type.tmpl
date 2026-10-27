@@ -741,6 +741,18 @@ const {{.Type.Name}}KnownFields = new Set<string>([
 {{- end}}
 ]);
 
+{{- if .Type.AllowUnknownFields}}
+
+/** A copy of value with only the keys {{.Type.Name}} declares: @allowUnknownFields drops every other (D87). */
+function declared{{.Type.Name}}Fields(value: Record<string, unknown>): Record<string, unknown> {
+  const declared: Record<string, unknown> = {};
+  for (const key of Object.keys(value)) {
+    if ({{.Type.Name}}KnownFields.has(key)) declared[key] = value[key];
+  }
+  return declared;
+}
+{{- end}}
+
 type {{.Type.Name}}TextParser = (value: string) => unknown;
 
 function parse{{.Type.Name}}Input(
@@ -767,7 +779,15 @@ function parse{{.Type.Name}}Input(
     throw new ParseError(`parse{{.Type.Name}} ${sourceFormat} expects an object input`, 'expected an object');
   }
 
+{{- if .Type.AllowUnknownFields}}
+
+  // @allowUnknownFields: the keys {{.Type.Name}} does not declare are dropped,
+  // not refused (D87).
+  const candidate = declared{{.Type.Name}}Fields(parsed as Record<string, unknown>);
+{{- else}}
+
   const candidate = parsed as Record<string, unknown>;
+{{- end}}
 
   // Apply @default values from the schema for keys absent from the payload.
   {{range .Type.Fields}}
@@ -832,7 +852,7 @@ export function parse{{.Type.Name}}FromJSON(input: unknown): {{.Type.Name}} {
   if (input == null || typeof input !== 'object') {
     {{if .Type.StrictJSON}}return parse{{.Type.Name}}Json(input);{{else}}return input as {{.Type.Name}};{{end}}
   }
-  const obj = input as Record<string, unknown>;
+  const obj = {{if .Type.AllowUnknownFields}}declared{{.Type.Name}}Fields(input as Record<string, unknown>){{else}}input as Record<string, unknown>{{end}};
   {{if .Type.StrictJSON}}const result = { {{else}}return { {{end}}
     ...(obj as unknown as {{.Type.Name}}),
     {{range .Type.Fields}}
@@ -911,6 +931,13 @@ export function parse{{.Type.Name}}FromJSON(input: unknown): {{.Type.Name}} {
 }
 {{else}}
 export function parse{{.Type.Name}}FromJSON(input: unknown): {{.Type.Name}} {
+  {{- if .Type.AllowUnknownFields}}
+  if (input == null || typeof input !== 'object' || Array.isArray(input)) {
+    return input as {{.Type.Name}};
+  }
+  return declared{{.Type.Name}}Fields(input as Record<string, unknown>) as unknown as {{.Type.Name}};
+  {{- else}}
   {{if .Type.StrictJSON}}return parse{{.Type.Name}}Json(input);{{else}}return input as {{.Type.Name}};{{end}}
+  {{- end}}
 }
 {{end}}

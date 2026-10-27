@@ -29,7 +29,17 @@ var sqlOutputSchema = json.RawMessage(`{
 			"additionalProperties": false,
 			"required": ["key"],
 			"properties": {"key": {"type": "string"}}
-		}
+		},
+		"systemActor": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["id"],
+			"properties": {
+				"id": {"type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"},
+				"name": {"type": "string", "minLength": 1}
+			}
+		},
+		"requireUpdatedBy": {"type": "boolean"}
 	}
 }`)
 

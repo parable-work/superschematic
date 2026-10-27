@@ -133,6 +133,15 @@ type TypeDef struct {
 	// this object only; a nested object type opts in on its own.
 	StrictJSON bool `json:"strictJSON,omitempty" yaml:"strictJSON,omitempty"`
 
+	// AllowUnknownFields (@allowUnknownFields) makes every decoder of this
+	// type, in Go, TypeScript, Python and Rust, the servers' input decoding
+	// and the schema runtimes' strict parse, accept a key the type does not
+	// declare and drop it, wherever the type is decoded: as an operation's
+	// input or nested in another type. The declared keys are checked as
+	// before. A type is never both this and StrictJSON or
+	// DenyUnknownFields (D87).
+	AllowUnknownFields bool `json:"allowUnknownFields,omitempty" yaml:"allowUnknownFields,omitempty"`
+
 	// Versioned marks a DB table for generated history tracking.
 	Versioned bool `json:"versioned,omitempty" yaml:"versioned,omitempty"`
 

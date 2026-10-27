@@ -33,8 +33,10 @@ export interface Deps {
   /**
    * The repositories of ts-db's tables over db (D79), a table's rows
    * read and written as its types' ./orm entry declares them, with no SQL of
-   * the implementation's. orm.as(ctx.principal) acts as the caller, whom
-   * createdBy, updatedBy and deletedBy record; orm.transaction(fn) writes in
+   * the implementation's. In an operation it acts as the caller, whom
+   * createdBy, updatedBy and deletedBy record, and in a job or a worker as
+   * no one: orm.asSystem() acts as the database's system actor, and
+   * orm.withUser(id) as another user (D87). orm.transaction(fn) writes in
    * one transaction, which enqueue takes.
    */
   readonly orm: TsDbOrm;
