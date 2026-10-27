@@ -6,6 +6,11 @@
 // guidance and the invocation policy, with the operation whose route a
 // tools/call runs through and where each argument goes in that route's
 // request. buildRouter serves them at POST /api/mcp.
+{{- if .MCP.Confirming }}
+//
+// A tool marked confirm runs only once the person confirms the call (D93):
+// buildRouter needs options.mcp.confirmationKey to sign its confirmations.
+{{- end }}
 {{- range .MCP.Left }}
 // Left out: {{ . }}.
 {{- end }}

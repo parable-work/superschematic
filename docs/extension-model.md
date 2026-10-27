@@ -763,13 +763,15 @@ spell its own way, so a registry holds one `ToolInvocationPolicy`
 | `Key` | the key inside `@mcp({...})`, in the data forms' `mcp` record, in the IR and in every tool document |
 | `Values` | the allowed values, in the order `tools/index.ts` types them |
 | `Default` | the value a visible tool gets when `@mcp` omits `Key` |
+| `Confirm` | the values whose tools an API's MCP endpoint runs only once the person confirms the call (D93); empty confirms every value but `Default` |
 
-The core's is `invocationPolicy`, `auto` or `ask`, `auto` by default.
+The core's is `invocationPolicy`, `auto` or `ask`, `auto` by default, `ask`
+confirmed.
 `RegisterToolInvocationPolicy` replaces it. A second registration is an
 error that names both extensions, so two extensions that disagree fail
 assembly. `Registry.ToolInvocationPolicy()` returns the one in force.
 
-The policy is read in four places, all through the registry:
+The policy is read in five places, all through the registry:
 
 - The core `@mcp` decorator's `Apply` accepts `Key` with a value from
   `Values`, fills in `Default` for a visible tool, and names the build's
@@ -781,6 +783,8 @@ The policy is read in four places, all through the registry:
   the tool hooks, for IR that did not come through the loader.
 - The SDK generators write `Key` at fixed positions and type it in
   `tools/index.ts` as the union of `Values`.
+- The TypeScript API generator marks each tool of `mcp.ts` whose value
+  `Confirm` lists, and the endpoint confirms its calls (D93).
 
 In the IR the policy is `OperationMCP.Invocation`, an `ir.MCPInvocation`
 holding the key and the value, which `OperationMCP`'s JSON and YAML

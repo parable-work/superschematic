@@ -81,11 +81,11 @@ func TestAnAPIOnAnEncryptedDatabaseHoldsItsKey(t *testing.T) {
 		outputs string
 		want    string
 	}{
-		{"no field", vaultAPI(), key, "its @envVars class holds no field VAULT_DB_FIELD_KEYS; declare VAULT_DB_FIELD_KEYS: Secret<string> in a class VaultKeys, and make vault-api's @envVars class VaultKeys or extend it"},
+		{"no field", vaultAPI(), key, "its @envVars class holds no field VAULT_DB_FIELD_KEYS; declare VAULT_DB_FIELD_KEYS: Secret<string> in an @envVars class VaultKeys, in vault-api's schema or in a General service vault-api depends on, and make vault-api's @envVars class VaultKeys or extend it (see " + EncryptionKeyDocs + ")"},
 		{"another secret", vaultAPI(&declaredHere), key, "its @envVars field VAULT_DB_FIELD_KEYS is declared by VaultApiConfig, so it is the secret VaultApiConfig.VAULT_DB_FIELD_KEYS"},
 		{"no secret", vaultAPI(&notSecret), key, "is no required Secret<string>"},
 		{"optional", vaultAPI(&optional), key, "is no required Secret<string>"},
-		{"no key", vaultAPI(inherited(good)), `{"sql": {}}`, `vault-db has Encrypted<T> fields, whose keys come from an @envVars Secret<string> its config names; set outputs.sql.encryption.key in vault-db's config to the field's declaring type and name, such as "FieldKeys.VAULT_DB_FIELD_KEYS"`},
+		{"no key", vaultAPI(inherited(good)), `{"sql": {}}`, `vault-db has Encrypted<T> fields, whose keys come from an @envVars Secret<string> its config names; set outputs.sql.encryption.key in vault-db's config to the field's declaring type and name, such as "FieldKeys.VAULT_DB_FIELD_KEYS", and declare that @envVars class in each API on vault-db, or in a General service whose @envVars class each such API's extends (see ` + EncryptionKeyDocs + `)`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := vaultRun(t, tc.api, tc.outputs).fieldKeysField("vault-db", vaultDB())

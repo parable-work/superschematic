@@ -12299,3 +12299,99 @@ the current time; seeds of rows other than roles; `stack queue backfill`
 on SQLite, with the other operator statements (D68); a backfill when a
 plan changes an existing trigger's `when`, which the declaration would
 have to ask for. The rules are reversible until the first release.
+
+## D93. An API's MCP endpoint runs a tool that asks only once the person confirms the call, and three build messages say what they meant (D81 amended)
+
+`@mcp({ invocationPolicy: "ask" })` reached a client only as `_meta`
+(D11, D81): the endpoint ran every call it was sent, so an agent whose
+client ignored the hint, or that called the endpoint itself, moved money
+or recategorized a ledger without a person seeing the call. D81 left the
+asking to the client. A server that publishes "ask" and runs the call
+anyway does not keep its own promise; this entry makes the endpoint keep
+it. Drafting the finances API also met three messages that sent the
+author the wrong way:
+- `capability: "finances.line_items.list"` failed with "must contain at
+  least two dot-separated lowercase segments"; it had three, and the
+  underscore was the problem.
+- An `@mcp` operation that uploads a file vanished from `tools/list` with
+  only a comment in the generated `mcp.ts`.
+- The `Encrypted<T>` error said to set `outputs.sql.encryption.key`, not
+  where the named `@envVars` class goes.
+
+### Confirming a call
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The endpoint confirms a call of a tool whose policy the build's policy `Confirm`s before the call reaches the route: the call runs only with a confirmation that redeems, and every other call of it runs nothing. The confirmation sits in the transport (`Server.confirm` in `mcp.ts`), asked through the tool set's `confirms`, so the route's checks run after it, on the confirmed call alone. | Enforcing in the route, which would confirm a call from the SDK or a browser that no agent made; leaving it to the client, which D81 did. |
+| A 2026-07-28 client whose envelope's `clientCapabilities` elicit forms (`elicitation: {}` or `{ form: {} }`) is asked in band, by MCP's multi-round-trip requests: the call answers `resultType: "input_required"` with one input request, `confirm`, an `elicitation/create` whose message is the call's summary and whose `requestedSchema` asks for nothing, and a `requestState`. The client asks the person and retries with `inputResponses.confirm`; `accept` runs the call, `decline` and `cancel` are a tool error, `403 confirmation_declined`, and run nothing. | A form with a "confirm" boolean, which `accept` already says; URL-mode elicitation, which needs a page to confirm on. |
+| Every other client gets a two-step token: the call answers a tool error, `428 confirmation_required`, whose `details` hold `summary`, `confirmationToken` and `expiresAt`, and the same call with `confirmationToken` added to its arguments runs. `tools/list` adds the optional argument to each such tool's input schema, and a tool that asks may not take an argument of that name (`tsrestgen` refuses it at build, `mountMcp` at mount). | The token in `params._meta`, which a model cannot set; a token-only `input_required` (a `requestState` with no input request), which the official client retries by itself with no person asked; a 2xx result, which an agent reads as done. |
+| A 2025 client gets the token even when it declared elicitation at `initialize`. The 2025 transport asks a client mid-call with a request on the call's event stream and takes the answer as a new POST; the endpoint is stateless, as the engine's is, so it neither keeps the capabilities `initialize` declared nor finds the call that waits for the answer, which may be on another replica or Worker isolate. 2026-07-28 carries both in the call, so the endpoint asks there. | Sessions (`Mcp-Session-Id`) with an in-process wait, which works on one process and hangs a call whose answer lands on another; sessions in a shared store with a relay between replicas, a new dependency for the revision the protocol is leaving. |
+| A confirmation, a `requestState` and a token alike, is `v1.<mode>.<expires>.<nonce>.<binding>.<mac>`: `mode` is `elicit` or `token`, and one does not redeem as the other, so a `requestState` sent as a token runs nothing the person was not asked about; `binding` is an HMAC-SHA-256 of the API's name, the tool, the caller (the principal's subject and the calling service's deployable) and the arguments as canonical JSON (sorted keys); `mac` an HMAC-SHA-256 of the rest. Both are keyed with the endpoint's confirmation key. Redeeming checks the MAC (`invalid`), the mode (`mismatch`), the expiry (`expired`), the binding (`mismatch`) and the claim (`used`), in that order; only a confirmation that passes all is claimed, so a call with other arguments does not spend the person's. One that does not redeem asks again, naming why in `details.refused` and the detail, or at the start of the next elicitation's message. | A random id kept server-side with the call, which needs a shared store before anything works across replicas; a JWT, a header and a library for five fields; the binding's fields in clear, which put the caller's id in what an agent logs. |
+| The summary is the tool's title and handle and its arguments as canonical JSON; past 2,000 characters the rest is counted, not shown. The binding covers every argument whatever the summary shows. | Every argument shown, which makes a 500-row bulk recategorization a dialog no one reads; a summary the author writes, a new `@mcp` option for what the arguments already say. |
+| The key is an `@envVars` `Secret<string>` the API's config names, `outputs.api.mcpConfirmationKey`, by the type that declares it and the field's name, as `outputs.sql.encryption.key` names a database's (D85). The API's `@envVars` class holds it, its own or one it extends, so the stack binds the one secret to every deployable of the API, set per environment with `stack secrets set`, and each server's generated entrypoint builds the router with `mcp: { confirmationKey: config.FIELD }` (`main.ts`, and a Worker's `fetch.ts`). The build refuses an API whose endpoint serves a tool that asks with no key, or whose `@envVars` lacks the field, naming the tools, where the class goes and the docs section; `mcpConfirmationKey` without `mcp` fails the config; `mountMcp` refuses a confirming tool without a key, and `McpConfirmations` a key under 32 bytes. | A key per process, generated at start, under which a token one replica minted fails on the next; a fixed environment variable the runtime reads, which the stack would not see (D85's reason); deriving it from the identity runtime's secrets, which an API without users has not got. |
+| A confirmation is good for ten minutes (`confirmationTtlSeconds`). Its nonce is claimed in an `McpConfirmationStore`, one method, `claim(id, ttlMs, now)`; the default keeps claims in process, bounded, refusing a claim while full of live ones rather than forgetting one. A deployment passes a store its replicas share (`confirmationStore`) for a token to be single-use across them; with the default, a token redeems once per replica until it expires. | A shared store by default, which the runtime has none of without a memory store, and which D75's reserved declarations would have to grow for; forgetting the oldest claim when full, which lets its token redeem again. |
+| Which values confirm is the invocation policy's: `ToolInvocationPolicy.Confirm`, `["ask"]` in the core's (D11, amended). A policy that lists none, as one registered before this entry, confirms every value but its default, the exception an author opts into, so it asks before more calls rather than fewer. acme's lists `always`. `mcp.ts` marks each such tool `confirm: true`, and `MCPInfo.Confirming` names them. | Matching the literal `ask`, which an extension's `confirm: "always"` never is; a list with no fallback, under which an extension's policy confirms nothing until it learns the field. |
+
+The engine's MCP endpoint (D58) publishes the same policy for its tools
+and does not confirm them yet. The Go and Rust servers serve no MCP
+endpoint (D81), so the TypeScript runtime is the one that enforces it, and
+there is no second implementation for parity vectors to hold to it; the
+engine's corpus (`mcp-parity.test.ts`) still replays unchanged.
+
+D81, amended: its row on the invocation policy ("published in `_meta`, as
+the engine does", with "enforcing `ask` on the server, which is the
+client's to ask" not taken) is replaced by the table above.
+
+### Messages that say what they meant
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A refused `@docs` capability names the first character it may not hold and where, else what is wrong with its segments (one segment, an empty one, a stray hyphen); says what a capability holds, two or more dot-separated segments of lowercase letters, digits and hyphens; and gives an example made from it, its underscores and spaces made hyphens and its letters lowercased, when that is a capability: `capability "finances.line_items.list" holds "_" at character 14; ... such as "finances.line-items.list"`. | Allowing underscores, which every tool document and catalog that keys on the capability would then have to accept; the pattern itself in the message. |
+| A visible `@mcp` tool whose input carries a file, or whose payload is encrypted, is a load warning that names the operation, the tool and the reason, and the fix that says so on purpose, `@mcp({ hidden: true, reason })`. It is the verification pass's warning, the channel `check` reports and `build` prints, and it fires whether or not `outputs.api.mcp` is on: the tool documents mark an upload `unsupported_multipart` and `invokeTool` refuses it too. A `FileDownload` with a visible `@mcp` stays an error (D81). | A warning from the TypeScript API generator, which has no channel to report one and runs only with `mcp` on; an error, which would break every API whose author meant the tool for the SDK alone. |
+| The `Encrypted<T>` key errors say the declaring `@envVars` class lives in each API on the database, or in a General service whose class each API's extends, and end with the docs section's address; the MCP key's errors do the same with theirs. Both read the field through one lookup, `envVarsSecret`. | A longer guide in the message; the docs address alone. |
+
+Status: built.
+- **The runtime.** `runtime/http/typescript/src/mcpconfirm.test.ts`
+  (20 tests): tokens that redeem once for their call, refuse another
+  tool, other arguments, another caller, scope or mode as `mismatch`
+  without spending themselves, expire, and are `invalid` when any part is
+  changed or another key made them; the bounded store; canonical JSON.
+  Through `mountMcp`: a 2025 client and a 2026-07-28 one without form
+  elicitation get `confirmation_required` and run nothing, run with the
+  token, and are asked again for a used, mismatched, forged or expired
+  token; an eliciting client gets `input_required` with the summary, runs
+  on `accept`, runs nothing on `decline` or `cancel`
+  (`confirmation_declined`), and is asked again for a replayed,
+  mismatched or unanswered `requestState` and for a `requestState` sent
+  as a token; replicas under one key with a shared store redeem each
+  other's tokens once; `mountMcp` refuses a missing or short key and a
+  tool that takes `confirmationToken`. `src/mcp-parity.test.ts` replays
+  the engine's corpus unchanged. A one-off run of the official MCP client
+  (`@modelcontextprotocol/client` 2.2.0, the engine's test dependency,
+  which the HTTP runtime does not take) against `mountMcp` found its
+  multi-round-trip driver asks its elicitation handler the summary and
+  retries, so `accept` runs the call and `decline` and `cancel` are
+  `confirmation_declined`, and its 2025 client, eliciting or not, gets
+  and redeems the token.
+- **The generated server.** `TestGeneratedMCPRuntime` runs fixture-mcp's
+  generated router: `update_order` (`ask`) answers a token, runs with it
+  once, and the router refuses to build without a key.
+  `TestTypeScriptMCPEndpointServes` runs a generated server over Postgres
+  whose entrypoint reads `AGENT_MCP_CONFIRMATION_KEY`, the field
+  `outputs.api.mcpConfirmationKey` names: a signed-in agent's `set_motto`
+  runs only with its token, once. `TestMCPToolsConfirmByTheBuildsPolicy`
+  confirms by an extension's policy and refuses the argument name;
+  `TestMCPRouterGolden` pins the `confirm` mark;
+  `TestAnAPIWhoseToolsAskHoldsItsConfirmationKey`,
+  `TestParseOutputsReadsTheMCPConfirmationKey` and
+  `TestToolInvocationPolicyConfirms` hold the key and the policy.
+- **The messages.** `TestValidateOperationDocs` (`ir`),
+  `TestInvalidOperationDocsIsALocatedSchemaError`,
+  `TestMCPToolsLeftOutAreWarnings` and
+  `TestAnAPIOnAnEncryptedDatabaseHoldsItsKey`.
+
+Left: confirmation on the engine's MCP endpoint; elicitation for 2025
+clients, which needs sessions a shared store keeps; a shared single-use
+store by default, through a memory store, which needs a reserved
+declaration of its own (D75); a summary the author words; MCP in the Go
+and Rust servers (D81). The rules are reversible until the first release.

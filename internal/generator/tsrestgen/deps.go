@@ -85,6 +85,13 @@ type DepsInfo struct {
 	// of Database's Encrypted<T> fields, which the entrypoints open Deps.orm
 	// with (D85): its key. Empty for a database without one.
 	ORMFieldKeys string
+
+	// MCPConfirmationKey is the field of the API's env config that holds
+	// the key its MCP endpoint signs confirmations with, which a server's
+	// entrypoint builds the router with (D93): its key, the field
+	// outputs.api.mcpConfirmationKey names. Empty for an API whose
+	// endpoint serves no tool that asks.
+	MCPConfirmationKey string
 }
 
 // DepsEngine is the engine in Deps (D58): the engine of the API's engine

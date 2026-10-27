@@ -452,6 +452,11 @@ type TypeScriptAPI struct {
 	// as Secrets Store secrets and fetch.ts awaits per isolate (D64).
 	Secrets []string
 
+	// MCPConfirmationKey is the expression of its config that holds the key
+	// its MCP endpoint signs confirmations with, which its router is built
+	// with (D93); empty for an API whose endpoint serves no tool that asks.
+	MCPConfirmationKey string
+
 	// Engine is the engine Deps holds, of the API's engine database (D58),
 	// nil without one; MountsEngine is true for the API whose callers its
 	// routes admit, the first on the database, on a server, and
@@ -814,6 +819,14 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			api.Identity = taken.take(stem + "Identity")
 			api.IdentityField = ir.IdentityConfigField(o.SchemaName)
 		}
+		if o.MCP != nil && len(o.MCP.Confirming) > 0 && !background {
+			// The MCP endpoint signs the confirmations of its tools that
+			// ask with the secret the API's config holds (D93).
+			if o.Deps.MCPConfirmationKey == "" || api.Config == "" {
+				return nil, fmt.Errorf("stack %s: server %s serves %s, whose MCP endpoint runs %s only once the person confirms the call, and whose config holds no confirmation key; set outputs.api.mcpConfirmationKey (D93)", in.Stack, in.Server, o.SchemaName, strings.Join(o.MCP.Confirming, ", "))
+			}
+			api.MCPConfirmationKey = api.Config + "." + o.Deps.MCPConfirmationKey
+		}
 		if o.HasServiceCallers && !background && (api.Callers == "" || api.Config == "") {
 			return nil, fmt.Errorf("stack %s: server %s serves %s, whose operations have a service clause, and whose config has no callers field", in.Stack, in.Server, o.SchemaName)
 		}
@@ -1061,6 +1074,10 @@ func (a *TypeScriptAPI) RouterOptions() []string {
 		// Its @rateLimit routes count in the store, and in process while
 		// the store is unavailable (D75).
 		out = append(out, fmt.Sprintf("rateLimit: { store: memoryStoreRateLimitStore(%s, %s) }", a.RateLimitStore.Var, tsQuote(a.Service)))
+	}
+	if a.MCPConfirmationKey != "" {
+		// Its MCP endpoint signs confirmations with the secret (D93).
+		out = append(out, "mcp: { confirmationKey: "+a.MCPConfirmationKey+" }")
 	}
 	return out
 }

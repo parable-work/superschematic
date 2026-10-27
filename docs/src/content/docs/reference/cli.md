@@ -362,6 +362,10 @@ OpenAPI document at `GET /api/openapi.json`, which every server serves
 The Go and Rust servers serve no MCP endpoint yet, so the config fails to
 load with it on another language, `--api-language` included:
 `outputs.api.mcp is on and the API's language is RUST: a TypeScript API serves the MCP endpoint; Go and Rust follow; set outputs.api.language to TYPESCRIPT, or remove mcp (D81)`.
+With a tool whose `invocationPolicy` is `"ask"`, the build needs
+`outputs.api.mcpConfirmationKey`, the `@envVars` secret the endpoint signs
+its confirmations with
+([Confirming a tool that asks](/superschematic/reference/mcp-tools/#confirming-a-tool-that-asks)).
 
 `--scaffold` writes the implementation of each Go API the command builds
 whose package is missing: an `implementation.go` at the naming file's

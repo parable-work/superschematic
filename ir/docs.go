@@ -70,7 +70,8 @@ type OperationDocs struct {
 	Description string `json:"description" yaml:"description"`
 
 	// Capability is a stable dotted identifier for what the operation does
-	// ("orders.returns.create"): at least two lowercase segments.
+	// ("orders.returns.create"): at least two segments of lowercase
+	// letters, digits and hyphens.
 	Capability string `json:"capability" yaml:"capability"`
 
 	Lifecycle  DocsLifecycle  `json:"lifecycle" yaml:"lifecycle"`
@@ -124,6 +125,56 @@ var docsCapabilityPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.[a
 
 var docsJSONPointerPattern = regexp.MustCompile(`^(?:/(?:[^~/]|~[01])*)+$`)
 
+// capabilityProblem says why capability, which docsCapabilityPattern
+// refuses, is no capability: the first character it may not hold and
+// where, else what is wrong with its segments.
+func capabilityProblem(capability string) string {
+	for i, r := range []rune(capability) {
+		if !capabilityRune(r) {
+			return fmt.Sprintf("holds %q at character %d", string(r), i+1)
+		}
+	}
+	segments := strings.Split(capability, ".")
+	if len(segments) < 2 {
+		return "has one segment"
+	}
+	for _, segment := range segments {
+		switch {
+		case segment == "":
+			return "has an empty segment"
+		case strings.HasPrefix(segment, "-") || strings.HasSuffix(segment, "-") || strings.Contains(segment, "--"):
+			return fmt.Sprintf("has the segment %q, whose hyphens must each sit between two letters or digits", segment)
+		}
+	}
+	return "is not dot-separated lowercase segments"
+}
+
+// capabilityRune reports whether a capability may hold r: a lowercase
+// letter, a digit, a dot or a hyphen.
+func capabilityRune(r rune) bool {
+	return r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '-'
+}
+
+// capabilityExample is capability with each character it may not hold
+// made a hyphen, or lowercased, when that is a capability: an underscore
+// or a space between words is the usual slip. It is orders.returns.create
+// otherwise.
+func capabilityExample(capability string) string {
+	mapped := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			return r - 'A' + 'a'
+		case r == '_' || r == ' ':
+			return '-'
+		}
+		return r
+	}, capability)
+	if docsCapabilityPattern.MatchString(mapped) {
+		return mapped
+	}
+	return "orders.returns.create"
+}
+
 // ValidateOperationDocs checks the shape of an operation's @docs record.
 // nil is valid: @docs is optional. The audience is not checked against a
 // value set; that is an extension's policy.
@@ -144,7 +195,8 @@ func ValidateOperationDocs(docs *OperationDocs) error {
 		return fmt.Errorf("title must not contain surrounding whitespace")
 	}
 	if !docsCapabilityPattern.MatchString(docs.Capability) {
-		return fmt.Errorf("capability %q must contain at least two dot-separated lowercase segments", docs.Capability)
+		return fmt.Errorf("capability %q %s; a capability is two or more dot-separated segments of lowercase letters, digits and hyphens, such as %q",
+			docs.Capability, capabilityProblem(docs.Capability), capabilityExample(docs.Capability))
 	}
 
 	switch docs.Lifecycle {

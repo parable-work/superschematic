@@ -123,6 +123,9 @@ export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions
    * The MCP endpoint (outputs.api.mcp, D81): its server info, this API's
    * name and its served OpenAPI version unless given, its instructions, and
    * its own rate limit and timeout. Each tools/call keeps its route's.
+   * confirmationKey is required: update_order runs only once the
+   * person confirms the call, and the endpoint signs its confirmations with
+   * it (D93).
    */
   mcp?: McpOptions;
 }

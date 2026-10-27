@@ -1,10 +1,12 @@
 # A TypeScript API over users-db's user model (D50, D51) that serves its
 # visible @mcp operations over MCP (outputs.api.mcp, D81): an agent signs in
-# through the session routes and calls them as the user.
+# through the session routes and calls them as the user. set_motto asks
+# the person first, so the endpoint signs its confirmations with the secret
+# mcpConfirmationKey names (D93).
 name: users-ts-agent
 kind: API
 authDb: users-db
 outputs:
   types:
     typescript: { enabled: true }
-  api: { enabled: true, language: TYPESCRIPT, mcp: true }
+  api: { enabled: true, language: TYPESCRIPT, mcp: true, mcpConfirmationKey: AgentKeys.AGENT_MCP_CONFIRMATION_KEY }
