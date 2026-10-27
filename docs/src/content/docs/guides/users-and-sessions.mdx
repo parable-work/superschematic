@@ -265,7 +265,11 @@ Workflow transition's, is then a role's like any other, and the opt-in
 `<schema>.<action>`, a behavior's namespace operation that reads to any
 caller, since its rows are only those of schemas the caller may read, and
 one that writes to a caller holding `<behavior>.<operation>`
-(`Comments.claimDeliveries`). See the engine README's Users section.
+(`Comments.claimDeliveries`). A caller acting for another user, an
+agent that works for her, also needs `actFor`, a role's permission like
+any other ([acting for
+someone](/superschematic/guides/engine/#callers-and-the-access-policy)).
+See the engine README's Users section.
 
 ## Pages with Topcoat
 
