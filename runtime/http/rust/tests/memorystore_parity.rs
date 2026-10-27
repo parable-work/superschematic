@@ -1,7 +1,7 @@
 //! The memory store parity vectors (D75):
 //! `runtime/http/testdata/memorystore_parity.json`, which ir writes
 //! (`cd ir && go test -run TestWriteMemoryStoreParityVectors
-//! -update-memorystore-parity`) and the Go, TypeScript and Rust runtimes
+//! -update`) and the Go, TypeScript and Rust runtimes
 //! each run: `names`, a declaration and its parts' wire strings joined into
 //! a name, with the store's prefix when the vector names a store, or
 //! refused; and `rateLimit`, the shared rate limit's sliding window
