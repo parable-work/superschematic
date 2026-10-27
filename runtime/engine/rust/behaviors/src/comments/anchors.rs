@@ -10,7 +10,9 @@ use superschematic_engine::storage::SqlValue;
 use superschematic_engine::Result;
 
 use super::blocks::{kind_of, lines_in_order, moved};
-use super::checks::{composing, deleted, holds, integer, invalid, moderates, not_author, present, veto};
+use super::checks::{
+    composing, deleted, holds, integer, invalid, moderates, not_author, present, veto,
+};
 use super::storage::{keyed, MESSAGES};
 use super::writes::{after, compact, for_of, Cx};
 
@@ -75,7 +77,9 @@ pub(super) fn move_anchor(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
             cx,
             OP,
             "anchor_unchanged",
-            format!("block {block} of message {id} is at revision {revision}, those lines, already"),
+            format!(
+                "block {block} of message {id} is at revision {revision}, those lines, already"
+            ),
             json!({ "message": id, "block": block, "revision": revision, "lines": lines }),
         ));
     }

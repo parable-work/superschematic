@@ -194,7 +194,9 @@ pub(crate) fn guidance(config: &CommentsConfig, target: &DescribeTarget) -> Beha
         None => " Each message that comes to stand records a delivery for each subject it mentions and each follower of its thread, which the inbox reads; this type names no deliverPermission, so nobody claims them.".to_owned(),
     };
     let mover = match (config.anchor_permission.as_deref(), moderator) {
-        (Some(anchor), Some(moderate)) => format!("its author, a caller with permission {anchor} or one with permission {moderate}"),
+        (Some(anchor), Some(moderate)) => format!(
+            "its author, a caller with permission {anchor} or one with permission {moderate}"
+        ),
         (Some(anchor), None) => format!("its author or a caller with permission {anchor}"),
         (None, Some(moderate)) => format!("its author or a caller with permission {moderate}"),
         (None, None) => "its author".to_owned(),

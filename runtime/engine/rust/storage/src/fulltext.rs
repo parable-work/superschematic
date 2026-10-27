@@ -667,7 +667,10 @@ pub(crate) fn postgres_configuration(config: &str) -> String {
 /// diacritics ([`Unaccent::IfAvailable`]).
 pub(crate) fn postgres_mapping(config: &str, extension: Option<&str>) -> String {
     let dictionaries = match extension {
-        Some(extension) => format!("{}.unaccent, pg_catalog.simple", quote_identifier(extension)),
+        Some(extension) => format!(
+            "{}.unaccent, pg_catalog.simple",
+            quote_identifier(extension)
+        ),
         None => "pg_catalog.simple".to_owned(),
     };
     format!(

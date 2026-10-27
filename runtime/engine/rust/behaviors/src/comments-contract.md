@@ -2182,6 +2182,12 @@ one addition to `superschematic_engine_storage::fulltext`:
   principal may read no schema, the relation has no row and the match
   none.
 - Search, and every caller today, passes `None`; nothing else changes.
+- `create_fulltext_with(name, columns, Unaccent)` beside
+  `create_fulltext`, which is `Unaccent::Required`: with
+  `Unaccent::IfAvailable` a Postgres where `unaccent` cannot be had (the
+  database lacks it and the engine may not create it, or the role may not
+  use it) gets a configuration of `simple` alone, and the migration goes
+  on ("Migration 6").
 
 The alternatives were worse: a `fulltext` call per readable schema, whose
 hits cannot be merged by score since a hit carries none (Search's
@@ -2220,11 +2226,16 @@ hold standing (but the race the second statement covers).
   "message"])`): the keys. The unique index serves a message's lookups
   and an instance's delete by its prefix.
 - `.up(|sql| ...)`:
-  1. `sql.create_fulltext("comment_search_text", &["body"])`: on SQLite
-     the FTS5 table (`unicode61 remove_diacritics 2`); on Postgres the
-     table `rowid`, `body`, `body_tsv`, `all_tsv`, its GIN index and its
-     text search configuration, with `unaccent`, created when the
-     database lacks it.
+  1. `sql.create_fulltext_with("comment_search_text", &["body"],
+     Unaccent::IfAvailable)`: on SQLite the FTS5 table (`unicode61
+     remove_diacritics 2`); on Postgres the table `rowid`, `body`,
+     `body_tsv`, `all_tsv`, its GIN index and its text search
+     configuration, with `unaccent` where the database has it or the
+     engine may create it, and `simple` alone where not (case folds,
+     diacritics stay), so the migration never fails for the extension.
+     Search's `create_fulltext` needs it (`Unaccent::Required`), but every
+     engine that composes Comments runs this migration, Search or not, and
+     one whose role may not create `unaccent` must still migrate.
   2. The backfill, every standing message in stand order per instance:
 
      ```sql

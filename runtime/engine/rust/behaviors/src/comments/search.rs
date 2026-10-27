@@ -54,7 +54,10 @@ pub(super) fn index<C>(
         ),
     )?;
     let row = row_of(cx, message)?.ok_or_else(|| {
-        Error::behavior(NAME, format!("message {message} has no search row just written"))
+        Error::behavior(
+            NAME,
+            format!("message {message} has no search row just written"),
+        )
     })?;
     cx.sql().run(
         format!("INSERT INTO {text} (rowid, body) VALUES (?, ?)"),
@@ -364,7 +367,10 @@ mod tests {
 
     #[test]
     fn a_query_is_its_first_eight_words_each_quoted() {
-        assert_eq!(expression("walnut desk"), Some("\"walnut\" \"desk\"".to_owned()));
+        assert_eq!(
+            expression("walnut desk"),
+            Some("\"walnut\" \"desk\"".to_owned())
+        );
         assert_eq!(
             expression("say \"hi\" AND * NEAR"),
             Some("\"say\" \"\"\"hi\"\"\" \"AND\" \"*\" \"NEAR\"".to_owned())

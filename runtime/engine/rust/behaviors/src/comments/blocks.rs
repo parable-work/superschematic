@@ -70,10 +70,7 @@ pub(super) fn check_block_shapes(operation: &str, blocks: Option<&Value>) -> Res
                 }
             }
             "attachment" => {
-                let uri = block
-                    .get("uri")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
+                let uri = block.get("uri").and_then(Value::as_str).unwrap_or_default();
                 if scheme_of(uri) == "https" && !https_with_host(uri) {
                     return Err(invalid(
                         operation,
@@ -106,9 +103,7 @@ fn relative_path(path: &str) -> bool {
     !path.starts_with('/')
         && !path.ends_with('/')
         && !path.contains('\\')
-        && path
-            .split('/')
-            .all(|part| !matches!(part, "" | "." | ".."))
+        && path.split('/').all(|part| !matches!(part, "" | "." | ".."))
 }
 
 // scheme_of is a uri's text before its first colon.
@@ -139,10 +134,7 @@ pub(super) fn check_attachments(
         if kind_of(block) != "attachment" || before.contains(block) {
             continue;
         }
-        let uri = block
-            .get("uri")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
+        let uri = block.get("uri").and_then(Value::as_str).unwrap_or_default();
         let scheme = scheme_of(uri);
         if !config.schemes.iter().any(|allowed| allowed == scheme) {
             return Err(not_allowed(
@@ -322,7 +314,13 @@ mod tests {
     #[test]
     fn an_https_uri_has_a_host() {
         assert!(https_with_host("https://files.example.com/a.png"));
-        for uri in ["https://", "https:///a", "https://?x", "https://#y", "https:a"] {
+        for uri in [
+            "https://",
+            "https:///a",
+            "https://?x",
+            "https://#y",
+            "https:a",
+        ] {
             assert!(!https_with_host(uri), "{uri}");
         }
         assert_eq!(scheme_of("bucket:uploads/a.png"), "bucket");
@@ -338,13 +336,19 @@ mod tests {
                    "original": {"revision": "a1", "lines": [1, 2]}, "moves": 1, "movedAt": 10, "movedBy": "bot"})
         );
         let twice = moved(&once, "c3", &json!([5, 6]), 20, "bot", Some("alice"));
-        assert_eq!(twice["original"], json!({"revision": "a1", "lines": [1, 2]}));
+        assert_eq!(
+            twice["original"],
+            json!({"revision": "a1", "lines": [1, 2]})
+        );
         assert_eq!(twice["moves"], json!(2));
         assert_eq!(twice["movedFor"], json!("alice"));
         let keys: Vec<&String> = twice.as_object().unwrap().keys().collect();
         assert_eq!(
             keys,
-            ["kind", "repo", "path", "revision", "lines", "snippet", "original", "moves", "movedAt", "movedBy", "movedFor"]
+            [
+                "kind", "repo", "path", "revision", "lines", "snippet", "original", "moves",
+                "movedAt", "movedBy", "movedFor"
+            ]
         );
     }
 }
