@@ -176,6 +176,9 @@ fn record(
         out.insert("quotes".into(), Value::from(quotes));
     }
     out.insert("author".into(), Value::from(message.author.as_str()));
+    if let Some(subject) = &message.for_subject {
+        out.insert("for".into(), Value::from(subject.as_str()));
+    }
     if let Some(via) = &message.via {
         out.insert("via".into(), Value::from(via.as_str()));
     }
@@ -224,6 +227,9 @@ fn record(
         if let (Some(by), Some(at)) = (&message.resolved_by, message.resolved_at) {
             let mut resolved = Map::new();
             resolved.insert("by".into(), Value::from(by.as_str()));
+            if let Some(subject) = &message.resolved_for {
+                resolved.insert("for".into(), Value::from(subject.as_str()));
+            }
             resolved.insert("at".into(), Value::from(at));
             out.insert("resolved".into(), Value::Object(resolved));
         }

@@ -11,11 +11,13 @@ use serde_json::{json, Value};
 use superschematic_engine::storage::SqlValue;
 use superschematic_engine::{OperationCx, Result};
 
+use super::blocks::{check_block_shapes, keep_moves};
 use super::checks::{
-    check_action_data, check_blocks, check_body, composing, deleted, forbidden, holds, integer,
-    invalid, moderates, not_a_thread, not_author, object, present, veto, MAX_EDITS, MAX_EMOJI,
+    check_blocks, check_body, composing, deleted, forbidden, holds, integer, invalid, moderates,
+    not_a_thread, not_author, object, present, veto, MAX_EDITS, MAX_EMOJI,
 };
 use super::follows;
+use super::search;
 use super::record::record_of;
 use super::storage::{
     conversation, key, keyed, move_counts, placeholders, save_conversation, Message, Moves,
@@ -116,6 +118,17 @@ pub(super) fn next_message(cx: Cx<'_, '_>) -> Result<(i64, bool, super::storage:
     Ok((conversation.last_message, existed, conversation))
 }
 
+/// The caller's for: the subject its principal acts for, when it acts for
+/// one other than itself (D77 primitive 4).
+pub(super) fn for_of<'a>(cx: Cx<'a, '_>) -> Option<&'a str> {
+    let principal = cx.principal();
+    principal
+        .acting_for
+        .as_ref()
+        .map(|acting| acting.subject.as_str())
+        .filter(|subject| *subject != principal.subject)
+}
+
 /// The calling service's deployable, when a service calls.
 pub(super) fn via<'a>(cx: Cx<'a, '_>) -> Option<&'a str> {
     cx.principal()
@@ -145,7 +158,7 @@ pub(super) fn post(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
     if quotes.is_some() && thread.is_none() {
         return Err(invalid(OP, "/quotes", "needs thread"));
     }
-    check_action_data(OP, blocks)?;
+    check_block_shapes(OP, blocks)?;
     check_reply(cx, OP, thread, quotes)?;
     check_blocks(cx, OP, blocks, None)?;
 
@@ -155,8 +168,8 @@ pub(super) fn post(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
     let stand = conversation.last_stand;
     cx.sql().run(
         format!(
-            "INSERT INTO {table} (namespace, schema, id, message, thread, quotes, author, via, state, body, blocks, mentions, created_at, posted_at, edited_at, edits, pinned, client_id, resolved_by, resolved_at, draft_length, last_append_at, stand)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 0, ?, NULL, NULL, NULL, NULL, ?)"
+            "INSERT INTO {table} (namespace, schema, id, message, thread, quotes, author, for_subject, via, state, body, blocks, mentions, created_at, posted_at, edited_at, edits, pinned, client_id, resolved_by, resolved_at, draft_length, last_append_at, stand)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 0, ?, NULL, NULL, NULL, NULL, ?)"
         ),
         &keyed(
             cx,
@@ -165,6 +178,7 @@ pub(super) fn post(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
                 thread.map_or(SqlValue::Null, SqlValue::Integer),
                 quotes.map_or(SqlValue::Null, SqlValue::Integer),
                 SqlValue::from(subject),
+                for_of(cx).map_or(SqlValue::Null, SqlValue::from),
                 via(cx).map_or(SqlValue::Null, SqlValue::from),
                 SqlValue::from(POSTED),
                 SqlValue::from(body),
@@ -180,7 +194,8 @@ pub(super) fn post(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
     let moves = Moves::standing(thread.is_none(), now);
     move_counts(cx, &mut conversation, &moves)?;
     save_conversation(cx, existed, &conversation)?;
-    follows::came_to_stand(cx, id, thread, subject, stand, mentions)?;
+    follows::came_to_stand(cx, id, thread, subject, for_of(cx), stand, mentions)?;
+    search::index(cx, id, thread, body)?;
     after(cx, OP, id)
 }
 
@@ -194,7 +209,7 @@ pub(super) fn edit(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
         return Err(invalid(OP, "", "names none of body, blocks and mentions"));
     }
     check_body(cx, OP, body)?;
-    check_action_data(OP, blocks)?;
+    check_block_shapes(OP, blocks)?;
     let message = present(cx, OP, id)?;
     if message.deleted() {
         return Err(deleted(cx, OP, id));
@@ -248,8 +263,8 @@ pub(super) fn edit(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
     let edits = cx.sql().table(EDITS)?;
     cx.sql().run(
         format!(
-            "INSERT INTO {edits} (namespace, schema, id, message, edit, body, blocks, mentions, edited_by, edited_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO {edits} (namespace, schema, id, message, edit, body, blocks, mentions, edited_by, for_subject, edited_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         ),
         &keyed(
             cx,
@@ -260,6 +275,7 @@ pub(super) fn edit(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
                 SqlValue::from(compact(Some(&message.blocks))),
                 SqlValue::from(compact(Some(&message.mentions))),
                 SqlValue::from(subject),
+                for_of(cx).map_or(SqlValue::Null, SqlValue::from),
                 SqlValue::Integer(now),
             ],
         ),
@@ -271,6 +287,11 @@ pub(super) fn edit(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
     } else {
         message.state.as_str()
     };
+    // A code block given back unchanged at its index keeps its moves.
+    let stored = match blocks {
+        Some(blocks) => keep_moves(blocks, &message.blocks),
+        None => message.blocks.clone(),
+    };
     let table = cx.sql().table(MESSAGES)?;
     cx.sql().run(
         format!(
@@ -280,7 +301,7 @@ pub(super) fn edit(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
         &[
             SqlValue::from(state),
             SqlValue::from(body.unwrap_or(message.body.as_str())),
-            SqlValue::from(compact(Some(blocks.unwrap_or(&message.blocks)))),
+            SqlValue::from(compact(Some(&stored))),
             SqlValue::from(compact(Some(mentions.unwrap_or(&message.mentions)))),
             SqlValue::Integer(now),
             SqlValue::Integer(message.edits + 1),
@@ -291,6 +312,9 @@ pub(super) fn edit(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
     )?;
     if let Some(mentions) = mentions {
         follows::edited_mentions(cx, &message, mentions)?;
+    }
+    if let Some(body) = body {
+        search::reindex(cx, id, body)?;
     }
     after(cx, OP, id)
 }
@@ -322,6 +346,7 @@ pub(super) fn delete_message(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
     }
     remove_edits_and_reactions(cx, &[id])?;
     follows::removed(cx, &[id], &[])?;
+    search::unindex(cx, &[id])?;
     let table = cx.sql().table(MESSAGES)?;
     // It keeps posted_at and its stand, as it keeps created_at; a composing message
     // leaves composing.
@@ -381,6 +406,7 @@ pub(super) fn purge(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
         .map(|message| message.id)
         .collect();
     follows::removed(cx, &ids, &threads)?;
+    search::unindex(cx, &ids)?;
     cx.sql().run(
         format!(
             "DELETE FROM {table} WHERE namespace = ? AND schema = ? AND id = ? AND message IN ({})",
@@ -489,7 +515,7 @@ pub(super) fn react(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
     conversation.last_reaction += 1;
     cx.sql().run(
         format!(
-            "INSERT INTO {table} (namespace, schema, id, message, emoji, subject, reaction, reacted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO {table} (namespace, schema, id, message, emoji, subject, for_subject, reaction, reacted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
         ),
         &keyed(
             cx,
@@ -497,6 +523,7 @@ pub(super) fn react(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
                 SqlValue::Integer(id),
                 SqlValue::from(emoji.as_str()),
                 SqlValue::from(cx.principal().subject.as_str()),
+                for_of(cx).map_or(SqlValue::Null, SqlValue::from),
                 SqlValue::Integer(conversation.last_reaction),
                 SqlValue::Integer(cx.now()),
             ],
@@ -631,19 +658,20 @@ fn thread_for(cx: Cx<'_, '_>, operation: &str, params: &Value) -> Result<Message
 // moves its count.
 fn set_resolved(cx: Cx<'_, '_>, top: &Message, resolved: bool) -> Result<()> {
     let table = cx.sql().table(MESSAGES)?;
-    let (by, at) = if resolved {
+    let (by, for_subject, at) = if resolved {
         (
             SqlValue::from(cx.principal().subject.as_str()),
+            for_of(cx).map_or(SqlValue::Null, SqlValue::from),
             SqlValue::Integer(cx.now()),
         )
     } else {
-        (SqlValue::Null, SqlValue::Null)
+        (SqlValue::Null, SqlValue::Null, SqlValue::Null)
     };
     cx.sql().run(
         format!(
-            "UPDATE {table} SET resolved_by = ?, resolved_at = ? WHERE namespace = ? AND schema = ? AND id = ? AND message = ?"
+            "UPDATE {table} SET resolved_by = ?, resolved_for = ?, resolved_at = ? WHERE namespace = ? AND schema = ? AND id = ? AND message = ?"
         ),
-        &[by, at]
+        &[by, for_subject, at]
             .into_iter()
             .chain(keyed(cx, [SqlValue::Integer(top.id)]))
             .collect::<Vec<_>>(),
@@ -692,7 +720,7 @@ pub(super) fn reopen(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
 }
 
 /// Deletes the instance's messages, edits, reactions, drafts, markers,
-/// follows and deliveries, and empties its conversation row but for its
+/// follows, deliveries and search rows, and empties its conversation row but for its
 /// high-water marks: an instance re-created with the id numbers its
 /// messages, reactions and stands on from them, so no id is reused across
 /// the lives one instance's events span.
@@ -707,6 +735,7 @@ pub(super) fn delete_conversation(
         )?;
     }
     follows::delete_reads(cx)?;
+    search::unindex_instance(cx)?;
     let table = cx.sql().table(CONVERSATIONS)?;
     cx.sql().run(
         format!(

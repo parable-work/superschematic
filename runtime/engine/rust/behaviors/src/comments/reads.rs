@@ -1,6 +1,7 @@
-//! Comments' read-only operations: listMessages, getMessage, listEdits and
-//! listReactions (`comments-contract.md`, "Operations"). None writes or
-//! appends an event; the access policy is asked for read.
+//! Comments' read-only operations: listMessages, getMessage, listEdits,
+//! listReactions and listPinned (`comments-contract.md`, "Operations",
+//! "Batch 5: listPinned"). None writes or appends an event; the access
+//! policy is asked for read.
 
 use serde_json::Value;
 
@@ -181,7 +182,7 @@ pub(super) fn list_edits(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
     let table = cx.sql().table(EDITS)?;
     let rows = cx.sql().all(
         format!(
-            "SELECT edit, body, blocks, mentions, edited_by, edited_at FROM {table}
+            "SELECT edit, body, blocks, mentions, edited_by, for_subject, edited_at FROM {table}
              WHERE namespace = ? AND schema = ? AND id = ? AND message = ? AND edit > ?
              ORDER BY edit LIMIT ?"
         ),
@@ -197,17 +198,18 @@ pub(super) fn list_edits(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
     let items = rows
         .iter()
         .map(|row| {
-            Ok((
-                row.i64("edit")?,
-                object(vec![
-                    ("edit", Value::from(row.i64("edit")?)),
-                    ("body", Value::from(row.text("body")?)),
-                    ("blocks", json_array(row.text("blocks")?)),
-                    ("mentions", json_array(row.text("mentions")?)),
-                    ("by", Value::from(row.text("edited_by")?)),
-                    ("at", Value::from(row.i64("edited_at")?)),
-                ]),
-            ))
+            let mut members = vec![
+                ("edit", Value::from(row.i64("edit")?)),
+                ("body", Value::from(row.text("body")?)),
+                ("blocks", json_array(row.text("blocks")?)),
+                ("mentions", json_array(row.text("mentions")?)),
+                ("by", Value::from(row.text("edited_by")?)),
+            ];
+            if let Some(subject) = row.opt_text("for_subject")? {
+                members.push(("for", Value::from(subject)));
+            }
+            members.push(("at", Value::from(row.i64("edited_at")?)));
+            Ok((row.i64("edit")?, object(members)))
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(paged(items, request.limit))
@@ -225,7 +227,7 @@ pub(super) fn list_reactions(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
     let table = cx.sql().table(REACTIONS)?;
     let rows = cx.sql().all(
         format!(
-            "SELECT subject, reaction, reacted_at FROM {table}
+            "SELECT subject, for_subject, reaction, reacted_at FROM {table}
              WHERE namespace = ? AND schema = ? AND id = ? AND message = ? AND emoji = ? AND reaction > ?
              ORDER BY reaction LIMIT ?"
         ),
@@ -242,16 +244,43 @@ pub(super) fn list_reactions(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
     let items = rows
         .iter()
         .map(|row| {
-            Ok((
-                row.i64("reaction")?,
-                object(vec![
-                    ("subject", Value::from(row.text("subject")?)),
-                    ("at", Value::from(row.i64("reacted_at")?)),
-                ]),
-            ))
+            let mut members = vec![("subject", Value::from(row.text("subject")?))];
+            if let Some(subject) = row.opt_text("for_subject")? {
+                members.push(("for", Value::from(subject)));
+            }
+            members.push(("at", Value::from(row.i64("reacted_at")?)));
+            Ok((row.i64("reaction")?, object(members)))
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(paged(items, request.limit))
+}
+
+/// The conversation's pinned messages, top-level and replies, by id,
+/// paged over the id; each item the record.
+pub(super) fn list_pinned(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
+    let request = page_request(NAME, "listPinned", params)?;
+    let table = cx.sql().table(MESSAGES)?;
+    let rows = cx.sql().all(
+        format!(
+            "SELECT {MESSAGE_COLUMNS} FROM {table}
+             WHERE namespace = ? AND schema = ? AND id = ? AND pinned = 1 AND message > ?
+             ORDER BY message LIMIT ?"
+        ),
+        &keyed(
+            cx,
+            [
+                SqlValue::Integer(request.after),
+                SqlValue::Integer(request.limit + 1),
+            ],
+        ),
+    )?;
+    let messages = rows.iter().map(Message::of).collect::<Result<Vec<_>>>()?;
+    let found = page(messages, request.limit, |message| message.id);
+    Ok(Page {
+        items: records(cx, &found.items)?,
+        next: found.next,
+    }
+    .to_json())
 }
 
 // paged is `{ items, next }` of rows read with a limit of `limit + 1`,

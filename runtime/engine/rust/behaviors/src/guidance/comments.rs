@@ -4,7 +4,8 @@
 //! says follows the config: the longest body, the edit window, the block
 //! kinds allowed, who moderates, pins and resolves, how long a streamed
 //! message's author may pause and how many it may write at once, and who
-//! claims the deliveries of its messages.
+//! claims the deliveries of its messages, who moves a code block's anchor,
+//! and what an attachment may describe.
 
 use superschematic_engine::behaviors::{BehaviorGuidance, DescribeTarget, OperationGuidance};
 
@@ -65,7 +66,7 @@ pub(crate) fn guidance(config: &CommentsConfig, target: &DescribeTarget) -> Beha
         )
     };
     let kinds = match &config.blocks {
-        None => "ref and action blocks".to_owned(),
+        None => "ref, action, code and attachment blocks".to_owned(),
         Some(kinds) if kinds.is_empty() => "no blocks".to_owned(),
         Some(kinds) => format!("{} blocks", list(kinds, "and")),
     };
@@ -78,6 +79,34 @@ pub(crate) fn guidance(config: &CommentsConfig, target: &DescribeTarget) -> Beha
         None,
         "Refer to an instance that exists in the namespace and that the caller may read.",
     )];
+    let attachments = &config.attachments;
+    let attaches = config
+        .blocks
+        .as_ref()
+        .is_none_or(|kinds| kinds.iter().any(|kind| kind == "attachment"));
+    if attaches {
+        let mut allowed = vec![format!(
+            "a uri whose scheme is {}",
+            list(&attachments.schemes, "or")
+        )];
+        if let Some(types) = &attachments.media_types {
+            allowed.push(format!("a mediaType of {}", list(types, "or")));
+        }
+        if let Some(max) = attachments.max_bytes {
+            allowed.push(format!("at most {max} bytes"));
+        }
+        blocks_refused.insert(
+            0,
+            refusal(
+                "attachment_not_allowed",
+                None,
+                &format!(
+                    "Describe an attachment with {}; the config's attachments allow no other.",
+                    list(&allowed, "and")
+                ),
+            ),
+        );
+    }
     if config.blocks.is_some() {
         blocks_refused.insert(
             0,
@@ -164,8 +193,14 @@ pub(crate) fn guidance(config: &CommentsConfig, target: &DescribeTarget) -> Beha
         Some(permission) => format!(" Each message that comes to stand records a delivery for each subject it mentions and each follower of its thread, which a caller with permission {permission} claims with Comments.claimDeliveries and settles with Comments.settleDeliveries."),
         None => " Each message that comes to stand records a delivery for each subject it mentions and each follower of its thread, which the inbox reads; this type names no deliverPermission, so nobody claims them.".to_owned(),
     };
+    let mover = match (config.anchor_permission.as_deref(), moderator) {
+        (Some(anchor), Some(moderate)) => format!("its author, a caller with permission {anchor} or one with permission {moderate}"),
+        (Some(anchor), None) => format!("its author or a caller with permission {anchor}"),
+        (None, Some(moderate)) => format!("its author or a caller with permission {moderate}"),
+        (None, None) => "its author".to_owned(),
+    };
     let summary = format!(
-        "Each {type_name} holds a conversation: messages, each top-level or a reply in the thread of a top-level one (one level deep), with {body}, {kinds} and mentions. A message is posted whole with post, or streamed as it is written: begin, appendDraft, then finish; one whose author appends nothing for {timeout} is interrupted, keeping what was written. Every write is beside the instance, so its seq and ETag do not move and a lease held by another does not stop it. behaviors.Comments.messages counts the posted and interrupted messages, lastMessageAt says when the latest came to stand, threads counts the open and resolved threads, composing names who is writing a message, and unread counts the caller's unread top-level messages of others; none of them moves in an event, so read the instance for them. A caller follows each thread it posts in or is mentioned in; markRead moves its read marker and follow its follows, and the namespace operation Comments.inbox lists its mentions, followed threads and read conversations.{deliver}"
+        "Each {type_name} holds a conversation: messages, each top-level or a reply in the thread of a top-level one (one level deep), with {body}, {kinds} and mentions. A message is posted whole with post, or streamed as it is written: begin, appendDraft, then finish; one whose author appends nothing for {timeout} is interrupted, keeping what was written. Every write is beside the instance, so its seq and ETag do not move and a lease held by another does not stop it. behaviors.Comments.messages counts the posted and interrupted messages, lastMessageAt says when the latest came to stand, threads counts the open and resolved threads, composing names who is writing a message, and unread counts the caller's unread top-level messages of others; none of them moves in an event, so read the instance for them. A caller follows each thread it posts in or is mentioned in; markRead moves its read marker and follow its follows, and the namespace operation Comments.inbox lists its mentions, followed threads and read conversations; Comments.searchMessages finds messages by the words of their bodies across the namespace. A caller acting for someone (actingFor) writes as itself, and the message records whom it was for: that subject follows the thread, hears nothing of the message and finds it unread.{deliver}"
     );
     BehaviorGuidance {
         summary,
@@ -329,6 +364,23 @@ pub(crate) fn guidance(config: &CommentsConfig, target: &DescribeTarget) -> Beha
                 ),
             ),
             (
+                "moveAnchor".to_owned(),
+                said(
+                    Some(format!("Use to move a code block of a posted or interrupted message to the same code at another revision, once the caller has found where it went (after a push, say): the block takes revision and lines, keeps its snippet, and records its first anchor as original and its moves; {mover} may move it. It is not an edit: the body, editedAt, edits and the edit window are untouched. {BESIDE}")),
+                    text("Do not use to change what a code block quotes; edit the message."),
+                    text("Returns the record, the block moved."),
+                    vec![
+                        no_message(),
+                        deleted(),
+                        composing(),
+                        refusal("not_author", None, &format!("Only {mover} moves an anchor.")),
+                        refusal("no_block", None, "Name a block the message has, counted from 0."),
+                        refusal("not_code", None, "Name a code block; only a code block has an anchor."),
+                        refusal("anchor_unchanged", None, "None: the block is at that revision and those lines already."),
+                    ],
+                ),
+            ),
+            (
                 "markRead".to_owned(),
                 said(
                     text("Use to mark the conversation's top-level messages read, or with thread that thread's replies, up to the message id upTo the caller has shown; a streamed message that comes to stand later stays unread. The marker never moves back. It writes only the caller's read state, appends no event and needs only read."),
@@ -368,6 +420,14 @@ pub(crate) fn guidance(config: &CommentsConfig, target: &DescribeTarget) -> Beha
                 OperationGuidance {
                     use_when: text("Use to read who reacted to a message with one emoji, in the order they reacted."),
                     success: text("Returns items and next; pass next as cursor for the page after, until it is null."),
+                    ..OperationGuidance::default()
+                },
+            ),
+            (
+                "listPinned".to_owned(),
+                OperationGuidance {
+                    use_when: text("Use to read the conversation's pinned messages, top-level and replies, in ascending id order."),
+                    success: text("Returns items, each a record, and next; pass next as cursor for the page after, until it is null."),
                     ..OperationGuidance::default()
                 },
             ),
