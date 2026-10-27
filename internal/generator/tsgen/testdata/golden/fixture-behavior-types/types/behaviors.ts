@@ -127,12 +127,13 @@ export interface RequestBehaviors {
     readonly stale: Array<'category' | 'summary'>;
   };
   readonly Provenance: {
-    /** By recorded field written since Provenance was added: { source, by, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; review is { state, by?, at? }, state proposed, accepted, rejected or edited. */
+    /** By recorded field written since Provenance was added: { source, by, for?, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; for is the subject it acted for, when it acted for one (D77); review is { state, by?, at? }, state proposed, accepted, rejected or edited. */
     readonly fields: {
       body?: {
         at: number;
         by: string;
         confidence?: number;
+        for?: string;
         review?: {
           at?: number;
           by?: string;
@@ -144,6 +145,7 @@ export interface RequestBehaviors {
         at: number;
         by: string;
         confidence?: number;
+        for?: string;
         review?: {
           at?: number;
           by?: string;
@@ -155,6 +157,7 @@ export interface RequestBehaviors {
         at: number;
         by: string;
         confidence?: number;
+        for?: string;
         review?: {
           at?: number;
           by?: string;
@@ -166,6 +169,7 @@ export interface RequestBehaviors {
         at: number;
         by: string;
         confidence?: number;
+        for?: string;
         review?: {
           at?: number;
           by?: string;

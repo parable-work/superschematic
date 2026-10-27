@@ -43,6 +43,7 @@ type namespaceOperation struct {
 // member of the result's items, which a caller holds one at a time.
 var coreNamespaceItems = map[string]string{
 	"Comments.inbox":            "CommentsInboxItem",
+	"Comments.searchMessages":   "CommentsSearchHit",
 	"Comments.claimDeliveries":  "CommentsDelivery",
 	"Comments.settleDeliveries": "CommentsSettledDelivery",
 }
@@ -50,6 +51,7 @@ var coreNamespaceItems = map[string]string{
 // coreNamespaceItemDocs document those item types, by the same key.
 var coreNamespaceItemDocs = map[string]string{
 	"Comments.inbox":            "An item of Comments' inbox: a message that mentions the caller, a thread it follows by its latest reply of another, or a conversation it has read by its latest top-level message of another, with how many of them it has not read. One with none unread is done.",
+	"Comments.searchMessages":   "A message searchMessages found: where it is, who wrote it and for whom, its place in the search's order, and a few words of its body around the matches, in parts.",
 	"Comments.claimDeliveries":  "A delivery claimDeliveries claimed: one message and one subject that should hear of it, with why and what a notifier needs to send it with no other read. Settle it by its id under the claim's token.",
 	"Comments.settleDeliveries": "A delivery as settleDeliveries left it: its state, its claims so far, and when a failed one is due again.",
 }
