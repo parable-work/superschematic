@@ -726,9 +726,11 @@ func TestTheTypeScriptDockerfileBuildsAnImageThatServes(t *testing.T) {
 	}
 	f := loadTypeScriptFixture(t)
 	// ts-shop's package depends on ts-db's TypeScript types, for the
-	// message its worker handles (D53), so the workspace installs only
+	// message its worker handles (D53), and both implementations on
+	// ts-cache's definitions (D75), so each root's workspace installs only
 	// with them built.
-	f.build(t, repoRoot, tsFakePaths(repoRoot), append([]string{"ts-db"}, append(slices.Clone(tsAPIs), tsCloudStack)...)...)
+	services := append([]string{"ts-db", "ts-cache"}, append(slices.Clone(tsAPIs), tsCloudStack)...)
+	f.build(t, repoRoot, tsFakePaths(repoRoot), services...)
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	install := exec.Command(bun, "install")
 	install.Dir = out
@@ -739,7 +741,7 @@ func TestTheTypeScriptDockerfileBuildsAnImageThatServes(t *testing.T) {
 	serveTypeScriptImage(t, repoRoot, filepath.Join(servergen.ServerDir(out, tsCloudStack, "ts-shop"), servergen.DockerFile))
 
 	other := filepath.Join(repoRoot, "schemas", "dist-b")
-	if err := buildTSInto(f, repoRoot, tsFakePaths(repoRoot), other, append([]string{"ts-db"}, append(slices.Clone(tsAPIs), tsCloudStack)...)...); err != nil {
+	if err := buildTSInto(f, repoRoot, tsFakePaths(repoRoot), other, services...); err != nil {
 		t.Fatal(err)
 	}
 	install = exec.Command(bun, "install")
