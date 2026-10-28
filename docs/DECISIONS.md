@@ -13355,3 +13355,97 @@ Left:
   share a shape with, and banners drawn in other characters, such as
   box-drawing ones, stay docs.
 The rules are reversible until the first release.
+
+## D102. A projection's migration stamp, once built, names the same files for good: the build records them in `projections.lock`, and `check` and `build` refuse other files under a recorded stamp and name the next stamp
+
+`@projection({ ..., migration })` is required, and the decorator's doc
+said "an applied migration is never rewritten: a changed declaration
+takes a new stamp"; the generated up file says it "is immutable once
+applied". Nothing held either. A finances API added a column to its
+`TransactionListRow` projection, kept the stamp, and `build` rewrote
+`20261028120000_transaction_list_projection.up.sql` in place with no
+word. The stack never noticed, since its migration plan creates the view
+from the model in a step of its own (`createView`) and never reads the
+pair; a runner of the user's own, which does read it, would have kept
+the old view on every database that had applied the stamp.
+
+### Keep the promise or drop the stamp
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The promise is kept, because a supported path applies the pair. No command of the CLI does: `migrate plan` and `superschematic-migrate` diff models (D27), and every stack target migrates through that plan, so `stack dev` and a deploy depend on no stamp; the examples only read the pair, and nothing in the version graph or `examples/migrations` names it. But `outputs.sql.migrationsDir` writes the pair "next to the service's hand-written migrations", to be committed, and `viewOwner` and `sourceSchema` exist for the runner that applies it, a golang-migrate style runner, whose versions the 14-digit stamp is. That runner never runs an applied version again, so a rewritten file reaches no database, and one that checksums its files (Atlas, Flyway) fails the deploy. | A stamp that is optional for a projection a stack deploys, the stamped pair written only when one is set: the IR's `migration`, the core meta-schema and the engine's recorded scenario would change for a rule on where a projection is deployed, which a DB service does not know, and the pair would stay unchecked for the teams that apply it. |
+| The stamp stays required and keeps its form. The stack's plan still creates the view from the model, so a service deployed only by a stack pays one edit when it changes a built projection, which the refusal spells. | |
+
+### The record
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `projections.lock`, beside the schema config as `queries.lock` is: a version, and per stamp a build wrote, the stamp, the projection that declared it, and the hash of the pair (`generator.MigrationHash`): each file's name and bytes, as `sqlgen.ProjectionMigrationFiles` renders them and `WriteProjections` writes them. | In `queries.lock`: `queries verify` writes it on Postgres, and removes it from a service without queries. |
+| The hash is of the files, not the declaration: a runner applies the files, and a checksumming one compares their bytes. So a doc comment (the view's and each column's `COMMENT`), `viewOwner` and `sourceSchema`, a column a table's `@column` renames, and a compiler that writes other DDL for the same declaration are each a change under the stamp, and the next is a migration that reaches every database. A compiler change to the pair's bytes therefore asks for a new stamp of every recorded projection, so the template is held to that. | D95's `sqlutil.ViewShape`, the model a query over the view is held to, which leaves out comments, the outputs and the rendering, so the file could still change under its stamp. The statements without their comment lines: the bytes are what a checksumming runner reads. |
+| A stamp stays recorded when no projection declares it any more. A database may have applied it, a stamp moved back by a revert must not reuse it, and the next stamp must sort after it. | Dropping it with its declaration. |
+| With no record of a stamp, a pair already in the service's own `migrationsDir` is its record: it is committed there and may have been applied, as on the first build after this entry. The output root's copy is no record: it is build output, rewritten on every build, and a branch switch leaves another branch's files there. | The output root's files as a record as well, which stale output would turn into refusals. |
+| A run with no service path, as a test's of an IR alone, records nothing and checks nothing, as it checks no `queries.lock`. | |
+
+### Who writes it, and who refuses
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `build` writes it. The sql generator records each stamp it writes that the lock does not hold, after the pair is written, and logs it. A stamp's files exist from its first build, which is when they can be applied, so that is when they are recorded; every build, `build-all` and `stack dev` among them, goes through the generator. | `queries verify`, which needs Postgres and runs only for a service with queries. A command of its own: a step a user forgets, with the files unrecorded until then. `check`, which writes no output. |
+| `build` refuses a stamp whose pair would change before it writes any file of the service's SQL, and `check` refuses it too, with no database: it renders the pair the build would write (`generator.CheckProjectionStamps`, the sql generator's DDL pass, which needs no database) and reports the refusal on `projections.lock`, as it reports a stale query on `queries.lock`. A schema the generator refuses is the build's to report. `check --watch` stamps the lock. | Only `build`, which an editor's check loop never runs. |
+| The refusal names the projection, its stamp, why (`which projections.lock records as built`, or the file `migrationsDir` holds), and the stamp to give it: `migration: "20261028120001"`. The next stamp is one second after the latest of the stamp, every stamp the lock records, every stamp the service declares and, with `migrationsDir`, every version a migration file there is named with, the service's hand-written ones among them, since a runner that only moves forward skips a version below the one it is at. Read as a time, YYYYMMDDHHMMSS, it rolls over minutes, days and years; a stamp that is no time takes the next number, and a version longer than 14 digits is left out, since no stamp can follow it. Each refused projection takes its own, so two never collide. | The wall clock, as `migrate create` stamps a file: a message that changes every second, and a stamp that can sort before one written ahead of time, as the finances draft's was. |
+| The build checks the stamps before `queries.lock`: a new stamp does not change the model a query over the view is held to (D95), so the order of the two fixes does not matter, and the stamp, which no database can check, comes first. | |
+
+### The author's loop
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A projection never built has no record, so editing it before the first build costs nothing. After it, each change takes the next stamp, which the refusal spells, or `superschematic build <db-service-dir> --rewrite-migration <stamp>`, repeatable, which writes the stamp's pair again and records it again, for a stamp no database has applied: the author's own database is dropped and built again. The refusal ends with that command. It names a stamp a projection of the service declares, or fails; it is refused on another kind and with `--with-deps`, as `--api-language` applies to the target alone. | Deleting the lock or its entry by hand, which unrecords every stamp, or edits a file only commands write. Treating the newest recorded stamp as unapplied, which no tool can know. A record written only by a deploy, which never reads the pair. |
+
+D27 and D95 stand. D27's "the only migrations the compiler writes are the
+projection views'" now records them, and D95's "the migration stamp is
+left out: it names the file the view is written to" is why the stamp is
+held here rather than in `queries.lock`. The rule the decorator's doc and
+the up file's header stated is now checked.
+
+Status: built.
+- **The acceptance.** Checked against a scratch copy of the finances
+  draft: unchanged, it checks clean and `build-all` builds it twice, the
+  first build recording `20261028120000` for `TransactionListRow`; a
+  `paymentChannel` column added under that stamp fails `check` (beside
+  the four queries over the view `queries.lock` already names) and
+  `build`, naming `20261028120001`, and leaves the up file as it was;
+  with that stamp, and `queries verify`, it builds and records both;
+  the column dropped again under `20261028120001` fails until `build
+  --rewrite-migration 20261028120001` records it again.
+- **The generator.** `TestABuiltProjectionMigrationIsNeverRewritten`:
+  the first build records fixture-projection's stamp, the same
+  declaration builds again, a dropped column under it fails naming the
+  projection, the stamp, `20260902120001` and the command, and writes
+  nothing; `RewriteMigrations` records it again, refuses a stamp no
+  projection declares, a new stamp is recorded beside the old, and two
+  projections whose comments changed take `...06` and `...07`.
+  `TestAPairInTheServicesMigrationsDirIsARecord`: a committed pair of
+  other bytes in `migrationsDir` fails with no lock, the next stamp after
+  the hand-written migration beside it, past a sequential and a 20-digit
+  version; and a build with no service path records nothing.
+  `TestNextMigrationStamp` for the rollovers and the latest version.
+- **The commands.** `TestCheckAndBuildHoldAProjectionToItsBuiltMigration`
+  (cli) on a copy of fixture-queries-db: `check` writes no lock and
+  `build` records `20261027000000`; a reworded doc comment of
+  `LineListEntry` fails `check` on `projections.lock` and `build`, while
+  `queries.lock` still holds; `--rewrite-migration` with `--with-deps` is
+  refused, and alone records it; the next stamp checks and builds; `check
+  --watch` stamps the lock.
+- **The repository.** acme-schematic's `shop-db`, which its smoke builds
+  in place, commits the `projections.lock` its build writes. No golden
+  moved: the pair's bytes are as before.
+
+Left:
+- The stack's plan still creates the view from the model, and reads no
+  stamp; a service deployed only by a stack carries one it does not use.
+- A build a shared build cache restores runs no generator, so a checkout
+  whose first build of a projection came from the cache records the stamp
+  at its next build that runs.
+- A migrations directory outside the service directory, where a team
+  keeps its runner's files, is not read for the next stamp.
+The rules are reversible until the first release.
