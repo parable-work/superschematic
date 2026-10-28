@@ -947,8 +947,10 @@ paged list over joined tables, is a query the DB schema declares with
 `Row`, and both ORMs run it as a typed function:
 `deps.orm.queries.categoryTotals(params)` and `tx.queries.categoryTotals(params)`
 in TypeScript, `db.Queries.CategoryTotals(ctx, params)` in Go. An enum
-parameter may pick one of fixed `ORDER BY` fragments, and a query may read
-its rows a page at a time by a keyset of its row's fields.
+parameter may pick one of fixed `ORDER BY` fragments, a query may read
+its rows a page at a time by a keyset of its row's fields, and one of one
+row returns it (`returns: "one"`, or `"optional"` for one or none). Reports
+share a filter by interpolating a string constant into their SQL.
 
 `superschematic queries verify <db-service-dir>` prepares each query on
 Postgres, checks the types Postgres describes against `Params` and `Row`,

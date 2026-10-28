@@ -12725,3 +12725,93 @@ Left:
 - Hyperdrive to a Cloud SQL database the gcp target places, in one
   environment with Workers (mixing targets).
 - Managing the config's caching, or the config itself, from the stack.
+
+## D95. A query's SQL interpolates string constants, a query over a projection's view is held to the projection in the lock, and a query returns one row, or one or none, when it says so (D86 amended)
+
+A finances API's dashboard ran four reports over one filter of 13
+optional conditions, and `@query`'s `sql` had to be a literal (D86): the
+filter was copied into each, about 15 lines four times, and nothing kept
+the copies in step. `${FILTER}` failed with "argument must be a literal;
+computed values are read by the execution path, not the static walk".
+Reading the filter from a `@rawSql` function, or the rows from the
+`TransactionListRow` projection's view, lost the lock's safety: D86's
+Left named "a raw SQL piece or a view a query reads, whose change the
+lock does not see". And the dashboard's totals, always one row, came back
+as a list, so the caller wrote `const [[totals]] = ...` and `totals!`.
+
+### Shared SQL
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The static walk reads a template literal whose `${...}` are string constants (`evaluateTemplate`): each evaluates through its `const`'s initializer to a string, a template literal of constants itself among them, in the schema file or a file it imports, which the TypeScript program resolves; the SQL is the text with each in place. It is the walk's rule for every argument, `@rawSql`'s and a config's among them, so it is written once. | Constants in `@query`'s `sql` alone, a second evaluator beside the one every decorator argument goes through. String concatenation with `+` as well, a second way to write the same thing. |
+| A `${...}` that does not evaluate statically, or evaluates to a number, a boolean, a class or an object, fails the load where it is written, saying what a `${...}` may be; when the reason lies in a constant's own initializer, the message carries that location too. Strings joined with `+` say to write a template literal. A reference to a `let` or `var` is refused for every argument: the walk reads an initializer that no assignment may change. | Reading a `let`'s initializer, as the walk did before, which the execution path may overwrite. |
+| The lock needs nothing new: its hash already covers each query's statements (D86), which now hold the constants' text, so editing a shared filter makes every query that interpolates it stale for `check` and `build` until `queries verify` prepares it again, and no other query. `check --watch` already stamps every `.ts` file of a service. | Recording which constants a query reads in the lock, which the expanded statement already says. |
+| Named fragments, `@queryFragment({ name, sql, params })` used as `{{name}}`, are not built. A constant meets the acceptance: the fragment's `:name`s are the query's own parameters, which D86 checks against its `Params` like any other, so the reports take one params type (`DashboardFilter`) and an unused parameter stays the error it is. A fragment of its own params would need a rule for how they join a query's, a second `:name` scope to check and a placeholder syntax the scanner reads, for nothing a constant cannot say. | Fragments, with "an unused fragment param is not an error", which lets a query's params type drift from its SQL. |
+
+### A query over a projection's view
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A query whose SQL names a projection's view (`sqlutil.QueriesOf`, by the view's name among the SQL's identifiers, as a table is named) adds the projection's model to the shapes its hash covers (`sqlutil.ViewShape`): its relation, source, joins, row rules and collapse, and each column's name, SQL type, nullability and what it reads, and the shapes of the tables the view reads. A changed join, column or rule of the projection, or of a table under it, is a query to verify again; a query that names no view keeps the hash it had. The migration stamp is left out: it names the file the view is written to. | The view's `CREATE VIEW` text, which lives in sqlgen, a package `sqlutil` sits under. The projection's `TypeDef` as JSON, whose doc comments would make an edited comment a query to verify again. |
+| A column of a projection's view whose field is required and reads a column, not a function, is never null to verification (`QueryModel.ViewNotNull`), beside Postgres's own `attnotnull`, which is false for every view's column. The projection's checks already hold a required field to a required source column through no left join (D90), and the lock holds the query to the projection, so the word is kept. A function's column is judged as a computed one. | Every view column nullable, as Postgres describes it, which makes every query over a view vouch for each column with `-- @notNull`. |
+| Generated views are the compiler's own; a `@rawSql` function or view a query reads stays outside the lock, as D86 left it. | Hashing `@rawSql` statements a query names, which the scanner cannot tell from a function of Postgres's own. |
+
+### One row
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `@query({ ..., returns })`: `"many"`, the rows, the default, which the IR leaves empty; `"one"`, the one row; `"optional"`, the row or none (`ir.QueryDef.Returns`, `Returning()`). TypeScript types the call `Promise<Row>` and `Promise<Row \| null>` (`ORMQuery.ResultType`) and the definition carries `returns`; Go returns `(Row, error)` and `(*Row, error)`, a pointer for none as the ORM's reads do. | A `firstOrThrow` on every query, which leaves the type a list. `(Row, bool, error)` in Go, where the ORM's reads answer a pointer. |
+| The statement runs as written. `"one"` fails on none with the ORM's not-found error, `NotFoundError` in TypeScript and an error wrapping `ErrNotFound` in Go, as `getOne`'s, so a caller tells it apart as it tells a missing row; both fail on more than one with `TooManyRowsError` and `ErrTooManyRows`, naming the query and the count; `"optional"` answers `null` and `nil` for none. The no-op database reads no rows, so its `"one"` fails and its `"optional"` answers nil. | Taking the first of several rows, as `QueryRow` does, which hides a missing `GROUP BY` key or join condition. Adding `LIMIT 2` to the statement to tell one from more, which changes the statement both ORMs, the lock and the parity test hold alike. |
+| The load refuses `"one"` and `"optional"` on a paged query, and on a statement whose text shows it may return more than one row (`QueryScan.ManyRows`): its top level groups with `GROUP BY`, is a `UNION` or a `VALUES` list of several rows, or calls a set-returning function in its select list, or reads one in its `FROM` with no aggregate in the select list to make one row of its rows. A top-level `LIMIT 1` or `FETCH FIRST ROW ONLY` holds it to one row whatever else it writes, which is how an author says a grouped query never returns more. The check reads the scanner's words with their depth, so a subquery's `GROUP BY` or `unnest` is its own; it needs no database, so it runs where D86's load checks do, and `check`, `build` and `queries verify` all refuse. | Only in `queries verify`, which needs Postgres for what the text tells. Postgres's plan (`EXPLAIN (GENERIC_PLAN)`), a describe document of a new form on Postgres 16 and up, for the few queries the text leaves unclear. |
+| `"optional"` takes the same check: it too promises no more than one row, and what tells a statement of one row from one of none is the data, which no check reads. | No check for `"optional"`, whose second row would fail at run time just as `"one"`'s does. |
+| The lock's hash covers what a query returns, written only when it is `"one"` or `"optional"`, so changing it is a query to verify again, and a query of many rows hashes as it did, so every lock written before this entry holds. | A new lock version, which would make every committed lock stale for a field most queries leave unset. |
+
+D86, amended: the static walk's "`sql` must be a literal" now reads a
+template literal of string constants; the lock's hash covers what a query
+returns and the projections whose views it names; and its Left's "a raw
+SQL piece or a view a query reads" is now a `@rawSql` piece alone.
+
+Status: built.
+- **The acceptance.** fixture-queries-db's dashboard shares one filter,
+  `LINE_FILTER` of `src/filters.ts`, a template of a nested constant,
+  across four reports: `dashboardTotals` (`returns: "one"`),
+  `dashboardCategories`, `dashboardLines` over the new `line_list`
+  projection, and `matchingLine` (`returns: "optional"`), with
+  `accountNamed` (`"one"`) beside them. `TestCheckHoldsASharedFilterToTheLock`
+  (cli) edits the filter, and a constant it interpolates, and `check`
+  names the four and no other query; editing the projection names
+  `dashboardLines` alone, and changing `returns` names `dashboardTotals`.
+  `TestQueriesVerifyReverifiesASharedFilter` verifies them again on
+  Postgres, moving the four hashes alone, and a broken filter fails
+  verify naming each. Checked against the finances draft in a scratch
+  copy: its four dashboard reports interpolate one constant and verify;
+  editing it fails `check` naming the four until `queries verify` runs
+  again; `dashboardTotals` with `returns: "one"` type-checks as
+  `const totals = await tx.queries.dashboardTotals(filter)`, and the
+  array form no longer does.
+- **The walk.** `TestQuerySQLInterpolatesStringConstants` and
+  `TestQuerySQLRefusesWhatIsNotAConstant` (tsreader): constants across
+  files and nested, a const of a template, and a `let`, a call, a number,
+  `+` and a bad constant in another file refused where they are.
+- **The lock.** `TestQueriesOverAProjection` and `TestQueryManyRows`
+  (sqlutil); `TestHashCoversWhatAQueryReturnsAndTheProjectionsItReads`,
+  `TestJudgeAViewsColumns` and `TestFixtureLockIsCurrent` (queryverify);
+  `TestVerifyFixtureOnPostgres -update` writes the fixture's lock;
+  `TestCheckWatchStampsTheQueriesLock` stamps the constants' file.
+- **One row.** `TestCheckQueryReturns` (verify) and
+  `TestQueriesVerifyRefusesManyRowsUnderOne` (cli) for the refusals;
+  `TestOneRowQueriesOnPostgres` and `TestDeclaredQueriesNoOp` (ormgen) and
+  `queries.test.ts` (tsgen's repositories) run none, one and more than one
+  row of each in Go and TypeScript; the HTTP runtime's `queries.test.ts`
+  over a recorded runner; `TestOneRowQueriesTypeTheirResult` type-checks
+  the calls; `TestQueriesParityOfGoAndTypeScriptOnPostgres` holds the two
+  to the same statements; `TestQueriesRoundTrip` writes `returns` back.
+- **The forms.** The goldens of fixture-queries-db's DDL, Go ORM
+  (`queries.go`, `projections.go`) and TypeScript types and `orm.ts`; the
+  schema-file types and the parity corpus's meta-schema hold `returns`.
+
+Left: named fragments with parameters of their own; a `@rawSql` function
+or view a query reads; constants of a type other than a string, such as a
+number a `LIMIT` interpolates; a projection's computed column as never
+null; telling a statement of one row from one of none, which the data
+alone says.

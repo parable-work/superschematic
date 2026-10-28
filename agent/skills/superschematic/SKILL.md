@@ -22,8 +22,15 @@ does. You never write, edit or duplicate:
   joined list is a `@query<Params, Row>({ sql })` in the DB schema, which
   both ORMs run as a typed function (`orm.queries.<name>(params)`), its
   rows decoded. Run `superschematic queries verify schemas/services/<db>`
-  after changing one, or a table one reads: it prepares each on Postgres
-  and writes `queries.lock`, which `check` and `build` require current.
+  after changing one, a table or projection one reads, or a constant one
+  interpolates: it prepares each on Postgres and writes `queries.lock`,
+  which `check` and `build` require current.
+- The same SQL twice: reports that share a filter interpolate it,
+  `` sql: `SELECT ... WHERE ${DASHBOARD_FILTER} GROUP BY 1` ``, a `const`
+  string or a template literal of such constants in the schema file or
+  one it imports. `+` and calls are refused. A report of one row takes
+  `returns: "one"` (`const totals = await orm.queries.dashboardTotals(f)`,
+  no `[0]` and no `!`), or `"optional"` for the row or `null`.
 - Validation: a field's scalar type and `Validate<T, {...}>` are checked
   by every generated decoder, server and SDK alike. Never re-check in a
   handler what a constraint can say.
