@@ -1,6 +1,7 @@
 // A standalone module so the Postgres driver stays out of the compiler's
-// module graph. TestStackQueueOnALocalEnvironment in the cli package copies
-// this directory and builds it, to make and read the database a local
+// module graph. TestStackQueueOnALocalEnvironment in the cli package, and
+// TestStackQueueOnACloudflareEnvironment in extensions/cloudflare, copy
+// this directory and build it, to make and read the database an
 // environment's queue lives in.
 module example.com/superschematic/queuedb
 
