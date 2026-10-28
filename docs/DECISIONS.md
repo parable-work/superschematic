@@ -13447,6 +13447,7 @@ Left:
   compile tests and goldens cover them as before.
 - A site whose build is a framework's or its author's is not checked for
   a type-check, and a dev server type-checks nothing.
+The rules are reversible until the first release.
 
 ## D102. A projection's migration stamp, once built, names the same files for good: the build records them in `projections.lock`, and `check` and `build` refuse other files under a recorded stamp and name the next stamp
 
