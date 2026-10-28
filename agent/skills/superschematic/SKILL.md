@@ -266,6 +266,12 @@ drains its queue once a minute under a Cron Trigger. An API over the user
 model signs users in there when its `authDb` is that Postgres; each
 password hash takes about 120 ms of CPU, so it needs Workers Paid.
 
+On gcp, a name the target makes from an API's and a class's names and
+that GCP would refuse as too long, such as a job's service account past
+30 characters, is shortened to a prefix and a hash, with the whole name
+in a label: don't rename a class to make it fit. A deployable the stack
+declares by name is still refused when its name is too long.
+
 ## Reference
 
 The binary prints its own references, written from what it links, its
