@@ -12725,3 +12725,79 @@ Left:
 - Hyperdrive to a Cloud SQL database the gcp target places, in one
   environment with Workers (mixing targets).
 - Managing the config's caching, or the config itself, from the stack.
+
+## D98. An API's MCP endpoint checks a call of a tool that asks through the tool's route before it asks the person, so only a call that would run is confirmed (D93 amended)
+
+D93 put the confirmation in the transport, before the call reaches the
+route, so the route's checks ran on the confirmed call alone. Against a
+finances API, an agent's `tools/call` of a tool that asks, its arguments
+wrapped in `input`, answered `428 confirmation_required` with a token; the
+same call with the token claimed it, and only then failed, 400,
+`... takes lineItemIds, categoryId, subCategoryId, not "input"`. The person
+was asked to approve a call that could never run, and the approval was
+spent: the corrected call asked again. A call the route refuses for its
+caller went the same way, with 401 or 403 in place of 400: a route only a
+calling service may call, or a credential whose scopes leave the operation
+out.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Before the endpoint mints a confirmation, answers `input_required`, or redeems a token or a `requestState`, which claims it, it checks the call: the tool set's `check(name, args)`, with the arguments the confirmation binds and the call runs with, `confirmationToken` taken out. A call the check refuses answers the refusal at once, a tool error whose `structuredContent` is the route's problem, whatever confirmation it carries or answer it brings (`accept`, `decline` or `cancel`): nothing is minted, no one is asked, and a confirmation sent with it is not claimed, so it still runs the call it was given for. | Checking on the first call alone, under which a retry with other, mis-shaped arguments and a good token still claims it; checking once the person has answered, which still asks them about a call that cannot run. |
+| On a generated router the check is the tool's route. Each `mountOperation` and `mountManualOperation` records its route's check, which `checkRoute` (`hono.ts`) runs on a router of its own that no client reaches, with the request a call of the tool makes (`toolRequest`, which refuses an argument the tool does not take and a missing path argument). The check runs the route's steps in the route's order, then its decoding, and answers 204 where the route would run its implementation or a manual route its handler, so it refuses what the route would, with the route's problem, by the route's code. `mountMcp`'s tool set answers `check` through it; the generated router and `mcp.ts` are unchanged, since the router mounts every operation through those two before `mountMcp`. | A JSON Schema validator over `tools/list`'s `inputSchema`, a new dependency and a second reading of the rules that can disagree with the route's; per-tool validators the generated `mcp.ts` calls, a copy of the route's decoding to keep in step; a flag on the request that stops the real route before its implementation, which, were the flag ever lost, runs the call unconfirmed; the check as a route of the app under a method no client sends, which a client can send. |
+| The check takes none of the route's rate limit, which counts runs: a call asked about, confirmed and run takes one token, as a request does. A call over the limit is refused at its run, its confirmation spent, as one the implementation refuses is. | A token at each check, which makes one confirmed call cost a route's `@rateLimit` three; reading the bucket without taking from it, which `RateLimitStore` cannot, and a shared store would race. |
+| Before anyone is asked: the tool exists and is offered to the caller (D81's list); each argument is one the tool takes, and each path argument is there; the route's webhook verifier and body limit; its service step, the calling service and `@requireService` or `@allowService`; the authenticator, run on the call's own request, which may refuse per operation as an API key's scopes do; the permission gate, `@auth`, `@requirePermission` and the caller `@requireOwnership` needs; the path, query and body parameters' types, lists and constraints, and the input type's members, types and rules. Only once the call is confirmed: the rate limit; the implementation's own checks, whether the caller owns the row, whether it exists (404), conflicts and revisions (409) and the database's constraints; a manual route's handler's reading of its request, the identity runtime's operations among them, whose gate alone the check runs; the timeout over the implementation; and what changes between the check and the run, a session revoked or a row deleted. A refusal there spends the confirmation, as before. | A dry run of the implementation in a transaction rolled back, which repeats every side effect outside the database; a dry-run contract each operation would declare. |
+| A caller without a tool's permission was never asked: D81's list holds only the tools whose routes admit the caller, by the route's auth requirement and the router's permission matcher, and a call of any other is the invalid-params error, `-32602`, before any confirmation. The requirement's "confirm, then 403" held for the refusals that list cannot see, the service clause and an authenticator's refusal of one operation, which now answer the route's 401 or 403 at once. | A 403 tool error in place of the invalid-params error for a tool the caller is not offered, which tells a caller about tools its list hides. |
+| `McpToolSet.check` is optional. A tool set without it is confirmed as D93 confirms, so a project's own `serveMcp` tool set keeps working, and the engine's MCP endpoint, which confirms nothing (D93's Left), is unchanged: the engine's corpus (`mcp-parity.test.ts`) replays unchanged. The check comes before the refusal of an endpoint with no confirmation key, so a call that cannot run says why first. A request no recorded route answers, one routed to a route mounted by hand, is not checked and is confirmed as before; a route mounted after a check is checked, the check router rebuilt for it, since a Hono router takes no route after its first match. | `check` required, which breaks every tool set a project hands `serveMcp`; refusing a call with no recorded route, under which a hand-mounted route's tool never runs. |
+
+D93, amended: its first row's "so the route's checks run after it, on the
+confirmed call alone" is replaced by the table above. The route's checks
+before its implementation run before the confirmation too, as the check,
+and again when the confirmed call runs.
+
+Status: built.
+- **The runtime.** `runtime/http/typescript/src/hono.test.ts`
+  (`checkRoute (D98)`, 3 tests): a route's check runs its gate, body limit
+  and decoding and never its implementation or a manual route's handler
+  (400 for an undeclared member and a missing one, 401, 403, 413, and an
+  unhooked manual route's 501); it takes no rate-limit token; it leaves a
+  request no route answers unchecked, and checks a route mounted after a
+  check. `src/mcpconfirm.test.ts` (5 new tests, 25 in all), through
+  `mountMcp`: a mis-shaped call of a tool that asks (an `input` argument,
+  as the finances API's agent sent; an empty, mistyped or missing value)
+  answers the route's 400 at once to a 2025 client, a 2026-07-28 one
+  without elicitation and one that elicits, with no token and no
+  `input_required`; a token, and a `requestState` accepted or declined,
+  sent with a mis-shaped call are not claimed, and run their own calls
+  after; a confirmation minted for the mis-shaped call itself, as one was
+  before this entry, is refused with it and not claimed; a key whose
+  scopes leave the route out answers its 403, and a route only a service
+  may call its 401, at once in both modes, and a confirmation of the
+  refused call is not claimed; a tool whose permission the caller lacks
+  stays the invalid-params error; a call asked about, confirmed and run
+  takes one token of a route limited to one a minute; a tool set's
+  `check` is given the arguments without the token and refuses before the
+  missing key's 500. D93's tests pass unchanged, and
+  `src/mcp-parity.test.ts` replays the engine's corpus unchanged.
+- **The generated router.** `TestGeneratedMCPRuntime` (fixture-mcp,
+  `mcp_runtime.test.ts`, 11 tests): `update_order` answers the route's 400
+  at once for `{ id, input }`, a mistyped revision, a missing one and a
+  bad path id, and 413 past its `bodyLimits`, with no token, and no
+  `input_required` for a client that elicits; a token sent with a
+  mis-shaped call runs its own call after; a service credential the
+  service step refuses on `updateOrder` alone is refused at once in both
+  modes; and the call still confirms by token and, for a client that
+  elicits, runs on `accept`.
+- **The generated server.** `TestTypeScriptMCPEndpointServes`
+  (users-ts-agent over Postgres): `set_motto` with an empty motto, a
+  number or `{"input": ...}` answers the route's 400 at once with no
+  token (`set_motto takes motto, not "input"`), and the token sent with
+  the empty motto then runs `Ship it`, once; `audit`, which now asks, is
+  the invalid-params error for a user without staff.
+
+Left: confirmation, and so a check, on the engine's MCP endpoint (D93); a
+check of what only the implementation sees, a row's owner or revision,
+which needs a dry run each operation would declare; a check of a manual
+route's own reading of its request, the identity operations' among them;
+a confirmation that survives a refusal at the run, such as the rate
+limit's, which would need the claim undone. The rules are reversible
+until the first release.
