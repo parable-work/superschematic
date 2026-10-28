@@ -40,8 +40,9 @@ type LineListEntry struct {
 }
 
 // LineListEntryFilter finds rows of the line_list view: each member set is a
-// condition, all of them ANDed, and AnyOf keeps the rows any of its filters
-// finds, as a table's filter does (D90).
+// condition, all of them ANDed, AllOf ANDs its filters' conditions with them
+// (D99), and AnyOf keeps the rows any of its filters finds, as a table's
+// filter does (D90).
 type LineListEntryFilter struct {
 	Id           *UUIDFilter
 	Date         *DateTimeFilter
@@ -50,6 +51,7 @@ type LineListEntryFilter struct {
 	AccountName  *StringFilter
 	CategoryId   *UUIDFilter
 	CategoryName *StringFilter
+	AllOf        []LineListEntryFilter
 	AnyOf        []LineListEntryFilter
 }
 
@@ -264,6 +266,11 @@ func (f *LineListEntryFilter) conditions(args *[]interface{}, paramOffset int) [
 				conditions = append(conditions, `line_list.category_name IS NOT NULL`)
 			}
 		}
+	}
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
 	}
 	if len(f.AnyOf) > 0 {
 		start := len(*args)

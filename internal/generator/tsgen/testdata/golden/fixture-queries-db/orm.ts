@@ -578,6 +578,8 @@ export interface LineListEntryFilter {
   accountName?: StringFilter<T.IdentityName>;
   categoryId?: UuidFilter<T.IdentityUUID> & NullFilter;
   categoryName?: StringFilter<T.IdentityName> & NullFilter;
+  /** The rows every one of the filters finds, beside the other members (D99); a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly LineListEntryFilter[];
   /** The rows any of the filters finds, beside the other members; a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly LineListEntryFilter[];
 }
