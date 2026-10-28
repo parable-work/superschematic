@@ -999,6 +999,12 @@ type AccountFilter struct {
 	// ReferencedByLineItemAccount filters on the presence or absence of a
 	// LineItem whose account points at this row.
 	ReferencedByLineItemAccount *ReferencedByFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []AccountFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -1123,6 +1129,14 @@ func (f *AccountFilter) conditions(args *[]interface{}, paramOffset int) []strin
 		}
 	}
 
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
 	if len(f.AnyOf) > 0 {
 		start := len(*args)
 		branches := make([]string, 0, len(f.AnyOf))
@@ -1168,6 +1182,12 @@ type CategoryFilter struct {
 	// ReferencedByLineItemCategory filters on the presence or absence of a
 	// LineItem whose category points at this row.
 	ReferencedByLineItemCategory *ReferencedByFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []CategoryFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -1470,6 +1490,14 @@ func (f *CategoryFilter) conditions(args *[]interface{}, paramOffset int) []stri
 		}
 	}
 
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
 	if len(f.AnyOf) > 0 {
 		start := len(*args)
 		branches := make([]string, 0, len(f.AnyOf))
@@ -1521,6 +1549,12 @@ type LineItemFilter struct {
 	// the filter finds (D90): one condition, the foreign key in the keys of
 	// those rows, so a row whose transferGroup is null is not kept.
 	TransferGroup *TransferGroupFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []LineItemFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -1875,6 +1909,14 @@ func (f *LineItemFilter) conditions(args *[]interface{}, paramOffset int) []stri
 		conditions = append(conditions, fmt.Sprintf(`line_item.transfer_group_id IN (SELECT transfer_group.id FROM transfer_group%s)`, where))
 	}
 
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
 	if len(f.AnyOf) > 0 {
 		start := len(*args)
 		branches := make([]string, 0, len(f.AnyOf))
@@ -1909,6 +1951,12 @@ type TransferGroupFilter struct {
 	// ReferencedByLineItemTransferGroup filters on the presence or absence of a
 	// LineItem whose transferGroup points at this row.
 	ReferencedByLineItemTransferGroup *ReferencedByFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []TransferGroupFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -2040,6 +2088,14 @@ func (f *TransferGroupFilter) conditions(args *[]interface{}, paramOffset int) [
 		} else {
 			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
 		}
+	}
+
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
 	}
 
 	if len(f.AnyOf) > 0 {

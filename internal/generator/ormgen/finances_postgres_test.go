@@ -24,7 +24,15 @@ const financesFixture = "fixture-finances-db"
 // account and provider, its category and parent, its business and its
 // person loaded; a @hasMany include of an account's line items; and the
 // TransactionListRow projection's FindPage, filtered on joined columns, its
-// next page, GetOne, and FindMany with its count and without (D89).
+// next page, GetOne, and FindMany with its count and without (D89). Then
+// AllOf (D99): two OR groups ANDed, the category or its parent and the name
+// or the description, which find what the four branches multiplied out
+// find; AllOf in an AnyOf branch and in an AllOf; an empty AllOf and one of
+// empty filters, which keep every row; an AnyOf branch of no condition in
+// an AllOf, whose dropped value leaves the next filter's placeholders
+// numbered right; UpdateMany and DeleteMany by an AllOf; and on the
+// projection, AllOf, and SearchText over LineItem's search fields, alone,
+// beside AnyOf and in FindPage.
 func TestFinancesOnPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -277,6 +285,106 @@ func TestFinancesOnPostgres(t *testing.T) {` + strings.Replace(pageTestSetup, "P
 		}
 		return err
 	}))
+
+	// Two OR groups ANDed (D99): the category is food or its parent is, and
+	// the name or the description holds coffee. The lunch holds it in its
+	// description, and so does the train, which is no food; the bread is
+	// food without coffee.
+	_, err = db.LineItem.UpdateOne(ctx, *lunch.Id, &LineItemUpdate{Description: strPtr("with a coffee")})
+	must(err)
+	_, err = db.LineItem.UpdateOne(ctx, *train.Id, &LineItemUpdate{Description: strPtr("coffee on board")})
+	must(err)
+	line(11, "Bread", -400, groceries, nil, ben)
+	coffee := &StringFilter{ILike: strPtr("coffee")}
+	holdsCoffee := []LineItemFilter{{Name: coffee}, {Description: coffee}}
+	both := []LineItemFilter{{AnyOf: either}, {AnyOf: holdsCoffee}}
+	foodWithCoffee := []string{"Coffee beans", "Lunch", "Dinner and coffee"}
+	if got := find(&LineItemFilter{AllOf: both}); !slices.Equal(got, foodWithCoffee) {
+		t.Errorf("food with coffee: %v, want %v", got, foodWithCoffee)
+	}
+	multiplied := []LineItemFilter{
+		{CategoryID: in(food), Name: coffee},
+		{CategoryID: in(food), Description: coffee},
+		{Category: &CategoryFilter{ParentID: in(food)}, Name: coffee},
+		{Category: &CategoryFilter{ParentID: in(food)}, Description: coffee},
+	}
+	if got := find(&LineItemFilter{AnyOf: multiplied}); !slices.Equal(got, foodWithCoffee) {
+		t.Errorf("the four branches AllOf replaces: %v, want %v", got, foodWithCoffee)
+	}
+	// Nested: an AllOf in each AnyOf branch, and an AllOf in an AllOf.
+	nested := &LineItemFilter{AnyOf: []LineItemFilter{
+		{AllOf: []LineItemFilter{{CategoryID: in(travel)}, {AnyOf: holdsCoffee}}},
+		{AllOf: []LineItemFilter{{AllOf: both}, {UserID: &UUIDFilter{Eq: ben.Id}}}},
+	}}
+	if got, want := find(nested), []string{"Lunch", "Train"}; !slices.Equal(got, want) {
+		t.Errorf("travel with coffee, or Ben's food with coffee: %v, want %v", got, want)
+	}
+	// An empty AllOf, and one of filters of no condition, add none.
+	if got := find(&LineItemFilter{AllOf: []LineItemFilter{}}); len(got) != 7 {
+		t.Errorf("an empty AllOf: %v, want every line", got)
+	}
+	if got := find(&LineItemFilter{AllOf: []LineItemFilter{{}, {}}}); len(got) != 7 {
+		t.Errorf("an AllOf of empty filters: %v, want every line", got)
+	}
+	// An AnyOf branch of no condition drops its siblings' values; the next
+	// filter's placeholders follow the values kept.
+	kept := &LineItemFilter{Amount: &Int64Filter{Lt: int64Ptr(0)}, AllOf: []LineItemFilter{{AnyOf: []LineItemFilter{{CategoryID: in(travel)}, {}}}, {AnyOf: holdsCoffee}}}
+	if got, want := find(kept), []string{"Coffee beans", "Lunch", "Train", "Dinner and coffee"}; !slices.Equal(got, want) {
+		t.Errorf("anything spent on coffee: %v, want %v", got, want)
+	}
+	// UpdateMany's placeholders follow its assignments'.
+	n, err := db.LineItem.UpdateMany(ctx, &LineItemFilter{AllOf: both}, &LineItemUpdate{Description: strPtr("coffee, checked")})
+	must(err)
+	if n != 3 || !slices.Equal(find(&LineItemFilter{Description: &StringFilter{ILike: strPtr("checked")}}), foodWithCoffee) {
+		t.Errorf("UpdateMany by AllOf updated %d rows, want the 3 lines of food with coffee", n)
+	}
+
+	// The projection: AllOf, and SearchText over LineItem's search fields.
+	listNames := func(filter *TransactionListRowFilter) []string {
+		t.Helper()
+		rows, _, err := db.TransactionListRow().FindMany(ctx, filter, &TransactionListRowFindOptions{OrderBy: []TransactionListRowOrderBy{{Field: TransactionListRowOrderByDate}}})
+		must(err)
+		var out []string
+		for _, row := range rows {
+			out = append(out, row.Name)
+		}
+		return out
+	}
+	listCoffee := []TransactionListRowFilter{{Name: coffee}, {Description: coffee}}
+	listFood := []TransactionListRowFilter{{CategoryId: in(food)}, {ParentCategoryId: in(food)}}
+	if got := listNames(&TransactionListRowFilter{AllOf: []TransactionListRowFilter{{AnyOf: listFood}, {AnyOf: listCoffee}}}); !slices.Equal(got, foodWithCoffee) {
+		t.Errorf("the list's food with coffee: %v, want %v", got, foodWithCoffee)
+	}
+	words := func(text string) *string { return &text }
+	if got, want := listNames(&TransactionListRowFilter{SearchText: words("COFFEE")}), []string{"Coffee beans", "Lunch", "Train", "Dinner and coffee"}; !slices.Equal(got, want) {
+		t.Errorf("the list's search for coffee: %v, want %v", got, want)
+	}
+	if got, want := listNames(&TransactionListRowFilter{SearchText: words("coffee board")}), []string{"Train"}; !slices.Equal(got, want) {
+		t.Errorf("the list's search for two words: %v, want %v", got, want)
+	}
+	if got := listNames(&TransactionListRowFilter{SearchText: words("  ")}); len(got) != 7 {
+		t.Errorf("the list's search for no word: %v, want every row", got)
+	}
+	searched, err := db.TransactionListRow().FindPage(ctx, &TransactionListRowFilter{SearchText: words("coffee"), AnyOf: listFood},
+		&TransactionListRowPageOptions{Sort: TransactionListRowSort{Field: TransactionListRowSortByDate, Desc: true}, Limit: 2})
+	must(err)
+	if len(searched.Rows) != 2 || searched.Rows[0].Name != "Dinner and coffee" || searched.Rows[1].Name != "Lunch" || searched.Next == nil {
+		t.Fatalf("the list's page of food with coffee = %+v", searched)
+	}
+	searched, err = db.TransactionListRow().FindPage(ctx, &TransactionListRowFilter{SearchText: words("coffee"), AnyOf: listFood},
+		&TransactionListRowPageOptions{Sort: TransactionListRowSort{Field: TransactionListRowSortByDate, Desc: true}, Limit: 2, After: searched.Next})
+	must(err)
+	if len(searched.Rows) != 1 || searched.Rows[0].Name != "Coffee beans" || searched.Next != nil {
+		t.Errorf("the list's next page of food with coffee = %+v", searched)
+	}
+
+	// DeleteMany by an AllOf: the notes of food lines whose content holds
+	// office, a note being soft-deleted.
+	deleted, err := db.Note.DeleteMany(ctx, &NoteFilter{AllOf: []NoteFilter{{LineItem: &LineItemFilter{AnyOf: either}}, {Content: &StringFilter{ILike: strPtr("office")}}}})
+	must(err)
+	if deleted != 1 {
+		t.Errorf("DeleteMany by AllOf deleted %d notes, want the office note", deleted)
+	}
 	_ = []*types.LineItem{lunch, train, dinner}
 }
 
