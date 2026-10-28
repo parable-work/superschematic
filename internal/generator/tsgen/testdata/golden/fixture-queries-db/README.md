@@ -22,7 +22,7 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { FinanceSignedMoney, GenericDecimal, GenericInt64, IdentityName, IdentityUUID, TemporalDate, TemporalDateTime, BucketUnit, LineOrder, Account, AccountLinesParams, AccountLinesRow, BudgetsParams, BudgetsRow, Category, CategoryTotalsParams, CategoryTotalsRow, LineItem, TimeBucketsParams, TimeBucketsRow, TransactionListParams, TransactionListRow, TransferCandidatesParams, TransferCandidatesRow, TransferGroup,  } from '@schemas/fixture-queries-db-types/types';
+import type { FinanceSignedMoney, GenericDecimal, GenericInt64, IdentityName, IdentityUUID, TemporalDate, TemporalDateTime, BucketUnit, LineOrder, Account, AccountLinesParams, AccountLinesRow, AccountNamedParams, AccountNamedRow, BudgetsParams, BudgetsRow, Category, CategoryTotalsParams, CategoryTotalsRow, DashboardCategoriesRow, DashboardFilter, DashboardLinesRow, DashboardTotalsRow, LineItem, MatchingLineParams, MatchingLineRow, TimeBucketsParams, TimeBucketsRow, TransactionListParams, TransactionListRow, TransferCandidatesParams, TransferCandidatesRow, TransferGroup,  } from '@schemas/fixture-queries-db-types/types';
 
 // Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-queries-db-types';
@@ -123,16 +123,16 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 ### Enums (2)
 
 
-- **BucketUnit** - ---- time buckets: one row per day, week, month or quarter -----------------
+- **BucketUnit**
   - Values: `Day`, `Week`, `Month`, `Quarter`
 
-- **LineOrder** - ---- an account's lines, in an order the caller picks ----------------------
+- **LineOrder**
   - Values: `Newest`, `Largest`, `Name`
 
 
 
 
-### Types (16)
+### Types (24)
 
 
 - **Account** - An account a line is booked to.
@@ -141,28 +141,44 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 - **AccountLinesRow**
 
-- **BudgetsParams** - ---- budgets: exact amounts from a day on ----------------------------------
+- **AccountNamedParams**
+
+- **AccountNamedRow**
+
+- **BudgetsParams**
 
 - **BudgetsRow**
 
 - **Category** - A category, which may sit under a parent; the dashboard rolls a
 sub-category's totals up to it. A budget is exact, and starts on a day.
 
-- **CategoryTotalsParams** - ---- category totals: rolled up to the parent category ---------------------
+- **CategoryTotalsParams**
 
 - **CategoryTotalsRow**
 
+- **DashboardCategoriesRow**
+
+- **DashboardFilter**
+
+- **DashboardLinesRow**
+
+- **DashboardTotalsRow**
+
 - **LineItem** - A line of the ledger: a signed amount in minor units, a debit negative.
+
+- **MatchingLineParams**
+
+- **MatchingLineRow**
 
 - **TimeBucketsParams**
 
 - **TimeBucketsRow** - Every bucket of the range, an empty one with zero totals.
 
-- **TransactionListParams** - ---- the transaction list: newest first, a page at a time ------------------
+- **TransactionListParams**
 
 - **TransactionListRow**
 
-- **TransferCandidatesParams** - ---- transfer candidates: the other side of a move between accounts --------
+- **TransferCandidatesParams**
 
 - **TransferCandidatesRow**
 

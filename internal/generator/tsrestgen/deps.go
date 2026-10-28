@@ -418,6 +418,27 @@ func WriteImplementationScaffold(output *APIOutput, dir string) (bool, error) {
 	return true, nil
 }
 
+// ImplementationDependencies are what the scaffold's package.json depends
+// on: the API's package and its types, the database's types when Deps
+// reaches them and they are other than the API's, the definitions of each
+// memory store the API lists that writes them, and the runtime. A stack's
+// build warns of one an implementation it no longer writes lacks (D100).
+func (o *APIOutput) ImplementationDependencies() []tsutil.Dependency {
+	deps := []tsutil.Dependency{
+		{Name: o.PackageName, Spec: tsutil.WorkspaceSpec},
+		{Name: o.TypesPackage, Spec: tsutil.WorkspaceSpec},
+	}
+	if o.Deps.DatabaseTypesPackage != "" && o.Deps.DatabaseTypesPackage != o.TypesPackage {
+		deps = append(deps, tsutil.Dependency{Name: o.Deps.DatabaseTypesPackage, Spec: tsutil.WorkspaceSpec})
+	}
+	for _, store := range o.Deps.MemoryStores {
+		if store.Definitions != "" {
+			deps = append(deps, tsutil.Dependency{Name: store.Definitions, Spec: tsutil.WorkspaceSpec})
+		}
+	}
+	return append(deps, tsutil.Dependency{Name: o.RuntimePackage, Spec: "*"})
+}
+
 // ImplementationExists reports whether dir holds a TypeScript package: a
 // .ts file.
 func ImplementationExists(dir string) (bool, error) {

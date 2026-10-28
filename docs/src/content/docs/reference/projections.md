@@ -181,8 +181,9 @@ repository.
 
 The row is the projection's class, its members the class's fields, typed
 as a table's fields are; the filter holds each column's conditions by its
-type, as a table's filter does, with `anyOf`, and a page sorts by the key
-or a column of one value of text, a number or a time that is never null.
+type, as a table's filter does, with `allOf` and `anyOf`, and a page sorts
+by the key or a column of one value of text, a number or a time that is
+never null.
 
 ```ts
 const page = await deps.orm.transactionListRow.findPage(
@@ -190,6 +191,26 @@ const page = await deps.orm.transactionListRow.findPage(
   { sort: { field: 'date', desc: true }, limit: 50 }
 );
 ```
+
+A projection keyed by its source table's key, over a source with
+`@searchField` fields, has `searchText` (`SearchText` in Go), which keeps
+the rows whose source row holds each word of the text, in any case, as the
+source's own filter's `searchText` does
+([Text search](/superschematic/guides/database-tables/#text-search)). It
+is one condition, the view's key in the keys of the source's rows whose
+`search_text` holds every word, which the source's trigram index serves:
+
+```ts
+const page = await deps.orm.transactionListRow.findPage(
+  { searchText: q, allOf: [{ anyOf: [{ categoryId: { in: ids } }, { parentCategoryId: { in: ids } }] }, { amount: { lt: 0 } }] },
+  { sort: { field: 'date', desc: true }, limit: 50 }
+);
+```
+
+The words match the source's search fields, whatever columns the view
+holds; a projection column is no search field of its own. A projection
+keyed by the column it collapses by has no `searchText`, since its rows
+are no source rows.
 
 | | TypeScript | Go |
 | --- | --- | --- |
@@ -204,6 +225,13 @@ bind settings sets them first, in the transaction it reads in:
 An API view may take a projection as its `@source`, as it takes a table:
 each of its fields is held to the projection's column of its name and
 type.
+
+A [declared query](/superschematic/reference/declared-queries/) may read a
+plain view, as `FROM transaction_list li`, for the aggregates and joins a
+repository does not express. `queries.lock` holds such a query to the
+projection's model, its joins, rules and columns, so changing the
+projection makes the query one to verify again, and a column of a
+required field counts as never null (D95).
 
 ## `outputs.sql`
 

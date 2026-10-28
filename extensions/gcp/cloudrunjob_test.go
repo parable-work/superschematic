@@ -143,9 +143,10 @@ func TestJobSchedule(t *testing.T) {
 	}
 }
 
-// TestJobRefusals: Cloud Run retries a task 10 times at most, a job's
-// account id fits 30 characters, and no job takes the name of the stack's
-// migration job, which the migration runner owns.
+// TestJobRefusals: Cloud Run retries a task 10 times at most, and no job
+// takes the name of the stack's migration job, which the migration runner
+// owns. A job whose name is too long for its account id is named short
+// (D97), which TestLongNamesGolden reads.
 func TestJobRefusals(t *testing.T) {
 	reg := assemble(t)
 	refused := func(t *testing.T, s *ir.Stack, services []stack.Service, want string) {
@@ -170,8 +171,16 @@ func TestJobRefusals(t *testing.T) {
 			t.Errorf("10 retries: %v", err)
 		}
 	})
-	t.Run("account id", func(t *testing.T) {
-		refused(t, shop(), withJob(ir.Job{Name: "ReconcileWarehouseStock"}), "give the job's class or its API a shorter name")
+	t.Run("a long name", func(t *testing.T) {
+		env, err := stack.Resolve(reg, stack.Input{Stack: shop(), Services: withJob(ir.Job{Name: "ReconcileWarehouseStock"}), Environment: "Staging"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		job := node(t, env, "shop-orders-reconcile-warehouse-stock.job").Properties
+		if name, _ := job["name"].(string); len(name) > 30 || !strings.HasPrefix(name, "shop-orders-reconcile-") {
+			t.Errorf("the job is named %v, want a prefix and a hash in 30 characters", job["name"])
+		}
+		wantJSON(t, "the job's labels", job["labels"], `{"superschematic-deployable":"shop-orders-reconcile-warehouse-stock"}`)
 	})
 	t.Run("the migration job's name", func(t *testing.T) {
 		s := shop()

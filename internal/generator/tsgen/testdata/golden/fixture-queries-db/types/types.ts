@@ -36,9 +36,15 @@ export interface AccountLinesRow {
   amount: FinanceSignedMoney;
 }
 
-/**
- * BudgetsParams - ---- budgets: exact amounts from a day on ----------------------------------
- */
+export interface AccountNamedParams {
+  name: IdentityName;
+}
+
+export interface AccountNamedRow {
+  id: IdentityUUID;
+  name: IdentityName;
+}
+
 export interface BudgetsParams {
   /** A parent's sub-categories alone; every category when null. */
   parentId?: IdentityUUID | null;
@@ -64,9 +70,6 @@ export interface Category {
   budgetSince?: TemporalDate | null;
 }
 
-/**
- * CategoryTotalsParams - ---- category totals: rolled up to the parent category ---------------------
- */
 export interface CategoryTotalsParams {
   start: TemporalDateTime;
   end: TemporalDateTime;
@@ -80,6 +83,36 @@ export interface CategoryTotalsRow {
   earned: FinanceSignedMoney;
 }
 
+export interface DashboardCategoriesRow {
+  categoryId?: IdentityUUID | null;
+  total: FinanceSignedMoney;
+  lines: GenericInt64;
+}
+
+export interface DashboardFilter {
+  start: TemporalDateTime;
+  end: TemporalDateTime;
+  /** Every account, and every category, when null. */
+  accountIds?: IdentityUUID[] | null;
+  categoryIds?: IdentityUUID[] | null;
+  /** Lines whose name holds the text, in any case; every line when null. */
+  search?: string | null;
+}
+
+export interface DashboardLinesRow {
+  id: IdentityUUID;
+  date: TemporalDateTime;
+  name: string;
+  accountName: IdentityName;
+  categoryName?: IdentityName | null;
+}
+
+export interface DashboardTotalsRow {
+  spent: FinanceSignedMoney;
+  earned: FinanceSignedMoney;
+  lines: GenericInt64;
+}
+
 /**
  * LineItem - A line of the ledger: a signed amount in minor units, a debit negative.
  */
@@ -91,6 +124,21 @@ export interface LineItem {
   account: Account;
   category?: Category | null;
   transferGroup?: TransferGroup | null;
+}
+
+export interface MatchingLineParams {
+  start: TemporalDateTime;
+  end: TemporalDateTime;
+  accountIds?: IdentityUUID[] | null;
+  categoryIds?: IdentityUUID[] | null;
+  search?: string | null;
+  name: string;
+}
+
+export interface MatchingLineRow {
+  id: IdentityUUID;
+  date: TemporalDateTime;
+  amount: FinanceSignedMoney;
 }
 
 export interface TimeBucketsParams {
@@ -109,9 +157,6 @@ export interface TimeBucketsRow {
   lines: GenericInt64;
 }
 
-/**
- * TransactionListParams - ---- the transaction list: newest first, a page at a time ------------------
- */
 export interface TransactionListParams {
   start: TemporalDateTime;
   end: TemporalDateTime;
@@ -130,9 +175,6 @@ export interface TransactionListRow {
   categoryName?: IdentityName | null;
 }
 
-/**
- * TransferCandidatesParams - ---- transfer candidates: the other side of a move between accounts --------
- */
 export interface TransferCandidatesParams {
   lineItemId: IdentityUUID;
   windowDays: GenericInt64;

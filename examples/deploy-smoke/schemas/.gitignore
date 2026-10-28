@@ -1,0 +1,11 @@
+# The output root is generated, but for the lockfiles of its Bun and Cargo
+# workspaces, which pin the dependencies of the generated packages (D51).
+# A broader rule may ignore the directory itself, which would hide every
+# file under it, so it is taken back and its contents ignored instead.
+!/dist/
+/dist/*
+!/dist/bun.lock
+!/dist/Cargo.lock
+
+# .superschematic holds this machine's local secrets and keys.
+/.superschematic/

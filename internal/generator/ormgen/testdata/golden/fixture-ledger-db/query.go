@@ -728,6 +728,12 @@ type AccountFilter struct {
 	// with its \, % and _ escaped, so they match themselves. A text without
 	// words, such as a blank one, keeps every row, and nil filters nothing.
 	SearchText *string
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []AccountFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -1087,6 +1093,14 @@ func (f *AccountFilter) conditions(args *[]interface{}, paramOffset int) []strin
 		}
 	}
 
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
 	if len(f.AnyOf) > 0 {
 		start := len(*args)
 		branches := make([]string, 0, len(f.AnyOf))
@@ -1146,6 +1160,12 @@ type EntryFilter struct {
 	// with its \, % and _ escaped, so they match themselves. A text without
 	// words, such as a blank one, keeps every row, and nil filters nothing.
 	SearchText *string
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []EntryFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -1762,6 +1782,14 @@ func (f *EntryFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			conditions = append(conditions, fmt.Sprintf(`entry.search_text ILIKE $%d ESCAPE '\'`, paramNum))
 			*args = append(*args, searchLikePattern(term))
 		}
+	}
+
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
 	}
 
 	if len(f.AnyOf) > 0 {

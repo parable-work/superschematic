@@ -54,6 +54,37 @@ type QueryPageOptions[K any] struct {
 	Limit int
 }
 
+// ErrTooManyRows is the error of a query that returns one row, or one or
+// none, whose statement read more than one (D95).
+var ErrTooManyRows = fmt.Errorf("the query read more than one row")
+
+// queryOne is the row of a query that returns one (D95): ErrNotFound when
+// its statement read none, as GetOne's, and ErrTooManyRows when it read
+// more than one.
+func queryOne[T any](name string, rows []T) (T, error) {
+	var zero T
+	switch len(rows) {
+	case 0:
+		return zero, fmt.Errorf("query %s returns one row, and its statement read none: %w", name, ErrNotFound)
+	case 1:
+		return rows[0], nil
+	}
+	return zero, fmt.Errorf("query %s returns one row, and its statement read %d: %w", name, len(rows), ErrTooManyRows)
+}
+
+// queryOptional is the row of a query that returns one or none (D95): nil
+// when its statement read none, and ErrTooManyRows when it read more than
+// one.
+func queryOptional[T any](name string, rows []T) (*T, error) {
+	switch len(rows) {
+	case 0:
+		return nil, nil
+	case 1:
+		return &rows[0], nil
+	}
+	return nil, fmt.Errorf("query %s returns one row or none, and its statement read %d: %w", name, len(rows), ErrTooManyRows)
+}
+
 // run sends a query's statement, refusing a Queries with no database.
 func (q *Queries) run(ctx context.Context, name, sql string, args []any) (pgx.Rows, error) {
 	if q == nil || q.runner == nil {
@@ -125,6 +156,56 @@ func scanAccountLines(rows pgx.Rows) ([]types.AccountLinesRow, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("query accountLines: %w", err)
+	}
+	return out, nil
+}
+
+// accountNamedQuery is the statement of the query accountNamed.
+const accountNamedQuery = "SELECT a.id, a.\"name\" FROM account a WHERE a.\"name\" = $1"
+
+// AccountNamed runs the query accountNamed.
+func (q *Queries) AccountNamed(ctx context.Context, params types.AccountNamedParams) (types.AccountNamedRow, error) {
+	args := make([]any, 0, 1)
+	args = append(args, string(params.Name))
+	rows, err := q.run(ctx, "accountNamed", accountNamedQuery, args)
+	if err != nil {
+		return types.AccountNamedRow{}, err
+	}
+	found, err := scanAccountNamed(rows)
+	if err != nil {
+		return types.AccountNamedRow{}, err
+	}
+	return queryOne("accountNamed", found)
+}
+
+// scanAccountNamed reads the rows of the query accountNamed, each column into the field it is named after.
+func scanAccountNamed(rows pgx.Rows) ([]types.AccountNamedRow, error) {
+	defer rows.Close()
+	var fields []pgconn.FieldDescription
+	out := []types.AccountNamedRow{}
+	for rows.Next() {
+		if fields == nil {
+			fields = rows.FieldDescriptions()
+		}
+		var row types.AccountNamedRow
+		dest := make([]any, len(fields))
+		for i, field := range fields {
+			switch field.Name {
+			case "id":
+				dest[i] = &row.Id
+			case "name":
+				dest[i] = &row.Name
+			default:
+				return nil, fmt.Errorf("query accountNamed: column %q is no field of types.AccountNamedRow", field.Name)
+			}
+		}
+		if err := rows.Scan(dest...); err != nil {
+			return nil, fmt.Errorf("query accountNamed: %w", err)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("query accountNamed: %w", err)
 	}
 	return out, nil
 }
@@ -232,6 +313,227 @@ func scanCategoryTotals(rows pgx.Rows) ([]types.CategoryTotalsRow, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("query categoryTotals: %w", err)
+	}
+	return out, nil
+}
+
+// dashboardCategoriesQuery is the statement of the query dashboardCategories.
+const dashboardCategoriesQuery = "-- @notNull total, lines\n    SELECT li.category_id, SUM(li.amount)::bigint AS total, COUNT(*) AS lines\n    FROM line_item li\n    WHERE li.\"date\" BETWEEN $1 AND $2\n      AND ($3::uuid[] IS NULL OR li.account_id = ANY($3))\n      AND ($4::uuid[] IS NULL OR li.category_id = ANY($4))\n      AND ($5::text IS NULL OR li.\"name\" ILIKE '%' || $5 || '%')\n    GROUP BY li.category_id\n    ORDER BY total, li.category_id"
+
+// DashboardCategories runs the query dashboardCategories.
+func (q *Queries) DashboardCategories(ctx context.Context, params types.DashboardFilter) ([]types.DashboardCategoriesRow, error) {
+	args := make([]any, 0, 5)
+	args = append(args, time.Time(params.Start))
+	args = append(args, time.Time(params.End))
+	args = append(args, queryList(params.AccountIds, func(v types.IdentityUUID) [16]byte { return [16]byte(v.ToUUID()) }))
+	args = append(args, queryList(params.CategoryIds, func(v types.IdentityUUID) [16]byte { return [16]byte(v.ToUUID()) }))
+	args = append(args, queryText(params.Search))
+	rows, err := q.run(ctx, "dashboardCategories", dashboardCategoriesQuery, args)
+	if err != nil {
+		return nil, err
+	}
+	return scanDashboardCategories(rows)
+}
+
+// scanDashboardCategories reads the rows of the query dashboardCategories, each column into the field it is named after.
+func scanDashboardCategories(rows pgx.Rows) ([]types.DashboardCategoriesRow, error) {
+	defer rows.Close()
+	var fields []pgconn.FieldDescription
+	out := []types.DashboardCategoriesRow{}
+	for rows.Next() {
+		if fields == nil {
+			fields = rows.FieldDescriptions()
+		}
+		var row types.DashboardCategoriesRow
+		dest := make([]any, len(fields))
+		for i, field := range fields {
+			switch field.Name {
+			case "category_id":
+				dest[i] = &row.CategoryId
+			case "total":
+				dest[i] = &row.Total
+			case "lines":
+				dest[i] = &row.Lines
+			default:
+				return nil, fmt.Errorf("query dashboardCategories: column %q is no field of types.DashboardCategoriesRow", field.Name)
+			}
+		}
+		if err := rows.Scan(dest...); err != nil {
+			return nil, fmt.Errorf("query dashboardCategories: %w", err)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("query dashboardCategories: %w", err)
+	}
+	return out, nil
+}
+
+// dashboardLinesQuery is the statement of the query dashboardLines.
+const dashboardLinesQuery = "SELECT li.id, li.\"date\", li.\"name\", li.account_name, li.category_name\n    FROM line_list li\n    WHERE li.\"date\" BETWEEN $1 AND $2\n      AND ($3::uuid[] IS NULL OR li.account_id = ANY($3))\n      AND ($4::uuid[] IS NULL OR li.category_id = ANY($4))\n      AND ($5::text IS NULL OR li.\"name\" ILIKE '%' || $5 || '%')\n    ORDER BY li.\"date\" DESC, li.id"
+
+// DashboardLines runs the query dashboardLines.
+func (q *Queries) DashboardLines(ctx context.Context, params types.DashboardFilter) ([]types.DashboardLinesRow, error) {
+	args := make([]any, 0, 5)
+	args = append(args, time.Time(params.Start))
+	args = append(args, time.Time(params.End))
+	args = append(args, queryList(params.AccountIds, func(v types.IdentityUUID) [16]byte { return [16]byte(v.ToUUID()) }))
+	args = append(args, queryList(params.CategoryIds, func(v types.IdentityUUID) [16]byte { return [16]byte(v.ToUUID()) }))
+	args = append(args, queryText(params.Search))
+	rows, err := q.run(ctx, "dashboardLines", dashboardLinesQuery, args)
+	if err != nil {
+		return nil, err
+	}
+	return scanDashboardLines(rows)
+}
+
+// scanDashboardLines reads the rows of the query dashboardLines, each column into the field it is named after.
+func scanDashboardLines(rows pgx.Rows) ([]types.DashboardLinesRow, error) {
+	defer rows.Close()
+	var fields []pgconn.FieldDescription
+	out := []types.DashboardLinesRow{}
+	for rows.Next() {
+		if fields == nil {
+			fields = rows.FieldDescriptions()
+		}
+		var row types.DashboardLinesRow
+		dest := make([]any, len(fields))
+		for i, field := range fields {
+			switch field.Name {
+			case "id":
+				dest[i] = &row.Id
+			case "date":
+				dest[i] = &row.Date
+			case "name":
+				dest[i] = &row.Name
+			case "account_name":
+				dest[i] = &row.AccountName
+			case "category_name":
+				dest[i] = &row.CategoryName
+			default:
+				return nil, fmt.Errorf("query dashboardLines: column %q is no field of types.DashboardLinesRow", field.Name)
+			}
+		}
+		if err := rows.Scan(dest...); err != nil {
+			return nil, fmt.Errorf("query dashboardLines: %w", err)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("query dashboardLines: %w", err)
+	}
+	return out, nil
+}
+
+// dashboardTotalsQuery is the statement of the query dashboardTotals.
+const dashboardTotalsQuery = "-- @notNull spent, earned, lines\n    SELECT COALESCE(SUM(li.amount) FILTER (WHERE li.amount < 0), 0)::bigint AS spent,\n           COALESCE(SUM(li.amount) FILTER (WHERE li.amount > 0), 0)::bigint AS earned,\n           COUNT(*) AS lines\n    FROM line_item li\n    WHERE li.\"date\" BETWEEN $1 AND $2\n      AND ($3::uuid[] IS NULL OR li.account_id = ANY($3))\n      AND ($4::uuid[] IS NULL OR li.category_id = ANY($4))\n      AND ($5::text IS NULL OR li.\"name\" ILIKE '%' || $5 || '%')"
+
+// DashboardTotals runs the query dashboardTotals.
+func (q *Queries) DashboardTotals(ctx context.Context, params types.DashboardFilter) (types.DashboardTotalsRow, error) {
+	args := make([]any, 0, 5)
+	args = append(args, time.Time(params.Start))
+	args = append(args, time.Time(params.End))
+	args = append(args, queryList(params.AccountIds, func(v types.IdentityUUID) [16]byte { return [16]byte(v.ToUUID()) }))
+	args = append(args, queryList(params.CategoryIds, func(v types.IdentityUUID) [16]byte { return [16]byte(v.ToUUID()) }))
+	args = append(args, queryText(params.Search))
+	rows, err := q.run(ctx, "dashboardTotals", dashboardTotalsQuery, args)
+	if err != nil {
+		return types.DashboardTotalsRow{}, err
+	}
+	found, err := scanDashboardTotals(rows)
+	if err != nil {
+		return types.DashboardTotalsRow{}, err
+	}
+	return queryOne("dashboardTotals", found)
+}
+
+// scanDashboardTotals reads the rows of the query dashboardTotals, each column into the field it is named after.
+func scanDashboardTotals(rows pgx.Rows) ([]types.DashboardTotalsRow, error) {
+	defer rows.Close()
+	var fields []pgconn.FieldDescription
+	out := []types.DashboardTotalsRow{}
+	for rows.Next() {
+		if fields == nil {
+			fields = rows.FieldDescriptions()
+		}
+		var row types.DashboardTotalsRow
+		dest := make([]any, len(fields))
+		for i, field := range fields {
+			switch field.Name {
+			case "spent":
+				dest[i] = &row.Spent
+			case "earned":
+				dest[i] = &row.Earned
+			case "lines":
+				dest[i] = &row.Lines
+			default:
+				return nil, fmt.Errorf("query dashboardTotals: column %q is no field of types.DashboardTotalsRow", field.Name)
+			}
+		}
+		if err := rows.Scan(dest...); err != nil {
+			return nil, fmt.Errorf("query dashboardTotals: %w", err)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("query dashboardTotals: %w", err)
+	}
+	return out, nil
+}
+
+// matchingLineQuery is the statement of the query matchingLine.
+const matchingLineQuery = "SELECT li.id, li.\"date\", li.amount\n    FROM line_item li\n    WHERE li.\"date\" BETWEEN $1 AND $2\n      AND ($3::uuid[] IS NULL OR li.account_id = ANY($3))\n      AND ($4::uuid[] IS NULL OR li.category_id = ANY($4))\n      AND ($5::text IS NULL OR li.\"name\" ILIKE '%' || $5 || '%')\n      AND li.\"name\" = $6"
+
+// MatchingLine runs the query matchingLine.
+func (q *Queries) MatchingLine(ctx context.Context, params types.MatchingLineParams) (*types.MatchingLineRow, error) {
+	args := make([]any, 0, 6)
+	args = append(args, time.Time(params.Start))
+	args = append(args, time.Time(params.End))
+	args = append(args, queryList(params.AccountIds, func(v types.IdentityUUID) [16]byte { return [16]byte(v.ToUUID()) }))
+	args = append(args, queryList(params.CategoryIds, func(v types.IdentityUUID) [16]byte { return [16]byte(v.ToUUID()) }))
+	args = append(args, queryText(params.Search))
+	args = append(args, string(params.Name))
+	rows, err := q.run(ctx, "matchingLine", matchingLineQuery, args)
+	if err != nil {
+		return nil, err
+	}
+	found, err := scanMatchingLine(rows)
+	if err != nil {
+		return nil, err
+	}
+	return queryOptional("matchingLine", found)
+}
+
+// scanMatchingLine reads the rows of the query matchingLine, each column into the field it is named after.
+func scanMatchingLine(rows pgx.Rows) ([]types.MatchingLineRow, error) {
+	defer rows.Close()
+	var fields []pgconn.FieldDescription
+	out := []types.MatchingLineRow{}
+	for rows.Next() {
+		if fields == nil {
+			fields = rows.FieldDescriptions()
+		}
+		var row types.MatchingLineRow
+		dest := make([]any, len(fields))
+		for i, field := range fields {
+			switch field.Name {
+			case "id":
+				dest[i] = &row.Id
+			case "date":
+				dest[i] = &row.Date
+			case "amount":
+				dest[i] = &row.Amount
+			default:
+				return nil, fmt.Errorf("query matchingLine: column %q is no field of types.MatchingLineRow", field.Name)
+			}
+		}
+		if err := rows.Scan(dest...); err != nil {
+			return nil, fmt.Errorf("query matchingLine: %w", err)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("query matchingLine: %w", err)
 	}
 	return out, nil
 }

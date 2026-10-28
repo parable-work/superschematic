@@ -54,6 +54,37 @@ type QueryPageOptions[K any] struct {
 	Limit int
 }
 
+// ErrTooManyRows is the error of a query that returns one row, or one or
+// none, whose statement read more than one (D95).
+var ErrTooManyRows = fmt.Errorf("the query read more than one row")
+
+// queryOne is the row of a query that returns one (D95): ErrNotFound when
+// its statement read none, as GetOne's, and ErrTooManyRows when it read
+// more than one.
+func queryOne[T any](name string, rows []T) (T, error) {
+	var zero T
+	switch len(rows) {
+	case 0:
+		return zero, fmt.Errorf("query %s returns one row, and its statement read none: %w", name, ErrNotFound)
+	case 1:
+		return rows[0], nil
+	}
+	return zero, fmt.Errorf("query %s returns one row, and its statement read %d: %w", name, len(rows), ErrTooManyRows)
+}
+
+// queryOptional is the row of a query that returns one or none (D95): nil
+// when its statement read none, and ErrTooManyRows when it read more than
+// one.
+func queryOptional[T any](name string, rows []T) (*T, error) {
+	switch len(rows) {
+	case 0:
+		return nil, nil
+	case 1:
+		return &rows[0], nil
+	}
+	return nil, fmt.Errorf("query %s returns one row or none, and its statement read %d: %w", name, len(rows), ErrTooManyRows)
+}
+
 // run sends a query's statement, refusing a Queries with no database.
 func (q *Queries) run(ctx context.Context, name, sql string, args []any) (pgx.Rows, error) {
 	if q == nil || q.runner == nil {
@@ -107,7 +138,7 @@ type {{ $q.Method }}Page struct {
 // it is set.
 func (q *Queries) {{ .Method }}(ctx context.Context, params {{ .Params }}, page *QueryPageOptions[{{ .Page.KeyType }}]) (*{{ .Method }}Page, error) {
 {{- else }}
-func (q *Queries) {{ .Method }}(ctx context.Context, params {{ .Params }}) ([]{{ .Row }}, error) {
+func (q *Queries) {{ .Method }}(ctx context.Context, params {{ .Params }}) ({{ .Result }}, error) {
 {{- end }}
 	args := make([]any, 0, {{ len .Args }})
 {{- range .Args }}
@@ -117,13 +148,13 @@ func (q *Queries) {{ .Method }}(ctx context.Context, params {{ .Params }}) ([]{{
 	order := {{ .Order.Value }}
 	fragment, ok := {{ .Order.Const }}[order]
 	if !ok {
-		return nil, fmt.Errorf("query {{ .Name }} orders by {{ .Order.Values }}, not %q", order)
+		return {{ .Zero }}, fmt.Errorf("query {{ .Name }} orders by {{ .Order.Values }}, not %q", order)
 	}
 	rows, err := q.run(ctx, {{ printf "%q" .Name }}, fmt.Sprintf({{ .Const }}, fragment), args)
 	if err != nil {
-		return nil, err
+		return {{ .Zero }}, err
 	}
-	return scan{{ .Method }}(rows)
+{{- template "queryAnswer" . }}
 {{- else if .Page }}
 	limit, statement := {{ $.DefaultLimit }}, {{ .Page.FirstConst }}
 	if page != nil && page.Limit < 0 {
@@ -157,9 +188,9 @@ func (q *Queries) {{ .Method }}(ctx context.Context, params {{ .Params }}) ([]{{
 {{- else }}
 	rows, err := q.run(ctx, {{ printf "%q" .Name }}, {{ .Const }}, args)
 	if err != nil {
-		return nil, err
+		return {{ .Zero }}, err
 	}
-	return scan{{ .Method }}(rows)
+{{- template "queryAnswer" . }}
 {{- end }}
 }
 
@@ -341,3 +372,15 @@ func queryConvert[T, U any](values []T, convert func(T) U) []U {
 	}
 	return out
 }
+
+{{- define "queryAnswer" }}
+{{- if .Answer }}
+	found, err := scan{{ .Method }}(rows)
+	if err != nil {
+		return {{ .Zero }}, err
+	}
+	return {{ .Answer }}({{ printf "%q" .Name }}, found)
+{{- else }}
+	return scan{{ .Method }}(rows)
+{{- end }}
+{{- end }}

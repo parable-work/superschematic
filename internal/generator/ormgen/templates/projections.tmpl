@@ -47,14 +47,23 @@ type {{ .TypeName }} struct {
 }
 
 // {{ .TypeName }}Filter finds rows of the {{ .Relation }} view: each member set is a
-// condition, all of them ANDed, and AnyOf keeps the rows any of its filters
-// finds, as a table's filter does (D90).
+// condition, all of them ANDed, AllOf ANDs its filters' conditions with them
+// (D99), and AnyOf keeps the rows any of its filters finds, as a table's
+// filter does (D90).
 type {{ .TypeName }}Filter struct {
 	{{- range .Fields }}
 	{{- if .FilterType }}
 	{{ toGoName .Name }} *{{ .FilterType }}
 	{{- end }}
 	{{- end }}
+	{{- if .SearchProbe }}
+	// SearchText keeps the rows whose {{ .Source }} row's search fields hold each
+	// of its words, in any case, as {{ .Source }}Filter's SearchText does (D62,
+	// D99): one condition, the view's key in the keys of those rows. A text
+	// without words keeps every row, and nil filters nothing.
+	SearchText *string
+	{{- end }}
+	AllOf []{{ .TypeName }}Filter
 	AnyOf []{{ .TypeName }}Filter
 }
 
@@ -75,6 +84,24 @@ func (f *{{ .TypeName }}Filter) conditions(args *[]interface{}, paramOffset int)
 	}
 	{{- end }}
 	{{- end }}
+	{{- if .SearchProbe }}
+	if f.SearchText != nil {
+		var words []string
+		for _, term := range searchTerms(*f.SearchText) {
+			paramNum++
+			words = append(words, fmt.Sprintf({{ goRawString .SearchCondition }}, paramNum))
+			*args = append(*args, searchLikePattern(term))
+		}
+		if len(words) > 0 {
+			conditions = append(conditions, fmt.Sprintf({{ goRawString .SearchProbe }}, " WHERE "+strings.Join(words, " AND ")))
+		}
+	}
+	{{- end }}
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
 	if len(f.AnyOf) > 0 {
 		start := len(*args)
 		branches := make([]string, 0, len(f.AnyOf))

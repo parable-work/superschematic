@@ -662,6 +662,12 @@ type BankAccountFilter struct {
 	// ReferencedByLineItemAccount filters on the presence or absence of a
 	// LineItem whose account points at this row.
 	ReferencedByLineItemAccount *ReferencedByFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []BankAccountFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -822,6 +828,14 @@ func (f *BankAccountFilter) conditions(args *[]interface{}, paramOffset int) []s
 		}
 	}
 
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
 	if len(f.AnyOf) > 0 {
 		start := len(*args)
 		branches := make([]string, 0, len(f.AnyOf))
@@ -869,6 +883,12 @@ type LineItemFilter struct {
 	// the filter finds (D90): one condition, the foreign key in the keys of
 	// those rows.
 	Account *BankAccountFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []LineItemFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -1410,6 +1430,14 @@ func (f *LineItemFilter) conditions(args *[]interface{}, paramOffset int) []stri
 			where = " WHERE " + strings.Join(through, " AND ")
 		}
 		conditions = append(conditions, fmt.Sprintf(`line_item.account_id IN (SELECT bank_account.id FROM bank_account%s)`, where))
+	}
+
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
 	}
 
 	if len(f.AnyOf) > 0 {

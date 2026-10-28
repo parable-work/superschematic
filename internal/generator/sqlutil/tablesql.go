@@ -434,12 +434,13 @@ func ReferenceProbeOf(table *TableModel, ref Reference) ReferenceProbe {
 }
 
 // SearchConditionOf is the condition of one word of a search on table's
-// search column, or "" for a table without search fields.
+// search column, a view's source's on a view (D99), or "" for a table
+// without search fields.
 func SearchConditionOf(table *TableModel) string {
 	if !table.Search {
 		return ""
 	}
-	return SearchCondition(Qualify(table.Name, SearchTextColumn))
+	return SearchCondition(table.SearchColumn)
 }
 
 // AllStatements are the table's statements by name, sorted, for the tests

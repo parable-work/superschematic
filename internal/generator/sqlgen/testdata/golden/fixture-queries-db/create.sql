@@ -80,3 +80,24 @@ CREATE INDEX idx_category_parent ON category USING BTREE (parent_id);
 CREATE INDEX idx_line_item_date ON line_item USING BTREE ("date");
 
 CREATE INDEX idx_line_item_category ON line_item USING BTREE (category_id);
+
+-- Create projection views: read-only relations over the tables above. A
+-- setting a view binds without optional makes current_setting raise while
+-- it is unset, so the view fails closed.
+
+CREATE VIEW line_list WITH (security_barrier = true) AS
+-- Projection column order is the published Arrow contract.
+SELECT -- noqa: ST06
+  base.id,
+  base."date",
+  base."name",
+  base.account_id,
+  account."name" AS account_name,
+  base.category_id,
+  category."name" AS category_name
+FROM line_item AS base
+  INNER JOIN account AS account ON base.account_id = account.id
+  LEFT JOIN category AS category ON base.category_id = category.id
+;
+
+COMMENT ON VIEW line_list IS 'A line with its account''s and its category''s names, flat: a plain view the dashboard''s line list reads. The lock holds a query over it to the projection''s model, its joins and its columns (D95).';

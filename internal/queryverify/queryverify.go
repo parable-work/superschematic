@@ -129,9 +129,10 @@ func Describe(ctx context.Context, runner, url string, doc Document) (*Result, e
 //   - the result's columns are not the row's fields' columns, or one's type
 //     is not its field's;
 //   - a row field that is not Nullable<T> reads a column that may be null:
-//     one computed, one of a column that is not NOT NULL, or one of a table
-//     an outer join may leave out, which the query does not vouch for with
-//     notNull or a -- @notNull comment.
+//     one computed, one of a column that is not NOT NULL (a projection's
+//     view's column of a required field is), or one of a table an outer
+//     join may leave out, which the query does not vouch for with notNull
+//     or a -- @notNull comment.
 func Judge(queries []sqlutil.QueryModel, result *Result) (*Lock, []string) {
 	described := map[string]Description{}
 	for _, d := range result.Statements {
@@ -232,9 +233,12 @@ func judgeColumns(where string, q sqlutil.QueryModel, columns []Column) []string
 }
 
 // straightNotNull reports whether column c comes straight from a NOT NULL
-// column of a table no outer join of q may leave out.
+// column of a table no outer join of q may leave out: a table's NOT NULL
+// column, or a column of a projection's view whose field is required
+// (sqlutil.QueryModel.ViewNotNull, D95), which the view's model the lock
+// hashes holds.
 func straightNotNull(q sqlutil.QueryModel, c Column) bool {
-	return c.Table != "" && c.NotNull && !outer(q, c.Table)
+	return c.Table != "" && (c.NotNull || q.ViewNotNull[c.Table+"."+c.Column]) && !outer(q, c.Table)
 }
 
 func outer(q sqlutil.QueryModel, table string) bool {
@@ -254,7 +258,7 @@ func nullReason(q sqlutil.QueryModel, c Column) string {
 	switch {
 	case c.Table == "":
 		return "is computed, which Postgres cannot tell is never null"
-	case !c.NotNull:
+	case !c.NotNull && !q.ViewNotNull[c.Table+"."+c.Column]:
 		return fmt.Sprintf("reads %s.%s, which may be null", c.Table, c.Column)
 	}
 	return fmt.Sprintf("reads %s.%s of a table an outer join may leave out", c.Table, c.Column)

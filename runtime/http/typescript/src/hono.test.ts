@@ -17,7 +17,7 @@ import {
   type ServiceAuthConfig,
   type ServiceAuthenticator,
 } from './index';
-import { errorHandler, honoPath, mountManualOperation, mountOperation, notFoundHandler, parseJsonBody, type WebhookVerifier } from './hono';
+import { checkRoute, errorHandler, honoPath, mountManualOperation, mountOperation, notFoundHandler, parseJsonBody, type WebhookVerifier } from './hono';
 
 const getOrder: OperationSpec = {
   name: 'getOrder',
@@ -427,6 +427,66 @@ describe('mountManualOperation', () => {
     const malformed = await app.request('/api/items/a%ZZ', { method: 'POST' });
     expect(malformed.status).toBe(400);
     expect(await malformed.json()).toMatchObject({ status: 400, code: 'bad_request', details: { location: 'path' } });
+  });
+});
+
+describe('checkRoute (D98)', () => {
+  const check = (app: Hono, path: string, init: RequestInit = {}) => checkRoute(app, new Request(`http://api.test${path}`, init));
+  const post = (body: string, user = 'writer'): RequestInit => ({ method: 'POST', headers: { 'content-type': 'application/json', 'x-user': user }, body });
+
+  test("runs a route's gate and decoding, and never its implementation or handler", async () => {
+    const ran: string[] = [];
+    const app = new Hono();
+    const options = { authenticate: async (ctx: { headers: Headers }) => principals[ctx.headers.get('x-user') ?? ''] ?? null };
+    mountOperation(
+      app,
+      createOrder,
+      async (_ctx, request) => {
+        ran.push('createOrder');
+        return request.input;
+      },
+      options
+    );
+    mountManualOperation(
+      app,
+      stream,
+      c => {
+        ran.push('stream');
+        return c.text('streamed');
+      },
+      options
+    );
+    mountManualOperation(app, { ...stream, name: 'unhooked', path: '/api/unhooked' }, undefined, options);
+    expect(await check(app, '/api/orders', post('{"name":"desk"}'))).toBeUndefined();
+    expect(await check(app, '/api/stream', post(''))).toBeUndefined();
+    const unknown = await check(app, '/api/orders', post('{"name":"desk","extra":1}'));
+    expect(unknown?.status).toBe(400);
+    expect(await unknown?.json()).toMatchObject({ code: 'bad_request', details: { location: 'body', reason: 'unknown fields: extra' } });
+    expect((await check(app, '/api/orders', post('{}')))?.status).toBe(400);
+    expect((await check(app, '/api/orders', post('{"name":"desk"}', 'reader')))?.status).toBe(403);
+    expect((await check(app, '/api/orders', post('{"name":"desk"}', 'nobody')))?.status).toBe(401);
+    expect((await check(app, '/api/orders', post(JSON.stringify({ name: 'x'.repeat(100) }))))?.status).toBe(413);
+    expect((await check(app, '/api/stream', post('', 'nobody')))?.status).toBe(401);
+    expect((await check(app, '/api/unhooked', post('')))?.status).toBe(501);
+    expect(ran).toEqual([]);
+  });
+
+  test('takes no token of the rate limit, which counts the runs alone', async () => {
+    const app = new Hono();
+    mountOperation(app, { ...health, name: 'limited', path: '/api/limited', rateLimitPerMinute: 1 }, async () => ({ ok: true }));
+    for (let i = 0; i < 3; i++) expect(await check(app, '/api/limited')).toBeUndefined();
+    expect((await app.request('/api/limited')).status).toBe(200);
+    expect((await app.request('/api/limited')).status).toBe(429);
+  });
+
+  test('leaves a request no route of the app answers unchecked, and checks a route mounted after a check', async () => {
+    const app = new Hono();
+    expect(await check(app, '/api/orders', post('{"name":"desk"}', 'nobody'))).toBeUndefined();
+    mountOperation(app, health, async () => ({ status: 'ok' }));
+    expect(await check(app, '/api/health')).toBeUndefined();
+    expect(await check(app, '/api/orders', post('{"name":"desk"}', 'nobody'))).toBeUndefined();
+    mountOperation(app, createOrder, async () => null);
+    expect((await check(app, '/api/orders', post('{"name":"desk"}', 'nobody')))?.status).toBe(401);
   });
 });
 

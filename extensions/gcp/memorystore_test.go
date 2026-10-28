@@ -176,7 +176,12 @@ func TestMemoryStoreSettingsRefusals(t *testing.T) {
 	t.Run("a long name", func(t *testing.T) {
 		s := shop()
 		s.Name = "TheShopStackOfTheAcmeCompanyStorefrontAndWarehouses"
-		refused(t, s, stack.CodeLowering, "the Memorystore instance id of shop-cache")
+		env := resolve(t, reg, s, withCache(stacktest.AcmeShop()), "Staging")
+		instance := node(t, env, "shop-cache.instance").Properties
+		if id, _ := instance["instanceId"].(string); len(id) != 63 || !strings.HasPrefix(id, "acme-staging-the-shop-stack-") {
+			t.Errorf("instanceId = %v, want a prefix and a hash in 63 characters (D97)", instance["instanceId"])
+		}
+		wantJSON(t, "the instance's labels", instance["labels"], `{"superschematic-deployable":"shop-cache"}`)
 	})
 }
 

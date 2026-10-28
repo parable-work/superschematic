@@ -443,8 +443,17 @@ type TableModel struct {
 	HistoryActor string
 
 	// Search is a table with search fields, whose filter holds a search
-	// text over its search_text column.
-	Search bool
+	// text over its search_text column, or a projection's view whose
+	// filter holds one over its source's (D99). SearchColumn is that
+	// column, qualified by its table.
+	Search       bool
+	SearchColumn string
+
+	// SearchProbe is, on a view, the condition a search text makes: the
+	// view's key in the keys of its source's rows of the WHERE %s, which
+	// the words' conditions on SearchColumn write. Empty on a table, whose
+	// words are each a condition of its own.
+	SearchProbe string
 
 	// UniqueKeys are the unique keys an upsert may be keyed by: the
 	// primary key, each @unique field and each unique @index.
@@ -762,7 +771,7 @@ func tableOf(td *ir.TypeDef, schema *ir.Schema, sqlTypes map[string]string, scal
 		}
 		c.Sortable = c.Key || sortableColumn(c, ir.SortValue(schema, ref))
 		if f.SearchField {
-			table.Search = true
+			table.Search, table.SearchColumn = true, Qualify(name, SearchTextColumn)
 		}
 		if f.Key {
 			table.Key, table.KeyField = column, f.Name

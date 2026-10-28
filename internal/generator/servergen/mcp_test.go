@@ -26,8 +26,9 @@ const (
 	// agentAPI is a TypeScript API over the identity fixture's users-db
 	// with outputs.api.mcp on (D81): its visible @mcp tools are greet,
 	// which reads, set_motto, whose policy is ask, and audit, for a holder
-	// of staff; forgetMotto is hidden and motto unclassified. agentStack
-	// serves it from its default server, named after it.
+	// of staff, which asks too; forgetMotto is hidden and motto
+	// unclassified. agentStack serves it from its default server, named
+	// after it.
 	agentAPI   = "users-ts-agent"
 	agentStack = "users-ts-agent-stack"
 )
@@ -100,7 +101,11 @@ export const create: Constructor = () => ({
 // as a tool error with its problem. set_motto, whose policy is ask, runs
 // only with the confirmation token its first call answered, signed with
 // the key the entrypoint reads from the config field
-// outputs.api.mcpConfirmationKey names, and that token once (D93). After
+// outputs.api.mcpConfirmationKey names, and that token once (D93). A call
+// of it the route would refuse, a value the route refuses or an argument
+// it does not take, answers the route's 400 at once with no token, and a
+// token sent with one is not spent; audit, which asks too, is no tool of a
+// user without staff, whose call is refused, not confirmed (D98). After
 // logout the token is refused.
 func TestTypeScriptMCPEndpointServes(t *testing.T) {
 	if testing.Short() {
@@ -229,6 +234,19 @@ func TestTypeScriptMCPEndpointServes(t *testing.T) {
 		return strings.TrimSuffix(arguments, "}") + `, "confirmationToken": "` + confirmation + `"}`
 	}
 	confirmed := confirmation(`{"motto": "Ship it"}`)
+	// A call the route would refuse answers its 400 at once, with no token
+	// to confirm, and a token sent with one is not spent (D98).
+	for _, arguments := range []string{`{"motto": ""}`, `{"motto": 7}`, `{"input": {"motto": "Ship it"}}`, withToken(`{"motto": ""}`, confirmed)} {
+		refused := online.toolCall(t, token, "set_motto", arguments)
+		problem, _ := refused["structuredContent"].(map[string]any)
+		details, _ := problem["details"].(map[string]any)
+		if refused["isError"] != true || problem["status"] != float64(400) || problem["code"] != "bad_request" || details["confirmationToken"] != nil {
+			t.Errorf("set_motto with %s answered %v, want the route's 400 as a tool error, and no token", arguments, refused)
+		}
+		if strings.Contains(arguments, `"input"`) && problem["detail"] != `set_motto takes motto, not "input"` {
+			t.Errorf("set_motto with %s says %v", arguments, problem["detail"])
+		}
+	}
 	set := online.toolCall(t, token, "set_motto", withToken(`{"motto": "Ship it"}`, confirmed))
 	if mustMarshal(t, set["structuredContent"]) != `{"message":"Ada's motto: Ship it"}` {
 		t.Errorf("set_motto with its token answered %v", set)
@@ -237,10 +255,7 @@ func TestTypeScriptMCPEndpointServes(t *testing.T) {
 	if problem, _ := replayed["structuredContent"].(map[string]any); problem["code"] != "confirmation_required" || mustMarshal(t, problem["details"].(map[string]any)["refused"]) != `"used"` {
 		t.Errorf("set_motto with a used token answered %v, want it asked about again", replayed)
 	}
-	refused := online.toolCall(t, token, "set_motto", withToken(`{"motto": ""}`, confirmation(`{"motto": ""}`)))
-	if problem, _ := refused["structuredContent"].(map[string]any); refused["isError"] != true || problem["status"] != float64(400) || problem["code"] != "bad_request" {
-		t.Errorf("set_motto with an empty motto answered %v, want the route's 400 as a tool error", refused)
-	}
+	// audit asks, and Ada lacks staff: its call is refused, never confirmed.
 	for _, name := range []string{"forget_motto", "audit", "motto"} {
 		_, reply := online.rpc(t, token, `{"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {"name": "`+name+`", "arguments": {}}}`)
 		if mustMarshal(t, reply["error"]) != `{"code":-32602,"message":"users-ts-agent has no tool \"`+name+`\""}` {

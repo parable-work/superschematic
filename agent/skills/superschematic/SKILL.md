@@ -22,8 +22,15 @@ does. You never write, edit or duplicate:
   joined list is a `@query<Params, Row>({ sql })` in the DB schema, which
   both ORMs run as a typed function (`orm.queries.<name>(params)`), its
   rows decoded. Run `superschematic queries verify schemas/services/<db>`
-  after changing one, or a table one reads: it prepares each on Postgres
-  and writes `queries.lock`, which `check` and `build` require current.
+  after changing one, a table or projection one reads, or a constant one
+  interpolates: it prepares each on Postgres and writes `queries.lock`,
+  which `check` and `build` require current.
+- The same SQL twice: reports that share a filter interpolate it,
+  `` sql: `SELECT ... WHERE ${DASHBOARD_FILTER} GROUP BY 1` ``, a `const`
+  string or a template literal of such constants in the schema file or
+  one it imports. `+` and calls are refused. A report of one row takes
+  `returns: "one"` (`const totals = await orm.queries.dashboardTotals(f)`,
+  no `[0]` and no `!`), or `"optional"` for the row or `null`.
 - Validation: a field's scalar type and `Validate<T, {...}>` are checked
   by every generated decoder, server and SDK alike. Never re-check in a
   handler what a constraint can say.
@@ -39,9 +46,10 @@ does. You never write, edit or duplicate:
   repository read includes relations (`include: { category: { include:
   { parent: true } } }`, Go's nested `Fields`), selects members, and a
   filter reaches through a to-one relation (`{ category: { parentId: {
-  in: ids } } }`, `anyOf` for an OR); a flat list is a `@projection`,
-  which both ORMs read through a repository of its own
-  (`deps.orm.transactionListRow.findPage(...)`).
+  in: ids } } }`, `anyOf` for an OR, `allOf` to AND two OR groups); a
+  flat list is a `@projection`, which both ORMs read through a repository
+  of its own (`deps.orm.transactionListRow.findPage(...)`), with
+  `searchText` over its source's `@searchField`s.
 
 You do write:
 
@@ -109,7 +117,12 @@ path for when the store is unavailable.
    build) writes a missing implementation: Go at `go/<service>`,
    TypeScript at `typescript/<service>`, Rust at `rust/<service>`, beside
    the schemas root. Each method answers 501 until you fill it. Compile
-   errors after a schema change point at exactly the code to follow.
+   errors after a schema change point at exactly the code to follow. The
+   build never writes a scaffolded package again: when it warns that one's
+   `package.json` or `Cargo.toml` lacks a dependency, as a site's after a
+   new `calls` entry, add the line the warning names. Make a branded scalar value with
+   `parse<Scalar>Strict` or `normalize<Scalar>Strict` from the types
+   package the implementation depends on, never with a cast.
 6. **Test.** `superschematic stack dev schemas/services/<stack>` runs the
    whole stack locally, with Postgres in Docker and migrations applied. A
    site whose config names `site.dev` runs its dev server there, with its
@@ -189,7 +202,12 @@ path for when the store is unavailable.
   the person confirms the call, by elicitation or a two-step
   `confirmationToken`, and the API's config names the `@envVars` secret
   that signs confirmations, `outputs.api.mcpConfirmationKey`. Never pass a
-  `confirmationToken` the person has not confirmed.
+  `confirmationToken` the person has not confirmed. A call its route
+  would refuse (an argument the tool does not take, a value that fails
+  validation, a caller the route refuses) gets the route's 400, 401 or 403
+  at once, with no token: fix the arguments from the error, as the tool's
+  `inputSchema` lists them, and call again; a token sent with such a call
+  is not used up.
 - **Outputs must line up.** A server or SDK in a language needs
   `outputs.types` in that language, and a DB always needs Go types; the
   config fails to load and says so otherwise.
@@ -211,10 +229,22 @@ Most are load errors; knowing them saves a build round-trip:
   A `@jsonField` class, a `@queue` message, a `@projection`, a `@query`
   class and the params and row types it names, and a type that composes
   a behavior are not tables.
+- A service's config is the `@envVars` class no other `@envVars` class
+  extends; it holds the fields of each class it extends. Two `@envVars`
+  classes that do not extend one another fail the load: make the
+  settings class extend the one that declares a shared secret, as in
+  `@envVars FinancesConfig extends FieldKeys`.
 - A required date or time column has no default unless it is `createdAt`
   or `updatedAt`: a posting date an import leaves out fails `NOT NULL`.
   Declare `Default<Temporal.DateTime, "now">` (or `Temporal.Date`) where
   the time of the insert is the right value.
+- A path parameter is in braces and names an argument:
+  `@rest(HttpMethod.GET, "orders/{id}/export")`. A router's `orders/:id`
+  is refused.
+- The comment directly above a declaration is its documentation, in every
+  generated language, OpenAPI and `COMMENT ON`. Leave a blank line under a
+  note or a section banner (`// ---- Plaid ----`) that is not; a banner or
+  rule at a comment's head is dropped anyway.
 
 ## Starting a project
 
@@ -260,11 +290,19 @@ Postgres outside Cloudflare (Neon, Supabase, Cloud SQL) that Workers reach
 through a Hyperdrive config: the user makes the config, names its id in
 the environment's `settings` (`{ of: FinancesDb, hyperdrive: "<id>" }`),
 and keeps the database's connection string in `HYPERDRIVE_ORIGIN_<DB>`
-for the deploy's migration. Don't make the config or handle the
-connection string yourself. Queue workers there must be TypeScript; each
+for the deploy's migration and for `stack queue dead|retry|drop|backfill`,
+which run from the user's machine against that origin and refuse a string
+whose host, port, database or user is not the config's. Don't make the
+config or handle the connection string yourself. Queue workers there must be TypeScript; each
 drains its queue once a minute under a Cron Trigger. An API over the user
 model signs users in there when its `authDb` is that Postgres; each
 password hash takes about 120 ms of CPU, so it needs Workers Paid.
+
+On gcp, a name the target makes from an API's and a class's names and
+that GCP would refuse as too long, such as a job's service account past
+30 characters, is shortened to a prefix and a hash, with the whole name
+in a label: don't rename a class to make it fit. A deployable the stack
+declares by name is still refused when its name is too long.
 
 ## Reference
 

@@ -3102,6 +3102,12 @@ type CoverFilter struct {
 	// the filter finds (D90): one condition, the foreign key in the keys of
 	// those rows.
 	Ref *RecipeRefFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []CoverFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -3402,6 +3408,14 @@ func (f *CoverFilter) conditions(args *[]interface{}, paramOffset int) []string 
 		conditions = append(conditions, fmt.Sprintf(`cover.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)`, where))
 	}
 
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
 	if len(f.AnyOf) > 0 {
 		start := len(*args)
 		branches := make([]string, 0, len(f.AnyOf))
@@ -3450,6 +3464,12 @@ type IngredientFilter struct {
 	// the filter finds (D90): one condition, the foreign key in the keys of
 	// those rows.
 	Ref *RecipeRefFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []IngredientFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -3811,6 +3831,14 @@ func (f *IngredientFilter) conditions(args *[]interface{}, paramOffset int) []st
 		conditions = append(conditions, fmt.Sprintf(`ingredient.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)`, where))
 	}
 
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
 	if len(f.AnyOf) > 0 {
 		start := len(*args)
 		branches := make([]string, 0, len(f.AnyOf))
@@ -3858,6 +3886,12 @@ type NoteFilter struct {
 	// the filter finds (D90): one condition, the foreign key in the keys of
 	// those rows.
 	Ref *RecipeRefFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []NoteFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -4193,6 +4227,14 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 		conditions = append(conditions, fmt.Sprintf(`note.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)`, where))
 	}
 
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
 	if len(f.AnyOf) > 0 {
 		start := len(*args)
 		branches := make([]string, 0, len(f.AnyOf))
@@ -4252,6 +4294,12 @@ type RecipeFilter struct {
 	// ReferencedByUtensilRecipe filters on the presence or absence of a
 	// Utensil whose recipe points at this row.
 	ReferencedByUtensilRecipe *ReferencedByFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []RecipeFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -4494,6 +4542,14 @@ func (f *RecipeFilter) conditions(args *[]interface{}, paramOffset int) []string
 		}
 	}
 
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
 	if len(f.AnyOf) > 0 {
 		start := len(*args)
 		branches := make([]string, 0, len(f.AnyOf))
@@ -4565,6 +4621,12 @@ type RecipeCommitFilter struct {
 	// ReferencedByRecipeSnapshotEntryCommit filters on the presence or absence of a
 	// RecipeSnapshotEntry whose commit points at this row.
 	ReferencedByRecipeSnapshotEntryCommit *ReferencedByFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []RecipeCommitFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -5068,6 +5130,14 @@ func (f *RecipeCommitFilter) conditions(args *[]interface{}, paramOffset int) []
 		}
 	}
 
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
 	if len(f.AnyOf) > 0 {
 		start := len(*args)
 		branches := make([]string, 0, len(f.AnyOf))
@@ -5109,6 +5179,12 @@ type RecipePatchFilter struct {
 	// the filter finds (D90): one condition, the foreign key in the keys of
 	// those rows.
 	Commit *RecipeCommitFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []RecipePatchFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -5408,6 +5484,14 @@ func (f *RecipePatchFilter) conditions(args *[]interface{}, paramOffset int) []s
 		conditions = append(conditions, fmt.Sprintf(`recipe_patch.commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)`, where))
 	}
 
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
 	if len(f.AnyOf) > 0 {
 		start := len(*args)
 		branches := make([]string, 0, len(f.AnyOf))
@@ -5491,6 +5575,12 @@ type RecipeRefFilter struct {
 	// ReferencedByUtensilRef filters on the presence or absence of a
 	// Utensil whose ref points at this row.
 	ReferencedByUtensilRef *ReferencedByFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []RecipeRefFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -6067,6 +6157,14 @@ func (f *RecipeRefFilter) conditions(args *[]interface{}, paramOffset int) []str
 		}
 	}
 
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
 	if len(f.AnyOf) > 0 {
 		start := len(*args)
 		branches := make([]string, 0, len(f.AnyOf))
@@ -6112,6 +6210,12 @@ type RecipeReleaseFilter struct {
 	// the filter finds (D90): one condition, the foreign key in the keys of
 	// those rows.
 	Commit *RecipeCommitFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []RecipeReleaseFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -6427,6 +6531,14 @@ func (f *RecipeReleaseFilter) conditions(args *[]interface{}, paramOffset int) [
 		conditions = append(conditions, fmt.Sprintf(`recipe_release.commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)`, where))
 	}
 
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
 	if len(f.AnyOf) > 0 {
 		start := len(*args)
 		branches := make([]string, 0, len(f.AnyOf))
@@ -6467,6 +6579,12 @@ type RecipeSnapshotEntryFilter struct {
 	// the filter finds (D90): one condition, the foreign key in the keys of
 	// those rows.
 	Commit *RecipeCommitFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []RecipeSnapshotEntryFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -6733,6 +6851,14 @@ func (f *RecipeSnapshotEntryFilter) conditions(args *[]interface{}, paramOffset 
 		conditions = append(conditions, fmt.Sprintf(`recipe_snapshot_entry.commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)`, where))
 	}
 
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
 	if len(f.AnyOf) > 0 {
 		start := len(*args)
 		branches := make([]string, 0, len(f.AnyOf))
@@ -6784,6 +6910,12 @@ type StepFilter struct {
 	// the filter finds (D90): one condition, the foreign key in the keys of
 	// those rows.
 	Ref *RecipeRefFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []StepFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -7320,6 +7452,14 @@ func (f *StepFilter) conditions(args *[]interface{}, paramOffset int) []string {
 		conditions = append(conditions, fmt.Sprintf(`step.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)`, where))
 	}
 
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
 	if len(f.AnyOf) > 0 {
 		start := len(*args)
 		branches := make([]string, 0, len(f.AnyOf))
@@ -7378,6 +7518,12 @@ type TastingFilter struct {
 	// the filter finds (D90): one condition, the foreign key in the keys of
 	// those rows.
 	Ref *RecipeRefFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []TastingFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -8086,6 +8232,14 @@ func (f *TastingFilter) conditions(args *[]interface{}, paramOffset int) []strin
 		conditions = append(conditions, fmt.Sprintf(`tasting.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)`, where))
 	}
 
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
 	if len(f.AnyOf) > 0 {
 		start := len(*args)
 		branches := make([]string, 0, len(f.AnyOf))
@@ -8132,6 +8286,12 @@ type UtensilFilter struct {
 	// the filter finds (D90): one condition, the foreign key in the keys of
 	// those rows.
 	Ref *RecipeRefFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []UtensilFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -8430,6 +8590,14 @@ func (f *UtensilFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			where = " WHERE " + strings.Join(through, " AND ")
 		}
 		conditions = append(conditions, fmt.Sprintf(`utensil.ref_id IN (SELECT recipe_ref.id FROM recipe_ref%s)`, where))
+	}
+
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
 	}
 
 	if len(f.AnyOf) > 0 {

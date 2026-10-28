@@ -22,6 +22,7 @@ var (
 	errTitleMisplaced = errors.New("@title is read from a JSDoc comment (/** @title … */), not a // or /* */ comment")
 	errTitleMidLine   = errors.New("@title must begin a line of the member's JSDoc comment")
 	errTitleBlocks    = errors.New("@title is read from the member's only JSDoc comment, and it has more than one")
+	errTitleDetached  = errors.New("@title is read from the member's own comment, and a blank line parts this one from the member")
 )
 
 // commentKind is the kind of one comment of a node's leading trivia.
@@ -34,10 +35,13 @@ const (
 )
 
 // commentSpan is one comment of a node's leading trivia, its lines with
-// the comment's markers stripped.
+// the comment's markers stripped, and its offsets in the trivia: start at
+// its first "/", end past its last character, before a // comment's line
+// terminator.
 type commentSpan struct {
-	kind  commentKind
-	lines []commentText
+	kind       commentKind
+	lines      []commentText
+	start, end int
 }
 
 // commentText is one line of a comment: its text, trimmed, without the
@@ -65,7 +69,7 @@ func commentSpans(trivia string) []commentSpan {
 			if at := strings.IndexAny(rest, "\n\r\u2028\u2029"); at >= 0 {
 				end = at
 			}
-			spans = append(spans, commentSpan{kind: lineComment, lines: []commentText{{text: strings.TrimSpace(rest[2:end]), kept: true}}})
+			spans = append(spans, commentSpan{kind: lineComment, lines: []commentText{{text: strings.TrimSpace(rest[2:end]), kept: true}}, start: i, end: i + end})
 			i += end
 		case strings.HasPrefix(rest, "/*"):
 			kind, open := blockComment, len("/*")
@@ -76,7 +80,7 @@ func commentSpans(trivia string) []commentSpan {
 			if end := strings.Index(rest[2:], "*/"); end >= 0 {
 				body, size = rest[open:2+end], 2+end+2
 			}
-			span := commentSpan{kind: kind}
+			span := commentSpan{kind: kind, start: i, end: i + size}
 			for n, line := range splitLines(body) {
 				text := strings.TrimSpace(line)
 				kept := text != ""
@@ -113,6 +117,106 @@ func splitLines(text string) []string {
 	return append(lines, text[start:])
 }
 
+// attachedFrom is the index in spans, the comments of trivia, of the first
+// comment attached to the node trivia leads (D100): the comments after the
+// last blank line between two of them, or between the last and the node.
+// It is len(spans) when a blank line parts the last comment from the node.
+// A comment so parted, such as a section's banner, is not the node's.
+func attachedFrom(trivia string, spans []commentSpan) int {
+	next := len(trivia)
+	for i := len(spans) - 1; i >= 0; i-- {
+		// A blank line is two line terminators with nothing but
+		// whitespace between them.
+		if len(splitLines(trivia[spans[i].end:next])) > 2 {
+			return i + 1
+		}
+		next = spans[i].start
+	}
+	return 0
+}
+
+// triviaComment is leadingComment over a node's leading trivia: the lines
+// of the comments attached to the node (attachedFrom), each line's comment
+// markers stripped, undecorated.
+func triviaComment(trivia string) string {
+	spans := commentSpans(trivia)
+	from := len(trivia)
+	if at := attachedFrom(trivia, spans); at < len(spans) {
+		from = spans[at].start
+	}
+	var lines []string
+	for _, raw := range strings.Split(trivia[from:], "\n") {
+		if s, ok := commentLine(strings.TrimSpace(raw)); ok {
+			lines = append(lines, s)
+		}
+	}
+	return strings.Join(undecorated(lines), "\n")
+}
+
+// ruleRunes are the characters a rule, or a banner's runs, are drawn
+// with.
+const ruleRunes = "-=*#~_+/"
+
+// undecorated is a comment's lines without the decoration a source file's
+// sections are marked with (D100). At its head it drops each rule, each
+// banner and a line framed between two rules, and the empty lines after
+// them; at its tail, each rule and the empty lines before it. A rule
+// between lines of text stays: in a doc comment it is Markdown's.
+func undecorated(lines []string) []string {
+	start := 0
+head:
+	for start < len(lines) {
+		switch line := lines[start]; {
+		case isRule(line) || isBanner(line):
+			start++
+		case start > 0 && line == "":
+			start++
+		case start > 0 && start+1 < len(lines) && isRule(lines[start-1]) && isRule(lines[start+1]):
+			// "=====", "Accounts", "=====": a title framed by rules.
+			start += 2
+		default:
+			break head
+		}
+	}
+	end := len(lines)
+	for end > start && isRule(lines[end-1]) {
+		end--
+		for end > start && lines[end-1] == "" {
+			end--
+		}
+	}
+	return lines[start:end]
+}
+
+// isRule reports whether line is a rule: three or more of ruleRunes and
+// nothing but spaces beside them ("-----", "=====", "*****", "= = =").
+func isRule(line string) bool {
+	n := 0
+	for _, r := range line {
+		switch {
+		case strings.ContainsRune(ruleRunes, r):
+			n++
+		case r != ' ' && r != '\t':
+			return false
+		}
+	}
+	return n >= 3
+}
+
+// isBanner reports whether line is a banner: a title between two runs of
+// three or more of ruleRunes, each set off from it by a space ("---- Plaid
+// ----", "=== Accounts ==="). "***Bold***" and "Amount - in cents" are
+// text.
+func isBanner(line string) bool {
+	left := len(line) - len(strings.TrimLeft(line, ruleRunes))
+	right := len(line) - len(strings.TrimRight(line, ruleRunes))
+	if left < 3 || right < 3 || left+right >= len(line) {
+		return false
+	}
+	title := line[left : len(line)-right]
+	return strings.HasPrefix(title, " ") && strings.HasSuffix(title, " ") && strings.TrimSpace(title) != ""
+}
+
 // memberTitle reads an enum member's @title from its leading trivia (D48,
 // amended), and the member's comment without the tag's line. Every
 // comment on the member is read for the tag. The tag is the first token of
@@ -129,11 +233,15 @@ func memberTitle(node *astNode) (title, comment string, err error) {
 	return triviaTitle(leadingTrivia(node))
 }
 
-// triviaTitle is memberTitle over a member's leading trivia.
+// triviaTitle is memberTitle over a member's leading trivia. The
+// member's comment is the comments attached to it, undecorated, as
+// triviaComment reads them (D100); a tag in a comment a blank line parts
+// from the member is refused.
 func triviaTitle(trivia string) (title, comment string, err error) {
 	spans := commentSpans(trivia)
+	from := attachedFrom(trivia, spans)
 	jsdocs := 0
-	for _, span := range spans {
+	for _, span := range spans[from:] {
 		if span.kind == jsdocComment {
 			jsdocs++
 		}
@@ -145,7 +253,8 @@ func triviaTitle(trivia string) (title, comment string, err error) {
 	}
 	seen := false
 	var lines []string
-	for _, span := range spans {
+	for n, span := range spans {
+		attached := n >= from
 		// wrapping is set after the span's @title line, until its next tag.
 		wrapping := false
 		for _, line := range span.lines {
@@ -158,7 +267,7 @@ func triviaTitle(trivia string) (title, comment string, err error) {
 					fail(errTitleWrapped)
 					continue
 				}
-				if line.kept {
+				if line.kept && attached {
 					lines = append(lines, line.text)
 				}
 				continue
@@ -167,6 +276,8 @@ func triviaTitle(trivia string) (title, comment string, err error) {
 			switch {
 			case span.kind != jsdocComment:
 				fail(errTitleMisplaced)
+			case !attached:
+				fail(errTitleDetached)
 			case at > 0:
 				fail(errTitleMidLine)
 			case seen:
@@ -188,7 +299,7 @@ func triviaTitle(trivia string) (title, comment string, err error) {
 	if seen && jsdocs > 1 {
 		fail(errTitleBlocks)
 	}
-	return title, strings.Join(lines, "\n"), err
+	return title, strings.Join(undecorated(lines), "\n"), err
 }
 
 // titleAt is the byte offset in text of its first @title tag, or -1: the

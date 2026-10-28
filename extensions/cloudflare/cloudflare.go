@@ -8,7 +8,8 @@
 // CI's sign-in with those tokens, TypeScript servers as Workers that call
 // each other through service bindings, the R2 store of the bundles they
 // run, buckets on R2, databases on D1 and on a Postgres outside Cloudflare
-// through Hyperdrive, with their migrations from the deploying machine,
+// through Hyperdrive, with their migrations from the deploying machine and
+// `stack queue` on a Hyperdrive database's origin from there too,
 // TypeScript jobs as Workers under Cron Triggers, TypeScript queue workers
 // as Workers that drain their queues at each firing of a Cron Trigger, and
 // sites as Workers with static assets, whose files it keeps in R2.
@@ -114,7 +115,7 @@ func (Extension) Name() string { return Name }
 // Secrets Store, bootstrap, the bundles in R2, the emptying of a member's
 // buckets before its destroy, D1's migration runner, the job runner over
 // each job's Workflow, and the generated CI's sign-in with an account token
-// (D64).
+// (D64); and the queue runner on a Hyperdrive database's origin (D96).
 func (e Extension) Register(r *registry.Registry) error {
 	types, err := schemas.ResourceTypes(ProviderVersion)
 	if err != nil {
@@ -172,6 +173,7 @@ func (e Extension) Register(r *registry.Registry) error {
 		PreDestroy: destroyPreparer{ext: e},
 		Migrations: migrationRunner{ext: e},
 		Jobs:       jobRunner{ext: e},
+		Queues:     migrationRunner{ext: e},
 		CI:         ciIdentities{},
 	})
 }

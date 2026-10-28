@@ -50,10 +50,11 @@ import (
 // Cloudflare's API and refuses an origin it does not reach, a host, port,
 // database or user other than the connection string's, and a config that
 // caches reads while the database's settings do not say it may
-// (checkOrigin); then it runs `superschematic-migrate apply` per plan with
-// steps, the connection string in DATABASE_URL, which no file and no
-// command line holds. The Workers connect as the config's user, the
-// migration's, so it gives no privileges either.
+// (reachOrigin, checkOrigin); then it runs `superschematic-migrate apply`
+// per plan with steps, the connection string in DATABASE_URL, which no file
+// and no command line holds. The Workers connect as the config's user, the
+// migration's, so it gives no privileges either. `stack queue` reaches the
+// origin the same way (queues.go, D96).
 
 // The runner, as the local target finds it.
 const (
@@ -124,7 +125,7 @@ func (r migrationRunner) PrepareMigrations(_ context.Context, run registry.Run, 
 			continue
 		}
 		if r.ext.getenv(OriginEnv(d.Services[0].Name)) == "" {
-			return errNoOrigin(d.Name, d.Services[0].Name)
+			return errNoOrigin(*d, migrationsOnTheOrigin)
 		}
 	}
 	if log != nil {
@@ -133,11 +134,75 @@ func (r migrationRunner) PrepareMigrations(_ context.Context, run registry.Run, 
 	return nil
 }
 
-// errNoOrigin refuses a migration of database, on Hyperdrive, whose DB
-// service db's origin connection string the shell does not hold.
-func errNoOrigin(database, db string) error {
-	return fmt.Errorf("cloudflare: database %s is on %s, and its migrations run from this machine on its origin: set %s to the origin's connection string, postgres://<user>:<password>@<host>/<database>, the database and the user its Hyperdrive config names (in CI, the deploy job reads it from the secret %s_<STACK>_<ENV>)",
-		database, HyperdrivePlatform, OriginEnv(db), OriginEnv(db))
+// originUse is what the deploying machine runs on the origin of a database
+// on Hyperdrive, as a refusal names it: a deploy's migrations (D92), or an
+// operator's queue operation (D96).
+type originUse struct {
+	// runs says what runs on the origin: "its migrations run".
+	runs string
+
+	// across says what would happen were the variable to reach another
+	// database than the config.
+	across string
+
+	// caching refuses a config that caches reads unless the database's
+	// settings say it may, which only a deploy does: it rolls out Workers
+	// that read through the config, where a queue operation does not.
+	caching bool
+
+	// ci says the generated CI's deploy job reads the variable from a
+	// secret.
+	ci bool
+}
+
+// The uses of a database's origin from the deploying machine.
+var (
+	migrationsOnTheOrigin = originUse{
+		runs:    "its migrations run",
+		across:  "a deploy would migrate one database while its Workers read another",
+		caching: true,
+		ci:      true,
+	}
+	queuesOnTheOrigin = originUse{
+		runs:   "stack queue runs",
+		across: "stack queue would read and change the queues of one database while its Workers drain another's",
+	}
+)
+
+// errNoOrigin refuses use of the origin of d, a database on Hyperdrive
+// that hosts one DB service, whose connection string the shell does not
+// hold: it names the variable and what its value must reach.
+func errNoOrigin(d ir.ResolvedDeployable, use originUse) error {
+	env := OriginEnv(d.Services[0].Name)
+	msg := fmt.Sprintf("cloudflare: database %s is on %s, and %s from this machine on its origin: set %s to the origin's connection string, postgres://<user>:<password>@<host>:<port>/<database>, with the host, port, database and user of its Hyperdrive config, %s",
+		d.Name, HyperdrivePlatform, use.runs, env, hyperdriveConfigOf(d))
+	if use.ci {
+		msg += fmt.Sprintf(" (in CI, the deploy job reads it from the secret %s_<STACK>_<ENV>)", env)
+	}
+	return errors.New(msg)
+}
+
+// reachOrigin returns the connection string the shell holds for the origin
+// of d, a database on Hyperdrive, and where it reaches, which a log may
+// hold, once checkOrigin has found that d's Hyperdrive config reaches the
+// same database as the same user. Each refusal names use.
+func (e Extension) reachOrigin(ctx context.Context, account string, d ir.ResolvedDeployable, use originUse) (origin, where string, err error) {
+	if len(d.Services) != 1 {
+		return "", "", fmt.Errorf("cloudflare: database %s on %s hosts %d DB services; a Hyperdrive config reaches one", d.Name, HyperdrivePlatform, len(d.Services))
+	}
+	db := d.Services[0].Name
+	origin = e.getenv(OriginEnv(db))
+	if origin == "" {
+		return "", "", errNoOrigin(d, use)
+	}
+	cloud, err := e.cloud()
+	if err != nil {
+		return "", "", err
+	}
+	if where, err = checkOrigin(ctx, cloud, account, d, db, origin, use); err != nil {
+		return "", "", err
+	}
+	return origin, where, nil
 }
 
 // Migrate runs one phase of req's plans on its database's D1 databases.
@@ -234,24 +299,12 @@ func (r migrationRunner) Migrate(ctx context.Context, req registry.MigrationRequ
 
 // migrateOrigin runs one phase of plans, each with steps, on the origin of
 // d, a database on Hyperdrive: it checks the origin the shell names is the
-// one d's Hyperdrive config reaches (checkOrigin), then runs
+// one d's Hyperdrive config reaches (reachOrigin), then runs
 // `superschematic-migrate apply` per plan with the connection string in
 // DATABASE_URL alone.
 func (r migrationRunner) migrateOrigin(ctx context.Context, req registry.MigrationRequest, d ir.ResolvedDeployable, plans []registry.MigrationPlan, v accountValues, binary string, log io.Writer) error {
 	logf := func(format string, args ...any) { _, _ = fmt.Fprintf(log, "  "+format+"\n", args...) }
-	if len(d.Services) != 1 {
-		return fmt.Errorf("cloudflare: database %s on %s hosts %d DB services; a Hyperdrive config reaches one", d.Name, HyperdrivePlatform, len(d.Services))
-	}
-	db := d.Services[0].Name
-	origin := r.ext.getenv(OriginEnv(db))
-	if origin == "" {
-		return errNoOrigin(d.Name, db)
-	}
-	cloud, err := r.ext.cloud()
-	if err != nil {
-		return err
-	}
-	where, err := checkOrigin(ctx, cloud, v.accountID, d, db, origin)
+	origin, where, err := r.ext.reachOrigin(ctx, v.accountID, d, migrationsOnTheOrigin)
 	if err != nil {
 		return err
 	}
@@ -283,16 +336,17 @@ func (r migrationRunner) migrateOrigin(ctx context.Context, req registry.Migrati
 // when no --database-url names one.
 const databaseURLEnv = "DATABASE_URL"
 
-// checkOrigin refuses a migration of origin, the connection string the
-// shell holds for d's DB service db, that d's Hyperdrive config does not
-// reach: a config the account does not hold; an origin whose host, port,
-// database or user differ from the connection string's, so the deploy
-// would migrate one database while the Workers read another; and a config
-// that caches reads while d's settings do not say it may, which would
-// answer a request with what its database held before the request's own
-// write. It returns where the connection string reaches, its user, host
-// and database, which a log may hold: never its password.
-func checkOrigin(ctx context.Context, cloud Cloud, account string, d ir.ResolvedDeployable, db, origin string) (string, error) {
+// checkOrigin refuses use of origin, the connection string the shell holds
+// for d's DB service db, that d's Hyperdrive config does not reach: a
+// config the account does not hold; an origin whose host, port, database or
+// user differ from the connection string's, so the deploy would migrate one
+// database, or stack queue change the queues of one, while the Workers read
+// another; and, for a use that checks caching, a config that caches reads
+// while d's settings do not say it may, which would answer a request with
+// what its database held before the request's own write. It returns where
+// the connection string reaches, its user, host and database, which a log
+// may hold: never its password.
+func checkOrigin(ctx context.Context, cloud Cloud, account string, d ir.ResolvedDeployable, db, origin string, use originUse) (string, error) {
 	u, err := url.Parse(origin)
 	if err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") || u.Hostname() == "" {
 		return "", fmt.Errorf("cloudflare: %s is no postgres:// connection string with a host", OriginEnv(db))
@@ -317,9 +371,9 @@ func checkOrigin(ctx context.Context, cloud Cloud, account string, d ir.Resolved
 	o := config.Origin
 	reached := fmt.Sprintf("database %s of %s:%d as %s", o.Database, o.Host, o.Port, o.User)
 	if !strings.EqualFold(o.Host, u.Hostname()) || o.Port != port || o.Database != database || o.User != user {
-		return "", fmt.Errorf("cloudflare: database %s's Hyperdrive config %s reaches %s, and %s reaches %s: a deploy would migrate one database while its Workers read another; point the config or the variable at the same database, as the same user", d.Name, id, reached, OriginEnv(db), where)
+		return "", fmt.Errorf("cloudflare: database %s's Hyperdrive config %s reaches %s, and %s reaches %s: %s; point the config or the variable at the same database, as the same user", d.Name, id, reached, OriginEnv(db), where, use.across)
 	}
-	if !config.Caching.Disabled && !settingBool(d.Settings, "caching", false) {
+	if use.caching && !config.Caching.Disabled && !settingBool(d.Settings, "caching", false) {
 		return "", fmt.Errorf("cloudflare: database %s's Hyperdrive config %s caches reads, which can answer a request with what the database held before the request's own write; turn its caching off, or set caching: true in the database's settings to keep it", d.Name, id)
 	}
 	return where, nil
@@ -363,7 +417,7 @@ func (e Extension) migrateBinary() (string, error) {
 	}
 	path, err := exec.LookPath(MigrateBinary)
 	if err != nil {
-		return "", fmt.Errorf("cloudflare: %s is not on PATH, and %s names no runner; the cloudflare target migrates D1 from this machine with it: "+
+		return "", fmt.Errorf("cloudflare: %s is not on PATH, and %s names no runner; the cloudflare target migrates D1 and a Postgres on Hyperdrive from this machine with it, and runs stack queue with it there: "+
 			"install it from a release, checked against SHA256SUMS, or build it (cd runtime/migrate/go && go build -o \"$(go env GOPATH)/bin/%s\" ./cmd/%s): %w",
 			MigrateBinary, MigrateEnv, MigrateBinary, MigrateBinary, err)
 	}

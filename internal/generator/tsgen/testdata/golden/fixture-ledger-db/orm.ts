@@ -21,7 +21,8 @@ A read's options select members and include relations (D90), and its rows
 hold what they name: include: { category: { include: { parent: true } } }
 loads each row's category, and its parent, in one statement per relation.
 A filter reaches through a to-one relation, { category: { parentId: {
-in: ids } } }, and anyOf ORs filters.
+in: ids } } }, anyOf ORs filters, and allOf ANDs them, so two OR groups
+are two filters of an allOf (D99).
 
 Each table's definition also describes its rows for the runtime's
 decodeRow, so a raw query of its columns reads back as its row type:
@@ -79,6 +80,8 @@ export interface AccountFilter {
   referencedByEntryTransfer?: ReferencedByFilter;
   /** The rows whose search fields hold each word of the text, in any case (D62). */
   searchText?: string;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly AccountFilter[];
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly AccountFilter[];
 }
@@ -254,6 +257,8 @@ export interface EntryFilter {
   account?: AccountFilter;
   /** The rows whose transfer is among the Account rows the filter finds; a row whose transfer is null is not among them (D90). */
   transfer?: AccountFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly EntryFilter[];
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly EntryFilter[];
 }

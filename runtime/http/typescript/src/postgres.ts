@@ -335,7 +335,7 @@ export type { Revealable } from './secret.js';
 
 // The generated repositories (D79): the tables a DB's types package
 // describes in its ./orm entry, whose createOrm calls ormOf over a pool.
-export { NoUserError, NotFoundError, ORM_MEMBERS, PageKeyError, fill, ormOf } from './orm.js';
+export { NoUserError, NotFoundError, ORM_MEMBERS, PageKeyError, TooManyRowsError, fill, ormOf } from './orm.js';
 // A DB service's declared queries (D86), which its ./orm entry describes
 // and its ORM's queries member runs.
 export { queriesOf } from './queries.js';

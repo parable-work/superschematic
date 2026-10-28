@@ -37,6 +37,15 @@ type ProjectionRepository struct {
 	// SQL are the view's statements, of which the repository runs the
 	// reads.
 	SQL sqlutil.TableStatements
+
+	// Source is the table the view reads its rows from. SearchCondition is
+	// the condition of one word of the filter's SearchText on the source's
+	// search column, and SearchProbe the condition the words' conditions
+	// sit in, the view's key in the keys of the source's rows they keep
+	// (D99); both empty on a view with no search text.
+	Source          string
+	SearchCondition string
+	SearchProbe     string
 }
 
 // Comment is the row struct's doc comment: what it is, then the class's
@@ -154,6 +163,11 @@ func projectionRepositories(schema *ir.Schema, dependencies map[string]*ir.Schem
 			Relation: td.Projection.Relation(),
 			Doc:      codegen.DocText(td.Description, td.Comment),
 			SQL:      sqlutil.TableStatementsOf(view),
+			Source:   td.Projection.Source,
+			// A view whose source has search fields searches the source's
+			// search column (D99).
+			SearchCondition: sqlutil.SearchConditionOf(view),
+			SearchProbe:     view.SearchProbe,
 		}
 		if err := p.SQL.CheckFormats(); err != nil {
 			return nil, err

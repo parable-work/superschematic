@@ -1,6 +1,6 @@
 import type { Context, Env, Hono } from 'hono';
 import { authorize } from './auth.js';
-import { mountManualOperation, type RouterRuntimeOptions } from './hono.js';
+import { checkRoute, mountManualOperation, type RouterRuntimeOptions } from './hono.js';
 import {
   MCP_CONFIRMATION_ARGUMENT,
   MCP_CONFIRMATION_DECLINED,
@@ -89,6 +89,15 @@ the call (D93; McpToolSet.confirms, mcpconfirm.ts):
 A token binds the tool, the caller and the exact arguments, expires, is
 claimed once, and is an HMAC under the endpoint's confirmation key; one
 that does not redeem asks again, saying why.
+
+Only a call that would reach the tool's implementation is confirmed (D98):
+before the endpoint mints a confirmation, asks a client to elicit, or
+redeems a token or a requestState, it checks the call (McpToolSet.check),
+on a generated router through its route's own checks (hono.ts's
+checkRoute): the arguments decoded and validated as the route decodes them,
+and the route's body limit, service step, authenticator and permission
+gate. A call they refuse answers their refusal at once, a tool error
+carrying the route's problem, and mints and claims nothing.
 */
 
 /** The 2025 revisions initialize negotiates, the newest first: the one a client asks for when it is here, else the first. */
@@ -190,6 +199,18 @@ export interface McpToolSet {
    * never sees the confirmationToken argument.
    */
   confirms?(name: string): McpTool | undefined | Promise<McpTool | undefined>;
+  /**
+   * The refusal a call of the tool name with args would meet before its
+   * implementation runs, its problem document; undefined for a call that
+   * would reach the implementation (D98). The endpoint checks a call of a
+   * tool confirms names with the arguments the confirmation binds, the
+   * confirmationToken's taken out, before it asks the person or redeems a
+   * confirmation, and answers a refusal at once, so a call that cannot run
+   * asks no one and spends nothing. Throws McpUnknownToolError for a tool
+   * the set has not got, as call does. Without it every such call is
+   * confirmed, and refused, if at all, once it runs.
+   */
+  check?(name: string, args: Readonly<Record<string, unknown>>): ProblemBody | undefined | Promise<ProblemBody | undefined>;
 }
 
 // A JSON-RPC error: its code, message and data.
@@ -443,13 +464,20 @@ class Server {
   // confirm is the confirmation of a call of tool, which asks the person
   // first (D93): the arguments it runs with, the token's taken out, once
   // the call carries a confirmation that redeems, else what the call
-  // answers instead, a confirmation to ask for or the person's refusal.
+  // answers instead, the refusal its check met, a confirmation to ask for
+  // or the person's refusal.
   async confirm(
     tool: McpTool,
     args: Readonly<Record<string, unknown>>,
     params: Record<string, unknown>,
     modern: boolean
   ): Promise<{ readonly args: Readonly<Record<string, unknown>> } | { readonly result: Record<string, unknown> }> {
+    const { [MCP_CONFIRMATION_ARGUMENT]: token, ...rest } = args;
+    // A call that would not reach the implementation is refused before
+    // anyone is asked, and mints and claims nothing (D98). It is checked
+    // with the arguments the binding covers and the call runs with.
+    const refusal = await this.tools.check?.(tool.name, rest);
+    if (refusal) return { result: toolError(refusal) };
     const confirmations = this.options.confirmations;
     if (!confirmations) {
       const problem = new HttpProblem(500, `${tool.name} runs only once the person confirms it, and this endpoint has no confirmation key`, {
@@ -457,7 +485,6 @@ class Server {
       });
       return { result: toolError(problemBody(problem, this.requestId())) };
     }
-    const { [MCP_CONFIRMATION_ARGUMENT]: token, ...rest } = args;
     const binding: McpConfirmationBinding = { tool: tool.name, caller: this.options.caller ?? '', args: rest };
     const elicits = modern && elicitsForms(clientCapabilities(params));
     let refused: McpConfirmationRefusal | undefined;
@@ -924,9 +951,11 @@ function toolOperations(operations: Readonly<Record<string, OperationSpec>>, too
  * router's options. Each request lists the tools whose routes its caller
  * may call, by the route's auth requirement and the router's permission
  * matcher, and runs a call through app in process, a call of a tool that
- * confirms once the person confirms it, bound to the caller (D93). Throws
- * when a tool names an operation the router does not have, and when a
- * tool confirms and options.confirmationKey is absent or short.
+ * confirms once the person confirms it, bound to the caller (D93), and
+ * only once its route's check, which the route's mount recorded on app,
+ * admits it (checkRoute, D98). Throws when a tool names an operation the
+ * router does not have, and when a tool confirms and
+ * options.confirmationKey is absent or short.
  */
 export function mountMcp<E extends Env>(
   app: Hono<E>,
@@ -1012,6 +1041,17 @@ function routerTools<E extends Env>(
     confirms: name => {
       const entry = byName.get(name);
       return entry?.tool.confirm && offered(entry.spec) ? entry.tool : undefined;
+    },
+    // The call's request through its route's check (D98): the same
+    // request call makes, and every step of the route before the
+    // implementation but its rate limit.
+    check: async (name, args) => {
+      const entry = byName.get(name);
+      if (!entry || !offered(entry.spec)) throw new McpUnknownToolError(`${mount.api} has no tool ${JSON.stringify(name)}`);
+      const request = toolRequest(entry.tool, entry.spec, args, c.req.raw, ctx);
+      if (request instanceof HttpProblem) return problemBody(request, ctx.requestId);
+      const refused = await checkRoute(app, request, c.env);
+      return refused ? problemOf(refused, ctx.requestId) : undefined;
     },
     call: async (name, args) => {
       const entry = byName.get(name);
@@ -1134,27 +1174,33 @@ function base64(bytes: Uint8Array): string {
 }
 
 /**
- * What the route's response comes to: a refusal (4xx or 5xx) as its
- * problem document, or one made of its status and text when the route
- * answered another body; a success's envelope data, a JSON body that is no
- * envelope as it is, text as text content, and any other body as a
- * resource at the route's path.
+ * A route's refusal (4xx or 5xx) as its problem document, or one made of
+ * its status and text when the route answered another body.
+ */
+async function problemOf(response: Response, requestId: string): Promise<ProblemBody> {
+  const text = await response.text();
+  if (isJsonMedia(mediaType(response))) {
+    try {
+      const problem: unknown = JSON.parse(text);
+      if (isObject(problem)) return problem as ProblemBody;
+    } catch {
+      // Not JSON after all: made from its text below.
+    }
+  }
+  return problemBody(new HttpProblem(response.status, text.trim() || 'Request failed'), requestId);
+}
+
+/**
+ * What the route's response comes to: a refusal as its problem document
+ * (problemOf); a success's envelope data, a JSON body that is no envelope
+ * as it is, text as text content, and any other body as a resource at the
+ * route's path.
  */
 async function outcomeOf(response: Response, requestId: string, uri: string): Promise<McpCallOutcome> {
+  if (response.status >= 400) return { problem: await problemOf(response, requestId) };
   const type = mediaType(response);
   const bytes = new Uint8Array(await response.arrayBuffer());
   const text = new TextDecoder().decode(bytes);
-  if (response.status >= 400) {
-    if (isJsonMedia(type)) {
-      try {
-        const problem: unknown = JSON.parse(text);
-        if (isObject(problem)) return { problem: problem as ProblemBody };
-      } catch {
-        // Not JSON after all: made from its text below.
-      }
-    }
-    return { problem: problemBody(new HttpProblem(response.status, text.trim() || 'Request failed'), requestId) };
-  }
   if (bytes.length === 0) return { result: null };
   if (isJsonMedia(type)) {
     try {

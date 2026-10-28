@@ -596,9 +596,11 @@ It applies the service's `create.sql` to a database of its own, prepares
 each statement of each query, every order's and both of a page's, and
 compares what Postgres describes with the declared types: each
 parameter's type, each result column's name and type, and that a row
-field that is not `Nullable<T>` reads a column that is never null. Each
+field that is not `Nullable<T>` reads a column that is never null (a
+projection's view's column of a required field is). Each
 problem names its query; a statement Postgres refuses is reported with
-its message. With none it writes `queries.lock` beside the schema config,
+its message. A query that returns one row, or one or none, whose SQL
+shows it may return more fails the load first, as it fails `check`. With none it writes `queries.lock` beside the schema config,
 which `check` and `build` then hold the queries to with no database; a
 service with no queries has its lock removed.
 
@@ -1126,6 +1128,16 @@ execution's logs; an execution that fails reports the runner's error, read
 from Cloud Logging as a failed migration's is. The `deployer` account, or
 an owner, runs it; a project bootstrapped before this needs `stack
 bootstrap` again, which grants the `migrator` its write.
+
+On cloudflare the queue's database is a Postgres outside Cloudflare on
+Hyperdrive, and the runner runs on this machine against its origin, as
+the deploy's migrations do (D96): with the connection string the shell
+holds in `HYPERDRIVE_ORIGIN_<DB>` (`HYPERDRIVE_ORIGIN_FINANCES_DB` for
+`finances-db`), passed to the runner in `DATABASE_URL` alone. It first
+reads the database's Hyperdrive config with `CLOUDFLARE_API_TOKEN`, and
+refuses a connection string whose host, port, database or user is not
+the config's, and a shell that holds none, naming the variable. The log
+says which database it ran on, never the result.
 
 It refuses a queue no DB service of the stack declares, and a queue whose
 database the environment places on another dialect than Postgres, on

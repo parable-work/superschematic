@@ -21,7 +21,8 @@ A read's options select members and include relations (D90), and its rows
 hold what they name: include: { category: { include: { parent: true } } }
 loads each row's category, and its parent, in one statement per relation.
 A filter reaches through a to-one relation, { category: { parentId: {
-in: ids } } }, and anyOf ORs filters.
+in: ids } } }, anyOf ORs filters, and allOf ANDs them, so two OR groups
+are two filters of an allOf (D99).
 
 Each table's definition also describes its rows for the runtime's
 decodeRow, so a raw query of its columns reads back as its row type:
@@ -76,6 +77,8 @@ export interface CoverFilter {
   recipe?: RecipeFilter;
   /** The rows whose ref is among the live RecipeRef rows the filter finds (D90). */
   ref?: RecipeRefFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly CoverFilter[];
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly CoverFilter[];
 }
@@ -223,6 +226,8 @@ export interface IngredientFilter {
   recipe?: RecipeFilter;
   /** The rows whose ref is among the live RecipeRef rows the filter finds (D90). */
   ref?: RecipeRefFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly IngredientFilter[];
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly IngredientFilter[];
 }
@@ -368,6 +373,8 @@ export interface NoteFilter {
   recipe?: RecipeFilter;
   /** The rows whose ref is among the live RecipeRef rows the filter finds (D90). */
   ref?: RecipeRefFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly NoteFilter[];
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly NoteFilter[];
 }
@@ -507,6 +514,8 @@ export interface RecipeFilter {
   referencedByTastingRecipe?: ReferencedByFilter;
   /** The rows a Utensil row's recipe points at, or none does. */
   referencedByUtensilRecipe?: ReferencedByFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly RecipeFilter[];
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly RecipeFilter[];
 }
@@ -690,6 +699,8 @@ export interface RecipeCommitFilter {
   ref?: RecipeRefFilter;
   /** The rows whose parentCommit is among the RecipeCommit rows the filter finds; a row whose parentCommit is null is not among them (D90). */
   parentCommit?: RecipeCommitFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly RecipeCommitFilter[];
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly RecipeCommitFilter[];
 }
@@ -856,6 +867,8 @@ export interface RecipePatchFilter {
   operation?: StringFilter<T.RecipePatchOperation>;
   /** The rows whose commit is among the RecipeCommit rows the filter finds (D90). */
   commit?: RecipeCommitFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly RecipePatchFilter[];
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly RecipePatchFilter[];
 }
@@ -1027,6 +1040,8 @@ export interface RecipeRefFilter {
   baseCommit?: RecipeCommitFilter;
   /** The rows whose headCommit is among the RecipeCommit rows the filter finds; a row whose headCommit is null is not among them (D90). */
   headCommit?: RecipeCommitFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly RecipeRefFilter[];
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly RecipeRefFilter[];
 }
@@ -1203,6 +1218,8 @@ export interface RecipeReleaseFilter {
   root?: RecipeFilter;
   /** The rows whose commit is among the RecipeCommit rows the filter finds (D90). */
   commit?: RecipeCommitFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly RecipeReleaseFilter[];
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly RecipeReleaseFilter[];
 }
@@ -1340,6 +1357,8 @@ export interface RecipeSnapshotEntryFilter {
   entityVersion?: NumberFilter<T.GenericInt64>;
   /** The rows whose commit is among the RecipeCommit rows the filter finds (D90). */
   commit?: RecipeCommitFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly RecipeSnapshotEntryFilter[];
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly RecipeSnapshotEntryFilter[];
 }
@@ -1496,6 +1515,8 @@ export interface StepFilter {
   recipe?: RecipeFilter;
   /** The rows whose ref is among the live RecipeRef rows the filter finds (D90). */
   ref?: RecipeRefFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly StepFilter[];
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly StepFilter[];
 }
@@ -1689,6 +1710,8 @@ export interface TastingFilter {
   recipe?: RecipeFilter;
   /** The rows whose ref is among the live RecipeRef rows the filter finds (D90). */
   ref?: RecipeRefFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly TastingFilter[];
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly TastingFilter[];
 }
@@ -1841,6 +1864,8 @@ export interface UtensilFilter {
   recipe?: RecipeFilter;
   /** The rows whose ref is among the live RecipeRef rows the filter finds (D90). */
   ref?: RecipeRefFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly UtensilFilter[];
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly UtensilFilter[];
 }

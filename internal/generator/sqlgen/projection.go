@@ -117,18 +117,15 @@ type ProjectionJoinClause struct {
 	On          string
 }
 
-// lookupEnum finds an enum by name in the schema or any dependency schema:
+// lookupEnum finds an enum by name in the schema or a dependency schema:
 // an enum a DB schema references often lives in a shared General schema,
-// which the loader does not merge into schema.Enums.
+// which the loader does not merge into schema.Enums. It is the first of
+// ir.LookupScopes that declares it: the schema, the dependency it imports
+// name from, then the others by service name, never in the order of a map
+// walk (D94).
 func lookupEnum(schema *ir.Schema, deps map[string]*ir.Schema, name string) *ir.EnumDef {
-	if enum := schema.Enums[name]; enum != nil {
-		return enum
-	}
-	for _, dep := range deps {
-		if dep == nil {
-			continue
-		}
-		if enum := dep.Enums[name]; enum != nil {
+	for _, scope := range ir.LookupScopes(schema, deps, name) {
+		if enum := scope.Schema.Enums[name]; enum != nil {
 			return enum
 		}
 	}

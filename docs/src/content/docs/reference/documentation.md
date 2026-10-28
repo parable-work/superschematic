@@ -317,7 +317,10 @@ so put the member's comment above the tag. The reader reads every
 comment on a member for the tag, and refuses one it would not read as
 the member's whole title: a tag in a `//` or `/* */` comment, a tag that
 is not the first word of its line, a tag on a member with a second
-`/** */` comment, a tag that wraps, an empty tag and a second tag. A word
+`/** */` comment, a tag in a comment a blank line parts from the member,
+which is not the member's comment (see
+[object types](/superschematic/guides/modeling-types/#object-types)), a
+tag that wraps, an empty tag and a second tag. A word
 that only begins with `@title`, such as `@titles` or `@title-case`, is
 comment text. Anywhere but on an enum's member, a `@title` line is
 comment text. These fail the load:
@@ -330,6 +333,7 @@ src/orders.schema.ts: enum OrderStatus member OnHold: @title must fit on its lin
 src/orders.schema.ts: enum OrderStatus member OnHold: @title is read from a JSDoc comment (/** @title … */), not a // or /* */ comment
 src/orders.schema.ts: enum OrderStatus member OnHold: @title must begin a line of the member's JSDoc comment
 src/orders.schema.ts: enum OrderStatus member OnHold: @title is read from the member's only JSDoc comment, and it has more than one
+src/orders.schema.ts: enum OrderStatus member OnHold: @title is read from the member's own comment, and a blank line parts this one from the member
 ```
 
 For example, a title that wraps onto a second line fails, where a reader
