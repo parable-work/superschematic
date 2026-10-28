@@ -218,6 +218,10 @@ Most are load errors; knowing them saves a build round-trip:
 - A path parameter is in braces and names an argument:
   `@rest(HttpMethod.GET, "orders/{id}/export")`. A router's `orders/:id`
   is refused.
+- The comment directly above a declaration is its documentation, in every
+  generated language, OpenAPI and `COMMENT ON`. Leave a blank line under a
+  note or a section banner (`// ---- Plaid ----`) that is not; a banner or
+  rule at a comment's head is dropped anyway.
 
 ## Starting a project
 

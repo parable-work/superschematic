@@ -36,9 +36,6 @@ export interface AccountLinesRow {
   amount: FinanceSignedMoney;
 }
 
-/**
- * BudgetsParams - ---- budgets: exact amounts from a day on ----------------------------------
- */
 export interface BudgetsParams {
   /** A parent's sub-categories alone; every category when null. */
   parentId?: IdentityUUID | null;
@@ -64,9 +61,6 @@ export interface Category {
   budgetSince?: TemporalDate | null;
 }
 
-/**
- * CategoryTotalsParams - ---- category totals: rolled up to the parent category ---------------------
- */
 export interface CategoryTotalsParams {
   start: TemporalDateTime;
   end: TemporalDateTime;
@@ -109,9 +103,6 @@ export interface TimeBucketsRow {
   lines: GenericInt64;
 }
 
-/**
- * TransactionListParams - ---- the transaction list: newest first, a page at a time ------------------
- */
 export interface TransactionListParams {
   start: TemporalDateTime;
   end: TemporalDateTime;
@@ -130,9 +121,6 @@ export interface TransactionListRow {
   categoryName?: IdentityName | null;
 }
 
-/**
- * TransferCandidatesParams - ---- transfer candidates: the other side of a move between accounts --------
- */
 export interface TransferCandidatesParams {
   lineItemId: IdentityUUID;
   windowDays: GenericInt64;

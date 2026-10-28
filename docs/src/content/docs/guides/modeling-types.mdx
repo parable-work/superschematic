@@ -26,7 +26,26 @@ shop reads its suppliers' product feeds as `FeedItem` rows:
   the file.
 - The comment above a type or a field becomes its documentation in every
   language, in OpenAPI and, for a table, in the SQL. Write it for the
-  reader of the API.
+  reader of the API. `//`, `/* */` and `/** */` comments read alike. The
+  documentation is the comments directly above the declaration: one that
+  a blank line parts from it is a note in the source, not its
+  documentation. A file's section markers are left out too: a rule
+  (`// -----`, `// =====`, `/* ***** */`), a banner (a title between two
+  runs, `// ---- Plaid ----`, `// === Accounts ===`) and a title between
+  two rules, at the head of a comment, with the empty lines after them,
+  and a rule at its tail. A rule between lines of text, and text that
+  holds dashes (`// Amount - in cents`), stay:
+
+  ```ts
+  // ---- Plaid ---------------------------------------------------------
+
+  // The state of a linked Plaid item.
+  export enum PlaidItemStatus {
+  ```
+
+  documents `PlaidItemStatus` as "The state of a linked Plaid item." A
+  `/** @title */` tag in a comment a blank line parts from an enum's
+  member fails the load, since the member's title would be lost.
 - `extends` copies the base class's fields, first, into the subclass. The
   base class is still generated as a type of its own. In a DB schema it is
   not a table: `shop-db`'s `Auditable` gives every table its timestamps.
