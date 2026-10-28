@@ -12725,3 +12725,80 @@ Left:
 - Hyperdrive to a Cloud SQL database the gcp target places, in one
   environment with Workers (mixing targets).
 - Managing the config's caching, or the config itself, from the stack.
+
+## D94. A service's config is the @envVars class no other @envVars class extends, and two that do not extend one another fail the load (D22, D34, D85 and D93 amended)
+
+The database-tables guide documents the `Encrypted<T>` key as a pair of
+`@envVars` classes: `FieldKeys`, which declares the secret the database's
+config names, and the API's settings, `FinancesConfig extends FieldKeys`.
+Each reader of "the schema's `@envVars` class" took the first a walk of
+`schema.Types`, a Go map, met (`findEnvVarsTypeIR`), and each build walks
+it afresh. Porting a finances API, one `build-all` wrote a TypeScript
+`config.ts` that loads `FinancesConfig` and a stack that read `FieldKeys`:
+every environment failed `unknown-env-key` on `EMBEDDING_MODEL`, "not a
+field of FieldKeys", minutes after `stack init` had reported it "of
+FinancesConfig". A build that chose `FieldKeys` throughout would have
+served without the API's settings. The handle took neither class: the
+sentinel gave a schema with two `@envVars` classes no config type, so the
+stack's `env` went unchecked.
+
+### The config
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A service's config is the `@envVars` class no other `@envVars` class of the schema extends, directly or through plain classes of the schema between them. `ir.Schema.EnvVarsType` is the one rule: it collects the `@envVars` classes by name, follows each one's `Extends` while it names a type of the schema, and returns the one class no other's chain reaches. The answer is a function of the schema alone, never of a walk's order. | The first `@envVars` class by name, which is deterministic and picks `FieldKeys`, the wrong one; one `@envVars` class per schema, which breaks the documented pair and a General service whose own `@envVars` class an API extends; a config that merges every `@envVars` class's fields, which has no class for the handle to name or a loader to return. |
+| The config's fields are its own and those of every class it extends. The IR already flattens them (`FieldDef.InheritedFrom` names the declaring class), so no reader folds anything: the Go, TypeScript and Rust loaders and `EnvConfig`, `values-schema.json`, a stack's `Config` and the handle's TypeScript class all read one list. Since a single leaf is reached from every other `@envVars` class, that list holds every `@envVars` field the schema declares. A secret keeps its declaring class's identity: `FieldKeys.FINANCES_DB_FIELD_KEYS` on a server whose config is `FinancesConfig`. | Each reader folding the bases' fields itself, which is how two readers come to disagree; the class's own fields alone, which would drop the key it inherits. |
+| Two or more `@envVars` classes no other extends, or classes that extend one another (which only a data form can write), are a load error from the verification pass (`checkEnvVarsTypes`), at the file of the first by name. It names each class and its file and says how to fix it: make one extend the other, or remove `@envVars` from one. `EnvVarsType` returns the same error, an `*ir.EnvVarsTypesError`, so every reader refuses an IR that did not come through the loader. | Choosing one and warning, the bug's own shape; a refusal at build alone, which names no file and which the stack and the handle would have needed again. |
+| Every reader takes the config from `EnvVarsType`: envgen, so every loader, `values-schema.json` and stackgen's `configOf` (`build`, `build-all`, `stack init`, `stack prepare`, the CI generator); `envVarsSecret`, which reads `outputs.sql.encryption.key` and `outputs.api.mcpConfirmationKey` in the config alone; and the sentinel's `ConfigTypeOf`, which now gives the documented pair's handle `FinancesConfig`, so tsc checks an environment's `env` against it. `checkDerivedFields` reports a field the config inherits from another `@envVars` class once, at the class that declares it. `tsgen`'s `HasEnvConfig` and `TakesIdentityConfigField` ask whether any `@envVars` class or field exists, which no walk changes, and stay. | A second helper per package, which is how the bug arose. |
+
+### Other lookups that took the first a map walk met
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Every range over a Go map in the twelve Go modules whose body returns, breaks or keeps the last match was listed (a one-off `go/packages` scan, 96 functions) and read. Those that pick one item now pick it by a rule: apigen's `findScalarDef` and sqlgen's `lookupEnum` take the first of `ir.LookupScopes`, the schema, the dependency that imports the name and then the others by name, as references already did; apigen's `resolveUUIDTypeExpr` takes the least by name of the scalars whose leaf is UUID; servergen's `namedOutputRoot` reads each Cargo dependency table by name. Two walks whose output followed the map's order are fixed too: typegen's `normalizeImportedGoType` matches a service qualifier only where a name begins, longest first, so `db.` no longer rewrites the tail of `shop-db.`; and the Go schema runtime's serializer writes undeclared keys sorted, as its comment said it did. | Refusing ambiguity in the dependency lookups, where the import names one dependency and `LookupScopes` already prefers it. |
+| The rest are left. A lookup guarded by a count of one: engineclientgen's `instanceTypeOf`, schemafile's `SingleDefinition`, yamlreader's `singleDefinitionComment`, the stack resolver's `serverLanguage`, `@environment`'s `dns` (the JSON Schema allows one key), and the one-key branches of `ir.DecodeValue` and pulumi's `value`. A predicate that asks whether any entry matches: `declaresVersionGraph`, `isUnion`, `isEnum`, `hasEncryptedFields`, `isQueryType`, `TakesIdentityConfigField`, `DirectoryExists`, `PackageAllowsKind`, `holdsAny`, `runsMigrations`, `preparesMigrations`, pulumi's `known`, `isJSONValue`, behaviortypes' `constraint` and toolsutil's `Holds`. And 67 functions that stop at the first entry that fails a check, a decode or a write, whose outcome is the same on every walk but whose message names whichever bad entry the walk met first: the decorator decoders in `internal/registry` (`indexDef`, `rawSQLDef`, `applyServiceCallers`, `appOf`, `deriverOf`, `enqueueOnChangeOf`, `enqueueConditions`, `CheckEnqueueOnChange`, `jobOf`, `channelOf`, `keyOf`, `queryOrderBy`, `queueOf`, `workerOf`, `roleSeedsOf`), `ParseOutputs`, `RegisterConnector`, `stack_deploy`'s `Check`, the tsreader's `siteConfig`, `siteDevConfig`, `versionedConfigFromDecorator`, `versionGraphFromDecorator` and `NewDeclarationProgram`, schemaconfig's `validateMemoryStores`, `validateCompositeObject`, schemafile's `canonicalizeDocument` and `checkSlotNames`, sqlgen's `collectCompositeDefaults`, rustgen's `runtimeSchemas` and `writeRuntimeSchemas`, servergen's `manifest`, memorystoregen's `GenerateTypeScript`, `sdktest.FlattenFieldErrors`, `ir`'s `CanonicalizeExtensions`, `CanonicalizeDocuments`, `ValidateOperationTransportMetadata`, `DisplayCurrency.UnmarshalYAML` and `DecodeValue`'s object branch, registrytest's `generateCatalog`, the local platform's `ProgramOf`, `containerOf`, `runOutputs`, `siteOf`, `apis` and `routes`, stackdeploy's `UnmarshalManifest`, `ReadPrepared` and `planSites`, `providerschema.JSONSchema`, `stacktest`'s `writeFiles`, `cli`'s `runBehaviors`, the agent catalog's `readPackages`, gcp's `Migrate`, pulumi's `collectExports`, topcoat's `decodeTable`, the HTTP runtime's `ParseFilters`, `checkMemberNames` and `newIssuer`, migrate's `ReadQueueDocument`, and the version graph's `Save`, `index`, `overlay`, `New`, `UpsertRow`, `upsert`, `image` and `readObject`. | Sorting each of them, which changes no outcome and touches every decoder; a lint that refuses an early exit from a map walk, which would flag all of these. |
+
+D22, amended: `load<Type>` loads the config, the `@envVars` class no
+other extends. D34, amended: a sentinel's type is that class. D85,
+amended: an API holds the key's field in its config, which may inherit it
+from another `@envVars` class, as the guide's pair does. D93, amended:
+`envVarsSecret` reads the config alone, not every `@envVars` class.
+
+Status: built.
+- **The rule.** `TestTheEnvVarsTypeIsTheOneNoOtherExtends` (`ir`) builds
+  each case's types in every order and asks 50 times per order: none,
+  one, the documented pair, a chain, a chain through a plain class, a
+  base from another service, two unrelated, two on one base, three, and
+  a cycle. `TestTheConfigIsTheEnvVarsClassNoOtherExtends` (envgen),
+  `TestConfigTypeOf` (sentinel), `TestEnvVarsTypesMakeOneConfig`
+  (verify) and `TestAnAPIOnAnEncryptedDatabaseHoldsItsKey` hold each
+  reader to it.
+- **The documented pair.** stackgen's `testdata/finances` is
+  `finances-db`, whose `Encrypted<T>` field's key is
+  `FieldKeys.FINANCES_DB_FIELD_KEYS`, `finances-api` with the guide's
+  pair, and `finances-stack`, whose environment sets `EMBEDDING_MODEL`.
+  `TestTheStackAndTheLoadersReadOneConfig` asks the stack, the
+  TypeScript, Go and Rust contracts and the handle 200 times and renders
+  each language's loader; `TestTheDocumentedEncryptedPairBuilds` builds
+  the API and then the stack ten times, and pins the types package's
+  `config.ts` (`loadFinancesConfig`), the API's `config.ts`,
+  `values-schema.json` and the resolved environment. Before this entry
+  the first failed at once with the stack reading `FieldKeys`, and the
+  second with `unknown-env-key`.
+- **The refusal.** `TestLoadRefusesTwoEnvVarsConfigs`: the
+  `broken-env-vars` fixture fails at `src/keys.schema.ts` naming both
+  classes, as do two unrelated classes in the data form; the pair and a
+  chain through a plain class load.
+- **The audit.** `TestTheUUIDTypeIsTheLeastByName` and
+  `TestImportedGoTypesRewriteEachQualifierOnce`.
+- **The finances draft.** With its schemas restored to the pair,
+  `build-all` ran ten times from clean output: each run resolved the
+  local, gcp and Cloudflare environments, byte for byte alike, with
+  `EMBEDDING_MODEL` bound and `FieldKeys.FINANCES_DB_FIELD_KEYS` a secret.
+
+Left: the first-error walks above, whose message can name another bad
+entry on another run; a check in CI for a new early exit from a map walk,
+for which the scan this entry used would be the start; and the walks that
+append in a map's order without sorting, which this audit did not cover
+and which the goldens pin where they reach generated output. The rule is
+reversible until the first release.

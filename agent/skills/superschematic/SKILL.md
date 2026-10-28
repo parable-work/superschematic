@@ -211,6 +211,11 @@ Most are load errors; knowing them saves a build round-trip:
   A `@jsonField` class, a `@queue` message, a `@projection`, a `@query`
   class and the params and row types it names, and a type that composes
   a behavior are not tables.
+- A service's config is the `@envVars` class no other `@envVars` class
+  extends; it holds the fields of each class it extends. Two `@envVars`
+  classes that do not extend one another fail the load: make the
+  settings class extend the one that declares a shared secret, as in
+  `@envVars FinancesConfig extends FieldKeys`.
 - A required date or time column has no default unless it is `createdAt`
   or `updatedAt`: a posting date an import leaves out fails `NOT NULL`.
   Declare `Default<Temporal.DateTime, "now">` (or `Temporal.Date`) where
