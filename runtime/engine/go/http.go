@@ -57,10 +57,17 @@ type Refusal struct {
 }
 
 // HTTPOptions are how a mount serves: the event stream's page size and
-// heartbeat, and the MCP endpoint's server info and instructions.
+// heartbeat, the MCP endpoint's server info and instructions, and whether
+// the request's Acting-For header is honored (D77).
 type HTTPOptions struct {
 	Stream *StreamOptions `json:"stream,omitempty"`
 	MCP    *MCPOptions    `json:"mcp,omitempty"`
+	// ActingFor is the subject a host's mount decided the caller acts for
+	// (D77), from the request's Acting-For header: the engine's principal
+	// then acts for exactly this subject, and the engine does not read the
+	// header again, so the subject the host's decision approved is the one
+	// every event records. Empty acts for no one.
+	ActingFor string `json:"actingFor,omitempty"`
 }
 
 // StreamOptions are the event stream's page size (1 to 500, 100 unless

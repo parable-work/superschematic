@@ -819,7 +819,7 @@
           {
             "json": "fields",
             "name": "Fields",
-            "doc": "By recorded field written since Provenance was added: { source, by, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; review is { state, by?, at? }, state proposed, accepted, rejected or edited.",
+            "doc": "By recorded field written since Provenance was added: { source, by, for?, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; for is the subject it acted for, when it acted for one (D77); review is { state, by?, at? }, state proposed, accepted, rejected or edited.",
             "shape": {
               "kind": "struct",
               "ref": "RequestProvenanceFields"
@@ -903,6 +903,13 @@
             }
           },
           {
+            "json": "for",
+            "name": "For",
+            "shape": {
+              "kind": "string"
+            }
+          },
+          {
             "json": "review",
             "name": "Review",
             "shape": {
@@ -979,6 +986,13 @@
             "name": "Confidence",
             "shape": {
               "kind": "number"
+            }
+          },
+          {
+            "json": "for",
+            "name": "For",
+            "shape": {
+              "kind": "string"
             }
           },
           {
@@ -1061,6 +1075,13 @@
             }
           },
           {
+            "json": "for",
+            "name": "For",
+            "shape": {
+              "kind": "string"
+            }
+          },
+          {
             "json": "review",
             "name": "Review",
             "shape": {
@@ -1137,6 +1158,13 @@
             "name": "Confidence",
             "shape": {
               "kind": "number"
+            }
+          },
+          {
+            "json": "for",
+            "name": "For",
+            "shape": {
+              "kind": "string"
             }
           },
           {

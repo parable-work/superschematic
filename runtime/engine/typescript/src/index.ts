@@ -22,10 +22,11 @@ export type { DerivationAnswer, DerivationItem, DerivationSource, DeriverOptions
 export type { UnsupportedGap } from './native/errors.js';
 export type { SqliteConnection } from './native/sqlite.js';
 
-export { SERVICE_SUBJECT_PREFIX, allowAll, permissionPolicy, servicePrincipal, standsIn } from './access.js';
+export { ACT_FOR_PERMISSION, SERVICE_SUBJECT_PREFIX, allowAll, permissionPolicy, servicePrincipal, standsIn } from './access.js';
 export type {
   AccessPolicy,
   AccessRequest,
+  ActingFor,
   Action,
   BehaviorAccessRequest,
   ListingAccessRequest,

@@ -10,7 +10,7 @@ import { afterEach, describe, test } from 'node:test';
 
 import { Hono } from 'hono';
 
-import { allowAll, openEngine, openEngineAsync, type AsyncEngine } from '../dist/index.js';
+import { allowAll, openEngine, openEngineAsync, permissionPolicy, type AsyncEngine } from '../dist/index.js';
 import { engineApp } from '../dist/http/index.js';
 import { openMetaSchema } from './behavior-fixtures.ts';
 import { alice, cleanup, freshPath, openTestEngine, orderDocument, schemaDocument } from './helpers.ts';
@@ -95,6 +95,38 @@ for (const backend of backends) {
       await assert.rejects(
         engine.behaviors.invoke(alice, { behavior: 'test.Nothing', operation: 'inbox', namespace: 'default' }),
         (error: Error & { code?: string }) => error.code === 'not_found' && error.message === 'this engine runs no behavior test.Nothing'
+      );
+    });
+
+    test('a principal acting for a subject (D77): permissionPolicy refuses it without actFor, its events record for, and engineApp honors the header when it opts in', async () => {
+      const engine = await openEngineAsync({ ...backend.options(), policy: permissionPolicy() } as never);
+      opened.push(engine);
+      const owner = { subject: 'owner', permissions: ['Order'] };
+      await engine.schemas.define(owner, orderDocument());
+      await engine.schemas.publish(owner, 'Order');
+      const agent = { subject: 'agent', permissions: ['Order'], actingFor: { subject: 'bob' } };
+      await assert.rejects(engine.instances.create(agent, 'Order', { title: 'Desk' }, { id: 'o1' }), (error: Error & { code?: string }) => error.code === 'forbidden');
+      const trusted = { ...agent, permissions: ['Order', 'actFor'] };
+      await engine.instances.create(trusted, 'Order', { title: 'Desk' }, { id: 'o1' });
+      await assert.rejects(
+        engine.instances.create({ ...trusted, actingFor: { subject: 'agent' } }, 'Order', { title: 'Desk' }),
+        (error: Error & { code?: string }) => error.code === 'invalid_argument'
+      );
+      const app = new Hono();
+      app.route('/api', engineApp(engine, { authenticate: async () => ({ subject: 'agent', permissions: ['Order', 'actFor'] }), actingFor: true }));
+      const created = await app.request('/api/namespaces/default/schemas/Order/instances', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'acting-for': 'carol' },
+        body: JSON.stringify({ id: 'o2', data: { title: 'Lamp' } }),
+      });
+      assert.equal(created.status, 201);
+      const { events } = (await engine.events.read(owner, { schema: 'Order' })) as { events: Array<{ kind: string; actor: string; for?: string }> };
+      assert.deepEqual(
+        events.filter((event) => event.kind === 'create').map((event) => [event.actor, event.for]),
+        [
+          ['agent', 'bob'],
+          ['agent', 'carol'],
+        ]
       );
     });
 

@@ -111,8 +111,8 @@ pub use namespaces::{
 pub use options::OPTION_MEMBERS;
 pub use paging::{DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE};
 pub use principal::{
-    actor_of, check_principal, Actor, Principal, PrincipalService, SERVICE_SUBJECT_PREFIX,
-    SYSTEM_SUBJECT,
+    acting_for_header_subject, actor_of, check_principal, ActingFor, Actor, Principal,
+    PrincipalService, SERVICE_SUBJECT_PREFIX, SYSTEM_SUBJECT,
 };
 pub use registry::{
     is_schema_name, ComposedBehavior, DefineOptions, NormalizeMode, Normalized, PublishResult,

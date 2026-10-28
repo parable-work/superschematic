@@ -14,15 +14,16 @@ use superschematic_engine::behaviors::ScheduleCx;
 use superschematic_engine::storage::SqlValue;
 use superschematic_engine::Result;
 
+use super::blocks::check_block_shapes;
 use super::checks::{
-    check_action_data, check_blocks, check_body, has_text, integer, invalid, moderates, not_author,
-    not_composing, object, present, veto, MAX_APPEND_BYTES,
+    check_blocks, check_body, has_text, integer, invalid, moderates, not_author, not_composing,
+    object, present, veto, MAX_APPEND_BYTES,
 };
 use super::storage::{
     keyed, move_counts, save_conversation, Message, Moves, COMPOSING, DELETED, DRAFTS, INTERRUPTED,
     MESSAGES, POSTED,
 };
-use super::writes::{after, check_reply, compact, next_message, retried, via, Cx};
+use super::writes::{after, check_reply, compact, for_of, next_message, retried, via, Cx};
 use super::CommentsConfig;
 
 /// How many idle messages the schedule reads at a time.
@@ -76,8 +77,8 @@ pub(super) fn begin(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
     let now = cx.now();
     cx.sql().run(
         format!(
-            "INSERT INTO {table} (namespace, schema, id, message, thread, quotes, author, via, state, body, blocks, mentions, created_at, posted_at, edited_at, edits, pinned, client_id, resolved_by, resolved_at, draft_length, last_append_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', '[]', '[]', ?, NULL, NULL, 0, 0, ?, NULL, NULL, 0, ?)"
+            "INSERT INTO {table} (namespace, schema, id, message, thread, quotes, author, for_subject, via, state, body, blocks, mentions, created_at, posted_at, edited_at, edits, pinned, client_id, resolved_by, resolved_at, draft_length, last_append_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '[]', '[]', ?, NULL, NULL, 0, 0, ?, NULL, NULL, 0, ?)"
         ),
         &keyed(
             cx,
@@ -86,6 +87,7 @@ pub(super) fn begin(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
                 thread.map_or(SqlValue::Null, SqlValue::Integer),
                 quotes.map_or(SqlValue::Null, SqlValue::Integer),
                 SqlValue::from(subject),
+                for_of(cx).map_or(SqlValue::Null, SqlValue::from),
                 via(cx).map_or(SqlValue::Null, SqlValue::from),
                 SqlValue::from(COMPOSING),
                 SqlValue::Integer(now),
@@ -262,9 +264,11 @@ fn stand(
             message.id,
             message.thread,
             &message.author,
+            message.for_subject.as_deref(),
             stand,
             mentions,
         )?;
+        super::search::index(cx, message.id, message.thread, body)?;
     }
     Ok(())
 }
@@ -275,7 +279,7 @@ pub(super) fn finish(cx: Cx<'_, '_>, params: &Value) -> Result<Value> {
     let blocks = params.get("blocks");
     let mentions = params.get("mentions");
     check_body(cx, OP, body)?;
-    check_action_data(OP, blocks)?;
+    check_block_shapes(OP, blocks)?;
     let message = composing_message(cx, OP, params)?;
     if message.author != cx.principal().subject {
         return Err(not_author(cx, OP, &message));

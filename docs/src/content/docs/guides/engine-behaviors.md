@@ -36,7 +36,7 @@ server does.
 | Behavior | What it adds | Requires | Covered in |
 | --- | --- | --- | --- |
 | `Workflow` | a `status` that moves only along declared transitions, each optionally behind a permission, and that a list filters on; `enteredAt`, when it last moved; an [outcome](#outcomes) for each terminal state | | [The engine](/superschematic/guides/engine/#workflow) |
-| `Comments` | a conversation on the instance: messages and their one-level threads, which their authors edit and delete and others react to, pin and resolve, every operation beside the instance; a reply streamed as it is written (`begin`, `appendDraft`, `finish`), the [signals](/superschematic/guides/engine/#signals) `typing`, `viewing` and `draft`, each reader's read markers and follows, and across the namespace an inbox and the deliveries a notifier or an agent dispatcher claims | | [The engine](/superschematic/guides/engine/#comments) |
+| `Comments` | a conversation on the instance: messages and their one-level threads, which their authors edit and delete and others react to, pin and resolve, every operation beside the instance; blocks beside a message's body (refs, action cards, code anchored at a revision, which `moveAnchor` moves, and attachments the deployment stores); a reply streamed as it is written (`begin`, `appendDraft`, `finish`), the [signals](/superschematic/guides/engine/#signals) `typing`, `viewing` and `draft`, each reader's read markers and follows, the pinned messages (`listPinned`), who a message was written for when its author acted for someone, and across the namespace an inbox, a search of the messages' bodies and the deliveries a notifier or an agent dispatcher claims | | [The engine](/superschematic/guides/engine/#comments) |
 | `Revisions` | a revision at every change, and an optional propose, approve and reject step | | [The engine](/superschematic/guides/engine/#revisions) |
 | `Dependencies` | blockers that hold a transition until they finish | `Workflow` | [Dependencies](#dependencies) |
 | `Links` | named links to instances of other schemas, optionally pinned to a revision or a release | | [Links](#links) |
@@ -413,8 +413,13 @@ more keys of the database's `outputs.engine` say how:
   `"permission"` unless set, which allows an action on a type to a caller
   holding `<Type>.<action>` (`Ticket.read`, `Ticket.write`,
   `Ticket.define`, `Ticket.publish`), the permissions the API's
-  `permissions.json` then lists; `"allowAll"`, for tests and local use; or
-  `{ "rules": [...] }`, the engine's ordered rules.
+  `permissions.json` then lists, and to a caller [acting for
+  someone](/superschematic/guides/engine/#callers-and-the-access-policy)
+  only when it also holds `actFor`; `"allowAll"`, for tests and local
+  use; or `{ "rules": [...] }`, the engine's ordered rules, where only a
+  rule that names `actingFor` allows a caller acting for someone, and a
+  deny that leaves it out refuses such a caller as it refuses one acting
+  as itself.
 - **`retention`** is how long the event log keeps events, as the engine's
   `retention` option reads it (see the runner below): `maxAgeMs`,
   `maxEvents` or both, and `maxHoldMs`, `everyMs` and `batchSize`, each
@@ -699,11 +704,12 @@ takes the operation's parameters and no instance id.
 An operation a behavior declares with `scope: "namespace"` runs on the
 behavior's own tables across every schema of a namespace that composes
 it, with no instance and no schema: "my mentions" or "what is unread"
-over every conversation. Comments declares three:
+over every conversation. Comments declares four:
 
 | Operation | What it does |
 | --- | --- |
 | `inbox` | the caller's mentions, the threads it follows with replies of others, and the conversations it has read with new top-level messages, newest first, read-only |
+| `searchMessages` | the messages whose bodies hold the query's words, ranked, over the schemas the caller may read, read-only |
 | `claimDeliveries` | claims due deliveries, one per message and subject that should hear of it, under a token that lapses |
 | `settleDeliveries` | settles claimed deliveries `sent`, `failed` (tried again after a backoff) or `dropped` |
 
@@ -1939,7 +1945,7 @@ some writes until a person accepts them.
 | | |
 | --- | --- |
 | Config | `fields`: the own top-level fields it records, every one when absent. `review`, optional: `sources`, the other behaviors the type composes whose writes enter review; `below`, a confidence at or above which a write is accepted with no reviewer (every write from a source is proposed when absent); `permission`, what a reviewer needs. `gates`, optional: by state of the type's Workflow, `{ reviewed }`, the recorded fields or `"all"` that a move into it requires out of review |
-| Fields | `fields`: by recorded field, its last write, `{ source, by, at, confidence?, review? }`; `source` is `caller` for a caller's create or update, else the behavior whose operation wrote it, `by` the principal's subject, `review` `{ state, by?, at? }` with a state of `proposed`, `accepted`, `rejected` or `edited`. `inReview`: whether any field is proposed, which a list filters on (`where: { "Provenance.inReview": true }`) |
+| Fields | `fields`: by recorded field, its last write, `{ source, by, for?, at, confidence?, review? }`; `source` is `caller` for a caller's create or update, else the behavior whose operation wrote it, `by` the principal's subject, `for` the subject it [acted for](/superschematic/guides/engine/#callers-and-the-access-policy), when it acted for one, `review` `{ state, by?, at? }` with a state of `proposed`, `accepted`, `rejected` or `edited`. `inReview`: whether any field is proposed, which a list filters on (`where: { "Provenance.inReview": true }`) |
 | Operations | `accept({ fields })`; `reject({ fields, patch? })`, which clears each field, or sets it to the patch's value, through its own `update()` |
 | Guard | a transition into a gated state while a field its gate lists is proposed is `vetoed` (`unreviewed_fields`), with `{ state, fields }` in `details.details` |
 | Vetoes | `not_recorded`; `not_in_review`, an accept or a reject of a field that is not proposed; `unreviewed_fields`. A caller without the review's `permission` is `forbidden` (403) to accept and to reject |

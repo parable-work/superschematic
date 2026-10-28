@@ -252,7 +252,7 @@ recorder to this.
 | `now` | For an engine with a fixed clock: the time the clock read during the step, in epoch milliseconds, when it read one time and that time differs from the last `now` of the engine. A replayer sets the engine's clock to it before the step. |
 | `clock` | For a fixed clock that read several times during the step (a test clock that counts up each time it is read): the times, in order. A replayer's clock returns them in order, then the last. |
 | `ids` | For an engine opened with `ids`: the ids the engine drew during the step, in order. A replayer's id source returns them in order. |
-| `dialect` | `"sqlite"` for a step whose answer is SQLite's: a call of Search's `search` or `similar` operations, the search across schemas (`search`), or a tool call of one, which rank with FTS5's bm25; and a read through the file's own SQL (`storage.get`, `storage.all`). On Postgres, a replayer makes the call but does not compare its answer, and skips a `storage` read. |
+| `dialect` | `"sqlite"` for a step whose answer is SQLite's: a call of Search's `search` or `similar` operations, the search across schemas (`search`), or a tool call of one, which rank with FTS5's bm25; a call of Comments' `searchMessages` (`behaviors.invoke`, or its tool), whose order and snippets are each database's own; and a read through the file's own SQL (`storage.get`, `storage.all`). On Postgres, a replayer makes the call but does not compare its answer, and skips a `storage` read. |
 | `js` | `true` for a step only the recording's own host can run. |
 
 The methods a step calls are the components' of `Engine` (`typescript/src/native/engine.ts`):

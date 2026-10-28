@@ -11,6 +11,7 @@ import { Hono } from 'hono';
 
 import { BehaviorError, EngineError, OperationParamsError, type AccessPolicy, type AccessRequest, type Engine } from '../dist/index.js';
 import { ENGINE_ERROR_STATUS, MERGE_PATCH_MEDIA_TYPE, engineApp, engineProblem, type EngineHttpOptions } from '../dist/http/index.js';
+import { engineMcp } from '../dist/mcp/index.js';
 import { counter, flag, hold, itemDocument, openMetaSchema, testBehaviors } from './behavior-fixtures.ts';
 import {
   alice,
@@ -37,6 +38,7 @@ const PERMISSIONS: Record<string, string[]> = {
   writer: ['write'],
   eastern: ['east:*'],
   nameless: ['*'],
+  agent: ['*', 'actFor'],
 };
 
 const authenticate: Authenticator = async (ctx) => {
@@ -47,7 +49,9 @@ const authenticate: Authenticator = async (ctx) => {
   return { subject: token === 'nameless' ? '' : token, permissions: PERMISSIONS[token] };
 };
 
+// A caller acts for someone else (D77) only when it holds actFor.
 const policy: AccessPolicy = ({ principal, action, namespace }) =>
+  (principal.actingFor === undefined || principal.permissions.includes('actFor')) &&
   principal.permissions.some((permission) => permission === '*' || permission === action || permission === `${namespace}:*`);
 
 const NAMESPACES = { names: ['east', 'west', 'common'], shared: 'common' };
@@ -67,7 +71,7 @@ interface Call {
   token?: string | null;
   body?: unknown;
   type?: string;
-  headers?: Record<string, string>;
+  headers?: Record<string, string> | [string, string][];
 }
 
 async function call(app: Hono, method: string, path: string, options: Call = {}): Promise<Response> {
@@ -922,6 +926,181 @@ describe('service callers', () => {
     const { app } = withService({ authenticateService, authenticate: undefined });
     await data(call(app, 'GET', ORDERS, { token: null, headers: service('worker') }));
     assert.equal((await problem(call(app, 'GET', ORDERS, { token: 'bob', headers: service('worker') }), 401)).code, 'unauthorized');
+  });
+});
+
+describe('acting for a subject (D77)', () => {
+  // The for an instance's create event recorded.
+  const forOf = (engine: Engine, id: string) => engine.events.read(everything, { schema: 'Order', instanceId: id }).events[0]?.for;
+  const actingFor = (subject: string) => ({ 'acting-for': subject });
+
+  test('a mount ignores the Acting-For header unless it opts in: the request is answered as if it were not there', async () => {
+    const { app, engine } = await withOrders();
+    await data(call(app, 'POST', ORDERS, { token: 'agent', headers: actingFor('bob'), body: { id: 'o1', data: { title: 'Desk' } } }), 201);
+    assert.equal(forOf(engine, 'o1'), undefined);
+    // Not even a subject that is the caller's own is looked at.
+    await data(call(app, 'POST', ORDERS, { token: 'agent', headers: actingFor('agent'), body: { id: 'o2', data: { title: 'Desk' } } }), 201);
+  });
+
+  test('actingFor true honors the header for any caller, the policy decides, and every event the call writes records for', async () => {
+    const { app, engine } = await withOrders({ actingFor: true });
+    const created = await data(call(app, 'POST', ORDERS, { token: 'agent', headers: actingFor(' bob '), body: { id: 'o1', data: { title: 'Desk' } } }), 201);
+    assert.equal(created.createdBy, 'agent');
+    assert.equal(forOf(engine, 'o1'), 'bob');
+    await data(call(app, 'PATCH', `${ORDERS}/o1`, { token: 'agent', headers: actingFor('bob'), body: { title: 'Lamp' } }));
+    const events = await data(call(app, 'GET', '/namespaces/default/events?schema=Order&instanceId=o1', { token: 'agent' }));
+    assert.deepEqual(
+      events.events.map((logged: { kind: string; actor: string; for?: string }) => [logged.kind, logged.actor, logged.for]),
+      [
+        ['create', 'agent', 'bob'],
+        ['update', 'agent', 'bob'],
+      ]
+    );
+    // No header, or an empty one, acts for no one.
+    await data(call(app, 'POST', ORDERS, { token: 'agent', body: { id: 'o2', data: { title: 'Desk' } } }), 201);
+    await data(call(app, 'POST', ORDERS, { token: 'agent', headers: actingFor(' '), body: { id: 'o3', data: { title: 'Desk' } } }), 201);
+    assert.deepEqual([forOf(engine, 'o2'), forOf(engine, 'o3')], [undefined, undefined]);
+    // The policy refuses a caller without actFor; the engine refuses a
+    // subject that is the caller's own.
+    assert.equal((await problem(call(app, 'POST', ORDERS, { token: 'alice', headers: actingFor('bob'), body: { data: { title: 'Desk' } } }), 403)).code, 'forbidden');
+    assert.equal((await problem(call(app, 'POST', ORDERS, { token: 'agent', headers: actingFor('agent'), body: { data: { title: 'Desk' } } }), 400)).code, 'invalid_argument');
+  });
+
+  test('a function decides per request, given the principal, the subject and the request', async () => {
+    const seen: string[] = [];
+    const { app, engine } = await withOrders({
+      actingFor: (principal, subject, request) => {
+        seen.push(`${principal.subject} for ${subject} on ${request.method}`);
+        return subject !== 'carol';
+      },
+    });
+    await data(call(app, 'POST', ORDERS, { token: 'agent', headers: actingFor('bob'), body: { id: 'o1', data: { title: 'Desk' } } }), 201);
+    await data(call(app, 'POST', ORDERS, { token: 'agent', headers: actingFor('carol'), body: { id: 'o2', data: { title: 'Desk' } } }), 201);
+    assert.deepEqual([forOf(engine, 'o1'), forOf(engine, 'o2')], ['bob', undefined]);
+    assert.deepEqual(seen, ['agent for bob on POST', 'agent for carol on POST']);
+    assert.throws(() => engineApp(engine, { authenticate, actingFor: 'yes' as never }), /actingFor is true, false or a function/);
+  });
+
+  test('one rule reads the header: ASCII whitespace is trimmed, and a second header, a comma, a control or other whitespace is refused', async () => {
+    const seen: string[] = [];
+    // A function that refuses role: subjects sees the subject the engine
+    // records, so no spelling of one gets past it.
+    const deciding = await withOrders({
+      actingFor: (_principal, subject) => {
+        seen.push(subject);
+        return !subject.startsWith('role:');
+      },
+    });
+    const honoring = await withOrders({ actingFor: true });
+    for (const { app, engine } of [deciding, honoring]) {
+      const create = (id: string, headers: Record<string, string> | [string, string][]) =>
+        call(app, 'POST', ORDERS, { token: 'agent', headers, body: { id, data: { title: 'Desk' } } });
+      await data(create('o1', actingFor('\t bob \r')), 201);
+      assert.equal(forOf(engine, 'o1'), 'bob');
+      for (const [id, headers] of [
+        // U+0085 is whitespace to Rust and to Unicode, but not to JavaScript's trim.
+        ['o2', actingFor('\u0085role:admins')],
+        ['o3', actingFor('role:admins\u00a0')],
+        // A header is bytes, which fetch reads as Latin-1: U+2028 sent as
+        // UTF-8 arrives as \u00e2\u0080\u00a8, whose U+0080 is a control.
+        ['o4', actingFor('bob\u00e2\u0080\u00a8')],
+        ['o5', actingFor('b ob')],
+        ['o6', actingFor('bob, role:admins')],
+        ['o7', [['acting-for', 'bob'], ['acting-for', 'role:admins']]],
+      ] as const) {
+        const refused = await problem(create(id, headers as Record<string, string> | [string, string][]), 400);
+        assert.equal(refused.code, 'invalid_argument', id);
+        assert.equal(forOf(engine, id), undefined);
+      }
+    }
+    await data(call(deciding.app, 'POST', ORDERS, { token: 'agent', headers: actingFor('role:admins'), body: { id: 'o8', data: { title: 'Desk' } } }), 201);
+    assert.equal(forOf(deciding.engine, 'o8'), undefined);
+    assert.deepEqual(seen, ['bob', 'role:admins']);
+  });
+
+  test('an agent acting for Alice replies over HTTP: the reply is for her, she hears nothing of it, and searchMessages finds it', async () => {
+    const { app, engine } = serve({ actingFor: true });
+    const review = schemaDocument('Review', [{ name: 'title', typeRef: { name: 'string' }, required: true }]) as { types: { Review: Record<string, unknown> } };
+    review.types.Review.behaviors = [{ name: 'Comments', config: { deliverPermission: 'comments.notify' } }];
+    await data(call(app, 'POST', '/namespaces/default/schemas', { body: review }));
+    await data(call(app, 'POST', '/namespaces/default/schemas/Review/publish'));
+    const REVIEWS = '/namespaces/default/schemas/Review/instances';
+    await data(call(app, 'POST', REVIEWS, { body: { id: 'r1', data: { title: 'Q3 plan' } } }), 201);
+    const post = (token: string, body: Record<string, unknown>, headers: Record<string, string> = {}) =>
+      data(call(app, 'POST', `${REVIEWS}/r1/operations/post`, { token, headers, body }));
+    const thread = await post('alice', { body: 'Can someone check the totals?' });
+    await post('bob', { body: 'Looking.', thread: thread.id });
+    // The agent holds actFor and the mount honors the header: the reply is
+    // the agent's, written for Alice, mentioning her.
+    const reply = await post('agent', { body: 'Totals are off by one in March', thread: thread.id, mentions: ['alice'] }, actingFor('alice'));
+    assert.deepEqual([reply.author, reply.for], ['agent', 'alice']);
+    const [event] = engine.events.read(everything, { schema: 'Review', instanceId: 'r1', beside: true }).events.slice(-1);
+    assert.deepEqual([event?.actor, event?.for], ['agent', 'alice']);
+    // Alice gets no delivery of it, though mentioned and following; Bob
+    // does, as a follower.
+    const notifier = { subject: 'notifier', permissions: ['read', 'write', 'comments.notify'] };
+    const claimed = engine.behaviors.invoke(notifier, { behavior: 'Comments', operation: 'claimDeliveries', params: { limit: 10 } }) as { items: Array<Record<string, unknown>> };
+    assert.deepEqual(
+      claimed.items.filter((item) => item.message === reply.id).map((item) => [item.subject, item.reasons, item.author, item.for]),
+      [['bob', ['reply'], 'agent', 'alice']]
+    );
+    // searchMessages finds it, with whom it was for. (Its words match from
+    // its first to its last, so both databases write the same snippet.)
+    const found = await data(call(app, 'POST', '/namespaces/default/behaviors/Comments/operations/searchMessages', { token: 'alice', body: { query: 'totals march' } }));
+    assert.deepEqual(
+      found.items.map((item: Record<string, unknown>) => [item.instanceId, item.message, item.thread, item.author, item.for, item.rank]),
+      [['r1', reply.id, thread.id, 'agent', 'alice', 1]]
+    );
+    assert.deepEqual(found.items[0].snippet, [
+      { text: 'Totals', match: true },
+      { text: ' are off by one in ', match: false },
+      { text: 'March', match: true },
+    ]);
+    assert.equal(found.next, null);
+  });
+
+  test('the MCP endpoint honors the header as the routes do', async () => {
+    const engine = openTestEngine({ policy, namespaces: NAMESPACES });
+    engine.schemas.define(everything, orderDocument());
+    engine.schemas.publish(everything, 'Order');
+    const create = async (app: Hono, id: string) => {
+      const response = await app.request('/namespaces/default/mcp', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer agent',
+          'acting-for': 'bob',
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+          'mcp-protocol-version': '2025-06-18',
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'order_create', arguments: { id, data: { title: 'Desk' } } } }),
+      });
+      assert.equal(response.status, 200);
+      const text = await response.text();
+      assert.match(text, new RegExp(`"id":"${id}"`));
+      return forOf(engine, id);
+    };
+    assert.equal(await create(servedApp(engineMcp, engine, { authenticate }, 'mcp'), 'o1'), undefined);
+    assert.equal(await create(servedApp(engineMcp, engine, { authenticate, actingFor: true }, 'mcp'), 'o2'), 'bob');
+  });
+
+  test('a service acting for its end user cannot act for another; a service standing in may', async () => {
+    const authenticateService: ServiceAuthenticator = async (ctx) => {
+      const header = ctx.headers.get('service-authorization');
+      return header === null ? null : { deployable: 'worker', serves: ['worker-api'], subject: 'sa-worker' };
+    };
+    const served = serve(
+      { authenticateService, actingFor: true },
+      { policy: (request) => policy(request) || request.principal.service?.deployable === 'worker' }
+    );
+    served.engine.schemas.define(everything, orderDocument());
+    served.engine.schemas.publish(everything, 'Order');
+    const worker = { 'service-authorization': 'Bearer worker' };
+    const refused = await problem(call(served.app, 'POST', ORDERS, { token: 'bob', headers: { ...worker, ...actingFor('carol') }, body: { data: { title: 'Desk' } } }), 400);
+    assert.equal(refused.code, 'invalid_argument');
+    await data(call(served.app, 'POST', ORDERS, { token: null, headers: { ...worker, ...actingFor('carol') }, body: { id: 'o1', data: { title: 'Desk' } } }), 201);
+    const [event] = served.engine.events.read(everything, { schema: 'Order', instanceId: 'o1' }).events;
+    assert.deepEqual([event.actor, event.service, event.for], ['service:worker', 'worker', 'carol']);
   });
 });
 

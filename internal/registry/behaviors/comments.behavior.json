@@ -1,6 +1,6 @@
 {
   "name": "Comments",
-  "description": "A conversation on the instance: messages, each top-level or a reply in the thread of a top-level one, one level deep, which their authors edit and delete, others react to and pin, and whose threads are resolved and reopened. A message may be streamed as it is written: begin holds its place as composing, appendDraft adds to its draft and sends the draft signal to the streams open on the instance, and finish posts it; one whose author stops appending for composeTimeoutMs is interrupted, keeping what was written. Readers send typing and viewing, signals the engine delivers and does not keep. Each caller has a read marker on the conversation and on each thread, which markRead moves, and follows the threads it posts in, is mentioned in, or follows with follow. Each message that comes to stand, and each edit that adds a mention, records a delivery for each subject it mentions and each follower of its thread but its author, which a notifier or an agent dispatcher outside the engine claims and settles with claimDeliveries and settleDeliveries; the engine sends nothing. inbox reads a caller's mentions, followed threads and read conversations across every schema of the namespace it may read. Every writing operation on an instance is beside the instance: it writes Comments' own tables, never moves the instance's seq, ETag or updatedAt, and runs none of its guards, so a lease on the instance does not stop a reply. A caller who may read the instance reads the conversation; the policy is asked write for a writing operation, post included. Deleting the instance deletes its conversation, with its read markers, follows and deliveries.",
+  "description": "A conversation on the instance: messages, each top-level or a reply in the thread of a top-level one, one level deep, which their authors edit and delete, others react to and pin, and whose threads are resolved and reopened. A message may be streamed as it is written: begin holds its place as composing, appendDraft adds to its draft and sends the draft signal to the streams open on the instance, and finish posts it; one whose author stops appending for composeTimeoutMs is interrupted, keeping what was written. Readers send typing and viewing, signals the engine delivers and does not keep. Each caller has a read marker on the conversation and on each thread, which markRead moves, and follows the threads it posts in, is mentioned in, or follows with follow. Each message that comes to stand, and each edit that adds a mention, records a delivery for each subject it mentions and each follower of its thread but its author, which a notifier or an agent dispatcher outside the engine claims and settles with claimDeliveries and settleDeliveries; the engine sends nothing. inbox reads a caller's mentions, followed threads and read conversations across every schema of the namespace it may read, and searchMessages searches the bodies of the messages that stand. A message written by an agent or a service acting for someone records that subject as for: the subject follows its thread and hears of it from no delivery, as its author does, while its author, the caller, is the one whose read markers, follows, reactions and drafts it writes; acting for someone grants nothing an author or a permission holder may do. Besides ref and action blocks, a message may hold code blocks, a place in code at a revision with the text captured when it was posted, which moveAnchor moves to the same code at a newer revision, and attachment blocks, the description of a file the deployment stores. Every writing operation on an instance is beside the instance: it writes Comments' own tables, never moves the instance's seq, ETag or updatedAt, and runs none of its guards, so a lease on the instance does not stop a reply. A caller who may read the instance reads the conversation; the policy is asked write for a writing operation, post included. Deleting the instance deletes its conversation, with its read markers, follows, deliveries and search index.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -24,18 +24,45 @@
         "maximum": 50
       },
       "blocks": {
-        "description": "The block kinds a post, an edit or a finish may give; every kind when absent, none when empty.",
+        "description": "The block kinds a post, an edit or a finish may give: ref, action, code and attachment; every kind when absent, none when empty.",
         "type": "array",
         "uniqueItems": true,
-        "items": { "enum": ["ref", "action"] }
+        "items": { "enum": ["ref", "action", "code", "attachment"] }
+      },
+      "attachments": {
+        "description": "What an attachment block may describe. The engine keeps a file's description, never its bytes: the deployment stores and serves the file, through an upload route of its own.",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "maxBytes": { "description": "The largest file an attachment block may describe, in bytes; no limit when absent.", "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+          "mediaTypes": {
+            "description": "The media types an attachment may have, each type/subtype or type/* in lower case; any when absent.",
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "maxLength": 255, "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/([a-z0-9][a-z0-9!#$&^_.+-]{0,126}|\\*)$" }
+          },
+          "schemes": {
+            "description": "The URI schemes an attachment's uri may use, in lower case: https and bucket, say, for files a deployment serves from a bucket by a scheme of its own. https alone when absent. Schemes that run code or carry the bytes themselves are refused.",
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^[a-z][a-z0-9+.-]{0,31}$", "not": { "enum": ["javascript", "vbscript", "data", "file", "blob", "about"] } }
+          }
+        }
       },
       "moderatePermission": {
-        "description": "The permission that lets a caller edit, delete and interrupt another's message, edit past editWindowMs, and purge. Absent, only a message's author edits, deletes or interrupts it before composeTimeoutMs passes, and nobody purges.",
+        "description": "The permission that lets a caller edit, delete and interrupt another's message, edit past editWindowMs, move the anchor of a code block on another's message, and purge. Absent, only a message's author edits, deletes or interrupts it before composeTimeoutMs passes, and nobody purges.",
         "type": "string",
         "minLength": 1
       },
       "pinPermission": { "description": "The permission a caller needs to pin and unpin. Absent, any caller the policy lets write may.", "type": "string", "minLength": 1 },
       "resolvePermission": { "description": "The permission that lets a caller resolve and reopen another's thread. Absent, only a thread's author does.", "type": "string", "minLength": 1 },
+      "anchorPermission": {
+        "description": "The permission that lets a caller move the anchor of a code block on another's message with moveAnchor, as a git extension does after a push. Absent, only the message's author and a caller holding moderatePermission may.",
+        "type": "string",
+        "minLength": 1
+      },
       "deliverPermission": {
         "description": "The permission a notifier or an agent dispatcher needs to claim and settle the deliveries of this type's messages, beside the policy's Comments.claimDeliveries and Comments.settleDeliveries. Absent, nobody claims them, and they serve only the inbox.",
         "type": "string",
@@ -80,7 +107,7 @@
   "operations": [
     {
       "name": "post",
-      "description": "Posts a message as the caller: top-level, or a reply in the thread of a top-level message, which may quote a message of that thread. A composing message has no thread to reply in and cannot be quoted. A ref block's instance must be one the caller may read, and each block's kind one the config allows. A retry with the clientId of a message the caller posted or began returns that message and posts nothing.",
+      "description": "Posts a message as the caller: top-level, or a reply in the thread of a top-level message, which may quote a message of that thread. A composing message has no thread to reply in and cannot be quoted. A ref block's instance must be one the caller may read, each block's kind one the config allows, and an attachment's uri scheme, media type and size ones the config's attachments allow. A caller acting for someone records that subject as the message's for. A retry with the clientId of a message the caller posted or began returns that message and posts nothing.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -118,6 +145,34 @@
                     "status": { "description": "Where it stands.", "enum": ["running", "succeeded", "failed"] },
                     "data": { "description": "What a client shows with it, at most 8192 bytes as compact JSON.", "type": "object" }
                   }
+                },
+                {
+                  "description": "A place in code at a revision, with the text captured when it was posted, so a reader sees it with no repository; moveAnchor moves it to the same code at a newer revision. The engine knows no repository: finding where the code went is the caller's.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind", "repo", "path", "revision", "lines", "snippet"],
+                  "properties": {
+                    "kind": { "const": "code" },
+                    "repo": { "description": "The repository, as the deployment names it: github.com/acme/shop, say.", "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\x00-\\x20\\x7F]+$" },
+                    "path": { "description": "The file's path in the repository, its parts joined by /: no leading or trailing /, no \\, and no empty, . or .. part.", "type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^[^\\x00-\\x1F\\x7F]+$" },
+                    "revision": { "description": "The revision the lines are at: a commit's id, as the repository names it.", "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\x00-\\x20\\x7F]+$" },
+                    "lines": { "description": "The first and the last line, counted from 1, both included; the first is at most the last.", "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "integer", "minimum": 1, "maximum": 2147483647 } },
+                    "snippet": { "description": "The text of those lines at that revision, as the poster captured it, at most 8000 code points.", "type": "string", "maxLength": 8000 }
+                  }
+                },
+                {
+                  "description": "A file the deployment stored, in a bucket say, through an upload route of its own: the engine keeps this description, not the bytes. Its uri's scheme, its mediaType and its bytes are held to the config's attachments.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind", "uri", "name", "mediaType", "bytes", "sha256"],
+                  "properties": {
+                    "kind": { "const": "attachment" },
+                    "uri": { "description": "Where the deployment keeps the file: an https URL with a host, or a URI of a scheme the config's attachments.schemes lists (bucket:shop-files/7c1e, say).", "type": "string", "minLength": 3, "maxLength": 2048, "pattern": "^[a-z][a-z0-9+.-]{0,31}:[^\\x00-\\x20\\x7F]+$" },
+                    "name": { "description": "The file's name as a reader sees it, at most 255 code points: no / or \\, no control character, and not white space alone.", "type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[^/\\\\\\x00-\\x1F\\x7F]*[^/\\\\\\s\\x00-\\x1F\\x7F][^/\\\\\\x00-\\x1F\\x7F]*$" },
+                    "mediaType": { "description": "The file's media type, type/subtype in lower case with no parameters: image/png, text/plain.", "type": "string", "maxLength": 255, "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$" },
+                    "bytes": { "description": "The file's size in bytes.", "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+                    "sha256": { "description": "The SHA-256 of the file's bytes, 64 lower-case hexadecimal digits, so a reader can check what it downloads.", "type": "string", "pattern": "^[0-9a-f]{64}$" }
+                  }
                 }
               ]
             }
@@ -144,6 +199,7 @@
           "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
           "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
           "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "for": { "description": "The subject the message was written for: the person the agent or service that posted or began it acted for (D77); absent when it acted for nobody.", "type": "string" },
           "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
           "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
           "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
@@ -151,10 +207,10 @@
             "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
             "type": "array",
             "items": {
-              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "description": "A block as it was posted: ref { kind, schema, id }; action { kind, title, status, data? }; code { kind, repo, path, revision, lines, snippet }, which once moveAnchor moved it also holds original { revision, lines }, the anchor it was given with, moves, movedAt, movedBy and movedFor?; or attachment { kind, uri, name, mediaType, bytes, sha256 }.",
               "type": "object",
               "required": ["kind"],
-              "properties": { "kind": { "enum": ["ref", "action"] } }
+              "properties": { "kind": { "enum": ["ref", "action", "code", "attachment"] } }
             }
           },
           "mentions": {
@@ -189,11 +245,15 @@
             "items": { "type": "string" }
           },
           "resolved": {
-            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "description": "On a top-level message whose thread is resolved: who resolved it, for whom when it acted for someone, and when.",
             "type": "object",
             "additionalProperties": false,
             "required": ["by", "at"],
-            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+            "properties": {
+              "by": { "type": "string" },
+              "for": { "description": "The subject the caller who resolved it acted for, when it acted for someone.", "type": "string" },
+              "at": { "description": "In epoch milliseconds.", "type": "integer" }
+            }
           }
         }
       },
@@ -202,7 +262,7 @@
     },
     {
       "name": "begin",
-      "description": "Begins a message as the caller, composing: it takes its id and its place in the conversation now, top-level or a reply in the thread of a top-level message, which may quote a message of that thread, and shows the caller as writing. Its author adds the text with appendDraft and posts it with finish; one whose author appends nothing for the config's composeTimeoutMs is interrupted. Nothing is counted until it is finished or interrupted. A caller may have at most the config's maxDrafts composing messages on the instance. A retry with the clientId of a message the caller posted or began returns that message and begins nothing.",
+      "description": "Begins a message as the caller, composing: it takes its id and its place in the conversation now, top-level or a reply in the thread of a top-level message, which may quote a message of that thread, and shows the caller as writing. Its author adds the text with appendDraft and posts it with finish; one whose author appends nothing for the config's composeTimeoutMs is interrupted. Nothing is counted until it is finished or interrupted. A caller may have at most the config's maxDrafts composing messages on the instance. A caller acting for someone records that subject as the message's for; finish and interrupt keep it. A retry with the clientId of a message the caller posted or began returns that message and begins nothing.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -222,6 +282,7 @@
           "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
           "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
           "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "for": { "description": "The subject the message was written for: the person the agent or service that posted or began it acted for (D77); absent when it acted for nobody.", "type": "string" },
           "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
           "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
           "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
@@ -229,10 +290,10 @@
             "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
             "type": "array",
             "items": {
-              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "description": "A block as it was posted: ref { kind, schema, id }; action { kind, title, status, data? }; code { kind, repo, path, revision, lines, snippet }, which once moveAnchor moved it also holds original { revision, lines }, the anchor it was given with, moves, movedAt, movedBy and movedFor?; or attachment { kind, uri, name, mediaType, bytes, sha256 }.",
               "type": "object",
               "required": ["kind"],
-              "properties": { "kind": { "enum": ["ref", "action"] } }
+              "properties": { "kind": { "enum": ["ref", "action", "code", "attachment"] } }
             }
           },
           "mentions": {
@@ -267,11 +328,15 @@
             "items": { "type": "string" }
           },
           "resolved": {
-            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "description": "On a top-level message whose thread is resolved: who resolved it, for whom when it acted for someone, and when.",
             "type": "object",
             "additionalProperties": false,
             "required": ["by", "at"],
-            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+            "properties": {
+              "by": { "type": "string" },
+              "for": { "description": "The subject the caller who resolved it acted for, when it acted for someone.", "type": "string" },
+              "at": { "description": "In epoch milliseconds.", "type": "integer" }
+            }
           }
         }
       },
@@ -347,6 +412,34 @@
                     "status": { "description": "Where it stands.", "enum": ["running", "succeeded", "failed"] },
                     "data": { "description": "What a client shows with it, at most 8192 bytes as compact JSON.", "type": "object" }
                   }
+                },
+                {
+                  "description": "A place in code at a revision, with the text captured when it was posted, so a reader sees it with no repository; moveAnchor moves it to the same code at a newer revision. The engine knows no repository: finding where the code went is the caller's.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind", "repo", "path", "revision", "lines", "snippet"],
+                  "properties": {
+                    "kind": { "const": "code" },
+                    "repo": { "description": "The repository, as the deployment names it: github.com/acme/shop, say.", "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\x00-\\x20\\x7F]+$" },
+                    "path": { "description": "The file's path in the repository, its parts joined by /: no leading or trailing /, no \\, and no empty, . or .. part.", "type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^[^\\x00-\\x1F\\x7F]+$" },
+                    "revision": { "description": "The revision the lines are at: a commit's id, as the repository names it.", "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\x00-\\x20\\x7F]+$" },
+                    "lines": { "description": "The first and the last line, counted from 1, both included; the first is at most the last.", "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "integer", "minimum": 1, "maximum": 2147483647 } },
+                    "snippet": { "description": "The text of those lines at that revision, as the poster captured it, at most 8000 code points.", "type": "string", "maxLength": 8000 }
+                  }
+                },
+                {
+                  "description": "A file the deployment stored, in a bucket say, through an upload route of its own: the engine keeps this description, not the bytes. Its uri's scheme, its mediaType and its bytes are held to the config's attachments.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind", "uri", "name", "mediaType", "bytes", "sha256"],
+                  "properties": {
+                    "kind": { "const": "attachment" },
+                    "uri": { "description": "Where the deployment keeps the file: an https URL with a host, or a URI of a scheme the config's attachments.schemes lists (bucket:shop-files/7c1e, say).", "type": "string", "minLength": 3, "maxLength": 2048, "pattern": "^[a-z][a-z0-9+.-]{0,31}:[^\\x00-\\x20\\x7F]+$" },
+                    "name": { "description": "The file's name as a reader sees it, at most 255 code points: no / or \\, no control character, and not white space alone.", "type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[^/\\\\\\x00-\\x1F\\x7F]*[^/\\\\\\s\\x00-\\x1F\\x7F][^/\\\\\\x00-\\x1F\\x7F]*$" },
+                    "mediaType": { "description": "The file's media type, type/subtype in lower case with no parameters: image/png, text/plain.", "type": "string", "maxLength": 255, "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$" },
+                    "bytes": { "description": "The file's size in bytes.", "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+                    "sha256": { "description": "The SHA-256 of the file's bytes, 64 lower-case hexadecimal digits, so a reader can check what it downloads.", "type": "string", "pattern": "^[0-9a-f]{64}$" }
+                  }
                 }
               ]
             }
@@ -370,6 +463,7 @@
           "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
           "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
           "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "for": { "description": "The subject the message was written for: the person the agent or service that posted or began it acted for (D77); absent when it acted for nobody.", "type": "string" },
           "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
           "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
           "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
@@ -377,10 +471,10 @@
             "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
             "type": "array",
             "items": {
-              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "description": "A block as it was posted: ref { kind, schema, id }; action { kind, title, status, data? }; code { kind, repo, path, revision, lines, snippet }, which once moveAnchor moved it also holds original { revision, lines }, the anchor it was given with, moves, movedAt, movedBy and movedFor?; or attachment { kind, uri, name, mediaType, bytes, sha256 }.",
               "type": "object",
               "required": ["kind"],
-              "properties": { "kind": { "enum": ["ref", "action"] } }
+              "properties": { "kind": { "enum": ["ref", "action", "code", "attachment"] } }
             }
           },
           "mentions": {
@@ -415,11 +509,15 @@
             "items": { "type": "string" }
           },
           "resolved": {
-            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "description": "On a top-level message whose thread is resolved: who resolved it, for whom when it acted for someone, and when.",
             "type": "object",
             "additionalProperties": false,
             "required": ["by", "at"],
-            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+            "properties": {
+              "by": { "type": "string" },
+              "for": { "description": "The subject the caller who resolved it acted for, when it acted for someone.", "type": "string" },
+              "at": { "description": "In epoch milliseconds.", "type": "integer" }
+            }
           }
         }
       },
@@ -446,6 +544,7 @@
           "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
           "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
           "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "for": { "description": "The subject the message was written for: the person the agent or service that posted or began it acted for (D77); absent when it acted for nobody.", "type": "string" },
           "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
           "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
           "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
@@ -453,10 +552,10 @@
             "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
             "type": "array",
             "items": {
-              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "description": "A block as it was posted: ref { kind, schema, id }; action { kind, title, status, data? }; code { kind, repo, path, revision, lines, snippet }, which once moveAnchor moved it also holds original { revision, lines }, the anchor it was given with, moves, movedAt, movedBy and movedFor?; or attachment { kind, uri, name, mediaType, bytes, sha256 }.",
               "type": "object",
               "required": ["kind"],
-              "properties": { "kind": { "enum": ["ref", "action"] } }
+              "properties": { "kind": { "enum": ["ref", "action", "code", "attachment"] } }
             }
           },
           "mentions": {
@@ -491,11 +590,15 @@
             "items": { "type": "string" }
           },
           "resolved": {
-            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "description": "On a top-level message whose thread is resolved: who resolved it, for whom when it acted for someone, and when.",
             "type": "object",
             "additionalProperties": false,
             "required": ["by", "at"],
-            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+            "properties": {
+              "by": { "type": "string" },
+              "for": { "description": "The subject the caller who resolved it acted for, when it acted for someone.", "type": "string" },
+              "at": { "description": "In epoch milliseconds.", "type": "integer" }
+            }
           }
         }
       },
@@ -505,7 +608,7 @@
     },
     {
       "name": "edit",
-      "description": "Replaces a posted or interrupted message's body, blocks or mentions, keeping what it held before for listEdits; an edit by its author posts an interrupted message. Its author may, within the config's editWindowMs of its postedAt when it sets one; a caller holding moderatePermission may edit any message, at any time. A ref block not on the message before must name an instance the caller may read.",
+      "description": "Replaces a posted or interrupted message's body, blocks or mentions, keeping what it held before for listEdits; an edit by its author posts an interrupted message. Its author may, within the config's editWindowMs of its postedAt when it sets one; a caller holding moderatePermission may edit any message, at any time. A ref block not on the message before must name an instance the caller may read, and an attachment not on it before must be one the config's attachments allow; a code block equal to the one at its place before keeps its moves. Acting for the author is not being it: only the author's own subject, or moderatePermission, may edit.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -544,6 +647,34 @@
                     "status": { "description": "Where it stands.", "enum": ["running", "succeeded", "failed"] },
                     "data": { "description": "What a client shows with it, at most 8192 bytes as compact JSON.", "type": "object" }
                   }
+                },
+                {
+                  "description": "A place in code at a revision, with the text captured when it was posted, so a reader sees it with no repository; moveAnchor moves it to the same code at a newer revision. The engine knows no repository: finding where the code went is the caller's.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind", "repo", "path", "revision", "lines", "snippet"],
+                  "properties": {
+                    "kind": { "const": "code" },
+                    "repo": { "description": "The repository, as the deployment names it: github.com/acme/shop, say.", "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\x00-\\x20\\x7F]+$" },
+                    "path": { "description": "The file's path in the repository, its parts joined by /: no leading or trailing /, no \\, and no empty, . or .. part.", "type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^[^\\x00-\\x1F\\x7F]+$" },
+                    "revision": { "description": "The revision the lines are at: a commit's id, as the repository names it.", "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\x00-\\x20\\x7F]+$" },
+                    "lines": { "description": "The first and the last line, counted from 1, both included; the first is at most the last.", "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "integer", "minimum": 1, "maximum": 2147483647 } },
+                    "snippet": { "description": "The text of those lines at that revision, as the poster captured it, at most 8000 code points.", "type": "string", "maxLength": 8000 }
+                  }
+                },
+                {
+                  "description": "A file the deployment stored, in a bucket say, through an upload route of its own: the engine keeps this description, not the bytes. Its uri's scheme, its mediaType and its bytes are held to the config's attachments.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind", "uri", "name", "mediaType", "bytes", "sha256"],
+                  "properties": {
+                    "kind": { "const": "attachment" },
+                    "uri": { "description": "Where the deployment keeps the file: an https URL with a host, or a URI of a scheme the config's attachments.schemes lists (bucket:shop-files/7c1e, say).", "type": "string", "minLength": 3, "maxLength": 2048, "pattern": "^[a-z][a-z0-9+.-]{0,31}:[^\\x00-\\x20\\x7F]+$" },
+                    "name": { "description": "The file's name as a reader sees it, at most 255 code points: no / or \\, no control character, and not white space alone.", "type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[^/\\\\\\x00-\\x1F\\x7F]*[^/\\\\\\s\\x00-\\x1F\\x7F][^/\\\\\\x00-\\x1F\\x7F]*$" },
+                    "mediaType": { "description": "The file's media type, type/subtype in lower case with no parameters: image/png, text/plain.", "type": "string", "maxLength": 255, "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$" },
+                    "bytes": { "description": "The file's size in bytes.", "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+                    "sha256": { "description": "The SHA-256 of the file's bytes, 64 lower-case hexadecimal digits, so a reader can check what it downloads.", "type": "string", "pattern": "^[0-9a-f]{64}$" }
+                  }
                 }
               ]
             }
@@ -567,6 +698,7 @@
           "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
           "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
           "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "for": { "description": "The subject the message was written for: the person the agent or service that posted or began it acted for (D77); absent when it acted for nobody.", "type": "string" },
           "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
           "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
           "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
@@ -574,10 +706,10 @@
             "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
             "type": "array",
             "items": {
-              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "description": "A block as it was posted: ref { kind, schema, id }; action { kind, title, status, data? }; code { kind, repo, path, revision, lines, snippet }, which once moveAnchor moved it also holds original { revision, lines }, the anchor it was given with, moves, movedAt, movedBy and movedFor?; or attachment { kind, uri, name, mediaType, bytes, sha256 }.",
               "type": "object",
               "required": ["kind"],
-              "properties": { "kind": { "enum": ["ref", "action"] } }
+              "properties": { "kind": { "enum": ["ref", "action", "code", "attachment"] } }
             }
           },
           "mentions": {
@@ -612,11 +744,15 @@
             "items": { "type": "string" }
           },
           "resolved": {
-            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "description": "On a top-level message whose thread is resolved: who resolved it, for whom when it acted for someone, and when.",
             "type": "object",
             "additionalProperties": false,
             "required": ["by", "at"],
-            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+            "properties": {
+              "by": { "type": "string" },
+              "for": { "description": "The subject the caller who resolved it acted for, when it acted for someone.", "type": "string" },
+              "at": { "description": "In epoch milliseconds.", "type": "integer" }
+            }
           }
         }
       },
@@ -642,6 +778,7 @@
           "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
           "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
           "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "for": { "description": "The subject the message was written for: the person the agent or service that posted or began it acted for (D77); absent when it acted for nobody.", "type": "string" },
           "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
           "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
           "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
@@ -649,10 +786,10 @@
             "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
             "type": "array",
             "items": {
-              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "description": "A block as it was posted: ref { kind, schema, id }; action { kind, title, status, data? }; code { kind, repo, path, revision, lines, snippet }, which once moveAnchor moved it also holds original { revision, lines }, the anchor it was given with, moves, movedAt, movedBy and movedFor?; or attachment { kind, uri, name, mediaType, bytes, sha256 }.",
               "type": "object",
               "required": ["kind"],
-              "properties": { "kind": { "enum": ["ref", "action"] } }
+              "properties": { "kind": { "enum": ["ref", "action", "code", "attachment"] } }
             }
           },
           "mentions": {
@@ -687,11 +824,15 @@
             "items": { "type": "string" }
           },
           "resolved": {
-            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "description": "On a top-level message whose thread is resolved: who resolved it, for whom when it acted for someone, and when.",
             "type": "object",
             "additionalProperties": false,
             "required": ["by", "at"],
-            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+            "properties": {
+              "by": { "type": "string" },
+              "for": { "description": "The subject the caller who resolved it acted for, when it acted for someone.", "type": "string" },
+              "at": { "description": "In epoch milliseconds.", "type": "integer" }
+            }
           }
         }
       },
@@ -746,6 +887,7 @@
           "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
           "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
           "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "for": { "description": "The subject the message was written for: the person the agent or service that posted or began it acted for (D77); absent when it acted for nobody.", "type": "string" },
           "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
           "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
           "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
@@ -753,10 +895,10 @@
             "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
             "type": "array",
             "items": {
-              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "description": "A block as it was posted: ref { kind, schema, id }; action { kind, title, status, data? }; code { kind, repo, path, revision, lines, snippet }, which once moveAnchor moved it also holds original { revision, lines }, the anchor it was given with, moves, movedAt, movedBy and movedFor?; or attachment { kind, uri, name, mediaType, bytes, sha256 }.",
               "type": "object",
               "required": ["kind"],
-              "properties": { "kind": { "enum": ["ref", "action"] } }
+              "properties": { "kind": { "enum": ["ref", "action", "code", "attachment"] } }
             }
           },
           "mentions": {
@@ -791,11 +933,15 @@
             "items": { "type": "string" }
           },
           "resolved": {
-            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "description": "On a top-level message whose thread is resolved: who resolved it, for whom when it acted for someone, and when.",
             "type": "object",
             "additionalProperties": false,
             "required": ["by", "at"],
-            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+            "properties": {
+              "by": { "type": "string" },
+              "for": { "description": "The subject the caller who resolved it acted for, when it acted for someone.", "type": "string" },
+              "at": { "description": "In epoch milliseconds.", "type": "integer" }
+            }
           }
         }
       },
@@ -824,6 +970,7 @@
           "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
           "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
           "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "for": { "description": "The subject the message was written for: the person the agent or service that posted or began it acted for (D77); absent when it acted for nobody.", "type": "string" },
           "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
           "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
           "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
@@ -831,10 +978,10 @@
             "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
             "type": "array",
             "items": {
-              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "description": "A block as it was posted: ref { kind, schema, id }; action { kind, title, status, data? }; code { kind, repo, path, revision, lines, snippet }, which once moveAnchor moved it also holds original { revision, lines }, the anchor it was given with, moves, movedAt, movedBy and movedFor?; or attachment { kind, uri, name, mediaType, bytes, sha256 }.",
               "type": "object",
               "required": ["kind"],
-              "properties": { "kind": { "enum": ["ref", "action"] } }
+              "properties": { "kind": { "enum": ["ref", "action", "code", "attachment"] } }
             }
           },
           "mentions": {
@@ -869,11 +1016,15 @@
             "items": { "type": "string" }
           },
           "resolved": {
-            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "description": "On a top-level message whose thread is resolved: who resolved it, for whom when it acted for someone, and when.",
             "type": "object",
             "additionalProperties": false,
             "required": ["by", "at"],
-            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+            "properties": {
+              "by": { "type": "string" },
+              "for": { "description": "The subject the caller who resolved it acted for, when it acted for someone.", "type": "string" },
+              "at": { "description": "In epoch milliseconds.", "type": "integer" }
+            }
           }
         }
       },
@@ -899,6 +1050,7 @@
           "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
           "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
           "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "for": { "description": "The subject the message was written for: the person the agent or service that posted or began it acted for (D77); absent when it acted for nobody.", "type": "string" },
           "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
           "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
           "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
@@ -906,10 +1058,10 @@
             "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
             "type": "array",
             "items": {
-              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "description": "A block as it was posted: ref { kind, schema, id }; action { kind, title, status, data? }; code { kind, repo, path, revision, lines, snippet }, which once moveAnchor moved it also holds original { revision, lines }, the anchor it was given with, moves, movedAt, movedBy and movedFor?; or attachment { kind, uri, name, mediaType, bytes, sha256 }.",
               "type": "object",
               "required": ["kind"],
-              "properties": { "kind": { "enum": ["ref", "action"] } }
+              "properties": { "kind": { "enum": ["ref", "action", "code", "attachment"] } }
             }
           },
           "mentions": {
@@ -944,11 +1096,15 @@
             "items": { "type": "string" }
           },
           "resolved": {
-            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "description": "On a top-level message whose thread is resolved: who resolved it, for whom when it acted for someone, and when.",
             "type": "object",
             "additionalProperties": false,
             "required": ["by", "at"],
-            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+            "properties": {
+              "by": { "type": "string" },
+              "for": { "description": "The subject the caller who resolved it acted for, when it acted for someone.", "type": "string" },
+              "at": { "description": "In epoch milliseconds.", "type": "integer" }
+            }
           }
         }
       },
@@ -974,6 +1130,7 @@
           "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
           "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
           "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "for": { "description": "The subject the message was written for: the person the agent or service that posted or began it acted for (D77); absent when it acted for nobody.", "type": "string" },
           "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
           "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
           "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
@@ -981,10 +1138,10 @@
             "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
             "type": "array",
             "items": {
-              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "description": "A block as it was posted: ref { kind, schema, id }; action { kind, title, status, data? }; code { kind, repo, path, revision, lines, snippet }, which once moveAnchor moved it also holds original { revision, lines }, the anchor it was given with, moves, movedAt, movedBy and movedFor?; or attachment { kind, uri, name, mediaType, bytes, sha256 }.",
               "type": "object",
               "required": ["kind"],
-              "properties": { "kind": { "enum": ["ref", "action"] } }
+              "properties": { "kind": { "enum": ["ref", "action", "code", "attachment"] } }
             }
           },
           "mentions": {
@@ -1019,11 +1176,15 @@
             "items": { "type": "string" }
           },
           "resolved": {
-            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "description": "On a top-level message whose thread is resolved: who resolved it, for whom when it acted for someone, and when.",
             "type": "object",
             "additionalProperties": false,
             "required": ["by", "at"],
-            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+            "properties": {
+              "by": { "type": "string" },
+              "for": { "description": "The subject the caller who resolved it acted for, when it acted for someone.", "type": "string" },
+              "at": { "description": "In epoch milliseconds.", "type": "integer" }
+            }
           }
         }
       },
@@ -1049,6 +1210,7 @@
           "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
           "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
           "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "for": { "description": "The subject the message was written for: the person the agent or service that posted or began it acted for (D77); absent when it acted for nobody.", "type": "string" },
           "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
           "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
           "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
@@ -1056,10 +1218,10 @@
             "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
             "type": "array",
             "items": {
-              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "description": "A block as it was posted: ref { kind, schema, id }; action { kind, title, status, data? }; code { kind, repo, path, revision, lines, snippet }, which once moveAnchor moved it also holds original { revision, lines }, the anchor it was given with, moves, movedAt, movedBy and movedFor?; or attachment { kind, uri, name, mediaType, bytes, sha256 }.",
               "type": "object",
               "required": ["kind"],
-              "properties": { "kind": { "enum": ["ref", "action"] } }
+              "properties": { "kind": { "enum": ["ref", "action", "code", "attachment"] } }
             }
           },
           "mentions": {
@@ -1094,11 +1256,15 @@
             "items": { "type": "string" }
           },
           "resolved": {
-            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "description": "On a top-level message whose thread is resolved: who resolved it, for whom when it acted for someone, and when.",
             "type": "object",
             "additionalProperties": false,
             "required": ["by", "at"],
-            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+            "properties": {
+              "by": { "type": "string" },
+              "for": { "description": "The subject the caller who resolved it acted for, when it acted for someone.", "type": "string" },
+              "at": { "description": "In epoch milliseconds.", "type": "integer" }
+            }
           }
         }
       },
@@ -1124,6 +1290,7 @@
           "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
           "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
           "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "for": { "description": "The subject the message was written for: the person the agent or service that posted or began it acted for (D77); absent when it acted for nobody.", "type": "string" },
           "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
           "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
           "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
@@ -1131,10 +1298,10 @@
             "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
             "type": "array",
             "items": {
-              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "description": "A block as it was posted: ref { kind, schema, id }; action { kind, title, status, data? }; code { kind, repo, path, revision, lines, snippet }, which once moveAnchor moved it also holds original { revision, lines }, the anchor it was given with, moves, movedAt, movedBy and movedFor?; or attachment { kind, uri, name, mediaType, bytes, sha256 }.",
               "type": "object",
               "required": ["kind"],
-              "properties": { "kind": { "enum": ["ref", "action"] } }
+              "properties": { "kind": { "enum": ["ref", "action", "code", "attachment"] } }
             }
           },
           "mentions": {
@@ -1169,11 +1336,100 @@
             "items": { "type": "string" }
           },
           "resolved": {
-            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "description": "On a top-level message whose thread is resolved: who resolved it, for whom when it acted for someone, and when.",
             "type": "object",
             "additionalProperties": false,
             "required": ["by", "at"],
-            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+            "properties": {
+              "by": { "type": "string" },
+              "for": { "description": "The subject the caller who resolved it acted for, when it acted for someone.", "type": "string" },
+              "at": { "description": "In epoch milliseconds.", "type": "integer" }
+            }
+          }
+        }
+      },
+      "writes": true,
+      "beside": true
+    },
+    {
+      "name": "moveAnchor",
+      "description": "Moves a code block of a posted or interrupted message to the same code at another revision, where a caller that knows the repository found it, a git extension after a push say: the block takes revision and lines and keeps its snippet, and records the anchor it was first given with as original, how many times it moved, and who moved it last and when; each move's event holds the steps between. It is not an edit: the message's text, editedAt, edits and edit window are untouched. Its author may move it; another caller needs the config's anchorPermission or moderatePermission.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message", "block", "revision", "lines"],
+        "properties": {
+          "message": { "description": "The id of the message.", "type": "integer", "minimum": 1 },
+          "block": { "description": "The code block's index in the message's blocks, from 0.", "type": "integer", "minimum": 0, "maximum": 19 },
+          "revision": { "description": "The revision the code is at now: a commit's id, as the repository names it.", "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\x00-\\x20\\x7F]+$" },
+          "lines": { "description": "The first and the last line of the same code at that revision, counted from 1, both included; the first is at most the last.", "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "integer", "minimum": 1, "maximum": 2147483647 } }
+        }
+      },
+      "resultSchema": {
+        "description": "The message, its code block moved.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "author", "state", "body", "blocks", "mentions", "reactions", "createdAt", "edits", "pinned"],
+        "properties": {
+          "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
+          "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
+          "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
+          "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "for": { "description": "The subject the message was written for: the person the agent or service that posted or began it acted for (D77); absent when it acted for nobody.", "type": "string" },
+          "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
+          "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
+          "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
+          "blocks": {
+            "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
+            "type": "array",
+            "items": {
+              "description": "A block as it was posted: ref { kind, schema, id }; action { kind, title, status, data? }; code { kind, repo, path, revision, lines, snippet }, which once moveAnchor moved it also holds original { revision, lines }, the anchor it was given with, moves, movedAt, movedBy and movedFor?; or attachment { kind, uri, name, mediaType, bytes, sha256 }.",
+              "type": "object",
+              "required": ["kind"],
+              "properties": { "kind": { "enum": ["ref", "action", "code", "attachment"] } }
+            }
+          },
+          "mentions": {
+            "description": "The subjects the message names for someone to hear of it; none once deleted.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "reactions": {
+            "description": "The reactions, by emoji, in the order each emoji was first given: how many, and whether the caller is among them. None once deleted.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["count", "mine"],
+              "properties": {
+                "count": { "type": "integer" },
+                "mine": { "description": "Whether the caller reacted with the emoji.", "type": "boolean" }
+              }
+            }
+          },
+          "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
+          "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
+          "stand": { "description": "The message's place in the order the conversation's messages came to stand: 1, 2, 3, ... on the instance, given when it is posted, finished or interrupted and never changed. A streamed reply that began early and finished late stands after the messages posted meanwhile, so a reader compares it, not the id, with its read marker. Absent while composing, and on a message deleted while composing.", "type": "integer" },
+          "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
+          "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
+          "pinned": { "type": "boolean" },
+          "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
+          "lastReplyAt": { "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
+          "participants": {
+            "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "resolved": {
+            "description": "On a top-level message whose thread is resolved: who resolved it, for whom when it acted for someone, and when.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["by", "at"],
+            "properties": {
+              "by": { "type": "string" },
+              "for": { "description": "The subject the caller who resolved it acted for, when it acted for someone.", "type": "string" },
+              "at": { "description": "In epoch milliseconds.", "type": "integer" }
+            }
           }
         }
       },
@@ -1263,6 +1519,7 @@
                 "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
                 "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
                 "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+                "for": { "description": "The subject the message was written for: the person the agent or service that posted or began it acted for (D77); absent when it acted for nobody.", "type": "string" },
                 "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
                 "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
                 "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
@@ -1270,10 +1527,10 @@
                   "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
                   "type": "array",
                   "items": {
-                    "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+                    "description": "A block as it was posted: ref { kind, schema, id }; action { kind, title, status, data? }; code { kind, repo, path, revision, lines, snippet }, which once moveAnchor moved it also holds original { revision, lines }, the anchor it was given with, moves, movedAt, movedBy and movedFor?; or attachment { kind, uri, name, mediaType, bytes, sha256 }.",
                     "type": "object",
                     "required": ["kind"],
-                    "properties": { "kind": { "enum": ["ref", "action"] } }
+                    "properties": { "kind": { "enum": ["ref", "action", "code", "attachment"] } }
                   }
                 },
                 "mentions": {
@@ -1308,11 +1565,15 @@
                   "items": { "type": "string" }
                 },
                 "resolved": {
-                  "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+                  "description": "On a top-level message whose thread is resolved: who resolved it, for whom when it acted for someone, and when.",
                   "type": "object",
                   "additionalProperties": false,
                   "required": ["by", "at"],
-                  "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+                  "properties": {
+                    "by": { "type": "string" },
+                    "for": { "description": "The subject the caller who resolved it acted for, when it acted for someone.", "type": "string" },
+                    "at": { "description": "In epoch milliseconds.", "type": "integer" }
+                  }
                 }
               }
             }
@@ -1339,6 +1600,7 @@
               "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
               "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
               "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+              "for": { "description": "The subject the message was written for: the person the agent or service that posted or began it acted for (D77); absent when it acted for nobody.", "type": "string" },
               "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
               "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
               "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
@@ -1346,10 +1608,10 @@
                 "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
                 "type": "array",
                 "items": {
-                  "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+                  "description": "A block as it was posted: ref { kind, schema, id }; action { kind, title, status, data? }; code { kind, repo, path, revision, lines, snippet }, which once moveAnchor moved it also holds original { revision, lines }, the anchor it was given with, moves, movedAt, movedBy and movedFor?; or attachment { kind, uri, name, mediaType, bytes, sha256 }.",
                   "type": "object",
                   "required": ["kind"],
-                  "properties": { "kind": { "enum": ["ref", "action"] } }
+                  "properties": { "kind": { "enum": ["ref", "action", "code", "attachment"] } }
                 }
               },
               "mentions": {
@@ -1384,11 +1646,15 @@
                 "items": { "type": "string" }
               },
               "resolved": {
-                "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+                "description": "On a top-level message whose thread is resolved: who resolved it, for whom when it acted for someone, and when.",
                 "type": "object",
                 "additionalProperties": false,
                 "required": ["by", "at"],
-                "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+                "properties": {
+                  "by": { "type": "string" },
+                  "for": { "description": "The subject the caller who resolved it acted for, when it acted for someone.", "type": "string" },
+                  "at": { "description": "In epoch milliseconds.", "type": "integer" }
+                }
               }
             }
           }
@@ -1414,6 +1680,7 @@
           "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
           "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
           "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+          "for": { "description": "The subject the message was written for: the person the agent or service that posted or began it acted for (D77); absent when it acted for nobody.", "type": "string" },
           "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
           "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
           "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
@@ -1421,10 +1688,10 @@
             "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
             "type": "array",
             "items": {
-              "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+              "description": "A block as it was posted: ref { kind, schema, id }; action { kind, title, status, data? }; code { kind, repo, path, revision, lines, snippet }, which once moveAnchor moved it also holds original { revision, lines }, the anchor it was given with, moves, movedAt, movedBy and movedFor?; or attachment { kind, uri, name, mediaType, bytes, sha256 }.",
               "type": "object",
               "required": ["kind"],
-              "properties": { "kind": { "enum": ["ref", "action"] } }
+              "properties": { "kind": { "enum": ["ref", "action", "code", "attachment"] } }
             }
           },
           "mentions": {
@@ -1459,11 +1726,15 @@
             "items": { "type": "string" }
           },
           "resolved": {
-            "description": "On a top-level message whose thread is resolved: who resolved it and when.",
+            "description": "On a top-level message whose thread is resolved: who resolved it, for whom when it acted for someone, and when.",
             "type": "object",
             "additionalProperties": false,
             "required": ["by", "at"],
-            "properties": { "by": { "type": "string" }, "at": { "description": "In epoch milliseconds.", "type": "integer" } }
+            "properties": {
+              "by": { "type": "string" },
+              "for": { "description": "The subject the caller who resolved it acted for, when it acted for someone.", "type": "string" },
+              "at": { "description": "In epoch milliseconds.", "type": "integer" }
+            }
           }
         }
       }
@@ -1499,14 +1770,15 @@
                   "description": "The blocks before the edit.",
                   "type": "array",
                   "items": {
-                    "description": "A block as it was posted: ref { kind, schema, id }, or action { kind, title, status, data? }.",
+                    "description": "A block as it was posted: ref { kind, schema, id }; action { kind, title, status, data? }; code { kind, repo, path, revision, lines, snippet }, which once moveAnchor moved it also holds original { revision, lines }, the anchor it was given with, moves, movedAt, movedBy and movedFor?; or attachment { kind, uri, name, mediaType, bytes, sha256 }.",
                     "type": "object",
                     "required": ["kind"],
-                    "properties": { "kind": { "enum": ["ref", "action"] } }
+                    "properties": { "kind": { "enum": ["ref", "action", "code", "attachment"] } }
                   }
                 },
                 "mentions": { "description": "The mentions before the edit.", "type": "array", "items": { "type": "string" } },
                 "by": { "description": "The subject of the caller who made the edit.", "type": "string" },
+                "for": { "description": "The subject the caller who made the edit acted for, when it acted for someone.", "type": "string" },
                 "at": { "description": "When, in epoch milliseconds.", "type": "integer" }
               }
             }
@@ -1542,7 +1814,99 @@
               "required": ["subject", "at"],
               "properties": {
                 "subject": { "description": "The subject of the caller who reacted.", "type": "string" },
+                "for": { "description": "The subject the caller who reacted acted for, when it acted for someone.", "type": "string" },
                 "at": { "description": "When, in epoch milliseconds.", "type": "integer" }
+              }
+            }
+          },
+          "next": { "description": "The cursor of the next page; null after the last.", "type": ["string", "null"] }
+        }
+      }
+    },
+    {
+      "name": "listPinned",
+      "description": "Lists the conversation's pinned messages, top-level and replies, in ascending id order, one page at a time. Only a posted or interrupted message is pinned: a deleted one loses its pin, and a composing one cannot take one.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit": { "description": "At most this many messages; 50 when absent.", "type": "integer", "minimum": 1, "maximum": 100 },
+          "cursor": { "description": "The next of the previous page.", "type": "string" }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["items", "next"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "description": "A pinned message.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "author", "state", "body", "blocks", "mentions", "reactions", "createdAt", "edits", "pinned"],
+              "properties": {
+                "id": { "description": "The message's number on the instance: 1, 2, 3, ...; never reused.", "type": "integer" },
+                "thread": { "description": "For a reply, the id of the top-level message whose thread it is in; absent on a top-level message.", "type": "integer" },
+                "quotes": { "description": "The id of the message of the thread the reply quotes.", "type": "integer" },
+                "author": { "description": "The subject of the caller who posted or began it.", "type": "string" },
+                "for": { "description": "The subject the message was written for: the person the agent or service that posted or began it acted for (D77); absent when it acted for nobody.", "type": "string" },
+                "via": { "description": "The deployable of the service whose call posted or began it (D37).", "type": "string" },
+                "state": { "description": "composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text.", "enum": ["composing", "posted", "interrupted", "deleted"] },
+                "body": { "description": "The text, Markdown: the draft so far while composing; empty once deleted.", "type": "string" },
+                "blocks": {
+                  "description": "The structured parts a client renders beside the body, as posted or last edited; none once deleted.",
+                  "type": "array",
+                  "items": {
+                    "description": "A block as it was posted: ref { kind, schema, id }; action { kind, title, status, data? }; code { kind, repo, path, revision, lines, snippet }, which once moveAnchor moved it also holds original { revision, lines }, the anchor it was given with, moves, movedAt, movedBy and movedFor?; or attachment { kind, uri, name, mediaType, bytes, sha256 }.",
+                    "type": "object",
+                    "required": ["kind"],
+                    "properties": { "kind": { "enum": ["ref", "action", "code", "attachment"] } }
+                  }
+                },
+                "mentions": {
+                  "description": "The subjects the message names for someone to hear of it; none once deleted.",
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "reactions": {
+                  "description": "The reactions, by emoji, in the order each emoji was first given: how many, and whether the caller is among them. None once deleted.",
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["count", "mine"],
+                    "properties": {
+                      "count": { "type": "integer" },
+                      "mine": { "description": "Whether the caller reacted with the emoji.", "type": "boolean" }
+                    }
+                  }
+                },
+                "createdAt": { "description": "When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes.", "type": "integer" },
+                "postedAt": { "description": "When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing.", "type": "integer" },
+                "stand": { "description": "The message's place in the order the conversation's messages came to stand: 1, 2, 3, ... on the instance, given when it is posted, finished or interrupted and never changed. A streamed reply that began early and finished late stands after the messages posted meanwhile, so a reader compares it, not the id, with its read marker. Absent while composing, and on a message deleted while composing.", "type": "integer" },
+                "editedAt": { "description": "When it was last edited, in epoch milliseconds; absent when it never was, or once deleted.", "type": "integer" },
+                "edits": { "description": "How many times it was edited; listEdits reads the text before each. 0 once deleted.", "type": "integer" },
+                "pinned": { "type": "boolean" },
+                "replies": { "description": "On a top-level message: how many posted or interrupted replies its thread has.", "type": "integer" },
+                "lastReplyAt": { "description": "On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none.", "type": "integer" },
+                "participants": {
+                  "description": "On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10.",
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "resolved": {
+                  "description": "On a top-level message whose thread is resolved: who resolved it, for whom when it acted for someone, and when.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["by", "at"],
+                  "properties": {
+                    "by": { "type": "string" },
+                    "for": { "description": "The subject the caller who resolved it acted for, when it acted for someone.", "type": "string" },
+                    "at": { "description": "In epoch milliseconds.", "type": "integer" }
+                  }
+                }
               }
             }
           },
@@ -1590,6 +1954,7 @@
                 "message": { "description": "The id of the message the item shows.", "type": "integer" },
                 "thread": { "description": "The id of the thread's top-level message, when the message is a reply; on a thread item, the thread followed.", "type": "integer" },
                 "author": { "description": "The message's author.", "type": "string" },
+                "for": { "description": "The subject the message was written for, when its author acted for someone.", "type": "string" },
                 "postedAt": { "description": "When the message came to stand, in epoch milliseconds: the item's place in the inbox.", "type": "integer" },
                 "excerpt": { "description": "The message's body with each run of white space made one space, at most 200 code points, ending with an ellipsis when cut.", "type": "string" },
                 "unread": { "description": "On a mention, 1 while the caller has not read the message and 0 after; on a thread or a conversation, how many messages of others stand above the caller's marker. 0 makes the item done.", "type": "integer" }
@@ -1597,6 +1962,63 @@
             }
           },
           "next": { "description": "The cursor of the next page; null after the last.", "type": ["string", "null"] }
+        }
+      },
+      "scope": "namespace"
+    },
+    {
+      "name": "searchMessages",
+      "description": "Searches the bodies of the posted and interrupted messages of every schema of the namespace that composes Comments and that the caller may read, best match first: a message is found when its body holds each word of query, in any order, case and diacritics aside. schema narrows the search to one type, instanceId to one conversation, and thread to one thread, its top-level message and its replies. A composing message's draft, a deleted message and the text before an edit are never found. The order is each database's own ranking, bm25 on SQLite and ts_rank_cd on Postgres, so the two may order the same hits differently; a search reaches its first 1000 hits.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["query"],
+        "properties": {
+          "query": { "description": "The words to find, plain text split at white space: quotes, AND, OR, NOT, NEAR and * are words like any other. The first 8 words count.", "type": "string", "minLength": 1, "maxLength": 500, "pattern": "\\S" },
+          "schema": { "description": "Only messages on instances of this schema; nothing is found when the caller may not read it.", "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$" },
+          "instanceId": { "description": "Only messages of this instance's conversation; needs schema.", "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$" },
+          "thread": { "description": "Only the thread of this top-level message: it and its replies; needs instanceId.", "type": "integer", "minimum": 1 },
+          "limit": { "description": "At most this many hits; 50 when absent.", "type": "integer", "minimum": 1, "maximum": 100 },
+          "cursor": { "description": "The next of the previous page.", "type": "string" }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["items", "next"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["schema", "instanceId", "message", "author", "state", "postedAt", "rank", "snippet"],
+              "properties": {
+                "schema": { "description": "The instance's schema.", "type": "string" },
+                "instanceId": { "description": "The instance's id.", "type": "string" },
+                "message": { "description": "The id of the message found.", "type": "integer" },
+                "thread": { "description": "The id of the thread's top-level message, when the message is a reply.", "type": "integer" },
+                "author": { "description": "The message's author.", "type": "string" },
+                "for": { "description": "The subject the message was written for, when its author acted for someone.", "type": "string" },
+                "via": { "description": "The deployable of the service whose call posted or began the message (D37).", "type": "string" },
+                "state": { "description": "The message's: posted, or interrupted when its author stopped before finishing it.", "enum": ["posted", "interrupted"] },
+                "postedAt": { "description": "When the message came to stand, in epoch milliseconds.", "type": "integer" },
+                "editedAt": { "description": "When the message was last edited, in epoch milliseconds; absent when it never was.", "type": "integer" },
+                "rank": { "description": "The hit's place in the search's order, from 1, across pages.", "type": "integer" },
+                "snippet": {
+                  "description": "A few words of the body around its matches, at most 12, with ... where it cuts, in parts; each part says whether it is a match.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["text", "match"],
+                    "properties": { "text": { "type": "string" }, "match": { "type": "boolean" } }
+                  }
+                }
+              }
+            }
+          },
+          "next": { "description": "The cursor of the next page; null after the last, and past the 1000th hit.", "type": ["string", "null"] }
         }
       },
       "scope": "namespace"
@@ -1648,6 +2070,7 @@
                   "items": { "enum": ["mention", "reply"] }
                 },
                 "author": { "description": "The message's author.", "type": "string" },
+                "for": { "description": "The subject the message was written for, when its author acted for someone.", "type": "string" },
                 "via": { "description": "The deployable of the service whose call posted or began the message (D37).", "type": "string" },
                 "state": { "description": "The message's: posted, or interrupted when its author stopped before finishing it.", "enum": ["posted", "interrupted"] },
                 "postedAt": { "description": "When the message came to stand, in epoch milliseconds.", "type": "integer" },
@@ -1749,15 +2172,15 @@
     },
     { "code": "not_a_thread", "description": "thread names a reply, not a top-level message: post, begin, listMessages, resolve, reopen, markRead and follow. details: message, thread, the reply's thread." },
     { "code": "not_in_thread", "description": "post or begin with quotes naming a message outside the thread it replies in. details: message, thread." },
-    { "code": "deleted", "description": "An edit, delete, reaction, pin, resolve or reopen of a deleted message, or a post or begin quoting one. details: message." },
+    { "code": "deleted", "description": "An edit, delete, reaction, pin, resolve, reopen or moveAnchor of a deleted message, or a post or begin quoting one. details: message." },
     {
       "code": "composing",
-      "description": "An edit, reaction, pin, resolve or reopen of a composing message, a post or begin replying in the thread of a composing top-level message, or quoting a composing message. details: message."
+      "description": "An edit, reaction, pin, resolve, reopen or moveAnchor of a composing message, a post or begin replying in the thread of a composing top-level message, or quoting a composing message. details: message."
     },
     { "code": "not_composing", "description": "appendDraft, finish or interrupt of a message that is posted, interrupted or deleted. details: message, state." },
     {
       "code": "not_author",
-      "description": "An edit or delete of another's message, or a resolve or reopen of another's thread, by a caller without moderatePermission (resolvePermission for a thread); or appendDraft or finish of another's composing message, which nobody but its author writes. details: message, author."
+      "description": "An edit or delete of another's message, or a resolve or reopen of another's thread, by a caller without moderatePermission (resolvePermission for a thread); a moveAnchor of a code block on another's message by a caller without anchorPermission or moderatePermission; or appendDraft or finish of another's composing message, which nobody but its author writes. A caller acting for the author is not its author. details: message, author."
     },
     { "code": "edit_window_passed", "description": "An edit by the message's author more than the config's editWindowMs after its postedAt. details: message, postedAt, editWindowMs." },
     { "code": "too_many_edits", "description": "An edit of a message that has been edited 500 times. details: message, max." },
@@ -1770,6 +2193,13 @@
     { "code": "not_resolved", "description": "reopen of a thread that is not resolved. details: thread." },
     { "code": "block_not_allowed", "description": "A block of a kind the config's blocks does not list. details: block, its index in blocks; kind; allowed." },
     { "code": "ref_not_found", "description": "A ref block whose instance does not exist or the caller may not read, the same refusal for both. details: block, schema, id." },
+    {
+      "code": "attachment_not_allowed",
+      "description": "An attachment block whose uri scheme, media type or size the config's attachments do not allow. details: block, its index in blocks; member, uri, mediaType or bytes; value, the scheme, the media type or the size; allowed, the schemes, the media types or maxBytes."
+    },
+    { "code": "no_block", "description": "moveAnchor of a block index the message's blocks do not reach. details: message, block, blocks, how many the message has." },
+    { "code": "not_code", "description": "moveAnchor of a block that is not a code block. details: message, block, kind." },
+    { "code": "anchor_unchanged", "description": "moveAnchor to the revision and lines the code block is at already. details: message, block, revision, lines." },
     {
       "code": "not_idle",
       "description": "interrupt of another's composing message, by a caller without moderatePermission, whose author appended less than the config's composeTimeoutMs ago. details: message, author, lastAppendAt, composeTimeoutMs."

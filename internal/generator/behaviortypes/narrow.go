@@ -288,7 +288,7 @@ func narrowWorkflow(n *Narrowing, config map[string]any, target Target) error {
 
 // commentsMessageResults are Comments' operations whose result is one
 // message's record.
-var commentsMessageResults = []string{"post", "begin", "finish", "interrupt", "edit", "deleteMessage", "react", "unreact", "pin", "unpin", "resolve", "reopen", "getMessage"}
+var commentsMessageResults = []string{"post", "begin", "finish", "interrupt", "edit", "deleteMessage", "react", "unreact", "pin", "unpin", "resolve", "reopen", "moveAnchor", "getMessage"}
 
 // commentsBlocksGiven are Comments' operations whose parameters give a
 // message's blocks: post and finish, which take none when the config
@@ -301,13 +301,17 @@ var commentsBlocksGiven = []string{"post", "finish", "edit"}
 // absent while none has. A message's stand and listMessages' readUpTo are
 // as declared, optional. Its namespace operations (inbox, claimDeliveries,
 // settleDeliveries) belong to no type, and no config narrows them.
-// A block is one of the kinds post's parameters declare, and a message's
-// record is post's result with its blocks typed so: <Base>CommentBlock
-// and <Base>CommentMessage, which every operation that returns a record
-// (begin, finish and interrupt among them) returns and listMessages' page
-// holds. A record keeps every kind of block, since narrowing the config
-// leaves posted blocks as they are; what post, finish and edit give is of
-// the kinds the config's blocks allow, and with none allowed post and
+// A block is one of the kinds post's parameters declare (<Base>CommentBlock),
+// and a message's record is post's result with its blocks typed as the
+// record holds them: <Base>CommentPostedBlock, the same kinds with a code
+// block's move members (moveAnchor's original, moves, movedAt, movedBy and
+// movedFor), which the parameters' closed code block does not declare.
+// <Base>CommentMessage is what every operation that returns a record
+// (begin, finish, interrupt and moveAnchor among them) returns and
+// listMessages' and listPinned's pages hold; listEdits' items hold posted
+// blocks too. A record keeps every kind of block, since narrowing the
+// config leaves posted blocks as they are; what post, finish and edit give
+// is of the kinds the config's blocks allow, and with none allowed post and
 // finish take no blocks.
 func narrowComments(n *Narrowing, config map[string]any, target Target) error {
 	given, err := at(n.Params["post"], "properties", "blocks", "items")
@@ -319,11 +323,21 @@ func narrowComments(n *Narrowing, config map[string]any, target Target) error {
 		return fmt.Errorf("operation post: a block is not one of its kinds")
 	}
 	block := target.Base + "CommentBlock"
+	postedBlock := target.Base + "CommentPostedBlock"
 	message := target.Base + "CommentMessage"
 	n.Aliases = append(n.Aliases, Alias{
 		Name:   block,
 		Doc:    fmt.Sprintf("A block of a message of %s's Comments: a structured part beside its body, of a kind Comments declares.", An(target.Base)),
 		Schema: map[string]any{"oneOf": cloneValue(kinds)},
+	})
+	postedKinds, err := commentsPostedBlocks(kinds)
+	if err != nil {
+		return fmt.Errorf("operation post: %w", err)
+	}
+	n.Aliases = append(n.Aliases, Alias{
+		Name:   postedBlock,
+		Doc:    fmt.Sprintf("A block of a message of %s's Comments as the record holds it: a code block that moveAnchor moved also holds its first anchor and its last move.", An(target.Base)),
+		Schema: map[string]any{"oneOf": postedKinds},
 	})
 	posted, ok := n.Results["post"].(map[string]any)
 	if !ok {
@@ -331,7 +345,7 @@ func narrowComments(n *Narrowing, config map[string]any, target Target) error {
 	}
 	record := cloneSchema(posted)
 	delete(record, "description")
-	if err := setItems(record, ref(block, ""), "properties", "blocks"); err != nil {
+	if err := setItems(record, ref(postedBlock, ""), "properties", "blocks"); err != nil {
 		return fmt.Errorf("operation post: %w", err)
 	}
 	n.Aliases = append(n.Aliases, Alias{
@@ -356,7 +370,10 @@ func narrowComments(n *Narrowing, config map[string]any, target Target) error {
 	if err := setOperationProperty(n.Results, "listMessages", nil, "root", ref(message, DescriptionOf(root))); err != nil {
 		return err
 	}
-	if err := setItems(n.Results["listEdits"], ref(block, ""), "properties", "items", "items", "properties", "blocks"); err != nil {
+	if err := setItems(n.Results["listPinned"], ref(message, ""), "properties", "items"); err != nil {
+		return fmt.Errorf("operation listPinned: %w", err)
+	}
+	if err := setItems(n.Results["listEdits"], ref(postedBlock, ""), "properties", "items", "items", "properties", "blocks"); err != nil {
 		return fmt.Errorf("operation listEdits: %w", err)
 	}
 	allowed := kinds
@@ -404,6 +421,51 @@ func narrowComments(n *Narrowing, config map[string]any, target Target) error {
 		typedField{"composing", map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, true},
 		typedField{"unread", integer(), true},
 	)
+}
+
+// commentsMoveMembers are what moveAnchor adds to a code block, in the
+// order it writes them: the anchor the block was given with, how many
+// times it moved, and when, by whom and for whom it last moved.
+var commentsMoveMembers = map[string]any{
+	"original": map[string]any{
+		"description":          "The anchor the block was given with, before its first move.",
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []any{"revision", "lines"},
+		"properties": map[string]any{
+			"revision": map[string]any{"type": "string"},
+			"lines":    map[string]any{"type": "array", "items": integer()},
+		},
+	},
+	"moves":    map[string]any{"description": "How many times moveAnchor moved it.", "type": "integer"},
+	"movedAt":  map[string]any{"description": "When it last moved, in epoch milliseconds.", "type": "integer"},
+	"movedBy":  map[string]any{"description": "The subject of the caller who last moved it.", "type": "string"},
+	"movedFor": map[string]any{"description": "The subject the caller who last moved it acted for, when it acted for someone.", "type": "string"},
+}
+
+// commentsPostedBlocks are the kinds of block a record holds: the kinds
+// given, the code kind with moveAnchor's members, each optional. The code
+// kind must be declared, so the members cannot drift from the declaration
+// unnoticed.
+func commentsPostedBlocks(kinds []any) ([]any, error) {
+	out := cloneValue(kinds).([]any)
+	for _, kind := range out {
+		if blockKind(kind) != "code" {
+			continue
+		}
+		properties, err := at(kind, "properties")
+		if err != nil {
+			return nil, err
+		}
+		for name, member := range commentsMoveMembers {
+			if _, ok := properties[name]; ok {
+				return nil, fmt.Errorf("a code block already declares %s", name)
+			}
+			properties[name] = cloneValue(member)
+		}
+		return out, nil
+	}
+	return nil, fmt.Errorf("a block is of no code kind")
 }
 
 // blockKind is the kind a block's schema holds: its kind's const.
@@ -1213,6 +1275,7 @@ func narrowProvenance(n *Narrowing, config map[string]any, target Target) error 
 		"properties": map[string]any{
 			"source":     map[string]any{"type": "string"},
 			"by":         map[string]any{"type": "string"},
+			"for":        map[string]any{"type": "string"},
 			"at":         integer(),
 			"confidence": map[string]any{"type": "number"},
 			"review": map[string]any{

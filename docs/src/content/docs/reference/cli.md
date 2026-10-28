@@ -765,7 +765,7 @@ exports:
 | `<T>Behaviors` | an instance's behaviors as a read returns them: by behavior name, each behavior that declares a field, with its fields `readonly`, optional where the engine can leave one out |
 | `<T>Patch` | a merge patch of the own fields |
 | `<T>State`, `<T>LinkName` | a `Workflow`'s states and a `Links` config's names, where the type composes them |
-| `<T>CommentMessage`, `<T>CommentBlock` | a `Comments` message as every operation that returns one gives it, and a block of one, where the type composes `Comments` |
+| `<T>CommentMessage`, `<T>CommentBlock`, `<T>CommentPostedBlock` | a `Comments` message as every operation that returns one gives it (`listPinned`'s items too), a block a post, a finish or an edit gives (`ref`, `action`, `code` or `attachment`), and a block as the record and `listEdits` hold it, a code block with the members `moveAnchor` adds, where the type composes `Comments` |
 | `<T>CreateParams`, `<T>Preconditions` | each behavior's create parameters and preconditions, by behavior name; an entry is required when its schema requires something, such as a required link |
 | `<T><Op>Params`, `<T><Op>Result`, `<T>Operations` | each behavior operation's parameters and result |
 | `<T>Vetoes`, `is<T>Veto` | the codes each behavior's vetoes carry, and `isVeto` typed by them |

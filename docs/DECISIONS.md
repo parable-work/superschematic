@@ -10008,6 +10008,10 @@ Three rules hold throughout.
 |----------|------------------------|
 | A principal may carry `actingFor: { subject }`: the person an agent or a service works for. The authenticator that admits the caller sets it (over HTTP, from the `Acting-For` header it chooses to honor), and the policy sees it and may refuse it. It adds no permissions: `can()` answers for the principal's own. | D37's service with an end user, whose events name the person as `actor` and lose which agent wrote. Token exchange (RFC 8693), which belongs to the identity provider and which v1 does not have (D37). |
 | An event a principal acting for someone wrote carries `for` beside `actor`; Provenance (D73) records `for` beside `by`; Comments records it on each message. | Writing the person into the agent's subject (`agent:reviewer@alice`), which makes every agent a new principal per person and every lease a new holder. |
+| The engine's routes and MCP read `Acting-For` only where the host mounts them with `actingFor` (true, or a function that decides per request); elsewhere the header is ignored. `permissionPolicy` and the `permission` shorthand refuse a principal acting for someone unless it holds `actFor`, and then answer for its own permissions; a policy rule decides such a question only when it names `actingFor`, so a rule written before it grants none. Events store the subject in a column of their own (engine migration 14), a define's and a publish's too; the runner's never act for anyone. | Honoring the header on every mount, which lets any authenticated caller name anyone. Permission per subject acted for (`actFor:alice`), which a deployment can still write as a rule. |
+| A service that stands in for no one may act for a subject. A service that brings an end user already acts for that user, and a call that names a third is refused (`invalid_argument`). | An actor, a service and a person acted for on one call, three parties whose order no event records. |
+| A host whose mount decides by a function passes the engine the subject the function approved (`actingFor: "<subject>"` across the ABI), and the engine acts for exactly that subject without reading the header again; `true` still has the engine read it. Every host reads the header by one rule, written once in each language: ASCII whitespace around it is trimmed and nothing else, and a request with more than one `Acting-For` header, or a value holding a comma, a control character or any other whitespace, Unicode's included, is 400 `invalid_argument`. | Each host trimming its own copy and passing `true`, so a TypeScript function saw `\u0085role:admins` that Rust's trim then made `role:admins`, and a Go function saw the first of two headers while the engine read both joined. Trimming every Unicode whitespace in every host, which each language defines differently. |
+| A deny rule (`allow: false`) that leaves `actingFor` out matches a principal acting for a subject as it matches one acting for none; only an allow or a require that leaves it out keeps to principals acting for no one. | A deny that, like an allow, skips acting principals, so `{ service: "crawler", allow: false }` before `{ actingFor: true, allow: true }` lets a crawler through by acting for anyone. |
 
 ### Comments, rebuilt
 
@@ -10144,6 +10148,10 @@ for a caller who may read the type.
 | A streamed reply is a composing message, its text written to the tables by unlogged appends and sent as signals; a reader who opens the conversation midway reads the draft so far, then follows the signals from its `offset`. | Each chunk an event, hundreds per reply. Signals alone, which a reader who joins late or misses one cannot catch up from. |
 | A mention, a follow and a delivery are rows; the engine never sends anything. | Reactions or a webhook in the engine, which would hold the namespace's writer while a request goes out (D73's reason, the same). |
 | Attachments are descriptions of files the deployment stores. | The value store, which keeps JSON in the database and is no place for a 20 MB log or a screenshot. |
+| An attachment's URI is `https` unless the config's `attachments.schemes` names others, and `javascript`, `vbscript`, `data`, `file`, `blob` and `about` are refused whatever it names: the engine keeps a description, and a client renders the link. | Any URI, which hands every client a script link to render. |
+| Acting for someone grants nothing in Comments: an agent acting for Alice is not Alice's author, moderator or resolver, and Alice is not the author of what it wrote for her. What a caller keeps of its own (markers, follows, reactions, drafts, `clientId`) is the caller's. The person acted for follows the thread, as one mentioned, has no delivery of what was written for them, and finds it unread, since they did not write it. | The person treated as the author, so anyone allowed to name Alice could rewrite her words. |
+| `moveAnchor` is not an edit: it keeps the first anchor as `original` and counts its moves, and moves neither `editedAt` nor the edit history, so a bot that follows every push does not fill the history, spend the edit limit or mark unchanged words edited. | An edit per move, which a busy repository turns into hundreds. |
+| `searchMessages` searches the bodies of standing messages, in one full-text query over the schemas the caller may read, narrowed to one conversation or thread by `schema`, `instanceId` and `thread`; drafts, deleted messages and the text before an edit are never found. `listPinned` lists a conversation's pinned messages, top-level and replies alike. | A search per readable schema merged after, which cannot rank across them. A `pinned` filter on `listMessages`, which lists one level at a time. |
 | `comment` and `listComments` are replaced by `post` and `listMessages`, and `commentCount` by `messages`; the scenario and HTTP corpora are recorded again. | Keeping the old names beside the new ones before a first release has anything that depends on them. |
 
 Each step below adds the storage it needs as a migration of its own.
@@ -10161,7 +10169,7 @@ Later steps add `comment_drafts`, `comment_reads`, `comment_follows` and
 `for` is reserved in both dialects. Every top-level message is a thread,
 so a comment with no replies can be resolved.
 
-Status: steps 1 to 3 are built; steps 4 and 5 are not. The order to build it in:
+Status: built, all five steps. The order they were built in:
 1. Primitive 1, beside operations, and Comments' posts, edits, deletes,
    reactions, pins, threads and resolve on it, in the engine, the corpora
    and the three bindings. Built. The engine's side is
@@ -10208,13 +10216,31 @@ Status: steps 1 to 3 are built; steps 4 and 5 are not. The order to build it in:
    typed clients give each behavior with namespace operations a client of
    its own, kept off every schema's.
 4. Primitive 4, acting for a subject, in the principal, the events,
-   Provenance and Comments.
+   Provenance and Comments. Built. The principal and its checks are
+   `runtime/engine/rust/engine/src/principal.rs`, the header rule and the
+   mount's choice `api/mod.rs` (`acting_for_header_subject`,
+   `ActingForHeader`), the policy's gate and rule member `access.rs`, and
+   engine migration 14 the events' column; `testkit/tests/acting_for.rs`
+   holds them on both databases, and the TypeScript and Go mounts each
+   have the header rule's test. A host that decides by a function hands
+   the engine the subject it approved, so the two never read the header
+   apart. Comments' side is `testkit/tests/core_comments_acting_for.rs`.
 5. `searchMessages`, `code` blocks and `moveAnchor`, and attachments.
+   Built, with `listPinned`. A full-text match in a namespace operation
+   keeps to `sql.readable()`'s schemas (`storage/src/fulltext.rs`), so one
+   query ranks across them. Comments' index takes `unaccent` where the
+   database has it or can create it, and folds case alone where it is
+   refused or missing, so a Comments engine never fails to migrate for
+   the extension; Search still requires it. Held by
+   `testkit/tests/core_comments_search.rs` and
+   `testkit/tests/behavior_fulltext.rs` on both databases, a Postgres
+   without `unaccent` included.
 
-Left: listing a conversation's pinned messages; vectors over messages;
-moving Search's every-schema search onto namespace operations; a notifier
-and an agent dispatcher as stack workers; and a conversation UI. The rule is reversible until the first
-release.
+Left: vectors over messages; moving Search's every-schema search onto
+namespace operations; asking `readable()` per operation, so a rule that
+refuses `listMessages` on a schema hides its messages from search too; a
+notifier and an agent dispatcher as stack workers; and a conversation UI.
+The rule is reversible until the first release.
 
 ## D75. A memory store is a service of the core kind MemoryStore that APIs list in their config, whose schema declares each channel and key it carries, and which holds no fact
 
