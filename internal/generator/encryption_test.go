@@ -98,6 +98,21 @@ func TestAnAPIOnAnEncryptedDatabaseHoldsItsKey(t *testing.T) {
 		})
 	}
 
+	// The documented pair: the class that declares the key, and the API's
+	// config, which extends it and so holds the key (D94).
+	pair := vaultAPI(inherited(good))
+	pair.Types["VaultKeys"] = &ir.TypeDef{Name: "VaultKeys", EnvVars: true, Fields: []*ir.FieldDef{inherited(declaredHere)}}
+	pair.Types["VaultApiConfig"].Extends = "VaultKeys"
+	for range 50 {
+		if field, err := vaultRun(t, pair, key).fieldKeysField("vault-db", vaultDB()); err != nil || field == nil || field.InheritedFrom != "VaultKeys" {
+			t.Fatalf("the documented pair's fieldKeysField = %v, %v", field, err)
+		}
+	}
+	pair.Types["VaultApiConfig"].Extends = ""
+	if _, err := vaultRun(t, pair, key).fieldKeysField("vault-db", vaultDB()); err == nil || !strings.Contains(err.Error(), "vault-api has two @envVars classes, VaultApiConfig and VaultKeys, and neither extends the other") {
+		t.Errorf("two configs' fieldKeysField = %v", err)
+	}
+
 	db := run{registry.GenerateContext{Schema: vaultDB(), Config: &schemaconfig.SchemaConfig{Name: "vault-db"}, Outputs: &registry.Outputs{}}}
 	if err := db.checkEncryptionKey(); err == nil || !strings.Contains(err.Error(), "set outputs.sql.encryption.key in vault-db's config") {
 		t.Errorf("the database's build = %v", err)

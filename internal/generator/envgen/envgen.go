@@ -224,17 +224,6 @@ type ConfigField struct {
 	OptionalBool bool
 }
 
-// findEnvVarsTypeIR finds the type with EnvVars == true in the IR schema.
-// Returns nil if no such type is found.
-func findEnvVarsTypeIR(schema *ir.Schema) *ir.TypeDef {
-	for _, typeDef := range schema.Types {
-		if typeDef.EnvVars {
-			return typeDef
-		}
-	}
-	return nil
-}
-
 // Options configures env-config generation.
 type Options struct {
 	// SchemaName is the service name (e.g. "web-api").
@@ -296,10 +285,14 @@ func GenerateWithOptions(schema *ir.Schema, opts Options) (*ConfigOutput, error)
 	schemaName := opts.SchemaName
 	dependencies := opts.Dependencies
 	names := opts.Naming.OrDefault()
-	envVarsType := findEnvVarsTypeIR(schema)
+	// The config is the @envVars class no other extends, which the stack,
+	// the handle and every loader read alike (D94).
+	envVarsType, err := schema.EnvVarsType()
+	if err != nil {
+		return nil, fmt.Errorf("envgen: %w", err)
+	}
 	var derived []DerivedField
 	if opts.Derived {
-		var err error
 		if derived, err = derivedFields(schema, envVarsType, names); err != nil {
 			return nil, err
 		}

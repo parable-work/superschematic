@@ -81,24 +81,17 @@ type ConfigType struct {
 }
 
 // ConfigTypeOf returns the config type an API schema's sentinel names: its
-// one @envVars class, when a TypeScript schema file declares it. Only an
-// API handle has a config type. An @envVars class from a data-form schema
-// file has no TypeScript type to import, so its handle has none either.
+// config, the @envVars class no other extends (ir.Schema.EnvVarsType, D94),
+// when a TypeScript schema file declares it. Only an API handle has a
+// config type. An @envVars class from a data-form schema file has no
+// TypeScript type to import, so its handle has none either, nor has a
+// schema whose @envVars classes make no one config, which its load refuses.
 func ConfigTypeOf(schema *ir.Schema) *ConfigType {
 	if schema == nil || schema.Kind != ir.SchemaKindAPI {
 		return nil
 	}
-	var found *ir.TypeDef
-	for _, def := range schema.Types {
-		if !def.EnvVars {
-			continue
-		}
-		if found != nil {
-			return nil
-		}
-		found = def
-	}
-	if found == nil || !strings.HasPrefix(found.Owner, "src/") || !strings.HasSuffix(found.Owner, ".ts") {
+	found, err := schema.EnvVarsType()
+	if err != nil || found == nil || !strings.HasPrefix(found.Owner, "src/") || !strings.HasSuffix(found.Owner, ".ts") {
 		return nil
 	}
 	return &ConfigType{Name: found.Name, Module: "./" + strings.TrimSuffix(strings.TrimPrefix(found.Owner, "src/"), ".ts")}
