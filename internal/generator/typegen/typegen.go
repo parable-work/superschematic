@@ -13,6 +13,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"path"
 	"path/filepath"
 	"slices"
@@ -982,11 +983,51 @@ func importAliasReplacements(imports []ModuleImport) map[string]string {
 	return replacements
 }
 
+// normalizeImportedGoType rewrites each service qualifier of goType,
+// `<service>.`, to the service's import alias. A qualifier matches only
+// where a name begins, the longest service name first, so `db.` never
+// rewrites the tail of `shop-db.`, whatever order the aliases are walked
+// in (D94).
 func normalizeImportedGoType(goType string, importAliases map[string]string) string {
-	for serviceName, alias := range importAliases {
-		goType = strings.ReplaceAll(goType, serviceName+".", alias+".")
+	if len(importAliases) == 0 {
+		return goType
 	}
-	return goType
+	services := slices.SortedFunc(maps.Keys(importAliases), func(a, b string) int {
+		if len(a) != len(b) {
+			return len(b) - len(a)
+		}
+		return strings.Compare(a, b)
+	})
+	var b strings.Builder
+	for i := 0; i < len(goType); {
+		if i == 0 || !isQualifierByte(goType[i-1]) {
+			if svc := matchQualifier(goType[i:], services); svc != "" {
+				b.WriteString(importAliases[svc] + ".")
+				i += len(svc) + 1
+				continue
+			}
+		}
+		b.WriteByte(goType[i])
+		i++
+	}
+	return b.String()
+}
+
+// matchQualifier returns the first of services that rest begins with as a
+// qualifier, `<service>.`, or "".
+func matchQualifier(rest string, services []string) string {
+	for _, svc := range services {
+		if strings.HasPrefix(rest, svc+".") {
+			return svc
+		}
+	}
+	return ""
+}
+
+// isQualifierByte reports whether c can be part of a service qualifier or
+// a selector before one: a letter, a digit, '_', '-' or '.'.
+func isQualifierByte(c byte) bool {
+	return c == '_' || c == '-' || c == '.' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }
 
 func buildScalarMap(scalars []ScalarInfo) map[string]*ScalarInfo {
