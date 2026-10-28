@@ -39,9 +39,10 @@ does. You never write, edit or duplicate:
   repository read includes relations (`include: { category: { include:
   { parent: true } } }`, Go's nested `Fields`), selects members, and a
   filter reaches through a to-one relation (`{ category: { parentId: {
-  in: ids } } }`, `anyOf` for an OR); a flat list is a `@projection`,
-  which both ORMs read through a repository of its own
-  (`deps.orm.transactionListRow.findPage(...)`).
+  in: ids } } }`, `anyOf` for an OR, `allOf` to AND two OR groups); a
+  flat list is a `@projection`, which both ORMs read through a repository
+  of its own (`deps.orm.transactionListRow.findPage(...)`), with
+  `searchText` over its source's `@searchField`s.
 
 You do write:
 

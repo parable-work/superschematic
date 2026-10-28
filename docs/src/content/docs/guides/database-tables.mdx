@@ -217,6 +217,30 @@ const filter = {
 A filter of `anyOf` with no member keeps every row, and so does an empty
 `anyOf`, as `in` with no values adds no condition.
 
+A filter holds one `anyOf`, so two OR groups that must both hold go in
+`AllOf` (`allOf`), which keeps the rows every one of its filters finds,
+beside the filter's other members. "The category is X or its parent is X,
+and the name or the description holds a word" is one filter, not four
+branches multiplied out:
+
+```ts
+const filter = {
+  allOf: [
+    { anyOf: [{ categoryId: { in: ids } }, { category: { parentId: { in: ids } } }] },
+    { anyOf: [{ name: { ilike: word } }, { description: { ilike: word } }] },
+  ],
+  date: { gte: start, lt: end },
+};
+```
+
+Each filter of an `allOf` adds its conditions to the filter's own, ANDed. A
+filter of no member adds none, and so does an empty `allOf`. The two nest
+either way: a branch of `anyOf` may hold an `allOf`, and a filter of
+`allOf` an `anyOf` or an `allOf` of its own. Every read and write that
+takes a filter takes both, in Go (`AllOf []LineItemFilter`) and in
+TypeScript: a find, a page, `updateMany`, `deleteMany` and `nearest`'s
+filter, and a projection's reads ([Read a projection](/superschematic/reference/projections/#read-a-projection)).
+
 ## One-to-many
 
 `HasMany<T>` on the parent is the other side of a `Relation` on the child.
@@ -394,7 +418,9 @@ The SQLite DDL has the same column, `VIRTUAL`, and no index over it:
 SQLite has no trigram index ([SQLite](/superschematic/reference/migrations/#types-and-defaults)).
 
 The TypeScript repositories' filter has `searchText`, which keeps the
-same rows with the same conditions.
+same rows with the same conditions. So does the filter of a projection
+keyed by the table's key, over the table's search fields
+([Read a projection](/superschematic/reference/projections/#read-a-projection)).
 
 An API's search argument, a `SearchQuery`, is what reads it
 ([References and search](/superschematic/reference/references-and-search/)):

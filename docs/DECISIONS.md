@@ -12725,3 +12725,71 @@ Left:
 - Hyperdrive to a Cloud SQL database the gcp target places, in one
   environment with Workers (mixing targets).
 - Managing the config's caching, or the config itself, from the stack.
+
+## D99. A filter ANDs filters with allOf beside anyOf, and a projection keyed by its source's key searches the source's search fields (D90 amended)
+
+A finances API's list filters line items by two OR groups that must both
+hold: the category is X or its parent is X, and the name or the
+description holds a word. A filter held one `anyOf` (D90), so the
+implementation multiplied the groups out into four branches, each holding
+one condition of each group, and a third group would have made eight. Its
+flat list, the `TransactionListRow` projection, had no search at all: a
+projection's filter held its columns' conditions alone, and a projection
+column cannot be a `@searchField`, so a search of the list was one more OR
+group of `ilike` on its columns, which splits no words and which no
+trigram index serves.
+
+### allOf
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `AllOf []XFilter` and `allOf: XFilter[]` keep the rows every one of the filters finds, beside the filter's other members: each filter's conditions are the filter's own, ANDed. Two OR groups are two filters of an `allOf`, `{ allOf: [{ anyOf: [...] }, { anyOf: [...] }] }`, one condition per group, after the search and before the filter's own `anyOf`, which stays the last condition. | A list of `anyOf` lists, a shape for one case that nests no further. An expression tree of `and`, `or` and `not` operators in place of members, which D90 declined while a filter's members already AND. |
+| A filter of `allOf` adds its conditions to the filter's list, flat, joined by `AND` as the others are, with no parentheses of its own. A filter of no condition adds none, and so does an empty `allOf`: `allOf: []` filters nothing, as `in` with no values and an empty `anyOf` do (D90). | Refusing an empty `allOf`, which an app that builds the list from a request's groups would have to guard against, and against `in`'s rule. Parentheses around each filter, which `AND` does not need. |
+| The two nest either way, as deep as a filter goes: a branch of `anyOf` may hold an `allOf`, and a filter of `allOf` an `anyOf` or an `allOf` of its own. Both ORMs number each filter's placeholders after the last value kept, so an `anyOf` whose branch keeps every row, and whose values go, leaves the next filter's numbered right, and `UpdateMany`'s and `DeleteMany`'s, after their assignments, hold too. | |
+| Every read and write that takes a filter takes it: they all write a filter's conditions through one function in each ORM, the filter's `conditions` in the Go ORM's `query.go` and the runtime's `conditions` in `orm.ts`, so a find, its count, a page, `updateMany`, `deleteMany`, `nearest`'s filter, a filter through a relation and `<T>FilterConditions` do, and so does a projection's filter (`projections.go`, and the same `conditions` over the view). | |
+| The engine's `list` takes neither (`where`, D16): its members are values, or lists of values, ANDed, and its amendment declined a negation as an expression language over equality. The `anyOf` its tools hold are JSON Schema's, in the list tool's parameters, not a filter's. `allOf`, like `anyOf`, is the ORMs'. | `allOf` and `anyOf` in `where`, an expression language its query parameter, its MCP tool and its three runtimes would each learn. |
+
+### A projection's search
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A projection keyed by its source's key (D90's `sqlutil.ViewKey`, the column that reads `base.<key>`), whose source table has `@searchField` fields, has `searchText` (`SearchText *string` in Go). It keeps the rows whose source row holds each word of the text, in any case, as the source's filter's does (D62): the words split, capped and escaped as a table's are, each a condition on the source's `search_text`, in one condition, `transaction_list.id IN (SELECT line_item.id FROM line_item WHERE line_item.search_text ILIKE $1 ESCAPE '\' AND ...)`, which the source's trigram index serves. A text without words adds none. `sqlutil.ViewsOf` models it as the view's `SearchColumn` and `SearchProbe`, which both ORMs write. | `@searchField` on a projection's columns: a view stores no generated column, so each word would be an `ILIKE` over the columns joined, which no index serves, and a decorator the projection's registry, verification, writers and migration would each learn. The source's `search_text` as a column of the view, which changes each such view's DDL and migration for a column no row type should show. |
+| The words match the source's search fields, not the view's columns, so a word in a joined table's column, a category's name, matches no row, as it does not through the source's own filter. | A search over the joined columns, which the joined table's own search fields and a filter through a relation give a table; a projection has no relation to reach through. |
+| A projection keyed by the column it collapses by has no `searchText`: a row is a group of the source's rows, and no one row's text is the group's. | An `EXISTS` of a row of the group that holds the words, a different question from the source's. |
+| The probe names the source table unqualified, as its repository's statements do, so it reads the table the ORM's `search_path` finds, as every statement over a table does; the view keeps its pool-qualified name. | |
+
+D90, amended: its `anyOf` row, which declined `or` "and an `and` beside it, which a filter's members already are", stands for an operator tree. `allOf` is that `and`, which members cannot give twice once each group is an `anyOf`. A projection's filter, which held each column's conditions and `anyOf`, holds `allOf` and, keyed by its source's key over a source with search fields, `searchText`.
+
+Status: built.
+- **The model:** `TestViewsOfAProjection` (sqlutil): the TransactionListRow
+  view's search column, `LineItem`'s, its probe and a word's condition,
+  and `LineItem`'s own search column, without a probe.
+- **Go:** `TestFinancesOnPostgres`: (the category is food or its parent
+  is) and (the name or the description holds coffee) finds what the four
+  branches multiplied out find, the lunch through its description, and
+  leaves out the bread, food without coffee, and the train, coffee
+  without food; an `AllOf` in each `AnyOf` branch and in an `AllOf`; an
+  empty `AllOf` and one of empty filters keep every row; an `AnyOf` branch
+  of no condition in an `AllOf`, whose dropped value leaves the next
+  filter's placeholders right; `UpdateMany` by an `AllOf`, and
+  `DeleteMany` of notes through their line item's relation by one; on the
+  projection, an `AllOf` of two groups, `SearchText` of one word in
+  another case, of two words and of none, and beside `AnyOf` in
+  `FindPage` over two pages. ormgen's goldens: every table filter's
+  `AllOf`.
+- **TypeScript:** `finances.test.ts` under `TestRepositoriesOnPostgres`,
+  the same, and the projection's page's statement, the probe then the
+  `anyOf`; `TestIncludeAndSelectTypeTheRows` type-checks two groups in
+  an `allOf`, nested both ways, in `findPage`, `findMany`, `updateMany`
+  and `deleteMany`, and the projection's `searchText` and `allOf`, and
+  refuses another table's member in `allOf`, a table's relation in the
+  projection's, and `searchText` on a table without search fields;
+  tsgen's goldens and acme-shop's `orm.ts`.
+- **Parity:** `TestReadParityOfGoAndTypeScriptOnPostgres`, 56 statements
+  over 35 calls alike: two groups ANDed, an `allOf` after an `anyOf`
+  branch of no condition, an `UpdateMany` by an `allOf`, and the
+  projection's `searchText` beside `allOf` in `FindMany` and `FindPage`.
+
+Left: `searchText` on a projection keyed by the column it collapses by; a
+search over a projection's joined columns; `not`; `where` (D16) with
+either. The rules are reversible until the first release.
