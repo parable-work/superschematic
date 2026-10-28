@@ -2501,7 +2501,15 @@ as they are, with no build step (D51). The pieces mirror Go's:
   verifier per `@hmacVerified` provider that refuses every request. An
   implementation that exists and exports no `createManualRoutes` while its
   API declares a manual route fails a stack's build, which says what to
-  add, as one without its `createJobs` does (section 8.7). `deps.db` is a
+  add, as one without its `createJobs` does (section 8.7). An
+  implementation whose `package.json` lacks a package its scaffold would
+  depend on now, such as the database's types after the API gains a
+  worker, draws a warning from the stack's build that names the line to
+  add; the build does not edit the file (D100). The types package
+  re-exports superscalar's `parse<Scalar>Strict` and
+  `normalize<Scalar>Strict` for each of its scalars, so the
+  implementation makes a branded value without depending on superscalar
+  (D25, amended). `deps.db` is a
   `pg` Pool that the runtime's `connectPostgres`
   (`@superschematic/http-runtime/postgres`) opens from the derived
   connection; a TypeScript ORM, when one exists, adds a typed client on
@@ -3814,7 +3822,9 @@ config may leave `outputs` out.
   is missing, the build scaffolds a minimal site there once: an
   `index.html`, a script that loads the config, and a `package.json`
   that depends on each SDK and whose `build` script bundles them with
-  `bun build`.
+  `bun build`. A site whose `package.json` lacks an SDK the config
+  imports, as one scaffolded before its config named the API, draws a
+  warning from each build that names the line to add (D100).
 - **Build.** The deploy runs the site's `build` script after a frozen
   install of the workspace. It digests the output as it digests a server's
   build context (D46): every file in path order, at the epoch, owned by

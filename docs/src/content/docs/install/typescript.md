@@ -463,6 +463,27 @@ writes into a directory that holds a `.ts` file, so an implementation
 that predates its manual routes, jobs or workers fails the stack's build,
 which says what to add.
 
+The scaffold's `package.json` depends on the API's package and types
+package, the database's types package when the API has a worker, a
+deriver or the ORM in its `Deps`, the definitions of each memory store it
+lists, and the runtime. When the API gains one of these after the
+scaffold, as a worker that names its database's queue, the stack's build
+warns, naming the line to add, and leaves the file as it is:
+
+```
+warning: stack shop-stack: the implementation of shop-api, at typescript/shop-api, does not depend on @acme/shop-db-types, which its scaffold depends on now; the build wrote the package's package.json once and does not write it again, so add
+
+    "@acme/shop-db-types": "workspace:*"
+
+to its dependencies (D100)
+```
+
+To make a branded scalar value, import its constructor from the types
+package the implementation already depends on, which re-exports
+superscalar's `parse<Scalar>Strict` and `normalize<Scalar>Strict` for each
+scalar its schema uses
+([branded values](/superschematic/guides/modeling-types/#branded-values-in-typescript)).
+
 In a [stack](/superschematic/guides/stacks/), the build writes each
 TypeScript server's entrypoint at `schemas/dist/server/<stack>/<server>`:
 a `package.json` in the output root's Bun workspace, which depends on the

@@ -6,6 +6,12 @@ import type { JSDate } from '../../types';
 
 import { parseTemporalDateTime as parseTemporalDateTimeFromLib } from 'superscalar/scalars';
 
+// The constructors of TemporalDateTime, the scalar library's own, which the
+// package hands out beside the type: each returns the value as
+// TemporalDateTime and throws on a value Temporal.DateTime refuses (D25,
+// amended; D100).
+export { parseTemporalDateTimeStrict, normalizeTemporalDateTimeStrict } from 'superscalar/scalars';
+
 /**
  * Validates a Temporal.DateTime value
  */

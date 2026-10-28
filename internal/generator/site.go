@@ -1,6 +1,8 @@
 package generator
 
 import (
+	"fmt"
+
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/generator/sitegen"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
@@ -37,6 +39,10 @@ func (r run) generateSite() error {
 	if scaffolded {
 		r.Logf("  + site scaffold of %s written to %s\n", r.Config.Name, dir)
 	}
+	// The build rewrites the config, which imports each SDK, but not the
+	// package.json it scaffolded, which a site that calls an API it did
+	// not call then lacks (D100).
+	r.warnScaffoldDependencies(fmt.Sprintf("site %s: its package", r.Config.Name), dir, site.Dependencies(), "config.generated.ts imports")
 	if tsgen.Mirrored(r.Options.OutputRoot, r.Options.SchemasRoot) {
 		m, err := servergen.PlanSiteMirror(r.Options.OutputRoot, tsgen.DefaultOutputRoot(r.Options.SchemasRoot), r.Config.Name, dir)
 		if err != nil {

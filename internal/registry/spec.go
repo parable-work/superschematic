@@ -497,6 +497,21 @@ func (ctx GenerateContext) Logf(format string, args ...any) {
 	}
 }
 
+// Warnf records a warning on the run's Result and writes it to the run's
+// log, "warning: " first, as the load writes the verification pass's
+// warnings (D100): what the run found that fails nothing now, such as a
+// package the build scaffolded once lacking a dependency its generated
+// neighbours need. A warning the run met before, as the server, the job
+// and the worker of one API meet it, is not recorded again.
+func (ctx GenerateContext) Warnf(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	if slices.Contains(ctx.Result.Warnings, msg) {
+		return
+	}
+	ctx.Result.Warnings = append(ctx.Result.Warnings, msg)
+	ctx.Logf("warning: %s\n", msg)
+}
+
 // Done records an output key written to dir.
 func (ctx GenerateContext) Done(key, dir string) {
 	ctx.Result.Outputs[key] = dir

@@ -99,6 +99,20 @@ depends on each SDK with `workspace:*`. An API whose config generates no
 TypeScript SDK has its `baseUrl` alone; enable `outputs.sdk.typescript`
 in its config for a client, or call it with `fetch`.
 
+The build writes the package's `package.json` once, with the scaffold, so
+an API the site's config names later is missing from it, and the site
+would not bundle (`Could not resolve "@acme/shop-api-sdk"`). Each build
+of the site then warns, naming the line to add; the build does not add it
+to a file that is yours:
+
+```
+warning: site shop-web: its package, at web/shop-web, does not depend on @acme/shop-api-sdk, which config.generated.ts imports; the build wrote the package's package.json once and does not write it again, so add
+
+    "@acme/shop-api-sdk": "workspace:*"
+
+to its dependencies (D100)
+```
+
 The SDK checks each value through superscalar, whose browser build a
 bundler takes through the `browser` export condition: `bun build
 --target=browser`, or an HTML entry point, bundles it with no plugin. That

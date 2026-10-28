@@ -99,13 +99,20 @@ To make a branded value:
   `parse<Scalar>Strict`, which throws, or `parse<Scalar>`, which returns
   null: `parseContactEmailStrict(form.email)`. Request and search params,
   form fields, storage reads and third-party responses are such places.
+  The types package re-exports `parse<Scalar>Strict` and
+  `normalize<Scalar>Strict` for each scalar its schema uses, beside the
+  scalar's validators, so an implementation that depends on the types
+  package needs no dependency on superscalar of its own:
+  `import { normalizeIdentitySlugStrict } from '@acme/shop-db-types'`.
 - Carry the type from there: type a parameter or a variable as the
   generated field (`Order['productId']`) or as its symbol.
 - Do not cast to a brand (`as ContactEmail`). The cast skips the check the
   brand stands for.
 
 The generated scalar validators still take the base type, so they check a
-value that has not been parsed yet. `parse<Type>Json` and `parse<Type>Yaml`
+value that has not been parsed yet, and the `parse<Scalar>` beside some
+of them returns the base type too, where the re-exported
+`parse<Scalar>Strict` returns the brand. `parse<Type>Json` and `parse<Type>Yaml`
 check every field before they return a typed value, and a generated router
 checks a request before the implementation sees it. The shop's TypeScript
 client parses its ids and the recipient's name before it sends them:
