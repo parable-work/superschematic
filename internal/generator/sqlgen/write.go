@@ -1,6 +1,7 @@
 package sqlgen
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,11 +44,12 @@ func WriteProjections(schema *ir.Schema, output *DDLOutput, outputDir, migration
 		}
 	}
 	for _, view := range output.Projections {
-		for _, file := range []struct{ tmpl, name string }{
-			{"projection_up.tmpl", view.UpFileName},
-			{"projection_down.tmpl", view.DownFileName},
-		} {
-			if err := generateFile(file.tmpl, filepath.Join(migrationsDir, file.name), &view); err != nil {
+		files, err := ProjectionMigrationFiles(view)
+		if err != nil {
+			return err
+		}
+		for _, file := range files {
+			if err := os.WriteFile(filepath.Join(migrationsDir, file.Name), file.Content, 0o644); err != nil {
 				return err
 			}
 		}
@@ -67,6 +69,49 @@ func WriteProjections(schema *ir.Schema, output *DDLOutput, outputDir, migration
 		}
 	}
 	return nil
+}
+
+// MigrationFile is one file of a projection's migration pair: its name in
+// the migrations directory and the bytes WriteProjections writes there.
+type MigrationFile struct {
+	Name    string
+	Content []byte
+}
+
+// ProjectionMigrationFiles renders view's migration pair, the up file then
+// the down file, as WriteProjections writes them. A build records their
+// bytes under the stamp, which names them for good (D102).
+func ProjectionMigrationFiles(view ProjectionView) ([]MigrationFile, error) {
+	files := make([]MigrationFile, 0, 2)
+	for _, file := range []struct{ tmpl, name string }{
+		{"projection_up.tmpl", view.UpFileName},
+		{"projection_down.tmpl", view.DownFileName},
+	} {
+		content, err := renderTemplate(file.tmpl, &view)
+		if err != nil {
+			return nil, fmt.Errorf("projection %s: %w", view.Relation, err)
+		}
+		files = append(files, MigrationFile{Name: file.name, Content: content})
+	}
+	return files, nil
+}
+
+// renderTemplate executes templateName with the funcs generateFile gives
+// it and returns the bytes generateFile would write.
+func renderTemplate(templateName string, data any) ([]byte, error) {
+	text, err := templatesFS.ReadFile("templates/" + templateName)
+	if err != nil {
+		return nil, err
+	}
+	tmpl, err := template.New(templateName).Funcs(codegen.BaseTemplateFuncs()).Funcs(customTemplateFuncs()).Parse(string(text))
+	if err != nil {
+		return nil, fmt.Errorf("parse template %s: %w", templateName, err)
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return nil, fmt.Errorf("execute template %s: %w", templateName, err)
+	}
+	return buf.Bytes(), nil
 }
 
 func generateFile(templateName, outputPath string, data any) error {

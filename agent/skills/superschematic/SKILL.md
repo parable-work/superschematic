@@ -238,6 +238,13 @@ Most are load errors; knowing them saves a build round-trip:
   or `updatedAt`: a posting date an import leaves out fails `NOT NULL`.
   Declare `Default<Temporal.DateTime, "now">` (or `Temporal.Date`) where
   the time of the insert is the right value.
+- A `@projection`'s `migration` stamp names the migration pair the build
+  writes, for a migration runner of the project's own (a stack builds the
+  view from its plan and ignores it). The first build records the stamp
+  in `projections.lock` beside the config; commit it. After that, a change
+  to the projection, its doc comments included, fails `check` until it
+  takes the stamp the message names, or, while no database has applied
+  the old one, `superschematic build <db-dir> --rewrite-migration <stamp>`.
 - A path parameter is in braces and names an argument:
   `@rest(HttpMethod.GET, "orders/{id}/export")`. A router's `orders/:id`
   is refused.

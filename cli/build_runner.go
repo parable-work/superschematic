@@ -59,6 +59,10 @@ type buildServiceOptions struct {
 	// ImplementationRoot is generator.Options.ImplementationRoot: the
 	// repository root under build --scaffold, else empty.
 	ImplementationRoot string
+
+	// RewriteMigrations is generator.Options.RewriteMigrations: build
+	// --rewrite-migration's stamps, else empty.
+	RewriteMigrations []string
 }
 
 type buildServiceResult struct {
@@ -192,6 +196,7 @@ func generateService(opts buildServiceOptions, schema *ir.Schema, cfg *schemacon
 			LoadDependencyConfig: opts.LoadDependencyConfig,
 			Stage:                opts.Stage,
 			ImplementationRoot:   opts.ImplementationRoot,
+			RewriteMigrations:    opts.RewriteMigrations,
 			RepositoryRoot:       repositoryRoot,
 			SchemasRoot:          opts.SchemasRoot,
 		})

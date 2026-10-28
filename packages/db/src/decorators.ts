@@ -130,8 +130,11 @@ export interface ProjectionOptions {
   /** The view's name inside the pool, or beside the tables. */
   readonly name: string;
   /**
-   * The 14-digit version stamp of the generated migration. An applied
-   * migration is never rewritten: a changed declaration takes a new stamp.
+   * The 14-digit version stamp of the generated migration pair, for a
+   * migration runner of your own (a stack builds the view from its plan).
+   * The first build that writes the pair records it in `projections.lock`;
+   * a changed declaration then takes a new stamp, which check and build
+   * name, since an applied migration is never rewritten (D102).
    */
   readonly migration: string;
   /** The row rules, all ANDed, in order. */
