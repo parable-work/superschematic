@@ -215,6 +215,9 @@ Most are load errors; knowing them saves a build round-trip:
   or `updatedAt`: a posting date an import leaves out fails `NOT NULL`.
   Declare `Default<Temporal.DateTime, "now">` (or `Temporal.Date`) where
   the time of the insert is the right value.
+- A path parameter is in braces and names an argument:
+  `@rest(HttpMethod.GET, "orders/{id}/export")`. A router's `orders/:id`
+  is refused.
 
 ## Starting a project
 

@@ -114,6 +114,13 @@ routers ([Rust](/superschematic/install/rust/#rust-servers)).
 A method's arguments say where each value comes from:
 
 - **Path**: an argument named in the path, such as `id` in `orders/{id}`.
+  A parameter is in braces, as OpenAPI writes it. The load refuses a
+  segment written as a router's `:id`, which every generator would publish
+  and route as the text `:id`, and gives the path in braces:
+
+  ```
+  src/businesses.schema.ts:12:25: @rest path "businesses/:businessId/export" writes a path parameter as ":businessId", which OpenAPI and the generated routers read as text; write it in braces: "businesses/{businessId}/export"
+  ```
 - **Query**: `QueryParam<T>`. `Nullable<T>` makes it optional, and the Go
   implementation receives a pointer (`minRating *float64`) or a nil slice. A
   list is read from repeated keys and comma-separated values
