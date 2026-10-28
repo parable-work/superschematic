@@ -12872,3 +12872,107 @@ Left:
   D92's migrations.
 - `stack queue` from CI, which no generated job runs.
 - `stack queue` on D1 and SQLite (D68).
+
+## D97. A smoke deploy of a stack shaped like a finances app proves D91 and D92 live on gcp and Cloudflare, and the gcp target shortens a name it derives past a GCP limit to a prefix and a hash rather than refuse it (D91, D92 amended)
+
+D91 and D92 were proven under fakes and the pinned workerd alone, and
+each listed in its Left what only a live deploy shows: on gcp, the load
+balancer passing `Host` through a serverless network endpoint group,
+`pathPrefixRewrite` on a `fullPathMatch` rule and
+`INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER` admitting the load balancer; on
+Cloudflare, `runWorkerFirst`, a service binding's `Host` and body,
+Hyperdrive's acceptance and its TLS to a real origin, and the Cron
+drainer's and a sign-in's time. A finances API relies on all of them,
+and no fixture, script or workflow deployed anything that would show
+them. The same port met a refusal on gcp: its job `SyncAllPlaidItems` is
+the deployable `finances-api-sync-all-plaid-items`, 33 characters, the
+id of its service account, which holds 30, and the build said "GCP
+allows 30; give the job's class or its API a shorter name". The author
+named neither the account nor the deployable; the target made the name.
+
+### A smoke deploy
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `examples/deploy-smoke` is a project of its own, shaped like a finances app: `smoke-db`, Postgres alone, with the user model and a seeded role, a vector column under an hnsw index, the keyed and serialized queue `DrainLineItem` and the declared query `lineItemTotals`; `smoke-api`, a TypeScript API over it with approval-gated registration and cookie sessions, a worker that drains the queue and a job whose name gcp shortens; `smoke-web`, a site; and `smoke-stack`, the site and the API on one origin in `Dev`, `Gcp` and `Cloudflare`. It builds with the installed binary. | Extending acme-shop, whose `shop-stack` deploys Go and Rust servers, an engine runner and a Topcoat app the installed binary refuses to build, none of which Workers runs, and keeps D82's proxy (D91's Left); a deploy of it would prove a different stack and take an hour longer. The draft finances project itself, which needs Plaid's and Voyage's keys. |
+| The committed stack names placeholder accounts, which resolve offline. `scripts/smoke.sh <environment>` writes the account's values from its environment in their place, builds every service, deploys, reads the site's address from the environment and `stack outputs`, runs the checks, destroys, and puts the placeholders back. A failed step still destroys; `--keep` leaves the deployment up, `--destroy` removes it, `--bootstrap` runs bootstrap first and `--base-url` checks a stack already up. | The values as parameters, which a project and an account cannot be (section 5.4). A stack per maintainer, an edit to commit. Imported constants, which bootstrap's in-place record of `projectNumber`, `workersSubdomain` and `secretsStoreId` cannot edit. |
+| The checks, `scripts/smoke-check.ts` on Bun, go through the site's origin as its page would: the page, the fallback and the config, which must put `smoke-api` on the same origin; an administrator registered as the first user, or signed in on a database an earlier run left, and a member of the run registered, refused until approved, then signed in three times with the cookie; the declared query over the run's own line items; `nearest`; a drain the worker must finish; sign-out. Each unsafe request sends `Origin` alone, so the identity runtime admits it only when the `Host` it sees is the site's, which proves the front passed it on, and a sign-in from another origin must be refused. The cookie is kept by hand, since gcp without a domain serves the origin over HTTP, where a browser keeps no `Secure` cookie (D91). | A browser, a dependency and a page for what four requests show. The SDK, whose validation would hide a status the check reads. A fresh database per run, which the Cloudflare origin is not: names and logins of the run's own make a reused database answer alike. |
+| It prints each sign-in's time and the time from the enqueue to the drain, the argon2id CPU and the Cron drainer's wall time D92 left; Workers Logs hold each invocation's CPU. | A pass or fail on a time, which a cold isolate or a busy region would fail. |
+| `smoke.sh Dev` runs the same checks against `stack dev`, and removes its database after, so the script and the fixture are proven with no cloud. | A check of its own for `Dev`, which would leave the cloud's untested until a deploy. |
+| On Cloudflare the destroy also empties the origin's tables, `drop.sql` and the runner's: the destroy removes the manifest, and the next deploy migrates from empty (D92). The origin is the smoke's own. | Leaving them, which fails the next deploy's first step. Dropping the schema, which a provider's grants may hang on. |
+| `.github/workflows/deploy-smoke.yml` runs the script by hand alone, `workflow_dispatch` with the target and `keep`, from a checkout it builds as CI's jobs do, its versions from `tools.env`. Its job runs in the GitHub environment of the stack's environment's name, `Gcp` or `Cloudflare`, which holds the variables and secrets CONTRIBUTING lists, and on gcp signs in through bootstrap's Workload Identity Federation as the stack's deployer, which admits a manual run of `main` there (D69). | A job on a schedule or a push, which spends money and touches the internet with no one asking. A service account key in a secret, which bootstrap's federation makes unneeded. A job in `ci.yml`, whose tiers run unattended. |
+
+### Derived names
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A name the gcp target makes from a service's, a class's, a job's or the stack's name, which a GCP limit would refuse, is shortened: a prefix of it, less a hyphen or underscore it ends with, the separator, and the first seven hex digits of the SHA-256 of the whole name, within the limit. One name always shortens alike and two names shorten apart; the prefix keeps the name's first letter and the hash ends it with a letter or a digit, as each name's charset asks. `finances-api-sync-all-plaid-items` in 30 is `finances-api-sync-all-` and the hash. | Refusing it, which asks the author to rename a class their code and their API's other targets use. A hash alone, which no one reads in a console. Truncating alone, which two names with one prefix share. A name the author writes in the settings, a field for what the target can derive. |
+| A name that fits is never shortened, so every resource a deploy made keeps its name, and every golden but the new ones is as it was. In a member of a parameterized environment, a base that leaves no room for the values is shortened to leave six characters for them, its hash the base's, so a member's names differ in their suffix alone; a name whose literal part fits keeps itself, as checkLength passes it. | Shortening every name past some length, which renames deployed resources. Hashing the member's values in, which resolution does not know. |
+| A shortened resource that takes labels holds its deployable's whole name in `superschematic-deployable`, a label value, its other characters made hyphens and shortened alike past 63: a Cloud Run service, job or worker pool, a bucket, a site's bucket and a Memorystore instance. A service account keeps it in its display name and a scheduler job in its description, as they did; a site's endpoint group and backend service, which take no labels, name the API and the site in their description. A name that fits takes no label, so nothing deployed changes. | A label on every resource, which updates each deployed one in place. |
+| A declared deployable's name is the author's (`deployables: [{ name }]`), and its account id past 30 is still refused, naming the deployable. Nothing else the gcp target names is given by the author. | Shortening it too, a name the author chose for the resources and can choose again. |
+
+Per resource kind:
+
+| Name | Made from | Limit | Now |
+| --- | --- | --- | --- |
+| A server's, job's, worker's, runner's, deriver's or app's resource name: its Cloud Run service, job or worker pool, its service account, its scheduler job, its exposed load balancer's nodes and host, its secrets' ids and its IAM database user | the default deployable's name, its API's with its class's, or its database's for a runner (D52, D53, D58, D74, D78) | 30, the account id's, the fewest of them | shortened to 30, with the label on the Cloud Run resource (`workloadName`) |
+| A bucket, `<project>-<stack>-<bucket>` | the project, the stack, the Bucket service | 63 | shortened, with the label |
+| A site's bucket, `<project>-<site>` | the project, the site | 63 | shortened, with the label |
+| A Memorystore instance, `<project>-<stack>-<store>` | the project, the stack, the store | 63 | shortened, with the label |
+| A Cloud SQL database, the DB service in snake case | the DB service | 63 | shortened, with an underscore |
+| A site's endpoint group and backend service for an API of its origin (D91), `<site>-<api>-neg` and `-api` | the site, the API | 63 | the API's part shortened, the site's kept; the description names both |
+| Bootstrap's accounts, `<stack>-<role>` | the stack | 30 | the stack's part shortened alike for all four, to leave room for the longest role |
+| Bootstrap's workload identity pool, `<stack>-github` | the stack | 32 | the stack's part shortened |
+| A site's own name, its load balancer's nodes and its host | the site | 63 each | unchanged: a site has no account, and the target never refused it for length |
+| A Cloud SQL instance, the stack's repository, network and migration job | the database, the stack | 63 or more | unchanged: no name of a reasonable length reaches them |
+
+D91, amended: its Left's list of what only a live deploy proves, on gcp
+and on Cloudflare, is what `smoke.sh` checks, by hand, and CONTRIBUTING
+tables it. D92, amended: the same for its Left's Hyperdrive acceptance
+and TLS, the Cron firing's time and a sign-in's CPU on Cloudflare's
+runtime; the destroy that leaves the config and the origin is the
+smoke's every Cloudflare run. D52's live check of a member's account id
+in 30 characters is this entry's derivation.
+
+Status: built; the live deploy is not run.
+- **The fixture.** `cmd/superschematic`'s `TestDeploySmokeEnvironments`
+  builds `smoke-stack` with the installed binary over a copy of the
+  example and holds `Gcp`'s and `Cloudflare`'s `environment.json` to
+  `examples/deploy-smoke/testdata/`, and reads in them `smoke-api`
+  behind the load balancer alone under `/api/smoke-api`, the job's short
+  name and label, `smoke-db` on Hyperdrive, the drainer every minute and
+  the site's Worker taking the API's paths first through
+  `SITE_API_SMOKE_API`. `check` and `build-all` pass, `queries verify`
+  wrote `queries.lock`, the implementation, the site and every generated
+  server type-check, and each server bundles for Workers.
+- **The script.** `scripts/smoke.sh Dev` passes against `stack dev`.
+  Run once with a stand-in binary for the cloud commands and `stack dev`'s
+  site as `Gcp`'s address, `smoke.sh Gcp` wrote the values, built, read
+  the address from the environment and the outputs, passed the checks,
+  destroyed and put the placeholders back; with a deploy that fails, it
+  destroyed and exited 1; `smoke.sh Cloudflare --destroy` emptied a
+  Postgres of `smoke-db`'s tables. actionlint passes the workflow.
+- **The names.** `extensions/gcp`'s `TestShorten`, `TestFitted`,
+  `TestLabelValue`, `TestWorkloadName` and `TestCIAccountNames`;
+  `TestLongNamesGolden`, LongShop's Staging and Preview, a job of 32
+  characters and a worker of 42 with their accounts, pools, scheduler
+  job and labels; `TestJobRefusals`, `TestWorkerRefusals`,
+  `TestBucketRefusals`, `TestMemoryStoreSettingsRefusals` and
+  `TestBootstrapGraph` for what was refused before; `TestAccountIDLength`
+  still refuses a declared deployable's; every other golden of the
+  target and of `extensions/pulumi` unchanged.
+
+Left:
+- The live runs themselves, on gcp and on Cloudflare, which a
+  maintainer starts; their timings belong in this entry once they have
+  run.
+- `smoke.sh Dev` in CI's full tier, beside acme's `stack dev` run.
+- A domain on the smoke's `Gcp`, which a browser's `Secure` cookie needs
+  and which a zone in the project would give; the check keeps the cookie
+  by hand.
+- The cloudflare target's names, which a name past 63 characters still
+  refuses, naming its longest part.
+- A name too short for its resource, an account id under six characters,
+  which is refused as before.
+- An IAM database user, `<account>@<project>.iam`, past Postgres's 63
+  bytes for a 30-character account in a long project id.
