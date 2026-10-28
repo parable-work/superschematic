@@ -6,7 +6,8 @@
 // ir.SiteConfigPath, which a deploy writes per environment, and returns
 // each API the site calls with its public base URL and a client of its
 // generated TypeScript SDK at that address. When the package is missing,
-// it scaffolds a minimal site there once, built with `bun build`.
+// it scaffolds a minimal site there once, type-checked and built with
+// `bun build` (D101).
 //
 // The config module imports each API's SDK: the SDKs validate through
 // superscalar, whose browser build a bundler takes through the `browser`
@@ -17,6 +18,7 @@ package sitegen
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -42,6 +44,11 @@ const ConfigFile = "config.generated.ts"
 // TypeScriptVersion is the TypeScript release a scaffolded site
 // type-checks with, the one the API implementations' scaffolds pin.
 const TypeScriptVersion = "5.9.3"
+
+// TypecheckScript is the script of a scaffolded site's package.json that
+// type-checks the site, and with it the SDKs its config imports, which its
+// build runs first (D101).
+const TypecheckScript = "typecheck"
 
 // API is one API a site calls, as its typed config names it.
 type API struct {
@@ -143,6 +150,43 @@ func Of(s *ir.Schema, n naming.Naming, sdks SDKs) (*Site, error) {
 	return site, nil
 }
 
+// BuildScript is the command of the scaffold's build script (D101): the
+// typecheck script, which type-checks the site and the SDKs it calls, then
+// a bundle of index.html and its script with `bun build` into the output.
+// Bun's bundler checks no type, so without the first a call the SDK's
+// TypeScript refuses reaches the browser.
+func (s *Site) BuildScript() string {
+	return "bun run " + TypecheckScript + " && " + s.bundleCommand()
+}
+
+// bundleCommand bundles index.html and its script with `bun build` into a
+// fresh output: the scaffold's whole build script before D101.
+func (s *Site) bundleCommand() string {
+	return fmt.Sprintf("rm -rf %s && bun build ./index.html --outdir=%s --public-path=/ --minify", s.Config.Output, s.Config.Output)
+}
+
+// UncheckedBuild reports whether the package at dir builds the site with
+// the build script its scaffold wrote before D101, word for word, which
+// bundles without a type-check. A package without a package.json, or
+// whose build script is any other, reports false: the package is its
+// author's, who may build it as they choose.
+func (s *Site) UncheckedBuild(dir string) (bool, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "package.json"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var manifest struct {
+		Scripts map[string]string `json:"scripts"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return false, fmt.Errorf("parse %s: %w", filepath.Join(dir, "package.json"), err)
+	}
+	return manifest.Scripts[s.Config.Build] == s.bundleCommand(), nil
+}
+
 // PackageName is the npm name of a site's package: the scope, the
 // service's name and `-site`, apart from the service's own schema package
 // of the service's name.
@@ -170,11 +214,12 @@ func (s *Site) Write(dir string) (scaffolded bool, err error) {
 	return scaffolded, writeIfChanged(filepath.Join(dir, ConfigFile), config)
 }
 
-// scaffold writes a minimal site into dir: a package whose build bundles
-// index.html and its script with `bun build`, and whose dev script serves
-// them with Bun's dev server, which reloads them on an edit, on PORT, as
-// stack dev runs a site's dev server (D82); a script that lists the APIs
-// it calls; and a .gitignore for the build's output.
+// scaffold writes a minimal site into dir: a package whose build
+// type-checks the site, then bundles index.html and its script with `bun
+// build` (BuildScript, D101), and whose dev script serves them with Bun's
+// dev server, which reloads them on an edit, on PORT, as stack dev runs a
+// site's dev server (D82); a script that lists the APIs it calls; and a
+// .gitignore for the build's output.
 func (s *Site) scaffold(dir string) error {
 	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
 		return fmt.Errorf("sitegen: create site package %s: %w", dir, err)
@@ -220,13 +265,14 @@ func writeIfChanged(path string, content []byte) error {
 }
 
 var funcs = template.FuncMap{
-	"tsQuote":       func(s string) string { return "'" + tsutil.EscapeString(s) + "'" },
-	"configPath":    func() string { return ir.SiteConfigPath },
-	"tsVersion":     func() string { return TypeScriptVersion },
-	"configFile":    func() string { return strings.TrimSuffix(ConfigFile, ".ts") },
-	"jsonQuote":     func(s string) string { return fmt.Sprintf("%q", s) },
-	"defaultOutput": func() string { return ir.DefaultSiteOutput },
-	"devScript":     func() string { return ir.DefaultSiteDevCommand },
+	"tsQuote":         func(s string) string { return "'" + tsutil.EscapeString(s) + "'" },
+	"configPath":      func() string { return ir.SiteConfigPath },
+	"tsVersion":       func() string { return TypeScriptVersion },
+	"configFile":      func() string { return strings.TrimSuffix(ConfigFile, ".ts") },
+	"jsonQuote":       func(s string) string { return fmt.Sprintf("%q", s) },
+	"defaultOutput":   func() string { return ir.DefaultSiteOutput },
+	"devScript":       func() string { return ir.DefaultSiteDevCommand },
+	"typecheckScript": func() string { return TypecheckScript },
 }
 
 var configTemplate = template.Must(template.New("config.generated.ts").Funcs(funcs).Parse(`// Code generated by superschematic. DO NOT EDIT.
@@ -357,9 +403,9 @@ var packageTemplate = template.Must(template.New("package.json").Funcs(funcs).Pa
   "private": true,
   "type": "module",
   "scripts": {
-    {{ jsonQuote .Config.Build }}: "rm -rf {{ .Config.Output }} && bun build ./index.html --outdir={{ .Config.Output }} --public-path=/ --minify",
+    {{ jsonQuote .Config.Build }}: {{ jsonQuote .BuildScript }},
     {{ jsonQuote devScript }}: "bun --port=${PORT:-3000} ./index.html",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    {{ jsonQuote typecheckScript }}: "tsc --noEmit -p tsconfig.json"
   },
 {{- with .Dependencies }}
   "dependencies": {

@@ -43,6 +43,9 @@ func (r run) generateSite() error {
 	// package.json it scaffolded, which a site that calls an API it did
 	// not call then lacks (D100).
 	r.warnScaffoldDependencies(fmt.Sprintf("site %s: its package", r.Config.Name), dir, site.Dependencies(), "config.generated.ts imports")
+	// Nor does it rewrite the build script, which a package scaffolded
+	// before D101 runs without a type-check.
+	r.warnUncheckedSiteBuild(site, dir)
 	if tsgen.Mirrored(r.Options.OutputRoot, r.Options.SchemasRoot) {
 		m, err := servergen.PlanSiteMirror(r.Options.OutputRoot, tsgen.DefaultOutputRoot(r.Options.SchemasRoot), r.Config.Name, dir)
 		if err != nil {
@@ -57,6 +60,23 @@ func (r run) generateSite() error {
 	}
 	r.Done(sitegen.Name, dir)
 	return nil
+}
+
+// warnUncheckedSiteBuild warns when the site's package at dir builds with
+// the script its scaffold wrote before D101, word for word, which bundles
+// without a type-check, so a call an SDK's TypeScript refuses reaches the
+// browser. It names the script the scaffold writes now, which runs the
+// typecheck script first; a package whose script is any other is its
+// author's choice and draws no warning.
+func (r run) warnUncheckedSiteBuild(site *sitegen.Site, dir string) {
+	// A package.json the build cannot read, warnScaffoldDependencies has
+	// warned of already.
+	if unchecked, err := site.UncheckedBuild(dir); err != nil || !unchecked {
+		return
+	}
+	build := site.Config.Build
+	r.Warnf("site %s: its package, at %s, builds without a type-check, with the %s script its scaffold wrote before D101; the build wrote the package's package.json once and does not write it again, so change the script to\n\n    %q: %q\n\nwhich type-checks the site, and the SDKs it calls, before it bundles them (D101)",
+		r.Config.Name, r.repositoryPath(dir), build, build, site.BuildScript())
 }
 
 // siteSDKs reports whether the config of an API the site calls generates

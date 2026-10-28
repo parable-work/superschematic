@@ -13355,3 +13355,96 @@ Left:
   share a shape with, and banners drawn in other characters, such as
   box-drawing ones, stay docs.
 The rules are reversible until the first release.
+
+## D101. A TypeScript SDK's namespace declares the types package's values its methods call, listed by the predicates its template calls them under; every golden SDK type-checks; and a scaffolded site type-checks before it bundles (D55, D100 amended)
+
+A finances API's site could not list its line items:
+`sdk.lineItems.listLineItems({ start, end })` threw `ReferenceError:
+newValidationErrors is not defined` before any request, and the
+namespace's `line-items.ts` did not type-check (TS2552, TS2304). The SDK
+generator decided with two predicates what a namespace's methods check.
+The namespace imported the types package's `newValidationErrors` and
+`setFieldErrors` when a query parameter carried a range, length,
+list-size or pattern rule (`queryParamHasValidation`); the template
+called them when a parameter validates (`QueryParam.Validates`), which
+for a list also counts that a required one has an item and that each
+text item is one a comma-separated value carries. `listLineItems` checks
+only the items of three lists of `Identity.UUID`, so its method called
+helpers its namespace never declared. In round 4, `exportBusiness`, whose
+misread `:businessId` was a body argument until D100, imported them into
+the same namespace for its own check. Nothing caught it: the goldens pin
+text; the fixture a test type-checked, `query-lists-api`, has a `limit`
+with a rule beside its lists; and the site bundled the SDK with `bun
+build`, which checks no type, so the error waited for the browser.
+
+### One decision
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A namespace's values from the types package, which it imports or, with `lazyValidation` (D82), declares and loads on its first call, are listed from the predicates its template calls them under (`NamespaceInfo.typesValues`): `EndpointInfo.InputValidator` (`validate<Input>`), `OutputParser` (`parse<T>FromJSON`), `ValidatesArgs` and `ValidatesQuery` (`newValidationErrors` and `setFieldErrors`), `ScalarArg.Validator` (`validate<T>` or `validate<T>Required`), and the flags that write the namespace's helpers (`setFieldErrors` for `validateMapArgument`, `validateUnionArgument` and `setObjectErrors`, `addNestedErrors` for the second). The template writes each call through the same method (`{{.Validator}}(...)`, `{{$endpoint.OutputParser}}`) and each check under the same predicate (`{{if .ValidatesQuery}}`), so every name it calls is one the list holds. `queryParamHasValidation` and the template functions `has_query_param_validation`, `scalar_needs_validation` and `scalar_validator_symbol` are gone. | `queryParamHasValidation` taught to count a list's items, beside `Validates`: two predicates kept in step by hand, which part again with the next check the template learns. The template collecting what it calls as it renders, which Go's templates cannot do before the imports they write first. |
+| The list is exact. A file upload's method sends its input as it is, so its namespace no longer imports `validate<Input>` and `ValidationResult` for it, and a list whose only rule is a `listMin` of one, which bounds nothing an SDK sends, no longer pulls in the helpers. An unused import type-checked, but under `lazyValidation` each is a binding the first call loads for nothing, and a superset hides the next missing name, as `exportBusiness`'s did. | Keeping the imports a superset of the calls. |
+| The types a namespace names stay imported as they were: the input's, the output's, the arguments' and the query parameters', and `ValidationErrors` and `ValidationResult` with the helpers that name them. An unused `import type` costs nothing at run time. | |
+
+The other names a namespace and its methods share were already one
+decision each: `pageItems` and `Page` under `HasPagedEndpoints`, which
+`client.ts` and `types.ts` read too; `FilterParam`, `RequestOptions`,
+`DownloadedFile` and `EncryptedRequestOptions` under the flags its
+methods set; the client's and `index.ts`'s token and cookie-session
+members under `HasAuth` and `CookieSessions`; and `tools/index.ts`'s type
+imports, which `toolParamTSTypes` lists as it names each type.
+
+### Every golden SDK type-checks
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `TestEveryGoldenSDKTypeChecks` runs `tsc --noEmit` on the SDK of every directory of sdkgen's `testdata/golden`, generated as its golden test generates it (`goldenSDKs`), against its generated types package. A directory with no entry fails the test, and so does a golden file that is not what its entry writes, so the SDK checked is the one pinned. The types packages are members of one Bun workspace, installed once; each SDK sits outside it with its types package linked in, since one with `lazyValidation` shares its package's name, and the checks run in parallel: thirteen SDKs, generated, installed and checked in about four seconds. | Type-checking only the goldens' files, which are some of an SDK's (`query-lists-api` pins one namespace). Leaning on each fixture's own compile test, several of which add an operation first (`AddPaintOperation`, `AddShelfItemsOperation`), whose imports can cover a namespace's missing one, as `exportBusiness`'s did. |
+| `list-filters-api`, a fixture of `sdktest`, holds two namespaces whose only checked query parameters are lists, with no body argument and no input type: `entry.countEntries` takes lists of `Identity.UUID` that may be absent beside two required strings with no rule, as `listLineItems` does, and `tally.sumYears` a required list of numbers with no rule. Its goldens pin both namespaces, with and without `lazyValidation`, and `test_list_filters.js` runs both SDKs over a stubbed fetch. | |
+| It runs in CI's full tier, whose `go test` runs without `-short` under `SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1`, so a missing bun or a failed install fails it rather than skipping it. Under `-short`, the pull request's tier, it checks only that each golden directory has an entry. No other golden TypeScript SDK is committed; acme-shop's check type-checks the SDKs its build writes. | The pull request's tier, which D40 keeps to tests that compile no generated module. |
+
+### A scaffolded site type-checks before it bundles
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The site scaffold's build script runs its `typecheck` script, `tsc --noEmit -p tsconfig.json`, before it bundles: `bun run typecheck && rm -rf dist && bun build ./index.html --outdir=dist --public-path=/ --minify` (`sitegen.Site.BuildScript`). The site's program takes in the SDKs its config imports, so a call an SDK's TypeScript refuses fails the build that `stack dev --build-sites`, a deploy and the generated CI run, not the page. Vite's templates do the same (`tsc -b && vite build`). | A type-check that `stack dev`, the deployers and the CI generator run beside the site's script: three runners to teach, a check the author did not ask for, and none of a framework's own. A warning when the check fails, which a deploy's log buries. |
+| A site whose `package.json` still holds the build script its scaffold wrote before, word for word (`sitegen.Site.UncheckedBuild`), draws a warning on each of its builds naming the script to write, as D100's missing dependency does, and the build changes nothing in the file. A script of the author's own draws none: it may type-check by other means, or not by choice. The examples' sites, acme-shop's `shop-web` and deploy-smoke's `smoke-web`, take the new script. | Rewriting the script, which is the author's (D51, D55). Warning of any script that runs no `tsc`, a guess at a shell line. |
+
+D55, amended: the site scaffold's build type-checks the site before it
+bundles it. D100, amended: a site's build also warns of a build script
+its scaffold wrote before D101.
+
+Status: built.
+- **The SDK.** `TestListFiltersDeclareTheHelpersTheyCall`: each namespace
+  of `list-filters-api` validates its query alone and declares
+  `newValidationErrors` and `setFieldErrors`.
+  `TestWriteSDKGoldenListFilters` pins its namespaces with and without
+  `lazyValidation`. `TestListFiltersSDKCompilesAndRuns` type-checks both
+  SDKs and runs `test_list_filters.js`: a call without the lists reaches
+  fetch, a blank item is refused at `categoryIds[0]` and a blank space at
+  `userIds[1]` before any request, and a required list of numbers is
+  refused without an item. No other golden moved.
+- **The type-check.** `TestEveryGoldenSDKTypeChecks`, thirteen SDKs. With
+  the helpers declared by the old predicate it fails on `list-filters-api`
+  and `list-filters-api-lazy` with TS2552 (`newValidationErrors`) and
+  TS2304 (`setFieldErrors`), the errors the finances API's site met.
+- **The site.** `TestASiteScaffoldTypeChecksBeforeItBundles` (servergen):
+  the scaffold's build runs `typecheck` first; a build script as the
+  scaffold wrote it before draws one warning naming the script, and the
+  file is unchanged; one of the author's own draws none.
+  `TestASiteBundlesItsAPIsSDKForTheBrowser` has the scaffold's build
+  refuse a file with a type error (TS2322).
+- **The finances API.** Rebuilt with this change, its `line-items.ts`
+  type-checks, `tsc --noEmit` passes in its site, and over a stubbed fetch
+  `listLineItems({ start, end, categoryIds: [""] })` is refused at
+  `categoryIds[0]` before a request while a valid call reaches fetch. Its
+  site's build warned of its script; changed, it type-checks and bundles,
+  and refuses round 4's `line-items.ts` with TS2552.
+
+Left:
+- The pull request's tier does not type-check the golden SDKs, so a
+  template that calls an undeclared name merges and fails the next release
+  candidate (D40).
+- The Go, Rust and Python SDK generators list their own imports; their
+  compile tests and goldens cover them as before.
+- A site whose build is a framework's or its author's is not checked for
+  a type-check, and a dev server type-checks nothing.
+The rules are reversible until the first release.
