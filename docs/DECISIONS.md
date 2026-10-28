@@ -12725,3 +12725,122 @@ Left:
 - Hyperdrive to a Cloud SQL database the gcp target places, in one
   environment with Workers (mixing targets).
 - Managing the config's caching, or the config itself, from the stack.
+
+## D100. A scaffold the build no longer writes is warned of a dependency it lacks, the types package hands out its scalars' constructors, `@rest` refuses a `:name` segment, and a section banner documents nothing (D25, D48 amended)
+
+Drafting a finances API after round 3 met four small surprises:
+- The build scaffolded the site's package before the site's config named
+  the API it calls. The package's `package.json` never gained the API's
+  SDK, which `config.generated.ts`, rewritten on every build, imports,
+  and `stack dev --build-sites` failed at bundling: `Could not resolve
+  "@schemas/finances-api-sdk"`.
+- An implementation must hand back branded scalars (`IdentitySlug`,
+  `IdentityUUID`), but its scaffold depends on no package that makes one:
+  the types package's `parseIdentityUUID` returns a plain
+  `string | null` (D25), and the author added superscalar by hand for
+  `normalizeIdentitySlugStrict`.
+- `@rest(GET, "businesses/:businessId/export")` checked clean and was
+  published in OpenAPI, and routed, as
+  `/api/businesses/:businessId/export`.
+- A `// ---- Plaid ----` banner above an enum became its generated doc,
+  "PlaidItemStatus - ---- Plaid ---...", and in an earlier round one
+  became a table's `COMMENT ON TABLE`.
+
+### A scaffold's dependencies
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The build checks the manifest of each package it scaffolded once and no longer writes, against the packages it knows the package needs. A site's `package.json` is checked on every build of the site, against the SDKs `config.generated.ts` imports (`Site.Dependencies`). On every build of a stack, the manifest of each implementation its servers, jobs, workers and derivers build against is checked against what its scaffold depends on now: a TypeScript one's `package.json` (`APIOutput.ImplementationDependencies`: the API's package and types, the database's types when `Deps` reaches them, for a worker, a deriver or the ORM, each listed memory store's definitions, and the runtime), and a Rust one's `Cargo.toml` (`rustrestgen.ImplementationDependencies`: async-trait, axum for a manual route, http for a route that checks an end user, the API crate and the runtime, and each store's definitions, by path). Each one no dependency table names, by its key or as a renamed dependency's package, is a warning naming the package, what needs it, and the exact entries to add: `"@schemas/finances-api-sdk": "workspace:*"`. The scaffold templates write the same lists, so the check cannot drift from them. | Reading the imports of the implementation's own files, which finds the gap only after the author wrote an import the bundler reports already; Go's implementation module, whose `go.mod` the build writes only when no module holds the package, so it is as often the author's own module as the scaffold's, and whose gap fails no generated file: the server's `go.mod` replaces every module the API needs. |
+| A warning, not an edit: the build does not add the line. The package is the author's from its first build (D51, D55), who may have moved the dependency or renamed the package, and a `package.json` the build rewrote would lose the author's order and formatting and still need an install. | Adding the dependency, which writes into a file the build promised to leave alone; an error, which fails a build whose servers the gap does not touch. |
+| The warning is the generator run's: `GenerateContext.Warnf` records it on the `Result` (`Result.Warnings`) and writes it to the build's log, `warning: ` first, as the load prints the verification pass's. A warning the run met before, as the server, the job and the worker of one API meet it, is not recorded again. `check` runs no generator, so it does not report it, as it reports none of the build's other scaffold checks (D51's `createManualRoutes`, D52's `createJobs`, D53's `createWorkers`). | A load warning, which `check` would report too, but the load knows neither the repository root, where the packages live, nor whether a callee's config writes a TypeScript SDK. |
+
+### A branded scalar's constructors
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The types package's module of each scalar, `validators/scalars/<scalar>.ts`, re-exports superscalar's `parse<Scalar>Strict` and `normalize<Scalar>Strict`, so the package root hands them out beside the symbol `types/scalars.ts` re-exports: `import { normalizeIdentitySlugStrict } from "@schemas/finances-db-types"`. They are superscalar's own functions, as the type is its own: each returns the brand and throws on a value the scalar refuses. An implementation's scaffold depends on its API's types package, and on its database's when `Deps` reaches it, so it needs no dependency on superscalar of its own. | superscalar in the implementation's scaffold: a second dependency on the library beside the one the types package pins, which every implementation scaffolded before would still lack, and whose range the scaffold would have to work out from the naming file. A wrapper, as the validators wrap `validate<Scalar>`, which adds nothing to a function that already returns the brand. |
+| The validators' `parse<Scalar>` keeps D25's base type. | Typing it by the brand, which changes a function D25 settled for every caller of it. |
+
+D25, amended: a caller builds a branded value with `parse<Scalar>Strict`
+or `normalize<Scalar>Strict` from the types package, or with
+superscalar's own; its other rules stand.
+
+### `@rest` paths
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A rest path segment that begins with `:`, a parameter in Express's and Hono's routes, is refused: OpenAPI and every generated router read it as text. The message names each such segment and gives the path with it in braces: `@rest path "businesses/:businessId/export" writes a path parameter as ":businessId", which OpenAPI and the generated routers read as text; write it in braces: "businesses/{businessId}/export"`. The decorator refuses it at the path argument, a located schema error; the API generator refuses it too, for the data forms, which carry `restPath` as written (`ir.ValidateRestPath`). A colon inside a segment, `orders/{id}:cancel`, is text. | Reading `:name` as `{name}`, a second spelling every reader of a schema would have to know; a warning, which leaves the route published wrong. |
+
+### Doc comments
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A node's comment is the comments no blank line parts from it. A blank line, two line terminators with only whitespace between them, after a comment parts that comment and every one above it from the node (`attachedFrom`). `//`, `/* */` and `/** */` comments read alike, as they did. | JSDoc alone, which drops every `//` doc today's schemas carry; TypeScript's attachment, which takes every `/** */` above a node however far it is. |
+| At a comment's head the reader drops each rule (three or more of `-=*#~_+/`, and spaces), each banner (a title between two runs of three or more of them, each set off by a space) and a line framed between two rules, and the empty lines after them; at its tail, each rule and the empty lines before it (`undecorated`). A comment whose first line is a banner keeps the prose under it. A rule between lines of text stays, as Markdown's; so does text that holds dashes (`Amount - in cents`), a run on one side (`### Examples`) and runs with no space (`***Settled***`). | Dropping every comment that holds a banner, which loses the prose under it; dropping a rule anywhere, which changes the Markdown a doc means; requiring a blank line under every banner, which leaves a banner directly above a declaration its doc. |
+| A `@title` tag in a comment a blank line parts from its enum member is refused (`... @title is read from the member's own comment, and a blank line parts this one from the member`), since the member's title would be lost without a word. | Reading the tag from it still, which makes a parted comment the member's for its title but not its text. |
+
+D48, amended: an enum member's comment is the comments attached to it,
+undecorated, as every other node's is, and the tags it refuses gain one
+in a comment a blank line parts from the member.
+
+Status: built.
+- **The scaffolds.** `TestAScaffoldWarnsOfADependencyItsPackageLacks`
+  (servergen) builds the TypeScript fixture, removes ts-shop's SDK from
+  ts-web's package and the database's types and the store's definitions
+  from ts-shop's implementation, and gets one warning from the site's
+  build and one from the stack's, though ts-shop's server, job and
+  worker each build against it, with the lines to add, and neither file
+  written; scaffolded packages draw none.
+  `TestARustScaffoldWarnsOfADependencyItsCrateLacks` removes axum and
+  the store's definitions from rs-stock's crate and gets one warning with
+  the two entries. `TestMissingDependencies` (tsutil) reads every
+  dependency table, a missing `package.json` and a malformed one;
+  `TestWarnfRecordsAWarningOnce` holds the log line and the dedupe. The
+  servergen goldens of the scaffolds' `package.json` and of the Rust
+  implementations' mirrored `Cargo.toml`, which the templates now write
+  from the lists the check reads, are unchanged.
+- **The constructors.** `TestScalarFieldsAreBranded` builds a field's
+  brands from the package root's `parseIdentityUUIDStrict` and
+  `normalizeIdentitySlugStrict` under bun and has the first throw on a
+  value the scalar refuses; `TestEveryCatalogScalarCompilesBranded`
+  type-checks the re-exports of every scalar in the linked catalog. The
+  tsgen goldens' `validators/scalars/*.ts` gain the re-export.
+- **`@rest`.** `TestCoreApplyBodiesReproduceWalkerBehaviour` (one, two
+  and three `:` segments, at the path argument; a colon inside a segment
+  and a bare `:` segment pass), `TestAColonPathParameterIsALocatedSchemaError`
+  (tsreader, `a.schema.ts:3:25`) and `TestAColonPathParameterIsRefused`
+  (apigen, a data form's path). Three fixtures, deps-orders,
+  deps-ts-pricing and deps-ts-shop, and three schemas inline in the
+  CLI's and the Pulumi bindings' tests wrote `orders/:id`,
+  `quotes/:sku` and `carts/:id`, which they routed as text; they write
+  the braces, and deps-orders' scaffold golden says `GET
+  /api/orders/{id}`.
+- **Doc comments.** `TestBannersAndDetachedCommentsAreNoDocs` (rules,
+  banners, framed titles, a banner over prose in `//` and in a block, a
+  rule at the tail and between paragraphs, dashes in text, Markdown's
+  runs, comments parted by a blank line, of spaces and of CRLF, and a
+  blank line inside a block, through both readers);
+  `TestASectionBannerDocumentsNothing` loads banners above an enum, a
+  member, a table and a field; `TestAMembersCommentIsReadAsLeadingCommentReadsIt`
+  gains banners and blank lines; `TestAMisplacedOrEmptyTitleIsRefused`
+  refuses a parted tag. Three goldens lose a comment a blank line parted
+  from the declaration: tsgen's `fixture-queries-db`, whose section
+  banners were the docs of six query types and two enums; sqlmigrate's
+  model of `fixture-finances-db`, whose file's opening note was the
+  `user` table's comment; and acme-shop's quoted `shop-db` Go types,
+  whose engine type `Inventory` began with `commerce.schema.ts`'s note on
+  the engine.
+
+Left:
+- `check` reports no scaffold warning; nor does `build --scaffold` of an
+  API alone, outside a stack, check its implementation, nor a stack's
+  build a Rust app's crate (D78).
+- Go's implementation module is not checked: its own `go.mod` can lack a
+  replace its API module gained since, which only `go test` in that
+  module alone meets.
+- A data-form comment whose first line is a banner loses it on a round
+  trip through the TypeScript writer, which writes it as a `//` comment.
+- A left-only banner (`// ---- Plaid`), which a Markdown heading would
+  share a shape with, and banners drawn in other characters, such as
+  box-drawing ones, stay docs.
+The rules are reversible until the first release.
