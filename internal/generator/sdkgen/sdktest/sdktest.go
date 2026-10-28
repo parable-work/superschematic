@@ -31,6 +31,26 @@ func LoadQueryListsService() (*ir.Schema, error) {
 	return loader.LoadService(filepath.Join(filepath.Dir(file), "testdata", QueryListsService))
 }
 
+// ListFiltersService is the name of the schema LoadListFiltersService
+// loads.
+const ListFiltersService = "list-filters-api"
+
+// LoadListFiltersService loads list-filters-api from this package's
+// testdata: two GET operations whose only query parameters with a check
+// are lists, with no body argument and no input type (D101).
+// EntryQueries.countEntries takes lists of a UUID scalar that may be
+// absent, whose items an SDK checks, beside two required strings with no
+// rule; TallyQueries.sumYears a required list of numbers with no rule. It
+// is local to the SDK generator tests, so no other generator's goldens
+// read it.
+func LoadListFiltersService() (*ir.Schema, error) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return nil, fmt.Errorf("locate package sdktest")
+	}
+	return loader.LoadService(filepath.Join(filepath.Dir(file), "testdata", ListFiltersService))
+}
+
 // OptionalJSONService is the name of the schema LoadOptionalJSONService
 // loads.
 const OptionalJSONService = "optional-json-api"
