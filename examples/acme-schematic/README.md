@@ -707,6 +707,9 @@ core-only binary loads it (`TestProjectionPolicyRequiresTheShopScope`).
 The sql generator writes the view into `create.sql`, its migration pair
 under `dist/sql/shop-db/projections/migrations`, and its Arrow schema with
 the `acme.` metadata keys the naming file's `metadata_key_prefix` sets.
+The build records the pair's stamp in `shop-db/projections.lock`, which
+is committed: a change to the view under that stamp fails the build and
+names the next stamp (D102).
 
 ## A behavior
 

@@ -13355,3 +13355,190 @@ Left:
   share a shape with, and banners drawn in other characters, such as
   box-drawing ones, stay docs.
 The rules are reversible until the first release.
+
+## D101. A TypeScript SDK's namespace declares the types package's values its methods call, listed by the predicates its template calls them under; every golden SDK type-checks; and a scaffolded site type-checks before it bundles (D55, D100 amended)
+
+A finances API's site could not list its line items:
+`sdk.lineItems.listLineItems({ start, end })` threw `ReferenceError:
+newValidationErrors is not defined` before any request, and the
+namespace's `line-items.ts` did not type-check (TS2552, TS2304). The SDK
+generator decided with two predicates what a namespace's methods check.
+The namespace imported the types package's `newValidationErrors` and
+`setFieldErrors` when a query parameter carried a range, length,
+list-size or pattern rule (`queryParamHasValidation`); the template
+called them when a parameter validates (`QueryParam.Validates`), which
+for a list also counts that a required one has an item and that each
+text item is one a comma-separated value carries. `listLineItems` checks
+only the items of three lists of `Identity.UUID`, so its method called
+helpers its namespace never declared. In round 4, `exportBusiness`, whose
+misread `:businessId` was a body argument until D100, imported them into
+the same namespace for its own check. Nothing caught it: the goldens pin
+text; the fixture a test type-checked, `query-lists-api`, has a `limit`
+with a rule beside its lists; and the site bundled the SDK with `bun
+build`, which checks no type, so the error waited for the browser.
+
+### One decision
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A namespace's values from the types package, which it imports or, with `lazyValidation` (D82), declares and loads on its first call, are listed from the predicates its template calls them under (`NamespaceInfo.typesValues`): `EndpointInfo.InputValidator` (`validate<Input>`), `OutputParser` (`parse<T>FromJSON`), `ValidatesArgs` and `ValidatesQuery` (`newValidationErrors` and `setFieldErrors`), `ScalarArg.Validator` (`validate<T>` or `validate<T>Required`), and the flags that write the namespace's helpers (`setFieldErrors` for `validateMapArgument`, `validateUnionArgument` and `setObjectErrors`, `addNestedErrors` for the second). The template writes each call through the same method (`{{.Validator}}(...)`, `{{$endpoint.OutputParser}}`) and each check under the same predicate (`{{if .ValidatesQuery}}`), so every name it calls is one the list holds. `queryParamHasValidation` and the template functions `has_query_param_validation`, `scalar_needs_validation` and `scalar_validator_symbol` are gone. | `queryParamHasValidation` taught to count a list's items, beside `Validates`: two predicates kept in step by hand, which part again with the next check the template learns. The template collecting what it calls as it renders, which Go's templates cannot do before the imports they write first. |
+| The list is exact. A file upload's method sends its input as it is, so its namespace no longer imports `validate<Input>` and `ValidationResult` for it, and a list whose only rule is a `listMin` of one, which bounds nothing an SDK sends, no longer pulls in the helpers. An unused import type-checked, but under `lazyValidation` each is a binding the first call loads for nothing, and a superset hides the next missing name, as `exportBusiness`'s did. | Keeping the imports a superset of the calls. |
+| The types a namespace names stay imported as they were: the input's, the output's, the arguments' and the query parameters', and `ValidationErrors` and `ValidationResult` with the helpers that name them. An unused `import type` costs nothing at run time. | |
+
+The other names a namespace and its methods share were already one
+decision each: `pageItems` and `Page` under `HasPagedEndpoints`, which
+`client.ts` and `types.ts` read too; `FilterParam`, `RequestOptions`,
+`DownloadedFile` and `EncryptedRequestOptions` under the flags its
+methods set; the client's and `index.ts`'s token and cookie-session
+members under `HasAuth` and `CookieSessions`; and `tools/index.ts`'s type
+imports, which `toolParamTSTypes` lists as it names each type.
+
+### Every golden SDK type-checks
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `TestEveryGoldenSDKTypeChecks` runs `tsc --noEmit` on the SDK of every directory of sdkgen's `testdata/golden`, generated as its golden test generates it (`goldenSDKs`), against its generated types package. A directory with no entry fails the test, and so does a golden file that is not what its entry writes, so the SDK checked is the one pinned. The types packages are members of one Bun workspace, installed once; each SDK sits outside it with its types package linked in, since one with `lazyValidation` shares its package's name, and the checks run in parallel: thirteen SDKs, generated, installed and checked in about four seconds. | Type-checking only the goldens' files, which are some of an SDK's (`query-lists-api` pins one namespace). Leaning on each fixture's own compile test, several of which add an operation first (`AddPaintOperation`, `AddShelfItemsOperation`), whose imports can cover a namespace's missing one, as `exportBusiness`'s did. |
+| `list-filters-api`, a fixture of `sdktest`, holds two namespaces whose only checked query parameters are lists, with no body argument and no input type: `entry.countEntries` takes lists of `Identity.UUID` that may be absent beside two required strings with no rule, as `listLineItems` does, and `tally.sumYears` a required list of numbers with no rule. Its goldens pin both namespaces, with and without `lazyValidation`, and `test_list_filters.js` runs both SDKs over a stubbed fetch. | |
+| It runs in CI's full tier, whose `go test` runs without `-short` under `SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1`, so a missing bun or a failed install fails it rather than skipping it. Under `-short`, the pull request's tier, it checks only that each golden directory has an entry. No other golden TypeScript SDK is committed; acme-shop's check type-checks the SDKs its build writes. | The pull request's tier, which D40 keeps to tests that compile no generated module. |
+
+### A scaffolded site type-checks before it bundles
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The site scaffold's build script runs its `typecheck` script, `tsc --noEmit -p tsconfig.json`, before it bundles: `bun run typecheck && rm -rf dist && bun build ./index.html --outdir=dist --public-path=/ --minify` (`sitegen.Site.BuildScript`). The site's program takes in the SDKs its config imports, so a call an SDK's TypeScript refuses fails the build that `stack dev --build-sites`, a deploy and the generated CI run, not the page. Vite's templates do the same (`tsc -b && vite build`). | A type-check that `stack dev`, the deployers and the CI generator run beside the site's script: three runners to teach, a check the author did not ask for, and none of a framework's own. A warning when the check fails, which a deploy's log buries. |
+| A site whose `package.json` still holds the build script its scaffold wrote before, word for word (`sitegen.Site.UncheckedBuild`), draws a warning on each of its builds naming the script to write, as D100's missing dependency does, and the build changes nothing in the file. A script of the author's own draws none: it may type-check by other means, or not by choice. The examples' sites, acme-shop's `shop-web` and deploy-smoke's `smoke-web`, take the new script. | Rewriting the script, which is the author's (D51, D55). Warning of any script that runs no `tsc`, a guess at a shell line. |
+
+D55, amended: the site scaffold's build type-checks the site before it
+bundles it. D100, amended: a site's build also warns of a build script
+its scaffold wrote before D101.
+
+Status: built.
+- **The SDK.** `TestListFiltersDeclareTheHelpersTheyCall`: each namespace
+  of `list-filters-api` validates its query alone and declares
+  `newValidationErrors` and `setFieldErrors`.
+  `TestWriteSDKGoldenListFilters` pins its namespaces with and without
+  `lazyValidation`. `TestListFiltersSDKCompilesAndRuns` type-checks both
+  SDKs and runs `test_list_filters.js`: a call without the lists reaches
+  fetch, a blank item is refused at `categoryIds[0]` and a blank space at
+  `userIds[1]` before any request, and a required list of numbers is
+  refused without an item. No other golden moved.
+- **The type-check.** `TestEveryGoldenSDKTypeChecks`, thirteen SDKs. With
+  the helpers declared by the old predicate it fails on `list-filters-api`
+  and `list-filters-api-lazy` with TS2552 (`newValidationErrors`) and
+  TS2304 (`setFieldErrors`), the errors the finances API's site met.
+- **The site.** `TestASiteScaffoldTypeChecksBeforeItBundles` (servergen):
+  the scaffold's build runs `typecheck` first; a build script as the
+  scaffold wrote it before draws one warning naming the script, and the
+  file is unchanged; one of the author's own draws none.
+  `TestASiteBundlesItsAPIsSDKForTheBrowser` has the scaffold's build
+  refuse a file with a type error (TS2322).
+- **The finances API.** Rebuilt with this change, its `line-items.ts`
+  type-checks, `tsc --noEmit` passes in its site, and over a stubbed fetch
+  `listLineItems({ start, end, categoryIds: [""] })` is refused at
+  `categoryIds[0]` before a request while a valid call reaches fetch. Its
+  site's build warned of its script; changed, it type-checks and bundles,
+  and refuses round 4's `line-items.ts` with TS2552.
+
+Left:
+- The pull request's tier does not type-check the golden SDKs, so a
+  template that calls an undeclared name merges and fails the next release
+  candidate (D40).
+- The Go, Rust and Python SDK generators list their own imports; their
+  compile tests and goldens cover them as before.
+- A site whose build is a framework's or its author's is not checked for
+  a type-check, and a dev server type-checks nothing.
+The rules are reversible until the first release.
+
+## D102. A projection's migration stamp, once built, names the same files for good: the build records them in `projections.lock`, and `check` and `build` refuse other files under a recorded stamp and name the next stamp
+
+`@projection({ ..., migration })` is required, and the decorator's doc
+said "an applied migration is never rewritten: a changed declaration
+takes a new stamp"; the generated up file says it "is immutable once
+applied". Nothing held either. A finances API added a column to its
+`TransactionListRow` projection, kept the stamp, and `build` rewrote
+`20261028120000_transaction_list_projection.up.sql` in place with no
+word. The stack never noticed, since its migration plan creates the view
+from the model in a step of its own (`createView`) and never reads the
+pair; a runner of the user's own, which does read it, would have kept
+the old view on every database that had applied the stamp.
+
+### Keep the promise or drop the stamp
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The promise is kept, because a supported path applies the pair. No command of the CLI does: `migrate plan` and `superschematic-migrate` diff models (D27), and every stack target migrates through that plan, so `stack dev` and a deploy depend on no stamp; the examples only read the pair, and nothing in the version graph or `examples/migrations` names it. But `outputs.sql.migrationsDir` writes the pair "next to the service's hand-written migrations", to be committed, and `viewOwner` and `sourceSchema` exist for the runner that applies it, a golang-migrate style runner, whose versions the 14-digit stamp is. That runner never runs an applied version again, so a rewritten file reaches no database, and one that checksums its files (Atlas, Flyway) fails the deploy. | A stamp that is optional for a projection a stack deploys, the stamped pair written only when one is set: the IR's `migration`, the core meta-schema and the engine's recorded scenario would change for a rule on where a projection is deployed, which a DB service does not know, and the pair would stay unchecked for the teams that apply it. |
+| The stamp stays required and keeps its form. The stack's plan still creates the view from the model, so a service deployed only by a stack pays one edit when it changes a built projection, which the refusal spells. | |
+
+### The record
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `projections.lock`, beside the schema config as `queries.lock` is: a version, and per stamp a build wrote, the stamp, the projection that declared it, and the hash of the pair (`generator.MigrationHash`): each file's name and bytes, as `sqlgen.ProjectionMigrationFiles` renders them and `WriteProjections` writes them. | In `queries.lock`: `queries verify` writes it on Postgres, and removes it from a service without queries. |
+| The hash is of the files, not the declaration: a runner applies the files, and a checksumming one compares their bytes. So a doc comment (the view's and each column's `COMMENT`), `viewOwner` and `sourceSchema`, a column a table's `@column` renames, and a compiler that writes other DDL for the same declaration are each a change under the stamp, and the next is a migration that reaches every database. A compiler change to the pair's bytes therefore asks for a new stamp of every recorded projection, so the template is held to that. | D95's `sqlutil.ViewShape`, the model a query over the view is held to, which leaves out comments, the outputs and the rendering, so the file could still change under its stamp. The statements without their comment lines: the bytes are what a checksumming runner reads. |
+| A stamp stays recorded when no projection declares it any more. A database may have applied it, a stamp moved back by a revert must not reuse it, and the next stamp must sort after it. | Dropping it with its declaration. |
+| With no record of a stamp, a pair already in the service's own `migrationsDir` is its record: it is committed there and may have been applied, as on the first build after this entry. The output root's copy is no record: it is build output, rewritten on every build, and a branch switch leaves another branch's files there. | The output root's files as a record as well, which stale output would turn into refusals. |
+| A run with no service path, as a test's of an IR alone, records nothing and checks nothing, as it checks no `queries.lock`. | |
+
+### Who writes it, and who refuses
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `build` writes it. The sql generator records each stamp it writes that the lock does not hold, after the pair is written, and logs it. A stamp's files exist from its first build, which is when they can be applied, so that is when they are recorded; every build, `build-all` and `stack dev` among them, goes through the generator. | `queries verify`, which needs Postgres and runs only for a service with queries. A command of its own: a step a user forgets, with the files unrecorded until then. `check`, which writes no output. |
+| `build` refuses a stamp whose pair would change before it writes any file of the service's SQL, and `check` refuses it too, with no database: it renders the pair the build would write (`generator.CheckProjectionStamps`, the sql generator's DDL pass, which needs no database) and reports the refusal on `projections.lock`, as it reports a stale query on `queries.lock`. A schema the generator refuses is the build's to report. `check --watch` stamps the lock. | Only `build`, which an editor's check loop never runs. |
+| The refusal names the projection, its stamp, why (`which projections.lock records as built`, or the file `migrationsDir` holds), and the stamp to give it: `migration: "20261028120001"`. The next stamp is one second after the latest of the stamp, every stamp the lock records, every stamp the service declares and, with `migrationsDir`, every version a migration file there is named with, the service's hand-written ones among them, since a runner that only moves forward skips a version below the one it is at. Read as a time, YYYYMMDDHHMMSS, it rolls over minutes, days and years; a stamp that is no time takes the next number, and a version longer than 14 digits is left out, since no stamp can follow it. Each refused projection takes its own, so two never collide. | The wall clock, as `migrate create` stamps a file: a message that changes every second, and a stamp that can sort before one written ahead of time, as the finances draft's was. |
+| The build checks the stamps before `queries.lock`: a new stamp does not change the model a query over the view is held to (D95), so the order of the two fixes does not matter, and the stamp, which no database can check, comes first. | |
+
+### The author's loop
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A projection never built has no record, so editing it before the first build costs nothing. After it, each change takes the next stamp, which the refusal spells, or `superschematic build <db-service-dir> --rewrite-migration <stamp>`, repeatable, which writes the stamp's pair again and records it again, for a stamp no database has applied: the author's own database is dropped and built again. The refusal ends with that command. It names a stamp a projection of the service declares, or fails; it is refused on another kind and with `--with-deps`, as `--api-language` applies to the target alone. | Deleting the lock or its entry by hand, which unrecords every stamp, or edits a file only commands write. Treating the newest recorded stamp as unapplied, which no tool can know. A record written only by a deploy, which never reads the pair. |
+
+D27 and D95 stand. D27's "the only migrations the compiler writes are the
+projection views'" now records them, and D95's "the migration stamp is
+left out: it names the file the view is written to" is why the stamp is
+held here rather than in `queries.lock`. The rule the decorator's doc and
+the up file's header stated is now checked.
+
+Status: built.
+- **The acceptance.** Checked against a scratch copy of the finances
+  draft: unchanged, it checks clean and `build-all` builds it twice, the
+  first build recording `20261028120000` for `TransactionListRow`; a
+  `paymentChannel` column added under that stamp fails `check` (beside
+  the four queries over the view `queries.lock` already names) and
+  `build`, naming `20261028120001`, and leaves the up file as it was;
+  with that stamp, and `queries verify`, it builds and records both;
+  the column dropped again under `20261028120001` fails until `build
+  --rewrite-migration 20261028120001` records it again.
+- **The generator.** `TestABuiltProjectionMigrationIsNeverRewritten`:
+  the first build records fixture-projection's stamp, the same
+  declaration builds again, a dropped column under it fails naming the
+  projection, the stamp, `20260902120001` and the command, and writes
+  nothing; `RewriteMigrations` records it again, refuses a stamp no
+  projection declares, a new stamp is recorded beside the old, and two
+  projections whose comments changed take `...06` and `...07`.
+  `TestAPairInTheServicesMigrationsDirIsARecord`: a committed pair of
+  other bytes in `migrationsDir` fails with no lock, the next stamp after
+  the hand-written migration beside it, past a sequential and a 20-digit
+  version; and a build with no service path records nothing.
+  `TestNextMigrationStamp` for the rollovers and the latest version.
+- **The commands.** `TestCheckAndBuildHoldAProjectionToItsBuiltMigration`
+  (cli) on a copy of fixture-queries-db: `check` writes no lock and
+  `build` records `20261027000000`; a reworded doc comment of
+  `LineListEntry` fails `check` on `projections.lock` and `build`, while
+  `queries.lock` still holds; `--rewrite-migration` with `--with-deps` is
+  refused, and alone records it; the next stamp checks and builds; `check
+  --watch` stamps the lock.
+- **The repository.** acme-schematic's `shop-db`, which its smoke builds
+  in place, commits the `projections.lock` its build writes. No golden
+  moved: the pair's bytes are as before.
+
+Left:
+- The stack's plan still creates the view from the model, and reads no
+  stamp; a service deployed only by a stack carries one it does not use.
+- A build a shared build cache restores runs no generator, so a checkout
+  whose first build of a projection came from the cache records the stamp
+  at its next build that runs.
+- A migrations directory outside the service directory, where a team
+  keeps its runner's files, is not read for the next stamp.
+The rules are reversible until the first release.

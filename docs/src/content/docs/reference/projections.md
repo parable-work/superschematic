@@ -73,7 +73,7 @@ export abstract class AppPreference {
 | --- | --- |
 | `@projection<Source>` | The table the view reads, addressed as `base` everywhere in the declaration. |
 | `pool`, `name` | The view is created as `"pool"."name"`, so readers address it as `pool.name`. Both are snake_case identifiers. Without a `pool`, the view is created beside the service's tables, in `outputs.sql.sourceSchema` or the `search_path`'s schema, and takes no table's name: a plain view the ORMs read, which binds no setting unless its rules do. |
-| `migration` | The 14-digit version stamp of the generated migration. An applied migration is never rewritten: a changed declaration takes a new stamp. |
+| `migration` | The 14-digit version stamp of the generated migration pair. Once a build writes the pair, the stamp names those files for good: a changed declaration takes a new stamp, which `check` and `build` name ([The migration stamp](#the-migration-stamp)). |
 | `where` | Row rules, all ANDed, in order. The forms are below. |
 | `collapse` | Keeps one row per key: `by` lists the `alias.field` columns of the key (`DISTINCT ON`), `order` ranks the rows that share it and the first wins. |
 | `@join<Table>(alias, on, kind?)` | Another table of the schema. `on` maps `alias.field` equalities; `kind` is `"inner"` (the default) or `"left"`. A left join makes every column read through its alias nullable. |
@@ -132,6 +132,45 @@ database that `superschematic-migrate` migrates gets the view from the plan
 rather than from the pair. A plan that drops the view, or changes the
 columns it publishes by name, type or order, marks that step
 `api-breaking`: the Arrow schema is the readers' contract.
+
+### The migration stamp
+
+The pair is for a migration runner of your own, golang-migrate or one
+like it, which applies a directory of versioned files: set
+`migrationsDir` so the pair lands beside the service's hand-written
+migrations, and commit it. A stack never reads the pair: its plan
+creates the view from the model, so `stack dev` and a deploy do not
+depend on the stamp.
+
+Such a runner applies each version once and never reads its file again,
+so the files a stamp names must never change. The first build that writes
+a stamp's pair records it in `projections.lock`, beside the schema
+config: the stamp, the projection, and a hash of the two files' names and
+bytes. Commit it with the service. From then on, a projection whose pair
+would differ under that stamp, from a new column, a changed rule or
+join, a reworded doc comment (the view's `COMMENT`), another
+`viewOwner` or `sourceSchema`, or a compiler that writes other DDL, fails
+`check` and `build`, which writes nothing:
+
+```
+projection TransactionListRow changed under its migration stamp 20261028120000, which projections.lock records as built, and an applied migration is never rewritten: give it a new stamp, migration: "20261028120001". While no database has applied 20261028120000, `superschematic build schemas/services/finances-db --rewrite-migration 20261028120000` writes its files again and records them instead
+```
+
+The next stamp is one second after the latest the service knows: the
+stamp itself, every stamp the lock records, every stamp the service
+declares and, with `migrationsDir`, every version of a migration file
+there, so a runner that only moves forward applies it. Two projections
+refused at once take one each. A stamp stays in the lock after no
+projection declares it: a database may have applied it.
+
+With no lock entry for a stamp, a pair already in `migrationsDir` is the
+record: a build refuses to write other bytes over it.
+
+A projection never built has no record, so iterating before the first
+build costs nothing. After it, while the stamp is applied nowhere but a
+database you can build again, `superschematic build <service-dir>
+--rewrite-migration <stamp>` writes the pair again and records it in place
+of the old one; otherwise take the next stamp.
 
 The view is created `WITH (security_barrier = true)`, so a function in a
 reader's query cannot observe rows the rules exclude. The view's comment
@@ -251,7 +290,7 @@ export default defineConfig({
 
 | Key | Meaning |
 | --- | --- |
-| `migrationsDir` | Where the migration pairs are written, relative to the service directory, so they land next to the service's hand-written migrations. Unset keeps them under `<out>/sql/<service>/projections/migrations`. The directory is not build-cache output: commit what the build writes there. |
+| `migrationsDir` | Where the migration pairs are written, relative to the service directory, so they land next to the service's hand-written migrations. Unset keeps them under `<out>/sql/<service>/projections/migrations`. The directory is not build-cache output: commit what the build writes there, with `projections.lock` ([The migration stamp](#the-migration-stamp)). |
 | `viewOwner` | The Postgres role the up migration creates the view as: `SET ROLE <viewOwner>` before the view DDL and `RESET ROLE` after it, so the schema's default privileges for that role grant readers their access. The migration runner must be a member of the role, and the role needs `CREATE` on the pool schema and `SELECT` on the tables the view reads. A lowercase identifier. Unset creates the view as the runner. `create.sql` and the down migration never switch roles. |
 | `sourceSchema` | The Postgres schema that holds the tables the view reads. The view selects `<sourceSchema>.<table>` for its source table and every joined table, in `create.sql`, the migration pair and a migration plan, so it does not depend on the migration runner's `search_path`. A lowercase identifier. Unset leaves the tables unqualified. |
 | `dialects` | The databases the service is built for: `postgres`, and `sqlite` to also write `<out>/sql/<service>/sqlite/create.sql` and plan SQLite migrations ([Schema migrations](/superschematic/reference/migrations/#sqlite)). The list must hold `postgres`, since the Go ORM the kind always generates runs on Postgres. Unset is `["postgres"]`. A service that lists `sqlite` cannot have projections: SQLite refuses them. |

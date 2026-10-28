@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/parable-work/superschematic/internal/generator"
 	"github.com/parable-work/superschematic/internal/queryverify"
 	"github.com/parable-work/superschematic/internal/sentinel"
 )
@@ -138,8 +139,9 @@ func (c *checker) snapshot() map[string]fileStamp {
 			stamp(path)
 		}
 		// A DB service's queries are held to its lock (D86), which
-		// queries verify rewrites.
-		if name == queryverify.LockFile {
+		// queries verify rewrites, and its projections' built migrations
+		// to projections.lock (D102), which build writes.
+		if name == queryverify.LockFile || name == generator.ProjectionsLockFile {
 			stamp(path)
 		}
 		return nil
