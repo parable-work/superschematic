@@ -1127,6 +1127,16 @@ from Cloud Logging as a failed migration's is. The `deployer` account, or
 an owner, runs it; a project bootstrapped before this needs `stack
 bootstrap` again, which grants the `migrator` its write.
 
+On cloudflare the queue's database is a Postgres outside Cloudflare on
+Hyperdrive, and the runner runs on this machine against its origin, as
+the deploy's migrations do (D96): with the connection string the shell
+holds in `HYPERDRIVE_ORIGIN_<DB>` (`HYPERDRIVE_ORIGIN_FINANCES_DB` for
+`finances-db`), passed to the runner in `DATABASE_URL` alone. It first
+reads the database's Hyperdrive config with `CLOUDFLARE_API_TOKEN`, and
+refuses a connection string whose host, port, database or user is not
+the config's, and a shell that holds none, naming the variable. The log
+says which database it ran on, never the result.
+
 It refuses a queue no DB service of the stack declares, and a queue whose
 database the environment places on another dialect than Postgres, on
 which no queue is claimed.

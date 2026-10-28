@@ -3600,13 +3600,15 @@ export abstract class FulfilOrders {}
   `superschematic/queue/` a day after it was written; the command sets
   that rule too before it runs. A failed execution reports the runner's
   error from Cloud Logging, as a failed migration does (D68, amended).
+  On cloudflare the runner runs on the deploying machine against the
+  origin of a database on Hyperdrive, as its migrations do (section 18.6,
+  D96).
 
 Not built:
 
 - A list of locations or durations, a `POINT[]` or `INTERVAL[]` column,
   in a queue's message.
 - Claims on SQLite and D1, whose write transaction would claim.
-- `stack queue` on a cloud target other than gcp.
 
 The engine's work-queue behaviors (D16) stay the engine's. A stack does
 not deploy the engine, whose single SQLite writer Cloud Run cannot keep.
@@ -4852,8 +4854,8 @@ The core adds a `stack` command group: `init`, `bootstrap`, `secrets set`,
 `queue` and `unlock`. Targets and provisioners plug into it; they add no commands of
 their own. `stack dev` runs a local environment (section 8.3), `stack run`
 runs a job once on demand, locally or in the cloud (section 8.7), and
-`stack queue` lists, retries and drops a queue's dead messages, locally or
-on gcp (section 8.8), in `cli/stack_queue.go`.
+`stack queue` lists, retries and drops a queue's dead messages, locally,
+on gcp or on cloudflare (section 8.8), in `cli/stack_queue.go`.
 
 `stack init [<services-root>]` starts a stack in a tree that already has
 API services (D59), in `cli/stack_init.go` over `internal/stackinit`. It
@@ -4962,7 +4964,9 @@ eight seams on its `TargetSpec` (D45, D46, D47, D52, D68):
   document where `superschematic-migrate` reaches the database and returns
   its result, which it keeps out of every log (section 8.8). Without it,
   `stack queue` refuses the target's environments. On gcp, an execution
-  of the migration job whose result comes back through the state bucket.
+  of the migration job whose result comes back through the state bucket;
+  on cloudflare, the runner on the deploying machine against a Hyperdrive
+  database's origin, whose result comes back on its stdout (D96).
 
 A target with none of them resolves and does not deploy. Platform
 credentials, such as a DNS platform's API token, come from one function,
@@ -5887,6 +5891,7 @@ app runs (`TargetSpec.Unplaced`, section 18.15, D78).
 | database | A `d1Database` per hosted DB schema, `<stack>-<env>-<db>`, with a suffix under a parameter, and `sqlite` dialect: the node `<database>.d1.<db>`, in infrastructure. `locationHint` and `jurisdiction` become `primaryLocationHint` and `jurisdiction`; D1 ignores the hint under a jurisdiction, so both together are refused. A database whose DB services list postgres first is on `cloudflare.hyperdrive` instead: a database of a Postgres outside Cloudflare, no node, reached through the Hyperdrive config whose id its settings name (section 18.6, D92). |
 | sql edge | `cloudflare.workers-d1` derives `d1: { binding: "<FIELD>", database: <uuid output> }`, the uuid an output of the database's node. The platform writes `{type: "d1", name: <binding>, id: <database>}` beside the field's two `plain_text` variables, and the binding is the grant: D1 has no roles, so a Worker bound to a database reads and writes all of it, and the edge has no node. To a database on Hyperdrive, `cloudflare.workers-hyperdrive`, `cloudflare.cron-hyperdrive` and `cloudflare.drainer-hyperdrive` derive `hyperdrive: { binding: "<FIELD>", config: <the settings' id> }`, and the Worker connects as the config's user. |
 | migration | The runner on the deploying machine, against `d1://<accountId>/<uuid>`, each uuid read from the applied graph's outputs, with the run's token and no privileges (section 18.6). A database on Hyperdrive is migrated on its origin, the connection string in the shell's `HYPERDRIVE_ORIGIN_<DB>`, once the runner has read the config and found it names that database (D92). |
+| queue operation | `stack queue` on a database on Hyperdrive: the runner on the deploying machine, `superschematic-migrate queue`, on its origin, with the connection string and the check a migration has (section 18.6, D96). |
 | http edge | A service binding `{type: "service", name: <binding>, service: <callee's Worker>}`, and D37's signed token with the edge's key, the generic connector's `tls:index/privateKey:PrivateKey` node `<caller>.calls.<callee>.key` (D63), in infrastructure. The value is `{url: "https://<callee's Worker>", binding: {name, worker}, credential: {source: signed-token, issuer, audience, key}}`: the binding's name is the derived field's, its worker the output `name` of the callee's `worker` node, the issuer the caller's deployable, the audience the callee's, and the key the node's `privateKeyPemPkcs8`, a secret member. The callee's callers field gets the edge's issuer: the caller, the node's `publicKeyPem`, EdDSA, at most 300 seconds. A call between two APIs one server serves derives the server's own address alone (section 18.10). |
 | internal server | No workers.dev, no custom domain and no route: only a service binding reaches it. |
 | bucket | An `r2Bucket` (`<bucket>.bucket`, in infrastructure), `<stack>-<env>-<bucket>`, with a suffix under a parameter, its `location` the settings' `locationHint`, its `storageClass` theirs, and its `jurisdiction`, `eu` or `fedramp`, theirs, which a location hint beside it is refused with. `deleteAfterDays` becomes an `r2BucketLifecycle` (`<bucket>.lifecycle`) whose one rule deletes each object that many days after it was written. Its address is the node's output `name`. A name R2 refuses, outside 3 to 63 lowercase letters, digits and hyphens, and the name of either bucket bootstrap makes, are refused as unrealizable. |
@@ -6497,6 +6502,20 @@ from the secret `HYPERDRIVE_ORIGIN_<DB>_<STACK>_<ENV>`, and `stack
 bootstrap --github` sets that secret from the shell. The deployer's token
 holds `Hyperdrive Read`. `stack destroy` leaves the config and the origin.
 
+The target's queue runner (`TargetSpec.Queues`, section 8.8, D96) reaches
+the origin the same way, through the same code (`reachOrigin`): it reads
+the connection string from `HYPERDRIVE_ORIGIN_<DB>`, refusing a shell
+without it with the variable's name and the config whose host, port,
+database and user it must match, reads the config with the shell's token
+and refuses an origin that is not the config's, writes the queue document
+to a file readable by its owner alone and runs `superschematic-migrate
+queue --queue <file>`, the connection string in `DATABASE_URL` alone. The
+runner prints the result, which the command reads and no log holds; the
+log names the database, host, port and user. It does not refuse a config
+that caches reads, which the operation does not read through. A queue on
+D1 is refused: no worker claims there, and the core refuses a queue on
+SQLite before it reaches the runner.
+
 An API over the user model whose authDb is on Hyperdrive is served on
 Workers (`PlatformSpec.IdentityDatabases`, beside `NoIdentity`, which
 still refuses one whose authDb is elsewhere): `fetch.ts` builds its
@@ -6870,7 +6889,8 @@ runtime tests run fixture bundles under the `workerd` binary.
   drainer, the runner's origin check and the CI secret are proven against
   the pins, a fake account and a stand-in `superschematic-migrate`, and
   the bundles under workerd over a hyperdrive binding to a local
-  Postgres.
+  Postgres; `stack queue` runs the real runner on a local Postgres as the
+  origin, behind a fake account's config (D96).
 - An identity store over SQLite or D1 for a TypeScript API (D50). An
   identity API on Workers is built over Hyperdrive (section 18.6, D92),
   and its cookie session on a site's origin through the site's Worker
@@ -6913,7 +6933,8 @@ from the deploying machine; the Cron platform for TypeScript jobs and
 in a jurisdiction; and the site platform, its embedded script and its site
 store in R2; databases on a Postgres outside Cloudflare through
 Hyperdrive, their migrations on the origin, and queue workers under Cron
-Triggers (D92); all proven offline (D64, amended). No Worker has deployed.
+Triggers (D92); `stack queue` on the origin (D96); all proven offline (D64,
+amended). No Worker has deployed.
 
 Milestone 7's second target is done when acme-shop's storefront has run
 live on Workers (workers.dev, then a domain, through the SDK, with a

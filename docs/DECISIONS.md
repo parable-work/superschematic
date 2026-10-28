@@ -12725,3 +12725,73 @@ Left:
 - Hyperdrive to a Cloud SQL database the gcp target places, in one
   environment with Workers (mixing targets).
 - Managing the config's caching, or the config itself, from the stack.
+
+## D96. On the cloudflare target `stack queue` runs from the deploying machine on the origin of a database on Hyperdrive, checked against its config as the database's migrations are (D68 and D92 amended)
+
+On Cloudflare a finances app's queues are tables of a Postgres outside
+Cloudflare, which its Workers reach through a Hyperdrive config (D92).
+Its Plaid sync and embedding workers leave dead messages there, and a
+port of the app found no way to see or repair them: `stack queue dead
+CfStaging finances-db.PlaidSyncRequested` was refused with "target
+cloudflare runs no queue operation", since the target had no queue runner
+(`TargetSpec.Queues`, D68 amended), and `stack queue backfill` with it.
+Listing, retrying and dropping dead messages took hand-written SQL against
+the origin, with no check that the shell's connection string reached the
+database the Workers read. D92 left "`stack queue` against a cloudflare
+environment's origin". The database's migrations already ran on the origin
+from the deploying machine, with the connection string the shell holds in
+`HYPERDRIVE_ORIGIN_<DB>`, after checking it against the config.
+
+### The runner
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The cloudflare target registers a queue runner, `Queues`, on the type of its migration runner, as gcp does (`queues.go`). It runs `superschematic-migrate queue --queue <file>` on the deploying machine against the origin of the queue's database, as the migrations run `apply` there. The core's `stack queue` does not change: it resolves the environment, checks the queue and its dialect, writes the document, reads the deploy manifest, and hands the request to the target through `registry.QueueRunner`, so the seam needs no new method and no core code learns Hyperdrive. | A seam that hands the core a database's connection string, for the core to run the runner as it does on the local target: the password would cross into the core, which logs, and a gcp database is reached only by a job inside its network, which a URL cannot say. A route of every deployed API that runs the operator's statements through Hyperdrive, which each API would then have to guard. |
+| The origin is reached through the code the migrations use (`reachOrigin`, over `checkOrigin`): the connection string from `HYPERDRIVE_ORIGIN_<DB>`, the database's Hyperdrive config read with the shell's token (`Hyperdrive Read`), and a refusal, before the runner runs, of a connection string whose host, port, database or user is not the config's. What differs between the two uses is a value, `originUse`: what runs there, which each refusal names, and what a mismatch would do. | Trusting the variable for an operator's command, whose `retry --all` or `drop --all --yes` would change another environment's queue when the shell holds the wrong string. A copy of the check. |
+| A shell without the variable is refused with its name, the form of its value, `postgres://<user>:<password>@<host>:<port>/<database>`, and the config, by id, whose host, port, database and user it must hold: "database finances-db is on cloudflare.hyperdrive, and stack queue runs from this machine on its origin: set HYPERDRIVE_ORIGIN_FINANCES_DB to ...". A mismatch names where the config reaches and where the variable does, and says the command would read and change the queues of one database while its Workers drain another's. The migrations' refusal names the port and the config too now, and keeps its CI hint, which `stack queue`'s leaves out: no generated job runs it. | The migrations' message as it was, which named the database and user alone, though the check compares the host and port too. |
+| A config that caches reads is not refused, as a deploy refuses one without `caching: true`: the operation reads and writes the origin itself, never through the config, so the config's caching changes nothing it does, and the deploy already reports it. | The deploy's check whole, which would stop an operator repairing dead messages over a setting that does not touch them. |
+| The document goes to a file readable by its owner alone, in a directory of its own that is removed after; the connection string goes to the runner in `DATABASE_URL` alone, so no argument or file holds the password. The runner prints its result on stdout, which the runner hands back to the command and writes to no log, since a listing holds the dead messages' bodies, which may be personal; the log names the database, host, port, user, config and runner. A failed run returns the runner's own line, with where it ran. | `--database-url`, which puts the password in the process list. The runner's output in the log, as the migrations' `apply` output is, which would put the messages in a CI log. |
+| A queue on D1 is refused by the runner, naming its platform: no worker claims on D1 (`NoQueueClaims`, D92), and the core refuses a queue on SQLite before it reaches a runner (D68). | |
+| As on gcp, the command runs on a deployed run alone: it reads the run's manifest from the state bucket, with the token, before the runner runs, since the queue's tables exist once a deploy has migrated the origin. | Running on an origin no deploy has migrated, which holds no queue. |
+
+D92, amended: its Left's "`stack queue` against a cloudflare
+environment's origin" is built. D68, amended: cloudflare is the second
+target with a queue runner, after gcp.
+
+Status: built.
+- **The runner.** `TestQueueOperationOnTheOrigin` and
+  `TestQueueOperationOnTheOriginRefusals` (`extensions/cloudflare`, over
+  the fake account and a stand-in `superschematic-migrate`): the runner's
+  arguments, `DATABASE_URL`, the document it was handed and the result it
+  printed; a log that holds where it ran and neither the password nor a
+  message; the document's file removed; a caching config that does not
+  stop it; and the refusals of a shell without the variable, a value that
+  is no connection string, a config the account does not hold, a config
+  that reaches another database, user, host or port, a runner that
+  refuses, and a queue on D1.
+- **End to end.** `TestStackQueueOnACloudflareEnvironment` runs the CLI
+  with the cloudflare target linked, over a fake account that holds the
+  Hyperdrive config and a deploy's manifest, and the migration runner
+  built from `runtime/migrate/go`, against a database of its own on the
+  Postgres `SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL` names, which holds
+  finances-db's tables as its build writes them and which
+  `HYPERDRIVE_ORIGIN_FINANCES_DB` names: `stack queue dead CfStaging
+  finances-db.PlaidSyncRequested` lists the two dead messages; a shell
+  without the variable, and a config that reaches another database, user,
+  host or port, are refused, naming the variable and what it must match,
+  and leave the messages dead; `retry` makes one ready, due now, with no
+  attempts; `drop` deletes the other, and `dead` then finds none; and
+  `backfill` of EmbedLineItem enqueues one message per line item with a
+  category, replacing the one that waited, under its ID, and a second
+  backfill still leaves one per line item.
+- **The migrations, over the shared code.**
+  `TestMigrateTheOriginThroughItsHyperdriveConfig`,
+  `TestMigrateTheOriginRefusals` and `TestDeployTheLedgerOnWorkers`, which
+  assert the refusals as before.
+
+Left:
+- What only a live account proves: the engineer's token reading the
+  config, and TLS from the deploying machine to Neon or Supabase, as for
+  D92's migrations.
+- `stack queue` from CI, which no generated job runs.
+- `stack queue` on D1 and SQLite (D68).

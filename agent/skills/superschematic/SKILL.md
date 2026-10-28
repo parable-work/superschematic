@@ -260,8 +260,10 @@ Postgres outside Cloudflare (Neon, Supabase, Cloud SQL) that Workers reach
 through a Hyperdrive config: the user makes the config, names its id in
 the environment's `settings` (`{ of: FinancesDb, hyperdrive: "<id>" }`),
 and keeps the database's connection string in `HYPERDRIVE_ORIGIN_<DB>`
-for the deploy's migration. Don't make the config or handle the
-connection string yourself. Queue workers there must be TypeScript; each
+for the deploy's migration and for `stack queue dead|retry|drop|backfill`,
+which run from the user's machine against that origin and refuse a string
+whose host, port, database or user is not the config's. Don't make the
+config or handle the connection string yourself. Queue workers there must be TypeScript; each
 drains its queue once a minute under a Cron Trigger. An API over the user
 model signs users in there when its `authDb` is that Postgres; each
 password hash takes about 120 ms of CPU, so it needs Workers Paid.
