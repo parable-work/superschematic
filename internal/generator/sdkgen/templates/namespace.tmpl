@@ -228,7 +228,7 @@ export class {{.Namespace.ClassName}} {
     {{join_params_filtered .PathParams $.Namespace.IsScopedNS $.Namespace.ScopeParamName}},
     {{- end}}
     {{- if .HasInput}}
-    input: Omit<{{.InputType}}, {{file_upload_field_union .FileUploadFields}}>,
+    input: Omit<{{type_ref .InputType}}, {{file_upload_field_union .FileUploadFields}}>,
     {{- end}}
     files: { {{- range $i, $field := .FileUploadFields}}{{if $i}} {{end}}{{$field.TSName}}{{if not $field.Required}}?{{end}}: File;{{end}} },
     {{- if has_query_params .QueryParams}}
@@ -263,19 +263,19 @@ export class {{.Namespace.ClassName}} {
     {{- if $endpoint.OutputIsMap}}
     return result !== null && typeof result === 'object'
       ? Object.fromEntries(
-          Object.entries(result).map(([key, value]) => [key, {{if $endpoint.OutputIsArray}}Array.isArray(value) ? value.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : value{{else}}parse{{type_ref $endpoint.OutputType}}FromJSON(value){{end}}])
+          Object.entries(result).map(([key, value]) => [key, {{if $endpoint.OutputIsArray}}Array.isArray(value) ? value.map({{$endpoint.OutputParser}}) : value{{else}}{{$endpoint.OutputParser}}(value){{end}}])
         )
       : result;
     {{- else if $endpoint.OutputIsArrayOfArrays}}
     return Array.isArray(result)
-      ? result.map((row) => (Array.isArray(row) ? row.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : row))
+      ? result.map((row) => (Array.isArray(row) ? row.map({{$endpoint.OutputParser}}) : row))
       : result;
     {{- else if $endpoint.OutputIsArray}}
-    return Array.isArray(result) ? result.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : result;
+    return Array.isArray(result) ? result.map({{$endpoint.OutputParser}}) : result;
     {{- else if $endpoint.OutputNullable}}
-    return result === null ? null : parse{{type_ref $endpoint.OutputType}}FromJSON(result);
+    return result === null ? null : {{$endpoint.OutputParser}}(result);
     {{- else}}
-    return parse{{type_ref $endpoint.OutputType}}FromJSON(result);
+    return {{$endpoint.OutputParser}}(result);
     {{- end}}
     {{- else}}
     return result;
@@ -332,19 +332,19 @@ export class {{.Namespace.ClassName}} {
     {{- if $endpoint.OutputIsMap}}
     return result !== null && typeof result === 'object'
       ? Object.fromEntries(
-          Object.entries(result).map(([key, value]) => [key, {{if $endpoint.OutputIsArray}}Array.isArray(value) ? value.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : value{{else}}parse{{type_ref $endpoint.OutputType}}FromJSON(value){{end}}])
+          Object.entries(result).map(([key, value]) => [key, {{if $endpoint.OutputIsArray}}Array.isArray(value) ? value.map({{$endpoint.OutputParser}}) : value{{else}}{{$endpoint.OutputParser}}(value){{end}}])
         )
       : result;
     {{- else if $endpoint.OutputIsArrayOfArrays}}
     return Array.isArray(result)
-      ? result.map((row) => (Array.isArray(row) ? row.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : row))
+      ? result.map((row) => (Array.isArray(row) ? row.map({{$endpoint.OutputParser}}) : row))
       : result;
     {{- else if $endpoint.OutputIsArray}}
-    return Array.isArray(result) ? result.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : result;
+    return Array.isArray(result) ? result.map({{$endpoint.OutputParser}}) : result;
     {{- else if $endpoint.OutputNullable}}
-    return result === null ? null : parse{{type_ref $endpoint.OutputType}}FromJSON(result);
+    return result === null ? null : {{$endpoint.OutputParser}}(result);
     {{- else}}
-    return parse{{type_ref $endpoint.OutputType}}FromJSON(result);
+    return {{$endpoint.OutputParser}}(result);
     {{- end}}
     {{- else}}
     return result;
@@ -462,18 +462,18 @@ export class {{.Namespace.ClassName}} {
     }
     {{- end}}
     // Validate input before sending request
-    const validationErrors: ValidationResult = validate{{.InputType}}(input);
+    const validationErrors: ValidationResult = {{.InputValidator}}(input);
     if (validationErrors !== true) {
       throw new ValidationError(validationErrors);
     }
-    {{- else if .ScalarArgs}}
+    {{- else if .ValidatesArgs}}
     // Validate scalar arguments before sending request
     const errors = newValidationErrors();
     {{- range .ScalarArgs}}
     {{- if .IsUnion}}
     {
       // {{.Name}} holds a union: each value is validated as the member the
-      // union picks (validate{{scalar_validator_symbol .Type}}), its errors under the value's path, as the
+      // union picks ({{.Validator}}), its errors under the value's path, as the
       // route reports them. A value no member reads is sent, for the
       // route to refuse it.
       const unionValue: unknown = scalarInput.{{toCamelCase .Name}};
@@ -483,7 +483,7 @@ export class {{.Namespace.ClassName}} {
         {{- end}}
       } else {
         validateUnionArgument(errors, "{{toCamelCase .Name}}", unionValue, {{.ArrayDepth}}, {{.IsMap}}, (member: unknown) =>
-          validate{{scalar_validator_symbol .Type}}(member as {{type_ref .Type}})
+          {{.Validator}}(member as {{type_ref .Type}})
         );
       }
     }
@@ -508,14 +508,14 @@ export class {{.Namespace.ClassName}} {
             setFieldErrors(errors, path, [{ validator: "type", message: "expected an object" }]);
             return;
           }
-          const itemErrors = validate{{scalar_validator_symbol .Type}}(item as {{type_ref .Type}});
+          const itemErrors = {{.Validator}}(item as {{type_ref .Type}});
           if (itemErrors !== true) {
             setObjectErrors(errors, path, itemErrors);
           }
         });
-        {{- else if scalar_needs_validation .Type}}
+        {{- else if .Validator}}
         validateMapArgument(errors, "{{toCamelCase .Name}}", mapValue, {{.IsArray}}, (item: unknown, path: string) => {
-          const [valid, fieldErrors] = validate{{scalar_validator_symbol .Type}}Required(item as {{type_ref .Type}});
+          const [valid, fieldErrors] = {{.Validator}}(item as {{type_ref .Type}});
           if (!valid && fieldErrors) {
             setFieldErrors(errors, path, fieldErrors);
           }
@@ -528,19 +528,19 @@ export class {{.Namespace.ClassName}} {
     {{- else if .IsArrayOfArrays}}
     {
       // An array of arrays: each inner list must be an array (an empty one
-      // is valid){{if scalar_needs_validation .Type}} and each element runs its own validation{{end}}.
+      // is valid){{if .Validator}} and each element runs its own validation{{end}}.
       const rows: unknown = scalarInput.{{toCamelCase .Name}};
       if (Array.isArray(rows)) {
         rows.forEach((row: unknown, rowIndex: number) => {
           if (!Array.isArray(row)) {
             setFieldErrors(errors, `{{toCamelCase .Name}}[${rowIndex}]`, [{ validator: "required", message: "inner list must be an array" }]);
-            {{- if scalar_needs_validation .Type}}
+            {{- if .Validator}}
             return;
             {{- end}}
           }
-          {{- if scalar_needs_validation .Type}}
+          {{- if .Validator}}
           row.forEach((elem: unknown, index: number) => {
-            const [valid, fieldErrors] = validate{{scalar_validator_symbol .Type}}Required(elem as {{type_ref .Type}});
+            const [valid, fieldErrors] = {{.Validator}}(elem as {{type_ref .Type}});
             if (!valid && fieldErrors) {
               setFieldErrors(errors, `{{toCamelCase .Name}}[${rowIndex}][${index}]`, fieldErrors);
             }
@@ -551,7 +551,7 @@ export class {{.Namespace.ClassName}} {
         setFieldErrors(errors, "{{toCamelCase .Name}}", [{ validator: "required", message: "{{.Name}} is required" }]);
       }{{end}}
     }
-    {{- else if not (scalar_needs_validation .Type)}}
+    {{- else if not .Validator}}
     {{- if .Required}}
     {
       // Bare-primitive argument: presence check only, no scalar validator.
@@ -566,7 +566,7 @@ export class {{.Namespace.ClassName}} {
       // Calling setFieldErrors per iteration would overwrite previous element errors.
       const elemErrors: { validator: string; message: string }[] = [];
       for (const elem of (scalarInput.{{toCamelCase .Name}} || [])) {
-        const [valid, fieldErrors] = validate{{scalar_validator_symbol .Type}}Required(elem);
+        const [valid, fieldErrors] = {{.Validator}}(elem);
         if (!valid && fieldErrors) {
           elemErrors.push(...fieldErrors);
         }
@@ -582,14 +582,14 @@ export class {{.Namespace.ClassName}} {
     }
     {{- else if .Required}}
     {
-      const [valid, fieldErrors] = validate{{scalar_validator_symbol .Type}}Required(scalarInput.{{toCamelCase .Name}});
+      const [valid, fieldErrors] = {{.Validator}}(scalarInput.{{toCamelCase .Name}});
       if (!valid && fieldErrors) {
         setFieldErrors(errors, "{{toCamelCase .Name}}", fieldErrors);
       }
     }
     {{- else}}
     {
-      const [valid, fieldErrors] = validate{{scalar_validator_symbol .Type}}(scalarInput.{{toCamelCase .Name}});
+      const [valid, fieldErrors] = {{.Validator}}(scalarInput.{{toCamelCase .Name}});
       if (!valid && fieldErrors) {
         setFieldErrors(errors, "{{toCamelCase .Name}}", fieldErrors);
       }
@@ -600,7 +600,7 @@ export class {{.Namespace.ClassName}} {
       throw new ValidationError(errors);
     }
     {{- end}}
-    {{- if has_query_param_validation .QueryParams}}
+    {{- if .ValidatesQuery}}
     // Validate query parameters before sending request
     const queryParamErrors = newValidationErrors();
     {{- /* Scalar-arg endpoints re-bind query params to the local
@@ -883,25 +883,25 @@ export class {{.Namespace.ClassName}} {
     {{- if $endpoint.HasOutputParser}}
     {{- if $endpoint.Page}}
     return {
-      items: Array.isArray(result.items) ? result.items.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : result.items,
+      items: Array.isArray(result.items) ? result.items.map({{$endpoint.OutputParser}}) : result.items,
       next: result.next,
     };
     {{- else if $endpoint.OutputIsMap}}
     return result !== null && typeof result === 'object'
       ? Object.fromEntries(
-          Object.entries(result).map(([key, value]) => [key, {{if $endpoint.OutputIsArray}}Array.isArray(value) ? value.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : value{{else}}parse{{type_ref $endpoint.OutputType}}FromJSON(value){{end}}])
+          Object.entries(result).map(([key, value]) => [key, {{if $endpoint.OutputIsArray}}Array.isArray(value) ? value.map({{$endpoint.OutputParser}}) : value{{else}}{{$endpoint.OutputParser}}(value){{end}}])
         )
       : result;
     {{- else if $endpoint.OutputIsArrayOfArrays}}
     return Array.isArray(result)
-      ? result.map((row) => (Array.isArray(row) ? row.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : row))
+      ? result.map((row) => (Array.isArray(row) ? row.map({{$endpoint.OutputParser}}) : row))
       : result;
     {{- else if $endpoint.OutputIsArray}}
-    return Array.isArray(result) ? result.map(parse{{type_ref $endpoint.OutputType}}FromJSON) : result;
+    return Array.isArray(result) ? result.map({{$endpoint.OutputParser}}) : result;
     {{- else if $endpoint.OutputNullable}}
-    return result === null ? null : parse{{type_ref $endpoint.OutputType}}FromJSON(result);
+    return result === null ? null : {{$endpoint.OutputParser}}(result);
     {{- else}}
-    return parse{{type_ref $endpoint.OutputType}}FromJSON(result);
+    return {{$endpoint.OutputParser}}(result);
     {{- end}}
     {{- else}}
     return result;

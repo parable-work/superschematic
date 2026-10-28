@@ -5,7 +5,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "rm -rf dist && bun build ./index.html --outdir=dist --public-path=/ --minify",
+    "build": "bun run typecheck && rm -rf dist && bun build ./index.html --outdir=dist --public-path=/ --minify",
     "dev": "bun --port=${PORT:-3000} ./index.html",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

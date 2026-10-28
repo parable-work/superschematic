@@ -120,7 +120,9 @@ path for when the store is unavailable.
    errors after a schema change point at exactly the code to follow. The
    build never writes a scaffolded package again: when it warns that one's
    `package.json` or `Cargo.toml` lacks a dependency, as a site's after a
-   new `calls` entry, add the line the warning names. Make a branded scalar value with
+   new `calls` entry, add the line the warning names; when it warns that a
+   site's build script skips the type-check, change the script as it
+   says. Make a branded scalar value with
    `parse<Scalar>Strict` or `normalize<Scalar>Strict` from the types
    package the implementation depends on, never with a cast.
 6. **Test.** `superschematic stack dev schemas/services/<stack>` runs the
