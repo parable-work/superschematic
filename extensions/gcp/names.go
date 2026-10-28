@@ -207,7 +207,9 @@ func literalLength(name any) (n int, refs bool) {
 // room for one character of the value. rename is what names it anew, which
 // the refusal tells the engineer to change: `the deployable`, or for a
 // job, whose name its API and class make (D52), `the job's class or its
-// API`.
+// API`. A long name the target derives reaches it shortened (fit, D97),
+// so it refuses a long one only when the author gave it, or when a
+// parameter's name leaves too little of it to shorten.
 func checkLength(what string, name any, min, max int, rename string) error {
 	n, refs := literalLength(name)
 	switch {
