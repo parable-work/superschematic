@@ -226,6 +226,13 @@ An API view may take a projection as its `@source`, as it takes a table:
 each of its fields is held to the projection's column of its name and
 type.
 
+A [declared query](/superschematic/reference/declared-queries/) may read a
+plain view, as `FROM transaction_list li`, for the aggregates and joins a
+repository does not express. `queries.lock` holds such a query to the
+projection's model, its joins, rules and columns, so changing the
+projection makes the query one to verify again, and a column of a
+required field counts as never null (D95).
+
 ## `outputs.sql`
 
 The DB kind's `sql` output has no switch; the DDL is implied by the kind.

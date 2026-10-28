@@ -596,9 +596,11 @@ It applies the service's `create.sql` to a database of its own, prepares
 each statement of each query, every order's and both of a page's, and
 compares what Postgres describes with the declared types: each
 parameter's type, each result column's name and type, and that a row
-field that is not `Nullable<T>` reads a column that is never null. Each
+field that is not `Nullable<T>` reads a column that is never null (a
+projection's view's column of a required field is). Each
 problem names its query; a statement Postgres refuses is reported with
-its message. With none it writes `queries.lock` beside the schema config,
+its message. A query that returns one row, or one or none, whose SQL
+shows it may return more fails the load first, as it fails `check`. With none it writes `queries.lock` beside the schema config,
 which `check` and `build` then hold the queries to with no database; a
 service with no queries has its lock removed.
 

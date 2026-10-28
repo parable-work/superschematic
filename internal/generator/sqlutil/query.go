@@ -1,8 +1,10 @@
 package sqlutil
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -43,17 +45,22 @@ type QueryScan struct {
 	// End is where the statement ends: the length of the SQL, or the offset
 	// of its trailing semicolon.
 	End int
+	// ManyRows says why the statement may return more than one row, as
+	// far as its text tells (queryManyRows, D95), or is empty.
+	ManyRows string
 }
 
 // notNullHint matches a comment's `@notNull a, b` hint.
 var notNullHint = regexp.MustCompile(`@notNull\s+([A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)*)`)
 
 // queryWord is a word of a query outside strings and comments, as join
-// detection reads it: an identifier in upper case with its raw text, a
-// quoted identifier, ".", "(" or a parameter.
+// detection and queryManyRows read it: an identifier in upper case with its
+// raw text, a quoted identifier, ".", "(", ")", ",", a literal or a
+// parameter, and how many parentheses enclose it.
 type queryWord struct {
 	upper string
 	raw   string
+	depth int
 }
 
 // ScanQuery reads a query's SQL: its parameters, its @notNull hints and its
@@ -63,6 +70,7 @@ type queryWord struct {
 func ScanQuery(sql string) (QueryScan, error) {
 	scan := QueryScan{End: len(sql)}
 	var words []queryWord
+	depth := 0
 	semicolon := -1
 	// statement refuses a token past the semicolon that ends the statement.
 	statement := func() error {
@@ -86,7 +94,7 @@ func ScanQuery(sql string) (QueryScan, error) {
 				j++
 			}
 			scan.Params = append(scan.Params, QueryParamUse{Name: sql[i+1 : j], Start: i, End: j})
-			words = append(words, queryWord{upper: ":"})
+			words = append(words, queryWord{upper: ":", depth: depth})
 			i = j
 			continue
 		case ch == '$' && i+1 < len(sql) && sql[i+1] >= '0' && sql[i+1] <= '9' && (i == 0 || !isSQLIdentByte(sql[i-1])):
@@ -103,7 +111,7 @@ func ScanQuery(sql string) (QueryScan, error) {
 			for j < len(sql) && isSQLIdentByte(sql[j]) {
 				j++
 			}
-			words = append(words, queryWord{upper: strings.ToUpper(sql[i:j]), raw: strings.ToLower(sql[i:j])})
+			words = append(words, queryWord{upper: strings.ToUpper(sql[i:j]), raw: strings.ToLower(sql[i:j]), depth: depth})
 			i = j
 			continue
 		case ch == ';':
@@ -135,15 +143,26 @@ func ScanQuery(sql string) (QueryScan, error) {
 					return scan, err
 				}
 				if ch == '"' {
-					words = append(words, queryWord{upper: "IDENT", raw: strings.ReplaceAll(sql[i+1:next-1], `""`, `"`)})
+					words = append(words, queryWord{upper: "IDENT", raw: strings.ReplaceAll(sql[i+1:next-1], `""`, `"`), depth: depth})
 				} else {
-					words = append(words, queryWord{upper: "LITERAL"})
+					words = append(words, queryWord{upper: "LITERAL", depth: depth})
 				}
 				i = next
 				continue
 			}
-		case ch == '.' || ch == '(':
-			words = append(words, queryWord{upper: string(ch)})
+		case ch == '.':
+			words = append(words, queryWord{upper: ".", depth: depth})
+		case ch == '(':
+			words = append(words, queryWord{upper: "(", depth: depth})
+			depth++
+		case ch == ')' || ch == ',':
+			if err := statement(); err != nil {
+				return scan, err
+			}
+			if ch == ')' && depth > 0 {
+				depth--
+			}
+			words = append(words, queryWord{upper: string(ch), depth: depth})
 		case ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r':
 			if err := statement(); err != nil {
 				return scan, err
@@ -152,6 +171,7 @@ func ScanQuery(sql string) (QueryScan, error) {
 		i++
 	}
 	scan.OuterTables, scan.AllOuter = outerJoins(words)
+	scan.ManyRows = queryManyRows(words)
 	for _, w := range words {
 		if w.raw != "" && w.upper != "LITERAL" {
 			scan.Identifiers = append(scan.Identifiers, w.raw)
@@ -267,8 +287,20 @@ type QueryModel struct {
 	// Tables are the shapes of the tables of the schema the SQL names,
 	// sorted: each table's name and its columns' names, types and
 	// nullability, which a lock's hash covers, so a change to a column the
-	// query may read is a query to verify again.
+	// query may read is a query to verify again. A projection's view the
+	// SQL names is its model (ViewShape), and the shapes of the tables the
+	// view reads join them (D95).
 	Tables []string
+
+	// ViewNotNull are the columns of the projections' views the SQL names
+	// that are never null, as view.column: each a required field of its
+	// projection that reads a column, which verification holds the
+	// projection to (D95). Postgres describes no view column as NOT NULL.
+	ViewNotNull map[string]bool
+
+	// Returns is what a call answers: ir.QueryReturnsMany, ir.QueryReturnsOne
+	// or ir.QueryReturnsOptional (D95).
+	Returns string
 
 	OrderBy *QueryOrderModel
 	Page    *QueryPageModel
@@ -348,6 +380,10 @@ func QueriesOf(schema *ir.Schema, dependencies map[string]*ir.Schema) ([]QueryMo
 		return nil, err
 	}
 	shapes := map[string]string{}
+	// reads are the tables each view reads, and notNull its columns that
+	// are never null, by the view's name.
+	reads := map[string][]string{}
+	notNull := map[string][]string{}
 	for _, t := range tables {
 		columns := make([]string, len(t.Columns))
 		for i, c := range t.Columns {
@@ -365,6 +401,30 @@ func QueriesOf(schema *ir.Schema, dependencies map[string]*ir.Schema) ([]QueryMo
 		}
 		shapes[t.Name] = t.Name + "(" + strings.Join(columns, ", ") + ")"
 	}
+	tableNames := map[string]string{}
+	for _, t := range tables {
+		tableNames[t.Type] = t.Name
+	}
+	for _, td := range schema.Projections() {
+		def := td.Projection
+		if def == nil {
+			continue
+		}
+		if _, taken := shapes[def.Name]; taken {
+			continue
+		}
+		shapes[def.Name] = ViewShape(schema, td, sqlTypes)
+		for _, f := range td.Fields {
+			if f != nil && f.Required && f.ProjectedFunction == nil {
+				notNull[def.Name] = append(notNull[def.Name], def.Name+"."+ColumnNameOf(f.Name))
+			}
+		}
+		for _, typ := range append([]string{def.Source}, joinTypes(def)...) {
+			if name := tableNames[typ]; name != "" && !slices.Contains(reads[def.Name], name) {
+				reads[def.Name] = append(reads[def.Name], name)
+			}
+		}
+	}
 	out := make([]QueryModel, 0, len(defs))
 	for _, td := range defs {
 		q, err := queryOf(schema, td, scalars, sqlTypes, enums, unions)
@@ -376,11 +436,24 @@ func QueriesOf(schema *ir.Schema, dependencies map[string]*ir.Schema) ([]QueryMo
 			return nil, fmt.Errorf("query %s: %w", td.Query.Name, err)
 		}
 		named := map[string]bool{}
-		for _, name := range scan.Identifiers {
-			if shape, ok := shapes[name]; ok && !named[name] {
-				named[name] = true
+		var name func(string)
+		name = func(table string) {
+			if shape, ok := shapes[table]; ok && !named[table] {
+				named[table] = true
 				q.Tables = append(q.Tables, shape)
+				for _, column := range notNull[table] {
+					if q.ViewNotNull == nil {
+						q.ViewNotNull = map[string]bool{}
+					}
+					q.ViewNotNull[column] = true
+				}
+				for _, read := range reads[table] {
+					name(read)
+				}
 			}
+		}
+		for _, identifier := range scan.Identifiers {
+			name(identifier)
 		}
 		sort.Strings(q.Tables)
 		out = append(out, q)
@@ -390,7 +463,7 @@ func QueriesOf(schema *ir.Schema, dependencies map[string]*ir.Schema) ([]QueryMo
 
 func queryOf(schema *ir.Schema, td *ir.TypeDef, scalars map[string]ScalarClass, sqlTypes map[string]string, enums, unions map[string]bool) (QueryModel, error) {
 	def := td.Query
-	q := QueryModel{Name: def.Name, Type: td.Name, Params: def.Params, Row: def.Row, NotNull: map[string]bool{}}
+	q := QueryModel{Name: def.Name, Type: td.Name, Params: def.Params, Row: def.Row, NotNull: map[string]bool{}, Returns: def.Returning()}
 	params := schema.Types[def.Params]
 	row := schema.Types[def.Row]
 	if params == nil || row == nil {
@@ -540,4 +613,51 @@ func QueryValueProblem(schema *ir.Schema, f *ir.FieldDef) string {
 		return "a " + strings.TrimSuffix(sqlType, "[]") + " value, which no query codec reads yet"
 	}
 	return ""
+}
+
+// ViewShape is the model of a projection's view as a lock's hash covers it
+// (D95): its relation, its source, its joins, its row rules and its
+// collapse, and each column's name, SQL type, nullability and what it
+// reads, so a change to the declaration, which sqlgen writes as a new view,
+// is a query over the view to verify again. The migration stamp, which
+// names the file the view is written to, is left out.
+func ViewShape(schema *ir.Schema, td *ir.TypeDef, sqlTypes map[string]string) string {
+	type column struct {
+		Name     string                     `json:"name"`
+		Type     string                     `json:"type"`
+		Nullable bool                       `json:"nullable,omitempty"`
+		From     string                     `json:"from,omitempty"`
+		Function *ir.ProjectionFunctionCall `json:"function,omitempty"`
+	}
+	var in struct {
+		Def     ir.ProjectionDef `json:"def"`
+		Columns []column         `json:"columns"`
+	}
+	if td.Projection != nil {
+		in.Def = *td.Projection
+	}
+	in.Def.Migration = ""
+	for _, f := range td.Fields {
+		if f == nil {
+			continue
+		}
+		c := column{Name: ColumnNameOf(f.Name), Type: ColumnType(schema, f, sqlTypes), Nullable: !f.Required, Function: f.ProjectedFunction}
+		if f.ProjectedFunction == nil {
+			c.From = f.ProjectionSource()
+		}
+		in.Columns = append(in.Columns, c)
+	}
+	data, _ := json.Marshal(in)
+	return "view " + in.Def.Relation() + " " + string(data)
+}
+
+// joinTypes are the types a projection joins, in declaration order.
+func joinTypes(def *ir.ProjectionDef) []string {
+	types := make([]string, 0, len(def.Joins))
+	for _, j := range def.Joins {
+		if j != nil {
+			types = append(types, j.Type)
+		}
+	}
+	return types
 }

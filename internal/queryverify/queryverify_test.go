@@ -190,6 +190,79 @@ func TestJudge(t *testing.T) {
 	}
 }
 
+// TestHashCoversWhatAQueryReturnsAndTheProjectionsItReads: a query's hash
+// changes with what it returns and with the projection whose view its SQL
+// names, and a query of the many rows it returns by default hashes as one
+// that says so; a query of the tables alone keeps its hash when the
+// projection changes, and the lock names the query over the view alone
+// (D95).
+func TestHashCoversWhatAQueryReturnsAndTheProjectionsItReads(t *testing.T) {
+	schema, queries := fixture(t)
+	totals := queries["dashboardTotals"]
+	many := totals
+	many.Returns = ir.QueryReturnsMany
+	optional := totals
+	optional.Returns = ir.QueryReturnsOptional
+	unset := queries["categoryTotals"]
+	unset.Returns = ""
+	if Hash(totals) == Hash(many) || Hash(totals) == Hash(optional) || Hash(many) == Hash(optional) {
+		t.Fatal("returns changes no hash")
+	}
+	if Hash(unset) != Hash(queries["categoryTotals"]) {
+		t.Fatal("a query of many rows hashes apart from one whose returns is unset, as a lock written before D95 holds it")
+	}
+
+	projection := schema.Types["LineListEntry"].Projection
+	projection.Joins[0].Kind = "left"
+	changed, err := sqlutil.QueriesOf(schema, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range changed {
+		switch moved := Hash(q) != Hash(queries[q.Name]); {
+		case q.Name == "dashboardLines" && !moved:
+			t.Error("a join of the projection dashboardLines reads leaves its hash")
+		case q.Name != "dashboardLines" && moved:
+			t.Errorf("a join of the projection moves the hash of %s, which does not read its view", q.Name)
+		}
+	}
+	err = CheckLock(fixtureDir, schema)
+	if err == nil || !strings.Contains(err.Error(), "query dashboardLines changed since it was verified: its SQL, its params' or row's types, what it returns, or a table or projection it names are not what queries.lock verified") ||
+		strings.Contains(err.Error(), "query dashboardTotals") {
+		t.Fatalf("a changed projection: %v", err)
+	}
+}
+
+// TestJudgeAViewsColumns: a required field of a projection holds a column of
+// its view that Postgres describes as no NOT NULL column, as every view's
+// is; without the projection's word for it, the column may be null (D95).
+func TestJudgeAViewsColumns(t *testing.T) {
+	_, queries := fixture(t)
+	lines := queries["dashboardLines"]
+	view := func(name, typ, typeName string) Column {
+		return Column{Name: name, Type: Type{Type: typ, Name: typeName}, Table: "line_list", Column: name}
+	}
+	timestamp := Type{Type: "timestamp with time zone", Name: "timestamptz"}
+	described := Description{ID: "dashboardLines/0",
+		Params: []Type{timestamp, timestamp, {Type: "uuid[]", Name: "_uuid", Element: "uuid"}, {Type: "uuid[]", Name: "_uuid", Element: "uuid"}, {Type: "text", Name: "text"}},
+		Columns: []Column{
+			view("id", "uuid", "uuid"), view("date", "timestamp with time zone", "timestamptz"), view("name", "text", "text"),
+			view("account_name", "character varying(80)", "varchar"), view("category_name", "character varying(80)", "varchar"),
+		}}
+	lock, problems := Judge([]sqlutil.QueryModel{lines}, &Result{Version: DescribeVersion, Statements: []Description{described}})
+	if len(problems) > 0 {
+		t.Fatalf("problems of a query over a view: %v", problems)
+	}
+	if columns := lock.Queries[0].Columns; !columns[0].NotNull || !columns[3].NotNull || columns[4].NotNull {
+		t.Fatalf("locked columns = %+v", columns)
+	}
+	lines.ViewNotNull = nil
+	_, problems = Judge([]sqlutil.QueryModel{lines}, &Result{Version: DescribeVersion, Statements: []Description{described}})
+	if len(problems) != 4 || !strings.Contains(problems[0], "column id reads line_list.id, which may be null, and DashboardLinesRow.id is not Nullable") {
+		t.Fatalf("a view's columns with no projection's word: %v", problems)
+	}
+}
+
 // TestFixtureLockIsCurrent: fixture-queries-db's committed queries.lock
 // verified each of its queries as the schema declares it now. Write it
 // again with TestVerifyFixtureOnPostgres -update.

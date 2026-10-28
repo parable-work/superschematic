@@ -100,12 +100,21 @@ const (
 	kindVariableDeclaration         = tsast.Kind(261)
 	kindQuestionToken               = tsast.Kind(57)
 	kindAsExpression                = tsast.Kind(235)
+	kindVariableDeclarationList     = tsast.Kind(262)
+	kindTemplateExpression          = tsast.Kind(229)
+	kindBinaryExpression            = tsast.Kind(227)
 )
 
 // Modifier flags.
 const (
 	modifierFlagsExport   = 1 << 5
 	modifierFlagsAbstract = 1 << 6
+)
+
+// Node flags: a variable declaration list's let and const.
+const (
+	nodeFlagsLet   = 1 << 0
+	nodeFlagsConst = 1 << 1
 )
 
 // Symbol flags.

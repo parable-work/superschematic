@@ -37,6 +37,18 @@ export interface AccountLinesRow {
 }
 
 /**
+ * AccountNamedParams - ---- the account of a name --------------------------------------------------
+ */
+export interface AccountNamedParams {
+  name: IdentityName;
+}
+
+export interface AccountNamedRow {
+  id: IdentityUUID;
+  name: IdentityName;
+}
+
+/**
  * BudgetsParams - ---- budgets: exact amounts from a day on ----------------------------------
  */
 export interface BudgetsParams {
@@ -81,6 +93,48 @@ export interface CategoryTotalsRow {
 }
 
 /**
+ * DashboardCategoriesRow - ---- the total of each category ---------------------------------------------
+ */
+export interface DashboardCategoriesRow {
+  categoryId?: IdentityUUID | null;
+  total: FinanceSignedMoney;
+  lines: GenericInt64;
+}
+
+/**
+ * DashboardFilter - ---- the dashboard: four reports over one filter (D95) ----------------------
+ */
+export interface DashboardFilter {
+  start: TemporalDateTime;
+  end: TemporalDateTime;
+  /** Every account, and every category, when null. */
+  accountIds?: IdentityUUID[] | null;
+  categoryIds?: IdentityUUID[] | null;
+  /** Lines whose name holds the text, in any case; every line when null. */
+  search?: string | null;
+}
+
+/**
+ * DashboardLinesRow - ---- the lines, through the line_list projection ----------------------------
+ */
+export interface DashboardLinesRow {
+  id: IdentityUUID;
+  date: TemporalDateTime;
+  name: string;
+  accountName: IdentityName;
+  categoryName?: IdentityName | null;
+}
+
+/**
+ * DashboardTotalsRow - ---- totals: spent, earned and the count, in one row ------------------------
+ */
+export interface DashboardTotalsRow {
+  spent: FinanceSignedMoney;
+  earned: FinanceSignedMoney;
+  lines: GenericInt64;
+}
+
+/**
  * LineItem - A line of the ledger: a signed amount in minor units, a debit negative.
  */
 export interface LineItem {
@@ -91,6 +145,24 @@ export interface LineItem {
   account: Account;
   category?: Category | null;
   transferGroup?: TransferGroup | null;
+}
+
+/**
+ * MatchingLineParams - ---- the line of a name, if the filter holds one ----------------------------
+ */
+export interface MatchingLineParams {
+  start: TemporalDateTime;
+  end: TemporalDateTime;
+  accountIds?: IdentityUUID[] | null;
+  categoryIds?: IdentityUUID[] | null;
+  search?: string | null;
+  name: string;
+}
+
+export interface MatchingLineRow {
+  id: IdentityUUID;
+  date: TemporalDateTime;
+  amount: FinanceSignedMoney;
 }
 
 export interface TimeBucketsParams {

@@ -79,6 +79,7 @@ none of a table's declarations (`@key`, `@index`, `@table`, a relation).
 | `notNull` | row fields the query vouches are never null, which Postgres cannot tell: an aggregate, a `COALESCE`, a column of a joined table that a `WHERE` keeps |
 | `orderBy` | `{ param, options, default? }`: an enum parameter that picks one of fixed `ORDER BY` fragments ([Order](#order)) |
 | `page` | `{ key, desc? }`: reads the rows a page at a time by a keyset of row fields ([Pages](#pages)) |
+| `returns` | `"many"`, the rows, unless set; `"one"`, the one row; `"optional"`, the row or none ([One row](#one-row)) |
 | `dialects` | the dialects it runs on, `postgres` and `sqlite`; unset is every dialect the service lists. A query runs on Postgres alone for now, so a service that also lists `sqlite` limits each query to `["postgres"]` |
 
 A field of either type holds a scalar, an enum, a list of either, a JSON
@@ -86,6 +87,49 @@ value (`Generic.JSON`, a `@jsonField` type or `JsonField<T>`) or a vector
 (`Validate<Embedding.Vector, { dimensions }>`). A map, a list of lists, a
 union, an object type, a relation, an `Encrypted<T>` field, a POINT and an
 INTERVAL fail the load, naming the fix.
+
+## Sharing SQL
+
+Reports over one dashboard read their rows through one filter. A `sql`
+template literal interpolates string constants, so the filter is written
+once and each query names it (D95):
+
+```ts
+// finances-db/src/filters.ts
+const IN_RANGE = `li."date" BETWEEN :start AND :end`;
+
+export const DASHBOARD_FILTER = `${IN_RANGE}
+  AND (:accountIds::uuid[] IS NULL OR li.account_id = ANY(:accountIds))
+  AND (:search::text IS NULL OR li."name" ILIKE '%' || :search || '%')`;
+```
+
+```ts
+// finances-db/src/reports.schema.ts
+import { DASHBOARD_FILTER } from "./filters";
+
+@query<DashboardFilter, CategoryTotalsRow>({
+  sql: `SELECT li.category_id, SUM(li.amount)::bigint AS total
+    FROM line_item li
+    WHERE ${DASHBOARD_FILTER}
+    GROUP BY li.category_id`,
+  notNull: ["total"],
+})
+export abstract class CategoryTotals {}
+```
+
+Each `${...}` names a string constant: a `const` declared with a string or
+with a template literal of such constants, in the schema file or a file it
+imports. The load reads the SQL with each one in place, and the
+statement's `:name`s are the query's own, so each query that interpolates
+the filter takes its parameters in its `Params` (here one type,
+`DashboardFilter`, for every report). Anything else in a `${...}`, a
+`let`, a call, a number, and strings joined with `+`, fails the load where
+it is written, saying what a `${...}` may be.
+
+The lock hashes each query's SQL as it reads with the constants in place,
+so editing the filter makes `check` and `build` fail on every query that
+interpolates it until `queries verify` prepares them again
+([Verification](#verification)).
 
 ## Parameters
 
@@ -174,6 +218,50 @@ next, err := db.Queries.TransactionList(ctx, params, &orm.QueryPageOptions[orm.T
 A page holds `limit` rows, 100 unless set, and `next` is the key of its
 last row when more follow, null on the last page.
 
+## One row
+
+A report of one row, a dashboard's totals, returns it rather than a list
+of one: `returns: "one"`.
+
+```ts
+@query<DashboardFilter, DashboardTotalsRow>({
+  sql: `SELECT COALESCE(SUM(li.amount), 0)::bigint AS total, COUNT(*) AS lines
+    FROM line_item li WHERE ${DASHBOARD_FILTER}`,
+  notNull: ["total", "lines"],
+  returns: "one",
+})
+export abstract class DashboardTotals {}
+```
+
+```ts
+const totals = await deps.orm.queries.dashboardTotals(filter); // DashboardTotalsRow
+const line = await deps.orm.queries.matchingLine(params);      // MatchingLineRow | null
+```
+
+```go
+totals, err := db.Queries.DashboardTotals(ctx, filter) // types.DashboardTotalsRow
+line, err := db.Queries.MatchingLine(ctx, params)      // *types.MatchingLineRow, nil for none
+```
+
+| `returns` | TypeScript | Go | None | More than one |
+| --- | --- | --- | --- | --- |
+| `"many"` | `Promise<Row[]>` | `([]Row, error)` | `[]` | the rows |
+| `"one"` | `Promise<Row>` | `(Row, error)` | `NotFoundError`; `ErrNotFound`, as `getOne`'s | `TooManyRowsError`; `ErrTooManyRows` |
+| `"optional"` | `Promise<Row \| null>` | `(*Row, error)` | `null`; `nil` | `TooManyRowsError`; `ErrTooManyRows` |
+
+The statement runs as written: nothing is added to it, so a query that
+reads more than one row fails rather than answering the first. The load
+refuses `"one"` and `"optional"` on a paged query, and on a statement
+that shows it may return more than one row: its top level groups with
+`GROUP BY`, is a `UNION` or a `VALUES` list of several rows, or reads a
+set-returning function (`generate_series`, `unnest`, `jsonb_array_elements`
+and the like) in its select list or its `FROM`. An aggregate with no
+`GROUP BY` makes one row, over a function's rows too, and a statement
+that ends `LIMIT 1` returns no more than one whatever it reads, so a
+grouped query that never returns more than one says so with `LIMIT 1`.
+What a query returns is in its lock hash, so changing it is a query to
+verify again.
+
 ## Verification
 
 ```sh
@@ -195,19 +283,28 @@ the declared types:
   `BIGINT` is a `NUMERIC`, which a `Finance.SignedMoney` is not, so the
   SQL casts it (`::bigint`);
 - a field that is not `Nullable<T>` reads a column that is never null
-  ([Rows](#rows)).
+  ([Rows](#rows)). A column of a projection's view
+  ([Projection views](/superschematic/reference/projections/)) is never
+  null when its projection field is required and reads a column, which
+  the projection's own checks hold; Postgres describes no view column as
+  `NOT NULL`.
 
 Each problem names its query, and a statement Postgres refuses is reported
 with Postgres's message. With none, `verify` writes `queries.lock` beside
 the service's schema config: per query, a hash of what it verified (its
-statements, the SQL types of its parameters and row, which fields may be
-null and which it vouches for, and the shape of each table its SQL names)
-and what Postgres described of its parameters and columns. Commit it.
+statements, with each string constant in place, the SQL types of its
+parameters and row, which fields may be null and which it vouches for,
+what it returns, the shape of each table its SQL names, and the model of
+each projection's view it names, its joins, row rules and columns, with
+the shapes of the tables the view reads) and what Postgres described of
+its parameters and columns. Commit it.
 
 `check` and `build` hold each query to the lock with no database: a query
-the lock holds no entry for, one whose hash differs (its SQL, its types,
-or a column of a table it names changed), and an entry for a query no
-longer declared fail them, naming the query and the command to run.
+the lock holds no entry for, one whose hash differs (its SQL or a
+constant it interpolates, its types, what it returns, a column of a table
+it names, or a join or column of a projection whose view it names
+changed), and an entry for a query no longer declared fail them, naming
+the query and the command to run.
 
 The Postgres is the server `--database-url` names, whose role may create
 a database (verify creates one and drops it), else the one
@@ -232,6 +329,8 @@ Docker, and writes no lock.
 ## Not yet
 
 SQLite queries, whose SQL a dialect of its own would verify; the field
-kinds above that no codec reads; a raw SQL piece or a view a query reads,
-whose change the lock does not see; a nullability rule finer than the
-outer join's table, such as a `LEFT JOIN` of a table also joined inside.
+kinds above that no codec reads; a `@rawSql` function or view a query
+reads, whose change the lock does not see (a projection's view it sees);
+a nullability rule finer than the outer join's table, such as a `LEFT
+JOIN` of a table also joined inside; named fragments with parameters of
+their own, which a string constant and the query's params type cover.

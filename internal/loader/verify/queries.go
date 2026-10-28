@@ -27,7 +27,9 @@ var queryDialects = []string{"postgres", "sqlite"}
 // field of the params, which uses every one; its notNull names row fields;
 // its orderBy's parameter is an enum of the schema, whose values are its
 // options, each a fixed fragment; its page's key are required row fields
-// of one value, and a paged query takes no orderBy.
+// of one value, and a paged query takes no orderBy; a query that returns
+// one row, or one or none, is not paged and does not show it may return
+// more (D95).
 func checkQueries(schema *ir.Schema, r *Result) {
 	var defs []*ir.TypeDef
 	for _, name := range sortedTypeNames(schema.Types) {
@@ -185,6 +187,33 @@ func checkQuerySQL(schema *ir.Schema, td *ir.TypeDef, def *ir.QueryDef, params, 
 	}
 	if def.Page != nil {
 		checkQueryPage(schema, td, def, row, r)
+	}
+	checkQueryReturns(td, def, scan, r)
+}
+
+// checkQueryReturns checks what a query's call answers (D95): many rows,
+// one or one or none. A query of one row, or of one or none, is not paged,
+// and its statement does not show it may return more than one row: a
+// top-level GROUP BY, UNION, VALUES list of several rows or set-returning
+// function (sqlutil.QueryScan.ManyRows). An author whose statement never
+// returns more ends it with LIMIT 1, which says so.
+func checkQueryReturns(td *ir.TypeDef, def *ir.QueryDef, scan sqlutil.QueryScan, r *Result) {
+	where := "query " + def.Name
+	returns := def.Returning()
+	switch returns {
+	case ir.QueryReturnsMany:
+		return
+	case ir.QueryReturnsOne, ir.QueryReturnsOptional:
+	default:
+		r.errorf(td.Owner, "%s: %s returns %q; a query returns %q, the rows, %q, the one row, or %q, the row or none", td.Name, where, def.Returns, ir.QueryReturnsMany, ir.QueryReturnsOne, ir.QueryReturnsOptional)
+		return
+	}
+	if def.Page != nil {
+		r.errorf(td.Owner, "%s: %s takes a page and returns %q; a paged query returns its rows a page at a time, so drop the page or the returns", td.Name, where, returns)
+		return
+	}
+	if scan.ManyRows != "" {
+		r.errorf(td.Owner, "%s: %s returns %q, and its SQL %s, so it may return more than one row; return %q, or end the statement with LIMIT 1 when it never returns more than one", td.Name, where, returns, scan.ManyRows, ir.QueryReturnsMany)
 	}
 }
 

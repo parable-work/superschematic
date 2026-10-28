@@ -62,10 +62,14 @@ type LockedColumn struct {
 
 // Hash is the hash of what verification checks of q: its statements as
 // Postgres runs them, the SQL types of its parameters and of its row's
-// fields, which fields may be null and which it vouches for, and the shape
-// of each table of the schema its SQL names. Any change to one of them,
-// such as a renamed column of a table it reads, is a query the lock has
-// not verified.
+// fields, which fields may be null and which it vouches for, the shape of
+// each table of the schema its SQL names, the model of each projection's
+// view it names and the tables that view reads, and whether it returns one
+// row or one or none. Any change to one of them, such as a renamed column
+// of a table it reads, a string constant its SQL interpolates or a
+// projection's join, is a query the lock has not verified (D95). What a
+// query of the many rows it returns by default hashes as before D95, so a
+// lock written before it holds.
 func Hash(q sqlutil.QueryModel) string {
 	type field struct {
 		Name     string `json:"name"`
@@ -82,6 +86,7 @@ func Hash(q sqlutil.QueryModel) string {
 		Outer      []string `json:"outer"`
 		AllOuter   bool     `json:"allOuter"`
 		Tables     []string `json:"tables"`
+		Returns    string   `json:"returns,omitempty"`
 	}
 	in.Name = q.Name
 	for _, st := range q.Statements() {
@@ -101,6 +106,9 @@ func Hash(q sqlutil.QueryModel) string {
 	sort.Strings(in.Outer)
 	in.AllOuter = q.AllOuter
 	in.Tables = q.Tables
+	if q.Returns != ir.QueryReturnsMany {
+		in.Returns = q.Returns
+	}
 	data, _ := json.Marshal(in)
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
@@ -170,7 +178,7 @@ func CheckLock(serviceDir string, schema *ir.Schema) error {
 		case !ok:
 			stale = append(stale, fmt.Sprintf("query %s has not been verified: %s holds no entry for it", q.Name, LockFile))
 		case entry.Hash != Hash(q):
-			stale = append(stale, fmt.Sprintf("query %s changed since it was verified: its SQL, its params' or row's types, or a table it names are not what %s verified", q.Name, LockFile))
+			stale = append(stale, fmt.Sprintf("query %s changed since it was verified: its SQL, its params' or row's types, what it returns, or a table or projection it names are not what %s verified", q.Name, LockFile))
 		}
 	}
 	if lock != nil {

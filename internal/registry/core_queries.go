@@ -36,14 +36,14 @@ func queryDecorator() DecoratorSpec {
 }
 
 // queryOptions names @query's options, for its errors.
-const queryOptions = "name, sql, notNull, orderBy, page and dialects"
+const queryOptions = "name, sql, notNull, orderBy, page, returns and dialects"
 
 // queryOf reads @query<Params, Row>({ name?, sql, notNull?, orderBy?, page?,
-// dialects? }). args[0] and args[1] are the type arguments' names; an
+// returns?, dialects? }). args[0] and args[1] are the type arguments' names; an
 // ArgError's index counts them first.
 func queryOf(td *ir.TypeDef, args []any) (*ir.QueryDef, error) {
 	if len(args) != 3 {
-		return nil, fmt.Errorf("@query takes one options object: { name?, sql, notNull?, orderBy?, page?, dialects? }")
+		return nil, fmt.Errorf("@query takes one options object: { name?, sql, notNull?, orderBy?, page?, returns?, dialects? }")
 	}
 	if td.Query != nil {
 		return nil, fmt.Errorf("a class takes one @query")
@@ -52,7 +52,7 @@ func queryOf(td *ir.TypeDef, args []any) (*ir.QueryDef, error) {
 	row, _ := args[1].(string)
 	opts, ok := args[2].(map[string]any)
 	if !ok {
-		return nil, ArgErrorf(2, "@query takes one options object: { name?, sql, notNull?, orderBy?, page?, dialects? }")
+		return nil, ArgErrorf(2, "@query takes one options object: { name?, sql, notNull?, orderBy?, page?, returns?, dialects? }")
 	}
 	def := &ir.QueryDef{Params: params, Row: row, Name: lowerFirstRune(td.Name)}
 	for _, key := range sortedKeys(opts) {
@@ -90,6 +90,16 @@ func queryOf(td *ir.TypeDef, args []any) (*ir.QueryDef, error) {
 				return nil, err
 			}
 			def.Page = page
+		case "returns":
+			// "many" is the default, which the IR leaves empty, as the
+			// writers leave it unwritten (D95).
+			switch s, _ := value.(string); s {
+			case ir.QueryReturnsMany:
+			case ir.QueryReturnsOne, ir.QueryReturnsOptional:
+				def.Returns = s
+			default:
+				return nil, ArgErrorf(2, "@query returns is %q, the rows, %q, the one row, or %q, the row or none", ir.QueryReturnsMany, ir.QueryReturnsOne, ir.QueryReturnsOptional)
+			}
 		default:
 			return nil, ArgErrorf(2, "@query has no option %q; it takes %s", key, queryOptions)
 		}

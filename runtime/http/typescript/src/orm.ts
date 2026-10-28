@@ -379,6 +379,14 @@ export class NoUserError extends Error {
   }
 }
 
+/** The error of a declared query that returns one row, or one or none, whose statement read more than one (D95). */
+export class TooManyRowsError extends Error {
+  constructor(message = 'the query read more than one row') {
+    super(message);
+    this.name = 'TooManyRowsError';
+  }
+}
+
 /** findPage's error for an after key that holds no key, or whose row no longer exists in an order by another column. */
 export class PageKeyError extends Error {
   constructor(message = 'the page key names no row of its sort') {

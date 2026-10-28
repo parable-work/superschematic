@@ -43,6 +43,12 @@ type QueryDef struct {
 	// findPage does (D60). Nil reads every row.
 	Page *QueryPage `json:"page,omitempty" yaml:"page,omitempty"`
 
+	// Returns is what a call answers (D95): QueryReturnsMany, the rows, as
+	// an empty one does; QueryReturnsOne, the one row, which fails when the
+	// statement reads none or more than one; QueryReturnsOptional, the row
+	// or none, which fails when it reads more than one.
+	Returns string `json:"returns,omitempty" yaml:"returns,omitempty"`
+
 	// Dialects lists the dialects the query runs on. Empty runs it on every
 	// dialect the service is built for.
 	Dialects []string `json:"dialects,omitempty" yaml:"dialects,omitempty"`
@@ -73,6 +79,22 @@ type QueryPage struct {
 
 	// Desc orders by the key descending.
 	Desc bool `json:"desc,omitempty" yaml:"desc,omitempty"`
+}
+
+// What a call of a query answers (QueryDef.Returns, D95).
+const (
+	QueryReturnsMany     = "many"
+	QueryReturnsOne      = "one"
+	QueryReturnsOptional = "optional"
+)
+
+// Returning is what a call of the query answers: its Returns, else
+// QueryReturnsMany.
+func (q *QueryDef) Returning() string {
+	if q.Returns == "" {
+		return QueryReturnsMany
+	}
+	return q.Returns
 }
 
 // RunsOn reports whether the query runs on dialect.

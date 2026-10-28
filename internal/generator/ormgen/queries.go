@@ -16,7 +16,9 @@ import (
 // a transaction, which runs the statement sqlutil writes for it, the one
 // the TypeScript runtime runs too (sqlutil.QueriesOf). A parameter binds as
 // its column would (a UUID through ToUUID, a time as a time.Time); a row is
-// read by its columns' names, each field scanned as a table's would be.
+// read by its columns' names, each field scanned as a table's would be. A
+// query that returns one row answers it, and one that returns one or none
+// a pointer to it (D95).
 
 // Query is a declared query as queries.go writes it.
 type Query struct {
@@ -40,6 +42,41 @@ type Query struct {
 	// Order is the query's dynamic sort, Page its keyset paging.
 	Order *QueryOrder
 	Page  *QueryPage
+	// Returns is what a call answers: "many", "one" or "optional" (D95).
+	Returns string
+}
+
+// Result is the Go type a call of the query that is not paged returns
+// beside its error: the rows, the one row, or a pointer to the row, nil
+// when there is none (D95).
+func (q Query) Result() string {
+	switch q.Returns {
+	case ir.QueryReturnsOne:
+		return q.Row
+	case ir.QueryReturnsOptional:
+		return "*" + q.Row
+	}
+	return "[]" + q.Row
+}
+
+// Zero is the value of Result a call returns beside an error.
+func (q Query) Zero() string {
+	if q.Returns == ir.QueryReturnsOne {
+		return q.Row + "{}"
+	}
+	return "nil"
+}
+
+// Answer names the function that makes a call's rows its Result, or ""
+// for the rows themselves.
+func (q Query) Answer() string {
+	switch q.Returns {
+	case ir.QueryReturnsOne:
+		return "queryOne"
+	case ir.QueryReturnsOptional:
+		return "queryOptional"
+	}
+	return ""
 }
 
 // QueryRowField is a field of a query's row: its column, the variable a
@@ -96,11 +133,12 @@ func queriesOf(schema *ir.Schema, scalars map[string]scalarLookup, unionNames ma
 	for _, q := range models {
 		method := codegen.ToPascalCase(q.Name)
 		query := Query{
-			Name:   q.Name,
-			Method: method,
-			Params: "types." + q.Params,
-			Row:    "types." + q.Row,
-			Const:  lowerFirstRune(q.Name) + "Query",
+			Name:    q.Name,
+			Method:  method,
+			Params:  "types." + q.Params,
+			Row:     "types." + q.Row,
+			Const:   lowerFirstRune(q.Name) + "Query",
+			Returns: q.Returns,
 		}
 		if td := schema.Types[q.Type]; td != nil {
 			query.Doc = codegen.DocText(td.Description, td.Comment)

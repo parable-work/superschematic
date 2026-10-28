@@ -22,7 +22,7 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { FinanceSignedMoney, GenericDecimal, GenericInt64, IdentityName, IdentityUUID, TemporalDate, TemporalDateTime, BucketUnit, LineOrder, Account, AccountLinesParams, AccountLinesRow, BudgetsParams, BudgetsRow, Category, CategoryTotalsParams, CategoryTotalsRow, LineItem, TimeBucketsParams, TimeBucketsRow, TransactionListParams, TransactionListRow, TransferCandidatesParams, TransferCandidatesRow, TransferGroup,  } from '@schemas/fixture-queries-db-types/types';
+import type { FinanceSignedMoney, GenericDecimal, GenericInt64, IdentityName, IdentityUUID, TemporalDate, TemporalDateTime, BucketUnit, LineOrder, Account, AccountLinesParams, AccountLinesRow, AccountNamedParams, AccountNamedRow, BudgetsParams, BudgetsRow, Category, CategoryTotalsParams, CategoryTotalsRow, DashboardCategoriesRow, DashboardFilter, DashboardLinesRow, DashboardTotalsRow, LineItem, MatchingLineParams, MatchingLineRow, TimeBucketsParams, TimeBucketsRow, TransactionListParams, TransactionListRow, TransferCandidatesParams, TransferCandidatesRow, TransferGroup,  } from '@schemas/fixture-queries-db-types/types';
 
 // Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-queries-db-types';
@@ -132,7 +132,7 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 
 
-### Types (16)
+### Types (24)
 
 
 - **Account** - An account a line is booked to.
@@ -140,6 +140,10 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 - **AccountLinesParams**
 
 - **AccountLinesRow**
+
+- **AccountNamedParams** - ---- the account of a name --------------------------------------------------
+
+- **AccountNamedRow**
 
 - **BudgetsParams** - ---- budgets: exact amounts from a day on ----------------------------------
 
@@ -152,7 +156,19 @@ sub-category's totals up to it. A budget is exact, and starts on a day.
 
 - **CategoryTotalsRow**
 
+- **DashboardCategoriesRow** - ---- the total of each category ---------------------------------------------
+
+- **DashboardFilter** - ---- the dashboard: four reports over one filter (D95) ----------------------
+
+- **DashboardLinesRow** - ---- the lines, through the line_list projection ----------------------------
+
+- **DashboardTotalsRow** - ---- totals: spent, earned and the count, in one row ------------------------
+
 - **LineItem** - A line of the ledger: a signed amount in minor units, a debit negative.
+
+- **MatchingLineParams** - ---- the line of a name, if the filter holds one ----------------------------
+
+- **MatchingLineRow**
 
 - **TimeBucketsParams**
 

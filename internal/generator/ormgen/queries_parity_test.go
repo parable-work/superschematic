@@ -11,7 +11,9 @@ import (
 // the same statements, as TestTableParityOfGoAndTypeScriptOnPostgres does:
 // a plain query, a list parameter null and set, a query an enum orders,
 // both ways, and a paged query's first page and the page after a key, in a
-// transaction too.
+// transaction too; and the dashboard's reports over one shared filter, a
+// view's among them, and the queries that return one row or one or none
+// (D95).
 func TestQueriesParityOfGoAndTypeScriptOnPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -71,6 +73,12 @@ try {
   await call('accountLinesDefault', () => orm.queries.accountLines({ accountId: account.id, order: null, limit: 5 as never }));
   await call('budgets', () => orm.queries.budgets({ parentId: null }));
   await call('transferCandidates', () => orm.queries.transferCandidates({ lineItemId: one.id, windowDays: 3 as never }));
+  const dashboard = { start, end, accountIds: null, categoryIds: null, search: null };
+  await call('dashboardTotals', () => orm.queries.dashboardTotals(dashboard));
+  await call('dashboardCategories', () => orm.queries.dashboardCategories({ ...dashboard, search: 'a' }));
+  await call('dashboardLines', () => orm.queries.dashboardLines({ ...dashboard, accountIds: [account.id] }));
+  await call('matchingLine', () => orm.queries.matchingLine({ ...dashboard, name: 'Market' }));
+  await call('accountNamed', () => orm.queries.accountNamed({ name: 'Checking' as never }));
   await call('budgetsInTransaction', () => orm.transaction(tx => tx.queries.budgets({ parentId: account.id })));
   writeFileSync(out!, JSON.stringify(calls, null, 2));
 } finally {
@@ -216,6 +224,21 @@ func TestQueriesParity(t *testing.T) {
 	must(err)
 	rec.call("transferCandidates")
 	_, err = db.Queries.TransferCandidates(ctx, types.TransferCandidatesParams{LineItemId: *one.Id, WindowDays: 3})
+	must(err)
+	rec.call("dashboardTotals")
+	_, err = db.Queries.DashboardTotals(ctx, types.DashboardFilter{Start: start, End: end})
+	must(err)
+	rec.call("dashboardCategories")
+	_, err = db.Queries.DashboardCategories(ctx, types.DashboardFilter{Start: start, End: end, Search: "a"})
+	must(err)
+	rec.call("dashboardLines")
+	_, err = db.Queries.DashboardLines(ctx, types.DashboardFilter{Start: start, End: end, AccountIds: []types.IdentityUUID{*account.Id}})
+	must(err)
+	rec.call("matchingLine")
+	_, err = db.Queries.MatchingLine(ctx, types.MatchingLineParams{Start: start, End: end, Name: "Market"})
+	must(err)
+	rec.call("accountNamed")
+	_, err = db.Queries.AccountNamed(ctx, types.AccountNamedParams{Name: "Checking"})
 	must(err)
 	rec.call("budgetsInTransaction")
 	must(db.Transaction(ctx, func(tx TxInterface) error {
