@@ -1198,6 +1198,12 @@ type RoleFilter struct {
 	// ReferencedByUserRoleGrantRole filters on the presence or absence of a
 	// UserRoleGrant whose role points at this row.
 	ReferencedByUserRoleGrantRole *ReferencedByFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []RoleFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -1327,6 +1333,14 @@ func (f *RoleFilter) conditions(args *[]interface{}, paramOffset int) []string {
 		}
 	}
 
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
 	if len(f.AnyOf) > 0 {
 		start := len(*args)
 		branches := make([]string, 0, len(f.AnyOf))
@@ -1368,6 +1382,12 @@ type SessionFilter struct {
 	// the filter finds (D90): one condition, the foreign key in the keys of
 	// those rows.
 	User *UserFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []SessionFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -1755,6 +1775,14 @@ func (f *SessionFilter) conditions(args *[]interface{}, paramOffset int) []strin
 		conditions = append(conditions, fmt.Sprintf(`"session".user_id IN (SELECT "user".id FROM "user"%s)`, where))
 	}
 
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
 	if len(f.AnyOf) > 0 {
 		start := len(*args)
 		branches := make([]string, 0, len(f.AnyOf))
@@ -1797,6 +1825,12 @@ type UserFilter struct {
 	// ReferencedByUserRoleGrantUser filters on the presence or absence of a
 	// UserRoleGrant whose user points at this row.
 	ReferencedByUserRoleGrantUser *ReferencedByFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []UserFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -2021,6 +2055,14 @@ func (f *UserFilter) conditions(args *[]interface{}, paramOffset int) []string {
 		}
 	}
 
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
 	if len(f.AnyOf) > 0 {
 		start := len(*args)
 		branches := make([]string, 0, len(f.AnyOf))
@@ -2061,6 +2103,12 @@ type UserCredentialFilter struct {
 	// the filter finds (D90): one condition, the foreign key in the keys of
 	// those rows.
 	User *UserFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []UserCredentialFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -2397,6 +2445,14 @@ func (f *UserCredentialFilter) conditions(args *[]interface{}, paramOffset int) 
 		conditions = append(conditions, fmt.Sprintf(`user_credential.user_id IN (SELECT "user".id FROM "user"%s)`, where))
 	}
 
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
 	if len(f.AnyOf) > 0 {
 		start := len(*args)
 		branches := make([]string, 0, len(f.AnyOf))
@@ -2440,6 +2496,12 @@ type UserRoleGrantFilter struct {
 	// the filter finds (D90): one condition, the foreign key in the keys of
 	// those rows.
 	Role *RoleFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []UserRoleGrantFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -2653,6 +2715,14 @@ func (f *UserRoleGrantFilter) conditions(args *[]interface{}, paramOffset int) [
 			where = " WHERE " + strings.Join(through, " AND ")
 		}
 		conditions = append(conditions, fmt.Sprintf(`user_role_grant.role_id IN (SELECT role.id FROM role%s)`, where))
+	}
+
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
 	}
 
 	if len(f.AnyOf) > 0 {

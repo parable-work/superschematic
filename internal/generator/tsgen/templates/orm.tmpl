@@ -21,7 +21,8 @@ A read's options select members and include relations (D90), and its rows
 hold what they name: include: { category: { include: { parent: true } } }
 loads each row's category, and its parent, in one statement per relation.
 A filter reaches through a to-one relation, { category: { parentId: {
-in: ids } } }, and anyOf ORs filters.
+in: ids } } }, anyOf ORs filters, and allOf ANDs them, so two OR groups
+are two filters of an allOf (D99).
 
 Each table's definition also describes its rows for the runtime's
 decodeRow, so a raw query of its columns reads back as its row type:
@@ -82,6 +83,8 @@ export interface {{.Type}}Filter {
   /** The rows whose {{.Field}} is among the{{if .TargetSoftDelete}} live{{end}} {{.Target}} rows the filter finds{{if .Nullable}}; a row whose {{.Field}} is null is not among them{{end}} (D90). */
   {{.Field}}?: {{.Target}}Filter;
 {{- end}}
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly {{.Type}}Filter[];
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly {{.Type}}Filter[];
 }
@@ -200,6 +203,12 @@ export interface {{.Type}}Filter {
 {{- range .FilterColumns}}
   {{.Member}}?: {{.FilterType}};
 {{- end}}
+{{- if .Search}}
+  /** The rows whose {{.SearchSource}} row's search fields hold each word of the text, in any case, as its filter's searchText finds them (D62, D99). */
+  searchText?: string;
+{{- end}}
+  /** The rows every one of the filters finds, beside the other members (D99); a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly {{.Type}}Filter[];
   /** The rows any of the filters finds, beside the other members; a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly {{.Type}}Filter[];
 }
@@ -233,6 +242,10 @@ export const {{.Const}}: TableDefinition = {
     {{.Name}}: {{jsonString .SQL}},
 {{- end}}
   },
+{{- if .Search}}
+  search: {{jsonString .Search}},
+  searchProbe: {{jsonString .SearchProbe}},
+{{- end}}
   uniqueKeys: {},
 };
 {{- end}}

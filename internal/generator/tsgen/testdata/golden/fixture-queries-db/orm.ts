@@ -21,7 +21,8 @@ A read's options select members and include relations (D90), and its rows
 hold what they name: include: { category: { include: { parent: true } } }
 loads each row's category, and its parent, in one statement per relation.
 A filter reaches through a to-one relation, { category: { parentId: {
-in: ids } } }, and anyOf ORs filters.
+in: ids } } }, anyOf ORs filters, and allOf ANDs them, so two OR groups
+are two filters of an allOf (D99).
 
 Each table's definition also describes its rows for the runtime's
 decodeRow, so a raw query of its columns reads back as its row type:
@@ -56,6 +57,8 @@ export interface AccountFilter {
   name?: StringFilter<T.IdentityName>;
   /** The rows a LineItem row's account points at, or none does. */
   referencedByLineItemAccount?: ReferencedByFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly AccountFilter[];
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly AccountFilter[];
 }
@@ -187,6 +190,8 @@ export interface CategoryFilter {
   referencedByLineItemCategory?: ReferencedByFilter;
   /** The rows whose parent is among the Category rows the filter finds; a row whose parent is null is not among them (D90). */
   parent?: CategoryFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly CategoryFilter[];
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly CategoryFilter[];
 }
@@ -335,6 +340,8 @@ export interface LineItemFilter {
   category?: CategoryFilter;
   /** The rows whose transferGroup is among the TransferGroup rows the filter finds; a row whose transferGroup is null is not among them (D90). */
   transferGroup?: TransferGroupFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly LineItemFilter[];
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly LineItemFilter[];
 }
@@ -456,6 +463,8 @@ export interface TransferGroupFilter {
   note?: StringFilter<string> & NullFilter;
   /** The rows a LineItem row's transferGroup points at, or none does. */
   referencedByLineItemTransferGroup?: ReferencedByFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly TransferGroupFilter[];
   /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
   anyOf?: readonly TransferGroupFilter[];
 }

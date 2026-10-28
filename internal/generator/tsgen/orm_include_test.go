@@ -13,8 +13,11 @@ import (
 // includes typed in turn; a filter reaches through a relation and ORs
 // filters; findMany's total is undefined under count: false (D89), and a
 // number otherwise; and a relation, a member or an option the table does
-// not have is refused.
-const includeCheck = `import type { FixtureFinancesDbOrm, LineItemPageKey, LineItemRow, LineItemSortField, TransactionListRow } from './orm';
+// not have is refused. allOf takes the table's filters, nested in anyOf
+// and in itself, and the projection's allOf and searchText its own (D99);
+// a member of another table's filter in allOf is refused, and so is
+// searchText on a table without search fields.
+const includeCheck = `import type { FixtureFinancesDbOrm, LineItemFilter, LineItemPageKey, LineItemRow, LineItemSortField, TransactionListRow } from './orm';
 
 declare const orm: FixtureFinancesDbOrm;
 declare const ids: readonly string[];
@@ -103,6 +106,26 @@ export async function dashboard(): Promise<void> {
   const providerName: string = listed[0]!.providerName;
   const parentName: string | null = listed[0]!.parentCategoryName;
   void [providerName, parentName, flat.next];
+
+  // allOf (D99): two OR groups ANDed, and nested both ways.
+  const food: LineItemFilter[] = [{ categoryId: { in: ids as never } }, { category: { parentId: { in: ids as never } } }];
+  const both: LineItemFilter = { allOf: [{ anyOf: food }, { anyOf: [{ name: { ilike: 'coffee' } }, { description: { ilike: 'coffee' } }] }] };
+  await orm.lineItem.findPage({ ...both, searchText: 'coffee' }, { sort: { field: 'date', desc: true }, limit: 50 });
+  await orm.lineItem.findMany({ anyOf: [both, { allOf: [{ allOf: [both] }, { amount: { lt: '0' as never } }] }] }, { count: false });
+  await orm.lineItem.updateMany({ allOf: [both] }, { description: 'checked' });
+  await orm.note.deleteMany({ allOf: [{ lineItem: both }, { content: { ilike: 'office' } }] });
+  // @ts-expect-error allOf takes LineItem's filters, which have no slug.
+  await orm.lineItem.findMany({ allOf: [{ slug: { eq: 'food' } }] });
+  // @ts-expect-error Category has no search fields, so its filter has no searchText.
+  await orm.category.findMany({ searchText: 'food' });
+  const searched = await orm.transactionListRow.findMany(
+    { searchText: 'coffee', allOf: [{ anyOf: [{ categoryId: { in: ids as never } }, { parentCategoryId: { in: ids as never } }] }, { amount: { lt: '0' as never } }] },
+    { select: ['id', 'name'] }
+  );
+  const searchedName: string = searched.rows[0]!.name;
+  void searchedName;
+  // @ts-expect-error The projection's allOf takes its own filters, which have no category.
+  await orm.transactionListRow.findMany({ allOf: [{ category: { parentId: { in: ids as never } } }] });
 }
 `
 

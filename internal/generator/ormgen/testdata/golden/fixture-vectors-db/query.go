@@ -1019,6 +1019,12 @@ type ChunkFilter struct {
 	Id   *UUIDFilter
 	Text *StringFilter
 	Note *StringFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []ChunkFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -1157,6 +1163,14 @@ func (f *ChunkFilter) conditions(args *[]interface{}, paramOffset int) []string 
 		}
 	}
 
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
 	if len(f.AnyOf) > 0 {
 		start := len(*args)
 		branches := make([]string, 0, len(f.AnyOf))
@@ -1193,6 +1207,12 @@ type LedgerLineFilter struct {
 	Confidence *DecimalFilter
 	Quantity   *DecimalFilter
 	BookedAt   *DateTimeFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []LedgerLineFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -1603,6 +1623,14 @@ func (f *LedgerLineFilter) conditions(args *[]interface{}, paramOffset int) []st
 		}
 	}
 
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
 	if len(f.AnyOf) > 0 {
 		start := len(*args)
 		branches := make([]string, 0, len(f.AnyOf))
@@ -1636,6 +1664,12 @@ type PassageFilter struct {
 	Title *StringFilter
 	Topic *StringFilter
 	Rates *ArrayStringFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []PassageFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -1826,6 +1860,14 @@ func (f *PassageFilter) conditions(args *[]interface{}, paramOffset int) []strin
 		}
 	}
 
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
 	if len(f.AnyOf) > 0 {
 		start := len(*args)
 		branches := make([]string, 0, len(f.AnyOf))
@@ -1857,6 +1899,12 @@ func (f *PassageFilter) conditions(args *[]interface{}, paramOffset int) []strin
 type TextEmbeddingFilter struct {
 	Id   *UUIDFilter
 	Text *StringFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []TextEmbeddingFilter
 	// AnyOf keeps the rows any of its filters finds, each filter's
 	// conditions ANDed and the filters ORed, beside the filter's other
 	// conditions (D90). A filter of no condition keeps every row, and so
@@ -1976,6 +2024,14 @@ func (f *TextEmbeddingFilter) conditions(args *[]interface{}, paramOffset int) [
 				conditions = append(conditions, `text_embedding.text IS NOT NULL`)
 			}
 		}
+	}
+
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
 	}
 
 	if len(f.AnyOf) > 0 {

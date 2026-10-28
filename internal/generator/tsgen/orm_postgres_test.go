@@ -42,7 +42,7 @@ type repositoryCase struct {
 // and updates only if changed under a trigger, and its options of a find, a
 // transaction and a raw query (D89); fixture-finances-db's reads (D90), a
 // filter through a relation, anyOf, select and include, and a projection's
-// repository; fixture-queries-db's declared queries (D86);
+// repository, and allOf and a projection's searchText (D99); fixture-queries-db's declared queries (D86);
 // fixture-vault-db's Encrypted<T> fields (D85), sealed, opened,
 // refused and resealed; fixture-actor-db's acting user, the caller of the
 // operation being run and the system actor (D87); and fixture-vectors-db's
@@ -114,6 +114,8 @@ var repositoryCases = []repositoryCase{
 		"select reads the members it names, and an include reads the foreign key it needs without keeping it",
 		"a to-one include of a soft-deleted or unset target is null, and one-to-many includes map each row's rows",
 		"the TransactionListRow projection reads through findPage, filtered on joined columns",
+		"allOf ANDs two OR groups, nests in anyOf and in itself, and an empty one adds no condition",
+		"the TransactionListRow projection takes allOf, and searchText over LineItem's search fields",
 	}},
 	{fixture: "fixture-queries-db", files: []string{"queries.test.ts"}, tests: []string{
 		"categoryTotals rolls a sub-category up to its parent, over a range and some accounts, its rows typed and decoded",

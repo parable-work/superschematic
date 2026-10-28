@@ -1,9 +1,10 @@
 // The reads of fixture-finances-db on Postgres (D90): a filter through a
 // to-one relation and anyOf, select and include, to-one and one-to-many,
 // the dashboard's transaction list as one findPage, and the
-// TransactionListRow projection read through its repository.
+// TransactionListRow projection read through its repository; then allOf,
+// on a table and on the projection, and the projection's searchText (D99).
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { createOrm, type FixtureFinancesDbOrm, type LineItemFilter } from './orm';
+import { createOrm, type FixtureFinancesDbOrm, type LineItemFilter, type TransactionListRowFilter } from './orm';
 import type { FinanceSignedMoney, IdentityName, IdentitySlug } from './types';
 import { alice, database, dsn, recording, type TestDatabase } from './harness';
 
@@ -183,5 +184,68 @@ describe.skipIf(dsn === '')('the finances', () => {
     const uncounted = await orm.transactionListRow.findMany(null, { count: false, select: ['id'] });
     expect(uncounted.total).toBeUndefined();
     expect(uncounted.rows).toHaveLength(6);
+  });
+
+  // The category is food or its parent is, and the name or the description
+  // holds coffee (D99). The lunch holds it in its description, and so does
+  // the train, which is no food; the bread is food without coffee.
+  const food = (): LineItemFilter[] => [{ categoryId: { in: [ids.food!] } }, { category: { parentId: { in: [ids.food!] } } }];
+  const coffee: LineItemFilter[] = [{ name: { ilike: 'coffee' } }, { description: { ilike: 'coffee' } }];
+  const foodWithCoffee = ['Coffee beans', 'Lunch', 'Dinner and coffee'];
+
+  test('allOf ANDs two OR groups, nests in anyOf and in itself, and an empty one adds no condition', async () => {
+    await orm.lineItem.updateOne(ids.lunch!, { description: 'with a coffee' });
+    await orm.lineItem.updateOne(ids.train!, { description: 'coffee on board' });
+    await orm.lineItem.createOne({ date: day(11), name: 'Bread', amount: money(-400), accountId: ids.checking!, categoryId: ids.groceries!, userId: ids.ben!, createdAt: day(11) });
+    const both: LineItemFilter[] = [{ anyOf: food() }, { anyOf: coffee }];
+    expect(await names({ allOf: both })).toEqual(foodWithCoffee);
+    // The four branches allOf replaces find the same rows.
+    const multiplied: LineItemFilter[] = food().flatMap(group => coffee.map(text => ({ ...group, ...text })));
+    expect(multiplied).toHaveLength(4);
+    expect(await names({ anyOf: multiplied })).toEqual(foodWithCoffee);
+    // An allOf in each anyOf branch, and an allOf in an allOf.
+    expect(
+      await names({
+        anyOf: [{ allOf: [{ categoryId: { in: [ids.travel!] } }, { anyOf: coffee }] }, { allOf: [{ allOf: both }, { userId: { eq: ids.ben! } }] }],
+      })
+    ).toEqual(['Lunch', 'Train']);
+    expect(await names({ allOf: [] })).toHaveLength(7);
+    expect(await names({ allOf: [{}, {}] })).toHaveLength(7);
+    // An anyOf branch of no condition drops its siblings' values; the next
+    // filter's placeholders follow the values kept.
+    expect(await names({ amount: { lt: money(0) }, allOf: [{ anyOf: [{ categoryId: { in: [ids.travel!] } }, {}] }, { anyOf: coffee }] })).toEqual([
+      'Coffee beans',
+      'Lunch',
+      'Train',
+      'Dinner and coffee',
+    ]);
+    // updateMany's placeholders follow its assignments', and deleteMany
+    // stamps the notes an allOf finds.
+    expect(await orm.lineItem.updateMany({ allOf: both }, { description: 'coffee, checked' })).toBe(3);
+    expect(await names({ description: { ilike: 'checked' } })).toEqual(foodWithCoffee);
+    expect(await orm.note.deleteMany({ allOf: [{ lineItem: { anyOf: food() } }, { content: { ilike: 'office' } }] })).toBe(1);
+  });
+
+  test("the TransactionListRow projection takes allOf, and searchText over LineItem's search fields", async () => {
+    const listed = async (filter: TransactionListRowFilter) =>
+      (await orm.transactionListRow.findMany(filter, { orderBy: [{ field: 'date' }], select: ['name'] })).rows.map(row => row.name);
+    const listFood: TransactionListRowFilter[] = [{ categoryId: { in: [ids.food!] } }, { parentCategoryId: { in: [ids.food!] } }];
+    const listCoffee: TransactionListRowFilter[] = [{ name: { ilike: 'coffee' } }, { description: { ilike: 'coffee' } }];
+    expect(await listed({ allOf: [{ anyOf: listFood }, { anyOf: listCoffee }] })).toEqual(foodWithCoffee);
+    expect(await listed({ searchText: 'COFFEE' })).toEqual(['Coffee beans', 'Lunch', 'Train', 'Dinner and coffee']);
+    expect(await listed({ searchText: 'coffee board' })).toEqual(['Train']);
+    expect(await listed({ searchText: '  ' })).toHaveLength(7);
+    // One condition: the view's key in the keys of LineItem's rows whose
+    // search column holds each word.
+    const recorded = recording(db.pool);
+    const reads = createOrm(recorded.pool);
+    const first = await reads.transactionListRow.findPage({ searchText: 'coffee', anyOf: listFood }, { sort: { field: 'date', desc: true }, limit: 2 });
+    expect(first.rows.map(row => row.name)).toEqual(['Dinner and coffee', 'Lunch']);
+    expect(recorded.statements[0]).toContain(
+      "WHERE transaction_list.id IN (SELECT line_item.id FROM line_item WHERE line_item.search_text ILIKE $1 ESCAPE '\\') AND ((transaction_list.category_id IN ($2)) OR (transaction_list.parent_category_id IN ($3)))"
+    );
+    const rest = await reads.transactionListRow.findPage({ searchText: 'coffee', anyOf: listFood }, { sort: { field: 'date', desc: true }, limit: 2, after: first.next });
+    expect(rest.rows.map(row => row.name)).toEqual(['Coffee beans']);
+    expect(rest.next).toBeNull();
   });
 });
