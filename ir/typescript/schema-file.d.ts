@@ -557,6 +557,7 @@ export interface QueryDef {
   orderBy?: QueryOrderBy;
   page?: QueryPage;
   params: string;
+  returns?: string;
   row: string;
   sql: string;
 }

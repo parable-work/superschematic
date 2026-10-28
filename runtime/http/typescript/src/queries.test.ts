@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { PageKeyError } from './orm';
+import { NotFoundError, PageKeyError, TooManyRowsError } from './orm';
 import { queriesOf, type QueryDefinition } from './queries';
 
 // A declared query's runtime (D86) over a runner that records what it is
 // sent and answers rows as pg would, with no database: each parameter
 // through encodeParam, each row through decodeRow, an order's fragment
-// from its options alone, and a page's key after the query's parameters.
+// from its options alone, and a page's key after the query's parameters;
+// a query that returns one row, or one or none, answers it (D95).
 
 const hyphenated = '0f8b6c4e-1b2a-4c3d-9e8f-123456789abc';
 const base62 = 'TKbHsHDO6x9RCjbs5c2u4';
@@ -31,6 +32,19 @@ const definitions: Record<string, QueryDefinition> = {
     text: 'SELECT id FROM line ORDER BY embedding <=> $1 LIMIT 1',
     params: [{ name: 'vector', column: 'vector', vector: true, required: true }],
     row: [{ name: 'id', column: 'id', uuid: true, required: true }],
+  },
+  totals: {
+    text: 'SELECT SUM(amount)::bigint AS total FROM line',
+    params: [],
+    row: [{ name: 'total', column: 'total', int64: true, required: true }],
+    returns: 'one',
+  },
+  named: {
+    text: 'SELECT id FROM line WHERE name = $1 ORDER BY %s',
+    params: [{ name: 'name', column: 'name', required: true }],
+    row: [{ name: 'id', column: 'id', uuid: true, required: true }],
+    orderBy: { param: 'order', options: { id: 'id' }, default: 'id' },
+    returns: 'optional',
   },
   page: {
     text: 'SELECT id, amount FROM line',
@@ -102,5 +116,28 @@ describe('declared queries', () => {
     expect(last.next).toBeNull();
     await expect(queries.page!({}, { after: { amount: 2 } })).rejects.toBeInstanceOf(PageKeyError);
     await expect(queries.page!({}, { limit: -1 })).rejects.toThrow('orm: a page of query page holds 1 or more rows, not -1');
+  });
+
+  test('a query that returns one row answers it, and fails on none, as getOne does, and on more than one', async () => {
+    let rows: Record<string, unknown>[] = [{ total: '12' }];
+    const { queries } = recorder(() => rows);
+    expect(await queries.totals!({})).toEqual({ total: 12 });
+    rows = [];
+    await expect(queries.totals!({})).rejects.toBeInstanceOf(NotFoundError);
+    await expect(queries.totals!({})).rejects.toThrow('orm: query totals returns one row, and its statement read none');
+    rows = [{ total: '1' }, { total: '2' }];
+    await expect(queries.totals!({})).rejects.toBeInstanceOf(TooManyRowsError);
+    await expect(queries.totals!({})).rejects.toThrow('orm: query totals returns one row, and its statement read 2');
+  });
+
+  test('a query that returns one row or none answers it or null, in an order too, and fails on more than one', async () => {
+    let rows: Record<string, unknown>[] = [{ id: hyphenated }];
+    const { sent, queries } = recorder(() => rows);
+    expect(await queries.named!({ name: 'a', order: null })).toEqual({ id: base62 });
+    expect(sent[0]!.text).toBe('SELECT id FROM line WHERE name = $1 ORDER BY id');
+    rows = [];
+    expect(await queries.named!({ name: 'a', order: 'id' })).toBeNull();
+    rows = [{ id: hyphenated }, { id: hyphenated }];
+    await expect(queries.named!({ name: 'a', order: 'id' })).rejects.toThrow('orm: query named returns one row or none, and its statement read 2');
   });
 });

@@ -123,6 +123,11 @@ var repositoryCases = []repositoryCase{
 		"budgets read an exact decimal and a date as the wire holds them, and an optional parent",
 		"transferCandidates finds the other side of a move within the window",
 		"a query runs in a transaction, and sends the statement sqlutil writes, its parameters positional",
+		"the dashboard reports share one filter, each statement holding it in place, its parameters numbered alike",
+		"dashboardLines reads the line_list projection through the filter, its required columns never null",
+		"dashboardTotals returns its one row, which an empty filter still reads, on the pool and in a transaction",
+		"a query that returns one row fails on none, as getOne does, and on more than one",
+		"a query that returns one row or none answers null for none, and fails on more than one",
 	}},
 	{fixture: "fixture-actor-db", files: []string{"actor.test.ts"}, tests: []string{
 		"an ORM opened with no user acts as the caller of the operation it runs in, and as no one outside one",

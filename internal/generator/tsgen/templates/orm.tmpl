@@ -256,9 +256,9 @@ export interface {{.Name}}Queries {
 {{- range .Queries}}
   /** {{if .Doc}}{{tsDoc .Doc "   * "}}{{else}}The query {{.Name}}.{{end}} */
 {{- if .Page}}
-  {{.Name}}(params: {{.ParamsType}}, page?: QueryPageOptions<{{.Page.KeyType}}>): Promise<RowPage<{{.RowType}}, {{.Page.KeyType}}>>;
+  {{.Name}}(params: {{.ParamsType}}, page?: QueryPageOptions<{{.Page.KeyType}}>): Promise<{{.ResultType}}>;
 {{- else}}
-  {{.Name}}(params: {{.ParamsType}}): Promise<{{.RowType}}[]>;
+  {{.Name}}(params: {{.ParamsType}}): Promise<{{.ResultType}}>;
 {{- end}}
 {{- end}}
 }
@@ -297,6 +297,9 @@ export const {{.QueriesConst}}: Readonly<Record<string, QueryDefinition>> = {
       after: {{jsonString .After}},
       key: [{{range $i, $k := .Key}}{{if $i}}, {{end}}{{jsonString $k.Member}}{{end}}],
     },
+{{- end}}
+{{- if .ReturnsOne}}
+    returns: {{jsonString .Returns}},
 {{- end}}
   },
 {{- end}}

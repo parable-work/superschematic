@@ -150,6 +150,79 @@ WHERE (:prefix::text IS NULL OR name LIKE :prefix) /* :z */ GROUP BY name ORDER 
 	}
 }
 
+// TestCheckQueryReturns: a query that returns one row, or one or none, is
+// not paged, and its statement does not show it may return more than one
+// row, unless it ends LIMIT 1; one that returns what no query returns is
+// refused (D95).
+func TestCheckQueryReturns(t *testing.T) {
+	// plain makes the query a statement of no parameter and no order.
+	plain := func(s *ir.Schema, sql string) {
+		q := s.Types["Totals"].Query
+		q.OrderBy = nil
+		q.SQL = sql
+		s.Types["TotalsParams"].Fields = nil
+	}
+	for _, tc := range []struct {
+		name string
+		edit func(s *ir.Schema)
+		want string
+	}{
+		{"many rows of a grouped query", func(*ir.Schema) {}, ""},
+		{"one row of a grouped query", func(s *ir.Schema) {
+			s.Types["Totals"].Query.Returns = ir.QueryReturnsOne
+		}, `query totals returns "one", and its SQL groups its rows with GROUP BY, which returns a row per group, so it may return more than one row; return "many", or end the statement with LIMIT 1 when it never returns more than one`},
+		{"one row or none of a grouped query", func(s *ir.Schema) {
+			s.Types["Totals"].Query.Returns = ir.QueryReturnsOptional
+		}, `query totals returns "optional", and its SQL groups its rows with GROUP BY`},
+		{"one row of a grouped query that ends LIMIT 1", func(s *ir.Schema) {
+			s.Types["Totals"].Query.Returns = ir.QueryReturnsOne
+			s.Types["Totals"].Query.SQL += " LIMIT 1"
+		}, ""},
+		{"one row of an aggregate", func(s *ir.Schema) {
+			plain(s, "SELECT 'all' AS name, COALESCE(SUM(amount), 0) AS sum_amount FROM line")
+			s.Types["Totals"].Query.Returns = ir.QueryReturnsOne
+		}, ""},
+		{"one row of an aggregate over a set-returning function", func(s *ir.Schema) {
+			plain(s, "SELECT 'days' AS name, COUNT(*) AS sum_amount FROM generate_series(1, 7) AS d")
+			s.Types["Totals"].Query.Returns = ir.QueryReturnsOne
+		}, ""},
+		{"one row of a set-returning function", func(s *ir.Schema) {
+			plain(s, "SELECT 'day' AS name, d AS sum_amount FROM generate_series(1, 7) AS d")
+			s.Types["Totals"].Query.Returns = ir.QueryReturnsOne
+		}, `query totals returns "one", and its SQL reads the set-returning function generate_series in its FROM, which returns a row per value`},
+		{"one row or none of a union", func(s *ir.Schema) {
+			plain(s, "SELECT name, amount AS sum_amount FROM line WHERE id = 'a' UNION SELECT name, amount FROM line WHERE id = 'b'")
+			s.Types["Totals"].Query.Returns = ir.QueryReturnsOptional
+		}, "its SQL is a UNION, which returns the rows of each of its branches"},
+		{"one row of a list of values", func(s *ir.Schema) {
+			plain(s, "VALUES ('a', 1), ('b', 2)")
+			s.Types["Totals"].Query.Returns = ir.QueryReturnsOne
+		}, "its SQL is a VALUES list of 2 rows"},
+		{"one row of a page", func(s *ir.Schema) {
+			plain(s, "SELECT name, amount AS sum_amount FROM line")
+			s.Types["Totals"].Query.Page = &ir.QueryPage{Key: []string{"name"}}
+			s.Types["Totals"].Query.Returns = ir.QueryReturnsOne
+		}, `query totals takes a page and returns "one"; a paged query returns its rows a page at a time`},
+		{"what no query returns", func(s *ir.Schema) {
+			s.Types["Totals"].Query.Returns = "first"
+		}, `query totals returns "first"; a query returns "many", the rows, "one", the one row, or "optional", the row or none`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := querySchema()
+			tc.edit(schema)
+			r := &Result{}
+			checkQueries(schema, r)
+			err := r.Err()
+			switch {
+			case tc.want == "" && err != nil:
+				t.Fatalf("%v", err)
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+				t.Fatalf("%v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
 // TestColumnOnARowField: @column names the result column a query's row
 // field reads (D86), and no table's.
 func TestColumnOnARowField(t *testing.T) {

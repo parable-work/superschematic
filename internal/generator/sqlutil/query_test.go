@@ -8,6 +8,7 @@ import (
 
 	. "github.com/parable-work/superschematic/internal/generator/sqlutil"
 	"github.com/parable-work/superschematic/internal/loader"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // TestScanQuery: a query's :name parameters are found outside strings,
@@ -87,7 +88,7 @@ func TestQueriesOf(t *testing.T) {
 		byName[q.Name] = q
 		names = append(names, q.Name)
 	}
-	if want := []string{"accountLines", "budgets", "categoryTotals", "timeBuckets", "transactionList", "transferCandidates"}; !reflect.DeepEqual(names, want) {
+	if want := []string{"accountLines", "accountNamed", "budgets", "categoryTotals", "dashboardCategories", "dashboardLines", "dashboardTotals", "matchingLine", "timeBuckets", "transactionList", "transferCandidates"}; !reflect.DeepEqual(names, want) {
 		t.Fatalf("queries = %v, want %v", names, want)
 	}
 	args := func(q QueryModel) []string {
@@ -150,5 +151,120 @@ func TestQueriesOf(t *testing.T) {
 	}
 	if row["accountName"] != "account_name:VARCHAR(80)" || row["categoryId"] != "category_id:UUID" {
 		t.Errorf("transactionList row = %v", row)
+	}
+	if totals.Returns != ir.QueryReturnsMany || byName["dashboardTotals"].Returns != ir.QueryReturnsOne || byName["matchingLine"].Returns != ir.QueryReturnsOptional {
+		t.Errorf("returns = %s, %s, %s", totals.Returns, byName["dashboardTotals"].Returns, byName["matchingLine"].Returns)
+	}
+}
+
+// TestQueriesOverAProjection: the dashboard's reports interpolate one
+// filter; one reads the line_list projection's view, whose model, and the
+// shapes of the tables it reads, join the tables its lock hash covers, and
+// whose required columns are never null; a query of the tables alone holds
+// no view (D95).
+func TestQueriesOverAProjection(t *testing.T) {
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-queries-db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	queries, err := QueriesOf(schema, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]QueryModel{}
+	for _, q := range queries {
+		byName[q.Name] = q
+	}
+	filter := `li."date" BETWEEN $1 AND $2
+      AND ($3::uuid[] IS NULL OR li.account_id = ANY($3))
+      AND ($4::uuid[] IS NULL OR li.category_id = ANY($4))
+      AND ($5::text IS NULL OR li."name" ILIKE '%%' || $5 || '%%')`
+	for _, name := range []string{"dashboardTotals", "dashboardCategories", "dashboardLines", "matchingLine"} {
+		if !strings.Contains(byName[name].Text, filter) {
+			t.Errorf("%s does not hold the filter: %s", name, byName[name].Text)
+		}
+	}
+
+	lines := byName["dashboardLines"]
+	var shapes []string
+	for _, table := range lines.Tables {
+		shapes = append(shapes, strings.SplitN(table, "(", 2)[0])
+	}
+	if want := []string{"account", "category", "line_item", `view line_list {"def":{"name":"line_list","migration":"","source":"LineItem","joins":[{"type":"Account","alias":"account","kind":"inner","on":[{"left":"account.id","right":"base.account"}]},{"type":"Category","alias":"category","kind":"left","on":[{"left":"category.id","right":"base.category"}]}]},"columns":[{"name":"id","type":"UUID","from":"base.id"},{"name":"date","type":"TIMESTAMPTZ","from":"base.date"},{"name":"name","type":"TEXT","from":"base.name"},{"name":"account_id","type":"UUID","from":"base.account"},{"name":"account_name","type":"VARCHAR`}; len(shapes) != len(want) || !reflect.DeepEqual(shapes[:3], want[:3]) || !strings.HasPrefix(lines.Tables[3], want[3]) {
+		t.Errorf("dashboardLines tables = %v", lines.Tables)
+	}
+	if !strings.Contains(lines.Tables[3], `{"name":"category_name","type":"VARCHAR(80)","nullable":true,"from":"category.name"}`) {
+		t.Errorf("the view's shape = %s", lines.Tables[3])
+	}
+	for column, want := range map[string]bool{"line_list.id": true, "line_list.account_name": true, "line_list.category_id": false, "line_list.category_name": false} {
+		if lines.ViewNotNull[column] != want {
+			t.Errorf("view column %s never null = %v, want %v", column, lines.ViewNotNull[column], want)
+		}
+	}
+	if totals := byName["dashboardTotals"]; len(totals.Tables) != 1 || !strings.HasPrefix(totals.Tables[0], "line_item(") || totals.ViewNotNull != nil {
+		t.Errorf("dashboardTotals tables = %v, view columns %v", totals.Tables, totals.ViewNotNull)
+	}
+
+	// The view's shape follows the projection's declaration: a join made
+	// left, and a column dropped.
+	before := lines.Tables[3]
+	projection := schema.Types["LineListEntry"]
+	projection.Projection.Joins[0].Kind = "left"
+	if after := ViewShape(schema, projection, ScalarSQLTypes(schema)); after == before {
+		t.Error("a join made left leaves the view's shape")
+	}
+	projection.Projection.Joins[0].Kind = "inner"
+	projection.Projection.Migration = "20991231000000"
+	if after := ViewShape(schema, projection, ScalarSQLTypes(schema)); after != before {
+		t.Errorf("a new migration stamp alone changes the view's shape:\n%s\n%s", before, after)
+	}
+	projection.Fields = projection.Fields[:len(projection.Fields)-1]
+	if after := ViewShape(schema, projection, ScalarSQLTypes(schema)); after == before {
+		t.Error("a column dropped leaves the view's shape")
+	}
+}
+
+// TestQueryManyRows: what a statement's text shows of the rows it may
+// return, which a query that returns one row, or one or none, is held to
+// (D95): its top level's GROUP BY, UNION, VALUES of several rows and
+// set-returning functions, unless an aggregate makes one row of a
+// function's, or LIMIT 1 holds it to one.
+func TestQueryManyRows(t *testing.T) {
+	for _, tc := range []struct {
+		sql, want string
+	}{
+		{"SELECT COALESCE(SUM(amount), 0)::bigint AS total, COUNT(*) AS lines FROM line_item li LEFT JOIN category c ON c.id = li.category_id WHERE li.amount > :min", ""},
+		{"SELECT a.id FROM account a WHERE a.name = :name", ""},
+		{"SELECT category_id, SUM(amount) FROM line_item GROUP BY 1", "groups its rows with GROUP BY, which returns a row per group"},
+		{"SELECT category_id, SUM(amount) FROM line_item GROUP BY 1 ORDER BY 2 DESC LIMIT 1", ""},
+		{"SELECT category_id FROM line_item GROUP BY 1 FETCH FIRST ROW ONLY", ""},
+		{"SELECT category_id FROM line_item GROUP BY 1 LIMIT 1 + :n", "groups its rows with GROUP BY, which returns a row per group"},
+		{"SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY amount) FROM line_item", ""},
+		{"SELECT b FROM generate_series(1, 3) AS b", "reads the set-returning function generate_series in its FROM, which returns a row per value"},
+		{"SELECT COUNT(*) FROM generate_series(1, 3) AS b", ""},
+		{"SELECT SUM(x) OVER () FROM unnest(:xs) AS x", "reads the set-returning function unnest in its FROM, which returns a row per value"},
+		{"SELECT SUM(x) FILTER (WHERE x > 0) FROM unnest(:xs) AS x", ""},
+		{"SELECT li.id FROM line_item li CROSS JOIN LATERAL jsonb_array_elements(li.tags) AS t", "reads the set-returning function jsonb_array_elements in its FROM, which returns a row per value"},
+		{"SELECT 1 FROM line_item, ROWS FROM (generate_series(1, 2)) AS g", "reads the set-returning function ROWS FROM in its FROM, which returns a row per value"},
+		{"SELECT unnest(:ids) AS id", "calls the set-returning function unnest in its select list, which returns a row per value"},
+		{"SELECT 1 + pg_catalog.generate_series(1, 3) AS n", "calls the set-returning function generate_series in its select list, which returns a row per value"},
+		{"SELECT (SELECT array_agg(x) FROM unnest(:ids) AS x) AS ids", ""},
+		{"SELECT id FROM line_item WHERE id IN (SELECT unnest(:ids))", ""},
+		{"SELECT extract(epoch FROM now()) AS at", ""},
+		{"WITH t AS (SELECT * FROM generate_series(1, 3) AS x) SELECT COUNT(*) FROM t", ""},
+		{"WITH t AS (SELECT 1) SELECT * FROM t UNION ALL SELECT 2", "is a UNION, which returns the rows of each of its branches"},
+		{"VALUES (1, 'a'), (2, 'b')", "is a VALUES list of 2 rows"},
+		{"VALUES (1, 'a')", ""},
+		{"SELECT * FROM (VALUES (1), (2)) AS v(n)", ""},
+	} {
+		t.Run(tc.sql, func(t *testing.T) {
+			scan, err := ScanQuery(tc.sql)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if scan.ManyRows != tc.want {
+				t.Fatalf("many rows = %q, want %q", scan.ManyRows, tc.want)
+			}
+		})
 	}
 }

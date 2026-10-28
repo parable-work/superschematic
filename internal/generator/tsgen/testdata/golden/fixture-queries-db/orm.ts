@@ -28,7 +28,7 @@ decodeRow, so a raw query of its columns reads back as its row type:
 query(text, values, { decode: <table>Table }) reads them so (D89).
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
-import type { DateFilter, DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, QueryDefinition, QueryPageOptions, ReferencedByFilter, Related, Repository, RowPage, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
+import type { DateFilter, DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, QueryDefinition, QueryPageOptions, ReadRepository, ReferencedByFilter, Related, Repository, RowPage, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
 
 /**
@@ -545,6 +545,97 @@ export const transferGroupTable: TableDefinition = {
   ],
 };
 
+/**
+ * A row of the line_list view (D90): A line with its account's and its category's names, flat: a plain view
+ * the dashboard's line list reads. The lock holds a query over it to the
+ * projection's model, its joins and its columns (D95).
+ */
+export interface LineListEntry {
+  id: T.IdentityUUID;
+  date: T.TemporalDateTime;
+  name: string;
+  accountId: T.IdentityUUID;
+  accountName: T.IdentityName;
+  categoryId: T.IdentityUUID | null;
+  categoryName: T.IdentityName | null;
+}
+
+/** The rows of LineListEntry a read finds: each member set is one condition, all of them ANDed. */
+export interface LineListEntryFilter {
+  id?: UuidFilter<T.IdentityUUID>;
+  date?: DateTimeFilter<T.TemporalDateTime>;
+  name?: StringFilter<string>;
+  accountId?: UuidFilter<T.IdentityUUID>;
+  accountName?: StringFilter<T.IdentityName>;
+  categoryId?: UuidFilter<T.IdentityUUID> & NullFilter;
+  categoryName?: StringFilter<T.IdentityName> & NullFilter;
+  /** The rows any of the filters finds, beside the other members; a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly LineListEntryFilter[];
+}
+
+/** The members findOne and findMany order rows of LineListEntry by. */
+export type LineListEntryOrderField = "id" | "date" | "name" | "accountId" | "accountName" | "categoryId" | "categoryName";
+
+/** The members findPage orders rows of LineListEntry by; ties break by id. */
+export type LineListEntrySortField = "id" | "date" | "name" | "accountId" | "accountName";
+
+/** The position of a row of LineListEntry in a findPage order: its id. */
+export interface LineListEntryPageKey {
+  readonly id: T.IdentityUUID;
+}
+
+/** The repository of LineListEntry, which reads the line_list view. */
+export type LineListEntryRepository = ReadRepository<LineListEntry, LineListEntryFilter, LineListEntryOrderField, LineListEntrySortField, T.IdentityUUID, LineListEntryPageKey>;
+
+/** The line_list view, as the runtime reads it. */
+export const lineListEntryView: TableDefinition = {
+  name: "LineListEntry",
+  table: "line_list",
+  key: "id",
+  columns: [
+    { name: "id", column: "id", field: "id", qualified: "line_list.id", uuid: true, key: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
+    { name: "date", column: "\"date\"", field: "date", qualified: "line_list.\"date\"", timestamp: true, required: true, filter: ["eq", "gt", "gte", "lt", "lte", "between", "in", "isNull"], sortable: true },
+    { name: "name", column: "\"name\"", field: "name", qualified: "line_list.\"name\"", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
+    { name: "accountId", column: "account_id", field: "accountId", qualified: "line_list.account_id", uuid: true, required: true, filter: ["eq", "in", "isNull"], sortable: true },
+    { name: "accountName", column: "account_name", field: "accountName", qualified: "line_list.account_name", required: true, filter: ["eq", "in", "ilike", "isNull"], sortable: true },
+    { name: "categoryId", column: "category_id", field: "categoryId", qualified: "line_list.category_id", uuid: true, filter: ["eq", "in", "isNull"] },
+    { name: "categoryName", column: "category_name", field: "categoryName", qualified: "line_list.category_name", filter: ["eq", "in", "ilike", "isNull"] },
+  ],
+  statements: {
+    columns: "\"id\", \"date\", \"name\", \"account_id\", \"account_name\", \"category_id\", \"category_name\"",
+    qualifiedColumns: "\"line_list\".\"id\", \"line_list\".\"date\", \"line_list\".\"name\", \"line_list\".\"account_id\", \"line_list\".\"account_name\", \"line_list\".\"category_id\", \"line_list\".\"category_name\"",
+    selectColumn: "\"line_list\".\"%s\"",
+    getOne: "SELECT \"id\", \"date\", \"name\", \"account_id\", \"account_name\", \"category_id\", \"category_name\" FROM line_list WHERE id = $1",
+    getOneFields: "SELECT %s FROM line_list WHERE id = $1",
+    getMany: "SELECT \"id\", \"date\", \"name\", \"account_id\", \"account_name\", \"category_id\", \"category_name\" FROM line_list WHERE id IN (%s)",
+    live: "",
+    liveWhere: "",
+    liveCondition: "",
+    findOne: "SELECT %s FROM line_list%s%s LIMIT 1",
+    findMany: "SELECT %s FROM line_list%s%s%s",
+    count: "SELECT COUNT(*) FROM line_list%s",
+    page: "SELECT %s FROM line_list%s%s LIMIT %d",
+    pageAfterKey: "line_list.id %s %s",
+    pageAfter: "(%s, line_list.id) %s ((SELECT %s FROM line_list AS page_key WHERE page_key.id = %s), %s)",
+    pageOrder: " ORDER BY %s %s",
+    pageTiebreak: ", line_list.id %s",
+    pageKeyExists: "SELECT EXISTS (SELECT 1 FROM line_list WHERE line_list.id = $1)",
+    insert: "INSERT INTO line_list (%s) VALUES (%s) RETURNING %s",
+    insertMany: "INSERT INTO line_list (%s) VALUES %s RETURNING %s",
+    update: "UPDATE line_list SET %s WHERE id = $%d",
+    returning: " RETURNING \"id\", \"date\", \"name\", \"account_id\", \"account_name\", \"category_id\", \"category_name\"",
+    updateMany: "UPDATE line_list SET %s%s",
+    updatedAt: "updated_at = $%d",
+    updatedBy: "updated_by = $%d",
+    upsert: "INSERT INTO line_list (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"date\", \"name\", \"account_id\", \"account_name\", \"category_id\", \"category_name\", (xmax = 0) AS _inserted",
+    softDelete: "",
+    softDeleteMany: "",
+    delete: "DELETE FROM line_list WHERE id = $1",
+    deleteMany: "DELETE FROM line_list%s",
+  },
+  uniqueKeys: {},
+};
+
 /** The position of a row of the query transactionList in its order: the members its pages are keyed by. */
 export interface TransactionListQueryPageKey {
   readonly date: T.TemporalDateTime;
@@ -555,10 +646,20 @@ export interface TransactionListQueryPageKey {
 export interface FixtureQueriesDbQueries {
   /** The query accountLines. */
   accountLines(params: T.AccountLinesParams): Promise<T.AccountLinesRow[]>;
+  /** The query accountNamed. */
+  accountNamed(params: T.AccountNamedParams): Promise<T.AccountNamedRow>;
   /** The query budgets. */
   budgets(params: T.BudgetsParams): Promise<T.BudgetsRow[]>;
   /** The query categoryTotals. */
   categoryTotals(params: T.CategoryTotalsParams): Promise<T.CategoryTotalsRow[]>;
+  /** The query dashboardCategories. */
+  dashboardCategories(params: T.DashboardFilter): Promise<T.DashboardCategoriesRow[]>;
+  /** The query dashboardLines. */
+  dashboardLines(params: T.DashboardFilter): Promise<T.DashboardLinesRow[]>;
+  /** The query dashboardTotals. */
+  dashboardTotals(params: T.DashboardFilter): Promise<T.DashboardTotalsRow>;
+  /** The query matchingLine. */
+  matchingLine(params: T.MatchingLineParams): Promise<T.MatchingLineRow | null>;
   /** The query timeBuckets. */
   timeBuckets(params: T.TimeBucketsParams): Promise<T.TimeBucketsRow[]>;
   /** The query transactionList. */
@@ -591,6 +692,17 @@ export const fixtureQueriesDbQueries: Readonly<Record<string, QueryDefinition>> 
       default: "newest",
     },
   },
+  accountNamed: {
+    text: "SELECT a.id, a.\"name\" FROM account a WHERE a.\"name\" = $1",
+    params: [
+      { name: "name", column: "name", required: true },
+    ],
+    row: [
+      { name: "id", column: "id", uuid: true, required: true },
+      { name: "name", column: "\"name\"", required: true },
+    ],
+    returns: "one",
+  },
   budgets: {
     text: "SELECT c.id, c.\"name\", c.budget, c.budget_since, c.parent_id\n    FROM category c\n    WHERE c.budget IS NOT NULL -- @notNull budget\n      AND ($1::uuid IS NULL OR c.parent_id = $1)\n    ORDER BY c.\"name\"",
     params: [
@@ -616,6 +728,71 @@ export const fixtureQueriesDbQueries: Readonly<Record<string, QueryDefinition>> 
       { name: "spent", column: "spent", int64: true, required: true },
       { name: "earned", column: "earned", int64: true, required: true },
     ],
+  },
+  dashboardCategories: {
+    text: "-- @notNull total, lines\n    SELECT li.category_id, SUM(li.amount)::bigint AS total, COUNT(*) AS lines\n    FROM line_item li\n    WHERE li.\"date\" BETWEEN $1 AND $2\n      AND ($3::uuid[] IS NULL OR li.account_id = ANY($3))\n      AND ($4::uuid[] IS NULL OR li.category_id = ANY($4))\n      AND ($5::text IS NULL OR li.\"name\" ILIKE '%%' || $5 || '%%')\n    GROUP BY li.category_id\n    ORDER BY total, li.category_id",
+    params: [
+      { name: "start", column: "start", timestamp: true, required: true },
+      { name: "end", column: "end", timestamp: true, required: true },
+      { name: "accountIds", column: "accountIds", list: true, uuid: true },
+      { name: "categoryIds", column: "categoryIds", list: true, uuid: true },
+      { name: "search", column: "search" },
+    ],
+    row: [
+      { name: "categoryId", column: "category_id", uuid: true },
+      { name: "total", column: "total", int64: true, required: true },
+      { name: "lines", column: "lines", int64: true, required: true },
+    ],
+  },
+  dashboardLines: {
+    text: "SELECT li.id, li.\"date\", li.\"name\", li.account_name, li.category_name\n    FROM line_list li\n    WHERE li.\"date\" BETWEEN $1 AND $2\n      AND ($3::uuid[] IS NULL OR li.account_id = ANY($3))\n      AND ($4::uuid[] IS NULL OR li.category_id = ANY($4))\n      AND ($5::text IS NULL OR li.\"name\" ILIKE '%%' || $5 || '%%')\n    ORDER BY li.\"date\" DESC, li.id",
+    params: [
+      { name: "start", column: "start", timestamp: true, required: true },
+      { name: "end", column: "end", timestamp: true, required: true },
+      { name: "accountIds", column: "accountIds", list: true, uuid: true },
+      { name: "categoryIds", column: "categoryIds", list: true, uuid: true },
+      { name: "search", column: "search" },
+    ],
+    row: [
+      { name: "id", column: "id", uuid: true, required: true },
+      { name: "date", column: "\"date\"", timestamp: true, required: true },
+      { name: "name", column: "\"name\"", required: true },
+      { name: "accountName", column: "account_name", required: true },
+      { name: "categoryName", column: "category_name" },
+    ],
+  },
+  dashboardTotals: {
+    text: "-- @notNull spent, earned, lines\n    SELECT COALESCE(SUM(li.amount) FILTER (WHERE li.amount < 0), 0)::bigint AS spent,\n           COALESCE(SUM(li.amount) FILTER (WHERE li.amount > 0), 0)::bigint AS earned,\n           COUNT(*) AS lines\n    FROM line_item li\n    WHERE li.\"date\" BETWEEN $1 AND $2\n      AND ($3::uuid[] IS NULL OR li.account_id = ANY($3))\n      AND ($4::uuid[] IS NULL OR li.category_id = ANY($4))\n      AND ($5::text IS NULL OR li.\"name\" ILIKE '%%' || $5 || '%%')",
+    params: [
+      { name: "start", column: "start", timestamp: true, required: true },
+      { name: "end", column: "end", timestamp: true, required: true },
+      { name: "accountIds", column: "accountIds", list: true, uuid: true },
+      { name: "categoryIds", column: "categoryIds", list: true, uuid: true },
+      { name: "search", column: "search" },
+    ],
+    row: [
+      { name: "spent", column: "spent", int64: true, required: true },
+      { name: "earned", column: "earned", int64: true, required: true },
+      { name: "lines", column: "lines", int64: true, required: true },
+    ],
+    returns: "one",
+  },
+  matchingLine: {
+    text: "SELECT li.id, li.\"date\", li.amount\n    FROM line_item li\n    WHERE li.\"date\" BETWEEN $1 AND $2\n      AND ($3::uuid[] IS NULL OR li.account_id = ANY($3))\n      AND ($4::uuid[] IS NULL OR li.category_id = ANY($4))\n      AND ($5::text IS NULL OR li.\"name\" ILIKE '%%' || $5 || '%%')\n      AND li.\"name\" = $6",
+    params: [
+      { name: "start", column: "start", timestamp: true, required: true },
+      { name: "end", column: "end", timestamp: true, required: true },
+      { name: "accountIds", column: "accountIds", list: true, uuid: true },
+      { name: "categoryIds", column: "categoryIds", list: true, uuid: true },
+      { name: "search", column: "search" },
+      { name: "name", column: "name", required: true },
+    ],
+    row: [
+      { name: "id", column: "id", uuid: true, required: true },
+      { name: "date", column: "\"date\"", timestamp: true, required: true },
+      { name: "amount", column: "amount", int64: true, required: true },
+    ],
+    returns: "optional",
   },
   timeBuckets: {
     text: "-- @notNull bucket, spent, earned, lines\n    SELECT b.bucket,\n           COALESCE(SUM(li.amount) FILTER (WHERE li.amount < 0), 0)::bigint AS spent,\n           COALESCE(SUM(li.amount) FILTER (WHERE li.amount > 0), 0)::bigint AS earned,\n           COUNT(li.id) AS lines\n    FROM generate_series(date_trunc($1, $2::timestamptz), $3::timestamptz, ('1 ' || $1)::interval) AS b(bucket)\n    LEFT JOIN line_item li\n      ON li.\"date\" >= b.bucket AND li.\"date\" < b.bucket + ('1 ' || $1)::interval\n     AND li.transfer_group_id IS NULL\n    GROUP BY b.bucket\n    ORDER BY b.bucket",
@@ -670,12 +847,13 @@ export const fixtureQueriesDbQueries: Readonly<Record<string, QueryDefinition>> 
   },
 };
 
-/** The repositories of fixture-queries-db, by table, and its declared queries. */
+/** The repositories of fixture-queries-db, by table, and of its projections, by projection, and its declared queries. */
 export interface FixtureQueriesDbRepositories {
   readonly account: AccountRepository;
   readonly category: CategoryRepository;
   readonly lineItem: LineItemRepository;
   readonly transferGroup: TransferGroupRepository;
+  readonly lineListEntry: LineListEntryRepository;
   /** The declared queries (D86), run on the pool or in the transaction. */
   readonly queries: FixtureQueriesDbQueries;
 }
@@ -730,6 +908,7 @@ export const fixtureQueriesDbOrm: OrmDefinition = {
     category: categoryTable,
     lineItem: lineItemTable,
     transferGroup: transferGroupTable,
+    lineListEntry: lineListEntryView,
   },
   queries: fixtureQueriesDbQueries,
 };

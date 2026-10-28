@@ -1,5 +1,5 @@
 import { decodeRow, encodeParam, type RowField } from './pgcodec.js';
-import { PageKeyError, fill, type RowPage } from './orm.js';
+import { NotFoundError, PageKeyError, TooManyRowsError, fill, type RowPage } from './orm.js';
 
 /*
 A DB service's declared queries (D86): @query<Params, Row>({ sql, ... })
@@ -19,6 +19,11 @@ parameter's value names, and refuses any other: no caller text reaches the
 SQL. A paged query reads a page in the order of its key, the page after
 the key of the page before's last row, and answers the next key when more
 rows follow, as findPage does (D60).
+
+A query that returns 'one' answers its one row, and throws NotFoundError
+when the statement reads none, as getOne does, and TooManyRowsError when it
+reads more than one; one that returns 'optional' answers its row or null,
+and throws TooManyRowsError the same (D95).
 */
 
 /** A query's dynamic sort: the parameter that picks it, each value's fixed ORDER BY fragment, and a null parameter's pick. */
@@ -45,6 +50,8 @@ export interface QueryDefinition {
   readonly row: readonly RowField[];
   readonly orderBy?: QueryOrderDefinition;
   readonly page?: QueryPageDefinition;
+  /** What a call answers: unset, the rows; 'one', the one row; 'optional', the row or null (D95). */
+  readonly returns?: 'one' | 'optional';
 }
 
 /** The options of a paged query. */
@@ -94,11 +101,11 @@ async function runQuery(name: string, def: QueryDefinition, run: QueryRun, defau
       throw new Error(`orm: query ${name} orders by ${Object.keys(order.options).join(', ')}, not ${JSON.stringify(value)}`);
     }
     const { rows } = await run(fill(def.text, order.options[value]), args);
-    return rows.map(row => decode(name, def, row));
+    return answer(name, def, rows.map(row => decode(name, def, row)));
   }
   if (!def.page) {
     const { rows } = await run(fill(def.text), args);
-    return rows.map(row => decode(name, def, row));
+    return answer(name, def, rows.map(row => decode(name, def, row)));
   }
   if (page.limit !== undefined && page.limit < 0) throw new Error(`orm: a page of query ${name} holds 1 or more rows, not ${page.limit}`);
   const limit = page.limit ? page.limit : defaultLimit;
@@ -121,4 +128,15 @@ async function runQuery(name: string, def: QueryDefinition, run: QueryRun, defau
   const next: Values = {};
   for (const member of def.page.key) next[member] = last[member];
   return { rows: kept, next } satisfies RowPage<Values, Values>;
+}
+
+/** What a call of a query that is not paged answers: its rows, or, when it returns 'one' or 'optional', its one row. */
+function answer(name: string, def: QueryDefinition, rows: unknown[]): unknown {
+  if (!def.returns) return rows;
+  if (rows.length > 1) {
+    throw new TooManyRowsError(`orm: query ${name} returns ${def.returns === 'one' ? 'one row' : 'one row or none'}, and its statement read ${rows.length}`);
+  }
+  if (rows.length === 1) return rows[0];
+  if (def.returns === 'optional') return null;
+  throw new NotFoundError(`orm: query ${name} returns one row, and its statement read none`);
 }
