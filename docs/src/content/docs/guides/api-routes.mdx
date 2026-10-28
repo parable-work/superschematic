@@ -701,6 +701,9 @@ the person confirms the call, by MCP elicitation or a two-step token, so
 the API's config names the secret the endpoint signs confirmations with,
 `outputs.api.mcpConfirmationKey`
 ([Confirming a tool that asks](/superschematic/reference/mcp-tools/#confirming-a-tool-that-asks)).
+The endpoint asks only about a call the tool's route would run: a call
+the route refuses, for its arguments or for its caller, gets the route's
+error at once.
 
 ## The TypeScript server
 

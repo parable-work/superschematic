@@ -42,7 +42,8 @@ operationSets:
           replayMode: read_only
         mcp: { handle: greet, hidden: false }
       # A visible tool for a user holding staff, which a user with no role
-      # is not offered.
+      # is not offered. It asks, and a user it is not offered is refused
+      # its call at once, never asked to confirm it (D98).
       - name: audit
         typeRef: { name: Greeting }
         required: true
@@ -57,7 +58,7 @@ operationSets:
           visibility: public
           mappingStatus: mapped
           replayMode: read_only
-        mcp: { handle: audit, hidden: false }
+        mcp: { handle: audit, hidden: false, invocationPolicy: ask }
       # Not classified: no @mcp, so no tool.
       - name: motto
         typeRef: { name: Greeting }

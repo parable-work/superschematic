@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
 import { mountOperation, type RouterRuntimeOptions } from './hono';
-import type { Authenticator, OperationSpec } from './index';
+import { HttpProblem, problemBody, type Authenticator, type OperationSpec } from './index';
+import { forbidden } from './problem';
 import {
   MCP_CONFIRMATION_ARGUMENT,
   McpConfirmations,
@@ -20,7 +21,8 @@ The confirmation of a call of a tool whose invocation policy is ask
 arguments, expire, redeem once and cannot be made without the key; and the
 endpoint, which asks a 2026-07-28 client that elicits forms in band and
 gives every other client a two-step token, and runs the call only once it
-is confirmed.
+is confirmed; and asks no one about a call its route would refuse before
+the implementation, nor spends a confirmation on it (D98).
 */
 
 const KEY = 'k'.repeat(16) + 'e'.repeat(16) + 'y';
@@ -378,6 +380,174 @@ describe('a tool that asks, through the endpoint', () => {
   });
 });
 
+const guardedSpecs = {
+  renameItem: specs.renameItem,
+  // Only a calling service may purge: a route the endpoint offers every
+  // signed-in caller, whose service step refuses one with no service.
+  purgeItem: {
+    name: 'purgeItem',
+    namespace: 'item',
+    method: 'DELETE',
+    path: '/api/items/{id}',
+    pathParams: [{ name: 'id', kind: 'string', required: true }],
+    queryParams: [],
+    bodyParams: [],
+    auth: { public: false, required: false, permissions: [] },
+    service: { mode: 'require', from: ['janitor'] },
+    manual: false,
+  },
+  archiveItem: {
+    name: 'archiveItem',
+    namespace: 'item',
+    method: 'POST',
+    path: '/api/items/{id}/archive',
+    pathParams: [{ name: 'id', kind: 'string', required: true }],
+    queryParams: [],
+    bodyParams: [],
+    auth: { public: false, required: true, permissions: ['items.archive'] },
+    manual: false,
+  },
+} as const satisfies Record<string, OperationSpec>;
+
+const purgeTool: McpRouteTool = {
+  name: 'purge_item',
+  title: 'Purge an item',
+  inputSchema: { type: 'object', additionalProperties: false, properties: { id: { type: 'string' } }, required: ['id'] },
+  _meta: { invocationPolicy: 'ask' },
+  operation: 'purgeItem',
+  arguments: [{ key: 'id', in: 'path', name: 'id' }],
+  confirm: true,
+};
+
+const archiveTool: McpRouteTool = { ...purgeTool, name: 'archive_item', title: 'Archive an item', operation: 'archiveItem' };
+
+// reader's key may read items and not rename them: the authenticator
+// refuses it on the rename route, as an API key's scopes would, which the
+// endpoint, authenticated as a route of its own, cannot see.
+const scoped: Authenticator = async ctx => {
+  if (ctx.bearerToken !== 'reader') return authenticate(ctx);
+  if (ctx.operation.name === 'renameItem') throw forbidden('This key may read items, not rename them');
+  return { subject: 'reader', permissions: [] };
+};
+
+/**
+ * An app whose tools that ask meet their routes' refusals, with the
+ * endpoint's confirmations under its key, scope and store, which mint what
+ * an endpoint gave before it checked a call.
+ */
+function guarded(options: { readonly rateLimitPerMinute?: number } = {}) {
+  const ran: string[] = [];
+  const store = new MemoryMcpConfirmationStore();
+  const app = new Hono();
+  const runtime: RouterRuntimeOptions = { authenticate: scoped };
+  const table = { ...guardedSpecs, renameItem: { ...guardedSpecs.renameItem, rateLimitPerMinute: options.rateLimitPerMinute } };
+  for (const spec of Object.values(table)) {
+    mountOperation(
+      app,
+      spec,
+      async () => {
+        ran.push(spec.name);
+        return { ran: spec.name };
+      },
+      runtime
+    );
+  }
+  mountMcp(app, table, [renameTool, purgeTool, archiveTool], runtime, { api: 'items-api', version: '1.0.0', requiresAuth: true }, {
+    confirmationKey: KEY,
+    confirmationStore: store,
+  });
+  return { app, ran, confirmations: new McpConfirmations({ key: KEY, scope: 'items-api', store }) };
+}
+
+/** A tools/call's JSON-RPC reply, of a 2025 request as ada. */
+async function rpc(app: Hono, params: Record<string, unknown>): Promise<Record<string, any>> {
+  const response = await app.request('/api/mcp', {
+    method: 'POST',
+    headers: { accept: 'application/json, text/event-stream', 'content-type': 'application/json', authorization: 'Bearer ada' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: ++ids, method: 'tools/call', params }),
+  });
+  return JSON.parse((await response.text()).slice('event: message\ndata: '.length));
+}
+
+describe('a call of a tool that asks, which its route would refuse (D98)', () => {
+  test('a mis-shaped call is refused at once, as the route refuses it, and no one is asked', async () => {
+    const { app, ran } = guarded();
+    for (const capabilities of [undefined, {}, ELICITS]) {
+      const misnamed = await call(app, rename({ id: 'i1', input: { newName: 'Desk' } }), capabilities);
+      expect(misnamed).toMatchObject({ isError: true, structuredContent: { status: 400, code: 'bad_request', detail: 'rename_item takes id, newName, not "input"' } });
+      expect(misnamed.structuredContent.details).toBeUndefined();
+      expect(misnamed.requestState).toBeUndefined();
+      for (const args of [{ id: 'i1', newName: '' }, { id: 'i1', newName: 7 }, { id: 'i1' }]) {
+        const refused = await call(app, rename(args), capabilities);
+        expect(refused).toMatchObject({ isError: true, structuredContent: { status: 400, code: 'bad_request' } });
+        expect(refused.structuredContent.details?.[MCP_CONFIRMATION_ARGUMENT]).toBeUndefined();
+        expect(refused.inputRequests).toBeUndefined();
+      }
+    }
+    expect(ran).toEqual([]);
+  });
+
+  test('a confirmation sent with a call that would not run is not spent, and runs its own call after', async () => {
+    const { app, ran, confirmations } = guarded();
+    const token = (await call(app, rename({ id: 'i1', newName: 'Desk' }))).structuredContent.details[MCP_CONFIRMATION_ARGUMENT];
+    const misShaped = await call(app, rename({ id: 'i1', newName: '', [MCP_CONFIRMATION_ARGUMENT]: token }));
+    expect(misShaped.structuredContent).toMatchObject({ status: 400, code: 'bad_request' });
+    expect(misShaped.structuredContent.details?.refused).toBeUndefined();
+    // A requestState sent back with a mis-shaped retry, accepted or declined.
+    const asked = await call(app, rename({ id: 'i1', newName: 'Desk' }), ELICITS);
+    for (const action of ['accept', 'decline']) {
+      const answered = await call(app, { ...rename({ id: 'i1', input: { newName: 'Desk' } }), inputResponses: { confirm: { action } }, requestState: asked.requestState }, ELICITS);
+      expect(answered).toMatchObject({ resultType: 'complete', isError: true, structuredContent: { status: 400, code: 'bad_request' } });
+    }
+    expect(ran).toEqual([]);
+
+    // Both confirmations still run the calls they were given for.
+    expect((await call(app, rename({ id: 'i1', newName: 'Desk', [MCP_CONFIRMATION_ARGUMENT]: token }))).structuredContent).toEqual({ ran: 'renameItem' });
+    const accepted = await call(app, { ...rename({ id: 'i1', newName: 'Desk' }), inputResponses: { confirm: { action: 'accept' } }, requestState: asked.requestState }, ELICITS);
+    expect(accepted).toMatchObject({ resultType: 'complete', structuredContent: { ran: 'renameItem' } });
+    expect(ran).toEqual(['renameItem', 'renameItem']);
+
+    // A confirmation of the mis-shaped call itself, as an endpoint gave one
+    // before it checked a call, is refused with the call and not claimed.
+    const binding: McpConfirmationBinding = { tool: 'rename_item', caller: '["ada",null]', args: { id: 'i1', input: { newName: 'Desk' } } };
+    const stale = await confirmations.mint('token', binding);
+    expect((await call(app, rename({ ...binding.args, [MCP_CONFIRMATION_ARGUMENT]: stale.token }))).structuredContent).toMatchObject({ status: 400 });
+    expect(await confirmations.redeem(stale.token, 'token', binding)).toBeUndefined();
+    expect(ran).toEqual(['renameItem', 'renameItem']);
+  });
+
+  test("a caller the route's gate refuses is refused at once, and no one is asked", async () => {
+    const { app, ran, confirmations } = guarded();
+    for (const capabilities of [undefined, ELICITS]) {
+      const scopedOut = await call(app, rename({ id: 'i1', newName: 'Desk' }), capabilities, 'reader');
+      expect(scopedOut).toMatchObject({ isError: true, structuredContent: { status: 403, code: 'forbidden', detail: 'This key may read items, not rename them' } });
+      expect(scopedOut.requestState).toBeUndefined();
+      const unserved = await call(app, { name: 'purge_item', arguments: { id: 'i1' } }, capabilities);
+      expect(unserved).toMatchObject({ isError: true, structuredContent: { status: 401, code: 'service_unauthorized' } });
+      expect(unserved.requestState).toBeUndefined();
+    }
+    // A confirmation of reader's call is refused with it and not claimed.
+    const binding: McpConfirmationBinding = { tool: 'rename_item', caller: '["reader",null]', args: { id: 'i1', newName: 'Desk' } };
+    const minted = await confirmations.mint('token', binding);
+    const refused = await call(app, rename({ ...binding.args, [MCP_CONFIRMATION_ARGUMENT]: minted.token }), undefined, 'reader');
+    expect(refused.structuredContent).toMatchObject({ status: 403, code: 'forbidden' });
+    expect(await confirmations.redeem(minted.token, 'token', binding)).toBeUndefined();
+    // A tool whose route needs a permission the caller lacks is no tool of
+    // theirs (D81), which asks no one either.
+    expect((await rpc(app, { name: 'archive_item', arguments: { id: 'i1' } })).error).toEqual({ code: -32602, message: 'items-api has no tool "archive_item"' });
+    expect(ran).toEqual([]);
+    // ada, whom the rename route admits, is asked.
+    expect((await call(app, rename({ id: 'i1', newName: 'Desk' }))).structuredContent.code).toBe('confirmation_required');
+  });
+
+  test("the check takes none of the route's rate limit: a call asked about, confirmed and run takes one token", async () => {
+    const { app, ran } = guarded({ rateLimitPerMinute: 1 });
+    const token = (await call(app, rename({ id: 'i1', newName: 'Desk' }))).structuredContent.details[MCP_CONFIRMATION_ARGUMENT];
+    expect((await call(app, rename({ id: 'i1', newName: 'Desk', [MCP_CONFIRMATION_ARGUMENT]: token }))).structuredContent).toEqual({ ran: 'renameItem' });
+    expect(ran).toEqual(['renameItem']);
+  });
+});
+
 describe('the transport', () => {
   const runs: string[] = [];
   const tools: McpToolSet = {
@@ -388,14 +558,14 @@ describe('the transport', () => {
       return { result: args };
     },
   };
-  const post = (confirmations: McpConfirmations | undefined, params: Record<string, unknown>) =>
+  const post = (confirmations: McpConfirmations | undefined, params: Record<string, unknown>, set: McpToolSet = tools) =>
     serveMcp(
       new Request('http://api.test/api/mcp', {
         method: 'POST',
         headers: { accept: 'application/json, text/event-stream', 'content-type': 'application/json' },
         body: JSON.stringify({ jsonrpc: '2.0', id: ++ids, method: 'tools/call', params }),
       }),
-      tools,
+      set,
       { serverInfo: { name: 'items-api', version: '1.0.0' }, ...(confirmations ? { confirmations } : {}), caller: 'ada', requestId: 'req-1' }
     ).then(async response => JSON.parse((await response.text()).slice('event: message\ndata: '.length)).result);
 
@@ -403,6 +573,32 @@ describe('the transport', () => {
     const refused = await post(undefined, rename({ id: 'i1', newName: 'Desk' }));
     expect(refused.structuredContent).toMatchObject({ status: 500, code: 'internal_error', requestId: 'req-1' });
     expect(runs).toEqual([]);
+  });
+
+  test("a tool set's check refuses a call before it is confirmed, given the arguments the confirmation binds", async () => {
+    const checked: unknown[] = [];
+    const strict: McpToolSet = {
+      ...tools,
+      check: (_name, args) => {
+        checked.push(args);
+        return args.newName === '' ? problemBody(new HttpProblem(400, 'newName is empty', { code: 'bad_request' }), 'req-1') : undefined;
+      },
+    };
+    const confirmations = new McpConfirmations({ key: KEY });
+    // No confirmations either: the check comes first.
+    expect((await post(undefined, rename({ id: 'i1', newName: '' }), strict)).structuredContent).toMatchObject({ status: 400, detail: 'newName is empty' });
+    const token = (await post(confirmations, rename({ id: 'i1', newName: 'Desk' }), strict)).structuredContent.details[MCP_CONFIRMATION_ARGUMENT];
+    expect((await post(confirmations, rename({ id: 'i1', newName: '', [MCP_CONFIRMATION_ARGUMENT]: token }), strict)).structuredContent.status).toBe(400);
+    expect(runs).toEqual([]);
+    expect((await post(confirmations, rename({ id: 'i1', newName: 'Desk', [MCP_CONFIRMATION_ARGUMENT]: token }), strict)).structuredContent).toEqual({ id: 'i1', newName: 'Desk' });
+    expect(runs).toEqual(['{"id":"i1","newName":"Desk"}']);
+    runs.length = 0;
+    expect(checked).toEqual([
+      { id: 'i1', newName: '' },
+      { id: 'i1', newName: 'Desk' },
+      { id: 'i1', newName: '' },
+      { id: 'i1', newName: 'Desk' },
+    ]);
   });
 
   test('an expired token is asked about again, and the call runs with the arguments the token was not among', async () => {

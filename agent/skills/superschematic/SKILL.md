@@ -190,7 +190,12 @@ path for when the store is unavailable.
   the person confirms the call, by elicitation or a two-step
   `confirmationToken`, and the API's config names the `@envVars` secret
   that signs confirmations, `outputs.api.mcpConfirmationKey`. Never pass a
-  `confirmationToken` the person has not confirmed.
+  `confirmationToken` the person has not confirmed. A call its route
+  would refuse (an argument the tool does not take, a value that fails
+  validation, a caller the route refuses) gets the route's 400, 401 or 403
+  at once, with no token: fix the arguments from the error, as the tool's
+  `inputSchema` lists them, and call again; a token sent with such a call
+  is not used up.
 - **Outputs must line up.** A server or SDK in a language needs
   `outputs.types` in that language, and a DB always needs Go types; the
   config fails to load and says so otherwise.

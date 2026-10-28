@@ -3,11 +3,13 @@ Runtime check of a generated router's OpenAPI routes and MCP endpoint (D81),
 run by TestGeneratedMCPRuntime with API_DIR set to the materialized
 fixture-mcp package, built with outputs.api.mcp on. Stub implementations
 echo their decoded arguments, so each tools/call shows where the router's
-route read each argument; the route's checks refuse what breaks its rules.
+route read each argument; the route's checks refuse what breaks its rules,
+and refuse a call of a tool that asks before anyone is asked (D98).
 fixture-mcp's routes need no caller, so its endpoint needs none either.
 */
 import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
+import { HttpProblem, type RequestContext } from '@superschematic/http-runtime';
 import { errorHandler, notFoundHandler } from '@superschematic/http-runtime/hono';
 import { parseIdentityUUID } from 'superscalar/scalars';
 
@@ -24,9 +26,15 @@ const ORDER_ID = parseIdentityUUID(ORDER);
 // policy is ask, with (D93); the router needs one.
 const CONFIRMATION_KEY = 'a random key of at least thirty-two bytes';
 
+// The operations the stubs ran, in order.
+const ran: string[] = [];
+
 function app(options: Record<string, unknown> = {}) {
   options = { ...options, mcp: { confirmationKey: CONFIRMATION_KEY, ...(options.mcp as object | undefined) } };
-  const echo = (name: string) => async (args: Record<string, unknown>) => ({ id: ORDER, status: 'open', revision: 1, totalCents: 0, echo: { name, args } });
+  const echo = (name: string) => async (args: Record<string, unknown>) => {
+    ran.push(name);
+    return { id: ORDER, status: 'open', revision: 1, totalCents: 0, echo: { name, args } };
+  };
   const root = new Hono();
   root.route(
     '/',
@@ -90,6 +98,22 @@ async function mcp(root: Hono, method: string, params?: unknown): Promise<Record
 
 const call = async (root: Hono, name: string, args: unknown) => (await mcp(root, 'tools/call', { name, arguments: args })).result;
 
+/** A tools/call's result for a 2026-07-28 client whose capabilities elicit forms, with params beside the name and arguments. */
+async function elicitingCall(root: Hono, name: string, args: unknown, params: Record<string, unknown> = {}): Promise<Record<string, any>> {
+  const _meta = {
+    'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+    'io.modelcontextprotocol/clientInfo': { name: 't', version: '1' },
+    'io.modelcontextprotocol/clientCapabilities': { elicitation: { form: {} } },
+  };
+  const response = await root.request('/api/mcp', {
+    method: 'POST',
+    headers: { accept: 'application/json, text/event-stream', 'content-type': 'application/json', 'mcp-protocol-version': '2026-07-28' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: ++ids, method: 'tools/call', params: { name, arguments: args, ...params, _meta } }),
+  });
+  expect(response.status).toBe(200);
+  return (await response.json()).result;
+}
+
 describe('the MCP endpoint', () => {
   test('initialize names the API and its served version', async () => {
     const init = { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 't', version: '1' } };
@@ -141,6 +165,71 @@ describe('the MCP endpoint', () => {
     expect(updated.structuredContent.echo.args).toEqual({ id: ORDER_ID, input: { revision: 2, note: null } });
     const again = await call(root, 'update_order', { id: ORDER, revision: 2, note: null, confirmationToken });
     expect(again.structuredContent).toMatchObject({ code: 'confirmation_required', details: { refused: 'used' } });
+  });
+
+  test('update_order is asked about in band for a client that elicits, and runs on accept (D93)', async () => {
+    const root = app();
+    ran.length = 0;
+    const asked = await elicitingCall(root, 'update_order', { id: ORDER, revision: 2, note: null });
+    expect(asked).toMatchObject({ resultType: 'input_required', inputRequests: { confirm: { method: 'elicitation/create' } } });
+    expect(ran).toEqual([]);
+    const answer = { inputResponses: { confirm: { action: 'accept' } }, requestState: asked.requestState };
+    const updated = await elicitingCall(root, 'update_order', { id: ORDER, revision: 2, note: null }, answer);
+    expect(updated.structuredContent.echo.args).toEqual({ id: ORDER_ID, input: { revision: 2, note: null } });
+    expect(ran).toEqual(['updateOrder']);
+  });
+
+  test('a call of update_order its route would refuse is refused at once, and no one is asked (D98)', async () => {
+    const root = app({ bodyLimits: { updateOrder: 64 } });
+    ran.length = 0;
+    const takesInput = await call(root, 'update_order', { id: ORDER, input: { revision: 2, note: null } });
+    expect(takesInput).toMatchObject({ isError: true, structuredContent: { status: 400, code: 'bad_request', detail: 'update_order takes id, revision, note, not "input"' } });
+    expect(takesInput.structuredContent.details).toBeUndefined();
+    const misShaped = [
+      { id: ORDER, revision: 'two', note: null },
+      { id: ORDER, note: 'no revision' },
+      { id: 'not an id!', revision: 2, note: null },
+    ];
+    for (const args of misShaped) {
+      const refused = await call(root, 'update_order', args);
+      expect(refused).toMatchObject({ isError: true, structuredContent: { status: 400, code: 'bad_request' } });
+      expect(refused.structuredContent.details?.confirmationToken).toBeUndefined();
+    }
+    const tooLong = await call(root, 'update_order', { id: ORDER, revision: 2, note: 'x'.repeat(100) });
+    expect(tooLong.structuredContent).toMatchObject({ status: 413, code: 'payload_too_large' });
+    // A client that elicits is not asked either.
+    const elicited = await elicitingCall(root, 'update_order', { id: ORDER, input: { revision: 2, note: null } });
+    expect(elicited).toMatchObject({ resultType: 'complete', isError: true, structuredContent: { status: 400, code: 'bad_request' } });
+    expect(elicited.requestState).toBeUndefined();
+
+    // A token sent with a mis-shaped call is not spent: it runs its own call after.
+    const confirmationToken = (await call(root, 'update_order', { id: ORDER, revision: 2, note: null })).structuredContent.details.confirmationToken;
+    const withToken = await call(root, 'update_order', { id: ORDER, revision: 'two', note: null, confirmationToken });
+    expect(withToken.structuredContent).toMatchObject({ status: 400, code: 'bad_request' });
+    expect(ran).toEqual([]);
+    const updated = await call(root, 'update_order', { id: ORDER, revision: 2, note: null, confirmationToken });
+    expect(updated.structuredContent.echo.args).toEqual({ id: ORDER_ID, input: { revision: 2, note: null } });
+    expect(ran).toEqual(['updateOrder']);
+  });
+
+  test("a caller update_order's route refuses is refused at once, and no one is asked (D98)", async () => {
+    // A service credential that may read orders and not change them, as a
+    // credential's scopes would say: the service step admits it to the
+    // endpoint's own route and every other, and refuses it on
+    // update_order's alone.
+    const readOnly = async (ctx: RequestContext) => {
+      if (ctx.operation.name === 'updateOrder') throw new HttpProblem(403, 'This credential may read orders, not change them', { code: 'service_forbidden' });
+      return null;
+    };
+    const root = app({ authenticateService: readOnly });
+    ran.length = 0;
+    const refused = await call(root, 'update_order', { id: ORDER, revision: 2, note: null });
+    expect(refused).toMatchObject({ isError: true, structuredContent: { status: 403, code: 'service_forbidden', detail: 'This credential may read orders, not change them' } });
+    expect(refused.structuredContent.details).toBeUndefined();
+    const elicited = await elicitingCall(root, 'update_order', { id: ORDER, revision: 2, note: null });
+    expect(elicited).toMatchObject({ resultType: 'complete', isError: true, structuredContent: { status: 403 } });
+    expect(ran).toEqual([]);
+    expect((await call(root, 'get_order', { id: ORDER })).structuredContent.echo.name).toBe('getOrder');
   });
 
   test('a tool that asks needs the confirmation key', () => {
