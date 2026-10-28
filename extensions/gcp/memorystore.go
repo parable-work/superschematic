@@ -65,12 +65,19 @@ const memoryStoreSettings = `{
 }`
 
 // memoryStoreName names a store's instance `<project>-<stack>-<store>`
-// (`acme-staging-shop-shop-cache`), as a bucket is named. A member of a
-// parameterized environment shares its parent's instance, so the name
-// holds no parameter.
+// (`acme-staging-shop-shop-cache`), as a bucket is named, shortened when
+// over an instance id's 63 characters (D97). A member of a parameterized
+// environment shares its parent's instance, so the name holds no
+// parameter.
 func memoryStoreName(ctx registry.PlatformContext) any {
-	v := valuesOf(ctx.Environment)
-	return v.project + "-" + kebab(ctx.Environment.Stack) + "-" + kebab(ctx.Deployable.Name)
+	return shorten(memoryStoreFullName(ctx.Environment, ctx.Deployable), 63, "-")
+}
+
+// memoryStoreFullName is a store's instance's name before memoryStoreName
+// shortens it.
+func memoryStoreFullName(env registry.StackEnvironment, d ir.ResolvedDeployable) string {
+	v := valuesOf(env)
+	return v.project + "-" + kebab(env.Stack) + "-" + kebab(d.Name)
 }
 
 // The instance's outputs a connection reads: the first Private Service
@@ -122,7 +129,7 @@ func lowerMemoryStore(ctx registry.PlatformContext) (registry.Lowered, error) {
 		replicas = count
 	}
 	out := registry.Lowered{Resources: memoryStoreNetworkNodes(env, v)}
-	out.Resources = append(out.Resources, &ir.Resource{
+	instance := &ir.Resource{
 		ID:        d.Name + ".instance",
 		Type:      TypeMemoryStoreInstance,
 		Phase:     ir.PhaseInfrastructure,
@@ -149,7 +156,11 @@ func lowerMemoryStore(ctx registry.PlatformContext) (registry.Lowered, error) {
 				"projectId": v.project,
 			}},
 		},
-	})
+	}
+	if full := memoryStoreFullName(env, d); len(full) > 63 {
+		instance.Properties["labels"] = nameLabels(d, true)
+	}
+	out.Resources = append(out.Resources, instance)
 	return out, nil
 }
 

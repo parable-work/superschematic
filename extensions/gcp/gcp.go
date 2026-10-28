@@ -272,7 +272,7 @@ func (e Extension) Register(r *registry.Registry) error {
 			Extension:       Name,
 			Kind:            ir.DeployableSite,
 			Settings:        json.RawMessage(siteSettings),
-			NameOf:          serviceName,
+			NameOf:          siteName,
 			AddressOf:       sitePublicAddress,
 			PublicAddressOf: sitePublicAddress,
 			// The site's load balancer routes its origin's APIs to their

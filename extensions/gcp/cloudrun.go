@@ -26,8 +26,33 @@ const (
 )
 
 // serviceName names a server's service, and its service account, after
-// the deployable: `shop-api`, or `shop-api-pr123` under a parameter.
+// the deployable: `shop-api`, or `shop-api-pr123` under a parameter. A
+// job's, a worker's and every other workload's Cloud Run resource is
+// named the same way (workloadName).
 func serviceName(ctx registry.PlatformContext) any {
+	name, _ := workloadName(ctx.Environment, ctx.Deployable)
+	return name
+}
+
+// workloadName is the name of a workload's Cloud Run resource and the id
+// of its service account, and whether it was shortened. A default
+// deployable's name, which its API's name makes, with its class's for a
+// job, a worker, a deriver or an app, and its database's for a runner, is
+// shortened to the account id's 30 characters when longer (D97). A
+// declared deployable's is the author's, and kept: checkLength refuses it
+// when too long, naming the deployable to rename.
+func workloadName(env registry.StackEnvironment, d ir.ResolvedDeployable) (any, bool) {
+	if d.Declared {
+		return suffixed(env, kebab(d.Name), "-"), false
+	}
+	return fitted(env, kebab(d.Name), "-", accountIDMax)
+}
+
+// siteName names a site's bucket's suffix, its load balancer's nodes and
+// its host after the deployable, as serviceName names a server, but
+// unshortened: a site has no service account, and the names it makes
+// have limits of their own (lowerSite).
+func siteName(ctx registry.PlatformContext) any {
 	return suffixed(ctx.Environment, kebab(ctx.Deployable.Name), "-")
 }
 
@@ -155,7 +180,7 @@ func lowerRunService(ctx registry.PlatformContext, probes func(container map[str
 	case d.Exposed:
 		ingress = ingressAll
 	}
-	add(&ir.Resource{ID: d.Name + ".service", Type: TypeService, Properties: map[string]any{
+	add(&ir.Resource{ID: d.Name + ".service", Type: TypeService, Properties: w.labeled(map[string]any{
 		"project":            v.project,
 		"location":           v.region,
 		"name":               d.ResourceName,
@@ -164,7 +189,7 @@ func lowerRunService(ctx registry.PlatformContext, probes func(container map[str
 		"customAudiences":    []any{serviceAudience(v, d.ResourceName)},
 		"deletionProtection": false,
 		"template":           template,
-	}})
+	})})
 	if d.Exposed && env.Domain != "" {
 		nodes, records := exposureNodes(env, v, d)
 		add(nodes...)
@@ -186,14 +211,28 @@ type workload struct {
 	// template has the account the container runs as, the Cloud SQL
 	// volume and the VPC egress; the platform adds the container.
 	template map[string]any
+
+	// labels are the Cloud Run resource's: the deployable's whole name
+	// when its name was shortened (D97), else none.
+	labels map[string]any
+}
+
+// labeled returns props, the Cloud Run resource's, with the workload's
+// labels when it has any.
+func (w workload) labeled(props map[string]any) map[string]any {
+	if len(w.labels) > 0 {
+		props["labels"] = w.labels
+	}
+	return props
 }
 
 // lowerWorkload lowers what a server, a job and a worker share (sections
 // 7.2, 8.7 and 8.8, D52, D53):
 //
-//   - a service account named after the deployable, and the trace agent
-//     role for it when it exports traces to Cloud Trace (telemetry.go,
-//     D67, amended);
+//   - a service account named after the deployable (workloadName, whose
+//     shortened name the Cloud Run resource's labels follow with the
+//     whole, D97), and the trace agent role for it when it exports traces
+//     to Cloud Trace (telemetry.go, D67, amended);
 //   - a Secret Manager secret and an accessor grant per secret binding
 //     (secretNodes);
 //   - its config as the container's environment variables: a literal as
@@ -290,7 +329,9 @@ func lowerWorkload(ctx registry.PlatformContext) (registry.Lowered, workload, er
 		envs = append(envs, vars...)
 	}
 
+	_, short := workloadName(env, d)
 	w := workload{
+		labels: nameLabels(d, short),
 		container: map[string]any{
 			"image": imageRepository(v, env.Stack, d.Name),
 			"resources": map[string]any{"limits": map[string]any{
