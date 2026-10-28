@@ -353,6 +353,19 @@ A field is a `string`, a `number` (read as an integer), a `boolean`
 (`true` or `false`), an enum, or a scalar, which runs its validators.
 `Default<T, V>` makes a variable optional; any other field is required.
 
+A schema may put `@envVars` on more than one class when each extends the
+next, as a class that declares a shared secret and the service's settings
+that extend it do
+([Encrypted fields](/superschematic/guides/database-tables/#encrypted-fields)).
+The service's config is then the `@envVars` class no other `@envVars`
+class extends, directly or through a plain class between them. Its
+variables are its own fields and those of every class it extends. The
+loaders, `values-schema.json`, a stack and the API's handle all read that
+class. Two `@envVars` classes neither of which extends the other fail the
+load, which names both: make one extend the other, or remove `@envVars`
+from one. A plain base class, without `@envVars`, works as well, since an
+`@envVars` class holds every field it inherits.
+
 The build writes a loader that reads and checks every variable and
 reports every one that is missing or invalid at once, never a value:
 

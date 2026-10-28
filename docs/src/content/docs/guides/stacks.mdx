@@ -253,6 +253,10 @@ export abstract class OrdersConfig extends PaymentsSecrets {
 A secret is identified by the type that declares the field and the
 field's name. When `shop-api`'s config extends the same `PaymentsSecrets`,
 both servers read one `PaymentsSecrets.STRIPE_KEY` in each environment.
+The base may carry `@envVars` too: the API's config is still the
+`@envVars` class no other extends, here `OrdersConfig`, and `env` sets its
+fields, the inherited ones among them
+([Environment variables](/superschematic/guides/modeling-types/#environment-variables)).
 
 Each API's build writes its handle to `src/service.generated.ts`. An API's
 handle carries its kind and its `@envVars` class as type parameters

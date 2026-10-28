@@ -572,6 +572,9 @@ export abstract class PaymentsSecrets {
   here, the servers of shop-api and shop-orders.
 - Two servers whose config is the same type share all its secrets with no
   further declaration.
+- The base may carry `@envVars` too. A service's config is the `@envVars`
+  class no other `@envVars` class extends, which holds every field it
+  inherits; two that do not extend one another fail the load (D94).
 - The platform stores the secret (Secret Manager on GCP, a gitignored file
   locally) under a name derived from the declaring type and the field.
 
@@ -625,10 +628,11 @@ line that holds it.
   `ServiceHandle` is any handle. An API's generated `service.generated.ts`
   writes both: `service<"API", ShopApiConfig>({ name: "shop-api", kind:
   SchemaKind.API })`, with `ShopApiConfig` imported as a type. The second
-  names the API's `@envVars` class, so the sentinel is written after the
-  service loads; the sentinel sweep, which reads only configs, keeps the
-  type a build wrote. A DB or General handle has no config type, nor has
-  an API without a TypeScript `@envVars` class, and `service()` infers the
+  names the API's config, the `@envVars` class no other extends (D94),
+  so the sentinel is written after the service loads; the sentinel
+  sweep, which reads only configs, keeps the type a build wrote. A DB or
+  General handle has no config type, nor has an API without a TypeScript
+  `@envVars` class, and `service()` infers the
   kind from its argument (`kind: SchemaKind.DB` gives `ServiceHandle<"DB">`).
   No person writes either parameter. `calls` takes `ServiceHandle<"API">`,
   so tsc refuses a DB handle there, and `buckets` takes
