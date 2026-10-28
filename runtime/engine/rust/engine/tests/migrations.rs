@@ -37,7 +37,7 @@ use support::{alice, code, count, order_document, refusal, schema_document, targ
 
 const ANY: SchemaTarget<'static> = SchemaTarget { namespace: None };
 
-const LATEST: usize = 13;
+const LATEST: usize = 14;
 
 fn note_document() -> Value {
     schema_document(
@@ -246,6 +246,23 @@ fn seed(tx: &Tx<'_>, version: usize) {
             );
             run(tx, "DELETE FROM engine_events WHERE namespace = 'default' AND cursor <= 4", &[]);
         }
+        // Version 13 kept beside events, with no sequence, and recorded no
+        // subject a principal acted for.
+        13 => {
+            run(tx, INSERT_SCHEMA, &order_row());
+            run(
+                tx,
+                INSERT_INSTANCE,
+                &row(json!(["default", "Order", "o1", "default", 1, 1, "{\"title\":\"Desk\"}", 300, "alice", 300, "alice"])),
+            );
+            run(tx, INSERT_EVENT, &row(json!(["publish", "default", "Order", null, null, 1, "alice", 200, order])));
+            run(tx, INSERT_EVENT, &row(json!(["create", "default", "Order", "o1", 1, 1, "alice", 300, "{\"data\":{\"title\":\"Desk\"},\"behaviors\":{}}"])));
+            run(
+                tx,
+                INSERT_EVENT,
+                &row(json!(["operation", "default", "Order", "o1", null, 1, "bob", 350, "{\"behavior\":\"Comments\",\"operation\":\"post\",\"params\":{},\"result\":{}}"])),
+            );
+        }
         _ => panic!("add a seed for engine storage version {version}"),
     }
 }
@@ -398,6 +415,7 @@ fn check(engine: &Engine, version: usize) {
         10 => check_version_10(engine),
         11 => check_version_11(engine),
         12 => check_version_12(engine),
+        13 => check_version_13(engine),
         _ => panic!("add a check for engine storage version {version}"),
     }
 }
@@ -839,6 +857,52 @@ fn check_version_12(engine: &Engine) {
     );
 }
 
+// Migration 14 (D77): the events before it acted for no one, and the next
+// write of a principal acting for a subject records it as `for`.
+fn check_version_13(engine: &Engine) {
+    let before = read_all(engine);
+    assert_eq!(
+        before
+            .iter()
+            .map(|event| (
+                event.kind.as_str(),
+                event.seq,
+                event.beside,
+                event.for_subject.clone()
+            ))
+            .collect::<Vec<_>>(),
+        [
+            ("publish", None, false, None),
+            ("create", Some(1), false, None),
+            ("operation", None, true, None),
+        ]
+    );
+    let updated = engine
+        .instances()
+        .update(
+            &alice().acting_for("bob"),
+            "Order",
+            "o1",
+            &json!({"title": "Lamp"}),
+            WriteOptions {
+                expected_seq: Some(1),
+                ..WriteOptions::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(updated.seq, 2);
+    let last = read_all(engine).pop().unwrap();
+    assert_eq!(
+        (
+            last.kind.as_str(),
+            last.actor.as_str(),
+            last.for_subject.as_deref()
+        ),
+        ("update", "alice", Some("bob"))
+    );
+    assert_eq!(serde_json::to_value(&last).unwrap()["for"], json!("bob"));
+}
+
 fn unique_indexes(db: &Db) -> i64 {
     db.read(|tx| {
         let row = tx.get(
@@ -898,7 +962,7 @@ fn from_each_earlier_version() {
             let engine = target.open();
             assert_eq!(
                 ledger(engine.db()),
-                (1..=13).collect::<Vec<u32>>(),
+                (1..=14).collect::<Vec<u32>>(),
                 "from {from}"
             );
             check(&engine, from);
@@ -974,7 +1038,7 @@ fn from_each_earlier_version() {
 fn from_an_empty_storage_every_migration_runs_and_reopening_runs_none() {
     for target in targets("from_an_empty_storage_every_migration_runs_and_reopening_runs_none") {
         let engine = target.open_with(|options| options.clock = Clock::Manual(42));
-        assert_eq!(ledger(engine.db()), (1..=13).collect::<Vec<u32>>());
+        assert_eq!(ledger(engine.db()), (1..=14).collect::<Vec<u32>>());
         let stamps = engine.db().applied_migrations(ENGINE_OWNER).unwrap();
         assert!(stamps.iter().all(|row| row.applied_at == 42));
         drop(engine);
@@ -1023,7 +1087,7 @@ fn an_engine_whose_storage_is_newer_than_the_build_refuses_to_open_it() {
             let mut later = engine_migrations(|_| Ok(()));
             later
                 .migrations
-                .push(Migration::new(14, "from a later build", |_| Ok(())));
+                .push(Migration::new(15, "from a later build", |_| Ok(())));
             db.migrate(&later, 0).unwrap();
         }
         let refused = Engine::open(target.options()).unwrap_err();
@@ -1096,7 +1160,7 @@ fn an_engine_opens_on_a_storage_the_host_opened() {
         options.policy = Some(superschematic_engine::Policy::allow_all());
         let engine = Engine::open(options).unwrap();
         assert_eq!(engine.dialect(), target.dialect);
-        assert_eq!(ledger(engine.db()), (1..=13).collect::<Vec<u32>>());
+        assert_eq!(ledger(engine.db()), (1..=14).collect::<Vec<u32>>());
     }
 }
 

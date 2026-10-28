@@ -76,7 +76,9 @@ use ::axum::Router;
 use futures_util::{Stream, StreamExt};
 use tokio::sync::watch;
 
-use crate::api::{self, ApiOptions, Body, Caller, EventStream, Problem, Pull, Route};
+use crate::api::{
+    self, ActingForHeader, ApiOptions, Body, Caller, EventStream, Problem, Pull, Route,
+};
 pub use crate::background::Background;
 use crate::storage::Notifier;
 use crate::Engine;
@@ -189,7 +191,7 @@ pub struct Options {
     pub prefix: String,
     /// The engine's own options for its routes: the event stream's page
     /// size and heartbeat, the MCP endpoint's server info, the tool
-    /// filter.
+    /// filter, and whether the `Acting-For` header is honored (D77).
     pub api: ApiOptions,
     /// Who each request's caller is ([`FromExtensions`] unless set).
     pub callers: Arc<dyn Callers>,
@@ -255,6 +257,13 @@ impl Options {
     /// The engine's own options for its routes.
     pub fn api(mut self, api: ApiOptions) -> Self {
         self.api = api;
+        self
+    }
+
+    /// Whether the routes honor the `Acting-For` header (D77): ignored
+    /// unless set.
+    pub fn acting_for(mut self, acting_for: ActingForHeader) -> Self {
+        self.api.acting_for = acting_for;
         self
     }
 

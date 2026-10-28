@@ -180,6 +180,38 @@ describe('the client', () => {
     await refused(client.events.read({ behaviors: ['not a name'] }), 400, 'invalid_argument');
   });
 
+  test('actingFor sends the Acting-For header, per client and per call, which a mount honors only when it opts in (D77)', async () => {
+    const forOf = (served: ReturnType<typeof serve>, id: string) => {
+      const [event] = served.engine.events.read(alice, { schema: 'Task', instanceId: id }).events;
+      return [event.actor, event.for];
+    };
+    // A mount that does not honor the header answers as if it were not there.
+    const ignoring = serve();
+    await ignoring.client({ actingFor: 'bob' }).instances.create('Task', { title: 'Ignored' }, { id: 'ignored' });
+    assert.equal(ignoring.requests.at(-1)!.headers.get('acting-for'), 'bob');
+    assert.deepEqual(forOf(ignoring, 'ignored'), ['alice', undefined]);
+
+    const honoring = serve({ actingFor: true });
+    const agent = honoring.client({ actingFor: 'bob' });
+    await agent.instances.create('Task', { title: 'For bob' }, { id: 'for-bob' });
+    assert.deepEqual(forOf(honoring, 'for-bob'), ['alice', 'bob']);
+    await agent.instances.create('Task', { title: 'For carol' }, { id: 'for-carol', actingFor: 'carol' });
+    assert.deepEqual(forOf(honoring, 'for-carol'), ['alice', 'carol']);
+    await agent.instances.create('Task', { title: 'Own' }, { id: 'own', actingFor: null });
+    assert.equal(honoring.requests.at(-1)!.headers.get('acting-for'), null);
+    assert.deepEqual(forOf(honoring, 'own'), ['alice', undefined]);
+    const events = await agent.events.read({ after: 0, schema: 'Task', kinds: ['create'] });
+    assert.deepEqual(
+      events.events.map((event) => event.for),
+      ['bob', 'carol', undefined]
+    );
+    // The policy decides: bob may not act for anyone, and alice may not act
+    // for herself.
+    await refused(honoring.client({ auth: { token: 'bob' }, actingFor: 'alice' }).instances.create('Task', { title: 'No' }), 403, 'forbidden');
+    await refused(agent.instances.create('Task', { title: 'Self' }, { actingFor: 'alice' }), 400, 'invalid_argument');
+    assert.throws(() => honoring.client({ actingFor: ' ' }), /actingFor is the subject the caller acts for/);
+  });
+
   test('lists, creates, archives and unarchives namespaces; reads from the start after retention, and a pruned cursor carries the floor and the head', async () => {
     const served = serve({}, { retention: { maxEvents: 1 } });
     const client = served.client();

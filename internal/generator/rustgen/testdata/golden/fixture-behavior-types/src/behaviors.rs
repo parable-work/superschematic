@@ -298,7 +298,7 @@ pub struct RequestDerivedFieldsSummaryOverridden {
 /// RequestProvenance holds the fields a Request's Provenance adds, as a read returns them: a field with no value is absent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RequestProvenance {
-    /// By recorded field written since Provenance was added: { source, by, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; review is { state, by?, at? }, state proposed, accepted, rejected or edited.
+    /// By recorded field written since Provenance was added: { source, by, for?, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; for is the subject it acted for, when it acted for one (D77); review is { state, by?, at? }, state proposed, accepted, rejected or edited.
     pub fields: RequestProvenanceFields,
     /// Whether any recorded field is proposed. A list filters on it.
     #[serde(rename = "inReview")]
@@ -326,6 +326,8 @@ pub struct RequestProvenanceFieldsBody {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confidence: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#for: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review: Option<RequestProvenanceFieldsBodyReview>,
     pub source: String,
 }
@@ -348,6 +350,8 @@ pub struct RequestProvenanceFieldsCategory {
     pub by: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confidence: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#for: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review: Option<RequestProvenanceFieldsCategoryReview>,
     pub source: String,
@@ -372,6 +376,8 @@ pub struct RequestProvenanceFieldsSubject {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confidence: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#for: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review: Option<RequestProvenanceFieldsSubjectReview>,
     pub source: String,
 }
@@ -394,6 +400,8 @@ pub struct RequestProvenanceFieldsSummary {
     pub by: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confidence: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#for: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review: Option<RequestProvenanceFieldsSummaryReview>,
     pub source: String,

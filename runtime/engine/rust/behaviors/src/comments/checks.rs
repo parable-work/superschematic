@@ -225,31 +225,11 @@ pub(super) fn check_body(
     }
 }
 
-/// Each action block's `data`, as compact JSON, is at most 8192 bytes.
-pub(super) fn check_action_data(operation: &str, blocks: Option<&Value>) -> Result<()> {
-    for (index, block) in blocks_of(blocks).iter().enumerate() {
-        if block.get("kind").and_then(Value::as_str) != Some("action") {
-            continue;
-        }
-        if let Some(data) = block.get("data") {
-            let size = serde_json::to_vec(data)
-                .map(|bytes| bytes.len())
-                .unwrap_or(0);
-            if size > MAX_ACTION_DATA {
-                return Err(invalid(
-                    operation,
-                    format!("/blocks/{index}/data"),
-                    format!("is more than {MAX_ACTION_DATA} bytes of JSON"),
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-/// The blocks a post or an edit gives: each kind one the config allows,
-/// then each ref block's instance one the caller may read. A ref block
-/// whose schema and id one of `before` holds is not read again.
+/// The blocks a post, a finish or an edit gives: each kind one the config
+/// allows, then each attachment one the config's `attachments` allows,
+/// then each ref block's instance one the caller may read. An attachment
+/// equal to one of `before`'s, and a ref block whose schema and id one of
+/// `before` holds, are not checked again.
 pub(super) fn check_blocks(
     view: &InstanceView<'_, CommentsConfig>,
     operation: &str,
@@ -283,6 +263,7 @@ pub(super) fn check_blocks(
         }
     }
     let held = blocks_of(before);
+    super::blocks::check_attachments(view, operation, blocks, held)?;
     for (index, block) in blocks.iter().enumerate() {
         if block.get("kind").and_then(Value::as_str) != Some("ref") {
             continue;

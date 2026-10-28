@@ -487,3 +487,34 @@ func TestNamespaceOperations(t *testing.T) {
 		t.Error("a module without namespace operations has a namespace client")
 	}
 }
+
+// Comments' namespace operations name their items (coreNamespaceItems):
+// searchMessages' hits are CommentsSearchHit, which its result holds and
+// the namespace client returns; a note's records hold posted blocks, and
+// moveAnchor and listPinned return its messages (D77, step 5).
+func TestCommentsNamespaceItemsAndRecords(t *testing.T) {
+	reg := coreRegistry(t)
+	module, err := Generate(loadSchemas(t, reg, notesSchemas), Options{Registry: reg, Naming: naming.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(module)
+	for _, want := range []string{
+		"/** A message searchMessages found: where it is, who wrote it and for whom, its place in the search's order, and a few words of its body around the matches, in parts. */\nexport type CommentsSearchHit = {",
+		"export type CommentsSearchMessagesResult = {\n  items: CommentsSearchHit[];",
+		"  searchMessages: { scope: 'namespace'; params: CommentsSearchMessagesParams; result: CommentsSearchMessagesResult };",
+		"  searchMessages(params: CommentsSearchMessagesParams, options?: Omit<CallOptions, 'namespace'>): Promise<CommentsSearchMessagesResult>;",
+		"export type NoteMoveAnchorResult = NoteCommentMessage;",
+		"export type NoteListPinnedResult = {\n  items: NoteCommentMessage[];",
+		"  blocks: NoteCommentPostedBlock[];",
+		"  moveAnchor(id: string, params: NoteMoveAnchorParams, options?: NoteWriteOptions): Promise<NoteMoveAnchorResult>;",
+		"  listPinned(id: string, params?: NoteListPinnedParams, options?: NoteWriteOptions): Promise<NoteListPinnedResult>;",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the notes module lacks %q", want)
+		}
+	}
+	if strings.Contains(text, "  blocks: NoteCommentBlock[];") {
+		t.Error("a record's blocks are the blocks a post gives, not the posted ones")
+	}
+}

@@ -82,12 +82,14 @@ describe('the describe document', () => {
         ['unpin', 'tickets: unpin'],
         ['resolve', 'tickets: resolve'],
         ['reopen', 'tickets: reopen'],
+        ['moveAnchor', 'tickets: moveAnchor'],
         ['markRead', 'tickets: markRead'],
         ['follow', 'tickets: follow'],
         ['listMessages', 'tickets: listMessages'],
         ['getMessage', 'tickets: getMessage'],
         ['listEdits', 'tickets: listEdits'],
         ['listReactions', 'tickets: listReactions'],
+        ['listPinned', 'tickets: listPinned'],
       ]
     );
     // Each title is its tool's.

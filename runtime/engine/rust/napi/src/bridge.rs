@@ -1847,6 +1847,7 @@ fn event_of(value: &Value) -> EngineEvent {
             .get("service")
             .and_then(Value::as_str)
             .map(str::to_owned),
+        for_subject: value.get("for").and_then(Value::as_str).map(str::to_owned),
         at: value.get("at").and_then(Value::as_i64).unwrap_or(0),
         change: value.get("change").cloned().unwrap_or(Value::Null),
         cause: None,

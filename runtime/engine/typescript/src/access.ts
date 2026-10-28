@@ -39,6 +39,16 @@ principal's subject names the service (`service:<deployable>`,
 servicePrincipal) and it holds no permissions, since services hold none
 (D37). The policy and the behaviors see the service through the
 principal, and a behavior's can() is false for a service standing in.
+
+A principal may act for a subject (D77): `actingFor: { subject }`, the
+person an agent or a service works for, which every event it writes
+records as `for` beside `actor`. It adds no permissions, so can() answers
+for the principal's own; the policy sees it and may refuse it.
+permissionPolicy refuses every question whose principal acts for someone
+unless the principal holds `actFor`. The engine refuses an actingFor whose
+subject is empty or the principal's own, and one beside the end user a
+service brings, whose call already acts for that user; a service standing
+in may act for a subject.
 */
 
 import { hasAnyPermission, type PermissionMatcher } from '@superschematic/http-runtime';
@@ -55,7 +65,22 @@ export interface Principal {
    * for, or standing in for one. Absent for a call no service made.
    */
   readonly service?: PrincipalService;
+  /**
+   * The subject the caller acts for (D77): the person an agent or a service
+   * works for. It adds no permissions. Absent for a caller acting as
+   * itself.
+   */
+  readonly actingFor?: ActingFor;
 }
+
+/** Whom a principal acts for (D77). */
+export interface ActingFor {
+  /** The subject, never the principal's own. */
+  readonly subject: string;
+}
+
+/** The permission permissionPolicy requires of a principal acting for a subject (D77), beside the question's own. */
+export const ACT_FOR_PERMISSION = 'actFor';
 
 /** The calling service of a principal: the HTTP runtime's ServiceCaller, and whether it stands in for an end user. */
 export interface PrincipalService {
@@ -199,7 +224,8 @@ const enginePermissionPolicies = new WeakSet<AccessPolicy>();
 
 /**
  * permissionAllows is permissionPolicy's rule: the principal holds
- * `<schema>.<action>`, by matcher. A behavior's namespace operation (D77)
+ * `<schema>.<action>`, by matcher, and, when it acts for a subject (D77),
+ * `actFor`. A behavior's namespace operation (D77)
  * that reads is allowed, since its rows are those of the schemas the
  * principal may read, and one that writes to a holder of
  * `<behavior>.<operation>`, a listing question about one the same. Any
@@ -208,6 +234,9 @@ const enginePermissionPolicies = new WeakSet<AccessPolicy>();
  * refuses it.
  */
 function permissionAllows(request: AccessRequest, matcher: PermissionMatcher): boolean {
+  if (request.principal.actingFor !== undefined && !matcher(request.principal.permissions, [ACT_FOR_PERMISSION])) {
+    return false;
+  }
   if (request.behavior !== undefined) {
     return request.action === 'read' || matcher(request.principal.permissions, [`${request.behavior}.${request.operation}`]);
   }
@@ -226,8 +255,10 @@ function permissionAllows(request: AccessRequest, matcher: PermissionMatcher): b
  * such as a Workflow transition's, is checked besides. A behavior's
  * namespace operation (D77) that reads it allows to anyone, and one that
  * writes to a caller holding `<behavior>.<operation>`
- * (`Comments.claimDeliveries`). It matches with the engine's
- * permissionMatcher, or with the one it is given. It refuses any other
+ * (`Comments.claimDeliveries`). A principal acting for a subject (D77) it
+ * refuses every question unless the principal holds `actFor`, and then
+ * answers as for the principal's own permissions. It matches with the
+ * engine's permissionMatcher, or with the one it is given. It refuses any other
  * question that names no schema: a namespace's own (`manage`), which a
  * deployment's own policy answers, and a listing question, so the tools
  * document hides define_schema and the namespace tools, though a define

@@ -70,7 +70,7 @@ func send(t *testing.T, method, url, body string, headers ...string) (*http.Resp
 		t.Fatal(err)
 	}
 	for i := 0; i+1 < len(headers); i += 2 {
-		req.Header.Set(headers[i], headers[i+1])
+		req.Header.Add(headers[i], headers[i+1])
 	}
 	response, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -451,5 +451,148 @@ func TestTheNamespaceOperationRoute(t *testing.T) {
 	var refused *engine.Error
 	if !errors.As(err, &refused) || refused.Code != engine.CodeNotFound {
 		t.Fatalf("behaviors.invoke: %v", err)
+	}
+}
+
+// The Acting-For header (D77) is ignored unless Options.ActingFor honors it;
+// a function decides per request, given the engine's principal.
+func TestTheActingForHeaderIsHonoredOnlyWhenTheOptionSaysSo(t *testing.T) {
+	e := openNotes(t)
+	var seen []string
+	mounts := map[string]func(engine.Principal, string, *http.Request) bool{
+		"/ignore": nil,
+		"/honor":  enginehttp.HonorActingFor,
+		"/decide": func(principal engine.Principal, subject string, _ *http.Request) bool {
+			seen = append(seen, principal.Subject+" for "+subject)
+			return subject != "carol"
+		},
+	}
+	router := chi.NewRouter()
+	for prefix, actingFor := range mounts {
+		router.Mount(prefix, enginehttp.Handler(e, enginehttp.Options{Prefix: prefix, Caller: bearer, ActingFor: actingFor}))
+	}
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	forOf := func(prefix, id, subject string) string {
+		t.Helper()
+		response, body := send(t, "POST", server.URL+prefix+"/namespaces/default/schemas/Note/instances",
+			`{"id": "`+id+`", "data": {"body": "hello"}}`,
+			"Authorization", "Bearer agent", "Content-Type", "application/json", "Acting-For", subject)
+		if response.StatusCode != 201 {
+			t.Fatalf("%s create %s: %d %s", prefix, id, response.StatusCode, body)
+		}
+		response, body = send(t, "GET", server.URL+prefix+"/namespaces/default/events?schema=Note&limit=500", "", "Authorization", "Bearer agent")
+		if response.StatusCode != 200 {
+			t.Fatalf("events: %d %s", response.StatusCode, body)
+		}
+		var page struct {
+			Data struct {
+				Events []struct {
+					InstanceID string `json:"instanceId"`
+					Actor      string `json:"actor"`
+					For        string `json:"for"`
+				} `json:"events"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(body), &page); err != nil {
+			t.Fatal(err)
+		}
+		for _, event := range page.Data.Events {
+			if event.InstanceID == id {
+				if event.Actor != "agent" {
+					t.Fatalf("actor = %q", event.Actor)
+				}
+				return event.For
+			}
+		}
+		t.Fatalf("no event of %s: %s", id, body)
+		return ""
+	}
+	if got := forOf("/ignore", "n1", "alice"); got != "" {
+		t.Fatalf("ignored by default: for = %q", got)
+	}
+	if got := forOf("/honor", "n2", "alice"); got != "alice" {
+		t.Fatalf("honored: for = %q", got)
+	}
+	if got := forOf("/decide", "n3", "alice"); got != "alice" {
+		t.Fatalf("decided yes: for = %q", got)
+	}
+	if got := forOf("/decide", "n4", "carol"); got != "" {
+		t.Fatalf("decided no: for = %q", got)
+	}
+	if strings.Join(seen, ", ") != "agent for alice, agent for carol" {
+		t.Fatalf("the function saw %v", seen)
+	}
+	// A subject that is the caller's own is the engine's invalid_argument.
+	response, body := send(t, "POST", server.URL+"/honor/namespaces/default/schemas/Note/instances",
+		`{"id": "n5", "data": {"body": "hello"}}`,
+		"Authorization", "Bearer agent", "Content-Type", "application/json", "Acting-For", "agent")
+	if response.StatusCode != 400 || !strings.Contains(body, `"code":"invalid_argument"`) {
+		t.Fatalf("acting for itself: %d %s", response.StatusCode, body)
+	}
+}
+
+// One rule reads the Acting-For header: ASCII whitespace is trimmed, and a
+// second header, a comma, a control or other whitespace is refused, so a
+// function that refuses role: subjects sees the subject the engine
+// records, and no spelling of one gets past it.
+func TestTheActingForHeaderIsReadByOneRule(t *testing.T) {
+	e := openNotes(t)
+	var seen []string
+	decide := func(_ engine.Principal, subject string, _ *http.Request) bool {
+		seen = append(seen, subject)
+		return !strings.HasPrefix(subject, "role:")
+	}
+	server := httptest.NewServer(enginehttp.Handler(e, enginehttp.Options{Caller: bearer, ActingFor: decide}))
+	defer server.Close()
+	create := func(id string, actingFor ...string) (int, string) {
+		t.Helper()
+		headers := []string{"Authorization", "Bearer agent", "Content-Type", "application/json"}
+		for _, value := range actingFor {
+			headers = append(headers, "Acting-For", value)
+		}
+		response, body := send(t, "POST", server.URL+"/namespaces/default/schemas/Note/instances",
+			`{"id": "`+id+`", "data": {"body": "hello"}}`, headers...)
+		return response.StatusCode, body
+	}
+	if status, body := create("n1", " \tbob\t "); status != 201 || !strings.Contains(body, `"createdBy":"agent"`) {
+		t.Fatalf("a trimmed subject: %d %s", status, body)
+	}
+	for id, values := range map[string][]string{
+		"n2": {"bob", "role:admins"},
+		"n3": {"bob, role:admins"},
+		"n4": {"\u0085role:admins"},
+		"n5": {"role:admins\u00a0"},
+		"n6": {"b ob"},
+		"n7": {"bob\u2028"},
+	} {
+		if status, body := create(id, values...); status != 400 || !strings.Contains(body, `"code":"invalid_argument"`) {
+			t.Fatalf("%s %q: %d %s", id, values, status, body)
+		}
+	}
+	if status, body := create("n8", "role:admins"); status != 201 {
+		t.Fatalf("refused by the function: %d %s", status, body)
+	}
+	if strings.Join(seen, ", ") != "bob, role:admins" {
+		t.Fatalf("the function saw %q", seen)
+	}
+	for _, check := range []struct {
+		values  []string
+		subject string
+		refused bool
+	}{
+		{nil, "", false},
+		{[]string{" \r\n"}, "", false},
+		{[]string{"\talice "}, "alice", false},
+		{[]string{"alice", "bob"}, "", true},
+		{[]string{"\u000balice"}, "", true},
+		{[]string{"\u3000alice"}, "", true},
+		{[]string{"alice\u0000"}, "", true},
+	} {
+		subject, err := enginehttp.ActingForSubject(check.values)
+		if subject != check.subject || (err != nil) != check.refused {
+			t.Fatalf("ActingForSubject(%q) = %q, %v", check.values, subject, err)
+		}
 	}
 }

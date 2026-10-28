@@ -274,7 +274,7 @@ pub(super) fn claim_deliveries(cx: Ncx<'_, '_>, params: &Value) -> Result<Value>
         let rows = sql.all(
             format!(
                 "SELECT d.schema, d.id, d.message, d.subject, d.mention, d.reply, d.state, d.attempts, d.due_at,
-                        m.thread, m.author, m.via, m.state AS message_state, m.posted_at, m.stand, m.body,
+                        m.thread, m.author, m.for_subject, m.via, m.state AS message_state, m.posted_at, m.stand, m.body,
                         CASE WHEN m.thread IS NULL THEN r.up_to ELSE f.read_up_to END AS marker
                    FROM {deliveries} d
                    LEFT JOIN {messages} m
@@ -359,6 +359,9 @@ pub(super) fn claim_deliveries(cx: Ncx<'_, '_>, params: &Value) -> Result<Value>
                 "author".into(),
                 Value::from(row.opt_text("author")?.unwrap_or_default()),
             );
+            if let Some(subject) = row.opt_text("for_subject")? {
+                item.insert("for".into(), Value::from(subject));
+            }
             if let Some(via) = row.opt_text("via")? {
                 item.insert("via".into(), Value::from(via));
             }

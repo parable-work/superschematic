@@ -259,6 +259,48 @@ either engine.
   permission stays closed to it. The README's
   [service callers](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#service-callers)
   section has the rules.
+- An agent or a service that works for a person acts for that person
+  (D77): its principal carries `actingFor: { subject }`, and stays its
+  own. The event a call acting for someone writes names the agent as
+  `actor` and the person as `for`, Provenance records both (`by` and
+  `for`), and Comments records the person as the message's `for`
+  ([Acting for someone](#acting-for-someone)). Acting for someone grants
+  nothing: every permission check answers for the principal's own.
+  Over HTTP and MCP a client sends the subject in the `Acting-For`
+  header, which a mount honors only when the host opts in with
+  `engineApp`'s and `engineMcp`'s `actingFor` option: `false`, the
+  default, ignores the header, `true` honors it for any caller the
+  runtime authenticated, and a function, `(principal, subject, request)
+  => boolean`, decides per request, so a host that trusts only its
+  agents' tokens to act for anyone says so there. The Go binding's
+  `enginehttp.Options.ActingFor` is that function
+  (`enginehttp.HonorActingFor` for `true`). Every host reads the header
+  by one rule: spaces, tabs and line ends around it are trimmed, and a
+  request with two `Acting-For` headers, or one whose value holds a
+  comma, a control character or any other whitespace (U+0085 and U+00A0
+  among them), is 400 `invalid_argument`. The subject a function approves
+  is the one the engine records.
+- The policy sees `principal.actingFor` on every question and decides.
+  `permissionPolicy()` refuses a principal acting for someone unless it
+  holds `actFor`, and then answers as for its own permissions: an agent
+  holding `notes.write` and `actFor` may write notes for anyone, and
+  nothing else. In a `{ rules }` policy a rule matches on `actingFor`:
+  `true` for a principal acting for any subject, `false` for one acting
+  for none, or a subject or a list of them; an allow or a require that
+  leaves it out matches only a principal acting for no one, so rules
+  written before it let nobody act for anyone. A deny (`"allow": false`)
+  that leaves it out binds a principal acting for someone too: `{
+  "service": "crawler", "allow": false }` refuses the crawler whoever it
+  acts for, and only `"actingFor": false` narrows a deny to callers
+  acting as themselves. `{ "actingFor": true, "require":
+  "{schema}.{action}" }` lets a principal act for anyone within its own
+  permissions. A policy of your own reads `principal.actingFor` first,
+  as this example's does: its callers act only as themselves, and its
+  server honors no `Acting-For` header. A subject that is the caller's
+  own is 400 `invalid_argument`, and so is one beside the end user a
+  service brings: a service that forwards an end user's token already
+  acts for that user. A service standing in, `service:<deployable>`,
+  may act for a subject, and the engine's runner acts for no one.
 
 ## Serve it
 
@@ -605,17 +647,23 @@ on the note does not stop a reply. Every message is top-level, a thread
 of its own, or a reply in one: `thread` names the top-level message, and
 threads are one level deep. A message may carry `mentions` and
 `blocks` beside its Markdown `body`: a `ref` to another instance the
-poster may read, or an `action` card with a title and a status. Its
+poster may read, an `action` card with a title and a status, a `code`
+block anchored at lines of a file, or an `attachment` that describes a
+file the deployment stores ([Code blocks and
+attachments](#code-blocks-and-attachments)). Its
 author edits it (`edit`, whose earlier text `listEdits` keeps) and
 deletes it (`deleteMessage`, which keeps its place in the thread);
 anyone who may write reacts to it with an emoji (`react`, `unreact`),
 pins it (`pin`, `unpin`), and the thread's author resolves the thread
 (`resolve`, `reopen`). `listMessages` reads a page of the top-level
 messages, or with `thread` of a thread's replies, with `before`,
-`after` or `around` a message id, and `getMessage` reads one. The config
-narrows who may do what: `editWindowMs`, `maxBodyLength` and `blocks`,
-and `moderatePermission`, `pinPermission` and `resolvePermission` for a
-caller who acts on another's message.
+`after` or `around` a message id, `getMessage` reads one, and
+`listPinned` the pinned ones ([Search and pinned
+messages](#search-and-pinned-messages)). The config
+narrows who may do what: `editWindowMs`, `maxBodyLength`, `blocks` and
+`attachments`, and `moderatePermission`, `pinPermission`,
+`resolvePermission` and `anchorPermission` for a caller who acts on
+another's message.
 
 A reply that is written as it goes, a model's or a person's typing it
 out, is streamed instead of posted. `begin` takes the message's id and
@@ -649,6 +697,162 @@ engine hands to the event streams open on it and keeps nowhere
 types or looks at the conversation, and `draft`, `{ message, offset,
 text }`, which `appendDraft` sends with each chunk, so a reader shows a
 streamed reply as it is written without reading it again.
+
+#### Code blocks and attachments
+
+A `code` block points at lines of a file at a revision, and carries the
+text of those lines as the poster captured it, so a reader sees it with
+no repository:
+
+```json
+{ "kind": "code", "repo": "github.com/acme/shop", "path": "src/orders.rs", "revision": "9c1f2e7", "lines": [40, 48], "snippet": "fn place(order: &Order) {" }
+```
+
+`path` is relative: no leading or trailing `/`, no `\`, and no empty,
+`.` or `..` part. `lines` are the first and the last, counted from 1, the
+first at most the last, and the `snippet` holds at most 8000 code
+points. The engine knows no repository. When the code moves, a caller
+that does, a git extension after a push say, moves the block to the same
+code at the new revision with `moveAnchor`, `{ message, block, revision,
+lines }`, `block` its index in the message's blocks. A move is no edit:
+it changes nothing the author wrote, so it is not held to
+`editWindowMs`, and `edits`, `editedAt` and `listEdits` stay as they
+were. The block keeps the anchor it was given with in `original`, and
+records the last move:
+
+```json
+{ "kind": "code", "repo": "github.com/acme/shop", "path": "src/orders.rs", "revision": "e41b07c", "lines": [44, 52],
+  "snippet": "fn place(order: &Order) {", "original": { "revision": "9c1f2e7", "lines": [40, 48] },
+  "moves": 2, "movedAt": 1790790900000, "movedBy": "service:git-anchors" }
+```
+
+Its author may move it, and so may a caller holding the config's
+`anchorPermission`, which suits a bot that should hold nothing else, or
+`moderatePermission`. Comments vetoes `no_block` for an index past the
+message's blocks, `not_code` for a block of another kind, and
+`anchor_unchanged` for the anchor it already has. An edit that gives a
+code block back unchanged at its index keeps its moves; one that changes
+it starts it over.
+
+An `attachment` block describes a file the deployment stored through an
+upload route of its own, in a [bucket](/superschematic/guides/buckets/)
+say. The engine keeps the description, never the bytes:
+
+```json
+{ "kind": "attachment", "uri": "https://files.acme.test/7c1e", "name": "trace.txt", "mediaType": "text/plain", "bytes": 2048, "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08" }
+```
+
+The config's `attachments` says what one may describe: `schemes`, the
+URI schemes its `uri` may use, `["https"]` when absent and always the
+whole list, so `["bucket"]` refuses `https`; `mediaTypes`, each
+`type/subtype` or `type/*`; and `maxBytes`. A block outside them is
+vetoed `attachment_not_allowed`, its details `{ block, member, value,
+allowed }`. An `https` URI must name a host. A config narrowed later
+leaves posted blocks as they are, and an edit that gives such a block
+back is not held to it again.
+
+What an attachment block is, and is not:
+
+- The `uri` is what the poster wrote. The engine never fetches it and
+  never checks the `sha256` against anything; it checks the scheme, the
+  media type and the size the poster gave, nothing more.
+- No config may list `javascript`, `vbscript`, `data`, `file`, `blob` or
+  `about`, the schemes that run code or carry the bytes themselves.
+  Still, a client links a `uri` only by a scheme it knows, `https` or a
+  scheme of your own it resolves itself (`bucket:shop-files/7c1e`), and
+  shows any other as text: never put an unchecked `uri` in an `href` or
+  a `src`, since a message posted before the config changed keeps its
+  blocks.
+- The `name` is the poster's too: show it as text, and name a download
+  yourself rather than write it to a path.
+- Downloads go through your route, which decides who may read the file.
+  A reader who may read the message is not thereby allowed the file, and
+  the engine asks nothing of a bucket. A reader that downloads it can
+  check the bytes against `sha256`.
+
+#### Search and pinned messages
+
+`listPinned`, `{ limit?, cursor? }`, reads a note's pinned messages,
+top-level and replies, in the conversation's order, each the record
+`getMessage` returns. Only a message that stands is pinned:
+`deleteMessage` unpins one.
+
+`searchMessages` finds messages by the words of their bodies across the
+namespace. Like `inbox` it is a namespace operation, asked of the policy
+as `read`, and it finds only messages of the schemas the caller may
+read: a `schema` it may not read finds nothing, rather than a refusal
+that would say the schema is there.
+
+"May read" is the policy's schema-wide `read`, which names no
+operation. A rule that refuses `listMessages` or `getMessage` on a
+schema by naming the operation does not keep that schema's messages
+out of `searchMessages`, snippets and all, or out of `inbox`. To hide
+them, refuse `read` on the schema, or refuse the namespace operations
+through the behavior question:
+`{ "behavior": "Comments", "operation": ["searchMessages", "inbox"], "allow": false }`.
+
+```sh
+curl -s $API/behaviors/Comments/operations/searchMessages \
+  -H 'authorization: Bearer alice-token' -H 'content-type: application/json' \
+  -d '{"query": "fall", "schema": "notes"}' | jq .data
+```
+
+```json
+{
+  "items": [
+    {
+      "schema": "notes",
+      "instanceId": "launch",
+      "message": 1,
+      "author": "carol",
+      "state": "posted",
+      "postedAt": 1790790700450,
+      "rank": 1,
+      "snippet": [
+        { "text": "Which ", "match": false },
+        { "text": "fall", "match": true },
+        { "text": "?", "match": false }
+      ]
+    }
+  ],
+  "next": null
+}
+```
+
+The query is plain words, all of which a message must hold: the first
+eight count, and quotes, `AND`, `OR`, `NOT`, `NEAR` and `*` are words
+like any other. `instanceId` (with `schema`) and `thread` (with
+`instanceId`, the top-level message and its replies) narrow it. Only the
+body of a message that stands, posted or interrupted, is searched: never
+a draft, a deleted message or the text before an edit, and never its
+blocks. Each hit gives its place in the order, `rank`, from 1 across
+pages, and a few words around its matches in parts; it ranks as the
+database's full-text index does, so SQLite and Postgres may order hits
+differently, and a search reaches its first 1000 hits. Matching ignores
+case, and on SQLite accents too, so `cafe` finds `Café`. On Postgres it
+ignores accents only where the migration that made Comments' index found
+the `unaccent` extension, or could create it: on a database without it,
+the index folds case but keeps accents, so `cafe` does not find `Café`,
+and an `unaccent` added later changes no index made before. The MCP tool
+is `comments_search_messages`.
+
+#### Acting for someone
+
+A message posted or begun by a caller [acting for
+someone](#callers-and-the-access-policy) records that subject as its
+`for`; the caller is still its `author`. An edit, a reaction and a
+resolve each record the caller's own `for` too, in `listEdits`,
+`listReactions` and `resolved.for`. It is an attribution, never a grant:
+a check that only the author passes compares the caller's own subject,
+so an agent acting for alice may not edit or delete alice's messages,
+nor alice the agent's, and what a call writes for its caller, a read
+marker, a follow, a reaction's `mine`, a draft, is the caller's.
+
+The person a message was written for follows its thread, so replies
+reach her, and gets no delivery of the message itself, as its author
+does not. Her inbox and her `unread` count it as another's message until
+she reads it. An inbox item and a delivery carry the message's `for`, so
+a notifier can say "the reviewer agent, for alice".
 
 #### Read state and follows
 
@@ -1015,7 +1219,9 @@ links pointing at it or a create that stamps children, appends an event
 on each instance it changes, all in the same transaction. An event the
 [runner](/superschematic/guides/engine-behaviors/#the-runner) writes
 also carries `cause`, the behavior and the event or schedule that set it
-off.
+off. An event a principal [acting for
+someone](#callers-and-the-access-policy) wrote carries `for`, that
+subject, beside `actor`.
 
 With `Accept: text/event-stream` the same route streams. It replays from
 `after` (or `Last-Event-ID`, which a reconnecting `EventSource` sends),
@@ -1162,6 +1368,9 @@ try {
   which the HTTP runtime's token sources fill. A 401
   `service_unauthorized` asks the service source for a fresh token once
   and never refreshes the end user.
+- `actingFor`, the client's or a call's, is sent as the `Acting-For`
+  header: the subject an agent or a service works for. A call's `null`
+  sends none. The mount honors it only when its host opts in.
 - `client.events.subscribe({ after: 'head' })` is the event stream as an
   async iterable of events and a `ready` per connection. It resumes after
   a dropped connection with `Last-Event-ID`, so it neither repeats nor
@@ -1248,15 +1457,35 @@ A reader also takes the record from a `finish`, `interrupt`,
 ignores a `draft` whose offset is below what it holds, one the read
 before it already had.
 
-`markRead` and `follow` are a note's operations, typed as any other. A
-behavior's namespace operations are no schema's, so the module types
+`markRead`, `follow`, `moveAnchor` and `listPinned` are a note's
+operations, typed as any other. A message's blocks are typed twice: what
+`post`, `finish` and `edit` give is a `NoteCommentBlock`, of the kinds
+the config allows, and what a record holds is a `NoteCommentPostedBlock`,
+whose code block may also hold `moveAnchor`'s `original`, `moves`,
+`movedAt`, `movedBy` and `movedFor`; an attachment that leaves out its
+`sha256`, or a code block under a config that allows none, fails to
+compile. Every method takes the client's per-call options, `actingFor`
+among them:
+
+```ts
+const posted = await notes.post('launch', {
+  body: 'The total rounds twice.',
+  blocks: [{ kind: 'code', repo: 'github.com/acme/shop', path: 'src/orders.rs', revision: '9c1f2e7', lines: [40, 48], snippet: 'fn place(order: &Order) {' }],
+}, { actingFor: 'alice' });                                             // posted.for === 'alice'
+const moved = await notes.moveAnchor('launch', { message: posted.id, block: 0, revision: 'e41b07c', lines: [44, 52] });
+const block = moved.blocks[0];                                          // NoteCommentPostedBlock
+if (block?.kind === 'code') block.original;                             // { revision: '9c1f2e7', lines: [40, 48] }
+```
+
+A behavior's namespace operations are no schema's, so the module types
 them once, named after the behavior: `CommentsInboxParams` and
 `CommentsInboxResult` for each, the items `CommentsInboxItem`,
-`CommentsDelivery` and `CommentsSettledDelivery`,
+`CommentsSearchHit`, `CommentsDelivery` and `CommentsSettledDelivery`,
 `CommentsNamespaceOperations`, `isCommentsNamespaceVeto`, and
 `commentsNamespaceClient(client, namespace?)`, whose `inbox`,
-`claimDeliveries` and `settleDeliveries` call them in that namespace,
-the client's own when none is given. `notes.inbox` fails to compile:
+`searchMessages`, `claimDeliveries` and `settleDeliveries` call them in
+that namespace, the client's own when none is given. `notes.inbox` and
+`notes.searchMessages` fail to compile:
 
 ```ts
 import { commentsNamespaceClient } from './notes.client.ts';
@@ -1267,6 +1496,10 @@ for (const item of items) {                                             // Comme
   if (item.schema !== 'notes') continue;
   // A mention is read once the marker of its listing passes it: the thread's for a reply.
   await notes.markRead(item.instanceId, item.thread === undefined ? { upTo: item.message } : { upTo: item.message, thread: item.thread });
+}
+const found = await comments.searchMessages({ query: 'rounds twice', schema: 'notes' });
+for (const hit of found.items) {                                        // CommentsSearchHit
+  console.log(hit.rank, hit.instanceId, hit.snippet.map((part) => (part.match ? `[${part.text}]` : part.text)).join(''));
 }
 ```
 

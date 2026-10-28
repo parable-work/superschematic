@@ -9,8 +9,10 @@
 // through begin, appendDraft and finish, and the signals a subscription
 // hands out, typed by the module's guard (D77); read markers, follows, and
 // Comments' namespace client, whose inbox lists what mentions the caller and
-// whose claimDeliveries and settleDeliveries an agent dispatcher runs. typos()
-// is never called:
+// whose claimDeliveries and settleDeliveries an agent dispatcher runs; code
+// and attachment blocks, moveAnchor, listPinned, the namespace client's
+// searchMessages, and calls acting for a subject (D77, steps 4 and 5).
+// typos() is never called:
 // each of its lines must fail to compile, which tsc -p tsconfig.test.json
 // checks.
 import assert from 'node:assert/strict';
@@ -22,7 +24,7 @@ import { Ajv2020 } from 'ajv/dist/2020.js';
 import { Hono } from 'hono';
 
 import { EngineClient, EngineProblem, type SignalMessage, type StreamMessage } from '../dist/client/index.js';
-import { engineApp } from '../dist/http/index.js';
+import { engineApp, type EngineHttpOptions } from '../dist/http/index.js';
 import type { Engine, Principal } from '../dist/index.js';
 import { isProjectVeto, isSpecVeto, isTaskVeto, projectClient, specClient, taskClient, type SpecClient, type Task, type TaskBehaviors, type TaskClient } from './generated/fixture.ts';
 import type { JobsClient, WorkersClient } from './generated/jobs.ts';
@@ -35,8 +37,11 @@ import {
   type CommentsDelivery,
   type CommentsInboxItem,
   type CommentsNamespaceClient,
+  type CommentsSearchHit,
   type NoteAppendDraftResult,
+  type NoteCommentBlock,
   type NoteCommentMessage,
+  type NoteCommentPostedBlock,
   type NoteDraftSignal,
   type NoteMarkReadResult,
   type NotesClient,
@@ -80,12 +85,16 @@ function open(): Engine {
   return engine;
 }
 
-/** serve mounts the engine under /api and returns a client whose fetch hands each request to the app. */
-function serve(engine: Engine): EngineClient {
+/**
+ * serve mounts the engine under /api and returns a client whose fetch hands
+ * each request to the app. mount adds the mount's options (actingFor), and
+ * actingFor is the client's own.
+ */
+function serve(engine: Engine, mount: Omit<EngineHttpOptions, 'authenticate'> = {}, actingFor?: string): EngineClient {
   const app = new Hono();
-  app.route('/api', engineApp(engine, { authenticate }));
+  app.route('/api', engineApp(engine, { ...mount, authenticate }));
   const fetch = async (input: string, init: RequestInit): Promise<Response> => app.fetch(new Request(input, init));
-  return new EngineClient({ baseUrl: 'http://engine.test/api', fetch, auth: { token: 'editor' } });
+  return new EngineClient({ baseUrl: 'http://engine.test/api', fetch, auth: { token: 'editor' }, ...(actingFor === undefined ? {} : { actingFor }) });
 }
 
 // next takes a subscription's next message, failing after a while.
@@ -424,6 +433,74 @@ describe('the generated client', () => {
     // A namespace client binds the namespace it is given.
     await assert.rejects(commentsNamespaceClient(client, 'elsewhere').inbox(), (error) => error instanceof EngineProblem);
   });
+
+  test('posts code and attachment blocks, moves an anchor, lists pinned messages, searches through the namespace client, and acts for a subject', async () => {
+    const engine = open();
+    const client = serve(engine, { actingFor: true });
+    const notes = notesClient(client);
+    const comments = commentsNamespaceClient(client);
+    await notes.create({ title: 'Launch' }, { id: 'launch' });
+
+    // A Note's Comments allow every kind; a call acting for Ada records
+    // her as the message's for, and the caller stays its author.
+    const code: NoteCommentBlock = { kind: 'code', repo: 'github.com/acme/shop', path: 'src/orders.rs', revision: '9c1f2e7', lines: [40, 48], snippet: 'fn place(order: &Order) {' };
+    const file: NoteCommentBlock = { kind: 'attachment', uri: 'https://files.acme.test/7c1e', name: 'trace.txt', mediaType: 'text/plain', bytes: 2048, sha256: 'a'.repeat(64) };
+    const posted: NoteCommentMessage = await notes.post('launch', { body: 'The order total rounds twice', blocks: [code, file] }, { actingFor: 'ada' });
+    assert.deepEqual([posted.author, posted.for, posted.blocks], ['editor', 'ada', [code, file]]);
+
+    // moveAnchor moves the code block and keeps its first anchor; it is no
+    // edit, and the caller acts for nobody this time.
+    const moved: NoteCommentMessage = await notes.moveAnchor('launch', { message: posted.id, block: 0, revision: 'e41b07c', lines: [44, 52] });
+    const block: NoteCommentPostedBlock | undefined = moved.blocks[0];
+    assert.ok(block?.kind === 'code');
+    assert.deepEqual(
+      [block.revision, block.lines, block.original, block.moves, block.movedBy, block.movedFor, typeof block.movedAt],
+      ['e41b07c', [44, 52], { revision: '9c1f2e7', lines: [40, 48] }, 1, 'editor', undefined, 'number']
+    );
+    assert.deepEqual([moved.edits, moved.editedAt, moved.for, moved.blocks[1]], [0, undefined, 'ada', file]);
+    await assert.rejects(notes.moveAnchor('launch', { message: posted.id, block: 1, revision: 'e41b07c', lines: [1, 2] }), (error) => isNoteVeto(error, 'Comments', 'not_code'));
+    await assert.rejects(notes.moveAnchor('launch', { message: posted.id, block: 0, revision: 'e41b07c', lines: [44, 52] }), (error) => isNoteVeto(error, 'Comments', 'anchor_unchanged'));
+    // An attachment's uri is held to the config's schemes, https alone here:
+    // the paramsSchema takes javascript:, the config refuses it.
+    await assert.rejects(notes.post('launch', { body: 'See this', blocks: [{ ...file, uri: 'javascript:alert(1)' }] }), (error) => isNoteVeto(error, 'Comments', 'attachment_not_allowed'));
+
+    // A client acting for Bob sends its subject on every call; a call's null
+    // sends none.
+    const forBob = notesClient(serve(engine, { actingFor: true }, 'bob'));
+    const reply = await forBob.post('launch', { body: 'Fixed in e41b07c', thread: posted.id });
+    assert.equal(reply.for, 'bob');
+    assert.equal((await forBob.post('launch', { body: 'Thanks' }, { actingFor: null })).for, undefined);
+    assert.equal((await forBob.react('launch', { message: posted.id, emoji: ':eyes:' })).reactions[':eyes:']?.mine, true);
+    assert.deepEqual(
+      (await notes.listReactions('launch', { message: posted.id, emoji: ':eyes:' })).items.map((item) => [item.subject, item.for]),
+      [['editor', 'bob']]
+    );
+
+    // listPinned holds top-level messages and replies, by id, as records.
+    await notes.pin('launch', { message: reply.id });
+    await notes.pin('launch', { message: posted.id });
+    const pinned = await notes.listPinned('launch', { limit: 1 });
+    const first: NoteCommentMessage | undefined = pinned.items[0];
+    assert.deepEqual([first?.id, first?.blocks[0]?.kind, typeof pinned.next], [posted.id, 'code', 'string']);
+    const rest = await notes.listPinned('launch', { cursor: pinned.next ?? undefined });
+    assert.deepEqual([rest.items.map((message) => message.id), rest.next], [[reply.id], null]);
+
+    // searchMessages is a namespace operation: the namespace client calls it.
+    const found = await comments.searchMessages({ query: 'rounds', schema: 'notes' });
+    const hit: CommentsSearchHit | undefined = found.items[0];
+    assert.deepEqual(
+      [found.items.length, hit?.schema, hit?.instanceId, hit?.message, hit?.author, hit?.for, hit?.state, hit?.rank, found.next],
+      [1, 'notes', 'launch', posted.id, 'editor', 'ada', 'posted', 1, null]
+    );
+    assert.deepEqual(
+      hit?.snippet.filter((part) => part.match).map((part) => part.text),
+      ['rounds']
+    );
+    assert.deepEqual((await comments.searchMessages({ query: 'fixed', schema: 'notes', instanceId: 'launch', thread: posted.id })).items.map((item) => [item.message, item.thread, item.for]), [
+      [reply.id, posted.id, 'bob'],
+    ]);
+    assert.deepEqual((await comments.searchMessages({ query: 'rounds', schema: 'Task' })).items, []);
+  });
 });
 
 /**
@@ -531,4 +608,24 @@ export function typos(
   void comments.inbox({}, { namespace: 'elsewhere' });
   // @ts-expect-error token_staled is not a code of Comments' vetoes
   isCommentsNamespaceVeto(new Error('refused'), 'token_staled');
+  // @ts-expect-error an attachment block gives its file's sha256
+  void notes.post('launch', { body: 'See this', blocks: [{ kind: 'attachment', uri: 'https://files.acme.test/7c1e', name: 'trace.txt', mediaType: 'text/plain', bytes: 2048 }] });
+  // @ts-expect-error a Task's Comments allow only action blocks: no code block
+  void tasks.post('t1', { body: 'Here.', blocks: [{ kind: 'code', repo: 'github.com/acme/shop', path: 'src/a.rs', revision: '9c1f2e7', lines: [1, 2], snippet: '' }] });
+  // @ts-expect-error a code block given holds no moves: moveAnchor writes them
+  void notes.post('launch', { body: 'Here.', blocks: [{ kind: 'code', repo: 'github.com/acme/shop', path: 'src/a.rs', revision: '9c1f2e7', lines: [1, 2], snippet: '', moves: 1 }] });
+  // @ts-expect-error moveAnchor gives the revision the code is at now
+  void notes.moveAnchor('launch', { message: 1, block: 0, lines: [1, 2] });
+  // @ts-expect-error moveAnchor's block is the code block's index, a number
+  void notes.moveAnchor('launch', { message: 1, block: 'code', revision: 'e41b07c', lines: [1, 2] });
+  // @ts-expect-error listPinned runs on an instance: it names the note
+  void notes.listPinned({ limit: 1 });
+  // @ts-expect-error searchMessages is Comments' namespace operation: no schema's client has it
+  void notes.searchMessages('launch', { query: 'rounds' });
+  // @ts-expect-error searchMessages gives a query
+  void comments.searchMessages({ schema: 'notes' });
+  // @ts-expect-error a search's thread is a message's id, a number
+  void comments.searchMessages({ query: 'rounds', schema: 'notes', instanceId: 'launch', thread: '1' });
+  // @ts-expect-error actingFor is the subject the call acts for, a string
+  void notes.post('launch', { body: 'Hi' }, { actingFor: 7 });
 }

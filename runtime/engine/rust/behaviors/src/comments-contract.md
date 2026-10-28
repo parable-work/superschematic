@@ -1,8 +1,8 @@
-# Comments v2, batches 1 to 3: the contract
+# Comments v2, batches 1 to 5: the contract
 
 This note is the contract the Rust behavior (`comments.rs`), the Go
-generators and the corpora implement for batches 1 to 3 of D77
-("Comments, rebuilt", steps 1 to 3 of its build order). The declaration is
+generators and the corpora implement for batches 1 to 5 of D77
+("Comments, rebuilt", steps 1 to 5 of its build order). The declaration is
 `declarations/Comments.behavior.json`, the canonical copy of
 `internal/registry/behaviors/comments.behavior.json`; where this note and
 the declaration disagree, the declaration's schemas win and this note is
@@ -14,8 +14,10 @@ resolve, every writing operation beside the instance (D77 primitive 1,
 primitive 2), is "Batch 2" below: where it amends a rule of batch 1 it
 says so, and the amended rule holds. Batch 3, read state, follows, the
 inbox and deliveries over namespace operations (D77 primitive 3), is
-"Batch 3" after it, and amends both the same way. What they leave out is
-listed at the end.
+"Batch 3" after it, and amends both the same way. Batches 4 and 5,
+acting-for, search, code blocks and attachments (D77 primitive 4 and step
+5), are "Batch 4 and 5" after that, amending the three before. What they
+leave out is listed at the end.
 
 ## Terms
 
@@ -1744,23 +1746,657 @@ TypeScript suite should hold, on both databases:
 - `prune`, the instance's delete, `deleteMessage` and `purge` of messages
   with deliveries in each state.
 
+## Batch 4 and 5: acting-for, search, code and attachments
+
+Batch 4 is D77's step 4 on Comments' side: what a message, an edit, a
+reaction and a resolve record of a principal acting for a subject (D77
+primitive 4), and what that subject's follows, deliveries and unread
+counts do. Batch 5 is step 5: `searchMessages`, the `code` block with
+`moveAnchor` and `anchorPermission`, the `attachment` block with the
+config's `attachments`, and `listPinned`, D77's "Left" item on pinned
+messages. Each amends batches 1 to 3 where it says so, and the amended
+rule holds. The engine's side of acting-for (the principal's
+`actingFor`, the policy's refusal without `actFor`, events' and
+Provenance's `for`) is the acting-for work's; the one engine change
+batch 5 needs, a full-text match joined to `sql.readable()`, is "The
+engine side" below.
+
+The two batches are separable: batch 4 is migration 5 and batch 5
+migration 6, so either can ship first, as D77's "each step adds the
+storage it needs as a migration of its own" asks. Where a rule of batch
+5 reads `for` (an item's member, `movedFor`), it reads the column batch 4
+adds; a batch 5 built before batch 4 leaves those members out.
+
+### Terms
+
+- *The caller* is still the call's principal, and *its subject*
+  `principal.subject`. Everything batches 1 to 3 key by the caller's
+  subject stays keyed by it: `author`, the `clientId`s it may retry, its
+  read markers, its follows, its reactions and `mine`, its composing
+  messages and `maxDrafts`, the `composing` field, `unread`, `readUpTo`,
+  the inbox's caller, `edited_by`, `resolved_by` and `claimed_by`.
+- *The caller's for*, F, is the `subject` of `cx.principal().acting_for`
+  (Rust `Principal.acting_for: Option<ActingFor { subject }>`, JSON
+  `actingFor`) when it is `Some` and differs from the caller's subject;
+  otherwise the caller has none. Comments asks the policy nothing about
+  it: the engine's policy saw it, and `permissionPolicy` refuses it to a
+  principal without `actFor`. A runner principal never acts for
+  anyone, and a service that brings an end user cannot also act for
+  someone (the primitive's rules), so the schedule's `interrupt` and a
+  D37 end-user call have none.
+- *The message's for* is the `for_subject` its `post` or `begin` recorded:
+  the caller's for at that call, or NULL.
+- A block's *index* is its place in the message's `blocks`, from 0.
+- *Lengths* are in code points, as batch 2's.
+
+### Batch 4: acting for a subject
+
+#### Decisions
+
+| Question | Decision | Why |
+|----------|----------|-----|
+| Is the person the author for author-only checks? | No, either way. Every check of batch 1 to 3 that compares a message's `author` with the caller compares it with `principal.subject` alone, and every permission is `cx.can()`'s, which answers for the principal's own (D77 primitive 4: "It adds no permissions"). So an agent acting for Alice may not edit, delete, finish, append to or resolve what Alice wrote (`not_author`), nor interrupt her composing message before it is idle (`not_idle`); and Alice may not edit or delete what an agent wrote for her, whose author is the agent. An agent acting for a moderator does not moderate | The safe default: acting for someone is an attribution, which the policy has already allowed or refused, never a grant. Letting the subject act as author would let any principal the authenticator lets name Alice rewrite Alice's words; letting Alice rewrite the agent's would put her words under the agent's name. A deployment that wants a person to retract what an agent wrote for them gives them `moderatePermission` |
+| Whose state does a call write? | The caller's subject's, never the for's: `markRead` and `follow` move the agent's marker and follow; `react` is the agent's reaction (`mine` for the agent); `begin` makes the agent the author and counts against the agent's `maxDrafts` | A marker moved by an agent would mark read for Alice what Alice never saw. A reaction keyed by Alice would let an agent that acts for her take her one reaction of an emoji |
+| What is recorded? | The message's for, at `post` and `begin`, on the message; the caller's for on each edit (`comment_edits.for_subject`), reaction (`comment_reactions.for_subject`) and resolve (`resolved_for`). `finish`, `interrupt`, `edit` and `moveAnchor` never change the message's for | The record says what D77 asks, "written by the reviewer agent, for the person who asked it", and each later act says who did it for whom, as its event's `for` does until retention |
+| Does the for follow the thread? | Yes, as a mentioned subject follows ("Who follows", the mention's row and its W), when the message comes to stand. Its conversation marker and thread marker do not move to the message | Replies to a message written for Alice answer Alice. She did not write it, so it is not read for her |
+| Is the for left out of the deliveries? | Yes, as the author is: recipients are (Mentioned union Followers) minus the author and minus the message's for. An edit that adds a mention leaves the message's for out too | A notifier would tell Alice of words she asked an agent to write; a dispatcher would hand an agent's own errand back to it. Replies reach her through the follow |
+| Does the inbox show a message written for the caller as the caller's own? | No: it is another's. `author <> ?` compares the author alone, so it counts in `unread`, in the caller's thread and conversation items and in `markRead`'s result, until the caller reads it | Alice should see what was said in her name. Since she is left out of its deliveries, the inbox and `unread` are where she does |
+
+#### The record and the items
+
+| Member | Batch 4 |
+|--------|---------|
+| `for` | new, string, after `author` and before `via`: the message's for; absent when NULL |
+| `resolved` | `{ by, for?, at }`: `for` the resolver's for, from `resolved_for`, absent when NULL |
+
+The record's members are now: `id`, `thread`, `quotes`, `author`, `for`,
+`via`, `state`, `body`, `blocks`, `mentions`, `reactions`, `createdAt`,
+`postedAt`, `stand`, `editedAt`, `edits`, `pinned`, `replies`,
+`lastReplyAt`, `participants`, `resolved`. `participants` stay authors.
+
+| Item | Batch 4 |
+|------|---------|
+| `listEdits` | `{ edit, body, blocks, mentions, by, for?, at }`: `for` the editor's for at that edit |
+| `listReactions` | `{ subject, for?, at }`: the reactor's for |
+| `inbox` | `{ kind, schema, instanceId, message, thread?, author, for?, postedAt, excerpt, unread }`: the item's message's for |
+| `claimDeliveries` | `for?` after `author`: the message's for, so a notifier can say "the reviewer agent, for Alice" |
+
+#### Operations, amended
+
+| Operation | Batch 4 |
+|-----------|---------|
+| `post`, `begin` | write `for_subject` = the caller's for, or NULL. A retry (refusal 1) returns the message whatever the retry's for |
+| `post`, `finish`, `interrupt` to `interrupted` | "Deliveries" step 3: recipients = (Mentioned union Followers) minus the author and minus the message's for. "Who follows": after the author's row, the message's for, when it is not NULL and does not start with `role:`, gets the mention's row write on the message's thread with the mention's W (stand for a top-level message, stand - 1 for a reply); no conversation marker of the for moves. A for that is also mentioned gets that write once |
+| `edit` | the `comment_edits` row's `for_subject` = the caller's for. With `mentions`: a subject added that is the author or the message's for gets no delivery and no follow |
+| `react` | the row's `for_subject` = the caller's for. `unreact` deletes the caller's row whatever its for |
+| `resolve` | `resolved_for` = the caller's for; `reopen` sets it NULL with `resolved_by` |
+| `deleteMessage` | keeps `for_subject`, as it keeps `author` |
+| everything else | unchanged: checks and state are the caller's subject's |
+
+No refusal is new, and none changes: `not_author`'s and `not_idle`'s
+conditions read the caller's subject, as before.
+
+A logged event's `for` is the call's (the engine stamps it); the record's
+`for` is the message's. They differ when an agent acting for Bob edits a
+message it wrote for Alice: the event says `for: "bob"`, the record
+`for: "alice"`, and `listEdits` keeps Bob as that edit's `for`.
+
+#### Migration 5, `acting_for`
+
+`BehaviorMigration::new(5, "acting_for")`, the same on both dialects, four
+`ALTER TABLE ... ADD COLUMN`, each nullable, existing rows NULL:
+
+| Table | Column | Spec | Holds |
+|-------|--------|------|-------|
+| `comment_messages` | `for_subject` | text | the message's for |
+| `comment_messages` | `resolved_for` | text | the resolver's for, while `resolved_by` is set |
+| `comment_edits` | `for_subject` | text | the editor's for |
+| `comment_reactions` | `for_subject` | text | the reactor's for |
+
+No index: nothing filters by them. `MESSAGE_COLUMNS` gains `for_subject`
+and `resolved_for`. `for` is reserved in both dialects, hence the names.
+
+#### Batch 4's tests
+
+- A post and a begin by a principal acting for `alice` record `for`, a
+  `finish` and the schedule's `interrupt` keep it, and the event's `for`
+  agrees; a principal acting for itself records none.
+- The agent acting for Alice may not edit, delete, finish or resolve
+  Alice's message (`not_author`) or interrupt her draft before it is
+  idle (`not_idle`); Alice may not edit the agent's message written for
+  her; the agent may edit its own message written for Alice, and the
+  edit's `for` is its call's.
+- Alice follows the thread of a message written for her, gets no
+  delivery of it even when mentioned or following, gets the delivery of
+  the next reply, and its `unread` and thread item count the message
+  until she reads it; the agent's marker moves, hers does not.
+- `react` acting for Alice: `mine` for the agent, not for Alice; a
+  second `react` with the same emoji acting for Bob is `already_reacted`.
+- `markRead` acting for Alice moves the agent's marker.
+- `resolved.for`, `listEdits`' and `listReactions`' `for`, the inbox's and
+  the claim's `for`.
+- Migration 5 on a database with batch 3's rows: every `for` absent.
+
+### Batch 5: config
+
+| Member | Type | When absent | Meaning |
+|--------|------|-------------|---------|
+| `blocks` | unique array of `"ref"`, `"action"`, `"code"`, `"attachment"` | every kind | as batch 1's, with two kinds more |
+| `anchorPermission` | string, `minLength` 1 | only the author and a moderator move an anchor | the permission that lets a caller `moveAnchor` a code block on another's message |
+| `attachments` | object, below | `{}` | what an attachment block may describe |
+
+`attachments`, every member optional, no others:
+
+| Member | Type | When absent | Meaning |
+|--------|------|-------------|---------|
+| `maxBytes` | integer 1..9007199254740991 | no limit | the largest `bytes` an attachment block may give |
+| `mediaTypes` | unique array, at least one, of `type/subtype` or `type/*`, lower case, pattern `^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/([a-z0-9][a-z0-9!#$&^_.+-]{0,126}\|\*)$` | any | the media types an attachment may have |
+| `schemes` | unique array, at least one, of URI schemes, lower case, pattern `^[a-z][a-z0-9+.-]{0,31}$`, none of `javascript`, `vbscript`, `data`, `file`, `blob`, `about` | `["https"]` | the schemes an attachment's `uri` may use. The list is the whole list: `["bucket"]` refuses `https` |
+
+`CommentsConfig` gains `anchor_permission: Option<String>` and
+`attachments: AttachmentsConfig { max_bytes: Option<i64>, media_types:
+Option<Vec<String>>, schemes: Vec<String> }`, `schemes` `["https"]` when
+absent. A config change applies to the next call, as batch 1's: a
+narrowed `attachments` leaves posted blocks as they are.
+
+### Batch 5: blocks
+
+Two kinds join batch 1's table, each a member of the `oneOf` of `post`'s,
+`finish`'s and `edit`'s `blocks` with `additionalProperties: false`:
+
+| Kind | Members (paramsSchema) | The behavior's own checks (`invalid_argument`) | The config's checks (veto) |
+|------|------------------------|-----------------------------------------------|----------------------------|
+| `code` | `repo` 1..512, no space or control character (`^[^\x00-\x20\x7F]+$`); `path` 1..1024, no control character; `revision` 1..256, as `repo`; `lines` exactly two integers 1..2147483647; `snippet` 0..8000 code points | `/blocks/<i>/lines` `must have its first line at most its last` when `lines[0] > lines[1]`; then `/blocks/<i>/path` `must be a relative path: no leading or trailing /, no \, and no empty, . or .. part` when the path starts or ends with `/`, holds `\`, or split at `/` has a part that is `""`, `"."` or `".."` | none |
+| `attachment` | `uri` 3..2048, `^[a-z][a-z0-9+.-]{0,31}:[^\x00-\x20\x7F]+$` (a lower-case scheme, a colon, no space or control character); `name` 1..255, no `/`, `\` or control character, not white space alone; `mediaType` `type/subtype` in lower case, no parameters, at most 255; `bytes` integer 0..9007199254740991; `sha256` `^[0-9a-f]{64}$` | `/blocks/<i>/uri` `must be an https URL with a host` when its scheme is `https` and it does not start with `https://` followed by a character that is not `/`, `?` or `#` | `attachment_not_allowed`, below |
+
+The scheme is the `uri`'s text before its first `:`. The config's checks
+of one attachment block, in order, each the veto `attachment_not_allowed`
+with details `{ block, member, value, allowed }`:
+
+| # | When | `member` | `value` | `allowed` |
+|---|------|----------|---------|-----------|
+| 1 | the scheme is not in `schemes` (`["https"]` when absent) | `"uri"` | the scheme | the schemes |
+| 2 | `mediaTypes` is given and the block's `mediaType` equals none of them and matches no `type/*` of them (the part before `/` equal) | `"mediaType"` | the media type | the media types |
+| 3 | `maxBytes` is given and `bytes > maxBytes` | `"bytes"` | `bytes` | `maxBytes` |
+
+The engine never fetches the `uri`, checks no `sha256` against anything,
+and asks nothing of a bucket: the deployment's upload route stored the
+file and decides who downloads it. A client links the `uri` only by a
+scheme it knows.
+
+A code block's `snippet` is the text as the poster captured it. A block's
+JSON is stored as given (`preserve_order`), so its members come back in
+the order given, plus, once moved, `original`, `moves`, `movedAt`,
+`movedBy` and `movedFor`, in that order ("moveAnchor").
+
+On `edit`, as for ref blocks: an attachment block equal, as a JSON value,
+to an attachment block of the message before the edit is not held to the
+config again, so an edit that moves an action's status does not fail on
+a file whose type the config has since dropped. A code block given at
+index `i` whose `repo`, `path`, `revision`, `lines` and `snippet` equal
+those of a code block at index `i` before the edit is stored as the block
+before, its move members kept; any other code block an edit gives is new,
+with none. A client that edits a message gives back the code blocks as it
+read them, the move members dropped by the paramsSchema, and keeps their
+history.
+
+The order of every operation that gives blocks becomes:
+
+| # | `post` | When |
+|---|--------|------|
+| 1 | (retry) | |
+| 2 | `invalid_argument` `/body` | |
+| 3 | `invalid_argument` `/quotes` `needs thread` | |
+| 4 | `invalid_argument` at `/blocks/<i>/...` | the first block, by index, that fails its kind's own checks: an action's `data` (batch 1), a code block's `lines` then `path`, an attachment's `uri` |
+| 5 to 11 | `no_message`, `not_a_thread`, `composing`, `no_message`, `not_in_thread`, `deleted`, `composing` | batch 2's 5 to 11 |
+| 12 | `block_not_allowed` | the first block whose kind the config does not list |
+| 13 | `attachment_not_allowed` | the first attachment block, by index, the config's checks refuse, its first failing check |
+| 14 | `ref_not_found` | |
+
+`finish`: its 2 (`/blocks/<i>/data`) becomes row 4 above; `block_not_allowed`,
+then `attachment_not_allowed`, then `ref_not_found`. `edit`: its 3 becomes
+row 4 above; after `block_not_allowed`, `attachment_not_allowed` for an
+attachment new to the message, then `ref_not_found` for a ref new to it.
+
+### Batch 5: `moveAnchor({ message, block, revision, lines })`
+
+`"writes": true, "beside": true`, logged. Moves a code block to the same
+code at another revision, where a caller that knows the repository found
+it: a git extension after a push, say, which the engine is not. Result
+and event `result`: the record after.
+
+| # | Refusal | When |
+|---|---------|------|
+| 1 | `invalid_argument` `/lines` `must have its first line at most its last` | `lines[0] > lines[1]` |
+| 2 | `no_message` | |
+| 3 | `deleted` `{ message }` | |
+| 4 | `composing` `{ message }` | |
+| 5 | `not_author` `{ message, author }` | the caller's subject is not the author, the config names no `anchorPermission` or the caller lacks it, and the caller does not moderate. Ask `cx.can()` only when the subject is not the author: `anchorPermission` first, then `moderatePermission` |
+| 6 | `no_block` `{ message, block, blocks }` | `block` is not below the message's block count, `blocks` |
+| 7 | `not_code` `{ message, block, kind }` | the block at `block` is not a code block; `kind` its kind |
+| 8 | `anchor_unchanged` `{ message, block, revision, lines }` | the block's `revision` and `lines` already equal the given ones; the details give them |
+
+An interrupted message is moved as a posted one. A move to the same
+revision with other lines is allowed: it corrects a misplaced anchor.
+
+Writes: the message's `blocks` column alone, with the block at `block`
+replaced by: its members as they were, but `revision` and `lines` the
+given ones; `original` = `{ revision, lines }` as they were, when the
+block had no `original` (its first move), else kept; `moves` = its
+`moves` + 1, 1 at the first; `movedAt = now`; `movedBy` = the caller's
+subject; `movedFor` = the caller's for, removed when it has none. The five
+move members are written in that order after the given ones. Nothing
+else: `edited_at`, `edits`, `comment_edits`, the counts, the stand, the
+search index, the deliveries and the follows stay.
+
+Why it is not an edit: it changes nothing its author wrote. The anchor
+follows code the engine cannot see move, and a bot moves it on each push.
+As an edit it would list the bot in `listEdits` with a copy of the text
+each time, spend the 500 edits a message has, be refused once
+`editWindowMs` passed though the comment's words are unchanged, mark the
+message edited to every reader, and need `moderatePermission` for a bot
+that should hold only `anchorPermission`. The history lives in the log:
+the `post` (or `edit`) event holds the anchor given, each `moveAnchor`
+event its params and the record after, and the record keeps the first
+anchor and the last move after retention prunes the events.
+
+A moved block, as the record returns it:
+
+```json
+{ "kind": "code", "repo": "github.com/acme/shop", "path": "src/orders.rs", "revision": "e41b07c", "lines": [44, 52],
+  "snippet": "fn place(...) {", "original": { "revision": "9c1f2e7", "lines": [40, 48] },
+  "moves": 2, "movedAt": 1793000000000, "movedBy": "service:git-anchors" }
+```
+
+### Batch 5: `listPinned({ limit?, cursor? })`
+
+Read-only, on the instance. Every pinned message of the conversation,
+top-level and replies, by id ascending, paged as `listEdits` over the
+message id (`page_request`, `limit` 1..100, 50 when absent; a cursor it
+did not write is `invalid_argument` at `/cursor`). Result `{ items,
+next }`, each item the record. Only a standing message is pinned: `pin`
+refuses a composing one and `deleteMessage` unpins. No refusal but the
+cursor's.
+
+```sql
+SELECT <MESSAGE_COLUMNS> FROM <comment_messages>
+ WHERE namespace = ? AND schema = ? AND id = ? AND pinned = 1 AND message > ?
+ ORDER BY message LIMIT ?                                   -- limit + 1
+```
+
+through `comment_messages_pinned` ("Migration 6"). The order is the
+conversation's, not the order they were pinned in: no pin time is kept
+("Left for later batches"). A `listMessages` filter was not taken: its listing is one
+level (top-level, or one thread's replies) with `around`, `root` and
+`readUpTo` of that level, and pinned messages span both.
+
+### Batch 5: `searchMessages({ query, schema?, instanceId?, thread?, limit?, cursor? })`
+
+`"scope": "namespace"`, read-only, no event. The policy is asked `read`
+with `{ behavior: "Comments", operation: "searchMessages" }`, so
+`permissionPolicy` lets it through, and only rows of `sql.readable()`'s
+schemas leave its statement. Result `{ items, next }`.
+
+`sql.readable()` keeps the schemas the policy lets the caller `read` by
+the schema-wide question, which names no operation; it asks nothing
+about `listMessages` or `getMessage`. A policy that refuses those on a
+schema by a rule that names the operation still lets `searchMessages`
+return that schema's messages and snippets, as it lets `inbox` list
+them (batch 3). A deployment that would hide a schema's messages from
+both refuses `read` on the schema, or refuses the namespace operations
+through the behavior question (`{ "behavior": "Comments", "operation":
+["searchMessages", "inbox"], "allow": false }`).
+
+An item, members in this order:
+
+| Member | Type | Value |
+|--------|------|-------|
+| `schema`, `instanceId`, `message` | string, string, integer | the message found |
+| `thread` | integer | its thread, when it is a reply |
+| `author`, `for`, `via` | string | as the record's (`for` and `via` when not NULL) |
+| `state` | `posted` or `interrupted` | |
+| `postedAt` | integer | |
+| `editedAt` | integer | when it was edited |
+| `rank` | integer | its place in the search's order, from 1, across pages |
+| `snippet` | array of `{ text, match }` | a few words of the body around its matches, as Search's: at most 12 words, `...` where it cuts, each part saying whether it is a match |
+
+What is searched: the `body` of every *standing* message (`posted`,
+`interrupted`). A composing message's draft is never indexed, a deleted
+message's row leaves the index at its delete, a purged one's at its
+purge, and an edit replaces the indexed body, so the text before an edit
+is never found. Blocks are not searched.
+
+The query. D62's `SearchQuery` filters with `LIKE` and does not rank, so
+it does not fit an FTS index; Search's plain query (D16, "Search") does,
+and `searchMessages` takes it, plain words alone, with D62's count of
+words:
+
+1. `query` is 1..500 code points with a non-space (paramsSchema).
+2. NUL becomes a space; the text splits at JavaScript white space
+   (Search's `is_js_space`); empty words drop; the first 8 words count.
+3. Each word becomes an FTS5 string, `"` doubled and the word quoted, and
+   the words are joined by a space: implicit AND. So quotes, `AND`, `OR`,
+   `NOT`, `NEAR`, `*`, `:` and parentheses are text, and the expression
+   is never refused. A word FTS5 splits (`slips-a-week`) is a phrase of
+   its parts; a word that tokenizes to nothing counts for nothing, and a
+   query of only such words finds nothing, without an error. No
+   `syntax: "fts5"`: a caller's prefix (`a*`) reads every term it starts,
+   which a namespace-wide search should not offer every reader.
+
+| # | Refusal | When |
+|---|---------|------|
+| 1 | `invalid_argument` `/instanceId` `needs schema` | `instanceId` without `schema` |
+| 2 | `invalid_argument` `/thread` `needs instanceId` | `thread` without `instanceId` |
+| 3 | `invalid_argument` `/cursor` `is not a cursor this operation returned` | `page_request`'s |
+
+A `schema` the caller may not read, or that does not compose Comments, an
+`instanceId` with no messages and a `thread` that names nothing find
+nothing: they are filters, never refused, so a search says nothing of
+what the caller may not read.
+
+Paging. `page_request`: `limit` 1..100, 50 when absent; the cursor is
+`after:<rank>`, an offset into the ranking, as Search's. A search reaches
+its first 1000 hits: with `after >= 1000` the page is empty and `next`
+null; otherwise it reads `min(limit + 1, 1000 - after)` hits from offset
+`after`, and `page(hits, limit, rank)` gives the items and `next`. A
+write between two pages can move a message across the boundary, as in
+Search.
+
+The match is one `sql.fulltext` call:
+
+| `FullTextQuery` member | Value |
+|------------------------|-------|
+| `index`, `columns`, `weights` | `"comment_search_text"`, `["body"]`, `[1.0]` |
+| `snippets` | `{ columns: 1, open: "\u{2}", close: "\u{3}", ellipsis: "...", words: 12 }`, Search's |
+| `keys`, `key`, `select` | `"comment_search"`, `"row"`, `["schema", "id", "message"]` |
+| `filters` | `("namespace", the call's)`, then `("schema", schema)`, `("id", instanceId)`, `("thread_root", thread)` for each given |
+| `readable` | `Some("schema")` (new, "The engine side") |
+| `exclude` | `None` |
+| `expression`, `caller` | the words above, `false`: a refusal is a defect, as Search's plain query |
+| `limit`, `offset` | the count above, `after` |
+
+Then one statement reads the hits' messages:
+
+```sql
+SELECT schema, id, message, thread, author, for_subject, via, state, posted_at, edited_at
+  FROM <comment_messages>
+ WHERE namespace = ? AND state IN ('posted', 'interrupted')
+   AND ((schema = ? AND id = ? AND message = ?) OR ...)         -- one group per hit
+```
+
+Items are in the hits' order, `rank = after + position + 1` over the hits
+read; `page` runs on the hits, then a hit whose message the second
+statement did not find standing (a write committed between the two
+statements, on Postgres) is dropped from the items, and no rank moves.
+The snippet's parts split the hit's snippet at `\u{2}` (a match starts)
+and `\u{3}` (it ends), as Search's `snippet_of`; share that helper.
+
+Ranking per dialect, as the engine's full-text index ranks (D58): on
+SQLite, FTS5's `bm25` over `body`, then `row` ascending, the order the
+messages were first indexed; on Postgres, `ts_rank_cd` over `body_tsv`
+labelled `A`, then `row`. The two databases find the same messages but
+for the tokens Postgres's parser keeps whole (an email address, a URL, a
+path, a number with a point), and order them differently. The index is
+one per engine, shared by every namespace and schema, so bm25's
+statistics are taken over all of them: the hits are the caller's, their
+order can move with another namespace's text, and no score is returned,
+as Search returns none.
+
+SQLite, as `sql.fulltext` writes it with the readable join:
+
+```sql
+WITH <readable> AS (SELECT CAST('Ticket' AS TEXT) AS schema UNION ALL ...)
+SELECT k.schema AS schema, k.id AS id, k.message AS message, k.row AS row,
+       snippet(<comment_search_text>, 0, ?, ?, ?, 12) AS s0
+  FROM <comment_search_text> CROSS JOIN <comment_search> AS k ON k.row = <comment_search_text>.rowid
+  JOIN <readable> AS r ON r.schema = k.schema
+ WHERE <comment_search_text> MATCH ? AND k.namespace = ? [AND k.schema = ?] [AND k.id = ?] [AND k.thread_root = ?]
+   AND k.row IS NOT ?
+ ORDER BY bm25(<comment_search_text>, ?), k.row
+ LIMIT ? OFFSET ?
+```
+
+Postgres:
+
+```sql
+WITH <readable> AS (...)
+SELECT m.schema, m.id, m.message, m.row,
+       ts_headline(CAST('<prefix>comment_search_text_config' AS regconfig), m.c0, m.q, ?) AS h0, m.c0 AS t0
+  FROM (
+    SELECT k.schema AS schema, k.id AS id, k.message AS message, k.row AS row, t.body AS c0, q.q AS q,
+           ts_rank_cd(CAST('{0, 0, 0, 1}' AS real[]), setweight(t.body_tsv, 'A'), q.q) AS rank
+      FROM <comment_search_text> AS t JOIN <comment_search> AS k ON k.row = t.rowid
+      JOIN <readable> AS r ON r.schema = k.schema
+     CROSS JOIN to_tsquery(CAST('<prefix>comment_search_text_config' AS regconfig), ?) AS q(q)
+     WHERE t.all_tsv @@ q.q AND k.namespace = ? [AND k.schema = ?] [AND k.id = ?] [AND k.thread_root = ?]
+       AND k.row IS DISTINCT FROM ?
+     ORDER BY rank DESC, k.row
+     LIMIT ? OFFSET ?
+  ) AS m
+ ORDER BY m.rank DESC, m.row
+```
+
+#### The engine side
+
+`sql.fulltext` filters `keys` by equality alone, so it cannot keep a
+namespace operation's hits to `sql.readable()`'s schemas. Batch 5 needs
+one addition to `superschematic_engine_storage::fulltext`:
+
+- `FullTextQuery` gains `readable: Option<&'a str>`: a column of `keys`
+  holding a schema name. When `Some`, both match statements join
+  `<readable> AS r ON r.schema = k.<column>` (SQLite after the `CROSS
+  JOIN`, Postgres in the inner `FROM`), the name from
+  `BehaviorSql::readable()`, which refuses outside a namespace operation
+  (a `BehaviorError`); `prepare` then puts the relation's definition
+  ahead of the statement, as for any statement that names it. When the
+  principal may read no schema, the relation has no row and the match
+  none.
+- Search, and every caller today, passes `None`; nothing else changes.
+- `create_fulltext_with(name, columns, Unaccent)` beside
+  `create_fulltext`, which is `Unaccent::Required`: with
+  `Unaccent::IfAvailable` a Postgres where `unaccent` cannot be had (the
+  database lacks it and the engine may not create it, or the role may not
+  use it) gets a configuration of `simple` alone, and the migration goes
+  on ("Migration 6").
+
+The alternatives were worse: a `fulltext` call per readable schema, whose
+hits cannot be merged by score since a hit carries none (Search's
+every-schema search merges by reciprocal rank for that reason, though
+Comments has one index and one weight across schemas); or filtering in
+the handler, which lets rows of unreadable schemas leave a statement and
+breaks the offset paging.
+
+#### Keeping the index
+
+The index is two tables ("Migration 6"): `comment_search`, one row per
+standing message, which gives it a `row`, and the full-text index
+`comment_search_text`, whose `rowid` is that `row` and whose one column
+is the body. Each write is plain SQL, as Search writes its own:
+
+| Call | Writes |
+|------|--------|
+| `post`, `finish`, `interrupt` to `interrupted` (a message comes to stand) | `INSERT INTO <comment_search> (namespace, schema, id, message, thread_root) VALUES (?, ?, ?, ?, ?)` with `thread_root` = `thread`, or the message's id when top-level; read its `row` back (`SELECT row ... WHERE namespace = ? AND schema = ? AND id = ? AND message = ?`); `INSERT INTO <comment_search_text> (rowid, body) VALUES (?, ?)` |
+| `edit` with `body`, of a standing message | `DELETE FROM <comment_search_text> WHERE rowid = ?` then the insert with the same `row`, as Search's `index` replaces a row. An edit without `body` writes nothing |
+| `deleteMessage` of a standing message | `DELETE FROM <comment_search_text> WHERE rowid = ?`, then the `comment_search` row. A composing message has none |
+| `purge` | the same for every purged message that has a row: `... WHERE rowid IN (SELECT row FROM <comment_search> WHERE namespace = ? AND schema = ? AND id = ? AND message IN (...))`, then the keys |
+| the instance's delete (`afterChange` on `Delete`) | the same for the instance: `... WHERE rowid IN (SELECT row FROM <comment_search> WHERE namespace = ? AND schema = ? AND id = ?)`, then its keys |
+| `interrupt` to `deleted`, `begin`, `appendDraft`, `moveAnchor`, reactions, pins, resolves, `markRead`, `follow` | nothing |
+
+Each write is in the call's transaction, so a call that fails takes its
+index change back, and a search never finds a message the tables do not
+hold standing (but the race the second statement covers).
+
+### Batch 5: migration 6, `search`
+
+`BehaviorMigration::new(6, "search")`:
+
+- `.table(TableSpec::new("comment_search").row_id("row")`, columns
+  `namespace`, `schema`, `id` text not null, `message` integer not null,
+  `thread_root` integer not null, `.unique(&["namespace", "schema", "id",
+  "message"])`): the keys. The unique index serves a message's lookups
+  and an instance's delete by its prefix.
+- `.up(|sql| ...)`:
+  1. `sql.create_fulltext_with("comment_search_text", &["body"],
+     Unaccent::IfAvailable)`: on SQLite the FTS5 table (`unicode61
+     remove_diacritics 2`); on Postgres the table `rowid`, `body`,
+     `body_tsv`, `all_tsv`, its GIN index and its text search
+     configuration, with `unaccent` where the database has it or the
+     engine may create it, and `simple` alone where not (case folds,
+     diacritics stay), so the migration never fails for the extension.
+     Search's `create_fulltext` needs it (`Unaccent::Required`), but every
+     engine that composes Comments runs this migration, Search or not, and
+     one whose role may not create `unaccent` must still migrate.
+  2. The backfill, every standing message in stand order per instance:
+
+     ```sql
+     INSERT INTO <comment_search> (namespace, schema, id, message, thread_root)
+     SELECT namespace, schema, id, message, COALESCE(thread, message) FROM <comment_messages>
+      WHERE state IN ('posted', 'interrupted')
+      ORDER BY namespace, schema, id, stand;
+     INSERT INTO <comment_search_text> (rowid, body)
+     SELECT s.row, m.body FROM <comment_search> s
+       JOIN <comment_messages> m
+         ON m.namespace = s.namespace AND m.schema = s.schema AND m.id = s.id AND m.message = s.message;
+     ```
+
+  3. Index `comment_messages_pinned` on `comment_messages (namespace,
+     schema, id, message)` where `pinned = 1`, named through
+     `sql.table(name)` as batch 2's; `listPinned`'s statement says
+     `pinned = 1` itself.
+
+Code and attachment blocks and the moves need no storage: they are the
+`blocks` column's JSON.
+
+Deleting the instance also removes its `comment_search` and
+`comment_search_text` rows ("Keeping the index").
+
+### Batch 5: operations, amended
+
+| Operation | Batch 5 |
+|-----------|---------|
+| `post`, `finish` | the blocks' checks ("Batch 5: blocks"); the index insert when it stands |
+| `interrupt` | to `interrupted`: the index insert. Its blocks are `[]`, so nothing else |
+| `edit` | the blocks' checks, an attachment new to the message held to the config, a code block unchanged at its index keeping its moves; the index replaced when `body` is given. Refusals as "Batch 5: blocks" orders them |
+| `deleteMessage` | deletes the index rows; the blocks clear as before, moves with them |
+| `purge` | deletes the purged messages' index rows |
+| `pin` | unchanged; `listPinned` reads what it sets |
+| `listEdits` | an item's `blocks` are as they were before the edit, a code block's move members included |
+| `listMessages`, `getMessage` and every record | blocks of the four kinds, code ones with their move members |
+
+### Batch 5: refusals
+
+New veto codes:
+
+| Veto code | details |
+|-----------|---------|
+| `attachment_not_allowed` | `{ block, member, value, allowed }` |
+| `no_block` | `{ message, block, blocks }` |
+| `not_code` | `{ message, block, kind }` |
+| `anchor_unchanged` | `{ message, block, revision, lines }` |
+
+`deleted`, `composing` and `not_author` also cover `moveAnchor`, with
+their details. `block_not_allowed` covers the two new kinds.
+
+### What the generators expose
+
+For `behaviortypes` (typegen, rustgen) and `engineclientgen`:
+
+- **The block union.** `<Base>CommentBlock` is post's `oneOf`, so it
+  gains `code` and `attachment` from the declaration with no code; the
+  `config.blocks` narrowing (`blockKind` over each kind's `const`) narrows
+  `post`'s, `finish`'s and `edit`'s blocks to any subset of the four as it
+  does of two. Tests and goldens gain the kinds.
+- **Posted blocks.** A record's code block may hold the move members,
+  which the paramsSchema's closed code block does not declare. Add
+  `<Base>CommentPostedBlock`, "A block of a message of <Base>'s Comments
+  as the record holds it: a code block that moveAnchor moved also holds
+  its first anchor and its last move": the `oneOf` of `<Base>CommentBlock`
+  with the code member extended by optional `original: { revision:
+  string; lines: number[] }`, `moves: number`, `movedAt: number`,
+  `movedBy: string`, `movedFor: string`, typed in `narrowComments` as
+  `threads` is. `<Base>CommentMessage`'s `blocks` and `listEdits`' items'
+  `blocks` are `<Base>CommentPostedBlock[]`; what a call gives stays
+  `<Base>CommentBlock`.
+- **The record.** `for?: string` after `author`, and `resolved.for?`,
+  come from the declaration with no code. In TypeScript `for` is a valid
+  member name; a Rust type that renders the record names it `r#for` or
+  `for_subject` with `#[serde(rename = "for")]`, a Go one `For` with
+  `json:"for,omitempty"` (neither renders records today: Go and Rust
+  render behavior fields only).
+- **`moveAnchor`.** Add it to `commentsMessageResults`: it returns
+  `<Base>CommentMessage`. Its params are as declared, on `<Schema>Client`
+  as every instance operation.
+- **`listPinned`.** Its result's `items` are `<Base>CommentMessage`, set
+  as `listMessages`' are (`setItems(n.Results["listPinned"], ref(message,
+  ""), "properties", "items")`).
+- **`searchMessages`.** A namespace operation, so it joins
+  `CommentsNamespaceOperations` and `CommentsNamespaceClient` from the
+  declaration: `searchMessages(params, options?)`, params required.
+  `coreNamespaceItems` gains `"Comments.searchMessages":
+  "CommentsSearchHit"`, documented "A message searchMessages found: where
+  it is, who wrote it and for whom, its place in the search's order, and
+  a few words of its body around the matches, in parts."
+- **The items' `for`.** `CommentsInboxItem` and `CommentsDelivery` gain
+  `for?` from the declaration; `listEdits`' and `listReactions`' items
+  too.
+- **Config.** `anchorPermission` and `attachments` are typed from the
+  configSchema with no code.
+- Go and Rust types render behavior fields only: no field is new, so they
+  change only through the declaration they embed. The MCP tool
+  `comments.searchMessages` is the engine's.
+
+### Batch 5's tests
+
+What `core_comments.rs` (or a `core_comments_search.rs` beside it) and the
+TypeScript suite should hold, on both databases:
+
+- Code blocks: a post with one; `lines` out of order and each bad `path`
+  (`/a`, `a/`, `a//b`, `./a`, `a/../b`, `a\b`) refused at their pointer;
+  `block_not_allowed` under `blocks: ["ref"]`.
+- Attachments: `https://` without a host refused; each of the config's
+  three checks in order, with its details; `schemes: ["bucket"]` refusing
+  `https`; `image/*` taking `image/png`; an edit that keeps an attachment
+  the narrowed config refuses, and one that adds it refused.
+- `moveAnchor`: each refusal in order; the author, a holder of
+  `anchorPermission`, a moderator; the first move records `original`,
+  the second keeps it and counts 2; `editedAt`, `edits`, `listEdits`, the
+  counts and the index unchanged; past `editWindowMs` allowed; an edit
+  giving the block back keeps its moves, one changing its `snippet` drops
+  them; the event's record.
+- `listPinned`: replies and top-level messages, id order, paging, a
+  deleted message gone from it.
+- `searchMessages`: finds posted and interrupted messages, never a
+  draft, a deleted or a purged message or the text before an edit; an
+  instance's delete leaves nothing; `schema`, `instanceId` and `thread`
+  narrow, `thread` holding the top-level message and its replies; refusals
+  1 to 3; a schema the caller may not read is never found, nor named; a
+  query of `"`, `AND`, `*` and `NEAR` is text; the 9th word does not
+  count; paging, `rank` across pages and the 1000-hit end; the snippet's
+  parts; the item's `for` and `via`.
+- Migration 6 on batch 3's rows: every standing message found, no
+  composing or deleted one; `listPinned` on pinned rows of before.
+- The engine side: `fulltext` with `readable` outside a namespace
+  operation is a `BehaviorError`; with no readable schema it matches
+  nothing; Search's matches are unchanged.
+
 ## Left for later batches
 
-Not declared and not built in batches 1 to 3, each in D77's order:
+Not declared and not built in batches 1 to 5:
 
-- Batch 4 (acting for a subject): the record's `for`, stored as
-  `for_subject`; whether a message an agent writes for a person makes the
-  person follow, and leaves the person out of its deliveries.
-- Batch 5: `searchMessages`; `code` and `attachment` blocks and the config
-  kinds for them; `moveAnchor` and `anchorPermission`.
-- After D77's steps: following a whole conversation (an instance's
-  assignee hears of each top-level message); a mention of a group in its
-  members' inboxes, which needs roles the principal does not carry; an
-  inbox past tens of thousands of followed threads, which needs a
-  per-subject table the stands keep; a typed Go or Rust client of the
-  namespace operations, with the notifier and the agent dispatcher as
-  stack workers.
+- Following a whole conversation (an instance's assignee hears of each
+  top-level message); a mention of a group in its members' inboxes,
+  which needs roles the principal does not carry; an inbox past tens of
+  thousands of followed threads, which needs a per-subject table the
+  stands keep; a typed Go or Rust client of the namespace operations,
+  with the notifier and the agent dispatcher as stack workers.
+- Search beyond bodies: blocks' text (a code snippet, an attachment's
+  name, an action's title), a recency order, a prefix on the last word as
+  a typing search box wants, and vectors over messages (D77's "Left").
+- A pin's time and who pinned, for a listing in the order pins were
+  made.
+- Moving Search's every-schema search onto namespace operations (D77's
+  "Left").
 
-Each batch adds its own migration (batch 2 adds 3, batch 3 adds 4, and
-later ones 5, ...) rather than the single migration 2 D77 describes, since
-batch 1 shipped alone.
+Each batch adds its own migration (batch 2 adds 3, batch 3 adds 4, batch
+4 adds 5, batch 5 adds 6) rather than the single migration 2 D77
+describes, since batch 1 shipped alone.

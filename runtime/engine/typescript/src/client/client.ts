@@ -45,6 +45,12 @@ export interface EngineClientOptions {
   readonly timeoutMs?: number;
   /** Headers sent on every request. */
   readonly headers?: Readonly<Record<string, string>>;
+  /**
+   * The subject every call acts for (D77), sent as the Acting-For header:
+   * the person an agent or a service works for. A call's own actingFor
+   * replaces it. The engine's mount honors it only when the host opts in.
+   */
+  readonly actingFor?: string;
 }
 
 /** A write's options: the sequence it expects (If-Match) and its preconditions (the Preconditions header). */

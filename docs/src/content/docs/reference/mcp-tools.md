@@ -616,10 +616,16 @@ name, and where one takes create parameters, as `Links` and
 A behavior's namespace operation (`scope: "namespace"`), which runs
 across every schema of the namespace that composes the behavior, has one
 tool, named after the behavior (`comments.inbox`, handle
-`comments_inbox`), that takes `params` alone; the access policy's
+`comments_inbox`; `comments.searchMessages`, handle
+`comments_search_messages`), that takes `params` alone; the access policy's
 question for it, which names the behavior and no schema, with
 `listing: true`, hides it from a caller it refuses
 ([Engine behaviors](/superschematic/guides/engine-behaviors/#namespace-operations)).
+The endpoint honors the `Acting-For` header, the subject an agent calls
+for, only when the host mounts it with `actingFor` as it does the HTTP
+API; then every call of the request acts for that subject, and the
+events it writes record it as `for`
+([The engine](/superschematic/guides/engine/#callers-and-the-access-policy)).
 Its `hiddenBy` names the same causes as a schema's tool (below):
 `deployment` when `tools.hidden` names it, `archived` for one that writes
 in an archived namespace, `policy` when that question refuses the caller,

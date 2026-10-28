@@ -1598,7 +1598,7 @@ fn migration_3_adds_drafts_to_a_conversation_migration_2_holds() {
                     .collect::<superschematic_engine::storage::Result<Vec<_>>>()
             })
             .unwrap();
-        assert_eq!(ledger, [1, 2, 3, 4]);
+        assert_eq!(ledger, [1, 2, 3, 4, 5, 6]);
         engine.shutdown();
     }
 }
