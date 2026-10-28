@@ -2253,6 +2253,16 @@ connection string from the secret `HYPERDRIVE_ORIGIN_<DB>_<STACK>_<ENV>`
 in its GitHub environment, which `stack bootstrap --github` sets from your
 shell. `stack destroy` leaves the config and the origin alone.
 
+`stack queue` reaches the origin the same way (D96): `stack queue dead
+Staging finances-db.PlaidSyncRequested` and its `retry`, `drop` and
+`backfill` run `superschematic-migrate queue` on your machine with the
+connection string in `HYPERDRIVE_ORIGIN_FINANCES_DB`, after the same check
+of the config's host, port, database and user, and say which variable to
+set when your shell holds none
+([Dead messages](/superschematic/guides/queues/#dead-messages)). A config
+that caches reads does not stop it, since it does not read through the
+config.
+
 An API over the user model whose `authDb` is on Hyperdrive signs its
 users in on Workers as on Bun (D92): the identity store runs on the same
 per-request pool, and the session cookie is `__Host-session`, Secure,

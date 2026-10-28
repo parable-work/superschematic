@@ -145,6 +145,7 @@ whose queue's database is on D1 is refused (`NoQueueClaims`).
 | `hyperdrive.go` | the `cloudflare.hyperdrive` platform: a database of a Postgres outside Cloudflare, no node of its own, its Hyperdrive config's id from its settings; and `cloudflare.workers-hyperdrive`, `cloudflare.cron-hyperdrive` and `cloudflare.drainer-hyperdrive`, the connectors of a sql edge, a hyperdrive binding |
 | `d1.go` | the `cloudflare.d1` platform: a `d1Database` per hosted DB schema, `<stack>-<env>-<db>` with a suffix per parameter, in `sqlite`, with `locationHint` or `jurisdiction`; and `cloudflare.workers-d1`, the connector of a sql edge, a d1 binding |
 | `migrations.go` | the migration runner: `superschematic-migrate job` on the deploying machine, against `d1://<accountId>/<uuid>`, each uuid read from the applied graph's outputs (`MigrationRequest.Outputs`); for a database on Hyperdrive, `superschematic-migrate apply` against the origin in `HYPERDRIVE_ORIGIN_<DB>`, after checking it against the config (`Cloud.HyperdriveConfig`); a deploy that only changes which servers connect needs no runner (`PrivilegelessMigrations`) |
+| `queues.go` | the queue runner (`Queues`, D96): `stack queue`'s document on a Hyperdrive database's origin, `superschematic-migrate queue` on the deploying machine with the connection string in `HYPERDRIVE_ORIGIN_<DB>`, after the migrations' check against the config (`reachOrigin`) |
 | `cron.go` | the `cloudflare.cron` platform: a TypeScript job as a Worker, its Cron Trigger, in UTC, within Cloudflare's 15 minutes for a scheduled run, and its Workflow; and `cloudflare.cron-workers`, `cloudflare.cron-r2` and `cloudflare.cron-d1`, a job's edges through the server's connectors |
 | `drainer.go` | the `cloudflare.drainer` platform: a TypeScript queue worker as a Worker that `drain.ts` runs at each firing of a Cron Trigger every minute, for `WORKER_DRAIN_SECONDS`; and `cloudflare.drainer-workers` and `cloudflare.drainer-r2`, a worker's edges through the server's connectors |
 | `jobs.go` | the job runner (`Jobs`): an instance of a job's Workflow through Cloudflare's API, for `stack run` and a job on every deploy |
@@ -303,6 +304,15 @@ connection string in `DATABASE_URL` alone. The CI identity names
 `env.HYPERDRIVE_ORIGIN_<DB>` as a secret of the deploy job,
 `HYPERDRIVE_ORIGIN_<DB>_<STACK>_<ENV>`, and `stack bootstrap --github`
 sets it from the shell, or says how.
+
+The queue runner (`queues.go`, D96) runs `stack queue`'s operations on the
+origin from the same machine, through the same `reachOrigin`: the shell's
+`HYPERDRIVE_ORIGIN_<DB>`, refused when missing with the variable's name
+and the config it must match, and refused when its host, port, database or
+user is not the config's. It writes the queue document to a file of its
+own and runs `superschematic-migrate queue --queue <file>` with the
+connection string in `DATABASE_URL` alone, and returns the runner's stdout,
+which no log holds. A config that caches reads is no reason to refuse it.
 
 ## Queue workers on Cron Triggers
 

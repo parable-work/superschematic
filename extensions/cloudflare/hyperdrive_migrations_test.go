@@ -28,21 +28,27 @@ import (
 const stagingOrigin = "postgres://finances:s3cret-password@db.example.com:5432/finances?sslmode=require"
 
 // originRun is one run of the stand-in runner: its arguments, the
-// DATABASE_URL its environment held, and the plan it was handed.
+// DATABASE_URL its environment held, and the plan or the queue document
+// it was handed.
 type originRun struct {
 	args        []string
 	databaseURL string
 	plan        string
+	queue       string
 }
 
 // originFixture is the extension over a fake Cloudflare holding
 // finances-db's Staging config, with a shell that names the runner, the
-// token and the origin, and a stand-in that records each run.
+// token and the origin, and a stand-in that records each run. A queue
+// operation's run prints result, or, with refusal set, writes it to
+// stderr and fails (D96).
 type originFixture struct {
-	cloud *fakeCloud
-	shell shell
-	runs  []originRun
-	reg   *registry.Registry
+	cloud   *fakeCloud
+	shell   shell
+	runs    []originRun
+	reg     *registry.Registry
+	result  string
+	refusal string
 }
 
 func newOriginFixture(t *testing.T) *originFixture {
@@ -70,8 +76,21 @@ func newOriginFixture(t *testing.T) *originFixture {
 			}
 			run.plan = string(data)
 		}
-		_, _ = cmd.Stdout.Write([]byte("service finances-db: applied 3 steps\n"))
 		f.runs = append(f.runs, run)
+		if len(cmd.Args) > 3 && cmd.Args[1] == "queue" && cmd.Args[2] == "--queue" {
+			data, err := os.ReadFile(cmd.Args[3])
+			if err != nil {
+				t.Errorf("the queue document the runner was handed: %v", err)
+			}
+			f.runs[len(f.runs)-1].queue = string(data)
+			if f.refusal != "" {
+				_, _ = cmd.Stderr.Write([]byte("superschematic-migrate: " + f.refusal + "\n"))
+				return errors.New("exit status 1")
+			}
+			_, _ = cmd.Stdout.Write([]byte(f.result))
+			return nil
+		}
+		_, _ = cmd.Stdout.Write([]byte("service finances-db: applied 3 steps\n"))
 		return nil
 	}}
 	reg, err := registry.Assemble(registry.DefaultNaming(), ext, pulumiStub{})

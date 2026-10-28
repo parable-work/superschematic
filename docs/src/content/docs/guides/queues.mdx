@@ -29,9 +29,9 @@ schema's instances into claimable work, are another thing.
 | the TypeScript types' `./queues` entry and the HTTP runtime's `enqueue`, in a transaction of the generated repositories (`Deps.orm`, D79), and `postgresQueue`, which run the Go ORM's statements; the Rust types' `queues` module and the Rust HTTP runtime's `queue::enqueue` and `PostgresQueue`, which run them too; a location (`POINT`) and a duration (`INTERVAL`) in a message, in every language | a list of locations or durations (`POINT[]`, `INTERVAL[]`) in a queue's message |
 | `@worker` on an API, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers`, Rust's `Workers` and `create_workers`, the `worker` deployable, its entrypoint and image | |
 | `stack dev`'s worker processes, a TypeScript one on the environment's SQLite file too; on gcp a Cloud Run worker pool; on Cloudflare a TypeScript worker's Worker, which drains its queue from Postgres through Hyperdrive at each firing of a Cron Trigger every minute; a worker's `maxInstances` | scaling a worker with its queue's depth, which `maxInstances` sets the ceiling for; a Cloudflare worker woken sooner than its next firing |
-| `stack queue dead`, `retry` and `drop` on a local environment's queues, and on gcp through the migration job | the same on another cloud target |
+| `stack queue dead`, `retry`, `drop` and `backfill` on a local environment's queues, on gcp through the migration job, and on Cloudflare from your machine on the database's origin | |
 
-D53, D68, D80 and D88 in `docs/DECISIONS.md` record the decisions, and section 8.8 of
+D53, D68, D80, D88 and D96 in `docs/DECISIONS.md` record the decisions, and section 8.8 of
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md)
 the design.
 
@@ -570,6 +570,30 @@ more, which lets the migrator write the result; without it the runner
 stops before it changes the queue, and says so. `--timeout`, 30 minutes
 unless set, bounds the wait.
 
+On Cloudflare the queue's database is a Postgres outside Cloudflare,
+which the Workers reach through its Hyperdrive config, and the command
+runs the migration runner on your machine against that origin, as a
+deploy's migrations do (D96). It takes the connection string from
+`HYPERDRIVE_ORIGIN_<DB>`, `HYPERDRIVE_ORIGIN_FINANCES_DB` for
+`finances-db`, and your `CLOUDFLARE_API_TOKEN`, which reads the deploy
+manifest and the config:
+
+```sh
+export HYPERDRIVE_ORIGIN_FINANCES_DB='postgres://finances:...@db.example.com:5432/finances'
+superschematic stack queue dead CfStaging finances-db.PlaidSyncRequested
+superschematic stack queue retry CfStaging finances-db.PlaidSyncRequested 3f2c8a10-5b1e-4c7a-9d2e-8f6b4a1c0e93
+superschematic stack queue backfill CfStaging finances-db.EmbedLineItem
+```
+
+Before it changes anything it reads the database's Hyperdrive config and
+refuses a connection string whose host, port, database or user is not
+the config's, so it never retries the messages of one database while the
+Workers drain another's; without the variable it says which to set and
+what it must match. The runner gets the connection string in
+`DATABASE_URL` alone, so no argument or file holds the password, and the
+result comes back to the command alone: the log says only which database
+it ran on.
+
 ## Change it per environment
 
 An environment sets how many instances of a worker run, and how many
@@ -663,6 +687,6 @@ resolve, and neither does one whose queue is on D1.
 
 A deploy migrates the database from the deploying machine
 ([Databases on Hyperdrive](/superschematic/guides/stacks/#databases-on-hyperdrive)),
-so a trigger's `backfill: true` runs in the plan's step there as anywhere.
-`stack queue`, `backfill` among its commands, does not reach a cloudflare
-environment's database yet (D92).
+so a trigger's `backfill: true` runs in the plan's step there as anywhere,
+and `stack queue`, `backfill` among its commands, runs from your machine on
+the origin too ([Dead messages](#dead-messages), D96).

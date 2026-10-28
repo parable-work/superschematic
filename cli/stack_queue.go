@@ -32,7 +32,9 @@ import (
 // target it runs against the Postgres container stack dev runs; on a cloud
 // target, through the target's queue runner, on the deployed run's
 // database (D68, amended): on gcp an execution of the migration job, which
-// hands the result back through the state bucket.
+// hands the result back through the state bucket; on cloudflare the
+// migration runner on this machine, on the origin of a database on
+// Hyperdrive, as the database's migrations run (D96).
 
 func init() { registerStackCommands(newStackQueueCmd) }
 
@@ -97,9 +99,15 @@ reads once and deletes, and which the bucket's lifecycle deletes after a
 day when the command does not. A deleted result stays restorable for the
 bucket's soft-delete window, seven days by default. A listing's messages
 may hold personal data, so they are never written to the execution's
-logs. A target with no queue runner is refused, as is a
-run that was never deployed. --timeout bounds the wait; an execution it
-stops waiting for may still finish.`
+logs. On cloudflare the runner runs on this machine, on the origin of
+the queue's database, a Postgres outside Cloudflare reached through
+Hyperdrive, with the connection string $HYPERDRIVE_ORIGIN_<DB> holds
+(HYPERDRIVE_ORIGIN_SHOP_DB for shop-db), as the deploy's migrations do:
+it first reads the database's Hyperdrive config, with the token in
+$CLOUDFLARE_API_TOKEN, and refuses a connection string whose host, port,
+database or user is not the config's. A target with no queue runner is
+refused, as is a run that was never deployed. --timeout bounds the wait;
+an execution it stops waiting for may still finish.`
 
 func newStackQueueCmd(a *app) *cobra.Command {
 	cmd := &cobra.Command{
