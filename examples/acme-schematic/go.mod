@@ -1,6 +1,6 @@
 module example.com/acme/schematic
 
-go 1.26.4
+go 1.27.3
 
 require (
 	github.com/microsoft/typescript-go/shim v0.0.0

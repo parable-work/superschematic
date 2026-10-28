@@ -3,7 +3,7 @@
 // copies this directory, points it at generated SQL, and runs its test.
 module example.com/superschematic/pgcheck
 
-go 1.26.4
+go 1.27.3
 
 require github.com/jackc/pgx/v5 v5.11.0
 

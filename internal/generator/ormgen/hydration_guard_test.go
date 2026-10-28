@@ -31,7 +31,7 @@ func TestRelationHydrationGuardBehavior(t *testing.T) {
 		}
 	}
 
-	if err := os.WriteFile(filepath.Join(outDir, "go.mod"), []byte("module hydrationtest\n\ngo 1.26.4\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(outDir, "go.mod"), []byte("module hydrationtest\n\ngo 1.27.3\n"), 0o644); err != nil {
 		t.Fatalf("write go.mod: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(outDir, "hydration_guard_test.go"), []byte(relationHydrationGuardPackageTest), 0o644); err != nil {
@@ -40,7 +40,7 @@ func TestRelationHydrationGuardBehavior(t *testing.T) {
 
 	cmd := exec.Command("go", "test", ".", "-count=1", "-run", "TestRelationHydrationGuard")
 	cmd.Dir = outDir
-	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=go1.26.4")
+	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=go1.27.3")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("go test hydration guard failed: %v\n%s", err, out)

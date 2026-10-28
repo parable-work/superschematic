@@ -12,7 +12,7 @@
 
 module example.com/schemas/server/shop-cloud-stack/shop-orders-fulfil-orders
 
-go 1.26.4
+go 1.27.3
 
 require (
 	cloud.google.com/go/cloudsqlconn v1.25.3

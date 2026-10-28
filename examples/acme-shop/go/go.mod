@@ -1,6 +1,6 @@
 module example.com/acme/shop
 
-go 1.26.4
+go 1.27.3
 
 require (
 	example.com/acme/api/shop-api v0.0.0-00010101000000-000000000000

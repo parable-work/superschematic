@@ -42,40 +42,40 @@ func secretMemberNodes(env registry.StackEnvironment, v values, d ir.ResolvedDep
 	id := d.Name + ".secret." + variable.Name
 	version := d.Name + ".secret-version." + variable.Name
 	return []*ir.Resource{
-			{
-				ID:    id,
-				Type:  TypeSecret,
-				Phase: ir.PhaseInfrastructure,
-				Properties: map[string]any{
-					"project":     v.project,
-					"secretId":    join(env.Stack, "-", env.Name, "-", d.ResourceName, "-", variable.Name),
-					"replication": map[string]any{"auto": map[string]any{}},
-				},
+		{
+			ID:    id,
+			Type:  TypeSecret,
+			Phase: ir.PhaseInfrastructure,
+			Properties: map[string]any{
+				"project":     v.project,
+				"secretId":    join(env.Stack, "-", env.Name, "-", d.ResourceName, "-", variable.Name),
+				"replication": map[string]any{"auto": map[string]any{}},
 			},
-			{
-				ID:    version,
-				Type:  TypeSecretVersion,
-				Phase: ir.PhaseInfrastructure,
-				Properties: map[string]any{
-					"secret":     ir.Output{Resource: id, Name: "id"},
-					"secretData": variable.Value,
-				},
+		},
+		{
+			ID:    version,
+			Type:  TypeSecretVersion,
+			Phase: ir.PhaseInfrastructure,
+			Properties: map[string]any{
+				"secret":     ir.Output{Resource: id, Name: "id"},
+				"secretData": variable.Value,
 			},
-			{
-				ID:    d.Name + ".reads." + variable.Name,
-				Type:  TypeSecretIAMMember,
-				Phase: ir.PhaseInfrastructure,
-				Properties: map[string]any{
-					"project":  v.project,
-					"secretId": ir.Output{Resource: id, Name: "id"},
-					"role":     "roles/secretmanager.secretAccessor",
-					"member":   member,
-				},
+		},
+		{
+			ID:    d.Name + ".reads." + variable.Name,
+			Type:  TypeSecretIAMMember,
+			Phase: ir.PhaseInfrastructure,
+			Properties: map[string]any{
+				"project":  v.project,
+				"secretId": ir.Output{Resource: id, Name: "id"},
+				"role":     "roles/secretmanager.secretAccessor",
+				"member":   member,
 			},
-		}, map[string]any{"secretKeyRef": map[string]any{
-			"secret":  ir.Output{Resource: id, Name: "secretId"},
-			"version": ir.Output{Resource: version, Name: "version"},
-		}}
+		},
+	}, map[string]any{"secretKeyRef": map[string]any{
+		"secret":  ir.Output{Resource: id, Name: "secretId"},
+		"version": ir.Output{Resource: version, Name: "version"},
+	}}
 }
 
 // secretNodes returns a server's nodes for one secret binding: the secret,

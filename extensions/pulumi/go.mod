@@ -1,6 +1,6 @@
 module github.com/parable-work/superschematic/extensions/pulumi
 
-go 1.26.4
+go 1.27.3
 
 // The extension builds against the checkout it lives in, as the other
 // modules do (D1). A release requires the core at a tag and drops these.

@@ -165,7 +165,7 @@ func TestDepsAndScaffoldCompile(t *testing.T) {
 	names := naming.Default()
 	implDir := filepath.Join(root, "go")
 	var gomod strings.Builder
-	gomod.WriteString("module example.com/impl\n\ngo 1.26.4\n")
+	gomod.WriteString("module example.com/impl\n\ngo 1.27.3\n")
 	local := map[string]string{
 		names.GoAPIModule("deps-orders"):    APIDir(outputRoot, "deps-orders"),
 		names.GoAPIModule("deps-catalog"):   APIDir(outputRoot, "deps-catalog"),

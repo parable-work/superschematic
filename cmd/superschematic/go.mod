@@ -1,6 +1,6 @@
 module github.com/parable-work/superschematic/cmd/superschematic
 
-go 1.26.4
+go 1.27.3
 
 require (
 	github.com/parable-work/superschematic v0.0.0

@@ -47,7 +47,7 @@ var templatesFS embed.FS
 // GoVersion is the go directive of the modules this package writes and the
 // Go image the Dockerfile builds in: tools.env's GO_VERSION, which every
 // go.mod in the repository and every generated one states.
-const GoVersion = "1.26.4"
+const GoVersion = "1.27.3"
 
 // RustVersion is the Rust image the Dockerfile builds the static archives
 // in: tools.env's RUST_VERSION, which scripts/superscalar-dep.sh and
