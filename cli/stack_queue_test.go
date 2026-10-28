@@ -84,7 +84,7 @@ operationSets:
         typeRef: { name: CartView }
         required: true
         httpMethod: GET
-        restPath: carts/:id
+        restPath: "carts/{id}"
         arguments:
           - { name: id, typeRef: { name: string }, required: true }
 `,
