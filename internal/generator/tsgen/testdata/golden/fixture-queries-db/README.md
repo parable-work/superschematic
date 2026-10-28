@@ -123,10 +123,10 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 ### Enums (2)
 
 
-- **BucketUnit** - ---- time buckets: one row per day, week, month or quarter -----------------
+- **BucketUnit**
   - Values: `Day`, `Week`, `Month`, `Quarter`
 
-- **LineOrder** - ---- an account's lines, in an order the caller picks ----------------------
+- **LineOrder**
   - Values: `Newest`, `Largest`, `Name`
 
 
@@ -141,32 +141,32 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 - **AccountLinesRow**
 
-- **AccountNamedParams** - ---- the account of a name --------------------------------------------------
+- **AccountNamedParams**
 
 - **AccountNamedRow**
 
-- **BudgetsParams** - ---- budgets: exact amounts from a day on ----------------------------------
+- **BudgetsParams**
 
 - **BudgetsRow**
 
 - **Category** - A category, which may sit under a parent; the dashboard rolls a
 sub-category's totals up to it. A budget is exact, and starts on a day.
 
-- **CategoryTotalsParams** - ---- category totals: rolled up to the parent category ---------------------
+- **CategoryTotalsParams**
 
 - **CategoryTotalsRow**
 
-- **DashboardCategoriesRow** - ---- the total of each category ---------------------------------------------
+- **DashboardCategoriesRow**
 
-- **DashboardFilter** - ---- the dashboard: four reports over one filter (D95) ----------------------
+- **DashboardFilter**
 
-- **DashboardLinesRow** - ---- the lines, through the line_list projection ----------------------------
+- **DashboardLinesRow**
 
-- **DashboardTotalsRow** - ---- totals: spent, earned and the count, in one row ------------------------
+- **DashboardTotalsRow**
 
 - **LineItem** - A line of the ledger: a signed amount in minor units, a debit negative.
 
-- **MatchingLineParams** - ---- the line of a name, if the filter holds one ----------------------------
+- **MatchingLineParams**
 
 - **MatchingLineRow**
 
@@ -174,11 +174,11 @@ sub-category's totals up to it. A budget is exact, and starts on a day.
 
 - **TimeBucketsRow** - Every bucket of the range, an empty one with zero totals.
 
-- **TransactionListParams** - ---- the transaction list: newest first, a page at a time ------------------
+- **TransactionListParams**
 
 - **TransactionListRow**
 
-- **TransferCandidatesParams** - ---- transfer candidates: the other side of a move between accounts --------
+- **TransferCandidatesParams**
 
 - **TransferCandidatesRow**
 

@@ -1906,13 +1906,7 @@ func CollectionPointFromYAMLNonStrict(data []byte) (*CollectionPoint, error) {
 	return decoded, nil
 }
 
-// Inventory - The shop's commerce, kept by the engine (D58, D70): these types compose
-// behaviors, so they are engine types, whose instances the engine keeps in
-// shop-db's database beside the tables, and which the SQL and the ORM
-// leave out. Every server, job and worker of an API on shop-db opens the
-// engine; the shop's implementations call it in-process, and staff reach
-// it at /engine/shop-db, under the policy in schema.config.ts.
-// The units the warehouse holds of a product: one instance per product,
+// Inventory - The units the warehouse holds of a product: one instance per product,
 // whose id is the product's. shop-stock's staff routes receive and count
 // them, and a checkout holds them at the price they sell for, in pounds.
 // A count at or below reorderAt makes Stock.low true, which shop-stock's

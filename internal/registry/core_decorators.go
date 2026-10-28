@@ -649,6 +649,9 @@ func applyRest(args []any, op *ir.FieldDef) error {
 		if !ok {
 			return fmt.Errorf("@rest path must be a string literal")
 		}
+		if err := ir.ValidateRestPath(path); err != nil {
+			return ArgErrorf(1, "%s", err)
+		}
 		op.RestPath = path
 	}
 	return nil

@@ -144,4 +144,8 @@ type Result struct {
 	// unknown target language, or an output the schema cannot back (e.g. an
 	// SDK for a schema that declares no operations).
 	Skipped []string
+
+	// Warnings are what the run found that fails nothing now, in the
+	// order it found them, each once (GenerateContext.Warnf, D100).
+	Warnings []string
 }

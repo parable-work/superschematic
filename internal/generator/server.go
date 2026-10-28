@@ -1191,9 +1191,15 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 			scaffolds = append(scaffolds, output)
 		} else if _, err := os.Stat(filepath.Join(dir, servergen.TypeScriptPackageFile)); errors.Is(err, fs.ErrNotExist) {
 			return nil, nil, fmt.Errorf("stack %s: server %s serves %s, whose implementation %s holds no package.json, by which the Bun workspace links it; add one named %s", stackName, s.Name, ref.Name, dir, r.Options.Naming.NpmImplementationPackage(ref.Name))
-		} else if s.Kind == ir.DeployableServer && output.HasManualRoutes() {
-			if err := r.checkTypeScriptManualRoutes(stackName, output); err != nil {
-				return nil, nil, err
+		} else {
+			// The build no longer writes the implementation, whose
+			// package.json predates what the API gained since, such as a
+			// worker that hands it the database's messages (D100).
+			r.warnScaffoldDependencies(fmt.Sprintf("stack %s: the implementation of %s", stackName, ref.Name), dir, output.ImplementationDependencies(), "its scaffold depends on now")
+			if s.Kind == ir.DeployableServer && output.HasManualRoutes() {
+				if err := r.checkTypeScriptManualRoutes(stackName, output); err != nil {
+					return nil, nil, err
+				}
 			}
 		}
 		pkg, err := servergen.ImplementationPackage(r.Options.Naming, ref.Name, dir)
@@ -1309,9 +1315,19 @@ func (r run) planRust(stackName string, s *ir.ResolvedDeployable, cors map[strin
 		}
 		if !exists {
 			scaffolds = append(scaffolds, output)
-		} else if s.Kind == ir.DeployableServer && len(output.ManualEndpoints) > 0 {
-			if err := r.checkRustManualRoutes(stackName, output); err != nil {
-				return nil, nil, nil, err
+		} else {
+			// The build no longer writes the implementation, whose
+			// Cargo.toml predates what the API gained since, such as a
+			// manual route its handlers answer with axum's types (D100). A
+			// build with no runtime checkout to name a path to is refused
+			// by the server's plan, below.
+			if deps, err := rustrestgen.ImplementationDependencies(output, dir, APIDir(out, ref.Name), r.Options.Paths, r.Options.Naming); err == nil {
+				r.warnCrateDependencies(fmt.Sprintf("stack %s: the implementation of %s", stackName, ref.Name), dir, deps, "its scaffold depends on now")
+			}
+			if s.Kind == ir.DeployableServer && len(output.ManualEndpoints) > 0 {
+				if err := r.checkRustManualRoutes(stackName, output); err != nil {
+					return nil, nil, nil, err
+				}
 			}
 		}
 		impl, err := servergen.ReadRustImplementation(r.Options.Naming, ref.Name, dir)

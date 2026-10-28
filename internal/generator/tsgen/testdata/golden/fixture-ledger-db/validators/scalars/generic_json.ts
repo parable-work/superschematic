@@ -6,6 +6,12 @@ import type { JSONValue } from 'superscalar/scalars';
 
 import { validateGenericJSON as validateGenericJSONFromLib } from 'superscalar/scalars';
 
+// The constructors of GenericJSON, the scalar library's own, which the
+// package hands out beside the type: each returns the value as
+// GenericJSON and throws on a value Generic.JSON refuses (D25,
+// amended; D100).
+export { parseGenericJSONStrict, normalizeGenericJSONStrict } from 'superscalar/scalars';
+
 /**
  * Validates a Generic.JSON value
  */

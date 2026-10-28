@@ -511,7 +511,7 @@
           "type": "TIMESTAMPTZ"
         }
       ],
-      "comment": "A household's finances, as the dashboard of a finance app reads them\n(D90): line items on accounts, each at a provider, filed under a\ncategory and its parent, a business and a person, with notes. A read\nincludes a line item's relations, a filter reaches through them, and a\nprojection reads the same rows flat.\nA person of the household.",
+      "comment": "A person of the household.",
       "kind": "entity",
       "name": "user",
       "origin": "User",

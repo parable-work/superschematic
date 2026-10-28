@@ -14,21 +14,15 @@ publish = false
 
 # The generated API crate, and the HTTP runtime it is built on.
 [dependencies]
-async-trait = "0.1.89"
-{{- if .ManualEndpoints }}
-axum = "0.8.9"
+{{- range .Dependencies }}
+{{ .Line }}
 {{- end }}
-{{- if .ChecksEndUsers }}
-http = "1"
-{{- end }}
-{{ .CrateName }} = { path = "{{ .APIPath }}" }
-{{ .RuntimeCrate }} = { path = "{{ .RuntimePath }}" }
-{{- if .Definitions }}
+{{- with .DefinitionDependencies }}
 
 # The definitions of the channels and keys of each memory store the API
 # lists (D75).
-{{- range .Definitions }}
-{{ .Crate }} = { path = "{{ .Path }}" }
+{{- range . }}
+{{ .Line }}
 {{- end }}
 {{- end }}
 

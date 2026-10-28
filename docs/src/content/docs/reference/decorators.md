@@ -66,7 +66,7 @@ as their support lands in every generator.
 
 | Name | On | What it does | Covered in |
 | --- | --- | --- | --- |
-| `@rest(method, path)` | method | the route's HTTP method and path, under `/api` | [API routes](/superschematic/guides/api-routes/#operation-sets) |
+| `@rest(method, path)` | method | the route's HTTP method and path, under `/api`; a path parameter is `{name}`, never `:name` | [API routes](/superschematic/guides/api-routes/#operation-sets) |
 | `QueryParam<T>` | argument | read the argument from the query string | [API routes](/superschematic/guides/api-routes/#arguments) |
 | `RefersTo<T, Target, { options?, value?, label? }>` | field, argument | the value names an item of `Target`, as the operation that lists it does: the API's own, or an API dependency's when none of the API's lists it ([Options from an API dependency](/superschematic/reference/references-and-search/#options-from-an-api-dependency)); `value` is the target's field it holds (`id`), `label` the one that names an item (its `titleField`) | [References and search](/superschematic/reference/references-and-search/#refersto-a-value-that-names-an-item) |
 | `SearchQuery<T>` | argument | the operation's search text: an optional query parameter of a `GET`, one per operation | [References and search](/superschematic/reference/references-and-search/#searchquery-a-lists-search-text) |

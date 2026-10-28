@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/BurntSushi/toml"
+
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/rustgen"
@@ -578,6 +580,49 @@ type ScaffoldDependency struct {
 	Path  string
 }
 
+// CargoDependency is an entry of a Cargo.toml's [dependencies]: a crate
+// and the value it is given, a version or an inline table.
+type CargoDependency struct {
+	Crate string
+	Value string
+}
+
+// Line is the entry as Cargo.toml writes it.
+func (d CargoDependency) Line() string { return d.Crate + " = " + d.Value }
+
+// Dependencies are the [dependencies] the scaffold's Cargo.toml writes
+// first: async-trait, axum for an API with a manual route, http for one
+// whose routes check an end user, and the API crate and the HTTP runtime
+// by their paths.
+func (s ImplementationScaffold) Dependencies() []CargoDependency {
+	deps := []CargoDependency{{Crate: "async-trait", Value: `"0.1.89"`}}
+	if len(s.ManualEndpoints) > 0 {
+		deps = append(deps, CargoDependency{Crate: "axum", Value: `"0.8.9"`})
+	}
+	if s.ChecksEndUsers() {
+		deps = append(deps, CargoDependency{Crate: "http", Value: `"1"`})
+	}
+	return append(deps,
+		CargoDependency{Crate: s.CrateName, Value: pathDependency(s.APIPath)},
+		CargoDependency{Crate: s.RuntimeCrate, Value: pathDependency(s.RuntimePath)})
+}
+
+// DefinitionDependencies are the [dependencies] the scaffold's Cargo.toml
+// writes after Dependencies: the definitions of each memory store the API
+// lists, by their paths (D75).
+func (s ImplementationScaffold) DefinitionDependencies() []CargoDependency {
+	var deps []CargoDependency
+	for _, d := range s.Definitions {
+		deps = append(deps, CargoDependency{Crate: d.Crate, Value: pathDependency(d.Path)})
+	}
+	return deps
+}
+
+// pathDependency is the inline table of a dependency on the crate at path.
+func pathDependency(path string) string {
+	return `{ path = "` + path + `" }`
+}
+
 // CrateIdent is the API crate as Rust source spells it.
 func (s ImplementationScaffold) CrateIdent() string {
 	return strings.ReplaceAll(s.CrateName, "-", "_")
@@ -733,32 +778,13 @@ var ImplementationLib = filepath.Join("src", "lib.rs")
 // returns the Handlers, each method answering 501 Not Implemented. The
 // output must have its Deps (SetDeps).
 func WriteImplementationScaffold(output *APIOutput, dir, apiDir string, paths naming.LocalPaths, names naming.Naming) (bool, error) {
-	if output.Deps == nil {
-		return false, fmt.Errorf("rustrestgen: the implementation scaffold of %s needs its Deps", output.SchemaName)
-	}
 	exists, err := ImplementationExists(dir)
 	if err != nil || exists {
 		return false, err
 	}
-	if paths.HTTPRuntimeRust == "" {
-		return false, fmt.Errorf("rustrestgen: [paths] http_runtime_rust is required to locate the http-runtime crate from the implementation of %s", output.SchemaName)
-	}
-	view := ImplementationScaffold{APIOutput: output, Crate: names.OrDefault().RustImplementationCrate(output.SchemaName)}
-	if view.APIPath, err = naming.RelPath(dir, apiDir); err != nil {
-		return false, fmt.Errorf("rustrestgen: the API crate's path from the implementation of %s: %w", output.SchemaName, err)
-	}
-	if view.RuntimePath, err = naming.RelPath(dir, paths.HTTPRuntimeRust); err != nil {
-		return false, fmt.Errorf("rustrestgen: the runtime crate's path from the implementation of %s: %w", output.SchemaName, err)
-	}
-	for _, m := range output.Deps.MemoryStores {
-		if m.Definitions == "" {
-			continue
-		}
-		path, err := naming.RelPath(dir, filepath.Join(apiDir, m.DefinitionsPath))
-		if err != nil {
-			return false, fmt.Errorf("rustrestgen: the definitions of %s from the implementation of %s: %w", m.Service, output.SchemaName, err)
-		}
-		view.Definitions = append(view.Definitions, ScaffoldDependency{Crate: m.Definitions, Path: path})
+	view, err := implementationScaffold(output, dir, apiDir, paths, names)
+	if err != nil {
+		return false, err
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
 		return false, fmt.Errorf("create implementation crate %s: %w", dir, err)
@@ -772,6 +798,80 @@ func WriteImplementationScaffold(output *APIOutput, dir, apiDir string, paths na
 		}
 	}
 	return true, nil
+}
+
+// implementationScaffold is what the scaffold of the API's implementation
+// at dir is written from: its crate's name and the paths from dir of the
+// API crate at apiDir, the runtime and each memory store's definitions.
+func implementationScaffold(output *APIOutput, dir, apiDir string, paths naming.LocalPaths, names naming.Naming) (ImplementationScaffold, error) {
+	view := ImplementationScaffold{APIOutput: output, Crate: names.OrDefault().RustImplementationCrate(output.SchemaName)}
+	if output.Deps == nil {
+		return view, fmt.Errorf("rustrestgen: the implementation scaffold of %s needs its Deps", output.SchemaName)
+	}
+	if paths.HTTPRuntimeRust == "" {
+		return view, fmt.Errorf("rustrestgen: [paths] http_runtime_rust is required to locate the http-runtime crate from the implementation of %s", output.SchemaName)
+	}
+	var err error
+	if view.APIPath, err = naming.RelPath(dir, apiDir); err != nil {
+		return view, fmt.Errorf("rustrestgen: the API crate's path from the implementation of %s: %w", output.SchemaName, err)
+	}
+	if view.RuntimePath, err = naming.RelPath(dir, paths.HTTPRuntimeRust); err != nil {
+		return view, fmt.Errorf("rustrestgen: the runtime crate's path from the implementation of %s: %w", output.SchemaName, err)
+	}
+	for _, m := range output.Deps.MemoryStores {
+		if m.Definitions == "" {
+			continue
+		}
+		path, err := naming.RelPath(dir, filepath.Join(apiDir, m.DefinitionsPath))
+		if err != nil {
+			return view, fmt.Errorf("rustrestgen: the definitions of %s from the implementation of %s: %w", m.Service, output.SchemaName, err)
+		}
+		view.Definitions = append(view.Definitions, ScaffoldDependency{Crate: m.Definitions, Path: path})
+	}
+	return view, nil
+}
+
+// ImplementationDependencies are what the scaffold of the API's
+// implementation at dir depends on now, by the entries its Cargo.toml
+// writes (Dependencies, DefinitionDependencies). A stack's build warns of
+// one an implementation it no longer writes lacks (D100).
+func ImplementationDependencies(output *APIOutput, dir, apiDir string, paths naming.LocalPaths, names naming.Naming) ([]CargoDependency, error) {
+	view, err := implementationScaffold(output, dir, apiDir, paths, names)
+	if err != nil {
+		return nil, err
+	}
+	return append(view.Dependencies(), view.DefinitionDependencies()...), nil
+}
+
+// MissingCargoDependencies returns each of deps that the Cargo.toml in dir
+// names in none of its [dependencies], [dev-dependencies] and
+// [build-dependencies], by its key or as the package a renamed one takes,
+// in the order of deps (D100).
+func MissingCargoDependencies(dir string, deps []CargoDependency) ([]CargoDependency, error) {
+	path := filepath.Join(dir, ImplementationManifest)
+	var manifest map[string]any
+	if _, err := toml.DecodeFile(path, &manifest); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	listed := map[string]bool{}
+	for _, table := range []string{"dependencies", "dev-dependencies", "build-dependencies"} {
+		entries, _ := manifest[table].(map[string]any)
+		for crate, value := range entries {
+			listed[crate] = true
+			if inline, ok := value.(map[string]any); ok {
+				if pkg, ok := inline["package"].(string); ok {
+					listed[pkg] = true
+				}
+			}
+		}
+	}
+	var missing []CargoDependency
+	for _, dep := range deps {
+		if !listed[dep.Crate] {
+			missing = append(missing, dep)
+		}
+	}
+	return missing, nil
 }
 
 // fnPattern matches a public function at the top of a file, by its name in

@@ -83,6 +83,18 @@ type Site struct {
 	APIs []API
 }
 
+// Dependencies are what the site's package depends on for the packages
+// the config imports: each SDK, a member of the Bun workspace, in the
+// order of APIs. The scaffold's package.json names them, and the build
+// warns of one a package it no longer writes lacks (D100).
+func (s *Site) Dependencies() []tsutil.Dependency {
+	var out []tsutil.Dependency
+	for _, pkg := range s.SDKPackages() {
+		out = append(out, tsutil.Dependency{Name: pkg, Spec: tsutil.WorkspaceSpec})
+	}
+	return out
+}
+
 // SDKPackages are the npm names of the SDKs the config imports, in the
 // order of APIs.
 func (s *Site) SDKPackages() []string {
@@ -349,10 +361,10 @@ var packageTemplate = template.Must(template.New("package.json").Funcs(funcs).Pa
     {{ jsonQuote devScript }}: "bun --port=${PORT:-3000} ./index.html",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
-{{- with .SDKPackages }}
+{{- with .Dependencies }}
   "dependencies": {
-{{- range $i, $pkg := . }}{{ if $i }},{{ end }}
-    {{ jsonQuote $pkg }}: "workspace:*"
+{{- range $i, $dep := . }}{{ if $i }},{{ end }}
+    {{ jsonQuote $dep.Name }}: {{ jsonQuote $dep.Spec }}
 {{- end }}
   },
 {{- end }}

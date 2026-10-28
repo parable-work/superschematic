@@ -36,9 +36,6 @@ export interface AccountLinesRow {
   amount: FinanceSignedMoney;
 }
 
-/**
- * AccountNamedParams - ---- the account of a name --------------------------------------------------
- */
 export interface AccountNamedParams {
   name: IdentityName;
 }
@@ -48,9 +45,6 @@ export interface AccountNamedRow {
   name: IdentityName;
 }
 
-/**
- * BudgetsParams - ---- budgets: exact amounts from a day on ----------------------------------
- */
 export interface BudgetsParams {
   /** A parent's sub-categories alone; every category when null. */
   parentId?: IdentityUUID | null;
@@ -76,9 +70,6 @@ export interface Category {
   budgetSince?: TemporalDate | null;
 }
 
-/**
- * CategoryTotalsParams - ---- category totals: rolled up to the parent category ---------------------
- */
 export interface CategoryTotalsParams {
   start: TemporalDateTime;
   end: TemporalDateTime;
@@ -92,18 +83,12 @@ export interface CategoryTotalsRow {
   earned: FinanceSignedMoney;
 }
 
-/**
- * DashboardCategoriesRow - ---- the total of each category ---------------------------------------------
- */
 export interface DashboardCategoriesRow {
   categoryId?: IdentityUUID | null;
   total: FinanceSignedMoney;
   lines: GenericInt64;
 }
 
-/**
- * DashboardFilter - ---- the dashboard: four reports over one filter (D95) ----------------------
- */
 export interface DashboardFilter {
   start: TemporalDateTime;
   end: TemporalDateTime;
@@ -114,9 +99,6 @@ export interface DashboardFilter {
   search?: string | null;
 }
 
-/**
- * DashboardLinesRow - ---- the lines, through the line_list projection ----------------------------
- */
 export interface DashboardLinesRow {
   id: IdentityUUID;
   date: TemporalDateTime;
@@ -125,9 +107,6 @@ export interface DashboardLinesRow {
   categoryName?: IdentityName | null;
 }
 
-/**
- * DashboardTotalsRow - ---- totals: spent, earned and the count, in one row ------------------------
- */
 export interface DashboardTotalsRow {
   spent: FinanceSignedMoney;
   earned: FinanceSignedMoney;
@@ -147,9 +126,6 @@ export interface LineItem {
   transferGroup?: TransferGroup | null;
 }
 
-/**
- * MatchingLineParams - ---- the line of a name, if the filter holds one ----------------------------
- */
 export interface MatchingLineParams {
   start: TemporalDateTime;
   end: TemporalDateTime;
@@ -181,9 +157,6 @@ export interface TimeBucketsRow {
   lines: GenericInt64;
 }
 
-/**
- * TransactionListParams - ---- the transaction list: newest first, a page at a time ------------------
- */
 export interface TransactionListParams {
   start: TemporalDateTime;
   end: TemporalDateTime;
@@ -202,9 +175,6 @@ export interface TransactionListRow {
   categoryName?: IdentityName | null;
 }
 
-/**
- * TransferCandidatesParams - ---- transfer candidates: the other side of a move between accounts --------
- */
 export interface TransferCandidatesParams {
   lineItemId: IdentityUUID;
   windowDays: GenericInt64;

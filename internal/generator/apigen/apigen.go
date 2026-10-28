@@ -1070,6 +1070,11 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 	if err := ir.ValidateOperationDocs(op.Docs); err != nil {
 		return nil, fmt.Errorf("apigen: operation %s.%s has invalid docs: %w", namespace, op.Name, err)
 	}
+	// The decorator refuses a :name segment where it is read (D100); the
+	// data forms carry the path as it is.
+	if err := ir.ValidateRestPath(op.RestPath); err != nil {
+		return nil, fmt.Errorf("apigen: operation %s.%s: %w", namespace, op.Name, err)
+	}
 	mcp, err := resolveOperationMCP(op, namespace, invocation)
 	if err != nil {
 		return nil, err
