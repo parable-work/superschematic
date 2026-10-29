@@ -3,12 +3,14 @@ module example.com/acme/schematic
 go 1.26.4
 
 require (
-	github.com/microsoft/typescript-go v0.0.0
+	github.com/microsoft/typescript-go/shim v0.0.0
 	github.com/parable-work/superscalar/go v0.0.0-20261025233249-5cc6787bc45f
 	github.com/parable-work/superschematic v0.0.0
 	github.com/parable-work/superschematic/ir v0.0.0
 	github.com/spf13/cobra v1.10.2
 )
+
+require github.com/microsoft/typescript-go v0.0.0 // indirect
 
 require (
 	github.com/BurntSushi/toml v1.6.0 // indirect
@@ -39,4 +41,6 @@ replace github.com/parable-work/superschematic/ir => ../../ir
 
 // replace directives do not propagate across modules, so the core's pins
 // are repeated here. Keep them equal to the root go.mod.
-replace github.com/microsoft/typescript-go => github.com/parable-work/typescript-go v0.0.0-20260701192534-c5de5679073f
+replace github.com/microsoft/typescript-go => github.com/microsoft/TypeScript/tsc v0.0.0-20260708042240-1e4744d68260
+
+replace github.com/microsoft/typescript-go/shim => github.com/parable-work/typescript-shim v0.0.0-20261028220021-9c62d2c703d9
