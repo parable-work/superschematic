@@ -118,12 +118,15 @@ for (const backend of backends) {
       const top = await invoke<Message>(author, 'post', { body: 'What do we ship?' });
       const begun = await invoke<Message>(author, 'begin', { thread: top.id });
       assert.equal(begun.state, 'composing');
-      await invoke(author, 'appendDraft', { message: begun.id, text: 'We ship ' });
 
-      // The reader opens the stream with signals before it reads.
+      // The reader opens the stream with signals before it reads, and
+      // before the author appends: on Postgres the listener hands a signal
+      // to the streams after its commit returns, so a stream opened just
+      // after an append may hear that append's draft or may not.
       const subscription = reader.events.subscribe({ after: 'head', signals: true });
       const messages = subscription[Symbol.asyncIterator]();
       assert.equal((await next(messages)).type, 'ready');
+      await invoke(author, 'appendDraft', { message: begun.id, text: 'We ship ' });
       const appended = await invoke<{ message: number; offset: number; length: number }>(author, 'appendDraft', { message: begun.id, text: 'the naïve ' });
       assert.deepEqual(appended, { message: begun.id, offset: 8, length: 18 });
       const follower = new Follower();
@@ -136,10 +139,10 @@ for (const backend of backends) {
       for (const text of ['🐉 build', '', ' today.']) {
         await invoke(author, 'appendDraft', { message: begun.id, text });
       }
-      // "the naïve " came after the read and is ignored; typing, then the
-      // two drafts that append.
+      // "We ship " and "the naïve " came before the read, which holds
+      // them, and are ignored; typing, then the two drafts that append.
       const seen: string[] = [];
-      for (let n = 0; n < 4; n += 1) {
+      for (let n = 0; n < 5; n += 1) {
         const message = await next(messages);
         if (message.type === 'signal') {
           seen.push(`${message.signal.name} ${message.signal.from} ${JSON.stringify(message.signal.data)}`);
@@ -147,6 +150,7 @@ for (const backend of backends) {
         await follower.heard(message, read);
       }
       assert.deepEqual(seen, [
+        `draft bob {"message":${begun.id},"offset":0,"text":"We ship "}`,
         `draft bob {"message":${begun.id},"offset":8,"text":"the naïve "}`,
         `typing carol {"thread":${top.id}}`,
         `draft bob {"message":${begun.id},"offset":18,"text":"🐉 build"}`,
