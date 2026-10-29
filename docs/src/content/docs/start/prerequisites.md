@@ -18,7 +18,7 @@ The versions are the pins in `tools.env`, which CI reads too.
 
 | Tool | Version | What it is for |
 | --- | --- | --- |
-| Go | 1.26.4 | The CLI is a Go binary, and generated Go code targets this version. |
+| Go | 1.27.3 | The CLI is a Go binary, and generated Go code targets this version. |
 | A C compiler | any | The CLI and generated Go code link superscalar through cgo (`CGO_ENABLED=1`). |
 | Rust (rustup) | 1.99.0 | Builds superscalar's static archive and the version-graph archive from source. `make` and the build scripts use this toolchain whatever rustup's default is. A TypeScript project needs none: without it the scripts download those archives prebuilt ([below](#without-rust)). |
 | git | any | Checks superscalar out at the commit in `superscalar.pin`. |
@@ -80,7 +80,7 @@ you run `go build` or `go test` on generated code yourself, export them in
 your shell first, from the checkout:
 
 ```sh
-export GOTOOLCHAIN=go1.26.4
+export GOTOOLCHAIN=go1.27.3
 export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print)"
 ```
 

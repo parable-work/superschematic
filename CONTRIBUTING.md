@@ -124,8 +124,8 @@ every design decision (cited as D1, D2, ... in code and commits).
 
 | Tool          | Version | How it is pinned                                   |
 | ------------- | ------- | -------------------------------------------------- |
-| Go            | 1.26.4  | `tools.env` (`GO_VERSION`), also `GOTOOLCHAIN` and every `go.mod` |
-| golangci-lint | 2.11.4  | `tools.env` (`GOLANGCI_LINT_VERSION`)              |
+| Go            | 1.27.3  | `tools.env` (`GO_VERSION`), also `GOTOOLCHAIN` and every `go.mod` |
+| golangci-lint | 2.15.0  | `tools.env` (`GOLANGCI_LINT_VERSION`)              |
 | Node          | 24      | `tools.env` (`NODE_VERSION`)                       |
 | Bun           | 1.4.2   | `tools.env` (`BUN_VERSION`)                        |
 | Python        | 3.9 or newer | floor in `runtime/schema/python/pyproject.toml` and `runtime/versiongraph/python/pyproject.toml`; CI tests on `tools.env` (`PYTHON_VERSION`), and the version-graph binding on 3.9 too |
@@ -138,7 +138,7 @@ every design decision (cited as D1, D2, ... in code and commits).
 Setup on a fresh machine:
 
 ```
-export GOTOOLCHAIN=go1.26.4
+export GOTOOLCHAIN=go1.27.3
 rustup toolchain install 1.99.0 --target wasm32-unknown-unknown
 make setup
 ```

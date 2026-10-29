@@ -1,6 +1,6 @@
 module github.com/parable-work/superschematic/runtime/schema/go
 
-go 1.26.4
+go 1.27.3
 
 require (
 	github.com/parable-work/superscalar/go v0.0.0-20261025233249-5cc6787bc45f

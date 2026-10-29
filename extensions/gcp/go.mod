@@ -1,6 +1,6 @@
 module github.com/parable-work/superschematic/extensions/gcp
 
-go 1.26.4
+go 1.27.3
 
 require (
 	cloud.google.com/go/artifactregistry v1.27.0

@@ -568,7 +568,7 @@ job's image itself. As a Cloud Run job, an image that holds the binary and
 the plan:
 
 ```dockerfile
-FROM golang:1.26.4 AS build
+FROM golang:1.27.3 AS build
 WORKDIR /src
 COPY runtime/migrate/go/ ./
 RUN CGO_ENABLED=0 go build -trimpath -o /superschematic-migrate ./cmd/superschematic-migrate
