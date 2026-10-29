@@ -13542,3 +13542,136 @@ Left:
 - A migrations directory outside the service directory, where a team
   keeps its runner's files, is not read for the next stamp.
 The rules are reversible until the first release.
+
+## D103. A behavior adds fields, sub-tables, operations and rules to a table that stays a table, its rules run in a pure Rust core every language embeds, and a project defines its types at build time or at run time, never both (D16, D50, D58, D64, D70 amended)
+
+D16 ported a server that takes schemas as data: one table of instances
+with their fields as JSON, an event log, and schemas defined and
+published while it runs. The behaviors were built on that store. D58 put
+the engine in every server and made a DB type that composes a behavior
+an engine type: its rows are the engine's, JSON in `engine_instances`,
+and `sql`, `orm` and D27's migrations leave it out. So composing a
+behavior changes where a type's data lives, and the build then refuses
+what only a table has: a relation either way, `@versioned`, a queue, a
+projection, `AutoGenerate`, the `User` trait. A finances app whose line
+items need reports, a projection, vectors, bulk upserts and a queue can
+compose no behavior on them, so it keeps `isAutoCategorized` and
+`categoryConfidence` columns by hand where Provenance would serve, and a
+`Note` table where Comments would. The store costs more than that: D64
+refuses a database that holds engine types on Cloudflare, D70 serializes
+a namespace's commerce writes behind one lock because SQLite has no
+exclusion constraint, and a server creates tables at run time through a
+role of its own (D58, amended).
+
+A behavior was meant to encapsulate a pattern most software repeats (a
+status that is a state machine, time on a resource that can be booked,
+money owed and paid) and extend an object that is already persisted. The
+framework manages the fields and sub-tables the behavior needs; the rest
+of the object is the author's, beside every other schema feature.
+Behaviors compose: Workflow with Calendar and Holds is a booking, and
+with Payments it is commerce. The Rust library exists so a behavior's
+rules are written once for Go, TypeScript, Rust and Python, rather than
+by a generator per language held to the others.
+
+This entry records the design before any of it is built.
+
+### What a behavior is
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A behavior is a mixin on a persisted type. It contributes fields, sub-tables, indexes and constraints, operations, reads, timed work and rules, and the type stays a table: its repository, migrations, relations, indexes, reports, projections, vectors, upserts and queues work beside the behavior as they do without it. | Engine types (D58), which move the type's rows into the engine's store; a service kind of its own for behaviors |
+| A behavior has state of its own, rules over how that state changes, and recurs across applications. A storage shape alone, or a query alone, is a schema feature. By that test `Links` is `Relation<>`, `Search` is `@searchField` with D84's vectors, `Queue`, `Lease` and `Retries` are `@queue` (D53, D68, D80), and `Branches` is `@versioned` with its version graph (D17, D19), and each of those behaviors goes. Every other behavior is held to the test when it is ported. | Keeping both, two ways to say each thing, which an agent writing a schema has to choose between |
+| A behavior changes another's state only through that behavior's operations, as D16 has it, and two behaviors meet through a named contract. A contract is an interface: D70's supply contract (`holdFor`, `commitFor`, `releaseFor`, `checkHold`) becomes `Supply`, which `Stock` and `Calendar` implement and a project's own supply may. The loader checks that a link `Holds` reads names a type that implements `Supply`, and that every requirement (`Holds` requires `Workflow`) is met, naming the one missing. | Requirements as TypeScript constraints, which `implements` cannot carry, since it adds nothing to the class's type |
+| The fields a behavior owns are read-only in the generated repository and SDKs, and only its operations change them. Nothing refuses a raw SQL write to one: an operator who needs to repair a row has a way to, and the documentation and the agent skill (D76) say why not to. | A trigger that refuses the write, which leaves no way out |
+
+### How a schema says it
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A capability of the whole type is `implements X<Type, Config>`, at most once per type: `Holds`, `Calendar`, `Payments`, `Comments`, `Approvals`. The carrier resolves to the empty object type, as `Trait<T>` and `User<Config>` do, so TypeScript imposes no members. `implements User<{ login: 'email' }>` is the precedent: the build adds `Session` and `UserCredential` beside the table (D50). | `@behavior(name, config)` (D16), a third way beside traits and `User` to say a type has a capability; a decorator factory for a bundle, which the reader cannot evaluate |
+| A behavior anchored on one value is a field type, and may repeat: `status: Workflow<{ ... }>` beside `fulfilment: Workflow<{ ... }>`. The field's name prefixes its columns and its operations (`transitionStatus`, `transitionFulfilment`), and the type resolves to the value's TypeScript type, a state machine's to the union of its states. This lifts D16's one behavior per type for a field behavior. Where several fields carry one behavior, a behavior that reads it names the field (`status: 'fulfilment'`); with one, it is implied. It follows `Relation<>`, `Encrypted<T>` (D85) and `AutoGenerate<>`, field types both ORMs act on. | `implements` alone, which allows one state machine per type |
+| A config is a type argument of literal types, which the reader resolves through the checker: nested tuples and object types, which the trait reader does not take yet (`traitConfigArgs` reads flat literals), and `typeof` a constant declared `as const`, which keeps a long config readable. A config that names a field is typed by the type it sits on, as `@index<LineItem>` is. | Values in a decorator's call |
+| A behavior is declared by an abstract class in the schema language: its fields, its sub-tables as nested classes, its operations as method signatures, its config as a type parameter and its contracts as the interfaces it implements. The build derives from the class the declaration the core reads. A class's bodies declare and never implement: a method body would run in one language. | The JSON declaration beside a Go registration and a TypeScript augmentation of its config (D16), which for `acme.Rating` is `rating.behavior.json`, `ext/behavior.go` and `packages/schema/src/behaviors.ts` beside the crate |
+
+### Three ways to define a behavior
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A bundle defines no rules. It is a class that implements existing behaviors with the wiring between them preset and exposes the settings that vary: a `Reservation` is `Workflow` with fixed states, `Calendar`, `Holds` with its `takeOn` and `commitOn` states, `Payments` and a `Timers` deadline that expires a hold, and a booking says only its resource, its interval, its amount and its currency. The loader expands a bundle into its parts, so the core never meets one. The reader substitutes a bundle's settings into its parts' configs through the checker, which it does not do yet. | A bundle as a behavior of its own in Rust, which repeats its parts' rules |
+| Declarative rules define a behavior with no Rust. The class declares its fields, sub-tables and operations, and its rules come from a fixed vocabulary the core interprets: conditions in the ORM's filter grammar (D90, D99, and `@enqueueOnChange`'s `when`), the fields a state requires or freezes (`StateRules`), reactions (`{ when, then }`), an operation's effects from a fixed list (set own fields, add or update a sub-table row, move a status, adjust a counter), and fields derived as a count, sum, minimum, maximum or average over a sub-table. Nothing else: no loops and no expressions. `acme.Rating` is one class under it: a `ratings` sub-table keyed by the rater, `rate(stars)` with its parameter held to 1 to `maxStars`, which upserts the rater's row, and `ratingCount` and `ratingAverage` derived from it. | An expression language, which grows into a programming language no tool checks; rules in the host's language, which run in that language alone |
+| A Rust crate implements a behavior whose rules need code: `Calendar`'s time zones, `Payments`' provider events. The class declares it and the crate implements its hooks over the core's API; the projectengine generator assembles the project's core from the core's behaviors and the extensions' crates, as it assembles its engine now. | WebAssembly plugins, which D58 turned down |
+
+### The core
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The core is pure. It takes a command (a create, an update, a delete, an operation, a due deadline, an event from the outbox) with the time it runs at, and the state it asks for, and returns a refusal or a change set. It opens no connection and no file and reads no clock. | A core that does its own I/O against the app's tables: a connection of its own, so no transaction with the caller's writes; a socket, so no WebAssembly build; a database driver in every binding. The core as every write's only path, which loses the ORM's upserts (D89) and transactions across tables. Behavior hooks inside the ORM's transaction through callbacks across the binding, which D58 turned down for the policy and which a synchronous core cannot make to an asynchronous host |
+| The core asks for what it reads, the host answers, and the core goes on: a row of a type by key, a sub-table's rows by a condition, a count. An asynchronous host (Node.js's pg, Bun) and a synchronous one answer alike. Before the reads a rule across rows decides on, the core asks for a lock key. | One request of everything a command might read, which over-reads every command to serve the few that branch |
+| A change set names logical targets: a row's columns that a behavior owns, sub-table rows to insert, update or delete, outbox events, deadlines to arm or clear, and the version each written row is expected at. When a version does not match, the adapter runs the command again from fresh state, a bounded number of times, and then refuses it as `busy` (D58's code). | Physical SQL in the change set, which ties the core to one layout and one dialect |
+| A row's writes are held by the version check, the column `@optimistic` already keeps. A rule across rows, the last unit of stock or two bookings of one room, takes the lock its key names: on Postgres a transaction's advisory lock, on SQLite and D1 the one writer that already holds. A generated constraint backs a rule where the dialect has one, as an exclusion constraint does `Calendar`'s on Postgres. | D58's one writer per namespace, which D70 relies on and which serializes every commerce write of a shop |
+| Each language reaches the core through a binding: the C ABI for Go, as now; Node-API or WebAssembly for TypeScript, which the change that builds it chooses between on Node.js and Bun; WebAssembly on Workers and in a browser; PyO3 for Python; the crate for Rust. | The engine's bindings as they are, each of which carries a database driver |
+| Each language has one adapter, generic and small: it answers the core's reads through the caller's transaction, takes its locks, applies its change sets and runs the version loop, reading the layout (below) to map logical targets to tables and columns. A behavior adds no code to any adapter or generator. | A generator per behavior per language |
+| The recorded scenarios (`runtime/engine/testdata/scenarios`) are the specification. Every adapter replays them on SQLite and on Postgres, as D58 has every binding do. | |
+
+### A build-time project
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A behavior's fields are columns of the type's table (`status`, `status_entered_at`); its collections are sub-tables with a foreign key to the row; its indexes and constraints are DDL (D83). sqlgen writes them, D27 plans them, both ORMs read them, and reports and projections may read them. | Storage the engine creates when a schema is published (D16, D58), outside the migration plan |
+| A behavior's operations are the API's operations: routes, SDK methods and MCP tools the API generators write from the declaration, each handler a call to the adapter. They are authorized as the API's other operations are (D37, D50), and a permission a behavior's config names is one the API's permissions list. D11's invocation policy and D70's confirmed operations carry over. A read that is a query is a declared query (D86); one that applies rules, as `findAvailability` does, is a call of the core that only reads. | The engine's routes mounted beside the API's, with a policy of their own |
+| A trigger the build writes on each table that composes a behavior writes an outbox row per change, whoever makes it, as D80's `@enqueueOnChange` writes a message. Reactions, Rollups, the arming of deadlines and the event stream read the outbox after the commit, so a raw write is heard, not refused. | Events only from the core's own writes, which an ORM write or a raw one would skip |
+| Deadlines and expiring holds are rows of a sub-table that a worker or a job of the API runs (D52, D53). | `<db>-engine-runner`, a deployable that exists only for the engine |
+
+### A runtime project
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A project defines its types at build time or at run time, never both. A runtime type never references a build-time row, a build-time table never holds a runtime type's id, and no runtime schema adds fields to a build-time table. | A project of both: references across two layouts, transactions that span them, and custom fields on a build-time table |
+| A runtime project keeps its types in fixed tables: schema versions, instances with a schema column and a JSON `data` column, and one shared sub-table, keyed by schema and id, for each behavior the project lets its types compose. The DB service's migrations create them, from the behaviors it lists. Publishing writes rows and never a table, so servers keep D46's grants of SELECT, INSERT, UPDATE and DELETE alone, and the engine role and schema of D58's amendment go. A new version may only add, as D16 has it. The core and the adapter are the build-time project's; only the layout differs. | Tables created when a schema is published, which needs DDL from servers that hold none |
+| A runtime type has `Relation<>` to another runtime type, held as an id in its JSON and checked by the adapter; `@unique`, `@key`, `@index` and list filters, through tables of their own as the engine keeps them now; `@searchField`, through a shared full-text table; and vectors, through a shared table keyed by schema, id and field. It has no reports, projections or queues. A feature reaches runtime types only once it has a build-time counterpart, so a runtime project expresses nothing a build-time one cannot. | Every schema feature over the shared tables at once |
+| Its routes (define, publish, the instance operations, the behaviors' operations, describe, the event stream and MCP) come from a Rust request handler that is pure as well: a request and its caller in, reads asked, a response and a change set out. D58 made the layer neutral to the transport; this makes it free of I/O. The access policy stays data, as D58 has it. | The routes in each language, which D58 turned down |
+| Its users are D50's: the fixed tables include its user, role and session shapes, and it serves the session routes every server serves. | Identity of the runtime project's own |
+| A library in each language mounts the handler and runs the adapter, for a server written by hand, as `examples/engine-notes` is; a prebuilt server image runs one with no code. It deploys through a stack: the infrastructure stays declared at build time, and only its data types are defined at run time. | A runtime project outside the stack model, with a deploy of its own |
+| A whole runtime project converts, once, into a build-time project, for performance: each published schema is written as a class (`format --to=ts`), its behaviors as `implements` and field types; the build writes its tables; a generated data migration moves each type's rows from the shared tables into its own, and each behavior's rows into the type's sub-tables; and clients move to the generated routes. | Converting a type at a time, a project of both until the last; runtime routes kept for a converted type |
+
+### What it amends
+
+D16: behaviors compose on tables; the authoring form is `implements` and
+field types, not `@behavior`; a behavior is declared by a class; and the
+engine's store of instances serves runtime projects alone. A behavior
+still changes another's state only through its operations, and a type's
+behaviors still run their checks in the order the type lists them. D58:
+engine types go, with `enginedoc`'s refusals, the engine database's
+`outputs.engine`, its runner deployable and its schema and role on Cloud
+SQL; the core does no I/O; and one implementation in Rust, D58's reason,
+stays. D70: a commerce write locks its supply, not its namespace, and
+`Calendar` may take Postgres's exclusion constraint. D50: a runtime
+project's users are its shapes. D64: the refusal of a database that holds
+engine types goes with them.
+
+The behaviors keep their names until the change that ports each one;
+whether `Workflow` as a field type reads better as `Status`, and whether
+`Calendar` with `Holds` ships as a bundle named for booking, is that
+change's to settle.
+
+### The order of the work
+
+1. The change set, the read exchange and the core's API, with `Workflow`
+   ported and its scenarios replayed in Rust.
+2. The TypeScript adapter, then Go's and Rust's, over a build-time table
+   with `Workflow` as a field type: the reader's field form and nested
+   configs, sqlgen's owned columns and sub-tables, the repository's
+   read-only fields and the API generators' operations.
+3. The outbox trigger and deadlines on workers and jobs, with `Reactions`
+   and `Timers`.
+4. The remaining behaviors in waves, as D58 ported them, each held to the
+   test, and the folded ones removed.
+5. The `implements` form, bundles and the declarative vocabulary, with
+   `acme.Rating` rewritten as a class and no crate.
+6. The runtime layout, the pure request handler, the library and the
+   image, with `engine-notes` and `engine-jobs` on them.
+7. The conversion, and engine types removed from the servers and from
+   acme-shop's `shop-db`.
+
+Status: not built. The names and rules are reversible until the first
+release.
