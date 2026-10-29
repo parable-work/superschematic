@@ -37,9 +37,8 @@ require (
 replace github.com/parable-work/superschematic/ir => ./ir
 
 // Project Corsa (TypeScript 7.0 Go compiler): Microsoft's unmodified compiler
-// at the v7.0.2 commit, and the shim module (parable-work/typescript-shim)
-// that exposes the packages the tsreader frontend programs against. Upgraded
-// in dedicated PRs.
+// at the v7.0.2 commit, and the shim module that exposes the packages the
+// tsreader frontend programs against. Upgraded in dedicated PRs.
 replace github.com/microsoft/typescript-go => github.com/microsoft/TypeScript/tsc v0.0.0-20260708042240-1e4744d68260
 
 replace github.com/microsoft/typescript-go/shim => github.com/parable-work/typescript-shim v0.0.0-20261028220021-9c62d2c703d9
