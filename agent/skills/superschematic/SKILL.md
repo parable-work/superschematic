@@ -120,7 +120,9 @@ path for when the store is unavailable.
    errors after a schema change point at exactly the code to follow. The
    build never writes a scaffolded package again: when it warns that one's
    `package.json` or `Cargo.toml` lacks a dependency, as a site's after a
-   new `calls` entry, add the line the warning names. Make a branded scalar value with
+   new `calls` entry, add the line the warning names; when it warns that a
+   site's build script skips the type-check, change the script as it
+   says. Make a branded scalar value with
    `parse<Scalar>Strict` or `normalize<Scalar>Strict` from the types
    package the implementation depends on, never with a cast.
 6. **Test.** `superschematic stack dev schemas/services/<stack>` runs the
@@ -238,6 +240,13 @@ Most are load errors; knowing them saves a build round-trip:
   or `updatedAt`: a posting date an import leaves out fails `NOT NULL`.
   Declare `Default<Temporal.DateTime, "now">` (or `Temporal.Date`) where
   the time of the insert is the right value.
+- A `@projection`'s `migration` stamp names the migration pair the build
+  writes, for a migration runner of the project's own (a stack builds the
+  view from its plan and ignores it). The first build records the stamp
+  in `projections.lock` beside the config; commit it. After that, a change
+  to the projection, its doc comments included, fails `check` until it
+  takes the stamp the message names, or, while no database has applied
+  the old one, `superschematic build <db-dir> --rewrite-migration <stamp>`.
 - A path parameter is in braces and names an argument:
   `@rest(HttpMethod.GET, "orders/{id}/export")`. A router's `orders/:id`
   is refused.

@@ -1,0 +1,56 @@
+# Operations whose only query parameters with a check are lists (D101), with
+# no body argument and no input type. entry.countEntries filters by lists of
+# a UUID scalar that may be absent, whose items the SDK checks, beside two
+# required strings with no rule, as a finances API's list of line items
+# does. tally.sumYears takes a required list of numbers with no rule, which
+# the SDK checks only for an item. The sdkgen tests load it through
+# sdktest.LoadListFiltersService.
+name: list-filters-api
+kind: API
+scalars:
+  Identity.UUID:
+    name: Identity.UUID
+    languagePrimitive: string
+operationSets:
+  - name: EntryQueries
+    operations:
+      # Count the entries between two dates, in any of the categories and by
+      # any of the users given.
+      - name: countEntries
+        typeRef: { name: number }
+        required: true
+        httpMethod: GET
+        restPath: "entries/count"
+        arguments:
+          # The first date.
+          - name: start
+            typeRef: { name: string }
+            isQuery: true
+            required: true
+          # The last date.
+          - name: end
+            typeRef: { name: string }
+            isQuery: true
+            required: true
+          # The categories, by id; every category when absent.
+          - name: categoryIds
+            typeRef: { name: Identity.UUID, isArray: true }
+            isQuery: true
+          # The users, by id; every user when absent.
+          - name: userIds
+            typeRef: { name: Identity.UUID, isArray: true }
+            isQuery: true
+  - name: TallyQueries
+    operations:
+      # The sum of the years' totals.
+      - name: sumYears
+        typeRef: { name: number }
+        required: true
+        httpMethod: GET
+        restPath: "tallies/sum"
+        arguments:
+          # The years.
+          - name: years
+            typeRef: { name: number, isArray: true }
+            isQuery: true
+            required: true

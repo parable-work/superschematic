@@ -29,8 +29,11 @@ type ProjectionDef struct {
 	Name string `json:"name" yaml:"name"`
 
 	// Migration is the 14-digit version stamp of the generated migration
-	// (golang-migrate style). A changed declaration takes a new stamp: an
-	// applied migration is never rewritten.
+	// pair (golang-migrate style), for a runner of the user's own. A
+	// changed declaration takes a new stamp: an applied migration is never
+	// rewritten. The first build that writes the pair records it in the
+	// service's projections.lock, and check and build refuse other files
+	// under a recorded stamp (D102).
 	Migration string `json:"migration" yaml:"migration"`
 
 	// Source is the DB table type the view reads, addressed as "base".

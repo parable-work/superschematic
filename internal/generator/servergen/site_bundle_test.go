@@ -124,6 +124,20 @@ func TestASiteBundlesItsAPIsSDKForTheBrowser(t *testing.T) {
 	run(site, filepath.Join(paths.HTTPRuntimeTypeScript, "node_modules", ".bin", "tsc"), "--noEmit", "-p", "tsconfig.json")
 	// The scaffold's own build bundles index.html and its script.
 	run(site, bun, "run", "build")
+	// It type-checks them first (D101): a type error fails it, which bun
+	// build alone would bundle.
+	broken := filepath.Join(site, "src", "broken.ts")
+	if err := os.WriteFile(broken, []byte("export const count: number = 'none';\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	refused := exec.Command(bun, "run", "build")
+	refused.Dir = site
+	if out, err := refused.CombinedOutput(); err == nil || !strings.Contains(string(out), "TS2322") {
+		t.Errorf("the scaffold's build of a site with a type error = %v, want it refused with TS2322:\n%s", err, out)
+	}
+	if err := os.Remove(broken); err != nil {
+		t.Fatal(err)
+	}
 
 	run(site, bun, "build", "--target=browser", "--outdir=probe", "src/probe.ts")
 	bundle, err := os.ReadFile(filepath.Join(site, "probe", "probe.js"))

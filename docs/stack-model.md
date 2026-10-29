@@ -3827,10 +3827,13 @@ config may leave `outputs` out.
   generates no TypeScript SDK has its `baseUrl` alone. When the package
   is missing, the build scaffolds a minimal site there once: an
   `index.html`, a script that loads the config, and a `package.json`
-  that depends on each SDK and whose `build` script bundles them with
-  `bun build`. A site whose `package.json` lacks an SDK the config
-  imports, as one scaffolded before its config named the API, draws a
-  warning from each build that names the line to add (D100).
+  that depends on each SDK and whose `build` script runs its `typecheck`
+  script, `tsc --noEmit` over the site and the SDKs it imports, before it
+  bundles them with `bun build`, which checks no type (D101). A site
+  whose `package.json` lacks an SDK the config imports, as one scaffolded
+  before its config named the API, draws a warning from each build that
+  names the line to add (D100); one whose build script is still the
+  scaffold's from before D101 draws a warning naming the script to write.
 - **Build.** The deploy runs the site's `build` script after a frozen
   install of the workspace. It digests the output as it digests a server's
   build context (D46): every file in path order, at the epoch, owned by

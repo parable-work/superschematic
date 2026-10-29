@@ -217,6 +217,27 @@ func (p QueryParam) Validates() bool {
 		p.ValidatePattern != ""
 }
 
+// Validator is the types package's function the method checks the
+// argument's values with (D101): validate<T> for a union's value, which
+// validates the member the union picks, and for a map's value of an object
+// type; validate<T>Required for each element of a list and each value of a
+// map, and for a required value; validate<T> for an optional one. It is
+// "" for a language primitive, which has none.
+func (a ScalarArg) Validator() string {
+	if codegen.IsLanguagePrimitive(a.Type) {
+		return ""
+	}
+	validator := "validate" + normalizeTSTypeIdentifier(a.Type)
+	switch {
+	case a.ValueIsObject || a.IsUnion:
+		return validator
+	case a.IsArray || a.IsMap || a.Required:
+		return validator + "Required"
+	default:
+		return validator
+	}
+}
+
 // SDKOutput contains all generated SDK code metadata
 type SDKOutput struct {
 	SchemaName             string          // Schema name (e.g., "my-api")
@@ -313,77 +334,41 @@ func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock
 		sdkEndpoint := convertEndpoint(endpoint, parseableTypes, apiOutput.TypeUnions)
 		namespaceMap[ns].Endpoints = append(namespaceMap[ns].Endpoints, sdkEndpoint)
 
-		// Track unique imports for this namespace
+		// The types the namespace names, from the types package.
 		if endpoint.InputType != "" {
-			inputType := normalizeTSTypeIdentifier(endpoint.InputType)
-			importsMap[ns][inputType] = true
-			// Import validation function for input type
-			importsMap[ns]["validate"+inputType] = true
-			// Import ValidationResult type for validation return value
+			importsMap[ns][normalizeTSTypeIdentifier(endpoint.InputType)] = true
+		}
+		if sdkEndpoint.InputValidator() != "" {
 			importsMap[ns]["ValidationResult"] = true
 		}
 		if endpoint.OutputType != "" && !codegen.IsLanguagePrimitive(endpoint.OutputType) {
 			// Bare language primitives are built-in TypeScript types; only
 			// named types are imported from the types package.
-			outputSymbol := normalizeTSTypeIdentifier(endpoint.OutputType)
-			importsMap[ns][outputSymbol] = true
-			if parseableTypes[endpoint.OutputType] {
-				importsMap[ns]["parse"+outputSymbol+"FromJSON"] = true
+			importsMap[ns][normalizeTSTypeIdentifier(endpoint.OutputType)] = true
+		}
+		for _, arg := range sdkEndpoint.ScalarArgs {
+			if arg.IsMap && !arg.IsUnion {
+				namespaceMap[ns].HasMapArgs = true
+				importsMap[ns]["ValidationErrors"] = true
+			}
+			if arg.ValueIsObject {
+				namespaceMap[ns].HasObjectMapArgs = true
+			}
+			if arg.IsUnion {
+				namespaceMap[ns].HasUnionArgs = true
+				importsMap[ns]["ValidationErrors"] = true
+				importsMap[ns]["ValidationResult"] = true
+			}
+			// Bare language primitives have no generated type alias in the
+			// types package; only named scalars import (e.g., Email, JWT).
+			if !codegen.IsLanguagePrimitive(arg.Type) {
+				importsMap[ns][normalizeTSTypeIdentifier(arg.Type)] = true
 			}
 		}
-
-		// Import scalar types and validation functions for scalar arguments
-		if len(endpoint.ScalarArgs) > 0 {
-			// Import newValidationErrors and setFieldErrors for scalar args validation
-			importsMap[ns]["newValidationErrors"] = true
-			importsMap[ns]["setFieldErrors"] = true
-			for _, arg := range sdkEndpoint.ScalarArgs {
-				if arg.IsMap && !arg.IsUnion {
-					namespaceMap[ns].HasMapArgs = true
-					importsMap[ns]["ValidationErrors"] = true
-				}
-				if arg.ValueIsObject {
-					namespaceMap[ns].HasObjectMapArgs = true
-				}
-				if arg.IsUnion {
-					namespaceMap[ns].HasUnionArgs = true
-					importsMap[ns]["ValidationErrors"] = true
-					importsMap[ns]["ValidationResult"] = true
-					importsMap[ns]["addNestedErrors"] = true
-				}
-				// Bare language primitives have no generated type alias or
-				// validators in the types package; only named scalars import.
-				if codegen.IsLanguagePrimitive(arg.Type) {
-					continue
-				}
-				scalarSymbol := normalizeTSTypeIdentifier(arg.Type)
-				// Import the scalar type itself (e.g., Email, JWT)
-				importsMap[ns][scalarSymbol] = true
-				// Import validation functions for the scalar.
-				// Array and map args always need the Required variant because
-				// each element or value is validated with validateXRequired
-				// regardless of whether the argument itself is required or
-				// optional; a map of an object type runs validateX on each value.
-				switch {
-				case arg.ValueIsObject || arg.IsUnion:
-					importsMap[ns]["validate"+scalarSymbol] = true
-				case arg.IsArray || arg.IsMap || arg.Required:
-					importsMap[ns]["validate"+scalarSymbol+"Required"] = true
-				default:
-					importsMap[ns]["validate"+scalarSymbol] = true
-				}
-			}
-		}
-
-		// Import enum types used in query parameters
-		for _, param := range endpoint.QueryParams {
-			if !codegen.IsLanguagePrimitive(param.Type) {
-				tsType := IRTypeToTSType(param.Type)
-				importsMap[ns][tsType] = true
-			}
-			if queryParamHasValidation(param) {
-				importsMap[ns]["newValidationErrors"] = true
-				importsMap[ns]["setFieldErrors"] = true
+		// Enum and scalar types used in query parameters.
+		for _, param := range sdkEndpoint.QueryParams {
+			if !codegen.IsLanguagePrimitive(param.IRType) {
+				importsMap[ns][IRTypeToTSType(param.IRType)] = true
 			}
 		}
 
@@ -414,6 +399,14 @@ func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock
 			namespaceMap[ns].HasPagedEndpoints = true
 			output.HasPagedEndpoints = true
 			output.HasSortedEndpoints = output.HasSortedEndpoints || sdkEndpoint.Page.Sort != nil
+		}
+	}
+
+	// The values each namespace calls, from the types package: decided by
+	// the predicates its template calls them under (D101).
+	for ns, imports := range importsMap {
+		for _, value := range namespaceMap[ns].typesValues() {
+			imports[value] = true
 		}
 	}
 
@@ -573,6 +566,91 @@ func setPageType(ns *NamespaceInfo, imports map[string]bool) {
 			ns.Endpoints[i].PageType = ns.PageType
 		}
 	}
+}
+
+// InputValidator is the types package's validate<Input> the method checks
+// its input with, or "" when it checks none: an endpoint without an input
+// type, or a file upload's, whose method sends its input as it is.
+func (e EndpointInfo) InputValidator() string {
+	if !e.HasInput || e.HasFileUpload {
+		return ""
+	}
+	return "validate" + normalizeTSTypeIdentifier(e.InputType)
+}
+
+// OutputParser is the types package's parse<T>FromJSON the method reads its
+// response with, or "" when the output type has none (HasOutputParser).
+func (e EndpointInfo) OutputParser() string {
+	if !e.HasOutputParser {
+		return ""
+	}
+	return "parse" + normalizeTSTypeIdentifier(e.OutputType) + "FromJSON"
+}
+
+// ValidatesArgs reports whether the method checks its body arguments
+// before the request, into a ValidationErrors it builds: an endpoint
+// without an input type that takes them.
+func (e EndpointInfo) ValidatesArgs() bool {
+	return !e.HasInput && len(e.ScalarArgs) > 0
+}
+
+// ValidatesQuery reports whether the method checks its query parameters
+// before the request, into a ValidationErrors it builds: whether one of
+// them is checked (QueryParam.Validates), a list's items among them.
+func (e EndpointInfo) ValidatesQuery() bool {
+	for _, param := range e.QueryParams {
+		if param.Validates() {
+			return true
+		}
+	}
+	return false
+}
+
+// typesValues are the values of the types package the method calls: its
+// input's validator, its response's parser, its body arguments'
+// validators, and newValidationErrors and setFieldErrors when it builds a
+// ValidationErrors of its own, for its body arguments or its query
+// parameters. The template calls each under the predicate that lists it
+// here, so the namespace, which declares its methods' (D101), declares
+// every one a method calls.
+func (e EndpointInfo) typesValues() []string {
+	var values []string
+	for _, value := range []string{e.InputValidator(), e.OutputParser()} {
+		if value != "" {
+			values = append(values, value)
+		}
+	}
+	if e.ValidatesArgs() || e.ValidatesQuery() {
+		values = append(values, "newValidationErrors", "setFieldErrors")
+	}
+	if e.ValidatesArgs() {
+		for _, arg := range e.ScalarArgs {
+			if validator := arg.Validator(); validator != "" {
+				values = append(values, validator)
+			}
+		}
+	}
+	return values
+}
+
+// typesValues are the values of the types package the namespace calls
+// (D101): its methods' (EndpointInfo.typesValues), and its helpers':
+// setFieldErrors, which validateMapArgument, validateUnionArgument and
+// setObjectErrors call, and addNestedErrors, which validateUnionArgument
+// calls. The template writes each helper under the flag that lists its
+// values here.
+func (n NamespaceInfo) typesValues() []string {
+	var values []string
+	for _, endpoint := range n.Endpoints {
+		values = append(values, endpoint.typesValues()...)
+	}
+	if n.HasMapArgs || n.HasUnionArgs || n.HasObjectMapArgs {
+		values = append(values, "setFieldErrors")
+	}
+	if n.HasUnionArgs {
+		values = append(values, "addNestedErrors")
+	}
+	return values
 }
 
 // HasQuery reports whether the method takes a query object: its query
@@ -871,13 +949,7 @@ func customTemplateFuncs() template.FuncMap {
 			}
 			return valueImports
 		},
-		"type_ref":                normalizeTSTypeIdentifier,
-		"scalar_validator_symbol": normalizeTSTypeIdentifier,
-		"scalar_needs_validation": func(irType string) bool {
-			// Bare language primitives have no generated validators; only
-			// named scalars carry superscalar validation.
-			return !codegen.IsLanguagePrimitive(irType)
-		},
+		"type_ref": normalizeTSTypeIdentifier,
 		"file_upload_field_union": func(fields []FileUploadField) string {
 			// Generate a TypeScript string union for file upload field names
 			// Used for Omit<InputType, 'field1' | 'field2'>
@@ -892,14 +964,6 @@ func customTemplateFuncs() template.FuncMap {
 		},
 		"has_query_params": func(params []QueryParam) bool {
 			return len(params) > 0
-		},
-		"has_query_param_validation": func(params []QueryParam) bool {
-			for _, param := range params {
-				if param.Validates() {
-					return true
-				}
-			}
-			return false
 		},
 		"escape_backslash": func(s string) string {
 			s = strings.ReplaceAll(s, "\\", "\\\\")
@@ -1208,16 +1272,6 @@ func toPascalCaseToolName(name string) string {
 		}
 	}
 	return result.String()
-}
-
-func queryParamHasValidation(param apigen.Param) bool {
-	return param.ValidateMin != nil ||
-		param.ValidateMax != nil ||
-		param.ValidateMinLength != nil ||
-		param.ValidateMaxLength != nil ||
-		param.ValidateListMin != nil ||
-		param.ValidateListMax != nil ||
-		param.ValidatePattern != ""
 }
 
 // sendsText reports whether a parameter's value is text on the wire: not a

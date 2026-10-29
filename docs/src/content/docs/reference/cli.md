@@ -136,7 +136,11 @@ rules, and the verification pass, warnings included. A DB service's
 declared queries are held to its `queries.lock`, which
 [`queries verify`](#queries-verify-service-dir) writes; a query the lock
 does not hold, as it is now, is an error on the lock, as it fails `build`
-too. It writes nothing
+too. Its projections' migration pairs are held to its `projections.lock`,
+which `build` writes: a pair that would change under a stamp the lock
+records is an error on that lock, naming the next stamp
+([The migration stamp](/superschematic/reference/projections/#the-migration-stamp)).
+It writes nothing
 under the output root. Like a build it writes each service's sentinel,
 `src/service.generated.ts`, the handle other services' configs import,
 when it is missing or stale.
@@ -203,7 +207,7 @@ tsconfig or a new service directory discovers the services again and
 re-checks them all. It never exits on errors, and stops at Ctrl-C.
 
 It watches the `.ts`, `.json`, `.yaml`, `.yml` and `.toml` files and the
-`queries.lock` of each
+`queries.lock` and `projections.lock` of each
 service outside `node_modules`, `dist`, `target` and hidden directories,
 the schemas root's `superschematic.toml` and `tsconfig.base.json`, and the
 file `--naming` names. It polls rather than subscribing to file events: a
@@ -355,6 +359,16 @@ as a committed language must. Pair it with `--out`, so the two servers do
 not share an output root; a build's cache stamps come from `build-all`,
 which has no such flag.
 
+A DB service's build records each projection migration stamp it writes in
+the service's `projections.lock`, and fails, writing nothing, when a
+projection's pair would change under a stamp the lock records, naming the
+next stamp to give it
+([The migration stamp](/superschematic/reference/projections/#the-migration-stamp)).
+`--rewrite-migration <stamp>` writes that stamp's pair again and records
+it in place of the old one, for a stamp no database has applied. It names
+a stamp a projection of the target declares, and builds a DB service
+alone, without `--with-deps`.
+
 `outputs.api.mcp: true` makes a TypeScript API's router serve the API's
 visible `@mcp` operations as MCP tools at `POST /api/mcp`, beside its
 OpenAPI document at `GET /api/openapi.json`, which every server serves
@@ -382,7 +396,8 @@ Rust API's is a crate at the `rust` template (`rust/{service}`): a
 crate's `Handlers`, written only while the directory holds no
 `Cargo.toml`.
 Without the flag a build writes nothing outside the output root, except a
-stack's: building a `Stack` service writes each Go and TypeScript server's
+DB service's `projections.lock` and the projection pairs `outputs.sql.migrationsDir`
+places, and a stack's: building a `Stack` service writes each Go and TypeScript server's
 entrypoint under `server/<stack>/<server>` in the output root and
 scaffolds, with no
 flag, each API its servers serve whose implementation is missing, with a
@@ -404,6 +419,7 @@ superschematic build ./schemas/services/shop-db
 superschematic build ./schemas/services/shop-db --emit-ir | jq .types
 superschematic build --with-deps ./schemas/services/shop-api
 superschematic build --with-deps --api-language RUST --out ./schemas/dist-rust ./schemas/services/shop-api
+superschematic build ./schemas/services/finances-db --rewrite-migration 20261028120000
 ```
 
 | Flag | Default | Meaning |
@@ -416,6 +432,7 @@ superschematic build --with-deps --api-language RUST --out ./schemas/dist-rust .
 | `--naming` | `<service-dir>/../../superschematic.toml` | naming config file |
 | `--api-language` | the config's | build the target's API server in this language (`GO`, `RUST` or `TYPESCRIPT`) |
 | `--scaffold` | false | write the implementation scaffold of each Go, TypeScript or Rust API built whose package is missing, at the `[implementation_paths]` template of its language |
+| `--rewrite-migration` | none | a projection's migration stamp whose pair the build writes and records again although `projections.lock` records other files under it, for a stamp no database has applied; repeatable; a DB service alone, not with `--with-deps` |
 
 ## `build-all <services-root>`
 

@@ -101,6 +101,13 @@ type Options struct {
 	// checkout.
 	SchemasRoot string
 
+	// RewriteMigrations are projection migration stamps the sql generator
+	// writes again, and records again in the service's projections.lock,
+	// although the lock records other files under them (D102): build
+	// --rewrite-migration, for a stamp no database has applied. Without
+	// it, a stamp whose files would change fails the build.
+	RewriteMigrations []string
+
 	// Release is the release of superschematic the generated code pins:
 	// the one a stack's workflow installs, and the modules and static
 	// archives a server takes when no [paths] key names a checkout of them
