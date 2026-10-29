@@ -5,7 +5,7 @@ go 1.26.4
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/invopop/jsonschema v0.14.0
-	github.com/microsoft/typescript-go v0.0.0
+	github.com/microsoft/typescript-go/shim v0.0.0
 	github.com/parable-work/superscalar/go v0.0.0-20261025233249-5cc6787bc45f
 	github.com/parable-work/superschematic/ir v0.0.0
 	github.com/robfig/cron/v3 v3.0.1
@@ -15,6 +15,8 @@ require (
 	golang.org/x/text v0.41.0
 	gopkg.in/yaml.v3 v3.0.1
 )
+
+require github.com/microsoft/typescript-go v0.0.0 // indirect
 
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
@@ -34,6 +36,10 @@ require (
 
 replace github.com/parable-work/superschematic/ir => ./ir
 
-// Project Corsa (TypeScript 7.0 Go compiler), pinned fork exposing the shim
-// packages the tsreader frontend programs against. Upgraded in dedicated PRs.
-replace github.com/microsoft/typescript-go => github.com/parable-work/typescript-go v0.0.0-20260701192534-c5de5679073f
+// Project Corsa (TypeScript 7.0 Go compiler): Microsoft's unmodified compiler
+// at the v7.0.2 commit, and the shim module (parable-work/typescript-shim)
+// that exposes the packages the tsreader frontend programs against. Upgraded
+// in dedicated PRs.
+replace github.com/microsoft/typescript-go => github.com/microsoft/TypeScript/tsc v0.0.0-20260708042240-1e4744d68260
+
+replace github.com/microsoft/typescript-go/shim => github.com/parable-work/typescript-shim v0.0.0-20261028220021-9c62d2c703d9
