@@ -1,0 +1,22 @@
+[package]
+name = "superschematic-rules"
+description = "The pure core of the behaviors (D103): a command and the state it asks for in, a refusal or a change set out, with no I/O"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# Nothing here does I/O (D103): no database driver, no runtime, no clock, no
+# randomness and no id source, so the crate builds for wasm32-unknown-unknown
+# as it does for a host's target.
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+# The engine's JSON features (D58): a number keeps its text, an object its
+# members' order, so a change set's values and an outcome's JSON read as the
+# engine wrote them.
+serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
+
+[lints]
+workspace = true

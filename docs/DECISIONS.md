@@ -13673,5 +13673,38 @@ change's to settle.
 7. The conversion, and engine types removed from the servers and from
    acme-shop's `shop-db`.
 
-Status: not built. The names and rules are reversible until the first
-release.
+Status: step 1 built; steps 2 to 7 are not. The names and rules are
+reversible until the first release.
+- **The core.** `runtime/engine/rust/rules` (`superschematic-rules`)
+  depends on serde and serde_json alone and builds for
+  wasm32-unknown-unknown. `Core::run(type, command, answers)` returns
+  `Read`, `Lock` or `Done`, and a host resumes it by running it again
+  with more answers; an answer made before the latest lock is asked for
+  again. A use is anchored on the type or on a field, and a field anchor
+  names its behavior's value field. The change set holds every row the
+  command writes, each with its type, key and expected version, and each
+  sub-table row, outbox event and deadline names its row, so a use can
+  reach another type's row through `Cx::call_on` and `Cx::create_row`.
+  `Cx::new_key` derives sub-row keys from the command's request id. A
+  create or update that names a field anchor's field in its own fields is
+  refused: only the behavior's operations change it. `tests/core.rs` has
+  30 cases.
+- **Workflow.** `rules-behaviors` (`superschematic-rules-behaviors`)
+  ports it with the engine's wording and reads its declaration file in
+  place. Its config checks are hand-written, and a test holds them to the
+  file's configSchema and paramsSchema exactly. `tests/workflow.rs` has 19
+  cases, including two Workflow fields on one type.
+- **The replay.** `rules-testkit` (`superschematic-rules-testkit`) holds an
+  in-memory reference host, which applies a change set whole or not at
+  all, runs a moved command again up to eight times and fires due
+  deadlines, and a replayer of the engine's recordings.
+  `core-workflow.json` replays as 16 scenarios, 154 steps checked, 4
+  skipped and 0 mismatches. Each refusal is compared in full: class, code,
+  status, message and details. The floor is 154. The four skipped steps
+  test the engine's store: the test's own SQL against its columns, and
+  own-field validation.
+- **Left for later steps.** `Cx::unchanged()` for an idempotent operation
+  that writes nothing; refusing writes made in a delete's after-change
+  hooks, which are dropped today; `requires` in a declaration; outbox
+  events of a behavior's own, which come with `Reactions`; the core
+  checking a deadline is still armed, which today each adapter must do.
