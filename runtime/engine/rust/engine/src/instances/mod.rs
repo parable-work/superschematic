@@ -694,18 +694,10 @@ fn start_operation(
     let engine = probe.engine;
     let spec = found.spec();
     let schema = found.record.name.as_str();
-    engine.access.require_operation(
-        principal,
-        if spec.writes {
-            SchemaAction::Write
-        } else {
-            SchemaAction::Read
-        },
-        namespace,
-        schema,
-        Some(&spec.name),
-    )?;
-    if spec.writes {
+    engine
+        .access
+        .require_operation(principal, spec.asks(), namespace, schema, Some(&spec.name))?;
+    if spec.refused_when_archived() {
         probe.view.require_writable(namespace)?;
     }
     check_expected_seq(options.expected_seq)?;
@@ -803,6 +795,9 @@ pub(crate) fn run_operation(
     let schema = record.name.as_str();
     let spec = found.spec();
     let bound = found.bound();
+    if spec.beside {
+        return run_beside(reach, found, id, checked, expected_seq, preconditions);
+    }
     chain.write(schema, id, || {
         let row = existing(reach.tx, namespace, schema, id)?;
         match_seq(&row, expected_seq)?;
@@ -817,7 +812,7 @@ pub(crate) fn run_operation(
             Own::Row(row.clone()),
             true,
         );
-        let before = execution.fields(None)?;
+        let before = execution.logged_fields()?;
         let (result, unchanged) =
             execution.operate(bound, spec, checked, None, preconditions)?;
         // A call that says it changed nothing, and wrote nothing, writes
@@ -830,14 +825,23 @@ pub(crate) fn run_operation(
             Some(_) => Some(execution.data()?),
             None => None,
         };
+        let own_patch = match (&own, &own_after) {
+            (Some(own), Some(own_after)) => Some(diff_patch(own, own_after)),
+            _ => None,
+        };
+        // Only the fields the call changed keep their attribution.
+        let attribution = own_patch
+            .as_ref()
+            .and_then(|changed| execution.attribution(changed));
         let change = InstanceChange::Operation {
             behavior: &bound.behavior.name,
             operation: &spec.name,
             params: checked,
             before: own.as_deref(),
+            attribution: attribution.as_ref(),
         };
         execution.after_change(&change)?;
-        let after = execution.fields(None)?;
+        let after = execution.logged_fields()?;
         let seq = row.i64("seq")? + 1;
         Reads::forget_instance(reach.tx, namespace, schema, id);
         reach.tx.run(
@@ -862,10 +866,6 @@ pub(crate) fn run_operation(
             &BTreeSet::new(),
             &BTreeSet::new(),
         )?;
-        let own_patch = match (&own, &own_after) {
-            (Some(own), Some(own_after)) => Some(diff_patch(own, own_after)),
-            _ => None,
-        };
         let patch = values.stow_change(
             reach.tx,
             "/patch",
@@ -877,10 +877,15 @@ pub(crate) fn run_operation(
         let mut base = Map::new();
         base.insert("behavior".into(), Value::from(bound.behavior.name.as_str()));
         base.insert("operation".into(), Value::from(spec.name.as_str()));
-        let logged = Stowed::join(
+        let mut logged = Stowed::join(
             base,
             vec![("params".to_owned(), params), ("patch".to_owned(), patch)],
         );
+        if let Some(attribution) = &attribution {
+            logged
+                .value
+                .insert("attribution".into(), Value::Object(attribution.clone()));
+        }
         append_event(
             reach.tx,
             &NewEvent {
@@ -905,6 +910,82 @@ pub(crate) fn run_operation(
             _ => moves(&record_fields(None, before), &record_fields(None, after)),
         };
         reach.referenced(schema, id, &change, &moved)?;
+        Ok((result, seq))
+    })
+}
+
+// run_beside runs a beside operation (D77) inside the call's transaction:
+// its own behavior's guard and its handler, which writes only its
+// behavior's own tables and columns. The instance keeps its seq, its
+// updatedAt and updatedBy, no afterChange and no reference's hook runs,
+// and a logged one appends an operation event of no sequence, whose change
+// is `{ behavior, operation, params, result }`. The result, with the
+// instance's sequence, which it read.
+fn run_beside(
+    reach: &Reach<'_, '_>,
+    found: &FoundOperation,
+    id: &str,
+    checked: &Value,
+    expected_seq: Option<i64>,
+    preconditions: Option<&Preconditions>,
+) -> Result<(Value, i64)> {
+    let chain = reach.chain;
+    let namespace = chain.namespace.as_str();
+    let record = &found.record;
+    let schema = record.name.as_str();
+    let spec = found.spec();
+    let bound = found.bound();
+    chain.write(schema, id, || {
+        let row = existing(reach.tx, namespace, schema, id)?;
+        match_seq(&row, expected_seq)?;
+        let seq = row.i64("seq")?;
+        let execution = Execution::new(
+            *reach,
+            Arc::clone(&found.runtime),
+            schema,
+            record.version.unwrap_or_default(),
+            id,
+            Own::Row(row),
+            true,
+        );
+        let (result, unchanged) = execution.operate(bound, spec, checked, None, preconditions)?;
+        if unchanged || !spec.log {
+            return Ok((result, seq));
+        }
+        let values = &reach.engine.values;
+        let params = values.stow(
+            reach.tx,
+            &object_of(checked.clone()),
+            "/params",
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+        )?;
+        let mut tail = Map::new();
+        tail.insert("result".into(), result.clone());
+        let tail = values.stow(reach.tx, &tail, "", &BTreeSet::new(), &BTreeSet::new())?;
+        let mut base = Map::new();
+        base.insert("behavior".into(), Value::from(bound.behavior.name.as_str()));
+        base.insert("operation".into(), Value::from(spec.name.as_str()));
+        let mut logged = Stowed::join(base, vec![("params".to_owned(), params)]);
+        logged.value.extend(tail.value);
+        logged.refs.extend(tail.refs);
+        logged.hashes.extend(tail.hashes);
+        append_event(
+            reach.tx,
+            &NewEvent {
+                kind: "operation",
+                namespace,
+                schema,
+                instance_id: Some(id),
+                seq: None,
+                version: record.version,
+                actor: &actor_of(&chain.principal),
+                at: chain.now,
+                change: Some(json::stringify(&Value::Object(logged.value.clone()))),
+                cause: chain.cause.as_ref(),
+                values: Some((values, &logged)),
+            },
+        )?;
         Ok((result, seq))
     })
 }
@@ -990,7 +1071,7 @@ fn update(
         true,
         preconditions.as_ref(),
     )?;
-    let before = execution.fields(None)?;
+    let before = execution.logged_fields()?;
     let seq = row.i64("seq")? + 1;
     write_own(
         engine,
@@ -1024,7 +1105,10 @@ fn update(
         before: &current,
     };
     execution.after_change(&change)?;
-    let after = execution.fields(None)?;
+    // The result is what the caller reads; the event and the moves record
+    // the instance's fields alone, not the caller's own.
+    let read = execution.fields(None)?;
+    let after = execution.logged(&read);
     let logged = engine.values.stow_change(
         tx,
         "",
@@ -1049,11 +1133,7 @@ fn update(
             values: Some((&engine.values, &logged)),
         },
     )?;
-    let updated = to_instance(
-        &existing(tx, namespace, schema, id)?,
-        merged.clone(),
-        after.clone(),
-    )?;
+    let updated = to_instance(&existing(tx, namespace, schema, id)?, merged.clone(), read)?;
     reach.referenced(
         schema,
         id,
@@ -1275,8 +1355,10 @@ pub(crate) fn insert(
         )?;
         execution.initialize(&params)?;
         execution.after_change(&InstanceChange::Create)?;
-        let fields = execution.fields(None)?;
-        let instance = to_instance(&existing(tx, namespace, schema, id)?, own, fields.clone())?;
+        let read = execution.fields(None)?;
+        // The event records the instance's fields, not the caller's own.
+        let fields = execution.logged(&read);
+        let instance = to_instance(&existing(tx, namespace, schema, id)?, own, read)?;
         // The event's instance is what a read returns, { data, behaviors }:
         // its own fields keep the row's refs, and a large field of a
         // behavior's goes to the store as an own field does.

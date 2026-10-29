@@ -11,6 +11,7 @@ declare module "@superschematic/stack" {
       job: { cpu?: string };
       bucket: { versioning?: boolean };
       worker: { memory?: string };
+      memoryStore: { nodeType?: string };
     };
   }
 }

@@ -1,0 +1,31 @@
+# The program of app Backoffice of the shop-stock API (D78): the back
+# office staff run the warehouse from, a Topcoat app over the crate the
+# Topcoat extension writes for shop-stock (superschematic.toml's
+# [extension.topcoat] lists it).
+#
+# superschematic wrote this crate once, as a scaffold, and never writes it
+# again. Each build of shop-stack copies it into the output root's impl/,
+# with its path dependencies re-based there, and the app's entrypoint
+# depends on that copy and calls its `serve` with the app's parts. The
+# paths below name the default output root, schemas/dist, which
+# `superschematic-topcoat build-all` writes, for an editor and the crate's
+# own `cargo check`.
+[package]
+name = "acme-shop-stock-backoffice-app"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99.0"
+publish = false
+
+[dependencies]
+# The generated API crate, whose apps::BackofficeParts `serve` takes.
+acme-shop-stock-api = { path = "../../schemas/dist/api/shop-stock" }
+# shop-stock's Topcoat crate: its pages under /stock, the engine console
+# under /stock/engine, and the identity pages, which
+# RouterBuilderShopStockExt::shop_stock_with_parts sets up from the parts.
+acme-shop-stock-topcoat = { path = "../../schemas/dist/topcoat/shop-stock" }
+tokio = { version = "1", features = ["net"] }
+topcoat = "0.10"
+
+# Its own workspace, so no Cargo.toml above this directory claims it.
+[workspace]

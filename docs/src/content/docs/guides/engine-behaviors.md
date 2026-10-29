@@ -1,6 +1,6 @@
 ---
 title: Engine behaviors
-description: Compose the engine's behaviors on a type in TypeScript or JSON; read their fields under each behavior's name; engine types in a DB schema and their engine document; label a type's instances, states and transitions with @display; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants, Branches, Timers, StateRules, Numbering and Approvals behaviors.
+description: Compose the engine's behaviors on a type in TypeScript or JSON; read their fields under each behavior's name; engine types in a DB schema and their engine document; label a type's instances, states and transitions with @display; create parameters; schema-level and namespace operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants, Branches, Timers, StateRules, Numbering, Approvals, Derived and Provenance behaviors.
 sidebar:
   order: 7
 ---
@@ -9,8 +9,8 @@ sidebar:
 with `Workflow`, `Comments` and `Revisions`. This page covers the rest of
 the behaviors the engine runs with no extension, and the mechanisms the
 newer ones lean on: parameters a create gives its behaviors, operations
-that run on a whole schema, and the runner that does work after a change
-commits.
+that run on a whole schema or across a namespace, and the runner that
+does work after a change commits.
 
 The
 [engine README](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#core-behaviors)
@@ -20,9 +20,9 @@ which CI runs on Node.js and Bun.
 
 ## Every behavior at a glance
 
-The core declares twenty-six behaviors, so every binary's meta-schema
-admits a schema that composes them. The engine implements fifteen itself
-and registers them when it opens. Seven are claimable work, the work
+The core declares twenty-eight behaviors, so every binary's meta-schema
+admits a schema that composes them. The engine implements seventeen
+itself and registers them when it opens. Seven are claimable work, the work
 queue's Rust behaviors, which the engine's addon is built with; the
 engine refuses a schema that composes one until a deployment names them
 in the engine's `behaviors` option (`workQueueBehaviors`, from
@@ -36,7 +36,7 @@ server does.
 | Behavior | What it adds | Requires | Covered in |
 | --- | --- | --- | --- |
 | `Workflow` | a `status` that moves only along declared transitions, each optionally behind a permission, and that a list filters on; `enteredAt`, when it last moved; an [outcome](#outcomes) for each terminal state | | [The engine](/superschematic/guides/engine/#workflow) |
-| `Comments` | comments on the instance | | [The engine](/superschematic/guides/engine/#comments) |
+| `Comments` | a conversation on the instance: messages and their one-level threads, which their authors edit and delete and others react to, pin and resolve, every operation beside the instance; blocks beside a message's body (refs, action cards, code anchored at a revision, which `moveAnchor` moves, and attachments the deployment stores); a reply streamed as it is written (`begin`, `appendDraft`, `finish`), the [signals](/superschematic/guides/engine/#signals) `typing`, `viewing` and `draft`, each reader's read markers and follows, the pinned messages (`listPinned`), who a message was written for when its author acted for someone, and across the namespace an inbox, a search of the messages' bodies and the deliveries a notifier or an agent dispatcher claims | | [The engine](/superschematic/guides/engine/#comments) |
 | `Revisions` | a revision at every change, and an optional propose, approve and reject step | | [The engine](/superschematic/guides/engine/#revisions) |
 | `Dependencies` | blockers that hold a transition until they finish | `Workflow` | [Dependencies](#dependencies) |
 | `Links` | named links to instances of other schemas, optionally pinned to a revision or a release | | [Links](#links) |
@@ -50,6 +50,8 @@ server does.
 | `Approvals` | sign-offs by distinct principals that a move into a state waits for, consumed by a change of the instance | `Workflow` | [Approvals](#approvals) |
 | `Numbering` | a number a person reads, `INV-2026-0042`, set at the create from a count per schema, per scope target and per year, that a list filters on | | [Numbering](#numbering) |
 | `Timers` | named deadlines from the create, an entry into a state or a date-time field, which the runner fires once due, moving the status | `Workflow` for a deadline that names a state | [Timers](#timers) |
+| `Derived` | own fields a model outside the engine fills from other own fields, under an instruction the schema holds, which a deriver pulls and settles by hash; a person's write wins | `Workflow` for a field that names states | [Derived](#derived) |
+| `Provenance` | who set each own field last and through what, with the confidence the writer gave, and a review that holds a source's writes until a person accepts them | `Workflow` for a gate | [Provenance](#provenance) |
 | `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` | claimable work: leases, claims, worker heartbeats, stamped children, budgets and retries | varies | [Work queues](/superschematic/guides/work-queues/) |
 | `Stock`, `Calendar`, `Holds`, `Payments` | commerce: units a supply counts, time it opens, a claim's holds on either through the supply contract, and what a claim owes and how a provider settles it | `Workflow` for `Holds` | [Selling and booking](/superschematic/guides/commerce/) |
 
@@ -168,13 +170,31 @@ same.
   A behavior that adds no field, such as `Search` or `Constants`, has
   none.
 - **Volatile fields.** A field the engine computes at a read, from other
-  instances, the clock or the config, moves with no event of its own
-  instance: `Dependencies.blocked`, `Links.targets`, `Rollups.values`,
-  `Lease.active` and `Budget.meters`. Its declaration says
-  `"volatile": true`, and so does the describe document.
+  instances, the clock or the config, or from what operations beside the
+  instance keep, moves with no event of its own instance:
+  `Dependencies.blocked`, `Links.targets`, `Rollups.values`,
+  `Lease.active`, `Budget.meters`, and Comments' `messages`,
+  `lastMessageAt`, `threads`, `composing` and `unread`. Its declaration
+  says `"volatile": true`, and so does the describe document. Comments'
+  `unread` is the one field that differs by who reads: the reader's
+  count of top-level messages of others since its read marker. It also
+  says `"perReader": true`, so no event records it: an operation's patch,
+  an update's and a create event's instance leave it out, and a read
+  computes it for each caller.
 - **The log.** An event's change is a merge patch of `{ data, behaviors }`:
   a create the whole instance, an update its patch under `data` and what
-  its behaviors' fields took under `behaviors`.
+  its behaviors' fields took under `behaviors`. An operation beside the
+  instance, such as Comments' `post`, writes only its behavior's own
+  tables: its event has no `seq`, carries `beside: true` and the
+  operation's `result` in place of a patch, and leaves the instance's
+  ETag where it was.
+- **Signals.** What a behavior says about an instance without storing it,
+  a typing indicator or a draft's next chunk, is a signal, not a field:
+  the engine hands it to the event streams opened with signals and keeps
+  nowhere ([signals](/superschematic/guides/engine/#signals)). A read
+  never returns one, and the generated types below hold none; the
+  [typed client](/superschematic/guides/engine/#typed-wrappers-for-your-schemas)
+  types their data.
 
 ### In the generated types
 
@@ -393,8 +413,13 @@ more keys of the database's `outputs.engine` say how:
   `"permission"` unless set, which allows an action on a type to a caller
   holding `<Type>.<action>` (`Ticket.read`, `Ticket.write`,
   `Ticket.define`, `Ticket.publish`), the permissions the API's
-  `permissions.json` then lists; `"allowAll"`, for tests and local use; or
-  `{ "rules": [...] }`, the engine's ordered rules.
+  `permissions.json` then lists, and to a caller [acting for
+  someone](/superschematic/guides/engine/#callers-and-the-access-policy)
+  only when it also holds `actFor`; `"allowAll"`, for tests and local
+  use; or `{ "rules": [...] }`, the engine's ordered rules, where only a
+  rule that names `actingFor` allows a caller acting for someone, and a
+  deny that leaves it out refuses such a caller as it refuses one acting
+  as itself.
 - **`retention`** is how long the event log keeps events, as the engine's
   `retention` option reads it (see the runner below): `maxAgeMs`,
   `maxEvents` or both, and `maxHoldMs`, `everyMs` and `batchSize`, each
@@ -442,6 +467,11 @@ let app = Router::builder()
     .shop_orders(implementations, page_authenticator, engine)
     .build();
 ```
+
+With the crate's pages on, its console also pages the engine's types at
+`<prefix>/engine`, each behavior in a panel and each operation as a form,
+every call the signed-in caller's ([Engine
+pages](/superschematic/guides/topcoat/#engine-pages)).
 
 ### The project's engine crate
 
@@ -581,8 +611,9 @@ refuses a title that is not one of the type's own text fields, a summary
 field that is neither the type's nor its behaviors', and a state or a
 transition the `Workflow` config does not list, with the compiler's
 wording. The describe document carries the instance type's display, its
-fields with their `@docs` titles and `@icon`s, and each operation's
-title. [Documentation decorators](/superschematic/reference/documentation/#display-on-a-type)
+fields with their `@docs` titles, `@icon`s and `@display`s (`multiline`,
+and `currency`, a code or another field by its JSON key), and each
+operation's title. [Documentation decorators](/superschematic/reference/documentation/#display-on-a-type)
 has every rule.
 
 ## Create parameters
@@ -667,6 +698,67 @@ tables where no read of an instance shows the change, as
 `settleEmbeddings` stores vectors. Each
 route answers 404 for an operation of the other scope. Over MCP, the tool
 takes the operation's parameters and no instance id.
+
+## Namespace operations
+
+An operation a behavior declares with `scope: "namespace"` runs on the
+behavior's own tables across every schema of a namespace that composes
+it, with no instance and no schema: "my mentions" or "what is unread"
+over every conversation. Comments declares four:
+
+| Operation | What it does |
+| --- | --- |
+| `inbox` | the caller's mentions, the threads it follows with replies of others, and the conversations it has read with new top-level messages, newest first, read-only |
+| `searchMessages` | the messages whose bodies hold the query's words, ranked, over the schemas the caller may read, read-only |
+| `claimDeliveries` | claims due deliveries, one per message and subject that should hear of it, under a token that lapses |
+| `settleDeliveries` | settles claimed deliveries `sent`, `failed` (tried again after a backoff) or `dropped` |
+
+Each is called by its behavior's name:
+
+```
+POST /namespaces/{namespace}/behaviors/{behavior}/operations/{operation}
+```
+
+```ts
+engine.behaviors.invoke(me, { namespace: 'default', behavior: 'Comments', operation: 'inbox', params: { limit: 20 } });
+client.behaviors.invoke('Comments', 'inbox', { limit: 20 });
+```
+
+It is no operation of a type: a schema's operation routes, `invoke` and
+`invokeSchema` answer 404 for it, the describe document lists it under
+its behavior as `namespaceOperations`, not among the type's operations,
+and `engine-client` types it apart from every schema's client,
+`commentsNamespaceClient(client, namespace?)`
+([typed wrappers](/superschematic/guides/engine/#typed-wrappers-for-your-schemas)).
+Its MCP tool is named after the behavior: `comments.inbox`, handle
+`comments_inbox`. Two behaviors of a type may each declare one of the
+same name, since neither is the type's. A namespace operation is never
+beside an instance and appends no event; a writing one writes only its
+behavior's tables, under the namespace's writer, and an archived
+namespace refuses it.
+
+The access policy is asked a question that names the behavior and no
+schema: `{ principal, action, namespace, behavior, operation }`, `action`
+`read` or `write` as the operation declares, and with `listing: true`
+while the tools document lists its tool. The engine keeps a row of a
+schema only when the caller may read that schema, asking `read` once per
+schema per call and skipping a refused one, so a policy may let every
+read one through. `permissionPolicy()` does, and allows a writing one to
+a caller holding `<behavior>.<operation>`: `Comments.claimDeliveries`.
+A policy of rules matches the question with a rule's `behavior`.
+
+A behavior's handler gets a `NamespaceContext`: `can()`, `configs()`,
+each composing schema with its config, read-only instance calls, and
+`sql`, whose `readable()` names the schemas the caller may read for a
+statement to join. The engine README's
+[namespace operations](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#namespace-operations)
+section has the rules, for an extension's behavior too.
+
+An instance operation that writes only its caller's own state, and
+appends no event, may declare `"asks": "read"` beside `"beside": true`
+and `"log": false`: the policy is asked `read` for it, so a caller who
+may only read the instance may call it, and an archived namespace lets
+it run. Comments' `markRead` and `follow` do.
 
 ## Refusals and preconditions
 
@@ -1152,13 +1244,13 @@ failed step while the first is still failed; `anyTerminal` would fail it
 again. An `all` over no step sets nothing off, so removing a run's last
 unfinished step completes it only when a passed step is left.
 
-A ticket escalates when its priority turns urgent, and is triaged at its
-first comment:
+A ticket escalates when its priority turns urgent, and is triaged once
+its severity is set:
 
 ```json
 { "name": "Reactions", "config": { "rules": [
     { "when": { "changes": { "field": "priority", "to": "urgent" } }, "then": { "transition": "escalated" } },
-    { "when": { "changes": { "field": "Comments.commentCount", "from": 0 } }, "then": { "transition": "triaged" } } ] } }
+    { "when": { "changes": { "field": "severity", "from": "unset" } }, "then": { "transition": "triaged" } } ] } }
 ```
 
 A rule reads the move from the event, so an update that gives the
@@ -1188,7 +1280,8 @@ claimed meanwhile ([Work queues](/superschematic/guides/work-queues/)).
   the status that cycle, are refused when the schema is defined. So is a
   `changes` on a volatile field, one the engine computes at a read from
   other instances, the clock or the config (`Rollups.values`,
-  `Dependencies.blocked`, `Links.targets`), since no event records its
+  `Dependencies.blocked`, `Links.targets`) or that operations beside the
+  instance keep (`Comments.messages`), since no event records its
   moves, and on `Workflow.enteredAt`, which every move of the status
   moves.
 - Rules across instances can chain, a `holds` rule up a tree of tasks
@@ -1701,6 +1794,216 @@ engine.instances.get(me, "requests", "jam")?.behaviors;
 - **Lease.** On a leased type, list `"Timers.fireTimer"` in `Lease`'s
   `exempt`, or the holder's lease refuses the runner's fire
   ([Work queues](/superschematic/guides/work-queues/#lease)).
+
+## Derived
+
+Own fields that a model outside the engine fills from other own fields:
+a ticket's category and priority, an article's summary, a document's
+extracted dates. The engine calls no model, as it calls no embedder for
+[vectors](#vectors). A deriver, a worker holding the config's
+permission, pulls what is stale, asks its model, and settles the answers
+with the hash it pulled.
+
+```ts
+import { behavior } from "@superschematic/schema";
+
+export enum Category { Billing = "billing", Bug = "bug", Other = "other" }
+
+@behavior("Derived", {
+  fields: {
+    category: { from: ["subject", "body"], instruction: "Classify the request.", model: "standard" },
+    summary: { from: ["body"], instruction: "Summarize it in one sentence.", model: "simple" },
+  },
+  permission: "tickets.derive",
+})
+export abstract class Ticket {
+  subject: string;
+  body?: string;
+  category?: Category;
+  summary?: string;
+}
+```
+
+| | |
+| --- | --- |
+| Config | `fields` (required, 1 to 16): by own top-level field, `{ from, instruction, model, states? }`: the own fields the value is derived from (never itself or another derived field), what the model is asked (at most 4000 characters), a model label the deployment maps to a provider's model, and the states of the type's Workflow it is derived in (every state when absent). `permission` (required), what a deriver needs; `maxAttempts`, 3 by default, from 1 to 10 |
+| Fields | `fields`: by derived field, the last value settled, `{ sourceHash, model, settledAt, settledBy, confidence? }`, and `overridden: { by, at }` once a write overrode it. `stale` (volatile): the derived fields to compute again, in the config's order |
+| Operations | schema-level, for the deriver: `staleDerivations({ field?, limit?, cursor? })` and `failedDerivations({ limit?, cursor? })`, read-only, and `settleDerivations({ items })`. On the instance: `applyDerived({ fields })`, which a settle invokes, and `rederive({ fields? })` |
+| Vetoes | `not_derived`, a field the config does not derive; `moved`, a hash the field's inputs, instruction, model or type no longer give; `out_of_state`; `overridden`. A caller without `permission` is `forbidden` (403) to pull, settle and apply |
+| Refusals at define | a derived field or an input the type lacks, a field derived from itself or from another derived field, `states` on a type without Workflow or naming a state it lacks, and a derived field that `Constants` keeps |
+
+```ts
+const deriver: Principal = { subject: "deriver", permissions: ["tickets.derive"] };
+const page = engine.instances.invokeSchema(deriver, "tickets", "staleDerivations", { limit: 50 });
+// { items: [{ id: "t1", field: "category", sourceHash: "4be0...", attempt: 1,
+//             instruction: "Classify the request.", model: "standard",
+//             inputs: { subject: "Card declined", body: "..." },
+//             output: { enum: ["billing", "bug", "other", null], ... } }, ...],
+//   next: null }
+engine.instances.invokeSchema(deriver, "tickets", "settleDerivations", {
+  items: [{ id: "t1", field: "category", sourceHash: page.items[0].sourceHash, value: "billing", confidence: 0.9 }],
+});
+// { settled: 1, failed: 0, skipped: [] }
+```
+
+- **The output is the field's type.** An item's `output` is the derived
+  field's JSON Schema, as the describe document writes it: an enum field
+  is a pick, a boolean a yes or no, an integer with bounds a score, a
+  string text, an object an extraction. A value the type refuses is not
+  written.
+- **The hash.** `sourceHash` is the SHA-256 of the model label, the
+  instruction, the output schema and the inputs that hold a value. A
+  write of an input, or a version that changes the instruction, the model
+  or the field's type, moves it. The field is then stale, and its last
+  value stays until a new one settles. A field whose inputs all hold
+  nothing wants no value.
+- **Settling.** `settleDerivations` takes at most 100 items, each a
+  `value` (with an optional `confidence` from 0 to 1 and `usage`, which
+  the event's parameters keep for cost reports) or a `failure`
+  (`{ class?, message }`). It writes each instance's values through
+  `applyDerived`, one event per instance, in a savepoint, so a refusal
+  skips that instance's items alone: `skipped` gives each one's reason,
+  `not_found`, `not_derived`, `overridden`, `moved`, `out_of_state`,
+  `invalid` (with the type's `issues`) or `vetoed` (with the vetoing
+  `behavior` and its `code`). An item given twice, or with both a value
+  and a failure, refuses the whole call (`invalid_argument`).
+- **What the event holds.** `applyDerived` writes through the operation's
+  `update()`, so every `validate` and every guard on the type judges the
+  values, as they judge a caller's update: StateRules' frozen fields skip
+  a late settle as `vetoed`. Its event attributes each value to `Derived`
+  with its confidence (D16, amended).
+- **Failures append no event.** A failure, an `invalid` value and a
+  `vetoed` one count an attempt, beside the queue, as a vector settle
+  appends no event. After `maxAttempts` the field leaves the queue, and
+  `failedDerivations` lists it with its last failure, until its hash
+  moves or `rederive` asks for it again.
+- **A person's write wins.** When a caller's create or update, or another
+  behavior's operation, writes a derived field, Derived records the
+  override and stops deriving it: `staleDerivations` leaves it out and
+  `applyDerived` refuses it (`overridden`). `rederive` clears the
+  override, the attempts and the last value's hash, and keeps the value
+  until a new one settles.
+- **States.** A field with `states` is listed and applied only while the
+  status is one of them, so a resolved ticket's body can change without
+  its category being derived again.
+- **New versions.** Any config may change, and `Derived` can be added to
+  and removed from a schema with instances. A field an instance already
+  holds when Derived first keeps a row for it counts as overridden, by
+  `existing`, so adding Derived never writes over a value a person gave.
+  Removing it leaves the values as own fields.
+- **Lease.** On a leased type, list `"Derived.applyDerived"` in Lease's
+  `exempt`.
+- **Secrets stay in.** A `Secret<T>` field is refused as an input, by the
+  build and by the engine at define: a deriver sends its inputs to a
+  model outside the engine (D74).
+
+### Run a deriver
+
+`runDeriver`, from `@superschematic/engine` (and `/client`), is the loop
+a deriver runs: it pages each schema's stale fields, hands each to your
+`answer`, which calls a model, and settles each page's answers in one
+call. An answer that throws settles as a failure. When a pass finds
+nothing, it waits for a commit, or `idleMs`, and its `signal` stops it. A
+pass that meets `not_found` (a schema not yet published), `busy` or
+`unavailable` waits a second, doubling to thirty, and tries again
+(`onRetry` hears each), so a deriver may start before its document is
+deployed.
+
+```ts
+import { inProcess, runDeriver } from "@superschematic/engine";
+
+const deriver: Principal = { subject: "deriver", permissions: ["tickets.derive"] };
+await runDeriver({
+  source: inProcess(engine, deriver),            // or an EngineClient's instances
+  schemas: ["tickets"],
+  concurrency: 4,
+  signal: controller.signal,
+  answer: async (schema, item) => {
+    const reply = await myModel(item.model, item.instruction, item.inputs, item.output);
+    return { value: reply.value, confidence: reply.confidence, usage: reply.usage };
+  },
+});
+```
+
+A Rust host runs the same loop over its background engine with
+`superschematic_engine::derive::run_deriver` (the `background` feature),
+which calls the engine on the blocking pool and waits on the storage's
+notifier. A stack runs one as a deployable of its own, from a `@deriver`
+on an API ([Stacks](/superschematic/guides/stacks/)).
+
+## Provenance
+
+Who set each own field last and through what, and a review that holds
+some writes until a person accepts them.
+
+```json
+{ "name": "Provenance", "config": {
+    "review": { "sources": ["Derived"], "below": 0.8, "permission": "tickets.review" },
+    "gates": { "assigned": { "reviewed": ["category", "priority"] } } } }
+```
+
+| | |
+| --- | --- |
+| Config | `fields`: the own top-level fields it records, every one when absent. `review`, optional: `sources`, the other behaviors the type composes whose writes enter review; `below`, a confidence at or above which a write is accepted with no reviewer (every write from a source is proposed when absent); `permission`, what a reviewer needs. `gates`, optional: by state of the type's Workflow, `{ reviewed }`, the recorded fields or `"all"` that a move into it requires out of review |
+| Fields | `fields`: by recorded field, its last write, `{ source, by, for?, at, confidence?, review? }`; `source` is `caller` for a caller's create or update, else the behavior whose operation wrote it, `by` the principal's subject, `for` the subject it [acted for](/superschematic/guides/engine/#callers-and-the-access-policy), when it acted for one, `review` `{ state, by?, at? }` with a state of `proposed`, `accepted`, `rejected` or `edited`. `inReview`: whether any field is proposed, which a list filters on (`where: { "Provenance.inReview": true }`) |
+| Operations | `accept({ fields })`; `reject({ fields, patch? })`, which clears each field, or sets it to the patch's value, through its own `update()` |
+| Guard | a transition into a gated state while a field its gate lists is proposed is `vetoed` (`unreviewed_fields`), with `{ state, fields }` in `details.details` |
+| Vetoes | `not_recorded`; `not_in_review`, an accept or a reject of a field that is not proposed; `unreviewed_fields`. A caller without the review's `permission` is `forbidden` (403) to accept and to reject |
+
+- **The source.** A change's own fields are compared before and after it.
+  An operation's change names its behavior and carries the attribution
+  its `update()`s gave (D16, amended): an entry names the behavior that
+  wrote the field, from a `call()` too, and its confidence. Provenance's
+  fields move in the change's own event.
+- **Review.** A write from a source the review names is `proposed`, or
+  `accepted` with no `by` when its confidence reaches `below`. A
+  reviewer's `accept` keeps the value and records who accepted it.
+  `reject` writes the field as the reviewer, source `Provenance`, which
+  Derived records as an override, so the model does not propose a
+  rejected value again. A caller's write over a proposal makes it
+  `edited`.
+- **New versions.** Any config may change, and `Provenance` can be added
+  to and removed from a schema with instances. A field written before it
+  was added has no record until its next write.
+- **Lease.** List `"Provenance.accept"` and `"Provenance.reject"` in
+  Lease's `exempt`.
+
+### A model triages, a person confirms
+
+The two compose with StateRules and Reactions into a ticket that a
+model triages and a person confirms when the model is unsure:
+
+```json
+"behaviors": [
+  { "name": "Workflow", "config": { "states": ["new", "triage", "assigned", "resolved"],
+      "transitions": [{ "from": "new", "to": "triage" }, { "from": "new", "to": "assigned" },
+                      { "from": "triage", "to": "assigned" }, { "from": "assigned", "to": "resolved" }] } },
+  { "name": "Derived", "config": { "permission": "tickets.derive", "fields": {
+      "category": { "from": ["subject", "body"], "instruction": "Classify the request.", "model": "standard", "states": ["new", "triage"] },
+      "priority": { "from": ["subject", "body"], "instruction": "How urgent is this?", "model": "standard", "states": ["new", "triage"] } } } },
+  { "name": "Provenance", "config": {
+      "review": { "sources": ["Derived"], "below": 0.8, "permission": "tickets.review" },
+      "gates": { "assigned": { "reviewed": ["category", "priority"] } } } },
+  { "name": "StateRules", "config": { "states": { "assigned": { "required": ["category", "priority"] } } } },
+  { "name": "Reactions", "config": { "rules": [
+      { "when": { "changes": { "field": "Derived.fields.category.settledAt" } }, "then": { "transition": "assigned" } },
+      { "when": { "changes": { "field": "Derived.fields.priority.settledAt" } }, "then": { "transition": "assigned" } },
+      { "when": { "changes": { "field": "Provenance.inReview", "to": true } }, "then": { "transition": "triage" } },
+      { "when": { "changes": { "field": "Provenance.inReview", "to": false } }, "then": { "transition": "assigned" } } ] } }
+]
+```
+
+A settle whose priority comes back at 0.6 puts it in review: the third
+rule moves the ticket to `triage`, and the gate holds the first two.
+Once a reviewer accepts it, the fourth rule assigns the ticket. When the
+model is sure of both fields, the `settledAt` rules assign it with no
+person, the first one held by StateRules until both fields are there.
+
+A `changes` rule fires once, on the event that moves its field, and
+acts only where a transition exists and every guard allows it. So key a
+rule on a derived value only when the record is sure to be in a state
+the rule's move leaves from; otherwise move on the gate's own signals,
+as here.
 
 ## Where to go next
 

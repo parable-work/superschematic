@@ -77,7 +77,7 @@ lengths or other rules, and the engine checks none of them.
 | Python types | `Dict[str, str]` | superscalar's `GeoLocation` `TypedDict`, or `Dict[str, Any]` where superscalar is not installed | `list[float]` |
 | Rust types | `HashMap<String, String>` | `superscalar::metadata::geo_location::Location`, under the scalar crate's name | `Vec<f32>` |
 | OpenAPI | `object` with string values | `object` | `array` of numbers |
-| SQL | `JSONB` | `POINT` | `TEXT` |
+| SQL | `JSONB` | `POINT` | pgvector's `vector(n)`, with `Validate`'s `dimensions`; a table's field without them fails the load ([Vectors](/superschematic/guides/database-tables/#vectors)) |
 
 The generated Go `Parse<Symbol>` reads the value's JSON text:
 `ParseEmbeddingVector("[0.5, 1]")` returns `[]float32{0.5, 1}`, and

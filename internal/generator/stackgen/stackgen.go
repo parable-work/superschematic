@@ -93,7 +93,7 @@ func Resolve(c registry.GenerateContext, st *ir.Stack, services []stack.Service)
 // Services loads the facts of every service st reaches, as resolution
 // collects them: its entry points and the services its declared
 // deployables serve and host, and from each API service its authDb, its
-// DB dependencies, its calls and its buckets. Each is loaded with
+// DB dependencies, its calls, its buckets and its memory stores. Each is loaded with
 // c.LoadDependency, its
 // outputs come from c.Options.LoadDependencyConfig, and Service reads the
 // facts from the two. A handle to a service of the wrong kind is loaded
@@ -146,6 +146,7 @@ func Services(c registry.GenerateContext, st *ir.Stack) ([]stack.Service, error)
 		}
 		reach(svc.Calls...)
 		reach(svc.Buckets...)
+		reach(svc.MemoryStores...)
 	}
 	return services, nil
 }
@@ -227,9 +228,10 @@ func declaresUserModel(c registry.GenerateContext, schema *ir.Schema, public boo
 }
 
 // SiteOf reads what a Site service builds and where its code is (D55): its
-// config with every default filled in, and its package at the naming
-// file's [implementation_paths] site template, relative to the repository
-// root, where the provisioners and the deploy find it.
+// config with every default filled in, its dev server's among them (D82),
+// and its package at the naming file's [implementation_paths] site
+// template, relative to the repository root, where the provisioners and
+// the deploy find it.
 func SiteOf(schema *ir.Schema, n naming.Naming) (*ir.ResolvedSite, error) {
 	cfg := ir.SiteConfig{}
 	if schema.Site != nil {
@@ -244,5 +246,6 @@ func SiteOf(schema *ir.Schema, n naming.Naming) (*ir.ResolvedSite, error) {
 		Build:    cfg.Build,
 		Output:   cfg.Output,
 		Fallback: cfg.Fallback,
+		Dev:      cfg.Dev,
 	}, nil
 }

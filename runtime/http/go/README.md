@@ -14,11 +14,13 @@ depends on a generated type.
 | `routing` | route registration and handler adapter scaffolding |
 | `session` | the principal on the request context, `RequireAuth` and the permission checks every provider's routes run, and the store interfaces a provider of its own may build on; the core user model's sessions are `identity`'s |
 | `serviceauth` | the service step (D37): the `Authenticator` seam and `Caller`, the standard JWT `Verifier` over a `Config` of issuers, keys and callers (RS256, ES256, EdDSA, with a JWKS cache), the route gate (`Authenticate`, `Require`, `AllowOr`), end-user forwarding (`ForwardedToken`), and the client credential sources (`GoogleIDToken`, `TokenFile`, `SignedToken`) |
+| `webhook` | verifiers for an `@hmacVerified` provider's `WebhookVerifiers` entry (D81): `JWTBodyHashVerifier`, for a provider that signs each webhook with an ES256 JWT carrying the body's SHA-256, as Plaid does, over a key lookup by `kid` or a JWKS URL, with the keys held by `kid` and the provider asked at most once a minute; it writes `runtime/http/testdata/webhook_jwt_parity.json` (`go test ./webhook -run TestWriteParityVectors -update`) |
 | `identity` | the core user model's runtime (D50): the identity `Config`, argon2id passwords as PHC strings, session tokens, the session cookie, the credential a request carries (`ExtractCredential`), the cross-origin check and the credentialed `CORS` middleware, roles and capabilities, the `Store` with its `database/sql` `SQLStore` for Postgres and SQLite, the `Service` with every session and administration operation, its handlers and its `Middleware` |
 | `filterparse` | list-endpoint filter expression parsing |
 | `paging` | the page of a `@paginated` operation (D60): `Read`, the router's reader of `cursor`, `limit` and a `SortBy` argument's sort (`Spec.Sort`, D60 amended) with a query parameter's 400s, from the raw query as the TypeScript and Rust routers parse one (`QueryValues`), into a `Request` whose `Sort` has its default filled in and whose cursor is unbound from its sort; `EncodeCursor` and `DecodeCursor`, a position as the unpadded base64url of its JSON, the encoder failing for a key no router reads back; `FromRows`, the page of the `limit + 1` rows an implementation read; and `Bind`, `BindCursor` and `UnbindCursor`, a sorted operation's cursor as the base64url of `{"sort":"-placedAt","key":K}`, whose sort a cursor sent with another refuses with the 400 `SortedCursorDetail`; it writes `runtime/http/testdata/page_parity.json` (`go test ./paging -run TestWriteParityVectors -update`) |
 | `stackconfig` | the config fields an API's edges derive in a stack: a database connection, a service endpoint, a bucket connection and an API's callers field, and their loaders from the environment variables a platform sets (`docs/stack-model.md`, section 3.4), which the TypeScript runtime's readers twin |
 | `bucket` | the provider-neutral `Bucket` a generated `Deps` holds per bucket an API lists (D54): put, get, delete, list and signed URLs. No provider's client: the GCS implementation is generated into the entrypoint of a server whose APIs list a bucket (`buckets.go`) |
+| `memorystore` | the provider-neutral `Store` a generated `Deps` holds per memory store an API lists (D75): channels and keys under the names the store's typed definitions build, `Disabled` and an in-process store, the shared rate limit's httprate counter, and what the Redis implementation shares (the health ping, the local fan-out, the metrics, IAM tokens, redaction). No Redis client: the Redis implementation is generated into the entrypoint of a workload whose APIs list a store (`memorystores.go`) |
 | `bodyargs` | decoding the body arguments of an operation without an input type: each from its JSON value, with the list rules and the value rules, every failure at its path, and a JSON-object scalar's value first checked on its own JSON by the check the route passes in (`CheckJSON`); and a list argument of a `GET` operation from the query string (`QueryList`), with the same rules |
 | `search` | what an implementation needs to answer a `SearchQuery` argument (D62): the search text's words (`Terms`), each word's `LIKE ... ESCAPE '\'` pattern (`LikePattern`), and the case folding an in-memory match compares by (`Fold`, `Matches`), with the lowercase mappings of the TypeScript and Rust runtimes' newer Unicode in `fold_table.go`, which `go generate` writes from the Rust runtime's `fold_mappings` example |
 | `worker` | a stack worker's claim loop (D53): claims, extensions, completions, failures and releases through the `Queue` a worker's entrypoint builds from its database's ORM, and a span per message it handles |
@@ -232,3 +234,21 @@ and U+00A0 separate, U+FEFF and U+200B do not), and the first 8 count. A
 pattern escapes `\`, `%` and `_` with `\` and is wrapped in `%`. A fold maps
 each character to its simple lowercase, one for one (`İ` is `i`, and a
 final `Σ` is `σ`). The file's `comment` states the harness.
+
+## Webhook JWT parity vectors
+
+`runtime/http/testdata/webhook_jwt_parity.json` holds the vectors the Go
+(`webhook.JWTBodyHashVerifier`), TypeScript (`jwtBodyHashVerifier`) and
+Rust (`JwtBodyHashVerifier`) verifiers each run (D81). The `webhook`
+package writes it:
+
+```
+cd runtime/http/go && go test ./webhook -run TestWriteParityVectors -update
+```
+
+The file holds no key and no signature. Each vector holds a token's
+signing input, which key signs it and how the signature is then tampered
+with, and each runtime signs it with P-256 keys it generates for the run,
+so no key is committed. It runs the vector's request through its verifier
+in front of a route that answers the body it reads, and compares the
+status and the problem `code`. The file's `comment` states the harness.

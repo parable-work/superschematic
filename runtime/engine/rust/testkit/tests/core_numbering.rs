@@ -835,6 +835,7 @@ fn invoice_target(operations: &[&str]) -> DescribeTarget {
                 name: (*name).to_owned(),
                 behavior: None,
                 writes: true,
+                beside: false,
                 scope: OperationScope::Instance,
             })
             .collect(),

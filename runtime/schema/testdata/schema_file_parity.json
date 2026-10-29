@@ -437,21 +437,21 @@
       "registry": "core",
       "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"fields\": [{\"name\": \"a\", \"typeRef\": {\"name\": \"String\"}, \"validateMinLength\": 1.0}]}",
       "accept": false,
-      "error": "an integer field refuses a fraction: json: cannot unmarshal number 1.0 into Go struct field FieldDef.fields.validateMinLength of type int"
+      "error": "an integer field refuses a fraction: json: cannot unmarshal number 1.0 into Go struct field TypeDef.fields.0.validateMinLength of type int"
     },
     {
       "name": "an integer field refuses an exponent",
       "registry": "core",
       "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"fields\": [{\"name\": \"a\", \"typeRef\": {\"name\": \"String\"}, \"validateMinLength\": 1e2}]}",
       "accept": false,
-      "error": "an integer field refuses an exponent: json: cannot unmarshal number 1e2 into Go struct field FieldDef.fields.validateMinLength of type int"
+      "error": "an integer field refuses an exponent: json: cannot unmarshal number 1e2 into Go struct field TypeDef.fields.0.validateMinLength of type int"
     },
     {
       "name": "an integer field refuses a value past int64",
       "registry": "core",
       "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"fields\": [{\"name\": \"a\", \"typeRef\": {\"name\": \"File\"}, \"validateUploadMaxBytes\": 9223372036854775808}]}",
       "accept": false,
-      "error": "an integer field refuses a value past int64: json: cannot unmarshal number 9223372036854775808 into Go struct field FieldDef.fields.validateUploadMaxBytes of type int64"
+      "error": "an integer field refuses a value past int64: json: cannot unmarshal number 9223372036854775808 into Go struct field TypeDef.fields.0.validateUploadMaxBytes of type int64"
     },
     {
       "name": "an integer field refuses a value below int64",
@@ -472,14 +472,14 @@
       "registry": "core",
       "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"implements\": [{\"name\": \"Named\", \"configArgs\": {\"a\": 1e400}}]}",
       "accept": false,
-      "error": "a float past float64 fails anywhere: json: cannot unmarshal number 1e400 into Go value of type float64"
+      "error": "a float past float64 fails anywhere: json: cannot unmarshal number 1e400 into Go struct field .implements.0.configArgs.a of type float64"
     },
     {
       "name": "a negative float past float64 fails",
       "registry": "core",
       "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"fields\": [{\"name\": \"a\", \"typeRef\": {\"name\": \"Float\"}, \"validateMin\": -1e309}]}",
       "accept": false,
-      "error": "a negative float past float64 fails: json: cannot unmarshal number -1e309 into Go value of type float64"
+      "error": "a negative float past float64 fails: json: cannot unmarshal number -1e309 into Go struct field .fields.0.validateMin of type float64"
     },
     {
       "name": "strings",
@@ -591,7 +591,7 @@
       "registry": "core",
       "input": "{\"name\": \"Item\", \"role\": \"Table\"}",
       "accept": false,
-      "error": "unknown role: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/role': value must be one of 'DBTable', 'APIView', 'APIInput', 'EmbeddedStruct', 'APIOperationSet', 'Trait', 'Projection'"
+      "error": "unknown role: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/role': value must be one of 'DBTable', 'APIView', 'APIInput', 'EmbeddedStruct', 'APIOperationSet', 'Trait', 'Projection', 'Query'"
     },
     {
       "name": "unknown schema kind",
@@ -864,7 +864,7 @@
       "registry": "extended",
       "input": "{\"extensions\": {\"acme\": {\"n\": 1e400}}}",
       "accept": false,
-      "error": "a float past float64 in extension data: json: cannot unmarshal number 1e400 into Go value of type float64"
+      "error": "a float past float64 in extension data: json: cannot unmarshal number 1e400 into Go struct field .extensions.acme.n of type float64"
     },
     {
       "name": "the registry's policy default",
@@ -927,7 +927,7 @@
       "registry": "core",
       "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [{\"name\": \"acme.Audited\"}]}",
       "accept": false,
-      "error": "a behavior under the core: behavior \"acme.Audited\" on type \"Item\" is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Calendar, Comments, Constants, Dependencies, Holds, Lease, Links, Numbering, Payments, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, StateRules, Stock, Timers, Variants, Workflow)"
+      "error": "a behavior under the core: behavior \"acme.Audited\" on type \"Item\" is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Calendar, Comments, Constants, Dependencies, Derived, Holds, Lease, Links, Numbering, Payments, Presence, Provenance, Queue, Reactions, Retries, Revisions, Rollups, Search, StateRules, Stock, Timers, Variants, Workflow)"
     },
     {
       "name": "the core's behaviors under the core",
@@ -951,25 +951,25 @@
       "error": "a missing required core behavior config: type \"Document\": behavior Workflow config: jsonschema validation failed with 'superschematic://behaviors/Workflow/config.json#'\n- at '': missing properties 'states', 'transitions'"
     },
     {
-      "name": "a config for a core behavior that takes none",
+      "name": "a core behavior config with a key its schema lacks",
       "registry": "core",
       "input": "{\"name\": \"Document\", \"role\": \"EmbeddedStruct\", \"behaviors\": [{\"name\": \"Comments\", \"config\": {\"threads\": true}}]}",
       "accept": false,
-      "error": "a config for a core behavior that takes none: type \"Document\": behavior Comments takes no config"
+      "error": "a core behavior config with a key its schema lacks: type \"Document\": behavior Comments config: jsonschema validation failed with 'superschematic://behaviors/Comments/config.json#'\n- at '': additional properties 'threads' not allowed"
     },
     {
       "name": "an unregistered behavior",
       "registry": "extended",
       "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [{\"name\": \"acme.Ghost\"}]}",
       "accept": false,
-      "error": "an unregistered behavior: behavior \"acme.Ghost\" on type \"Item\" is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Calendar, Comments, Constants, Dependencies, Holds, Lease, Links, Numbering, Payments, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, StateRules, Stock, Timers, Variants, Workflow, acme.Audited, acme.Stock)"
+      "error": "an unregistered behavior: behavior \"acme.Ghost\" on type \"Item\" is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Calendar, Comments, Constants, Dependencies, Derived, Holds, Lease, Links, Numbering, Payments, Presence, Provenance, Queue, Reactions, Retries, Revisions, Rollups, Search, StateRules, Stock, Timers, Variants, Workflow, acme.Audited, acme.Stock)"
     },
     {
       "name": "an unregistered behavior in a document",
       "registry": "extended",
       "input": "{\"types\": {\"Item\": {\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [{\"name\": \"acme.Ghost\"}]}}}",
       "accept": false,
-      "error": "an unregistered behavior in a document: behavior \"acme.Ghost\" on type \"Item\" is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Calendar, Comments, Constants, Dependencies, Holds, Lease, Links, Numbering, Payments, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, StateRules, Stock, Timers, Variants, Workflow, acme.Audited, acme.Stock)"
+      "error": "an unregistered behavior in a document: behavior \"acme.Ghost\" on type \"Item\" is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Calendar, Comments, Constants, Dependencies, Derived, Holds, Lease, Links, Numbering, Payments, Presence, Provenance, Queue, Reactions, Retries, Revisions, Rollups, Search, StateRules, Stock, Timers, Variants, Workflow, acme.Audited, acme.Stock)"
     },
     {
       "name": "a behavior config its schema rejects",
@@ -1032,7 +1032,7 @@
       "registry": "extended",
       "input": "{\"name\": \"Item\", \"role\": \"DBTable\", \"behaviors\": [{\"config\": {\"aisles\": 1}}]}",
       "accept": false,
-      "error": "a behavior entry without its name: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/behaviors/0': validation failed\n  - at '/behaviors/0': missing property 'name'\n  - at '/behaviors/0': 'allOf' failed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'gates'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing properties 'schema', 'parentLink', 'keyField'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n      - at '/behaviors/0/config': 'oneOf' failed, none matched\n        - at '/behaviors/0/config': missing property 'steps'\n        - at '/behaviors/0/config': missing property 'from'\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'kinds'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'meters'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing properties 'timeZone', 'hours'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'fields'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'holds'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'links'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'format'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing properties 'amount', 'record'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing properties 'ttlMs', 'principalField'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'claim'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'rules'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing properties 'classes', 'totalAttempts', 'exhaustedState'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'rollups'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'fields'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'states'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'permission'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'deadlines'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing properties 'field', 'by', 'types'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing properties 'states', 'transitions'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed"
+      "error": "a behavior entry without its name: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/behaviors/0': validation failed\n  - at '/behaviors/0': missing property 'name'\n  - at '/behaviors/0': 'allOf' failed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'gates'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing properties 'schema', 'parentLink', 'keyField'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n      - at '/behaviors/0/config': 'oneOf' failed, none matched\n        - at '/behaviors/0/config': missing property 'steps'\n        - at '/behaviors/0/config': missing property 'from'\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'kinds'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'meters'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing properties 'timeZone', 'hours'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'fields'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing properties 'fields', 'permission'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'holds'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'links'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'format'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing properties 'amount', 'record'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing properties 'ttlMs', 'principalField'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'claim'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'rules'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing properties 'classes', 'totalAttempts', 'exhaustedState'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'rollups'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'fields'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'states'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'permission'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing property 'deadlines'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing properties 'field', 'by', 'types'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': validation failed\n      - at '/behaviors/0/config': missing properties 'states', 'transitions'\n      - at '/behaviors/0/config': additional properties 'aisles' not allowed\n    - at '/behaviors/0/config': additional properties 'aisles' not allowed"
     },
     {
       "name": "a behavior name that is not a string",
@@ -1201,6 +1201,55 @@
       "input": "{\"name\": \"Note\", \"role\": \"APIInput\", \"fields\": [{\"name\": \"text\", \"typeRef\": {\"name\": \"String\"}, \"display\": {\"rows\": 6}}]}",
       "accept": false,
       "error": "a field display key the schema lacks: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fields/0/display': additional properties 'rows' not allowed"
+    },
+    {
+      "name": "a field display currency",
+      "registry": "core",
+      "input": "{\"name\": \"Price\", \"role\": \"APIInput\", \"fields\": [\n\t\t{\"name\": \"amount\", \"typeRef\": {\"name\": \"Finance.Money\"}, \"display\": {\"currency\": \"GBP\"}},\n\t\t{\"name\": \"fee\", \"typeRef\": {\"name\": \"Finance.Money\"}, \"display\": {\"currency\": {\"field\": \"currency\"}}},\n\t\t{\"name\": \"currency\", \"typeRef\": {\"name\": \"Finance.Currency\"}}]}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Price\":{\"fields\":[{\"display\":{\"currency\":\"GBP\"},\"name\":\"amount\",\"typeRef\":{\"name\":\"Finance.Money\"}},{\"display\":{\"currency\":{\"field\":\"currency\"}},\"name\":\"fee\",\"typeRef\":{\"name\":\"Finance.Money\"}},{\"name\":\"currency\",\"typeRef\":{\"name\":\"Finance.Currency\"}}],\"name\":\"Price\",\"role\":\"APIInput\"}}}"
+    },
+    {
+      "name": "a field display currency in lower case",
+      "registry": "core",
+      "input": "{\"name\": \"Price\", \"role\": \"APIInput\", \"fields\": [{\"name\": \"amount\", \"typeRef\": {\"name\": \"Finance.Money\"}, \"display\": {\"currency\": \"gbp\"}}]}",
+      "accept": false,
+      "error": "a field display currency in lower case: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fields/0/display/currency': 'oneOf' failed, none matched\n  - at '/fields/0/display/currency': 'gbp' does not match pattern '^[A-Z]{3}$'\n  - at '/fields/0/display/currency': got string, want object"
+    },
+    {
+      "name": "a field display currency of four letters",
+      "registry": "core",
+      "input": "{\"name\": \"Price\", \"role\": \"APIInput\", \"fields\": [{\"name\": \"amount\", \"typeRef\": {\"name\": \"Finance.Money\"}, \"display\": {\"currency\": \"GBPX\"}}]}",
+      "accept": false,
+      "error": "a field display currency of four letters: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fields/0/display/currency': 'oneOf' failed, none matched\n  - at '/fields/0/display/currency': 'GBPX' does not match pattern '^[A-Z]{3}$'\n  - at '/fields/0/display/currency': got string, want object"
+    },
+    {
+      "name": "a field display currency that is a number",
+      "registry": "core",
+      "input": "{\"name\": \"Price\", \"role\": \"APIInput\", \"fields\": [{\"name\": \"amount\", \"typeRef\": {\"name\": \"Finance.Money\"}, \"display\": {\"currency\": 826}}]}",
+      "accept": false,
+      "error": "a field display currency that is a number: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fields/0/display/currency': 'oneOf' failed, none matched\n  - at '/fields/0/display/currency': got number, want string\n  - at '/fields/0/display/currency': got number, want object"
+    },
+    {
+      "name": "a field display currency field that is blank",
+      "registry": "core",
+      "input": "{\"name\": \"Price\", \"role\": \"APIInput\", \"fields\": [{\"name\": \"amount\", \"typeRef\": {\"name\": \"Finance.Money\"}, \"display\": {\"currency\": {\"field\": \" \"}}}]}",
+      "accept": false,
+      "error": "a field display currency field that is blank: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fields/0/display/currency': 'oneOf' failed, none matched\n  - at '/fields/0/display/currency': got object, want string\n  - at '/fields/0/display/currency/field': ' ' does not match pattern '\\\\S'"
+    },
+    {
+      "name": "a field display currency without its field",
+      "registry": "core",
+      "input": "{\"name\": \"Price\", \"role\": \"APIInput\", \"fields\": [{\"name\": \"amount\", \"typeRef\": {\"name\": \"Finance.Money\"}, \"display\": {\"currency\": {}}}]}",
+      "accept": false,
+      "error": "a field display currency without its field: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fields/0/display/currency': 'oneOf' failed, none matched\n  - at '/fields/0/display/currency': got object, want string\n  - at '/fields/0/display/currency': missing property 'field'"
+    },
+    {
+      "name": "a field display currency with a code and a field",
+      "registry": "core",
+      "input": "{\"name\": \"Price\", \"role\": \"APIInput\", \"fields\": [{\"name\": \"amount\", \"typeRef\": {\"name\": \"Finance.Money\"}, \"display\": {\"currency\": {\"field\": \"currency\", \"code\": \"GBP\"}}}]}",
+      "accept": false,
+      "error": "a field display currency with a code and a field: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/fields/0/display/currency': 'oneOf' failed, none matched\n  - at '/fields/0/display/currency': got object, want string\n  - at '/fields/0/display/currency': additional properties 'code' not allowed"
     },
     {
       "name": "enum member titles in an enum file",

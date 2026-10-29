@@ -1,0 +1,24 @@
+{
+  "dialect": "postgres",
+  "from": "c6787cdef058267033f38e38e6c4e788b8fc54fcc00776b78d8b4db345c93d96",
+  "hash": "e778745afc598395119687801d3bab50778745c7a89b64b161c8a375ab0a25c9",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createIndex",
+      "phase": "expand",
+      "recovery": [
+        "DROP INDEX CONCURRENTLY IF EXISTS idx_customer_email_lower"
+      ],
+      "statements": [
+        "CREATE INDEX CONCURRENTLY idx_customer_email_lower ON customer USING BTREE ((lower(email)))"
+      ],
+      "subject": "table/customer/index/idx_customer_email_lower",
+      "transactional": false
+    }
+  ],
+  "to": "c6003238bdb3fc7c427c61b4722f86159a3ffe5d358fbfe64c94400f4c00112f",
+  "toModel": null,
+  "version": 1
+}

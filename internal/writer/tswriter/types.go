@@ -123,6 +123,12 @@ func (e *emitter) emitType(def *ir.TypeDef) {
 			return
 		}
 		e.emitProjection(def)
+	case ir.RoleQuery:
+		if e.doc.Kind != "" && e.doc.Kind != ir.SchemaKindDB {
+			e.failf("type %s: role Query is only expressible in a DB schema (document kind %s)", def.Name, e.doc.Kind)
+			return
+		}
+		e.emitQuery(def)
 	default:
 		e.failf("type %s: role %s has no TypeScript authoring form", def.Name, def.Role)
 	}
@@ -136,8 +142,8 @@ func (e *emitter) emitTypeAlias(def *ir.TypeDef) {
 	if def.Extends != "" || len(def.Implements) > 0 || def.RawHeritage != nil ||
 		def.User != nil || def.UserRole != nil ||
 		def.IsTrait || def.TraitConfig != nil || def.Source != nil ||
-		len(def.Indexes) > 0 || def.JsonField || def.EnvVars ||
-		def.DenyUnknownFields || def.StrictJSON || len(def.Behaviors) > 0 || def.Display != nil {
+		len(def.Indexes) > 0 || len(def.RawSQL) > 0 || def.JsonField || def.EnvVars || def.SQLName != "" ||
+		def.DenyUnknownFields || def.StrictJSON || def.AllowUnknownFields || len(def.Behaviors) > 0 || def.Display != nil {
 		e.failf("%s: embedded structs in a DB schema render as type aliases and cannot carry heritage or decorators", owner)
 		return
 	}
@@ -194,16 +200,42 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 		for i, k := range idx.Keys {
 			keys[i] = quote(k)
 		}
+		var options []string
+		if idx.Unique {
+			options = append(options, "unique: true")
+		}
+		for _, opt := range []struct{ key, value string }{
+			{"name", idx.Name}, {"method", idx.Method}, {"ops", idx.Ops}, {"where", idx.Where}, {"expression", idx.Expression},
+		} {
+			if opt.value != "" {
+				options = append(options, opt.key+": "+quote(opt.value))
+			}
+		}
+		if idx.Concurrently != nil {
+			options = append(options, fmt.Sprintf("concurrently: %t", *idx.Concurrently))
+		}
+		for _, opt := range []struct {
+			key   string
+			value *int
+		}{{"m", idx.M}, {"efConstruction", idx.EFConstruction}, {"lists", idx.Lists}} {
+			if opt.value != nil {
+				options = append(options, fmt.Sprintf("%s: %d", opt.key, *opt.value))
+			}
+		}
 		opts := ""
 		switch {
-		case idx.Name != "" && idx.Unique:
-			opts = fmt.Sprintf(", { unique: true, name: %s }", quote(idx.Name))
-		case idx.Name != "":
-			opts = fmt.Sprintf(", { name: %s }", quote(idx.Name))
-		case idx.Unique:
+		case len(options) == 1 && idx.Unique:
 			opts = ", true"
+		case len(options) > 0:
+			opts = ", { " + strings.Join(options, ", ") + " }"
 		}
 		fmt.Fprintf(&e.body, "@%s<%s>([%s]%s)\n", e.use("index"), def.Name, strings.Join(keys, ", "), opts)
+	}
+	for _, raw := range def.RawSQL {
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("rawSql"), rawSQLArgs(raw))
+	}
+	if def.SQLName != "" {
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("table"), quote(def.SQLName))
 	}
 	if def.Source != nil {
 		e.emitSourceDecorator(def)
@@ -217,6 +249,9 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 	if def.StrictJSON {
 		fmt.Fprintf(&e.body, "@%s\n", e.use("strictJSON"))
 	}
+	if def.AllowUnknownFields {
+		fmt.Fprintf(&e.body, "@%s\n", e.use("allowUnknownFields"))
+	}
 	if def.Versioned {
 		fmt.Fprintf(&e.body, "@%s%s\n", e.use("versioned"), versionedConfigArgs(def.VersionedConfig))
 	}
@@ -225,6 +260,14 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 	}
 	if def.Queue != nil {
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("queue"), queueArgs(def.Queue))
+	}
+	for _, change := range def.EnqueueOnChange {
+		// The queue may be declared in another file of the schema.
+		e.recordHeritageImports(change.Queue)
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("enqueueOnChange"), enqueueOnChangeArgs(change))
+	}
+	if len(def.SeedRoles) > 0 {
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("seedRoles"), seedRolesArgs(def.SeedRoles))
 	}
 	if def.VersionGraph != nil {
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("versionGraph"), versionGraphArgs(def.VersionGraph))
@@ -541,8 +584,8 @@ func (e *emitter) fieldDecorators(fd *ir.FieldDef) []string {
 	if fd.Icon != "" {
 		out = append(out, e.useAs("@superschematic/schema", "icon", "schemaIcon")+fmt.Sprintf("(%s)", quote(fd.Icon)))
 	}
-	if fd.Display != nil && fd.Display.Multiline != nil {
-		out = append(out, e.use("display")+fmt.Sprintf("({ multiline: %t })", *fd.Display.Multiline))
+	if members := fieldDisplayMembers(fd.Display); members != "" {
+		out = append(out, e.use("display")+"({ "+members+" })")
 	}
 	if fd.Key {
 		out = append(out, e.use("key"))
@@ -562,6 +605,12 @@ func (e *emitter) fieldDecorators(fd *ir.FieldDef) []string {
 	if fd.Virtual {
 		out = append(out, e.use("virtual"))
 	}
+	if fd.Decrypted {
+		out = append(out, e.use("decrypted"))
+	}
+	if fd.SQLName != "" {
+		out = append(out, e.use("column")+fmt.Sprintf("(%s)", quote(fd.SQLName)))
+	}
 	if fd.SourceMustProject {
 		out = append(out, e.use("sourceMustProject"))
 	}
@@ -574,6 +623,27 @@ func (e *emitter) fieldDecorators(fd *ir.FieldDef) []string {
 	return out
 }
 
+// fieldDisplayMembers is a field's @display argument's members (D48,
+// amended), in the IR's order: multiline, then currency, a code or
+// { field }; empty for a display that declares neither.
+func fieldDisplayMembers(display *ir.FieldDisplay) string {
+	if display == nil {
+		return ""
+	}
+	var members []string
+	if display.Multiline != nil {
+		members = append(members, fmt.Sprintf("multiline: %t", *display.Multiline))
+	}
+	if c := display.Currency; c != nil {
+		if c.Code != "" {
+			members = append(members, "currency: "+quote(c.Code))
+		} else {
+			members = append(members, "currency: { field: "+quote(c.Field)+" }")
+		}
+	}
+	return strings.Join(members, ", ")
+}
+
 // checkStructField rejects FieldDef metadata that has no authoring form on a
 // data-class property.
 func (e *emitter) checkStructField(fd *ir.FieldDef, owner string) {
@@ -583,18 +653,21 @@ func (e *emitter) checkStructField(fd *ir.FieldDef, owner string) {
 	rest.TypeRef = ir.TypeRef{}
 	rest.Required = false
 	rest.Title, rest.Purpose, rest.Icon = "", "", ""
-	if rest.Display != nil && rest.Display.Multiline != nil {
+	if fieldDisplayMembers(rest.Display) != "" {
 		rest.Display = nil
 	}
 	rest.Default = nil
 	rest.ValidateMin, rest.ValidateMax = nil, nil
 	rest.ValidateUploadMaxBytes = nil
+	rest.FileUpload = nil
 	rest.ValidateMinLength, rest.ValidateMaxLength = nil, nil
 	rest.ValidateListMin, rest.ValidateListMax = nil, nil
 	rest.ValidatePattern = ""
+	rest.ValidatePrecision, rest.ValidateScale, rest.ValidateDimensions = nil, nil, nil
 	rest.Key, rest.Unique, rest.AutoGenerated = false, false, false
 	rest.SearchField, rest.JsonField, rest.Secret = false, false, false
 	rest.UIHidden, rest.Virtual, rest.Encrypted = false, false, false
+	rest.EncryptedAtRest, rest.Decrypted, rest.SQLName = false, false, ""
 	rest.UIControl = ""
 	rest.SourceMustProject = false
 	rest.TemporalFormat = ""
@@ -610,4 +683,30 @@ func (e *emitter) checkStructField(fd *ir.FieldDef, owner string) {
 // isZeroField reports whether a FieldDef has been fully cleared.
 func isZeroField(fd *ir.FieldDef) bool {
 	return reflect.DeepEqual(fd, &ir.FieldDef{})
+}
+
+// rawSQLArgs renders @rawSql's options object, its SQL as template literals
+// when they span lines (D83).
+func rawSQLArgs(raw ir.RawSQLDef) string {
+	sql := func(s string) string {
+		if strings.Contains(s, "\n") && !strings.ContainsAny(s, "`\\") && !strings.Contains(s, "${") {
+			return "`" + s + "`"
+		}
+		return quote(s)
+	}
+	parts := []string{"id: " + quote(raw.ID), "up: " + sql(raw.Up)}
+	if raw.Down != "" {
+		parts = append(parts, "down: "+sql(raw.Down))
+	}
+	if raw.After != "" {
+		parts = append(parts, "after: "+quote(raw.After))
+	}
+	if len(raw.Dialects) > 0 {
+		dialects := make([]string, len(raw.Dialects))
+		for i, d := range raw.Dialects {
+			dialects[i] = quote(d)
+		}
+		parts = append(parts, "dialects: ["+strings.Join(dialects, ", ")+"]")
+	}
+	return "{ " + strings.Join(parts, ", ") + " }"
 }

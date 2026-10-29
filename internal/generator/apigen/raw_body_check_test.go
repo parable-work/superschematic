@@ -80,11 +80,11 @@ func writeRoutes(t *testing.T, output *apigen.APIOutput) string {
 // TestWriteAPIGoldenRawBodyChecks pins routes.go of raw-body-check-api
 // with a check registered for Generic.JSON. routes.go imports the check's
 // package, and each route calls the check on the raw JSON of the body
-// before it decodes the body, in all three decode paths: a JSON body
-// (saveNote), and a JSON body or the data part of a multipart form
-// (attachPhoto). The call names the input's single-valued Generic.JSON
-// fields, binds the check's result variable, and carries its comment in
-// the two JSON-body paths. Regenerate with
+// before it decodes the body, in both decode paths: a JSON body
+// (saveNote), and a JSON body or the data part of a multipart form, which
+// attachPhoto reads alike (D81). The call names the input's single-valued
+// Generic.JSON fields, binds the check's result variable, and carries its
+// comment. Regenerate with
 // go test ./internal/generator/apigen -run TestWriteAPIGoldenRawBodyChecks -update
 func TestWriteAPIGoldenRawBodyChecks(t *testing.T) {
 	output := generateRawBodyCheckAPI(t, loadRawBodyCheckAPI(t), rawBodyChecks{"Generic.JSON": documentedKeyCheck})
@@ -105,20 +105,16 @@ func TestWriteAPIGoldenRawBodyChecks(t *testing.T) {
 			"\t\tif keyErrors := jsonkeys.DuplicateKeyErrors(rawInput, \"body\", \"meta\"); keyErrors.HasErrors() {\n" +
 			"\t\t\tRespondInputRefusal(w, r, bodyargs.Mismatch(\"validation failed\", keyErrors))\n\t\t\treturn\n\t\t}\n" +
 			"\t\tif err := json.Unmarshal(rawInput, &input); err != nil {",
-		// attachPhoto: a JSON body.
+		// attachPhoto: a JSON body or the data part of a multipart form,
+		// read as one once the files are checked (D81). A body the
+		// decoder refuses is answered as a JSON body is: a string an enum
+		// lacks is "enum" at its path (D31, amended), and the problem
+		// names no Go type.
 		"\t\t\t// Decoding keeps the last of two equal keys, so check\n\t\t\t// the raw body first.\n" +
-			"\t\t\tif keyErrors := jsonkeys.DuplicateKeyErrors(rawInput, \"caption\"); keyErrors.HasErrors() {\n" +
+			"\t\t\tif keyErrors := jsonkeys.DuplicateKeyErrors(checked, \"caption\"); keyErrors.HasErrors() {\n" +
 			"\t\t\t\tRespondInputRefusal(w, r, bodyargs.Mismatch(\"validation failed\", keyErrors))\n\t\t\t\treturn\n\t\t\t}\n" +
-			"\t\t\tif err := json.Unmarshal(rawInput, &input); err != nil {",
-		// attachPhoto: the data part of a multipart form.
-		"\t\t\tif dataField != \"\" {\n" +
-			"\t\t\t\tif keyErrors := jsonkeys.DuplicateKeyErrors([]byte(dataField), \"caption\"); keyErrors.HasErrors() {\n" +
-			"\t\t\t\t\tRespondInputRefusal(w, r, bodyargs.Mismatch(\"validation failed\", keyErrors))\n\t\t\t\t\treturn\n\t\t\t\t}\n" +
-			"\t\t\t\tif err := json.Unmarshal([]byte(dataField), &input); err != nil {\n" +
-			// A data part the decoder refuses is answered as a JSON body
-			// is: a string an enum lacks is "enum" at its path (D31,
-			// amended), and the problem names no Go type.
-			"\t\t\t\t\tRespondInputRefusal(w, r, bodyargs.DecodeRefusal(json.RawMessage(dataField), &input, err))",
+			"\t\t\tif err := json.Unmarshal(checked, &input); err != nil {\n" +
+			"\t\t\t\tRespondInputRefusal(w, r, bodyargs.DecodeRefusal(checked, &input, err))",
 	} {
 		if !strings.Contains(string(routes), want) {
 			t.Errorf("routes.go has no\n%s", want)
@@ -279,9 +275,11 @@ func TestGenerateRefusesAnInvalidRawBodyCheck(t *testing.T) {
 // body whose check fails is refused with the check's errors at their
 // field paths before the route decodes it, and never reaches the
 // implementation. The check registers no result variable or comment, so
-// the defaults compile. attachPhoto is left out: the core cannot build a
-// Go API with an upload field (D4), so its two decode paths are pinned by
-// TestWriteAPIGoldenRawBodyChecks instead.
+// the defaults compile. attachPhoto is left out: its Media.Photo is a
+// scalar the scalar package does not define, whose Go type the types
+// module would name (D4), so its decode path is pinned by
+// TestWriteAPIGoldenRawBodyChecks, and a FileUpload field's route, which
+// compiles, by TestFileTransferRoutes (D81).
 func TestRawBodyCheckRoutesRefuseBeforeDecoding(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")

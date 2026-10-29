@@ -53,6 +53,8 @@ var coreBehaviors = []struct{ file, pkg string }{
 	{"approvals", EnginePackage},
 	{"numbering", EnginePackage},
 	{"timers", EnginePackage},
+	{"derived", EnginePackage},
+	{"provenance", EnginePackage},
 	{"lease", WorkQueuePackage},
 	{"assignment", WorkQueuePackage},
 	{"queue", WorkQueuePackage},

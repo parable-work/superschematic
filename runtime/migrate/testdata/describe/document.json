@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "ddl": "CREATE TABLE line (id UUID NOT NULL PRIMARY KEY, name TEXT NOT NULL, amount BIGINT);",
+  "statements": [
+    {
+      "id": "totals/0",
+      "sql": "SELECT name, SUM(amount) AS total FROM line WHERE name = $1 AND id = ANY($2) GROUP BY name"
+    },
+    {
+      "id": "totals/1",
+      "sql": "SELECT amout FROM line"
+    }
+  ]
+}

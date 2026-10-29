@@ -5,9 +5,16 @@
 // (-update) and fails when one is stale. Here the generator's create
 // parameters are held to the describe document's, the behavior fields it
 // types, by behavior, to the describe document's and to what reads return,
-// and the wrappers run against an engine over HTTP. typos() is never
-// called: each of its lines must fail to compile, which tsc -p
-// tsconfig.test.json checks.
+// and the wrappers run against an engine over HTTP: a streamed reply
+// through begin, appendDraft and finish, and the signals a subscription
+// hands out, typed by the module's guard (D77); read markers, follows, and
+// Comments' namespace client, whose inbox lists what mentions the caller and
+// whose claimDeliveries and settleDeliveries an agent dispatcher runs; code
+// and attachment blocks, moveAnchor, listPinned, the namespace client's
+// searchMessages, and calls acting for a subject (D77, steps 4 and 5).
+// typos() is never called:
+// each of its lines must fail to compile, which tsc -p tsconfig.test.json
+// checks.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, test } from 'node:test';
@@ -16,12 +23,30 @@ import type { Authenticator } from '@superschematic/http-runtime';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import { Hono } from 'hono';
 
-import { EngineClient, EngineProblem } from '../dist/client/index.js';
-import { engineApp } from '../dist/http/index.js';
+import { EngineClient, EngineProblem, type SignalMessage, type StreamMessage } from '../dist/client/index.js';
+import { engineApp, type EngineHttpOptions } from '../dist/http/index.js';
 import type { Engine, Principal } from '../dist/index.js';
 import { isProjectVeto, isSpecVeto, isTaskVeto, projectClient, specClient, taskClient, type SpecClient, type Task, type TaskBehaviors, type TaskClient } from './generated/fixture.ts';
 import type { JobsClient, WorkersClient } from './generated/jobs.ts';
-import { isNoteVeto, notesClient, type NotesClient } from './generated/notes.ts';
+import {
+  commentsNamespaceClient,
+  isCommentsNamespaceVeto,
+  isNoteSignal,
+  isNoteVeto,
+  notesClient,
+  type CommentsDelivery,
+  type CommentsInboxItem,
+  type CommentsNamespaceClient,
+  type CommentsSearchHit,
+  type NoteAppendDraftResult,
+  type NoteCommentBlock,
+  type NoteCommentMessage,
+  type NoteCommentPostedBlock,
+  type NoteDraftSignal,
+  type NoteMarkReadResult,
+  type NotesClient,
+  type NoteSignalMessage,
+} from './generated/notes.ts';
 import { cleanup, openTestEngine } from './helpers.ts';
 
 afterEach(cleanup);
@@ -39,8 +64,11 @@ interface ParityCorpus {
 
 const corpus = JSON.parse(readFileSync(new URL('../../testdata/client_codegen_parity.json', import.meta.url), 'utf8')) as ParityCorpus;
 
-/** An editor may publish and review notes. */
-const editor: Principal = { subject: 'editor', permissions: ['notes.publish', 'notes.review'] };
+/** An editor may publish and review notes, and claim and settle the deliveries of Tasks' messages (Task's Comments deliverPermission). */
+const editor: Principal = { subject: 'editor', permissions: ['notes.publish', 'notes.review', 'tasks.deliver'] };
+
+/** Ada writes to the editor and to an agent. */
+const ada: Principal = { subject: 'ada', permissions: [] };
 
 /** An approver signs a Spec off for final. */
 const approver: Principal = { subject: 'ada', permissions: ['specs.approve'] };
@@ -57,12 +85,31 @@ function open(): Engine {
   return engine;
 }
 
-/** serve mounts the engine under /api and returns a client whose fetch hands each request to the app. */
-function serve(engine: Engine): EngineClient {
+/**
+ * serve mounts the engine under /api and returns a client whose fetch hands
+ * each request to the app. mount adds the mount's options (actingFor), and
+ * actingFor is the client's own.
+ */
+function serve(engine: Engine, mount: Omit<EngineHttpOptions, 'authenticate'> = {}, actingFor?: string): EngineClient {
   const app = new Hono();
-  app.route('/api', engineApp(engine, { authenticate }));
+  app.route('/api', engineApp(engine, { ...mount, authenticate }));
   const fetch = async (input: string, init: RequestInit): Promise<Response> => app.fetch(new Request(input, init));
-  return new EngineClient({ baseUrl: 'http://engine.test/api', fetch, auth: { token: 'editor' } });
+  return new EngineClient({ baseUrl: 'http://engine.test/api', fetch, auth: { token: 'editor' }, ...(actingFor === undefined ? {} : { actingFor }) });
+}
+
+// next takes a subscription's next message, failing after a while.
+async function next(messages: AsyncIterator<StreamMessage | SignalMessage>, timeoutMs = 10_000): Promise<StreamMessage | SignalMessage> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('no message in time')), timeoutMs);
+  });
+  try {
+    const result = await Promise.race([messages.next(), timeout]);
+    assert.ok(!result.done, 'the subscription ended');
+    return result.value;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** withoutDescriptions copies a JSON value without its schemas' descriptions, which each side words itself. */
@@ -117,12 +164,14 @@ describe('the generated client', () => {
     engine.instances.create(editor, 'Task', { title: 'Review', kind: 'review', detail: { pullRequest: 7 } }, { id: 't2', behaviors: { Links: { project: 'p1', parent: 't1' } } });
     engine.instances.create(editor, 'Task', { title: 'Tidy', kind: 'chore', due: '2026-11-02T09:00:00Z' }, { id: 't3', behaviors: { Links: { project: 'p1', related: ['t1', 't2'] } } });
     engine.instances.invoke(editor, 'Task', 't2', 'transition', { to: 'doing' });
-    engine.instances.invoke(editor, 'Task', 't3', 'comment', { body: 'Soon' });
+    engine.instances.invoke(editor, 'Task', 't3', 'post', { body: 'Soon', blocks: [{ kind: 'action', title: 'Ran the tests', status: 'succeeded' }] });
+    engine.instances.invoke(editor, 'Task', 't3', 'resolve', { thread: 1 });
     engine.instances.create(editor, 'Spec', { title: 'Ranking' }, { id: 's2', behaviors: { Dependencies: { blockers: [{ schema: 'Task', id: 't1' }] } } });
     engine.instances.update(editor, 'Spec', 's1', { body: 'Words and vectors.' });
     engine.instances.invoke(approver, 'Spec', 's1', 'signOff', { state: 'final' });
     engine.instances.create(editor, 'notes', { title: 'Launch' }, { id: 'n1' });
-    engine.instances.invoke(editor, 'notes', 'n1', 'comment', { body: 'Ship it' });
+    engine.instances.invoke(editor, 'notes', 'n1', 'post', { body: 'Ship it' });
+    engine.instances.invoke(editor, 'notes', 'n1', 'post', { body: 'Agreed.', thread: 1 });
 
     const ajv = new Ajv2020({ strict: false, validateFormats: false });
     let checked = 0;
@@ -154,6 +203,10 @@ describe('the generated client', () => {
     const spec = engine.instances.get(editor, 'Spec', 's1')?.behaviors as Record<string, any>;
     assert.deepEqual(spec.Approvals.gates, { final: { signedBy: ['ada'] } });
     const tidy = engine.instances.get(editor, 'Task', 't3')?.behaviors as Record<string, any>;
+    assert.deepEqual([tidy.Comments.messages, tidy.Comments.threads, typeof tidy.Comments.lastMessageAt], [1, { open: 0, resolved: 1 }, 'number']);
+    const launch = engine.instances.get(editor, 'notes', 'n1')?.behaviors as Record<string, any>;
+    assert.deepEqual([launch.Comments.messages, launch.Comments.threads], [2, { open: 1, resolved: 0 }]);
+    assert.deepEqual(engine.instances.get(editor, 'Task', 't1')?.behaviors.Comments, { messages: 0, threads: { open: 0, resolved: 0 }, composing: [], unread: 0 });
     assert.deepEqual(tidy.Timers.deadlines, { overdue: { dueAt: Date.UTC(2026, 10, 2, 9), fired: false } });
     const started = engine.instances.get(editor, 'Task', 't2')?.behaviors as Record<string, any>;
     assert.deepEqual(Object.keys(started.Timers.deadlines), ['stuck']);
@@ -173,13 +226,23 @@ describe('the generated client', () => {
 
     const note = await notes.create({ title: 'Launch', tags: ['plan'] }, { id: 'launch' });
     assert.equal(note.behaviors.Workflow.status, 'draft');
-    assert.equal(note.behaviors.Comments.commentCount, 0);
+    assert.deepEqual(note.behaviors.Comments, { messages: 0, threads: { open: 0, resolved: 0 }, composing: [], unread: 0 });
     assert.deepEqual(await notes.transition('launch', { to: 'review' }), { from: 'draft', to: 'review' });
-    const commented = await notes.operate('launch', 'comment', { body: 'Looks good' });
-    assert.equal(commented.result.body, 'Looks good');
-    const updated = await notes.update('launch', { body: 'Ships in the fall.', tags: null }, { expectedSeq: commented.seq });
+    const reviewing = await notes.get('launch');
+    const posted = await notes.operate('launch', 'post', { body: 'Looks good', blocks: [{ kind: 'ref', schema: 'notes', id: 'launch' }] });
+    assert.deepEqual([posted.result.id, posted.result.body, posted.result.state, posted.result.blocks], [1, 'Looks good', 'posted', [{ kind: 'ref', schema: 'notes', id: 'launch' }]]);
+    // A post is beside the note: its sequence stays where the transition left it.
+    assert.equal(posted.seq, reviewing.seq);
+    const reply: NoteCommentMessage = await notes.post('launch', { body: 'Agreed.', thread: posted.result.id, mentions: ['ada'] });
+    assert.deepEqual([reply.thread, reply.mentions], [1, ['ada']]);
+    assert.deepEqual((await notes.react('launch', { message: 1, emoji: ':+1:' })).reactions, { ':+1:': { count: 1, mine: true } });
+    assert.equal((await notes.resolve('launch', { thread: 1 })).resolved?.by, 'editor');
+    const updated = await notes.update('launch', { body: 'Ships in the fall.', tags: null }, { expectedSeq: posted.seq });
     assert.deepEqual([updated.data.body, 'tags' in updated.data], ['Ships in the fall.', false]);
-    assert.equal((await notes.listComments('launch')).items.length, 1);
+    assert.deepEqual([updated.behaviors.Comments.messages, updated.behaviors.Comments.threads], [2, { open: 0, resolved: 1 }]);
+    const page = await notes.listMessages('launch');
+    assert.deepEqual([page.items.map((message) => message.id), page.items[0]?.replies, page.before, page.after], [[1], 1, null, null]);
+    assert.deepEqual((await notes.listMessages('launch', { thread: 1 })).root?.participants, ['editor']);
     const proposal = await notes.propose('launch', { patch: { title: 'Launch day' } });
     assert.equal((await notes.approve('launch', { proposal: proposal.id })).state, 'approved');
     assert.equal((await notes.get('launch')).data.title, 'Launch day');
@@ -213,6 +276,231 @@ describe('the generated client', () => {
     await tasks.delete('t2');
     assert.equal((await tasks.list()).items.length, 1);
   });
+
+  test('streams a reply through begin, appendDraft and finish, and types the signals a subscription hands out', async () => {
+    const engine = open();
+    const client = serve(engine);
+    const notes = notesClient(client);
+    await notes.create({ title: 'Launch' }, { id: 'launch' });
+    const subscription = client.events.subscribe({ after: 'head', signals: true, schema: 'notes', instanceId: 'launch' });
+    const messages = subscription[Symbol.asyncIterator]();
+    assert.equal((await next(messages)).type, 'ready');
+
+    const begun: NoteCommentMessage = await notes.begin('launch', { clientId: 'reply-1' });
+    assert.deepEqual([begun.state, begun.body, begun.postedAt], ['composing', '', undefined]);
+    assert.deepEqual((await notes.get('launch')).behaviors.Comments.composing, ['editor']);
+    const appended: NoteAppendDraftResult = await notes.appendDraft('launch', { message: begun.id, text: 'Ships ' });
+    assert.deepEqual(appended, { message: begun.id, offset: 0, length: 6 });
+    await notes.appendDraft('launch', { message: begun.id, text: 'in the fall ✓' });
+    assert.equal((await notes.getMessage('launch', { message: begun.id })).body, 'Ships in the fall ✓');
+    assert.equal(await notes.sendTyping('launch'), undefined);
+    await notes.sendViewing('launch', {});
+    const finished: NoteCommentMessage = await notes.finish('launch', { message: begun.id });
+    assert.deepEqual([finished.id, finished.state, finished.body, finished.createdAt], [begun.id, 'posted', 'Ships in the fall ✓', begun.createdAt]);
+    assert.equal(typeof finished.postedAt, 'number');
+    // A message stands when it is finished, not when it began.
+    assert.deepEqual([begun.stand, finished.stand], [undefined, 1]);
+    const after = (await notes.get('launch')).behaviors.Comments;
+    assert.deepEqual([after.messages, after.composing], [1, []]);
+
+    // Two events (begin, finish) and four signals, in no order between the
+    // two; each sender's signals in order.
+    const drafts: NoteDraftSignal[] = [];
+    const seen: string[] = [];
+    while (seen.length < 6) {
+      const message = await next(messages);
+      if (isNoteSignal(message, 'Comments', 'draft')) {
+        const offset: number = message.signal.data.offset;
+        drafts.push({ ...message.signal.data, offset });
+        seen.push(`draft ${message.signal.from}`);
+      } else if (isNoteSignal(message)) {
+        const signal: NoteSignalMessage['signal'] = message.signal;
+        seen.push(`${signal.name} ${JSON.stringify(signal.data)} ${signal.from}`);
+      } else if (message.type === 'event') {
+        seen.push(`event ${(message.event.change as { operation: string }).operation}`);
+      }
+    }
+    assert.deepEqual(seen.sort(), ['draft editor', 'draft editor', 'event begin', 'event finish', 'typing {} editor', 'viewing {} editor']);
+    // A draft's offset is the draft's length before it in code points: ✓ is one.
+    assert.deepEqual(drafts, [
+      { message: begun.id, offset: 0, text: 'Ships ' },
+      { message: begun.id, offset: 6, text: 'in the fall ✓' },
+    ]);
+
+    // An author who stops keeps what it wrote: interrupt returns the record.
+    const second = await notes.begin('launch', { thread: begun.id });
+    await notes.appendDraft('launch', { message: second.id, text: 'And then' });
+    const stopped: NoteCommentMessage = await notes.interrupt('launch', { message: second.id });
+    assert.deepEqual([stopped.state, stopped.body, stopped.thread], ['interrupted', 'And then', begun.id]);
+    await assert.rejects(notes.appendDraft('launch', { message: second.id, text: '.' }), (error) => isNoteVeto(error, 'Comments', 'not_composing'));
+    subscription.close();
+  });
+
+  test("marks read and follows, and a namespace client lists the inbox and claims and settles an agent's deliveries", async () => {
+    const engine = open();
+    const client = serve(engine);
+    const tasks = taskClient(client);
+    const comments: CommentsNamespaceClient = commentsNamespaceClient(client);
+    engine.instances.create(editor, 'Project', { name: 'Launch' }, { id: 'p1' });
+    engine.instances.create(editor, 'Task', { title: 'Index', kind: 'chore' }, { id: 't1', behaviors: { Links: { project: 'p1' } } });
+
+    // Ada mentions the editor and an agent. A conversation the editor has
+    // never read is unread for nobody; the mention reaches it anyway.
+    engine.instances.invoke(ada, 'Task', 't1', 'post', { body: 'Can you   look\nat this?', mentions: ['editor', 'agent:reviewer'] });
+    assert.equal((await tasks.get('t1')).behaviors.Comments.unread, 0);
+    const first = await comments.inbox();
+    const mention: CommentsInboxItem | undefined = first.items[0];
+    assert.equal(typeof mention?.postedAt, 'number');
+    assert.deepEqual(
+      { ...mention, postedAt: 0 },
+      { kind: 'mention', schema: 'Task', instanceId: 't1', message: 1, author: 'ada', postedAt: 0, excerpt: 'Can you look at this?', unread: 1 }
+    );
+    assert.deepEqual([first.items.length, first.next], [1, null]);
+
+    // markRead reads the mention; the conversation is in the inbox from
+    // then on, and the unread items are none.
+    const read: NoteMarkReadResult = await tasks.markRead('t1', { upTo: 1 });
+    assert.deepEqual(read, { readUpTo: 1, unread: 0 });
+    assert.deepEqual((await comments.inbox({ unread: true })).items, []);
+    assert.deepEqual(
+      (await comments.inbox()).items.map((item) => [item.kind, item.unread]),
+      [
+        ['mention', 0],
+        ['conversation', 0],
+      ]
+    );
+
+    // A reply in the thread the mention made the editor follow, and a new
+    // top-level message: the field counts the top-level one alone, for the
+    // editor; the thread is read in the inbox.
+    engine.instances.invoke(ada, 'Task', 't1', 'post', { body: 'Ping', thread: 1 });
+    engine.instances.invoke(ada, 'Task', 't1', 'post', { body: 'Also this' });
+    assert.equal((await tasks.get('t1')).behaviors.Comments.unread, 1);
+    assert.equal((engine.instances.get(ada, 'Task', 't1')?.behaviors as Record<string, any>).Comments.unread, 0);
+    const unread = await comments.inbox({ unread: true, kinds: ['thread', 'conversation'] });
+    // Newest first; two items of one millisecond list the thread first.
+    assert.deepEqual(
+      unread.items.map((item) => [item.kind, item.message, item.thread, item.unread]).sort(),
+      [
+        ['conversation', 3, undefined, 1],
+        ['thread', 2, 1, 1],
+      ]
+    );
+    assert.deepEqual((await tasks.listMessages('t1', { thread: 1 })).readUpTo, 1);
+    assert.deepEqual(await tasks.follow('t1', { thread: 1, on: false }), { thread: 1, following: false });
+
+    // An agent dispatcher claims the agents' deliveries, acts on mentions
+    // alone, and settles what it claimed. The mention made the agent follow
+    // the thread, so Ada's reply is a delivery to it too, for a reply,
+    // which the dispatcher drops.
+    const claim = await comments.claimDeliveries({ prefix: 'agent:', ttlMs: 30_000 });
+    assert.equal(typeof claim.token, 'string');
+    assert.equal(typeof claim.expiresAt, 'number');
+    const mentions: CommentsDelivery[] = claim.items.filter((delivery) => delivery.reasons.includes('mention'));
+    assert.deepEqual(
+      mentions.map((delivery) => ({ ...delivery, id: typeof delivery.id, postedAt: typeof delivery.postedAt })),
+      [
+        {
+          id: 'string',
+          schema: 'Task',
+          instanceId: 't1',
+          message: 1,
+          subject: 'agent:reviewer',
+          reasons: ['mention'],
+          author: 'ada',
+          state: 'posted',
+          postedAt: 'number',
+          body: 'Can you   look\nat this?',
+          truncated: false,
+          attempt: 1,
+        },
+      ]
+    );
+    const replies = claim.items.filter((delivery) => !delivery.reasons.includes('mention'));
+    assert.deepEqual(
+      replies.map((delivery) => [delivery.subject, delivery.message, delivery.thread, delivery.reasons]),
+      [['agent:reviewer', 2, 1, ['reply']]]
+    );
+    const settled = await comments.settleDeliveries({ token: claim.token ?? '', ids: mentions.map((delivery) => delivery.id), outcome: 'sent' });
+    assert.deepEqual(settled.items, [{ id: mentions[0]?.id, state: 'sent', attempts: 1 }]);
+    const dropped = await comments.settleDeliveries({ token: claim.token ?? '', ids: replies.map((delivery) => delivery.id), outcome: 'dropped', error: 'not a mention' });
+    assert.deepEqual(dropped.items, [{ id: replies[0]?.id, state: 'dropped', attempts: 1 }]);
+    await assert.rejects(
+      comments.settleDeliveries({ token: claim.token ?? '', ids: mentions.map((delivery) => delivery.id), outcome: 'sent' }),
+      (error) => isCommentsNamespaceVeto(error, 'token_stale')
+    );
+    assert.deepEqual(await comments.claimDeliveries({ prefix: 'agent:' }), { token: null, expiresAt: null, items: [] });
+    // A namespace client binds the namespace it is given.
+    await assert.rejects(commentsNamespaceClient(client, 'elsewhere').inbox(), (error) => error instanceof EngineProblem);
+  });
+
+  test('posts code and attachment blocks, moves an anchor, lists pinned messages, searches through the namespace client, and acts for a subject', async () => {
+    const engine = open();
+    const client = serve(engine, { actingFor: true });
+    const notes = notesClient(client);
+    const comments = commentsNamespaceClient(client);
+    await notes.create({ title: 'Launch' }, { id: 'launch' });
+
+    // A Note's Comments allow every kind; a call acting for Ada records
+    // her as the message's for, and the caller stays its author.
+    const code: NoteCommentBlock = { kind: 'code', repo: 'github.com/acme/shop', path: 'src/orders.rs', revision: '9c1f2e7', lines: [40, 48], snippet: 'fn place(order: &Order) {' };
+    const file: NoteCommentBlock = { kind: 'attachment', uri: 'https://files.acme.test/7c1e', name: 'trace.txt', mediaType: 'text/plain', bytes: 2048, sha256: 'a'.repeat(64) };
+    const posted: NoteCommentMessage = await notes.post('launch', { body: 'The order total rounds twice', blocks: [code, file] }, { actingFor: 'ada' });
+    assert.deepEqual([posted.author, posted.for, posted.blocks], ['editor', 'ada', [code, file]]);
+
+    // moveAnchor moves the code block and keeps its first anchor; it is no
+    // edit, and the caller acts for nobody this time.
+    const moved: NoteCommentMessage = await notes.moveAnchor('launch', { message: posted.id, block: 0, revision: 'e41b07c', lines: [44, 52] });
+    const block: NoteCommentPostedBlock | undefined = moved.blocks[0];
+    assert.ok(block?.kind === 'code');
+    assert.deepEqual(
+      [block.revision, block.lines, block.original, block.moves, block.movedBy, block.movedFor, typeof block.movedAt],
+      ['e41b07c', [44, 52], { revision: '9c1f2e7', lines: [40, 48] }, 1, 'editor', undefined, 'number']
+    );
+    assert.deepEqual([moved.edits, moved.editedAt, moved.for, moved.blocks[1]], [0, undefined, 'ada', file]);
+    await assert.rejects(notes.moveAnchor('launch', { message: posted.id, block: 1, revision: 'e41b07c', lines: [1, 2] }), (error) => isNoteVeto(error, 'Comments', 'not_code'));
+    await assert.rejects(notes.moveAnchor('launch', { message: posted.id, block: 0, revision: 'e41b07c', lines: [44, 52] }), (error) => isNoteVeto(error, 'Comments', 'anchor_unchanged'));
+    // An attachment's uri is held to the config's schemes, https alone here:
+    // the paramsSchema takes javascript:, the config refuses it.
+    await assert.rejects(notes.post('launch', { body: 'See this', blocks: [{ ...file, uri: 'javascript:alert(1)' }] }), (error) => isNoteVeto(error, 'Comments', 'attachment_not_allowed'));
+
+    // A client acting for Bob sends its subject on every call; a call's null
+    // sends none.
+    const forBob = notesClient(serve(engine, { actingFor: true }, 'bob'));
+    const reply = await forBob.post('launch', { body: 'Fixed in e41b07c', thread: posted.id });
+    assert.equal(reply.for, 'bob');
+    assert.equal((await forBob.post('launch', { body: 'Thanks' }, { actingFor: null })).for, undefined);
+    assert.equal((await forBob.react('launch', { message: posted.id, emoji: ':eyes:' })).reactions[':eyes:']?.mine, true);
+    assert.deepEqual(
+      (await notes.listReactions('launch', { message: posted.id, emoji: ':eyes:' })).items.map((item) => [item.subject, item.for]),
+      [['editor', 'bob']]
+    );
+
+    // listPinned holds top-level messages and replies, by id, as records.
+    await notes.pin('launch', { message: reply.id });
+    await notes.pin('launch', { message: posted.id });
+    const pinned = await notes.listPinned('launch', { limit: 1 });
+    const first: NoteCommentMessage | undefined = pinned.items[0];
+    assert.deepEqual([first?.id, first?.blocks[0]?.kind, typeof pinned.next], [posted.id, 'code', 'string']);
+    const rest = await notes.listPinned('launch', { cursor: pinned.next ?? undefined });
+    assert.deepEqual([rest.items.map((message) => message.id), rest.next], [[reply.id], null]);
+
+    // searchMessages is a namespace operation: the namespace client calls it.
+    const found = await comments.searchMessages({ query: 'rounds', schema: 'notes' });
+    const hit: CommentsSearchHit | undefined = found.items[0];
+    assert.deepEqual(
+      [found.items.length, hit?.schema, hit?.instanceId, hit?.message, hit?.author, hit?.for, hit?.state, hit?.rank, found.next],
+      [1, 'notes', 'launch', posted.id, 'editor', 'ada', 'posted', 1, null]
+    );
+    assert.deepEqual(
+      hit?.snippet.filter((part) => part.match).map((part) => part.text),
+      ['rounds']
+    );
+    assert.deepEqual((await comments.searchMessages({ query: 'fixed', schema: 'notes', instanceId: 'launch', thread: posted.id })).items.map((item) => [item.message, item.thread, item.for]), [
+      [reply.id, posted.id, 'bob'],
+    ]);
+    assert.deepEqual((await comments.searchMessages({ query: 'rounds', schema: 'Task' })).items, []);
+  });
 });
 
 /**
@@ -220,19 +508,33 @@ describe('the generated client', () => {
  * it (@ts-expect-error fails the typecheck when it does not), where the
  * untyped client takes it and the engine refuses it at run time.
  */
-export function typos(notes: NotesClient, tasks: TaskClient, specs: SpecClient, jobs: JobsClient, workers: WorkersClient): void {
+export function typos(
+  notes: NotesClient,
+  tasks: TaskClient,
+  specs: SpecClient,
+  jobs: JobsClient,
+  workers: WorkersClient,
+  message: StreamMessage | SignalMessage,
+  comments: CommentsNamespaceClient
+): void {
   // @ts-expect-error titel is not a field of a Note
   void notes.create({ titel: 'Launch' });
   // @ts-expect-error status is not an own field: it is Workflow's, which transition moves
   void notes.update('launch', { status: 'published' });
   // @ts-expect-error a note's status is under its Workflow, not in its data
   void notes.get('launch').then((note) => note.data.status);
-  // @ts-expect-error commentCount is Comments' field, not Workflow's
-  void notes.get('launch').then((note) => note.behaviors.Workflow.commentCount);
+  // @ts-expect-error messages is Comments' field, not Workflow's
+  void notes.get('launch').then((note) => note.behaviors.Workflow.messages);
   // @ts-expect-error publshed is not a state of a Note's Workflow
   void notes.transition('launch', { to: 'publshed' });
-  // @ts-expect-error comment takes body, not text
-  void notes.comment('launch', { text: 'Looks good' });
+  // @ts-expect-error post takes body, not text
+  void notes.post('launch', { text: 'Looks good' });
+  // @ts-expect-error a message's id is a number
+  void notes.edit('launch', { message: '1', body: 'Looks better' });
+  // @ts-expect-error a Task's Comments allow only action blocks
+  void tasks.post('t1', { body: 'See the spec.', blocks: [{ kind: 'ref', schema: 'Spec', id: 's1' }] });
+  // @ts-expect-error an action block's status is running, succeeded or failed
+  void tasks.post('t1', { body: 'Ran the tests.', blocks: [{ kind: 'action', title: 'Tests', status: 'passed' }] });
   // @ts-expect-error a note's writes take no preconditions: none of its behaviors declares one
   void notes.update('launch', { title: 'Launch' }, { preconditions: { Lease: { token: 1 } } });
   // @ts-expect-error lapsed is not a code of Workflow's vetoes
@@ -265,4 +567,65 @@ export function typos(notes: NotesClient, tasks: TaskClient, specs: SpecClient, 
   void specs.signOff('s1', { state: 'draft' });
   // @ts-expect-error late is not a deadline of a Task's Timers
   void tasks.snoozeTimer('t1', { deadline: 'late', dueAt: 1 });
+  // @ts-expect-error appendDraft alone sends draft (access operation): there is no send helper
+  void notes.sendDraft('launch', { message: 1, offset: 0, text: 'Hi' });
+  // @ts-expect-error typing's thread is a message's id, a number
+  void notes.sendTyping('launch', { thread: '1' });
+  // @ts-expect-error typing's data holds a thread alone
+  void notes.sendTyping('launch', { text: 'Hi' });
+  // @ts-expect-error finish names the composing message
+  void notes.finish('launch', { body: 'Done.' });
+  // @ts-expect-error a Task's Comments allow only action blocks, in a finish as in a post
+  void tasks.finish('t1', { message: 1, blocks: [{ kind: 'ref', schema: 'Spec', id: 's1' }] });
+  // @ts-expect-error whisper is not a signal of Comments
+  void isNoteSignal(message, 'Comments', 'whisper');
+  if (isNoteSignal(message, 'Comments', 'draft')) {
+    // @ts-expect-error a draft's data holds message, offset and text
+    void message.signal.data.thread;
+  }
+  if (isNoteSignal(message, 'Comments', 'typing')) {
+    // @ts-expect-error a typing signal's thread is a number
+    const thread: string | undefined = message.signal.data.thread;
+    void thread;
+  }
+  // @ts-expect-error markRead's upTo is a message's id, a number
+  void notes.markRead('launch', { upTo: '1' });
+  // @ts-expect-error follow says whether to follow
+  void notes.follow('launch', { thread: 1 });
+  // @ts-expect-error inbox is Comments' namespace operation: no schema's client has it
+  void notes.inbox({});
+  // @ts-expect-error inbox runs on no instance: it is no operation of a Task
+  void tasks.operate('t1', 'inbox', {});
+  // @ts-expect-error delivered is not an outcome of settleDeliveries: sent, failed or dropped
+  void comments.settleDeliveries({ token: 't', ids: ['d'], outcome: 'delivered' });
+  // @ts-expect-error settleDeliveries names the claim's token
+  void comments.settleDeliveries({ ids: ['d'], outcome: 'sent' });
+  // @ts-expect-error claimDeliveries takes subjects or a prefix, not a subject
+  void comments.claimDeliveries({ subject: 'agent:reviewer' });
+  // @ts-expect-error reply is not a kind of inbox item: mention, thread or conversation
+  void comments.inbox({ kinds: ['reply'] });
+  // @ts-expect-error the namespace client is bound to its namespace
+  void comments.inbox({}, { namespace: 'elsewhere' });
+  // @ts-expect-error token_staled is not a code of Comments' vetoes
+  isCommentsNamespaceVeto(new Error('refused'), 'token_staled');
+  // @ts-expect-error an attachment block gives its file's sha256
+  void notes.post('launch', { body: 'See this', blocks: [{ kind: 'attachment', uri: 'https://files.acme.test/7c1e', name: 'trace.txt', mediaType: 'text/plain', bytes: 2048 }] });
+  // @ts-expect-error a Task's Comments allow only action blocks: no code block
+  void tasks.post('t1', { body: 'Here.', blocks: [{ kind: 'code', repo: 'github.com/acme/shop', path: 'src/a.rs', revision: '9c1f2e7', lines: [1, 2], snippet: '' }] });
+  // @ts-expect-error a code block given holds no moves: moveAnchor writes them
+  void notes.post('launch', { body: 'Here.', blocks: [{ kind: 'code', repo: 'github.com/acme/shop', path: 'src/a.rs', revision: '9c1f2e7', lines: [1, 2], snippet: '', moves: 1 }] });
+  // @ts-expect-error moveAnchor gives the revision the code is at now
+  void notes.moveAnchor('launch', { message: 1, block: 0, lines: [1, 2] });
+  // @ts-expect-error moveAnchor's block is the code block's index, a number
+  void notes.moveAnchor('launch', { message: 1, block: 'code', revision: 'e41b07c', lines: [1, 2] });
+  // @ts-expect-error listPinned runs on an instance: it names the note
+  void notes.listPinned({ limit: 1 });
+  // @ts-expect-error searchMessages is Comments' namespace operation: no schema's client has it
+  void notes.searchMessages('launch', { query: 'rounds' });
+  // @ts-expect-error searchMessages gives a query
+  void comments.searchMessages({ schema: 'notes' });
+  // @ts-expect-error a search's thread is a message's id, a number
+  void comments.searchMessages({ query: 'rounds', schema: 'notes', instanceId: 'launch', thread: '1' });
+  // @ts-expect-error actingFor is the subject the call acts for, a string
+  void notes.post('launch', { body: 'Hi' }, { actingFor: 7 });
 }

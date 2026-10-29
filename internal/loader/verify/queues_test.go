@@ -45,14 +45,14 @@ func TestQueuesRefusedInIR(t *testing.T) {
 	want := []string{
 		"queue AsTable has role DBTable; a queue's class is its message, role EmbeddedStruct, and no table",
 		"queue Bad: retries is -1; it is zero or more",
-		"queue Bad field attempts is the column attempts, which the queue keeps itself; rename the field",
+		"queue Bad field attempts is the column attempts, which the queue keeps itself; rename the field, or name its column with @column",
 		"queue Bad field key is a @key, @unique, @searchField or generated field; a message's fields are values, and the queue keys each message itself",
 		"queue Bad field related is a relation; a message holds the key of what it names, not a reference to its table",
 		"queue Bad field order is of type Order, a table; a message holds its key instead",
 		"queue Bad field other is of type OrderPlaced, another queue's message; a message holds values",
 		"queue Empty has no fields; a queue's class holds its message's fields",
 		"queue Indexed is also a @jsonField, @versioned, @optimistic, version graph, projection or indexed class; a queue's class declares the message and nothing else",
-		"queue OrderPlaced's table is order_placed_queue, the table of OrderPlacedQueue; rename one of them",
+		"queue OrderPlaced's table is order_placed_queue, the table of OrderPlacedQueue; rename one of them, or name one with @table",
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("errors =\n%q\nwant\n%q", got, want)

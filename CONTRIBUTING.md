@@ -1,8 +1,8 @@
 # Contributing to superschematic
 
 This file covers what you need before opening a pull request: the sign-off
-requirement, the toolchain, the gates CI runs, and the rules that keep generated
-output stable across releases.
+requirement, the repository's layout, the toolchain, the gates CI runs, and the
+rules that keep generated output stable across releases.
 
 ## Sign your commits (DCO)
 
@@ -63,12 +63,69 @@ By making a contribution to this project, I certify that:
     this project or the open source license(s) involved.
 ```
 
+## Repository layout
+
+| Path | What it is |
+| --- | --- |
+| [`cmd/superschematic/`](cmd/superschematic/) | The installed binary, a Go module of its own: the core with the official extensions (gcp, cloudflare, pulumi) linked |
+| [`internal/cmd/superschematic-core/`](internal/cmd/superschematic-core/) | The core with no extension linked, which `make cli-smoke` and the examples' scripts run; never shipped |
+| [`cli/`](cli/) | `cli.New(Config, ...Extension)` and the commands: `init`, `check`, `build`, `build-all`, `migrate`, `json-schema`, `format`, `behaviors`, `engine-client`, `env`, `catalog`, `new`, `stack`, `identity` |
+| [`registry/`](registry/), [`loader/`](loader/), [`schemadeps/`](schemadeps/) | The public packages an extension imports |
+| [`internal/`](internal/) | The loader, the generators, the writers, the build plan and the cache |
+| [`ir/`](ir/) | The schema IR, its own Go module; [`ir/typescript/`](ir/typescript/) is `@superschematic/schema-ir`, its types and the data form's JSON Schema |
+| [`packages/`](packages/) | The authoring packages schemas import: `@superschematic/{schema,db,api,schema-config,stack}` |
+| [`runtime/schema/`](runtime/schema/) | The schema runtime generated types link, in Go, TypeScript and Python, and the helpers the generated Rust validators call |
+| [`runtime/http/`](runtime/http/) | The HTTP runtime generated servers link, in Go, Rust and TypeScript |
+| [`runtime/versiongraph/`](runtime/versiongraph/) | The version-graph core (Rust, with a Go binding and a wasm build) and its engines in Go, TypeScript, Rust and Python |
+| [`runtime/migrate/`](runtime/migrate/) | The migration runner: `superschematic-migrate` applies the plans `superschematic migrate plan` writes |
+| [`runtime/engine/`](runtime/engine/) | `@superschematic/engine`: runs a schema with no generated code |
+| [`runtime/engine-workqueue/`](runtime/engine-workqueue/) | `@superschematic/engine-workqueue`: claimable work for the engine |
+| [`stack/`](stack/) | The stack model's resolver: the Stack IR, the resource graph, `environment.json`, and the pinned provider schemas the targets check against offline |
+| [`extensions/`](extensions/), [`examples/`](examples/) | The official extensions (`gcp`, `cloudflare`, `pulumi`), `topcoat`, and example extensions and projects |
+| [`agent/`](agent/), [`.claude-plugin/`](.claude-plugin/) | The agent skill for building with superschematic, and the marketplace that publishes it (D76) |
+| [`docs/`](docs/) | The docs site, the decision log and the design documents |
+| [`superschematic.toml`](superschematic.toml) | The default naming file, every key written out |
+
+The repository has twelve Go modules: the root (the compiler), `ir`,
+`runtime/schema/go`, `runtime/http/go`, `runtime/versiongraph/go`,
+`runtime/engine/go` (the engine's binding),
+`runtime/migrate/go` (the migration runner), `extensions/gcp`,
+`extensions/cloudflare`, `extensions/pulumi`, `extensions/topcoat` and
+`cmd/superschematic` (the installed binary). Generated code imports the
+runtimes and the IR, never the compiler, and the root module never imports
+an extension.
+
+A binary is the core plus the extensions it links, through one call:
+
+```go
+func main() {
+	root := cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})
+	if err := root.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+```
+
+`cmd/superschematic` is that call with the official extensions, and
+`internal/cmd/superschematic-core` is the call with none. `go install
+github.com/parable-work/superschematic/cmd/superschematic@<version>` does
+not work, because the Go modules carry `replace` directives and `go
+install` at a version refuses them; build from a checkout, or download a
+release's `superschematic_<version>_<platform>.tar.gz`.
+
+[`docs/extension-model.md`](docs/extension-model.md) is the design of the
+extension seam, [`docs/stack-model.md`](docs/stack-model.md) the design of
+stacks and deploys, and [`docs/DECISIONS.md`](docs/DECISIONS.md) records
+every design decision (cited as D1, D2, ... in code and commits).
+[`docs/README.md`](docs/README.md) covers writing docs pages.
+
 ## Toolchain
 
 | Tool          | Version | How it is pinned                                   |
 | ------------- | ------- | -------------------------------------------------- |
-| Go            | 1.26.4  | `tools.env` (`GO_VERSION`), also `GOTOOLCHAIN` and every `go.mod` |
-| golangci-lint | 2.11.4  | `tools.env` (`GOLANGCI_LINT_VERSION`)              |
+| Go            | 1.27.3  | `tools.env` (`GO_VERSION`), also `GOTOOLCHAIN` and every `go.mod` |
+| golangci-lint | 2.15.0  | `tools.env` (`GOLANGCI_LINT_VERSION`)              |
 | Node          | 24      | `tools.env` (`NODE_VERSION`)                       |
 | Bun           | 1.4.2   | `tools.env` (`BUN_VERSION`)                        |
 | Python        | 3.9 or newer | floor in `runtime/schema/python/pyproject.toml` and `runtime/versiongraph/python/pyproject.toml`; CI tests on `tools.env` (`PYTHON_VERSION`), and the version-graph binding on 3.9 too |
@@ -81,7 +138,7 @@ By making a contribution to this project, I certify that:
 Setup on a fresh machine:
 
 ```
-export GOTOOLCHAIN=go1.26.4
+export GOTOOLCHAIN=go1.27.3
 rustup toolchain install 1.99.0 --target wasm32-unknown-unknown
 make setup
 ```
@@ -111,7 +168,52 @@ exports both link directories for every Go target; outside make, run
 `tools.env` only; workflows read that file and never inline a version. Bump
 the superscalar commit in `superscalar.pin` and `go.mod` together (a test
 fails when they disagree), then run `go run ./internal/tools/scalarcatalog`
-to rewrite the TypeScript and Python scalar catalogs.
+to rewrite the TypeScript and Python scalar catalogs and the docs' scalar
+page.
+
+### Without Rust
+
+A checkout without Rust builds the CLI and runs a TypeScript project
+(D82): Go, Bun, Node and Docker are enough. The Rust build products come
+prebuilt, in two families that `scripts/prebuilt_deps.py` describes:
+superscalar's Go binding with its static archive and its TypeScript
+binding with its builds, keyed by `superscalar.pin` and `tools.env`'s Rust
+and wasm-pack; and the version-graph core's archive and wasm32 module,
+keyed by its sources and Rust. With no `cargo` on `PATH`,
+`scripts/superscalar-dep.sh`, `scripts/versiongraph-archive.sh` and the
+version-graph package's wasm build stage them in place of a build (each
+script takes `--prebuilt` to do so with cargo present):
+
+```
+scripts/superscalar-dep.sh --prebuilt
+make cli          # bin/superschematic and bin/superschematic-migrate
+(cd runtime/http/typescript && bun install && bun run build)
+```
+
+The docs site's TypeScript install page has the minimal path for a
+TypeScript project. `make cli` builds only what the CLI links; the gates
+still need Rust, and `make setup` builds everything from source.
+
+The prebuilt-deps workflow (`.github/workflows/prebuilt-deps.yml`)
+publishes them: on a push to `main` that changes a family's inputs, or by
+hand, it builds each family that lacks a prerelease on the four release
+runners, writes its `manifest.json`, which lists each tarball's SHA-256,
+and attaches them to the prerelease `prebuilt-<family>-<key>`.
+`prebuilt.pin` pins each family's key and the digest of its manifest, and
+a fetch refuses a manifest or a tarball that differs. So after the
+workflow publishes a new key, a maintainer pins it and opens a pull
+request with the file:
+
+```
+scripts/prebuilt_deps.py pin superscalar versiongraph
+```
+
+Until it merges, a checkout without Rust is refused with that
+instruction. `SUPERSCHEMATIC_PREBUILT_URL` points the scripts at another
+copy of the releases, a URL or a directory of `<tag>/<file>`, and
+`SUPERSCHEMATIC_PREBUILT_<FAMILY>_MANIFEST_SHA256` trusts a manifest the
+pin does not name yet, as when you test one you packed yourself
+(`scripts/prebuilt_deps.py pack` and `manifest`).
 
 ## Running the gates
 
@@ -155,10 +257,11 @@ agent or a bot with write access counts.
 | `make go-test`        | `go test -count=1 ./...` in the Go modules                           |
 | `make go-fmt-check`   | `gofmt -l` is empty                                                  |
 | `make go-lint`        | `golangci-lint run` with `.golangci.yml` in the Go modules           |
-| `make catalog-check`  | The committed TypeScript and Python scalar catalogs match the pinned superscalar, and the TypeScript one's value classes match the graph descriptor's rule |
+| `make catalog-check`  | The committed TypeScript and Python scalar catalogs match the pinned superscalar, and the TypeScript one's value classes match the graph descriptor's rule, and the docs' scalar page matches the pinned superscalar |
 | `make schema-file-types-check` | The committed schema-file JSON Schema and TypeScript types in `ir/typescript` match the IR |
 | `make behaviors-check` | The copies of the core's behavior declarations in the crates that implement them (the engine's `runtime/engine/rust/behaviors/declarations`, the work queue's `runtime/engine-workqueue/rust/declarations`, the commerce crate's `runtime/engine-commerce/rust/declarations`) match the core registry; `make behaviors` rewrites them |
 | `make build`          | `go build ./...` in the Go modules, then `bin/superschematic`, the installed binary (`cmd/superschematic`: the core with the gcp target, the Cloudflare DNS platform and the Pulumi provisioner linked) |
+| `make cli`            | `bin/superschematic` and `bin/superschematic-migrate` alone, over superscalar's archive, built or, with no `cargo` on `PATH`, prebuilt ([Without Rust](#without-rust)) |
 | `make cli-smoke`      | `bin/superschematic-core`, the core with no extension linked (`internal/cmd/superschematic-core`, never shipped), builds the DB, API and General fixtures |
 | `make example-migrations` | `examples/migrations/scripts/check.sh`: `migrate plan` between the example's two versions for Postgres and SQLite, its hazard gate, and `superschematic-migrate` applying it to SQLite, and to Postgres when `SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL` is set; the outputs the docs quote match `testdata/generated/` there |
 | `make ts`             | `packages/`, `runtime/schema/typescript`, `runtime/http/typescript`, `runtime/versiongraph/typescript`, `runtime/engine/typescript`, `runtime/engine-workqueue/typescript` and `runtime/engine-commerce/typescript` typecheck, build and test; the version-graph package builds the version-graph core for wasm32 and runs every vector through the package, and every scenario on SQLite, and the SQLite adapter's tests under Bun and Node.js; the engine's, the work-queue package's and the commerce package's tests run under Node.js and Bun, and so do the end-to-end tests of `examples/engine-notes` and `examples/engine-jobs` (`scripts/check.sh` in each) |
@@ -204,31 +307,81 @@ export SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL="$SUPERSCHEMATIC_ORMGEN_TEST_DATA
 export SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL="$SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL"
 ```
 
-### A deploy to Google Cloud
+The tests of vector columns (D84) need pgvector, which the alpine image
+lacks, so they run on a second Postgres that
+`SUPERSCHEMATIC_VECTOR_TEST_DATABASE_URL` names, and skip without it;
+CI sets `SUPERSCHEMATIC_REQUIRE_VECTOR_TESTS=1`, which turns the skip into
+a failure. The other tests stay on the alpine image: the version-graph
+vectors hold date-times to its tzdata, which the pgvector image's Debian
+tzdata reads differently for an 1890 offset.
 
-No CI job deploys to Google Cloud. A maintainer proves the gcp target
-(milestone 3 of `docs/stack-model.md`) with a run from a checkout, against
-a fresh project they own, signed in with `gcloud auth login` and
-`gcloud auth application-default login`:
+```
+docker run -d --name superschematic-pgvector -e POSTGRES_PASSWORD=superschematic -p 55433:5432 pgvector/pgvector:0.8.7-pg16
+export SUPERSCHEMATIC_VECTOR_TEST_DATABASE_URL='postgres://postgres:superschematic@localhost:55433/postgres?sslmode=disable'
+```
 
-1. `make build`, and the `pulumi` CLI on `PATH`.
-2. Give `examples/acme-shop`'s `shop-stack` a gcp environment, beside
-   `Dev`, with the project and region, and the gcp target's types (the
-   stacks guide, "Type a target's values"). Keep the edit local: the
-   example builds with the core binary, which refuses a gcp environment.
-3. From `examples/acme-shop`, `../../bin/superschematic stack bootstrap
-   <environment> --repository ""`, which needs no GitHub repository.
-4. `export SUPERSCHEMATIC_MIGRATE_IMAGE="$(scripts/migrate-dev-image.sh
-   <project> <region> shop-stack)"` from the checkout's root, since a
-   binary built from a checkout names no release whose runner image the
-   deploy could build.
-5. `stack plan`, `stack deploy`, then call the APIs at the `run.app` URLs
-   `stack outputs` prints, and `stack destroy` (`--yes` away from a
-   terminal). Bootstrap's resources and the stack's images stay until the
-   project goes.
+### A deploy to the cloud
 
-`third_party` must be a directory, not a link to another checkout: a
-build's context keeps a link as a link, as Docker's does.
+No CI job deploys on a push or a pull request. A maintainer proves the
+gcp and cloudflare targets with `examples/deploy-smoke` (D97), a project
+shaped like a finances app: an API over the user model with a vector
+column, a keyed queue its TypeScript worker drains, a declared query, a
+job whose name is too long for a GCP service account, and a site on one
+origin with the API (D91). `scripts/smoke.sh <environment>` deploys
+`smoke-stack`'s `Gcp` or `Cloudflare`, checks it through the site's
+origin, signing in with a cookie, running the query and `nearest` and
+waiting for the worker to drain a message, prints the sign-ins' and the
+drain's times, and destroys it (`--keep` leaves it up, `--destroy`
+removes it later). `smoke.sh Dev` runs the same checks against `stack
+dev`, with no cloud. The example's README lists them.
+
+The deploy runs from a checkout, with `make cli`'s `bin/superschematic`,
+the pulumi CLI on `PATH` and Bun, against a project or an account you own.
+The committed stack names placeholders, and the script writes yours in
+their place from its environment for the run:
+
+| Target | Once, with an owner's credentials | Each run |
+| --- | --- | --- |
+| gcp | `gcloud auth login` and `gcloud auth application-default login`, then `SMOKE_GCP_PROJECT=... SMOKE_GCP_REGION=... examples/deploy-smoke/scripts/smoke.sh Gcp --bootstrap`: bootstrap enables the APIs and makes the state bucket, the stack's repository and accounts, and Workload Identity Federation for the checkout's GitHub repository (`SMOKE_GITHUB_REPOSITORY` names another, `""` none) | `SMOKE_GCP_PROJECT`, `SMOKE_GCP_REGION` and application default credentials; gcloud, with which `scripts/migrate-dev-image.sh` builds the migration runner's image unless `SUPERSCHEMATIC_MIGRATE_IMAGE` names one |
+| cloudflare | Workers Paid: a sign-in hashes with the identity runtime's argon2id, about 120 ms of CPU, and Workers Free allows 10 ms. A Postgres the smoke owns, on Neon, Supabase or Cloud SQL, in `HYPERDRIVE_ORIGIN_SMOKE_DB`; a Hyperdrive config of it, `wrangler hyperdrive create smoke-stack-cloudflare-smoke-db --connection-string="$HYPERDRIVE_ORIGIN_SMOKE_DB" --caching-disabled`; then `smoke.sh Cloudflare --bootstrap` with your own `CLOUDFLARE_API_TOKEN`: bootstrap takes `PULUMI_CONFIG_PASSPHRASE` as the state's passphrase, makes the stack's CI tokens, and prints the account's workers.dev subdomain and Secrets Store id as it records them | `SMOKE_CLOUDFLARE_ACCOUNT_ID`, `SMOKE_CLOUDFLARE_WORKERS_SUBDOMAIN`, `SMOKE_CLOUDFLARE_SECRETS_STORE_ID`, `SMOKE_HYPERDRIVE_ID`, `HYPERDRIVE_ORIGIN_SMOKE_DB`, `CLOUDFLARE_API_TOKEN` and `PULUMI_CONFIG_PASSPHRASE`. The destroy empties the origin's tables, with psql or Docker's postgres image, since the next deploy has no manifest and migrates it from empty |
+
+Both take `SMOKE_ADMIN_PASSWORD`, the password of the smoke's
+administrator, `admin@smoke.test` (`SMOKE_ADMIN_LOGIN`): the first run on
+a database registers them, and later runs sign them in, so keep it.
+Bootstrap's resources, the stack's images, the Hyperdrive config and the
+origin stay after a destroy. `third_party` must be a directory, not a link
+to another checkout: a build's context keeps a link as a link, as
+Docker's does.
+
+`.github/workflows/deploy-smoke.yml` runs the script on GitHub Actions,
+by hand alone (`workflow_dispatch`, with the target as its input, and
+`keep`), from `main`. Its job runs in the GitHub environment named as the
+stack's environment, `Gcp` or `Cloudflare`, which holds:
+
+| Environment | Variables | Secrets |
+| --- | --- | --- |
+| `Gcp` | `SMOKE_GCP_PROJECT`, `SMOKE_GCP_REGION`, `SMOKE_GCP_WORKLOAD_IDENTITY_PROVIDER` (`projects/<number>/locations/global/workloadIdentityPools/smoke-stack-github/providers/github`), `SMOKE_GCP_SERVICE_ACCOUNT` (`smoke-stack-deployer@<project>.iam.gserviceaccount.com`) | `SMOKE_ADMIN_PASSWORD` |
+| `Cloudflare` | `SMOKE_CLOUDFLARE_ACCOUNT_ID`, `SMOKE_CLOUDFLARE_WORKERS_SUBDOMAIN`, `SMOKE_CLOUDFLARE_SECRETS_STORE_ID`, `SMOKE_HYPERDRIVE_ID` | `CLOUDFLARE_API_TOKEN` (bootstrap's `smoke-stack-deployer` token), `PULUMI_CONFIG_PASSPHRASE`, `HYPERDRIVE_ORIGIN_SMOKE_DB`, `SMOKE_ADMIN_PASSWORD` |
+
+On gcp the job signs in through bootstrap's federation as the deployer,
+which admits a manual run of `main` in the environment of that name alone
+(D69).
+
+What a run proves, which the tests prove only under fakes and the pinned
+workerd (D91 and D92 Left):
+
+| Target | Behaviour | The check that shows it |
+| --- | --- | --- |
+| gcp | The load balancer passes the browser's `Host` to Cloud Run through a serverless network endpoint group | a sign-in that sends `Origin` alone is taken as same-origin, a bad password's 401 and not a 403, which the identity runtime does only when the `Host` it sees is the site's; one from another origin is refused |
+| gcp | `pathPrefixRewrite` on a `fullPathMatch` rule makes the path `/`, and the prefix rule's the rest | every API call under `/api/smoke-api/` reaches its route |
+| gcp | `INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER` admits the site's load balancer | the same calls reach `smoke-api`, which has no public address |
+| gcp | The files' rules serve the fallback, and the API's 404 passes | a path of no file serves the page; a missing line item answers the API's 404 |
+| cloudflare | `runWorkerFirst` takes the API's paths before the assets | the config and every API call answer from the Workers, not the assets |
+| cloudflare | A service binding's request carries the browser's `Host` and a body | the sign-in that sends `Origin` alone, and each POST's JSON body |
+| cloudflare | Cloudflare accepts the version's Hyperdrive binding, and Hyperdrive reaches a real origin over TLS | the deploy, then every call that reads or writes, the declared query and `nearest` among them |
+| cloudflare | The Cron drainer's wall time and CPU | the time from the enqueue to the drain, within a firing a minute; the drainer Worker's invocation in Workers Logs |
+| cloudflare | argon2id's CPU on a sign-in | the sign-ins' times, the first of an isolate about 120 ms more for the hash it makes as it builds the identity service; their CPU in Workers Logs |
+| gcp | A job whose derived name is past a GCP limit deploys | `smoke-api-sync-all-linked-accounts`'s Cloud Run job, scheduler job and account, named `smoke-api-sync-all-lin-` and a hash (D97) |
 
 ## Rules
 
@@ -237,7 +390,8 @@ build's context keeps a link as a link, as Docker's does.
 Golden files under `testdata/golden`, the scalar catalogs
 (`runtime/schema/typescript/src/runtime/builtin-scalars.generated.ts`,
 `runtime/schema/python/superschematic_schema_runtime/_generated_default_registry.py`),
-the schema-file JSON Schema and TypeScript types
+the docs' scalar page (`docs/src/content/docs/reference/scalars.md`), the
+schema-file JSON Schema and TypeScript types
 (`ir/typescript/schema-file.json`, `ir/typescript/schema-file.d.ts`) and
 the modules `superschematic engine-client` writes for the engine's tests
 and the engine-notes example (`runtime/engine/typescript/test/generated/`,
@@ -418,14 +572,17 @@ A release is three steps, each started by a person. For the first release,
    the full CI and builds the CLI (`cmd/superschematic`, the core with the
    official extensions) for linux and darwin on x64 and arm64, each
    on a runner of that os/arch, linked against the superscalar archive built
-   from the pinned checkout, and the identity runner,
+   from the pinned checkout, `superschematic-topcoat`
+   (`extensions/topcoat/cmd/superschematic-topcoat`, the CLI with the
+   Topcoat extension linked too) the same way, and the identity runner,
    `superschematic-identity`, on the same runners, since it needs cgo too.
    It cross-compiles the migration runner, `superschematic-migrate`, for the
    same four on one runner, since it needs no cgo. Both runners' `version`
    commands print the version the build stamps with `-X main.version`. It
    refuses a set not built from the tag's commit, writes `SHA256SUMS` over
-   the three binaries' archives
+   the binaries' archives
    (`superschematic_<version>_<platform>.tar.gz`,
+   `superschematic-topcoat_<version>_<platform>.tar.gz`,
    `superschematic-identity_<version>_<platform>.tar.gz` and
    `superschematic-migrate_<version>_<platform>.tar.gz`), and packs the npm
    tarballs and the PyPI sdist and wheel. It creates the GitHub release with

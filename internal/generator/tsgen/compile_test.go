@@ -88,6 +88,11 @@ func buildTSPackages(t *testing.T, cases []tsPackageCase) (typesRoot, bunPath st
 				t.Fatalf("set version-graph spec for %s: %v", tc.name, err)
 			}
 		}
+		if output.ORM != nil {
+			// orm.ts imports the HTTP runtime's ./postgres entry, whose
+			// declarations are its dist/ (D79).
+			testpaths.BuildHTTPRuntime(t, bunPath, paths)
+		}
 		if err := WriteTypes(output, outDir); err != nil {
 			t.Fatalf("write %s: %v", tc.name, err)
 		}

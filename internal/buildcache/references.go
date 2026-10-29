@@ -119,8 +119,8 @@ func (ih *InputHasher) writeReferences(h io.Writer, name string) {
 }
 
 // sourcesDigest digests the sources of the named service and of every
-// service it reaches through its config's dependencies, authDb, calls and
-// buckets:
+// service it reaches through its config's dependencies, authDb, calls,
+// buckets and memory stores:
 // all a schema that references it can read of it through the IR, as a
 // stack's resolver reads the services its entry points reach. The walk
 // collects a set, so services that reach each other digest without a
@@ -155,6 +155,9 @@ func (ih *InputHasher) sourcesDigest(name string) string {
 		}
 		for _, bucket := range service.Config.Buckets {
 			next = append(next, bucket.Name)
+		}
+		for _, store := range service.Config.UsedMemoryStores() {
+			next = append(next, store.Name)
 		}
 		for _, n := range next {
 			if !seen[n] {

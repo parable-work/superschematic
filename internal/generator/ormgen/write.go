@@ -20,6 +20,10 @@ type RepositoryOutput struct {
 	Timestamp    string
 	UUIDGoType   string
 	UserIDGoType string
+
+	// RequireUpdatedBy is outputs.sql.requireUpdatedBy (D87): a write that
+	// would leave a nullable updatedBy as it was refuses one without a user.
+	RequireUpdatedBy bool
 }
 
 // VersionGraphOutput wraps one version graph with module-level metadata for
@@ -56,6 +60,8 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 		{"interfaces.tmpl", "interfaces.go"},
 		{"query.tmpl", "query.go"},
 		{"utils.tmpl", "utils.go"},
+		{"upsert.tmpl", "upsert.go"},
+		{"transaction.tmpl", "transaction.go"},
 		{"module.tmpl", "go.mod"},
 		{"readme.tmpl", "README.md"},
 		{"makefile.tmpl", "Makefile"},
@@ -97,6 +103,26 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 	} else if err := os.Remove(sqliteQueuesFile); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove queues_sqlite.go: %w", err)
 	}
+	// queries.go runs the declared queries (D86); a schema without one has
+	// none, so a file an earlier build wrote goes.
+	queriesFile := filepath.Join(outputDir, "queries.go")
+	if output.HasQueries() {
+		if err := generateFile(generator, "queries.tmpl", queriesFile, output); err != nil {
+			return fmt.Errorf("failed to write queries.go: %w", err)
+		}
+	} else if err := os.Remove(queriesFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove queries.go: %w", err)
+	}
+	// encrypted.go seals and opens the Encrypted<T> fields (D85); a schema
+	// without one has none, so a file an earlier build wrote goes.
+	encryptedFile := filepath.Join(outputDir, "encrypted.go")
+	if output.HasEncryptedFields {
+		if err := generateFile(generator, "encrypted.tmpl", encryptedFile, output); err != nil {
+			return fmt.Errorf("failed to write encrypted.go: %w", err)
+		}
+	} else if err := os.Remove(encryptedFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove encrypted.go: %w", err)
+	}
 	// search.go writes the words of a filter's SearchText and their LIKE
 	// patterns (D62, amended); a schema without search fields has none, so a
 	// file an earlier build wrote goes.
@@ -107,6 +133,26 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 		}
 	} else if err := os.Remove(searchFile); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove search.go: %w", err)
+	}
+	// nearest.go writes a vector's text form and the Nearest of each table
+	// with a vector column (D84); a schema without one has none.
+	nearestFile := filepath.Join(outputDir, "nearest.go")
+	if output.HasVectors {
+		if err := generateFile(generator, "nearest.tmpl", nearestFile, output); err != nil {
+			return fmt.Errorf("failed to write nearest.go: %w", err)
+		}
+	} else if err := os.Remove(nearestFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove nearest.go: %w", err)
+	}
+	// projections.go reads the schema's projections with a key (D90); a
+	// schema without one has none.
+	projectionsFile := filepath.Join(outputDir, "projections.go")
+	if len(output.Projections) > 0 {
+		if err := generateFile(generator, "projections.tmpl", projectionsFile, output); err != nil {
+			return fmt.Errorf("failed to write projections.go: %w", err)
+		}
+	} else if err := os.Remove(projectionsFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove projections.go: %w", err)
 	}
 	if err := cleanStaleVersionGraphFiles(outputDir, output.VersionGraphs); err != nil {
 		return fmt.Errorf("failed to clean stale version graph files: %w", err)
@@ -124,6 +170,7 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 				UUIDGoType:   output.UUIDGoType,
 				UserIDGoType: output.UserIDGoType,
 			}
+			repoOutput.RequireUpdatedBy = output.Actor.RequireUpdatedBy
 			if err := generateFile(generator, "repository.tmpl", filepath.Join(outputDir, filename), repoOutput); err != nil {
 				return fmt.Errorf("failed to write %s: %w", filename, err)
 			}

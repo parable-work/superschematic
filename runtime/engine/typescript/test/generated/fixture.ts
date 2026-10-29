@@ -2,14 +2,17 @@
 //
 // Typed wrappers over the engine's client: each schema's instances, create
 // input and patches, and its behaviors' create parameters, preconditions,
-// operations and veto codes, as their configs narrow them.
+// operations, signals and veto codes, as their configs narrow them; then
+// each composed behavior's namespace operations, which belong to no schema.
 //
 // Schema Project: ProjectClient, projectClient.
+// Schema Request: RequestClient, requestClient.
 // Schema Spec: SpecClient, specClient.
 // Schema Task: TaskClient, taskClient.
+// Behavior Comments, across a namespace: CommentsNamespaceClient, commentsNamespaceClient.
 
 import { isVeto } from '@superschematic/engine/client';
-import type { CallOptions, CreateOptions, EngineClient, EngineVeto, Instance, InstancePage, JSONObject, ListOptions, OperationOutcome, WriteOptions } from '@superschematic/engine/client';
+import type { CallOptions, CreateOptions, EngineClient, EngineSignal, EngineVeto, Instance, InstancePage, JSONObject, ListOptions, OperationOutcome, SignalMessage, StreamMessage, WriteOptions } from '@superschematic/engine/client';
 
 // The Project schema.
 
@@ -136,6 +139,386 @@ export function projectClient(client: EngineClient): ProjectClient {
     },
     transition(id, params, options) {
       return client.instances.invoke<ProjectTransitionResult>('Project', id, 'transition', params, options);
+    },
+  };
+}
+
+// The Request schema.
+
+/** A Request's own fields, as a create gives them. A request whose category and summary a model fills (D73): a model outside the engine fills its category and summary from its subject and body, while it is new or in triage; a category under 0.8 confidence waits in review, and the request moves to assigned only once its category is reviewed. */
+export type RequestFields = {
+  subject: string;
+  body?: string | null;
+  category?: string | null;
+  summary?: string | null;
+};
+
+/** A Request's data as a read returns it: its own fields. Its behaviors' fields are in RequestBehaviors. */
+export type Request = RequestFields;
+
+/** The fields of a Request's behaviors as a read returns them, by behavior name: each behavior that declares a field, with those of its fields that have a value. */
+export type RequestBehaviors = {
+  readonly Workflow: {
+    /** The state the instance is in. */
+    readonly status: RequestState;
+    /** When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition. */
+    readonly enteredAt?: number;
+  };
+  readonly Derived: {
+    /** The last value settled for each derived field, by field: { sourceHash, model, settledAt, settledBy, confidence? }, and overridden: { by, at } once a caller or another behavior's operation wrote it. A field with neither is absent. */
+    readonly fields: {
+      category?: {
+        confidence?: number;
+        model?: string;
+        overridden?: { at: number; by: string };
+        settledAt?: number;
+        settledBy?: string;
+        sourceHash?: string;
+      };
+      summary?: {
+        confidence?: number;
+        model?: string;
+        overridden?: { at: number; by: string };
+        settledAt?: number;
+        settledBy?: string;
+        sourceHash?: string;
+      };
+    };
+    /** The derived fields whose inputs, instruction, model or type moved since their last value, or that rederive asked for, and that no write overrode, in the config's order. */
+    readonly stale: Array<'category' | 'summary'>;
+  };
+  readonly Provenance: {
+    /** By recorded field written since Provenance was added: { source, by, for?, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; for is the subject it acted for, when it acted for one (D77); review is { state, by?, at? }, state proposed, accepted, rejected or edited. */
+    readonly fields: {
+      body?: {
+        at: number;
+        by: string;
+        confidence?: number;
+        for?: string;
+        review?: {
+          at?: number;
+          by?: string;
+          state: 'proposed' | 'accepted' | 'rejected' | 'edited';
+        };
+        source: string;
+      };
+      category?: {
+        at: number;
+        by: string;
+        confidence?: number;
+        for?: string;
+        review?: {
+          at?: number;
+          by?: string;
+          state: 'proposed' | 'accepted' | 'rejected' | 'edited';
+        };
+        source: string;
+      };
+      subject?: {
+        at: number;
+        by: string;
+        confidence?: number;
+        for?: string;
+        review?: {
+          at?: number;
+          by?: string;
+          state: 'proposed' | 'accepted' | 'rejected' | 'edited';
+        };
+        source: string;
+      };
+      summary?: {
+        at: number;
+        by: string;
+        confidence?: number;
+        for?: string;
+        review?: {
+          at?: number;
+          by?: string;
+          state: 'proposed' | 'accepted' | 'rejected' | 'edited';
+        };
+        source: string;
+      };
+    };
+    /** Whether any recorded field is proposed. A list filters on it. */
+    readonly inReview: boolean;
+  };
+};
+
+/** A merge patch of a Request's own fields (RFC 7386): null removes an optional field. Its behaviors' fields change through their operations. */
+export type RequestPatch = {
+  subject?: string;
+  body?: string | null;
+  category?: string | null;
+  summary?: string | null;
+};
+
+/** A state of a Request's Workflow. */
+export type RequestState = 'new' | 'triage' | 'assigned';
+
+/** The parameters of Workflow's transition: Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it. */
+export type RequestTransitionParams = {
+  /** The state to move to. */
+  to: RequestState;
+};
+
+/** What Workflow's transition returns. */
+export type RequestTransitionResult = {
+  /** The state the instance was in. */
+  from: RequestState;
+  /** The state it is in now. */
+  to: RequestState;
+};
+
+/** The parameters of Derived's staleDerivations: Lists the derived fields a deriver should compute, oldest first: each one's instance id, field, inputs by field name, instruction, model label, the field's JSON Schema as output, the hash to present and the attempt number. Leaves out a field outside its states, one overridden, one whose inputs are all absent and one out of attempts. Needs the config's permission. */
+export type RequestStaleDerivationsParams = {
+  /** The next of the previous page. */
+  cursor?: string;
+  /** Only this derived field. */
+  field?: 'category' | 'summary';
+  /** At most this many, 50 when absent. */
+  limit?: number;
+};
+
+/** What Derived's staleDerivations returns. */
+export type RequestStaleDerivationsResult = {
+  items: Array<{
+    /** Which attempt this is, from 1. */
+    attempt: number;
+    field: string;
+    id: string;
+    /** The inputs that hold a value, by field name. */
+    inputs: JSONObject;
+    instruction: string;
+    model: string;
+    /** The derived field's JSON Schema: what the value must be. */
+    output: JSONObject | boolean;
+    /** The hash of the inputs, instruction, model and output, which a settle presents. */
+    sourceHash: string;
+  }>;
+  /** The cursor of the next page; null on the last. */
+  next: string | null;
+};
+
+/** The parameters of Derived's settleDerivations: Settles what a deriver computed from staleDerivations: each item a value, or a failure, with the hash it pulled. Values are written instance by instance through applyDerived, each instance in one event; an item whose hash moved, whose instance is gone, whose field was overridden or left its states, whose value the type refuses, or that another behavior vetoes is skipped, and the others still settle. A failure, an invalid value or a veto counts an attempt and appends no event. An item given twice, or with both a value and a failure, refuses the whole call. Needs the config's permission. */
+export type RequestSettleDerivationsParams = {
+  items: Array<{
+    /** How sure the model is, from 0 to 1. */
+    confidence?: number;
+    /** Why no value came back. */
+    failure?: { class?: string; message: string };
+    field: string;
+    id: string;
+    sourceHash: string;
+    /** What the call cost, kept in the event's parameters for reports. */
+    usage?: {
+      costMicros?: number;
+      inputTokens?: number;
+      modelId?: string;
+      outputTokens?: number;
+    };
+    /** The value, which the derived field's type must accept. */
+    value?: unknown;
+  }>;
+};
+
+/** What Derived's settleDerivations returns. */
+export type RequestSettleDerivationsResult = {
+  /** How many failures were counted. */
+  failed: number;
+  /** How many values were written. */
+  settled: number;
+  skipped: Array<{
+    /** For vetoed, the behavior that vetoed. */
+    behavior?: string;
+    /** For vetoed, its veto code. */
+    code?: string;
+    field: string;
+    id: string;
+    /** For invalid, what the type refuses. */
+    issues?: unknown[];
+    /** not_found, not_derived, moved, overridden, out_of_state, invalid or vetoed. */
+    reason: string;
+  }>;
+};
+
+/** The parameters of Derived's failedDerivations: Lists the derived fields out of attempts, oldest first, with each one's last failure. Needs the config's permission. */
+export type RequestFailedDerivationsParams = {
+  /** The next of the previous page. */
+  cursor?: string;
+  /** At most this many, 50 when absent. */
+  limit?: number;
+};
+
+/** What Derived's failedDerivations returns. */
+export type RequestFailedDerivationsResult = {
+  items: Array<{ attempts: number; failure?: JSONObject; field: string; id: string }>;
+  next: string | null;
+};
+
+/** The parameters of Derived's applyDerived: Writes derived values on the instance, each with the hash it was computed under: through update(), so the type's validation and every guard judge them, attributed to Derived with each value's confidence. Refused for a field the config does not derive, one a write overrode, one outside its states and one whose hash moved. Needs the config's permission; settleDerivations calls it. */
+export type RequestApplyDerivedParams = {
+  fields: {
+    category?: {
+      confidence?: number;
+      sourceHash: string;
+      usage?: JSONObject;
+      value: NonNullable<RequestFields["category"]>;
+    };
+    summary?: {
+      confidence?: number;
+      sourceHash: string;
+      usage?: JSONObject;
+      value: NonNullable<RequestFields["summary"]>;
+    };
+  };
+};
+
+/** What Derived's applyDerived returns. */
+export type RequestApplyDerivedResult = {
+  /** The fields written, in the order given. */
+  settled: Array<'category' | 'summary'>;
+};
+
+/** The parameters of Derived's rederive: Makes derived fields stale again, every one when fields is absent: clears an override, the failed attempts, and the last value's hash, so the deriver computes them anew. The values stay until new ones settle. */
+export type RequestRederiveParams = { fields?: Array<'category' | 'summary'> };
+
+/** What Derived's rederive returns. */
+export type RequestRederiveResult = {
+  /** The derived fields stale after it. */
+  stale: Array<'category' | 'summary'>;
+};
+
+/** The parameters of Provenance's accept: Accepts proposed fields as they are, as the caller. Needs the review's permission. */
+export type RequestAcceptParams = { fields: Array<'body' | 'category' | 'subject' | 'summary'> };
+
+/** What Provenance's accept returns. */
+export type RequestAcceptResult = {
+  accepted: Array<'body' | 'category' | 'subject' | 'summary'>;
+  inReview: boolean;
+};
+
+/** The parameters of Provenance's reject: Rejects proposed fields: clears each, or sets it to the patch's value, through update(), as the caller's own write, so Derived does not propose it again. Needs the review's permission. */
+export type RequestRejectParams = {
+  fields: Array<'body' | 'category' | 'subject' | 'summary'>;
+  /** Replacement values, by field of fields; a field it leaves out is cleared. */
+  patch?: Partial<Pick<RequestFields, "body" | "category" | "subject" | "summary">>;
+};
+
+/** What Provenance's reject returns. */
+export type RequestRejectResult = {
+  inReview: boolean;
+  rejected: Array<'body' | 'category' | 'subject' | 'summary'>;
+};
+
+/** Each operation a Request's behaviors add: its scope, parameters and result. */
+export type RequestOperations = {
+  transition: { scope: 'instance'; params: RequestTransitionParams; result: RequestTransitionResult };
+  staleDerivations: { scope: 'schema'; params: RequestStaleDerivationsParams; result: RequestStaleDerivationsResult };
+  settleDerivations: { scope: 'schema'; params: RequestSettleDerivationsParams; result: RequestSettleDerivationsResult };
+  failedDerivations: { scope: 'schema'; params: RequestFailedDerivationsParams; result: RequestFailedDerivationsResult };
+  applyDerived: { scope: 'instance'; params: RequestApplyDerivedParams; result: RequestApplyDerivedResult };
+  rederive: { scope: 'instance'; params: RequestRederiveParams; result: RequestRederiveResult };
+  accept: { scope: 'instance'; params: RequestAcceptParams; result: RequestAcceptResult };
+  reject: { scope: 'instance'; params: RequestRejectParams; result: RequestRejectResult };
+};
+
+/** The name of an operation on one Request. */
+export type RequestInstanceOperation = 'transition' | 'applyDerived' | 'rederive' | 'accept' | 'reject';
+
+/** The codes the vetoes of a Request's behaviors carry, by behavior: what a refused call's details.code holds. */
+export type RequestVetoes = {
+  Workflow: 'already_in_state' | 'terminal_state' | 'transition_not_allowed' | 'no_status';
+  Derived: 'not_derived' | 'moved' | 'out_of_state' | 'overridden';
+  Provenance: 'not_recorded' | 'not_in_review' | 'unreviewed_fields';
+};
+
+/** A Request create's options: its id, and each behavior's create parameters. */
+export type RequestCreateOptions = Omit<CreateOptions, 'behaviors'>;
+
+/** A Request write's options: the sequence it expects, and each behavior's preconditions. */
+export type RequestWriteOptions = Omit<WriteOptions, 'preconditions'>;
+
+/** isRequestVeto is isVeto with the behaviors of a Request and their codes. */
+export function isRequestVeto<B extends keyof RequestVetoes>(error: unknown, behavior?: B, codes?: RequestVetoes[B] | ReadonlyArray<RequestVetoes[B]>): error is EngineVeto {
+  return isVeto(error, behavior, codes);
+}
+
+/** The Request schema's calls, typed: the engine's built-in operations, then each operation its behaviors add. */
+export interface RequestClient {
+  /** create stores a new Request, with its behaviors' create parameters. */
+  create(data: RequestFields, options?: RequestCreateOptions): Promise<Instance<Request, RequestBehaviors>>;
+  /** get reads a Request; one that does not exist is 404 not_found. */
+  get(id: string, options?: CallOptions): Promise<Instance<Request, RequestBehaviors>>;
+  /** list returns a page in creation order. */
+  list(options?: ListOptions): Promise<InstancePage<Request, RequestBehaviors>>;
+  /** update applies a merge patch of the own fields. */
+  update(id: string, patch: RequestPatch, options?: RequestWriteOptions): Promise<Instance<Request, RequestBehaviors>>;
+  /** delete removes a Request. */
+  delete(id: string, options?: RequestWriteOptions): Promise<void>;
+  /** operate calls an instance operation and returns its result with the instance's sequence after it. */
+  operate<K extends RequestInstanceOperation>(id: string, operation: K, params: RequestOperations[K]['params'], options?: RequestWriteOptions): Promise<OperationOutcome<RequestOperations[K]['result']>>;
+  /** Workflow's transition: Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it. */
+  transition(id: string, params: RequestTransitionParams, options?: RequestWriteOptions): Promise<RequestTransitionResult>;
+  /** Derived's staleDerivations: Lists the derived fields a deriver should compute, oldest first: each one's instance id, field, inputs by field name, instruction, model label, the field's JSON Schema as output, the hash to present and the attempt number. Leaves out a field outside its states, one overridden, one whose inputs are all absent and one out of attempts. Needs the config's permission. */
+  staleDerivations(params?: RequestStaleDerivationsParams, options?: CallOptions): Promise<RequestStaleDerivationsResult>;
+  /** Derived's settleDerivations: Settles what a deriver computed from staleDerivations: each item a value, or a failure, with the hash it pulled. Values are written instance by instance through applyDerived, each instance in one event; an item whose hash moved, whose instance is gone, whose field was overridden or left its states, whose value the type refuses, or that another behavior vetoes is skipped, and the others still settle. A failure, an invalid value or a veto counts an attempt and appends no event. An item given twice, or with both a value and a failure, refuses the whole call. Needs the config's permission. */
+  settleDerivations(params: RequestSettleDerivationsParams, options?: CallOptions): Promise<RequestSettleDerivationsResult>;
+  /** Derived's failedDerivations: Lists the derived fields out of attempts, oldest first, with each one's last failure. Needs the config's permission. */
+  failedDerivations(params?: RequestFailedDerivationsParams, options?: CallOptions): Promise<RequestFailedDerivationsResult>;
+  /** Derived's applyDerived: Writes derived values on the instance, each with the hash it was computed under: through update(), so the type's validation and every guard judge them, attributed to Derived with each value's confidence. Refused for a field the config does not derive, one a write overrode, one outside its states and one whose hash moved. Needs the config's permission; settleDerivations calls it. */
+  applyDerived(id: string, params: RequestApplyDerivedParams, options?: RequestWriteOptions): Promise<RequestApplyDerivedResult>;
+  /** Derived's rederive: Makes derived fields stale again, every one when fields is absent: clears an override, the failed attempts, and the last value's hash, so the deriver computes them anew. The values stay until new ones settle. */
+  rederive(id: string, params?: RequestRederiveParams, options?: RequestWriteOptions): Promise<RequestRederiveResult>;
+  /** Provenance's accept: Accepts proposed fields as they are, as the caller. Needs the review's permission. */
+  accept(id: string, params: RequestAcceptParams, options?: RequestWriteOptions): Promise<RequestAcceptResult>;
+  /** Provenance's reject: Rejects proposed fields: clears each, or sets it to the patch's value, through update(), as the caller's own write, so Derived does not propose it again. Needs the review's permission. */
+  reject(id: string, params: RequestRejectParams, options?: RequestWriteOptions): Promise<RequestRejectResult>;
+}
+
+/** requestClient wraps an EngineClient with the Request schema's types. */
+export function requestClient(client: EngineClient): RequestClient {
+  return {
+    create(data, options) {
+      return client.instances.create<Request, RequestBehaviors>('Request', data, options);
+    },
+    get(id, options) {
+      return client.instances.get<Request, RequestBehaviors>('Request', id, options);
+    },
+    list(options) {
+      return client.instances.list<Request, RequestBehaviors>('Request', options);
+    },
+    update(id, patch, options) {
+      return client.instances.update<Request, RequestBehaviors>('Request', id, patch, options);
+    },
+    delete(id, options) {
+      return client.instances.delete('Request', id, options);
+    },
+    operate<K extends RequestInstanceOperation>(id: string, operation: K, params: RequestOperations[K]['params'], options?: RequestWriteOptions) {
+      return client.instances.operate<RequestOperations[K]['result']>('Request', id, operation, params, options);
+    },
+    transition(id, params, options) {
+      return client.instances.invoke<RequestTransitionResult>('Request', id, 'transition', params, options);
+    },
+    staleDerivations(params, options) {
+      return client.instances.invokeSchema<RequestStaleDerivationsResult>('Request', 'staleDerivations', params ?? {}, options);
+    },
+    settleDerivations(params, options) {
+      return client.instances.invokeSchema<RequestSettleDerivationsResult>('Request', 'settleDerivations', params, options);
+    },
+    failedDerivations(params, options) {
+      return client.instances.invokeSchema<RequestFailedDerivationsResult>('Request', 'failedDerivations', params ?? {}, options);
+    },
+    applyDerived(id, params, options) {
+      return client.instances.invoke<RequestApplyDerivedResult>('Request', id, 'applyDerived', params, options);
+    },
+    rederive(id, params, options) {
+      return client.instances.invoke<RequestRederiveResult>('Request', id, 'rederive', params ?? {}, options);
+    },
+    accept(id, params, options) {
+      return client.instances.invoke<RequestAcceptResult>('Request', id, 'accept', params, options);
+    },
+    reject(id, params, options) {
+      return client.instances.invoke<RequestRejectResult>('Request', id, 'reject', params, options);
     },
   };
 }
@@ -717,8 +1100,16 @@ export type TaskBehaviors = {
     readonly enteredAt?: number;
   };
   readonly Comments: {
-    /** How many comments the instance has. */
-    readonly commentCount: number;
+    /** How many posted and interrupted messages the conversation has, top-level and replies; composing, deleted and purged ones are not counted. */
+    readonly messages: number;
+    /** The greatest postedAt of a posted or interrupted message, in epoch milliseconds; absent while there is none. */
+    readonly lastMessageAt?: number;
+    /** The posted and interrupted top-level messages, each a thread, whether resolved or not: { open, resolved }. */
+    readonly threads: { open: number; resolved: number };
+    /** The subjects writing a message now: each subject with a composing message on the instance, once, in the order of its earliest composing message's id; empty while nobody is. */
+    readonly composing: string[];
+    /** The caller's: how many posted and interrupted top-level messages of others came to stand after the caller's read marker on the conversation. 0 until the caller first reads the conversation with markRead or posts in it top-level, so a conversation nobody opened is unread for nobody. Replies are read thread by thread, in the inbox, and not counted here. */
+    readonly unread: number;
   };
   readonly Links: {
     /** The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it; for a many-valued link, a list of them in the order they were linked. Absent when the instance holds none. */
@@ -793,6 +1184,153 @@ export type TaskPatch = {
 /** A state of a Task's Workflow. */
 export type TaskState = 'todo' | 'doing' | 'done' | 'failed';
 
+/** A block of a message of a Task's Comments: a structured part beside its body, of a kind Comments declares. */
+export type TaskCommentBlock = {
+  /** The instance's id. */
+  id: string;
+  kind: 'ref';
+  /** The instance's schema. */
+  schema: string;
+} | {
+  /** What a client shows with it, at most 8192 bytes as compact JSON. */
+  data?: JSONObject;
+  kind: 'action';
+  /** Where it stands. */
+  status: 'running' | 'succeeded' | 'failed';
+  /** What was done. */
+  title: string;
+} | {
+  kind: 'code';
+  /** The first and the last line, counted from 1, both included; the first is at most the last. */
+  lines: number[];
+  /** The file's path in the repository, its parts joined by /: no leading or trailing /, no \, and no empty, . or .. part. */
+  path: string;
+  /** The repository, as the deployment names it: github.com/acme/shop, say. */
+  repo: string;
+  /** The revision the lines are at: a commit's id, as the repository names it. */
+  revision: string;
+  /** The text of those lines at that revision, as the poster captured it, at most 8000 code points. */
+  snippet: string;
+} | {
+  /** The file's size in bytes. */
+  bytes: number;
+  kind: 'attachment';
+  /** The file's media type, type/subtype in lower case with no parameters: image/png, text/plain. */
+  mediaType: string;
+  /** The file's name as a reader sees it, at most 255 code points: no / or \, no control character, and not white space alone. */
+  name: string;
+  /** The SHA-256 of the file's bytes, 64 lower-case hexadecimal digits, so a reader can check what it downloads. */
+  sha256: string;
+  /** Where the deployment keeps the file: an https URL with a host, or a URI of a scheme the config's attachments.schemes lists (bucket:shop-files/7c1e, say). */
+  uri: string;
+};
+
+/** A block of a message of a Task's Comments as the record holds it: a code block that moveAnchor moved also holds its first anchor and its last move. */
+export type TaskCommentPostedBlock = {
+  /** The instance's id. */
+  id: string;
+  kind: 'ref';
+  /** The instance's schema. */
+  schema: string;
+} | {
+  /** What a client shows with it, at most 8192 bytes as compact JSON. */
+  data?: JSONObject;
+  kind: 'action';
+  /** Where it stands. */
+  status: 'running' | 'succeeded' | 'failed';
+  /** What was done. */
+  title: string;
+} | {
+  kind: 'code';
+  /** The first and the last line, counted from 1, both included; the first is at most the last. */
+  lines: number[];
+  /** When it last moved, in epoch milliseconds. */
+  movedAt?: number;
+  /** The subject of the caller who last moved it. */
+  movedBy?: string;
+  /** The subject the caller who last moved it acted for, when it acted for someone. */
+  movedFor?: string;
+  /** How many times moveAnchor moved it. */
+  moves?: number;
+  /** The anchor the block was given with, before its first move. */
+  original?: { lines: number[]; revision: string };
+  /** The file's path in the repository, its parts joined by /: no leading or trailing /, no \, and no empty, . or .. part. */
+  path: string;
+  /** The repository, as the deployment names it: github.com/acme/shop, say. */
+  repo: string;
+  /** The revision the lines are at: a commit's id, as the repository names it. */
+  revision: string;
+  /** The text of those lines at that revision, as the poster captured it, at most 8000 code points. */
+  snippet: string;
+} | {
+  /** The file's size in bytes. */
+  bytes: number;
+  kind: 'attachment';
+  /** The file's media type, type/subtype in lower case with no parameters: image/png, text/plain. */
+  mediaType: string;
+  /** The file's name as a reader sees it, at most 255 code points: no / or \, no control character, and not white space alone. */
+  name: string;
+  /** The SHA-256 of the file's bytes, 64 lower-case hexadecimal digits, so a reader can check what it downloads. */
+  sha256: string;
+  /** Where the deployment keeps the file: an https URL with a host, or a URI of a scheme the config's attachments.schemes lists (bucket:shop-files/7c1e, say). */
+  uri: string;
+};
+
+/** A message of a Task's Comments, as every operation that returns one gives it. */
+export type TaskCommentMessage = {
+  /** The subject of the caller who posted or began it. */
+  author: string;
+  /** The structured parts a client renders beside the body, as posted or last edited; none once deleted. */
+  blocks: TaskCommentPostedBlock[];
+  /** The text, Markdown: the draft so far while composing; empty once deleted. */
+  body: string;
+  /** When it was posted, or for a message begin started, when it began, in epoch milliseconds: its place in the conversation's order, which never changes. */
+  createdAt: number;
+  /** When it was last edited, in epoch milliseconds; absent when it never was, or once deleted. */
+  editedAt?: number;
+  /** How many times it was edited; listEdits reads the text before each. 0 once deleted. */
+  edits: number;
+  /** The subject the message was written for: the person the agent or service that posted or began it acted for (D77); absent when it acted for nobody. */
+  for?: string;
+  /** The message's number on the instance: 1, 2, 3, ...; never reused. */
+  id: number;
+  /** On a top-level message: the greatest postedAt of its thread's posted or interrupted replies; absent while it has none. */
+  lastReplyAt?: number;
+  /** The subjects the message names for someone to hear of it; none once deleted. */
+  mentions: string[];
+  /** On a top-level message: the subjects that have a posted or interrupted message in its thread, the top-level one included, the one whose latest such message is latest first, at most 10. */
+  participants?: string[];
+  pinned: boolean;
+  /** When it came to stand, posted or interrupted, in epoch milliseconds: a post's time, which is its createdAt, or the time of the finish or the interrupt of a message begin started. Absent while composing, and on a message deleted while composing. */
+  postedAt?: number;
+  /** The id of the message of the thread the reply quotes. */
+  quotes?: number;
+  /** The reactions, by emoji, in the order each emoji was first given: how many, and whether the caller is among them. None once deleted. */
+  reactions: { [key: string]: {
+    count: number;
+    /** Whether the caller reacted with the emoji. */
+    mine: boolean;
+  } };
+  /** On a top-level message: how many posted or interrupted replies its thread has. */
+  replies?: number;
+  /** On a top-level message whose thread is resolved: who resolved it, for whom when it acted for someone, and when. */
+  resolved?: {
+    /** In epoch milliseconds. */
+    at: number;
+    by: string;
+    /** The subject the caller who resolved it acted for, when it acted for someone. */
+    for?: string;
+  };
+  /** The message's place in the order the conversation's messages came to stand: 1, 2, 3, ... on the instance, given when it is posted, finished or interrupted and never changed. A streamed reply that began early and finished late stands after the messages posted meanwhile, so a reader compares it, not the id, with its read marker. Absent while composing, and on a message deleted while composing. */
+  stand?: number;
+  /** composing, posted, interrupted or deleted. A composing message holds its place while its author writes it; an interrupted one holds what its author wrote before it stopped appending; a deleted one keeps its place, its author and its replies, and holds no text. */
+  state: 'composing' | 'posted' | 'interrupted' | 'deleted';
+  /** For a reply, the id of the top-level message whose thread it is in; absent on a top-level message. */
+  thread?: number;
+  /** The deployable of the service whose call posted or began it (D37). */
+  via?: string;
+};
+
 /** A link of a Task, by name. */
 export type TaskLinkName = 'parent' | 'project' | 'related' | 'spec';
 
@@ -848,44 +1386,352 @@ export type TaskTransitionResult = {
   to: TaskState;
 };
 
-/** The parameters of Comments' comment: Adds a comment to the instance, or a reply to one of its comments. */
-export type TaskCommentParams = {
-  /** The comment's text. */
+/** The parameters of Comments' post: Posts a message as the caller: top-level, or a reply in the thread of a top-level message, which may quote a message of that thread. A composing message has no thread to reply in and cannot be quoted. A ref block's instance must be one the caller may read, each block's kind one the config allows, and an attachment's uri scheme, media type and size ones the config's attachments allow. A caller acting for someone records that subject as the message's for. A retry with the clientId of a message the caller posted or began returns that message and posts nothing. */
+export type TaskPostParams = {
+  /** Structured parts beside the body, each of a kind the config allows. */
+  blocks?: Array<{
+    /** What a client shows with it, at most 8192 bytes as compact JSON. */
+    data?: JSONObject;
+    kind: 'action';
+    /** Where it stands. */
+    status: 'running' | 'succeeded' | 'failed';
+    /** What was done. */
+    title: string;
+  }>;
+  /** The text, Markdown, at most the config's maxBodyLength code points. */
   body: string;
-  /** The id of the instance's comment this one replies to. */
-  replyTo?: number;
+  /** The caller's key for the message, so a retry returns the message it posted. */
+  clientId?: string;
+  /** The subjects the message names for someone to hear of it: a person's, an agent's or a group's (role:<name>), as the client resolved them from what was typed. */
+  mentions?: string[];
+  /** The id of the message of the thread the reply quotes, the top-level one or a reply; needs thread. */
+  quotes?: number;
+  /** The id of the top-level message to reply in; a top-level message when absent. */
+  thread?: number;
 };
 
-/** The comment. */
-export type TaskCommentResult = {
-  body: string;
-  /** When, in epoch milliseconds. */
-  createdAt: number;
-  /** The subject of the caller who added it. */
-  createdBy: string;
-  /** The comment's number on the instance: 1, 2, 3, ... */
-  id: number;
-  /** The id of the comment it replies to. */
-  replyTo?: number;
+/** The message. */
+export type TaskPostResult = TaskCommentMessage;
+
+/** The parameters of Comments' begin: Begins a message as the caller, composing: it takes its id and its place in the conversation now, top-level or a reply in the thread of a top-level message, which may quote a message of that thread, and shows the caller as writing. Its author adds the text with appendDraft and posts it with finish; one whose author appends nothing for the config's composeTimeoutMs is interrupted. Nothing is counted until it is finished or interrupted. A caller may have at most the config's maxDrafts composing messages on the instance. A caller acting for someone records that subject as the message's for; finish and interrupt keep it. A retry with the clientId of a message the caller posted or began returns that message and begins nothing. */
+export type TaskBeginParams = {
+  /** The caller's key for the message, so a retry returns the message it began. */
+  clientId?: string;
+  /** The id of the message of the thread the reply quotes, the top-level one or a reply; needs thread. */
+  quotes?: number;
+  /** The id of the top-level message to reply in; a top-level message when absent. */
+  thread?: number;
 };
 
-/** The parameters of Comments' listComments: Lists the instance's comments, oldest first, one page at a time. */
-export type TaskListCommentsParams = {
+/** The message: composing, its draft empty; for a retry, the message as it is now. */
+export type TaskBeginResult = TaskCommentMessage;
+
+/** The parameters of Comments' appendDraft: Appends text to the draft of the caller's composing message, and once the call commits sends the draft signal, { message, offset, text }, to the streams open on the instance. A reader that opens the conversation midway reads the draft so far as the message's body and follows the signals from its length. Its author only; the draft holds at most the config's maxBodyLength code points. An empty text appends nothing and sends nothing, and still counts as an append, so an author at work with nothing to show keeps its message from being interrupted. It appends no event. */
+export type TaskAppendDraftParams = {
+  /** The id of the composing message. */
+  message: number;
+  /** The text to append, at most 4000 bytes written as a JSON string, its quotes included, so that the draft signal fits a signal's 4096 bytes. */
+  text: string;
+};
+
+/** Where the text went. */
+export type TaskAppendDraftResult = {
+  /** The draft's length after the append, in code points. */
+  length: number;
+  /** The id of the message. */
+  message: number;
+  /** The draft's length before the append, in code points: where the text starts. */
+  offset: number;
+};
+
+/** The parameters of Comments' finish: Posts the caller's composing message: its body is body, or the draft when body is absent, checked as a post's body is, and its blocks and mentions are as a post gives them. Its author only. The message keeps its id, its place and the createdAt its begin gave it, and is counted from now. */
+export type TaskFinishParams = {
+  /** Structured parts beside the body, each of a kind the config allows; none when absent. */
+  blocks?: Array<{
+    /** What a client shows with it, at most 8192 bytes as compact JSON. */
+    data?: JSONObject;
+    kind: 'action';
+    /** Where it stands. */
+    status: 'running' | 'succeeded' | 'failed';
+    /** What was done. */
+    title: string;
+  }>;
+  /** The text, Markdown, at most the config's maxBodyLength code points, in place of the draft; the draft when absent. */
+  body?: string;
+  /** The subjects the message names for someone to hear of it: a person's, an agent's or a group's (role:<name>), as the client resolved them from what was typed. */
+  mentions?: string[];
+  /** The id of the composing message. */
+  message: number;
+};
+
+/** The message, posted. */
+export type TaskFinishResult = TaskCommentMessage;
+
+/** The parameters of Comments' interrupt: Stops a composing message: it becomes interrupted, its draft its body, or deleted when its draft holds no text. Its author may at any time, and so may a caller holding moderatePermission; any caller the policy lets write may once the author has appended nothing for the config's composeTimeoutMs, which is how the engine's runner interrupts a message whose author has stopped, on its schedule. An interrupted message is counted from now. */
+export type TaskInterruptParams = {
+  /** The id of the composing message. */
+  message: number;
+};
+
+/** The message, interrupted, or deleted when its draft held no text. */
+export type TaskInterruptResult = TaskCommentMessage;
+
+/** The parameters of Comments' edit: Replaces a posted or interrupted message's body, blocks or mentions, keeping what it held before for listEdits; an edit by its author posts an interrupted message. Its author may, within the config's editWindowMs of its postedAt when it sets one; a caller holding moderatePermission may edit any message, at any time. A ref block not on the message before must name an instance the caller may read, and an attachment not on it before must be one the config's attachments allow; a code block equal to the one at its place before keeps its moves. Acting for the author is not being it: only the author's own subject, or moderatePermission, may edit. */
+export type TaskEditParams = {
+  /** The blocks, in place of the message's; it keeps them when absent. */
+  blocks?: Array<{
+    /** What a client shows with it, at most 8192 bytes as compact JSON. */
+    data?: JSONObject;
+    kind: 'action';
+    /** Where it stands. */
+    status: 'running' | 'succeeded' | 'failed';
+    /** What was done. */
+    title: string;
+  }>;
+  /** The text, Markdown, at most the config's maxBodyLength code points. */
+  body?: string;
+  /** The mentions, in place of the message's; it keeps them when absent. */
+  mentions?: string[];
+  /** The id of the message. */
+  message: number;
+};
+
+/** The message after the edit. */
+export type TaskEditResult = TaskCommentMessage;
+
+/** The parameters of Comments' deleteMessage: Deletes a message, a composing one included, which drops its draft: its author may, or a caller holding moderatePermission. The message keeps its id, its place, its author and its thread's replies, and loses its body, blocks, mentions, reactions, pin and the text its edits kept. */
+export type TaskDeleteMessageParams = {
+  /** The id of the message. */
+  message: number;
+};
+
+/** The message, deleted. */
+export type TaskDeleteMessageResult = TaskCommentMessage;
+
+/** The parameters of Comments' purge: Removes a message, its edits and its reactions from the conversation, and for a top-level message its whole thread; needs moderatePermission. A purged message's id is not reused, and the copies earlier events hold stay until retention prunes them. */
+export type TaskPurgeParams = {
+  /** The id of the message. */
+  message: number;
+};
+
+/** What was removed. */
+export type TaskPurgeResult = {
+  /** The id of the message purged. */
+  message: number;
+  /** The ids of every message removed: the message, and for a top-level one its replies, in ascending order. */
+  purged: number[];
+};
+
+/** The parameters of Comments' react: Adds the caller's reaction to a posted or interrupted message. A message holds at most 20 distinct emoji. */
+export type TaskReactParams = {
+  /** The reaction: an emoji's name or the character itself, at most 32 code points. */
+  emoji: string;
+  /** The id of the message. */
+  message: number;
+};
+
+/** The message after the reaction. */
+export type TaskReactResult = TaskCommentMessage;
+
+/** The parameters of Comments' unreact: Removes the caller's reaction from a posted or interrupted message. */
+export type TaskUnreactParams = {
+  /** The reaction: an emoji's name or the character itself, at most 32 code points. */
+  emoji: string;
+  /** The id of the message. */
+  message: number;
+};
+
+/** The message after the reaction is removed. */
+export type TaskUnreactResult = TaskCommentMessage;
+
+/** The parameters of Comments' pin: Pins a posted or interrupted message, top-level or a reply. Needs pinPermission when the config names one. */
+export type TaskPinParams = {
+  /** The id of the message. */
+  message: number;
+};
+
+/** The message, pinned. */
+export type TaskPinResult = TaskCommentMessage;
+
+/** The parameters of Comments' unpin: Unpins a pinned message. Needs pinPermission when the config names one. */
+export type TaskUnpinParams = {
+  /** The id of the message. */
+  message: number;
+};
+
+/** The message, unpinned. */
+export type TaskUnpinResult = TaskCommentMessage;
+
+/** The parameters of Comments' resolve: Resolves the thread of a posted or interrupted top-level message: its author may, or a caller holding resolvePermission. Replies may still be posted in it. */
+export type TaskResolveParams = {
+  /** The id of the thread's top-level message. */
+  thread: number;
+};
+
+/** The top-level message, resolved. */
+export type TaskResolveResult = TaskCommentMessage;
+
+/** The parameters of Comments' reopen: Reopens a resolved thread: its top-level message's author may, or a caller holding resolvePermission. */
+export type TaskReopenParams = {
+  /** The id of the thread's top-level message. */
+  thread: number;
+};
+
+/** The top-level message, open. */
+export type TaskReopenResult = TaskCommentMessage;
+
+/** The parameters of Comments' moveAnchor: Moves a code block of a posted or interrupted message to the same code at another revision, where a caller that knows the repository found it, a git extension after a push say: the block takes revision and lines and keeps its snippet, and records the anchor it was first given with as original, how many times it moved, and who moved it last and when; each move's event holds the steps between. It is not an edit: the message's text, editedAt, edits and edit window are untouched. Its author may move it; another caller needs the config's anchorPermission or moderatePermission. */
+export type TaskMoveAnchorParams = {
+  /** The code block's index in the message's blocks, from 0. */
+  block: number;
+  /** The first and the last line of the same code at that revision, counted from 1, both included; the first is at most the last. */
+  lines: number[];
+  /** The id of the message. */
+  message: number;
+  /** The revision the code is at now: a commit's id, as the repository names it. */
+  revision: string;
+};
+
+/** The message, its code block moved. */
+export type TaskMoveAnchorResult = TaskCommentMessage;
+
+/** The parameters of Comments' markRead: Moves the caller's read marker past the messages it has read: on the conversation's top-level messages, or with thread on that thread's replies. upTo is the greatest message id the caller has shown; every posted or interrupted message of the listing with an id up to it is read, and a streamed reply that comes to stand later is not. The marker never moves back. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it. */
+export type TaskMarkReadParams = {
+  /** The id of a top-level message: the marker moved is the caller's on its thread's replies, whether the caller follows it or not. The conversation's when absent. */
+  thread?: number;
+  /** The greatest id of the messages read: a bound, which need not name a message. */
+  upTo: number;
+};
+
+/** The caller's marker after the call. */
+export type TaskMarkReadResult = {
+  /** The marker: the greatest stand of the messages read; 0 when none is. */
+  readUpTo: number;
+  /** How many posted or interrupted messages of others in the listing stand above the marker. */
+  unread: number;
+};
+
+/** The parameters of Comments' follow: Follows a thread, so each reply that comes to stand in it records a delivery for the caller and the inbox lists it, or with on false stops. A caller follows each thread it posts in and each it is mentioned in without asking, again after it stopped. Following counts the thread's replies from the latest message of the conversation. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it. */
+export type TaskFollowParams = {
+  /** true to follow, false to stop. */
+  on: boolean;
+  /** The id of the thread's top-level message. */
+  thread: number;
+};
+
+/** What Comments' follow returns. */
+export type TaskFollowResult = {
+  /** Whether the caller follows it now. */
+  following: boolean;
+  /** The id of the thread's top-level message. */
+  thread: number;
+};
+
+/** The parameters of Comments' listMessages: Lists a page of the conversation's top-level messages, or with thread a page of that thread's replies, composing and deleted ones included, a composing one with its draft so far as its body, in ascending id order: the latest page when no anchor is given, the page before or after a message id, or the page around a message of the listing. Each page says where the next older and newer ones start. */
+export type TaskListMessagesParams = {
+  /** The page is the earliest messages with a higher id. */
+  after?: number;
+  /** A message of the listing: the page holds it and the messages either side of it. At most one of around, before and after. */
+  around?: number;
+  /** The page is the latest messages with a lower id. */
+  before?: number;
+  /** At most this many messages; 50 when absent. */
+  limit?: number;
+  /** The id of a top-level message: the page is its thread's replies, and the result carries the message as root. */
+  thread?: number;
+};
+
+/** What Comments' listMessages returns. */
+export type TaskListMessagesResult = {
+  /** The id to pass as after for the page of newer messages: the last item's, when the listing has a newer message; null when it has none or the page is empty. */
+  after: number | null;
+  /** The id to pass as before for the page of older messages: the first item's, when the listing has an older message; null when it has none or the page is empty. */
+  before: number | null;
+  items: TaskCommentMessage[];
+  /** The caller's read marker on the listing, the conversation's or with thread the thread's: a message of another whose stand is above it is unread. Absent while the caller has none. */
+  readUpTo?: number;
+  /** With thread, the thread's top-level message. */
+  root?: TaskCommentMessage;
+};
+
+/** The parameters of Comments' getMessage: Reads one message of the conversation, a deleted one included; a composing one's body is its draft so far, from which a reader follows the draft signals. */
+export type TaskGetMessageParams = {
+  /** The id of the message. */
+  message: number;
+};
+
+/** The message. */
+export type TaskGetMessageResult = TaskCommentMessage;
+
+/** The parameters of Comments' listEdits: Lists what a message held before each of its edits, oldest first, one page at a time. */
+export type TaskListEditsParams = {
   /** The next of the previous page. */
   cursor?: string;
-  /** At most this many comments; 50 when absent. */
+  /** At most this many edits; 50 when absent. */
+  limit?: number;
+  /** The id of the message. */
+  message: number;
+};
+
+/** What Comments' listEdits returns. */
+export type TaskListEditsResult = {
+  items: Array<{
+    /** When, in epoch milliseconds. */
+    at: number;
+    /** The blocks before the edit. */
+    blocks: TaskCommentPostedBlock[];
+    /** The body before the edit. */
+    body: string;
+    /** The subject of the caller who made the edit. */
+    by: string;
+    /** The edit's number on the message: 1, 2, 3, ... */
+    edit: number;
+    /** The subject the caller who made the edit acted for, when it acted for someone. */
+    for?: string;
+    /** The mentions before the edit. */
+    mentions: string[];
+  }>;
+  /** The cursor of the next page; null after the last. */
+  next: string | null;
+};
+
+/** The parameters of Comments' listReactions: Lists who reacted to a message with an emoji, in the order they reacted, one page at a time. */
+export type TaskListReactionsParams = {
+  /** The next of the previous page. */
+  cursor?: string;
+  /** The reaction: an emoji's name or the character itself, at most 32 code points. */
+  emoji: string;
+  /** At most this many reactions; 50 when absent. */
+  limit?: number;
+  /** The id of the message. */
+  message: number;
+};
+
+/** What Comments' listReactions returns. */
+export type TaskListReactionsResult = {
+  items: Array<{
+    /** When, in epoch milliseconds. */
+    at: number;
+    /** The subject the caller who reacted acted for, when it acted for someone. */
+    for?: string;
+    /** The subject of the caller who reacted. */
+    subject: string;
+  }>;
+  /** The cursor of the next page; null after the last. */
+  next: string | null;
+};
+
+/** The parameters of Comments' listPinned: Lists the conversation's pinned messages, top-level and replies, in ascending id order, one page at a time. Only a posted or interrupted message is pinned: a deleted one loses its pin, and a composing one cannot take one. */
+export type TaskListPinnedParams = {
+  /** The next of the previous page. */
+  cursor?: string;
+  /** At most this many messages; 50 when absent. */
   limit?: number;
 };
 
-/** What Comments' listComments returns. */
-export type TaskListCommentsResult = {
-  items: Array<{
-    body: string;
-    createdAt: number;
-    createdBy: string;
-    id: number;
-    replyTo?: number;
-  }>;
+/** What Comments' listPinned returns. */
+export type TaskListPinnedResult = {
+  items: TaskCommentMessage[];
   /** The cursor of the next page; null after the last. */
   next: string | null;
 };
@@ -1082,8 +1928,28 @@ export type TaskListDependentsResult = {
 /** Each operation a Task's behaviors add: its scope, parameters and result. */
 export type TaskOperations = {
   transition: { scope: 'instance'; params: TaskTransitionParams; result: TaskTransitionResult };
-  comment: { scope: 'instance'; params: TaskCommentParams; result: TaskCommentResult };
-  listComments: { scope: 'instance'; params: TaskListCommentsParams; result: TaskListCommentsResult };
+  post: { scope: 'instance'; params: TaskPostParams; result: TaskPostResult };
+  begin: { scope: 'instance'; params: TaskBeginParams; result: TaskBeginResult };
+  appendDraft: { scope: 'instance'; params: TaskAppendDraftParams; result: TaskAppendDraftResult };
+  finish: { scope: 'instance'; params: TaskFinishParams; result: TaskFinishResult };
+  interrupt: { scope: 'instance'; params: TaskInterruptParams; result: TaskInterruptResult };
+  edit: { scope: 'instance'; params: TaskEditParams; result: TaskEditResult };
+  deleteMessage: { scope: 'instance'; params: TaskDeleteMessageParams; result: TaskDeleteMessageResult };
+  purge: { scope: 'instance'; params: TaskPurgeParams; result: TaskPurgeResult };
+  react: { scope: 'instance'; params: TaskReactParams; result: TaskReactResult };
+  unreact: { scope: 'instance'; params: TaskUnreactParams; result: TaskUnreactResult };
+  pin: { scope: 'instance'; params: TaskPinParams; result: TaskPinResult };
+  unpin: { scope: 'instance'; params: TaskUnpinParams; result: TaskUnpinResult };
+  resolve: { scope: 'instance'; params: TaskResolveParams; result: TaskResolveResult };
+  reopen: { scope: 'instance'; params: TaskReopenParams; result: TaskReopenResult };
+  moveAnchor: { scope: 'instance'; params: TaskMoveAnchorParams; result: TaskMoveAnchorResult };
+  markRead: { scope: 'instance'; params: TaskMarkReadParams; result: TaskMarkReadResult };
+  follow: { scope: 'instance'; params: TaskFollowParams; result: TaskFollowResult };
+  listMessages: { scope: 'instance'; params: TaskListMessagesParams; result: TaskListMessagesResult };
+  getMessage: { scope: 'instance'; params: TaskGetMessageParams; result: TaskGetMessageResult };
+  listEdits: { scope: 'instance'; params: TaskListEditsParams; result: TaskListEditsResult };
+  listReactions: { scope: 'instance'; params: TaskListReactionsParams; result: TaskListReactionsResult };
+  listPinned: { scope: 'instance'; params: TaskListPinnedParams; result: TaskListPinnedResult };
   link: { scope: 'instance'; params: TaskLinkParams; result: TaskLinkResult };
   unlink: { scope: 'instance'; params: TaskUnlinkParams; result: TaskUnlinkResult };
   listLinked: { scope: 'schema'; params: TaskListLinkedParams; result: TaskListLinkedResult };
@@ -1098,12 +1964,12 @@ export type TaskOperations = {
 };
 
 /** The name of an operation on one Task. */
-export type TaskInstanceOperation = 'transition' | 'comment' | 'listComments' | 'link' | 'unlink' | 'assignNumber' | 'fireTimer' | 'resetTimer' | 'snoozeTimer' | 'addBlocker' | 'removeBlocker' | 'listBlockers' | 'listDependents';
+export type TaskInstanceOperation = 'transition' | 'post' | 'begin' | 'appendDraft' | 'finish' | 'interrupt' | 'edit' | 'deleteMessage' | 'purge' | 'react' | 'unreact' | 'pin' | 'unpin' | 'resolve' | 'reopen' | 'moveAnchor' | 'markRead' | 'follow' | 'listMessages' | 'getMessage' | 'listEdits' | 'listReactions' | 'listPinned' | 'link' | 'unlink' | 'assignNumber' | 'fireTimer' | 'resetTimer' | 'snoozeTimer' | 'addBlocker' | 'removeBlocker' | 'listBlockers' | 'listDependents';
 
 /** The codes the vetoes of a Task's behaviors carry, by behavior: what a refused call's details.code holds. */
 export type TaskVetoes = {
   Workflow: 'already_in_state' | 'terminal_state' | 'transition_not_allowed' | 'no_status';
-  Comments: never;
+  Comments: 'no_message' | 'not_a_thread' | 'not_in_thread' | 'deleted' | 'composing' | 'not_composing' | 'not_author' | 'edit_window_passed' | 'too_many_edits' | 'already_reacted' | 'not_reacted' | 'too_many_reactions' | 'already_pinned' | 'not_pinned' | 'already_resolved' | 'not_resolved' | 'block_not_allowed' | 'ref_not_found' | 'attachment_not_allowed' | 'no_block' | 'not_code' | 'anchor_unchanged' | 'not_idle' | 'too_many_drafts' | 'draft_too_long' | 'not_configured' | 'unknown_delivery' | 'token_stale' | 'not_claimed';
   Links: 'no_revision' | 'no_release' | 'required_link' | 'required_target' | 'too_many' | 'not_linked';
   Numbering: never;
   Timers: 'no_deadline' | 'not_armed';
@@ -1111,6 +1977,36 @@ export type TaskVetoes = {
   Constants: never;
   Variants: never;
 };
+
+/** The data of Comments' typing signal: The sender is typing a message: top-level, or with thread a reply in that thread. A client sends it every few seconds while its person types, and a reader shows the sender as typing for a few seconds after the last; the engine keeps none. Comments does not check that thread names a message. */
+export type TaskTypingSignal = {
+  /** The id of the top-level message whose thread the sender is typing in; absent for a top-level message. */
+  thread?: number;
+};
+
+/** The data of Comments' viewing signal: The sender has the conversation open. A client sends it every few seconds while it shows the conversation, and a reader shows the sender as looking for a few seconds after the last; the engine keeps none. */
+export type TaskViewingSignal = Record<string, never>;
+
+/** The data of Comments' draft signal: Text appendDraft added to a composing message's draft, sent once its call commits; from is the message's author. A reader that holds offset code points of the draft appends text; one that holds fewer missed a signal and reads the message again with getMessage; one that holds more ignores it. A reader opens the stream with signals before it reads, counts what it holds in code points (Array.from(body).length), and drops a draft at its message's finish, interrupt, deleteMessage or purge event; a draft signal may arrive after that event, and is then ignored. */
+export type TaskDraftSignal = {
+  /** The id of the composing message. */
+  message: number;
+  /** The draft's length before the text, in code points. */
+  offset: number;
+  /** The text appended, never empty. */
+  text: string;
+};
+
+/** The data of the signals of a Task's behaviors, by behavior, then signal name: what a signal's data holds. */
+export type TaskSignals = {
+  Comments: { typing: TaskTypingSignal; viewing: TaskViewingSignal; draft: TaskDraftSignal };
+};
+
+/** A signal of a Task, as a stream opened with signals hands it out: its behavior, its name and its data, typed. */
+export type TaskSignalMessage =
+  | { readonly type: 'signal'; readonly signal: EngineSignal & { readonly behavior: 'Comments'; readonly name: 'typing'; readonly data: TaskTypingSignal } }
+  | { readonly type: 'signal'; readonly signal: EngineSignal & { readonly behavior: 'Comments'; readonly name: 'viewing'; readonly data: TaskViewingSignal } }
+  | { readonly type: 'signal'; readonly signal: EngineSignal & { readonly behavior: 'Comments'; readonly name: 'draft'; readonly data: TaskDraftSignal } };
 
 /** A Task create's options: its id, and each behavior's create parameters. */
 export type TaskCreateOptions = Omit<CreateOptions, 'behaviors'> & { readonly behaviors: TaskCreateParams };
@@ -1121,6 +2017,20 @@ export type TaskWriteOptions = Omit<WriteOptions, 'preconditions'>;
 /** isTaskVeto is isVeto with the behaviors of a Task and their codes. */
 export function isTaskVeto<B extends keyof TaskVetoes>(error: unknown, behavior?: B, codes?: TaskVetoes[B] | ReadonlyArray<TaskVetoes[B]>): error is EngineVeto {
   return isVeto(error, behavior, codes);
+}
+
+/** isTaskSignal reports whether a message of a stream opened with signals is a signal of the Task schema, of the behavior and with the name when they are given, and types its data. */
+export function isTaskSignal<B extends keyof TaskSignals = keyof TaskSignals, N extends (B extends keyof TaskSignals ? keyof TaskSignals[B] : never) = B extends keyof TaskSignals ? keyof TaskSignals[B] : never>(
+  message: StreamMessage | SignalMessage,
+  behavior?: B,
+  name?: N
+): message is Extract<TaskSignalMessage, { readonly signal: { readonly behavior: B; readonly name: N } }> {
+  return (
+    message.type === 'signal' &&
+    message.signal.schema === 'Task' &&
+    (behavior === undefined || message.signal.behavior === behavior) &&
+    (name === undefined || message.signal.name === name)
+  );
 }
 
 /** The Task schema's calls, typed: the engine's built-in operations, then each operation its behaviors add. */
@@ -1139,10 +2049,50 @@ export interface TaskClient {
   operate<K extends TaskInstanceOperation>(id: string, operation: K, params: TaskOperations[K]['params'], options?: TaskWriteOptions): Promise<OperationOutcome<TaskOperations[K]['result']>>;
   /** Workflow's transition: Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it. */
   transition(id: string, params: TaskTransitionParams, options?: TaskWriteOptions): Promise<TaskTransitionResult>;
-  /** Comments' comment: Adds a comment to the instance, or a reply to one of its comments. */
-  comment(id: string, params: TaskCommentParams, options?: TaskWriteOptions): Promise<TaskCommentResult>;
-  /** Comments' listComments: Lists the instance's comments, oldest first, one page at a time. */
-  listComments(id: string, params?: TaskListCommentsParams, options?: TaskWriteOptions): Promise<TaskListCommentsResult>;
+  /** Comments' post: Posts a message as the caller: top-level, or a reply in the thread of a top-level message, which may quote a message of that thread. A composing message has no thread to reply in and cannot be quoted. A ref block's instance must be one the caller may read, each block's kind one the config allows, and an attachment's uri scheme, media type and size ones the config's attachments allow. A caller acting for someone records that subject as the message's for. A retry with the clientId of a message the caller posted or began returns that message and posts nothing. */
+  post(id: string, params: TaskPostParams, options?: TaskWriteOptions): Promise<TaskPostResult>;
+  /** Comments' begin: Begins a message as the caller, composing: it takes its id and its place in the conversation now, top-level or a reply in the thread of a top-level message, which may quote a message of that thread, and shows the caller as writing. Its author adds the text with appendDraft and posts it with finish; one whose author appends nothing for the config's composeTimeoutMs is interrupted. Nothing is counted until it is finished or interrupted. A caller may have at most the config's maxDrafts composing messages on the instance. A caller acting for someone records that subject as the message's for; finish and interrupt keep it. A retry with the clientId of a message the caller posted or began returns that message and begins nothing. */
+  begin(id: string, params?: TaskBeginParams, options?: TaskWriteOptions): Promise<TaskBeginResult>;
+  /** Comments' appendDraft: Appends text to the draft of the caller's composing message, and once the call commits sends the draft signal, { message, offset, text }, to the streams open on the instance. A reader that opens the conversation midway reads the draft so far as the message's body and follows the signals from its length. Its author only; the draft holds at most the config's maxBodyLength code points. An empty text appends nothing and sends nothing, and still counts as an append, so an author at work with nothing to show keeps its message from being interrupted. It appends no event. */
+  appendDraft(id: string, params: TaskAppendDraftParams, options?: TaskWriteOptions): Promise<TaskAppendDraftResult>;
+  /** Comments' finish: Posts the caller's composing message: its body is body, or the draft when body is absent, checked as a post's body is, and its blocks and mentions are as a post gives them. Its author only. The message keeps its id, its place and the createdAt its begin gave it, and is counted from now. */
+  finish(id: string, params: TaskFinishParams, options?: TaskWriteOptions): Promise<TaskFinishResult>;
+  /** Comments' interrupt: Stops a composing message: it becomes interrupted, its draft its body, or deleted when its draft holds no text. Its author may at any time, and so may a caller holding moderatePermission; any caller the policy lets write may once the author has appended nothing for the config's composeTimeoutMs, which is how the engine's runner interrupts a message whose author has stopped, on its schedule. An interrupted message is counted from now. */
+  interrupt(id: string, params: TaskInterruptParams, options?: TaskWriteOptions): Promise<TaskInterruptResult>;
+  /** Comments' edit: Replaces a posted or interrupted message's body, blocks or mentions, keeping what it held before for listEdits; an edit by its author posts an interrupted message. Its author may, within the config's editWindowMs of its postedAt when it sets one; a caller holding moderatePermission may edit any message, at any time. A ref block not on the message before must name an instance the caller may read, and an attachment not on it before must be one the config's attachments allow; a code block equal to the one at its place before keeps its moves. Acting for the author is not being it: only the author's own subject, or moderatePermission, may edit. */
+  edit(id: string, params: TaskEditParams, options?: TaskWriteOptions): Promise<TaskEditResult>;
+  /** Comments' deleteMessage: Deletes a message, a composing one included, which drops its draft: its author may, or a caller holding moderatePermission. The message keeps its id, its place, its author and its thread's replies, and loses its body, blocks, mentions, reactions, pin and the text its edits kept. */
+  deleteMessage(id: string, params: TaskDeleteMessageParams, options?: TaskWriteOptions): Promise<TaskDeleteMessageResult>;
+  /** Comments' purge: Removes a message, its edits and its reactions from the conversation, and for a top-level message its whole thread; needs moderatePermission. A purged message's id is not reused, and the copies earlier events hold stay until retention prunes them. */
+  purge(id: string, params: TaskPurgeParams, options?: TaskWriteOptions): Promise<TaskPurgeResult>;
+  /** Comments' react: Adds the caller's reaction to a posted or interrupted message. A message holds at most 20 distinct emoji. */
+  react(id: string, params: TaskReactParams, options?: TaskWriteOptions): Promise<TaskReactResult>;
+  /** Comments' unreact: Removes the caller's reaction from a posted or interrupted message. */
+  unreact(id: string, params: TaskUnreactParams, options?: TaskWriteOptions): Promise<TaskUnreactResult>;
+  /** Comments' pin: Pins a posted or interrupted message, top-level or a reply. Needs pinPermission when the config names one. */
+  pin(id: string, params: TaskPinParams, options?: TaskWriteOptions): Promise<TaskPinResult>;
+  /** Comments' unpin: Unpins a pinned message. Needs pinPermission when the config names one. */
+  unpin(id: string, params: TaskUnpinParams, options?: TaskWriteOptions): Promise<TaskUnpinResult>;
+  /** Comments' resolve: Resolves the thread of a posted or interrupted top-level message: its author may, or a caller holding resolvePermission. Replies may still be posted in it. */
+  resolve(id: string, params: TaskResolveParams, options?: TaskWriteOptions): Promise<TaskResolveResult>;
+  /** Comments' reopen: Reopens a resolved thread: its top-level message's author may, or a caller holding resolvePermission. */
+  reopen(id: string, params: TaskReopenParams, options?: TaskWriteOptions): Promise<TaskReopenResult>;
+  /** Comments' moveAnchor: Moves a code block of a posted or interrupted message to the same code at another revision, where a caller that knows the repository found it, a git extension after a push say: the block takes revision and lines and keeps its snippet, and records the anchor it was first given with as original, how many times it moved, and who moved it last and when; each move's event holds the steps between. It is not an edit: the message's text, editedAt, edits and edit window are untouched. Its author may move it; another caller needs the config's anchorPermission or moderatePermission. */
+  moveAnchor(id: string, params: TaskMoveAnchorParams, options?: TaskWriteOptions): Promise<TaskMoveAnchorResult>;
+  /** Comments' markRead: Moves the caller's read marker past the messages it has read: on the conversation's top-level messages, or with thread on that thread's replies. upTo is the greatest message id the caller has shown; every posted or interrupted message of the listing with an id up to it is read, and a streamed reply that comes to stand later is not. The marker never moves back. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it. */
+  markRead(id: string, params: TaskMarkReadParams, options?: TaskWriteOptions): Promise<TaskMarkReadResult>;
+  /** Comments' follow: Follows a thread, so each reply that comes to stand in it records a delivery for the caller and the inbox lists it, or with on false stops. A caller follows each thread it posts in and each it is mentioned in without asking, again after it stopped. Following counts the thread's replies from the latest message of the conversation. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it. */
+  follow(id: string, params: TaskFollowParams, options?: TaskWriteOptions): Promise<TaskFollowResult>;
+  /** Comments' listMessages: Lists a page of the conversation's top-level messages, or with thread a page of that thread's replies, composing and deleted ones included, a composing one with its draft so far as its body, in ascending id order: the latest page when no anchor is given, the page before or after a message id, or the page around a message of the listing. Each page says where the next older and newer ones start. */
+  listMessages(id: string, params?: TaskListMessagesParams, options?: TaskWriteOptions): Promise<TaskListMessagesResult>;
+  /** Comments' getMessage: Reads one message of the conversation, a deleted one included; a composing one's body is its draft so far, from which a reader follows the draft signals. TaskDraftSignal says how a reader follows a draft. */
+  getMessage(id: string, params: TaskGetMessageParams, options?: TaskWriteOptions): Promise<TaskGetMessageResult>;
+  /** Comments' listEdits: Lists what a message held before each of its edits, oldest first, one page at a time. */
+  listEdits(id: string, params: TaskListEditsParams, options?: TaskWriteOptions): Promise<TaskListEditsResult>;
+  /** Comments' listReactions: Lists who reacted to a message with an emoji, in the order they reacted, one page at a time. */
+  listReactions(id: string, params: TaskListReactionsParams, options?: TaskWriteOptions): Promise<TaskListReactionsResult>;
+  /** Comments' listPinned: Lists the conversation's pinned messages, top-level and replies, in ascending id order, one page at a time. Only a posted or interrupted message is pinned: a deleted one loses its pin, and a composing one cannot take one. */
+  listPinned(id: string, params?: TaskListPinnedParams, options?: TaskWriteOptions): Promise<TaskListPinnedResult>;
   /** Links' link: Points a link at an instance of its schema, replacing the target it had; a many-valued link adds the instance to its list, or pins again one it holds. A pinned link records the target's latest revision or release, or the one given. */
   link(id: string, params: TaskLinkParams, options?: TaskWriteOptions): Promise<TaskLinkResult>;
   /** Links' unlink: Clears an optional link, or removes one target of a many-valued link. A required link cannot be unlinked, only moved, and a required many-valued link keeps at least one target. */
@@ -1165,6 +2115,10 @@ export interface TaskClient {
   listBlockers(id: string, params?: TaskListBlockersParams, options?: TaskWriteOptions): Promise<TaskListBlockersResult>;
   /** Dependencies' listDependents: Lists the instances this one blocks, of every schema the caller may read, in the order they were added, one page at a time. */
   listDependents(id: string, params?: TaskListDependentsParams, options?: TaskWriteOptions): Promise<TaskListDependentsResult>;
+  /** sendTyping sends Comments' typing signal to the streams open on a Task, as the policy lets its caller read; nothing is stored, and past the engine's rate it is 429 rate_limited. The sender is typing a message: top-level, or with thread a reply in that thread. A client sends it every few seconds while its person types, and a reader shows the sender as typing for a few seconds after the last; the engine keeps none. Comments does not check that thread names a message. */
+  sendTyping(id: string, data?: TaskTypingSignal, options?: CallOptions): Promise<void>;
+  /** sendViewing sends Comments' viewing signal to the streams open on a Task, as the policy lets its caller read; nothing is stored, and past the engine's rate it is 429 rate_limited. The sender has the conversation open. A client sends it every few seconds while it shows the conversation, and a reader shows the sender as looking for a few seconds after the last; the engine keeps none. */
+  sendViewing(id: string, data?: TaskViewingSignal, options?: CallOptions): Promise<void>;
 }
 
 /** taskClient wraps an EngineClient with the Task schema's types. */
@@ -1191,11 +2145,71 @@ export function taskClient(client: EngineClient): TaskClient {
     transition(id, params, options) {
       return client.instances.invoke<TaskTransitionResult>('Task', id, 'transition', params, options);
     },
-    comment(id, params, options) {
-      return client.instances.invoke<TaskCommentResult>('Task', id, 'comment', params, options);
+    post(id, params, options) {
+      return client.instances.invoke<TaskPostResult>('Task', id, 'post', params, options);
     },
-    listComments(id, params, options) {
-      return client.instances.invoke<TaskListCommentsResult>('Task', id, 'listComments', params ?? {}, options);
+    begin(id, params, options) {
+      return client.instances.invoke<TaskBeginResult>('Task', id, 'begin', params ?? {}, options);
+    },
+    appendDraft(id, params, options) {
+      return client.instances.invoke<TaskAppendDraftResult>('Task', id, 'appendDraft', params, options);
+    },
+    finish(id, params, options) {
+      return client.instances.invoke<TaskFinishResult>('Task', id, 'finish', params, options);
+    },
+    interrupt(id, params, options) {
+      return client.instances.invoke<TaskInterruptResult>('Task', id, 'interrupt', params, options);
+    },
+    edit(id, params, options) {
+      return client.instances.invoke<TaskEditResult>('Task', id, 'edit', params, options);
+    },
+    deleteMessage(id, params, options) {
+      return client.instances.invoke<TaskDeleteMessageResult>('Task', id, 'deleteMessage', params, options);
+    },
+    purge(id, params, options) {
+      return client.instances.invoke<TaskPurgeResult>('Task', id, 'purge', params, options);
+    },
+    react(id, params, options) {
+      return client.instances.invoke<TaskReactResult>('Task', id, 'react', params, options);
+    },
+    unreact(id, params, options) {
+      return client.instances.invoke<TaskUnreactResult>('Task', id, 'unreact', params, options);
+    },
+    pin(id, params, options) {
+      return client.instances.invoke<TaskPinResult>('Task', id, 'pin', params, options);
+    },
+    unpin(id, params, options) {
+      return client.instances.invoke<TaskUnpinResult>('Task', id, 'unpin', params, options);
+    },
+    resolve(id, params, options) {
+      return client.instances.invoke<TaskResolveResult>('Task', id, 'resolve', params, options);
+    },
+    reopen(id, params, options) {
+      return client.instances.invoke<TaskReopenResult>('Task', id, 'reopen', params, options);
+    },
+    moveAnchor(id, params, options) {
+      return client.instances.invoke<TaskMoveAnchorResult>('Task', id, 'moveAnchor', params, options);
+    },
+    markRead(id, params, options) {
+      return client.instances.invoke<TaskMarkReadResult>('Task', id, 'markRead', params, options);
+    },
+    follow(id, params, options) {
+      return client.instances.invoke<TaskFollowResult>('Task', id, 'follow', params, options);
+    },
+    listMessages(id, params, options) {
+      return client.instances.invoke<TaskListMessagesResult>('Task', id, 'listMessages', params ?? {}, options);
+    },
+    getMessage(id, params, options) {
+      return client.instances.invoke<TaskGetMessageResult>('Task', id, 'getMessage', params, options);
+    },
+    listEdits(id, params, options) {
+      return client.instances.invoke<TaskListEditsResult>('Task', id, 'listEdits', params, options);
+    },
+    listReactions(id, params, options) {
+      return client.instances.invoke<TaskListReactionsResult>('Task', id, 'listReactions', params, options);
+    },
+    listPinned(id, params, options) {
+      return client.instances.invoke<TaskListPinnedResult>('Task', id, 'listPinned', params ?? {}, options);
     },
     link(id, params, options) {
       return client.instances.invoke<TaskLinkResult>('Task', id, 'link', params, options);
@@ -1229,6 +2243,238 @@ export function taskClient(client: EngineClient): TaskClient {
     },
     listDependents(id, params, options) {
       return client.instances.invoke<TaskListDependentsResult>('Task', id, 'listDependents', params ?? {}, options);
+    },
+    sendTyping(id, data, options) {
+      return client.signals.send({ schema: 'Task', instanceId: id, behavior: 'Comments', name: 'typing', data: data ?? {} }, options);
+    },
+    sendViewing(id, data, options) {
+      return client.signals.send({ schema: 'Task', instanceId: id, behavior: 'Comments', name: 'viewing', data: data ?? {} }, options);
+    },
+  };
+}
+
+// The Comments behavior's namespace operations.
+
+/** An item of Comments' inbox: a message that mentions the caller, a thread it follows by its latest reply of another, or a conversation it has read by its latest top-level message of another, with how many of them it has not read. One with none unread is done. */
+export type CommentsInboxItem = {
+  /** The message's author. */
+  author: string;
+  /** The message's body with each run of white space made one space, at most 200 code points, ending with an ellipsis when cut. */
+  excerpt: string;
+  /** The subject the message was written for, when its author acted for someone. */
+  for?: string;
+  /** The instance's id. */
+  instanceId: string;
+  /** mention, a message that mentions the caller; thread, a thread the caller follows, by its latest reply of another; conversation, a conversation the caller has read, by its latest top-level message of another. */
+  kind: 'mention' | 'thread' | 'conversation';
+  /** The id of the message the item shows. */
+  message: number;
+  /** When the message came to stand, in epoch milliseconds: the item's place in the inbox. */
+  postedAt: number;
+  /** The instance's schema. */
+  schema: string;
+  /** The id of the thread's top-level message, when the message is a reply; on a thread item, the thread followed. */
+  thread?: number;
+  /** On a mention, 1 while the caller has not read the message and 0 after; on a thread or a conversation, how many messages of others stand above the caller's marker. 0 makes the item done. */
+  unread: number;
+};
+
+/** The parameters of Comments' inbox, across the schemas of a namespace that compose it: The caller's inbox across every schema of the namespace that composes Comments and that the caller may read, newest first: the messages that mention it, the threads it follows that have replies of others, and the conversations it has read that have top-level messages of others. Each item names the latest such message and how many of them the caller has not read; an item with none unread is done. A mention is read once the caller's marker on the conversation, for a top-level message, or on its thread, for a reply, passes it. Mentions reach back as far as the config's deliveryRetentionMs. */
+export type CommentsInboxParams = {
+  /** The next of the previous page. */
+  cursor?: string;
+  /** The kinds of item to list; every kind when absent. */
+  kinds?: Array<'mention' | 'thread' | 'conversation'>;
+  /** At most this many items; 50 when absent. */
+  limit?: number;
+  /** true lists only items with unread messages, false only done ones; both when absent. */
+  unread?: boolean;
+};
+
+/** What Comments' inbox returns. */
+export type CommentsInboxResult = {
+  items: CommentsInboxItem[];
+  /** The cursor of the next page; null after the last. */
+  next: string | null;
+};
+
+/** A message searchMessages found: where it is, who wrote it and for whom, its place in the search's order, and a few words of its body around the matches, in parts. */
+export type CommentsSearchHit = {
+  /** The message's author. */
+  author: string;
+  /** When the message was last edited, in epoch milliseconds; absent when it never was. */
+  editedAt?: number;
+  /** The subject the message was written for, when its author acted for someone. */
+  for?: string;
+  /** The instance's id. */
+  instanceId: string;
+  /** The id of the message found. */
+  message: number;
+  /** When the message came to stand, in epoch milliseconds. */
+  postedAt: number;
+  /** The hit's place in the search's order, from 1, across pages. */
+  rank: number;
+  /** The instance's schema. */
+  schema: string;
+  /** A few words of the body around its matches, at most 12, with ... where it cuts, in parts; each part says whether it is a match. */
+  snippet: Array<{ match: boolean; text: string }>;
+  /** The message's: posted, or interrupted when its author stopped before finishing it. */
+  state: 'posted' | 'interrupted';
+  /** The id of the thread's top-level message, when the message is a reply. */
+  thread?: number;
+  /** The deployable of the service whose call posted or began the message (D37). */
+  via?: string;
+};
+
+/** The parameters of Comments' searchMessages, across the schemas of a namespace that compose it: Searches the bodies of the posted and interrupted messages of every schema of the namespace that composes Comments and that the caller may read, best match first: a message is found when its body holds each word of query, in any order, case and diacritics aside. schema narrows the search to one type, instanceId to one conversation, and thread to one thread, its top-level message and its replies. A composing message's draft, a deleted message and the text before an edit are never found. The order is each database's own ranking, bm25 on SQLite and ts_rank_cd on Postgres, so the two may order the same hits differently; a search reaches its first 1000 hits. */
+export type CommentsSearchMessagesParams = {
+  /** The next of the previous page. */
+  cursor?: string;
+  /** Only messages of this instance's conversation; needs schema. */
+  instanceId?: string;
+  /** At most this many hits; 50 when absent. */
+  limit?: number;
+  /** The words to find, plain text split at white space: quotes, AND, OR, NOT, NEAR and * are words like any other. The first 8 words count. */
+  query: string;
+  /** Only messages on instances of this schema; nothing is found when the caller may not read it. */
+  schema?: string;
+  /** Only the thread of this top-level message: it and its replies; needs instanceId. */
+  thread?: number;
+};
+
+/** What Comments' searchMessages returns. */
+export type CommentsSearchMessagesResult = {
+  items: CommentsSearchHit[];
+  /** The cursor of the next page; null after the last, and past the 1000th hit. */
+  next: string | null;
+};
+
+/** A delivery claimDeliveries claimed: one message and one subject that should hear of it, with why and what a notifier needs to send it with no other read. Settle it by its id under the claim's token. */
+export type CommentsDelivery = {
+  /** Which claim of the delivery this is: 1 for the first. */
+  attempt: number;
+  /** The message's author. */
+  author: string;
+  /** The message's body as it is now, Markdown, at most its first 4000 code points. */
+  body: string;
+  /** The subject the message was written for, when its author acted for someone. */
+  for?: string;
+  /** The delivery's id, which settleDeliveries takes: opaque, and the same at each claim. */
+  id: string;
+  /** The instance's id. */
+  instanceId: string;
+  /** The id of the message. */
+  message: number;
+  /** When the message came to stand, in epoch milliseconds. */
+  postedAt: number;
+  /** Why: mention, the message mentions the subject; reply, the subject follows the thread. Both, in that order, when both hold. */
+  reasons: Array<'mention' | 'reply'>;
+  /** The instance's schema. */
+  schema: string;
+  /** The message's: posted, or interrupted when its author stopped before finishing it. */
+  state: 'posted' | 'interrupted';
+  /** Who should hear of it: a person's, an agent's or a group's (role:<name>) subject, as the message gave it; a notifier expands a group. */
+  subject: string;
+  /** The id of the thread's top-level message, when the message is a reply. */
+  thread?: number;
+  /** Whether body was cut. */
+  truncated: boolean;
+  /** The deployable of the service whose call posted or began the message (D37). */
+  via?: string;
+};
+
+/** The parameters of Comments' claimDeliveries, across the schemas of a namespace that compose it: Claims deliveries that are due, at most limit, oldest due first, under one new token that lapses after ttlMs, so two notifiers never send one twice: each pending one, each failed one whose next attempt has come, and each claimed one whose claim lapsed. Only deliveries of schemas the caller may read whose config names a deliverPermission the caller holds; with subjects or prefix, only theirs. A due delivery whose message no longer stands, or whose subject has read it, is dropped and not returned. Each delivery carries what a notifier needs to act with no other read. */
+export type CommentsClaimDeliveriesParams = {
+  /** At most this many deliveries; 20 when absent. */
+  limit?: number;
+  /** Only deliveries to subjects that start with it, agent: say; not with subjects. */
+  prefix?: string;
+  /** Only deliveries to these subjects. */
+  subjects?: string[];
+  /** How long the claim holds, in milliseconds; 60000 when absent. A delivery not settled by then is due again. */
+  ttlMs?: number;
+};
+
+/** What Comments' claimDeliveries returns. */
+export type CommentsClaimDeliveriesResult = {
+  /** When the claim lapses, in epoch milliseconds; null when nothing was claimed. */
+  expiresAt: number | null;
+  items: CommentsDelivery[];
+  /** The claim's token, which settleDeliveries takes; null when nothing was claimed. */
+  token: string | null;
+};
+
+/** A delivery as settleDeliveries left it: its state, its claims so far, and when a failed one is due again. */
+export type CommentsSettledDelivery = {
+  /** How many times it has been claimed. */
+  attempts: number;
+  id: string;
+  /** When a failed one is due again, in epoch milliseconds. */
+  nextAttemptAt?: number;
+  /** sent, failed or dropped: a failure on its last attempt is dropped. */
+  state: 'sent' | 'failed' | 'dropped';
+};
+
+/** The parameters of Comments' settleDeliveries, across the schemas of a namespace that compose it: Settles deliveries the caller claimed under token: sent; failed, which makes each due again after a backoff until the config's maxAttempts claims, then drops it; or dropped. Needs the deliverPermission of each delivery's schema. Every id must be held under the token, or nothing is settled. */
+export type CommentsSettleDeliveriesParams = {
+  /** Why it failed or was dropped, kept on the delivery; not with sent. */
+  error?: string;
+  /** The ids of the deliveries to settle. */
+  ids: string[];
+  /** sent, failed or dropped. */
+  outcome: 'sent' | 'failed' | 'dropped';
+  /** The token claimDeliveries returned. */
+  token: string;
+};
+
+/** What Comments' settleDeliveries returns. */
+export type CommentsSettleDeliveriesResult = {
+  /** Each delivery, in the order of ids. */
+  items: CommentsSettledDelivery[];
+};
+
+/** Each namespace operation Comments adds: its scope, parameters and result. None is a type's: CommentsNamespaceClient calls them. */
+export type CommentsNamespaceOperations = {
+  inbox: { scope: 'namespace'; params: CommentsInboxParams; result: CommentsInboxResult };
+  searchMessages: { scope: 'namespace'; params: CommentsSearchMessagesParams; result: CommentsSearchMessagesResult };
+  claimDeliveries: { scope: 'namespace'; params: CommentsClaimDeliveriesParams; result: CommentsClaimDeliveriesResult };
+  settleDeliveries: { scope: 'namespace'; params: CommentsSettleDeliveriesParams; result: CommentsSettleDeliveriesResult };
+};
+
+/** The codes Comments' vetoes carry: what a refused call's details.code holds. */
+export type CommentsVetoCode = 'no_message' | 'not_a_thread' | 'not_in_thread' | 'deleted' | 'composing' | 'not_composing' | 'not_author' | 'edit_window_passed' | 'too_many_edits' | 'already_reacted' | 'not_reacted' | 'too_many_reactions' | 'already_pinned' | 'not_pinned' | 'already_resolved' | 'not_resolved' | 'block_not_allowed' | 'ref_not_found' | 'attachment_not_allowed' | 'no_block' | 'not_code' | 'anchor_unchanged' | 'not_idle' | 'too_many_drafts' | 'draft_too_long' | 'not_configured' | 'unknown_delivery' | 'token_stale' | 'not_claimed';
+
+/** isCommentsNamespaceVeto is isVeto with Comments and its codes, for a refusal of one of its namespace operations. */
+export function isCommentsNamespaceVeto(error: unknown, codes?: CommentsVetoCode | ReadonlyArray<CommentsVetoCode>): error is EngineVeto {
+  return isVeto(error, 'Comments', codes);
+}
+
+/** Comments' namespace operations in one namespace, typed: each runs on its tables across the schemas of the namespace that compose it and that the caller may read, and the policy is asked of the behavior and the operation, not of a schema (D77). */
+export interface CommentsNamespaceClient {
+  /** Comments' inbox: The caller's inbox across every schema of the namespace that composes Comments and that the caller may read, newest first: the messages that mention it, the threads it follows that have replies of others, and the conversations it has read that have top-level messages of others. Each item names the latest such message and how many of them the caller has not read; an item with none unread is done. A mention is read once the caller's marker on the conversation, for a top-level message, or on its thread, for a reply, passes it. Mentions reach back as far as the config's deliveryRetentionMs. */
+  inbox(params?: CommentsInboxParams, options?: Omit<CallOptions, 'namespace'>): Promise<CommentsInboxResult>;
+  /** Comments' searchMessages: Searches the bodies of the posted and interrupted messages of every schema of the namespace that composes Comments and that the caller may read, best match first: a message is found when its body holds each word of query, in any order, case and diacritics aside. schema narrows the search to one type, instanceId to one conversation, and thread to one thread, its top-level message and its replies. A composing message's draft, a deleted message and the text before an edit are never found. The order is each database's own ranking, bm25 on SQLite and ts_rank_cd on Postgres, so the two may order the same hits differently; a search reaches its first 1000 hits. */
+  searchMessages(params: CommentsSearchMessagesParams, options?: Omit<CallOptions, 'namespace'>): Promise<CommentsSearchMessagesResult>;
+  /** Comments' claimDeliveries: Claims deliveries that are due, at most limit, oldest due first, under one new token that lapses after ttlMs, so two notifiers never send one twice: each pending one, each failed one whose next attempt has come, and each claimed one whose claim lapsed. Only deliveries of schemas the caller may read whose config names a deliverPermission the caller holds; with subjects or prefix, only theirs. A due delivery whose message no longer stands, or whose subject has read it, is dropped and not returned. Each delivery carries what a notifier needs to act with no other read. */
+  claimDeliveries(params?: CommentsClaimDeliveriesParams, options?: Omit<CallOptions, 'namespace'>): Promise<CommentsClaimDeliveriesResult>;
+  /** Comments' settleDeliveries: Settles deliveries the caller claimed under token: sent; failed, which makes each due again after a backoff until the config's maxAttempts claims, then drops it; or dropped. Needs the deliverPermission of each delivery's schema. Every id must be held under the token, or nothing is settled. */
+  settleDeliveries(params: CommentsSettleDeliveriesParams, options?: Omit<CallOptions, 'namespace'>): Promise<CommentsSettleDeliveriesResult>;
+}
+
+/** commentsNamespaceClient binds an EngineClient to a namespace, the client's own when none is given, for Comments' namespace operations. */
+export function commentsNamespaceClient(client: EngineClient, namespace?: string): CommentsNamespaceClient {
+  return {
+    inbox(params, options) {
+      return client.behaviors.invoke<CommentsInboxResult>('Comments', 'inbox', params ?? {}, namespace === undefined ? options : { ...options, namespace });
+    },
+    searchMessages(params, options) {
+      return client.behaviors.invoke<CommentsSearchMessagesResult>('Comments', 'searchMessages', params, namespace === undefined ? options : { ...options, namespace });
+    },
+    claimDeliveries(params, options) {
+      return client.behaviors.invoke<CommentsClaimDeliveriesResult>('Comments', 'claimDeliveries', params ?? {}, namespace === undefined ? options : { ...options, namespace });
+    },
+    settleDeliveries(params, options) {
+      return client.behaviors.invoke<CommentsSettleDeliveriesResult>('Comments', 'settleDeliveries', params, namespace === undefined ? options : { ...options, namespace });
     },
   };
 }

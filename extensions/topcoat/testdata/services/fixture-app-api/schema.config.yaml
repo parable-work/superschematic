@@ -1,0 +1,16 @@
+# The Topcoat extension's API of a stack app (D78): its users are the core
+# user model's (D50), in its authDb fixture-app-db, which is an engine
+# database too (D58), and it declares Backoffice, an app whose program
+# builds the Topcoat router from the app's parts
+# (RouterBuilderFixtureAppApiExt::fixture_app_api_with_parts). Its pages
+# are on, with the engine's and the identity runtime's.
+name: fixture-app-api
+kind: API
+authDb: fixture-app-db
+outputs:
+  types:
+    rust: { enabled: true }
+  api: { enabled: true, language: RUST }
+  topcoat:
+    enabled: true
+    pages: { enabled: true }

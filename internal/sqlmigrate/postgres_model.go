@@ -7,6 +7,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/graphdesc"
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -47,6 +48,7 @@ func (postgresDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, er
 		if err != nil {
 			return nil, err
 		}
+		table.Queue = queueKeyOf(schema, &out.Tables[i])
 		table.Optimistic = optimistic[table.Name]
 		if h, ok := histories[table.Name]; ok {
 			table.History = h.Name
@@ -101,9 +103,25 @@ func (postgresDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, er
 		m.Triggers = append(m.Triggers, trigger)
 	}
 
+	for _, e := range out.EnqueueTriggers {
+		m.Functions = append(m.Functions, &Function{Name: e.FunctionName, Definition: e.FunctionSQL(), Origin: e.Origin})
+		trigger, err := modelTrigger(e.Trigger(), e.Origin)
+		if err != nil {
+			return nil, err
+		}
+		if e.Backfill {
+			trigger.Backfill = e.BackfillSQL()
+		}
+		m.Triggers = append(m.Triggers, trigger)
+	}
+
 	schemas := map[string]bool{}
 	for _, view := range out.Projections {
-		schemas[view.Pool] = true
+		// A view without a pool is created beside the tables (D90), in a
+		// schema the plan does not create.
+		if view.Pool != "" {
+			schemas[view.Pool] = true
+		}
 		m.Views = append(m.Views, modelView(view))
 	}
 	for name := range schemas {
@@ -116,9 +134,49 @@ func (postgresDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, er
 		return nil, err
 	}
 	m.Graphs = graphs
+	m.RawSQL = modelRawSQL(out.RawSQL)
+	for _, s := range out.RoleSeeds {
+		m.Roles = append(m.Roles, modelRole(s, s.InsertSQL(), s.UpdateSQL()))
+	}
 
 	m.sort()
 	return m, nil
+}
+
+// modelRole is a @seedRoles role with its statements in the model's
+// dialect (D88).
+func modelRole(s sqlgen.RoleSeed, insert, update string) *RoleSeed {
+	return &RoleSeed{
+		Table: s.Table, Name: s.Name, Permissions: append([]string{}, s.Permissions...), Origin: s.Origin,
+		Insert: insert, Update: update,
+	}
+}
+
+// queueKeyOf is the key of the queue whose table t is, or nil for a table
+// that is no queue's or a queue with no key (D80).
+func queueKeyOf(schema *ir.Schema, t *sqlgen.Table) *QueueKey {
+	td := schema.Types[t.OriginalName]
+	if td == nil || td.Queue == nil || td.Queue.Key == "" || t.Name != sqlgen.QueueTableName(td) {
+		return nil
+	}
+	return &QueueKey{Key: sqlutil.QueueKeyColumnName(td), OnDuplicate: td.Queue.OnDuplicate, Serialize: td.Queue.Serialize}
+}
+
+// dedupes reports whether a queue keeps one ready message per key.
+func (q *QueueKey) dedupes() bool {
+	return q != nil && (q.OnDuplicate == ir.QueueOnDuplicateReplace || q.OnDuplicate == ir.QueueOnDuplicateSkip)
+}
+
+// modelRawSQL is the model's raw SQL, in the order it runs.
+func modelRawSQL(pieces []sqlutil.RawSQL) []*RawSQL {
+	var out []*RawSQL
+	for _, p := range pieces {
+		out = append(out, &RawSQL{
+			ID: p.ID, Origin: p.Origin, Position: p.Position, After: p.After,
+			Statements: append([]string{}, p.Statements...), Down: append([]string(nil), p.Down...), Checksum: p.Checksum,
+		})
+	}
+	return out
 }
 
 // entityTable is a DB type's table. The primary key and each UNIQUE clause
@@ -193,7 +251,15 @@ func entityTable(t *sqlgen.Table, ns *pgNamespace) (*Table, error) {
 			return nil, err
 		}
 		table.Indexes = append(table.Indexes, &Index{
-			Name: idx.Name, Columns: columns, Method: idx.Type, Unique: idx.Unique, Where: idx.Where,
+			Name: idx.Name, Columns: columns, Method: idx.Type, Opclass: idx.Opclass, Unique: idx.Unique, Where: idx.Where,
+			Expression: idx.Expression, InTransaction: idx.InTransaction, With: idx.With,
+		})
+	}
+	for _, check := range t.Checks {
+		spec := check.Spec
+		table.Checks = append(table.Checks, &Check{
+			Name: check.Name, Column: check.Column, In: append([]string(nil), spec.In...),
+			Min: spec.Min, Max: spec.Max, MinLength: spec.MinLength, MaxLength: spec.MaxLength,
 		})
 	}
 	if len(t.SearchFields) > 0 {
@@ -274,7 +340,7 @@ func modelTrigger(t sqlgen.Trigger, origin string) (*Trigger, error) {
 
 func modelView(view sqlgen.ProjectionView) *View {
 	v := &View{
-		Schema:     view.Pool,
+		Schema:     view.Schema,
 		Name:       view.Name,
 		Owner:      view.ViewOwner,
 		Definition: sqlgen.ProjectionViewStatements(view),
@@ -341,6 +407,7 @@ func (m *Model) sort() {
 		sort.Slice(t.Uniques, func(i, j int) bool { return t.Uniques[i].Name < t.Uniques[j].Name })
 		sort.Slice(t.ForeignKeys, func(i, j int) bool { return t.ForeignKeys[i].Name < t.ForeignKeys[j].Name })
 		sort.Slice(t.Indexes, func(i, j int) bool { return t.Indexes[i].Name < t.Indexes[j].Name })
+		sort.Slice(t.Checks, func(i, j int) bool { return t.Checks[i].Name < t.Checks[j].Name })
 		sort.Slice(t.Partitions, func(i, j int) bool { return t.Partitions[i].Name < t.Partitions[j].Name })
 	}
 	sort.Slice(m.Functions, func(i, j int) bool { return m.Functions[i].Name < m.Functions[j].Name })
@@ -360,4 +427,10 @@ func (m *Model) sort() {
 	for _, g := range m.Graphs {
 		sort.Slice(g.Members, func(i, j int) bool { return g.Members[i].Table < g.Members[j].Table })
 	}
+	sort.SliceStable(m.Roles, func(i, j int) bool {
+		if m.Roles[i].Table != m.Roles[j].Table {
+			return m.Roles[i].Table < m.Roles[j].Table
+		}
+		return m.Roles[i].Name < m.Roles[j].Name
+	})
 }

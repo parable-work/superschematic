@@ -25,7 +25,8 @@
 use std::sync::Arc;
 
 use superschematic_http_runtime::identity::{
-    Client, Config, ConfigError, Route, Scalars, Service, SqlStore, Store, StoreError,
+    Client, Config, ConfigError, FirstUser, Registration, Route, Scalars, Service, SqlStore, Store,
+    StoreError,
 };
 
 use crate::operations;
@@ -66,7 +67,8 @@ pub const IDENTITY_DESCRIPTOR: &str = r#"{
       "user": "user_id",
       "passwordHash": "password_hash",
       "passwordChangedAt": "password_changed_at",
-      "disabledAt": "disabled_at"
+      "disabledAt": "disabled_at",
+      "pendingAt": "pending_at"
     }
   },
   "role": {
@@ -118,10 +120,25 @@ pub fn store(client: impl Client) -> Result<SqlStore, StoreError> {
 /// route table `capabilities` answers for (`routes`). A service may set
 /// its clock or permission rule (`with_clock`, `with_permits`) before it
 /// shares it.
+/// `register` admits users as `registration` says (D81).
 pub fn service(store: Arc<dyn Store>, config: Config) -> Result<Service, ConfigError> {
-    Ok(Service::new(store, config)?
+    Service::new(store, config)?
         .with_permission_prefix(PERMISSION_PREFIX)?
-        .with_routes(routes()))
+        .with_routes(routes())
+        .with_registration(registration())
+}
+
+/// How `register` admits users, as the API's `@userSessions` declares it
+/// (D81).
+pub fn registration() -> Registration {
+    Registration {
+        approval: true,
+        default_roles: vec!["member".to_owned()],
+        first_user: Some(FirstUser {
+            role: "admin".to_owned(),
+            permissions: vec!["identity".to_owned()],
+        }),
+    }
 }
 
 /// The route table `capabilities` answers for: each operation an end user
@@ -141,6 +158,7 @@ pub fn routes() -> Vec<Route> {
         Route::of("AccountAdminListUsersHandler", &operations::ACCOUNT_ADMIN_LIST_USERS),
         Route::of("AccountAdminCreateUserHandler", &operations::ACCOUNT_ADMIN_CREATE_USER),
         Route::of("AccountAdminGetUserHandler", &operations::ACCOUNT_ADMIN_GET_USER),
+        Route::of("AccountAdminApproveUserHandler", &operations::ACCOUNT_ADMIN_APPROVE_USER),
         Route::of("AccountAdminDisableUserHandler", &operations::ACCOUNT_ADMIN_DISABLE_USER),
         Route::of("AccountAdminEnableUserHandler", &operations::ACCOUNT_ADMIN_ENABLE_USER),
         Route::of("AccountAdminSetUserPasswordHandler", &operations::ACCOUNT_ADMIN_SET_USER_PASSWORD),

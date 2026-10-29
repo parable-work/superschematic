@@ -52,6 +52,8 @@ jobs:
           curl -fsSL -o "$dir/SHA256SUMS" "$release/SHA256SUMS"
           (cd "$dir" && sha256sum --check --ignore-missing SHA256SUMS)
           tar -xzf "$dir/superschematic_1.2.3_linux-x64.tar.gz" -C "$dir"
+          got="$("$dir/superschematic_1.2.3_linux-x64/superschematic" --version)"
+          [ "$got" = "superschematic version 1.2.3" ] || { echo "the release's superschematic reports \"$got\", not superschematic version 1.2.3" && exit 1; }
           echo "$dir/superschematic_1.2.3_linux-x64" >> "$GITHUB_PATH"
       - name: Install the static archives
         run: |
@@ -65,7 +67,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26.4"
+          go-version: "1.27.3"
           cache: "false"
       - name: Set up Rust
         run: |
@@ -118,6 +120,8 @@ jobs:
           curl -fsSL -o "$dir/SHA256SUMS" "$release/SHA256SUMS"
           (cd "$dir" && sha256sum --check --ignore-missing SHA256SUMS)
           tar -xzf "$dir/superschematic_1.2.3_linux-x64.tar.gz" -C "$dir"
+          got="$("$dir/superschematic_1.2.3_linux-x64/superschematic" --version)"
+          [ "$got" = "superschematic version 1.2.3" ] || { echo "the release's superschematic reports \"$got\", not superschematic version 1.2.3" && exit 1; }
           echo "$dir/superschematic_1.2.3_linux-x64" >> "$GITHUB_PATH"
       - name: Set up Rust
         run: |
@@ -159,6 +163,8 @@ jobs:
           curl -fsSL -o "$dir/SHA256SUMS" "$release/SHA256SUMS"
           (cd "$dir" && sha256sum --check --ignore-missing SHA256SUMS)
           tar -xzf "$dir/superschematic_1.2.3_linux-x64.tar.gz" -C "$dir"
+          got="$("$dir/superschematic_1.2.3_linux-x64/superschematic" --version)"
+          [ "$got" = "superschematic version 1.2.3" ] || { echo "the release's superschematic reports \"$got\", not superschematic version 1.2.3" && exit 1; }
           echo "$dir/superschematic_1.2.3_linux-x64" >> "$GITHUB_PATH"
       - name: Download what prepare made
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -198,6 +204,8 @@ jobs:
           curl -fsSL -o "$dir/SHA256SUMS" "$release/SHA256SUMS"
           (cd "$dir" && sha256sum --check --ignore-missing SHA256SUMS)
           tar -xzf "$dir/superschematic_1.2.3_linux-x64.tar.gz" -C "$dir"
+          got="$("$dir/superschematic_1.2.3_linux-x64/superschematic" --version)"
+          [ "$got" = "superschematic version 1.2.3" ] || { echo "the release's superschematic reports \"$got\", not superschematic version 1.2.3" && exit 1; }
           echo "$dir/superschematic_1.2.3_linux-x64" >> "$GITHUB_PATH"
       - name: Download what prepare made
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1

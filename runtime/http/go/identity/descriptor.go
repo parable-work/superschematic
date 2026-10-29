@@ -66,6 +66,7 @@ type DescriptorCredential struct {
 		PasswordHash      string `json:"passwordHash"`
 		PasswordChangedAt string `json:"passwordChangedAt"`
 		DisabledAt        string `json:"disabledAt"`
+		PendingAt         string `json:"pendingAt"`
 	} `json:"columns"`
 }
 
@@ -124,6 +125,7 @@ func ParseDescriptor(data []byte) (Descriptor, error) {
 		"credential.table":          d.Credential.Table, "credential.columns.id": d.Credential.Columns.ID,
 		"credential.columns.user": d.Credential.Columns.User, "credential.columns.passwordHash": d.Credential.Columns.PasswordHash,
 		"credential.columns.passwordChangedAt": d.Credential.Columns.PasswordChangedAt, "credential.columns.disabledAt": d.Credential.Columns.DisabledAt,
+		"credential.columns.pendingAt": d.Credential.Columns.PendingAt,
 	}
 	if r := d.Role; r != nil {
 		names["role.type"], names["role.table"], names["role.keyScalar"] = r.Type, r.Table, r.KeyScalar

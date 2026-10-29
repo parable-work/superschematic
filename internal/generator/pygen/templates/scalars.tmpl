@@ -20,6 +20,9 @@ import re
 {{if .HasDateTime -}}
 from datetime import datetime
 {{end}}
+{{- if .HasDecimal -}}
+import decimal
+{{end}}
 {{if or .HasCustomNormalize .HasCustomValidate .HasCustomParse .HasJSONParse}}
 # Import custom scalar implementations from the scalar library
 try:
@@ -33,6 +36,9 @@ try:
         {{- end}}
         {{- if and (or $scalar.HasCustomParse (pythonParsesJSON $scalar)) (ne $scalar.Name "Generic.JSON")}}
         parse_{{pythonScalarModule $scalar}},
+        {{- end}}
+        {{- if isPythonDecimal $scalar}}
+        parse_{{pythonScalarModule $scalar}}_to_decimal,
         {{- end}}
         {{end}}{{end}}
     )
@@ -50,7 +56,7 @@ except ImportError:
     _{{pythonScalarSymbol $scalar}}Value = {{if eq $scalar.Traits.StructuredJSON "object"}}Dict[str, Any]{{else}}Any{{end}}
 {{end}}{{end}}
 
-{{range .Scalars}}{{if and (or .HasCustomParse (pythonParsesJSON .)) (ne .Name "Generic.JSON")}}
+{{range .Scalars}}{{if and (or .HasCustomParse (pythonParsesJSON .)) (ne .Name "Generic.JSON") (not (isPythonDecimal .))}}
 def _custom_parse_{{pythonScalarModule .}}(v: Any) -> Any:
 {{if pythonParsesJSON .}}    """Parse a JSON value, or its JSON text, into its native representation.
 
@@ -212,6 +218,51 @@ def _serialize_datetime(v: datetime) -> str:
     ),
     PlainValidator(_parse_datetime),
     PlainSerializer(_serialize_datetime, return_type=str, when_used="json"),
+]
+
+{{else if isPythonDecimal . -}}
+# {{.Name}} is a decimal.Decimal (D84). The scalar library reads its text, or
+# a decimal.Decimal, into the canonical value, so 1.50 is 1.5, and it is
+# written as the canonical text. A float is refused: it may already have
+# lost digits. Without the library the pattern checks the text alone.
+def _parse_{{pythonScalarModule .}}_value(v: Any) -> decimal.Decimal:
+    """Read {{.Name}} from its text or a decimal.Decimal."""
+    if isinstance(v, decimal.Decimal):
+        text = format(v, "f")
+    elif isinstance(v, str):
+        text = v
+    else:
+        raise ValueError("{{.Name}} is the text of a decimal or a decimal.Decimal, not a {}".format(type(v).__name__))
+    if not _SCALAR_MODULE_AVAILABLE:
+        {{- if .Pattern}}
+        if not _{{pythonScalarSymbol .}}_pattern.match(text.strip()):
+            raise ValueError("invalid format for {{.Name}}")
+        {{- end}}
+        return decimal.Decimal(text.strip())
+    try:
+        return parse_{{pythonScalarModule .}}_to_decimal(text)
+    except Exception as e:
+        raise ValueError(str(e))
+
+
+def _serialize_{{pythonScalarModule .}}(v: decimal.Decimal) -> str:
+    """Write {{.Name}} as its canonical text, in plain notation."""
+    text = format(v, "f")
+    if not _SCALAR_MODULE_AVAILABLE:
+        return text
+    return parse_{{pythonScalarModule .}}(text)
+
+
+{{pythonScalarSymbol .}} = Annotated[
+    decimal.Decimal,
+    Field(
+        description="{{pythonString (scalarDoc .)}}",
+        {{- if .Example}}
+        examples=["{{pythonString .Example}}"],
+        {{- end}}
+    ),
+    PlainValidator(_parse_{{pythonScalarModule .}}_value),
+    PlainSerializer(_serialize_{{pythonScalarModule .}}, return_type=str, when_used="json"),
 ]
 
 {{else if eq .Name "Generic.JSON" -}}

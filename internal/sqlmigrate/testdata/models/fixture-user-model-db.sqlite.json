@@ -1,5 +1,17 @@
 {
   "dialect": "sqlite",
+  "roles": [
+    {
+      "insert": "INSERT INTO \"role\" (\"name\", \"permissions\") VALUES ('member', '[\"identity.roles.read\"]')\nON CONFLICT (\"name\") DO UPDATE SET \"permissions\" = excluded.\"permissions\" WHERE json_array_length(\"role\".\"permissions\") = 0",
+      "name": "member",
+      "origin": "Role",
+      "permissions": [
+        "identity.roles.read"
+      ],
+      "table": "role",
+      "update": "UPDATE \"role\" SET \"permissions\" = '[\"identity.roles.read\"]' WHERE \"name\" = 'member'"
+    }
+  ],
   "service": "fixture-user-model-db",
   "tables": [
     {
@@ -196,6 +208,12 @@
           "name": "disabled_at",
           "nullable": true,
           "origin": "UserCredential.disabledAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "pending_at",
+          "nullable": true,
+          "origin": "UserCredential.pendingAt",
           "type": "TEXT"
         }
       ],

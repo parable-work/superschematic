@@ -22,10 +22,11 @@ CREATE TABLE customer (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
   "name" VARCHAR(80) NOT NULL,
   email CITEXT NOT NULL,
-  tier TEXT NOT NULL,
-  billing_address TEXT,
+  tier TEXT DEFAULT 'free' NOT NULL,
+  billing_address JSONB,
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
-  UNIQUE (email)
+  UNIQUE (email),
+  CONSTRAINT ck_customer_tier CHECK (tier IN ('free', 'paid'))
 );
 
 COMMENT ON TABLE customer IS 'A customer: a table.';

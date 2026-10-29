@@ -12,3 +12,6 @@ schemas-fixture-views-api-api = { path = "../../api/fixture-views-api" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 topcoat = { version = "0.10", features = ["tower"] }
+# Each currency's minor units, by which views.rs formats an amount and
+# forms.rs reads a decimal one.
+superscalar = { path = "<repo>/third_party/superscalar/crates/core" }

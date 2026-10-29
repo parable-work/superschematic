@@ -13,8 +13,9 @@ import "sort"
 // EnvironmentDecl), and StackOf assembles a schema's declarations into its
 // Stack. A service handle is a ServiceRef, a declared deployable's class is
 // its name, and the keys of one `settings` element other than `of`, `job`,
-// `worker`, `platform`, `env`, `schedule`, `timeZone`, `enabled`,
-// `instances` and `concurrency` are the platform settings.
+// `worker`, `runner`, `deriver`, `app`, `platform`, `env`, `schedule`,
+// `timeZone`, `enabled`, `instances` and `concurrency` are the platform
+// settings.
 
 // DeployableKind is the kind of a deployable: what runs (section 3.1).
 type DeployableKind string
@@ -58,21 +59,41 @@ const (
 	// by name, that connects to it; its one need is its database. On
 	// Postgres one process runs at a time, under the runner's lock.
 	DeployableRunner DeployableKind = "runner"
+
+	// DeployableDeriver runs one `@deriver` of an API schema until it is
+	// stopped: it fills the Derived fields of engine types of the API's
+	// engine database, calling the project's model for each stale field
+	// (D74). Its needs are its API's, as a worker's are; it claims from no
+	// queue.
+	DeployableDeriver DeployableKind = "deriver"
+
+	// DeployableMemoryStore is one MemoryStore service: a Redis or Valkey
+	// server, which needs nothing. The server, jobs and workers of each API
+	// that lists it reach it over a memoryStore edge (D75). An environment
+	// whose settings turn it off (`enabled: false`) places no deployable
+	// for it, and lists it in ResolvedEnvironment.Disabled.
+	DeployableMemoryStore DeployableKind = "memoryStore"
+
+	// DeployableApp runs one `@app` of an API schema: the project's own
+	// HTTP program over the API's Deps, implementations, identity and
+	// engine, which serves requests as a server does (D78). Its needs are
+	// its API's, as a job's are, and it is exposed as a server is.
+	DeployableApp DeployableKind = "app"
 )
 
 // Valid reports whether k is a deployable kind v1 knows.
 func (k DeployableKind) Valid() bool {
-	return k == DeployableDatabase || k == DeployableServer || k == DeployableJob || k == DeployableSite || k == DeployableBucket || k == DeployableWorker || k == DeployableRunner
+	return k == DeployableDatabase || k == DeployableServer || k == DeployableJob || k == DeployableSite || k == DeployableBucket || k == DeployableWorker || k == DeployableRunner || k == DeployableDeriver || k == DeployableMemoryStore || k == DeployableApp
 }
 
 // RunsCode reports whether a deployable of kind k runs code the stack's
 // build writes an entrypoint for, with a config and edges of its APIs: a
-// server, a job (D52) or a worker (D53), or an engine's runner (D58), whose
-// one edge is to its database. Each has an artifact a deploy builds, pins
-// and records, an image unless its platform builds a bundle
-// (ResolvedDeployable.Artifact, D64).
+// server, a job (D52), a worker (D53), a deriver (D74) or an app (D78), or
+// an engine's runner (D58), whose one edge is to its database. Each has an
+// artifact a deploy builds, pins and records, an image unless its platform
+// builds a bundle (ResolvedDeployable.Artifact, D64).
 func (k DeployableKind) RunsCode() bool {
-	return k == DeployableServer || k == DeployableJob || k == DeployableWorker || k == DeployableRunner
+	return k == DeployableServer || k == DeployableJob || k == DeployableWorker || k == DeployableRunner || k == DeployableDeriver || k == DeployableApp
 }
 
 // RollsOut reports whether a deployable of kind k rolls out in the deploy
@@ -84,7 +105,7 @@ func (k DeployableKind) RollsOut() bool {
 
 // DeployableKinds returns the deployable kinds, in a fixed order.
 func DeployableKinds() []DeployableKind {
-	return []DeployableKind{DeployableDatabase, DeployableServer, DeployableJob, DeployableSite, DeployableBucket, DeployableWorker, DeployableRunner}
+	return []DeployableKind{DeployableDatabase, DeployableServer, DeployableJob, DeployableSite, DeployableBucket, DeployableWorker, DeployableRunner, DeployableDeriver, DeployableMemoryStore, DeployableApp}
 }
 
 // EdgeKind is the kind of an edge: a need met by something that provides
@@ -109,11 +130,16 @@ const (
 	// EdgeBucket runs from a server, and from a job, to each bucket an API
 	// it serves lists in its config's buckets (D54).
 	EdgeBucket EdgeKind = "bucket"
+
+	// EdgeMemoryStore runs from a server, a job and a worker to each
+	// memory store an API it serves lists in its config's memoryStores, or
+	// names its rateLimitStore (D75).
+	EdgeMemoryStore EdgeKind = "memoryStore"
 )
 
 // Valid reports whether k is an edge kind v1 knows.
 func (k EdgeKind) Valid() bool {
-	return k == EdgeSQL || k == EdgeHTTP || k == EdgeSite || k == EdgeBucket
+	return k == EdgeSQL || k == EdgeHTTP || k == EdgeSite || k == EdgeBucket || k == EdgeMemoryStore
 }
 
 // A service handle is a ServiceRef (ir/schema.go), written `{name, kind}`
@@ -124,8 +150,9 @@ func (k EdgeKind) Valid() bool {
 // deployable that hosts or serves that service, or by the name of a
 // declared deployable's class. Exactly one is set. With Job beside an API
 // service's handle, it names that job of the API (D52), with Worker that
-// worker (D53), and with Runner beside a DB service's handle the engine's
-// runner of that database (D58).
+// worker (D53), with Deriver that deriver (D74), with App that app (D78),
+// and with Runner beside a DB service's handle the engine's runner of that
+// database (D58).
 type DeployableRef struct {
 	// Service is a handle to a service the deployable hosts or serves.
 	Service *ServiceRef `json:"service,omitempty" yaml:"service,omitempty"`
@@ -141,6 +168,14 @@ type DeployableRef struct {
 	// its `@worker` class (`{of: ShopOrders, worker: "FulfilOrders"}`).
 	Worker string `json:"worker,omitempty" yaml:"worker,omitempty"`
 
+	// Deriver names a deriver of the API service Service names: the name
+	// of its `@deriver` class (`{of: ShopCart, deriver: "TriageTickets"}`).
+	Deriver string `json:"deriver,omitempty" yaml:"deriver,omitempty"`
+
+	// App names an app of the API service Service names: the name of its
+	// `@app` class (`{of: ShopStock, app: "Backoffice"}`, D78).
+	App string `json:"app,omitempty" yaml:"app,omitempty"`
+
 	// Runner names the engine's runner of the DB service Service names, an
 	// engine database (`{of: ShopDb, runner: true}`): the deployable
 	// RunnerDeployableName names.
@@ -155,6 +190,12 @@ func (r DeployableRef) String() string {
 		}
 		if r.Worker != "" {
 			return r.Service.Name + " worker " + r.Worker
+		}
+		if r.Deriver != "" {
+			return r.Service.Name + " deriver " + r.Deriver
+		}
+		if r.App != "" {
+			return r.Service.Name + " app " + r.App
 		}
 		if r.Runner {
 			return r.Service.Name + " runner"
@@ -175,9 +216,14 @@ type Stack struct {
 	Deploy []ServiceRef `json:"deploy,omitempty" yaml:"deploy,omitempty"`
 
 	// Expose names what is reachable from outside the environment. Each
-	// must be a server or a site; a site is exposed whether it is named
-	// here or not (D55).
+	// must be a server, a site or an app (D78); a site is exposed whether it
+	// is named here or not (D55).
 	Expose []DeployableRef `json:"expose,omitempty" yaml:"expose,omitempty"`
+
+	// Origins put a site and APIs it calls on one origin in every
+	// environment (D91): each API under SiteDevAPIPath(service) on the
+	// site's own origin, as `stack dev`'s proxy serves it (D82).
+	Origins []*Origin `json:"origins,omitempty" yaml:"origins,omitempty"`
 
 	// Deployables are the declared deployables: those that differ from the
 	// defaults of section 3.2. StackOf gives them in name order.
@@ -197,6 +243,19 @@ func (s *Stack) Environment(name string) *Environment {
 		}
 	}
 	return nil
+}
+
+// Origin is one element of `@stack`'s origins (D91): a site that serves
+// APIs it calls on its own origin, each under SiteDevAPIPath(service), so
+// the page calls them with no CORS, and a cookie session needs no trusted
+// origin and no shared domain.
+type Origin struct {
+	// Site is the Site service whose origin it is.
+	Site ServiceRef `json:"site" yaml:"site"`
+
+	// APIs are the API services the origin serves, each one the site
+	// calls. Empty is every API the site calls.
+	APIs []ServiceRef `json:"apis,omitempty" yaml:"apis,omitempty"`
 }
 
 // DeployableDecl is a declared deployable, such as an `@server` class. It
@@ -295,7 +354,11 @@ type DeployableSettings struct {
 	// turns it on or off too: one that is off runs no instance, so no
 	// reaction, schedule, Timers deadline or retention pass runs until it is
 	// on again, when each reaction reads on from its cursor, a schedule
-	// that came due runs once and every overdue deadline fires (D58).
+	// that came due runs once and every overdue deadline fires (D58). A
+	// deriver's turns it on or off too: one that is off runs no instance,
+	// and its fields stay stale until it is on again (D74). An app's turns
+	// it on or off: one that is off is in the environment, with its edges,
+	// and its target runs nothing for it (D78).
 	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 
 	// OnDeploy runs a job once on every deploy of the environment, after
@@ -310,7 +373,9 @@ type DeployableSettings struct {
 	// Instances is how many instances of a worker the environment runs,
 	// one unless set, and Concurrency how many messages each handles at a
 	// time, its `@worker` concurrency unless set. Only an element whose
-	// `of` names a worker sets them (D53).
+	// `of` names a worker sets them (D53), or a deriver, which runs zero
+	// instances or one, and whose concurrency is how many answers it runs
+	// at a time, its `@deriver` concurrency unless set (D74).
 	Instances   *int `json:"instances,omitempty" yaml:"instances,omitempty"`
 	Concurrency *int `json:"concurrency,omitempty" yaml:"concurrency,omitempty"`
 
@@ -333,14 +398,17 @@ type EnvValue struct {
 	Parameter string `json:"parameter,omitempty" yaml:"parameter,omitempty"`
 }
 
-// StackDecl is the declaration of a stack's `@stack` class: Stack's Deploy
-// and Expose.
+// StackDecl is the declaration of a stack's `@stack` class: Stack's
+// Deploy, Expose and Origins.
 type StackDecl struct {
 	// Deploy names the entry points.
 	Deploy []ServiceRef `json:"deploy,omitempty" yaml:"deploy,omitempty"`
 
 	// Expose names what is reachable from outside the environment.
 	Expose []DeployableRef `json:"expose,omitempty" yaml:"expose,omitempty"`
+
+	// Origins put a site and APIs it calls on one origin (D91).
+	Origins []*Origin `json:"origins,omitempty" yaml:"origins,omitempty"`
 }
 
 // ServerDecl is the declaration of an `@server` class: a declared server
@@ -403,9 +471,10 @@ func StackOf(schema *Schema) *Stack {
 		}
 		if td.Stack != nil && stack == nil {
 			stack = &Stack{
-				Name:   schema.Name,
-				Deploy: td.Stack.Deploy,
-				Expose: td.Stack.Expose,
+				Name:    schema.Name,
+				Deploy:  td.Stack.Deploy,
+				Expose:  td.Stack.Expose,
+				Origins: td.Stack.Origins,
 			}
 		}
 		if td.Server != nil {
@@ -461,8 +530,9 @@ func EnvironmentNames(types map[string]*TypeDef) []string {
 }
 
 // StackReferences returns every service handle the declarations of a Stack
-// schema's classes hold: `@stack`'s deploy and its exposed handles,
-// `@server`'s serves, `@database`'s hosts and each settings element's `of`,
+// schema's classes hold: `@stack`'s deploy, its exposed handles and its
+// origins' sites and APIs (D91), `@server`'s serves, `@database`'s hosts
+// and each settings element's `of`,
 // in declaration order and with repeats. They are the schema's references
 // (Schema.References, D41). The TypeScript form records them from the
 // decorators' arguments; the data forms write the declarations as these
@@ -491,6 +561,12 @@ func StackReferences(schema *Schema) []ServiceRef {
 			refs = append(refs, td.Stack.Deploy...)
 			for _, exposed := range td.Stack.Expose {
 				deployable(exposed)
+			}
+			for _, origin := range td.Stack.Origins {
+				if origin != nil {
+					refs = append(refs, origin.Site)
+					refs = append(refs, origin.APIs...)
+				}
 			}
 		}
 		if td.Server != nil {

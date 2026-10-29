@@ -94,6 +94,9 @@ func Run(schema *ir.Schema, cfg *schemaconfig.SchemaConfig, opts Options) (*Resu
 	if err := refuseORMWithoutGoTypes(kind.Name, outputs, reg); err != nil {
 		return nil, fmt.Errorf("schema config for %s: %w", cfg.Name, err)
 	}
+	if len(opts.RewriteMigrations) > 0 && schema.Kind != ir.SchemaKindDB {
+		return nil, fmt.Errorf("generator: --rewrite-migration names a projection's migration stamp, and %s is of kind %s; a DB service declares projections", cfg.Name, schema.Kind)
+	}
 
 	r, _ := newRun(schema, cfg, outputs, opts, reg)
 

@@ -1,0 +1,109 @@
+{
+  "dialect": "sqlite",
+  "from": "d9697f8b128d88e9877145068feef31d9bdfa8a6c367bd3cdbd76a76318119f0",
+  "hash": "e228ce5e7f4304e1c3bee5a1317a7ca7fe9a8a9687cd7efa6761290685bc12d0",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/purchaseOrder",
+          "reason": "Table order is renamed to purchaseOrder, following Order's @table: servers built from the previous version still use the old name.",
+          "subject": "table/purchaseOrder"
+        },
+        {
+          "class": "api-breaking",
+          "id": "api-breaking:table/purchaseOrder@shop-api/OrderView.total",
+          "reader": "shop-api/OrderView.total",
+          "reason": "shop-api reads order.total through OrderView.total, and this step renames its table to purchaseOrder.",
+          "subject": "table/purchaseOrder"
+        }
+      ],
+      "index": 1,
+      "op": "renameTable",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" RENAME TO \"purchaseOrder\""
+      ],
+      "subject": "table/purchaseOrder",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/purchaseOrder_label",
+          "reason": "Table order_label is renamed to purchaseOrder_label, following Order's @table: servers built from the previous version still use the old name.",
+          "subject": "table/purchaseOrder_label"
+        }
+      ],
+      "index": 2,
+      "op": "renameTable",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order_label\" RENAME TO \"purchaseOrder_label\""
+      ],
+      "subject": "table/purchaseOrder_label",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/order_line/column/purchaseOrder_id",
+          "reason": "order_line.order_id is renamed to order_line.purchaseOrder_id, following Order's @table: servers built from the previous version still use the old name.",
+          "subject": "table/order_line/column/purchaseOrder_id"
+        }
+      ],
+      "index": 3,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order_line\" RENAME COLUMN \"order_id\" TO \"purchaseOrder_id\""
+      ],
+      "subject": "table/order_line/column/purchaseOrder_id",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/purchaseOrder_label/column/purchaseOrder_id",
+          "reason": "order_label.order_id is renamed to purchaseOrder_label.purchaseOrder_id, following Order's @table: servers built from the previous version still use the old name.",
+          "subject": "table/purchaseOrder_label/column/purchaseOrder_id"
+        }
+      ],
+      "index": 4,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"purchaseOrder_label\" RENAME COLUMN \"order_id\" TO \"purchaseOrder_id\""
+      ],
+      "subject": "table/purchaseOrder_label/column/purchaseOrder_id",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/purchaseOrder/index/idx_purchaseOrder_customer_placed_at",
+          "reason": "SQLite cannot rename an index, so the step drops it and builds it again under its new name holds the database's write lock for time that grows with purchaseOrder.",
+          "subject": "table/purchaseOrder/index/idx_purchaseOrder_customer_placed_at"
+        }
+      ],
+      "index": 5,
+      "op": "renameIndex",
+      "phase": "expand",
+      "statements": [
+        "DROP INDEX \"idx_order_customer_placed_at\"",
+        "CREATE INDEX \"idx_purchaseOrder_customer_placed_at\" ON \"purchaseOrder\" (\"customer_id\", \"placed_at\")"
+      ],
+      "subject": "table/purchaseOrder/index/idx_purchaseOrder_customer_placed_at",
+      "transactional": true
+    }
+  ],
+  "to": "798d562dbe21b9262168b70e768b139bcc17ea60349422a772d1a2d7c0bf92d7",
+  "toModel": null,
+  "version": 1
+}

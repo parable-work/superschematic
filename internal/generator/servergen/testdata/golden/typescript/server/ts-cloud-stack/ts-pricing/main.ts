@@ -20,9 +20,10 @@
 //   - ts-pricing: @schemas/ts-pricing-implementation, at typescript/ts-pricing
 
 import { Hono } from 'hono';
-import { createLogger, serviceAuthenticator } from '@superschematic/http-runtime';
+import { createLogger, serviceAuthenticator, disabledMemoryStore, type MemoryStore, type MemoryStoreConnection } from '@superschematic/http-runtime';
 import { errorHandler, notFoundHandler } from '@superschematic/http-runtime/hono';
 import { startTelemetry } from '@superschematic/http-runtime/telemetry';
+import { openRedisMemoryStore } from '@superschematic/http-runtime/redis';
 import * as tsPricingApi from '@schemas/ts-pricing-api';
 import * as tsPricingImpl from '@schemas/ts-pricing-implementation';
 
@@ -61,6 +62,13 @@ async function main(): Promise<void> {
   const port = listenPort();
   const tsPricingConfig = configure('ts-pricing', () => tsPricingApi.loadEnvConfig());
 
+  // One memory store per store, shared by every API that lists it (D75):
+  // on Redis, or disabled when its field is unset. Opening never waits for a
+  // store that is down, which reconnects in the background, and readiness
+  // never asks for one.
+  const tsCacheStore = await openMemoryStore('ts-cache', 'TS_CACHE_MEMORY_STORE', tsPricingConfig.TS_CACHE_MEMORY_STORE);
+  const memoryStores: readonly MemoryStore[] = [tsCacheStore];
+
   const app = new Hono();
   // With trace export on, each request but the probes is a server span.
   app.use(telemetry.middleware());
@@ -74,6 +82,7 @@ async function main(): Promise<void> {
   // ts-pricing: its implementation, built from its Deps, and its routes.
   const tsPricingDeps: tsPricingApi.Deps = {
     config: tsPricingConfig,
+    tsCache: tsCacheStore,
     logger: logger.child({ api: 'ts-pricing' }),
   };
   const tsPricingImplementations = await construct('ts-pricing', 'implementation', () => tsPricingImpl.create(tsPricingDeps));
@@ -103,6 +112,8 @@ async function main(): Promise<void> {
     logger.info('shutting down', { signal });
     // The spans still buffered are flushed once the requests are done.
     drain(server)
+      // The memory stores close once the requests are done.
+      .finally(() => Promise.allSettled(memoryStores.map(store => store.close())))
       .finally(() => telemetry.shutdown())
       .then(
         () => {
@@ -145,6 +156,27 @@ async function construct<T>(api: string, what: string, build: () => T | Promise<
     return await build();
   } catch (error) {
     throw new Error(`${what} of ${api}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
+}
+
+/**
+ * Opens the memory store service from the memory store field named field,
+ * connection (D75): on Redis, through the HTTP runtime's ./redis entry,
+ * which pings it once within a second and otherwise reconnects in the
+ * background. An unset field is a disabled store, and so is a connection
+ * the runtime refuses, which logs one error line: the server runs without
+ * the store, and each call takes its fallback path.
+ */
+async function openMemoryStore(service: string, field: string, connection: MemoryStoreConnection | null): Promise<MemoryStore> {
+  if (connection === null) {
+    logger.info('memory store disabled: its field is unset', { memoryStore: service, field });
+    return disabledMemoryStore(service);
+  }
+  try {
+    return await openRedisMemoryStore(connection, { logger });
+  } catch (error) {
+    logger.error('memory store refused; running without it', { memoryStore: service, field, error });
+    return disabledMemoryStore(service);
   }
 }
 

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -39,6 +40,10 @@ type fakeRunner struct {
 	missing []string
 	// inUse are the ports something listens on.
 	inUse []int
+
+	// portChecks are the ports PortInUse checked, and dials the ones
+	// Listens dialed, in order.
+	portChecks, dials []int
 	// notReady is how many probes of a URL answer 503 first.
 	notReady int
 	probes   map[string]int
@@ -52,6 +57,10 @@ type fakeRunner struct {
 	// exit, one each, as soon as they start; a process with none left
 	// runs until it is stopped.
 	exits map[string][]error
+	// listens, by the base name of a binary, are the processes that
+	// listen on the port in their PORT once they start, as an app does
+	// (D78).
+	listens map[string]bool
 }
 
 type rule struct {
@@ -103,6 +112,9 @@ func (f *fakeRunner) Start(cmd local.Command) (local.Process, error) {
 	if f.exitOnStart {
 		p.exit(errors.New("exit status 2"))
 	}
+	if port, err := strconv.Atoi(envValue(cmd.Env, "PORT")); err == nil && f.listens[filepath.Base(cmd.Path)] {
+		f.inUse = append(f.inUse, port)
+	}
 	if exits := f.exits[filepath.Base(cmd.Path)]; len(exits) > 0 {
 		f.exits[filepath.Base(cmd.Path)] = exits[1:]
 		p.exit(exits[0])
@@ -148,7 +160,19 @@ func (f *fakeRunner) Post(_ context.Context, url string, body []byte) (int, erro
 	return 200, nil
 }
 
-func (f *fakeRunner) PortInUse(port int) bool { return slices.Contains(f.inUse, port) }
+func (f *fakeRunner) PortInUse(port int) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.portChecks = append(f.portChecks, port)
+	return slices.Contains(f.inUse, port)
+}
+
+func (f *fakeRunner) Listens(port int) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dials = append(f.dials, port)
+	return slices.Contains(f.inUse, port)
+}
 
 // lines returns each command line Run or Start got, the program's
 // directory written as DIR.

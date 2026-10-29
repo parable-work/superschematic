@@ -10,6 +10,7 @@ import (
 	orm "example.com/acme/orm/shop-db"
 	engine "github.com/parable-work/superschematic/runtime/engine/go"
 	"github.com/parable-work/superschematic/runtime/http/go/bucket"
+	"github.com/parable-work/superschematic/runtime/http/go/memorystore"
 	"go.uber.org/zap"
 )
 
@@ -29,6 +30,15 @@ type Deps struct {
 	// storage it puts, gets, deletes and lists objects in, and signs URLs
 	// for (D54).
 	ShopMedia bucket.Bucket
+
+	// ShopCache is shop-cache, a memory store the API lists, which every
+	// replica shares and can lose (D75). The store's definitions,
+	// example.com/acme/types/go/shop-cache, name its channels and keys.
+	// While the store is disabled or unreachable every call returns
+	// memorystore.ErrUnavailable at once, and the implementation takes the
+	// path it had without it; a Subscribe while it is unreachable is held
+	// until it reconnects.
+	ShopCache memorystore.Store
 
 	// Engine is the engine of shop-db, the API's engine database
 	// (D58), which the entrypoint opens in the background, so it starts while

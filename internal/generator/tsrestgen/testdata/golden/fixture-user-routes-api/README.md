@@ -26,7 +26,10 @@ Generated TypeScript API server for the `fixture-user-routes-api` schema. Built 
   when it has one, a `pg` Pool `db` for its database, an SDK client per API
   it calls, and a `logger`), and `Constructor`, the type of the
   implementation's `create`.
-- `openapi.json`: the OpenAPI document shared with the Go and Rust generators.
+- `openapi.json`: the OpenAPI document shared with the Go and Rust generators,
+  and `openapi.ts`, the same document as a module: `buildRouter` serves it at
+  `GET /api/openapi.json`, with a RapiDoc page at `GET /api/docs`, unless
+  `serveOpenAPI` is false.
 - `values-schema.json`: the env-var contract, when the schema declares an
   `@envVars` class or its edges derive config fields.
 
@@ -46,6 +49,7 @@ stack's build (or `build --scaffold`) writes once when it is missing. Its
 | `GET` | `/api/auth/admin/users` | `account-admin.listUsers` (identity) | identity.users.read |
 | `POST` | `/api/auth/admin/users` | `account-admin.createUser` (identity) | identity.users.write |
 | `GET` | `/api/auth/admin/users/{id}` | `account-admin.getUser` (identity) | identity.users.read |
+| `POST` | `/api/auth/admin/users/{id}/approve` | `account-admin.approveUser` (identity) | identity.users.write |
 | `POST` | `/api/auth/admin/users/{id}/disable` | `account-admin.disableUser` (identity) | identity.users.write |
 | `POST` | `/api/auth/admin/users/{id}/enable` | `account-admin.enableUser` (identity) | identity.users.write |
 | `PUT` | `/api/auth/admin/users/{id}/password` | `account-admin.setUserPassword` (identity) | identity.users.write |

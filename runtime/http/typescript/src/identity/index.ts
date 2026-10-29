@@ -10,8 +10,9 @@ users, roles and grants over the tables the core owns.
   (newToken, hashToken), the credential on a request (extractCredential),
   the session cookie (sessionCookie, clearCookie), the cross-origin check
   (crossOriginAllowed) and credentialed CORS, permission names, a
-  principal's permissions, the grant rule (uncovered) and capabilities over
-  the operation table (routesOf, capabilitiesOf).
+  principal's permissions, the grant rule (uncovered) and its rule for a
+  write to a user (uncoveredUser), and capabilities over the operation
+  table (routesOf, capabilitiesOf).
 - IdentityStore, with SqlIdentityStore over Postgres (postgresIdentityStore,
   over pg) and SQLite (sqliteIdentityStore, over node:sqlite or
   bun:sqlite), built from the schema's identity descriptor.
@@ -51,7 +52,7 @@ export type { CredentialOutcome, HeaderSource, Transport } from './token.js';
 export { clearCookie, sessionCookie } from './cookie.js';
 export { corsAnswer, crossOriginAllowed, requestHost } from './crossorigin.js';
 export type { CorsAnswer, CrossOriginRequest } from './crossorigin.js';
-export { capabilitiesOf, effectivePermissions, operationIdOf, routeAdmits, routesOf, uncovered, validPermission } from './permissions.js';
+export { capabilitiesOf, effectivePermissions, operationIdOf, routeAdmits, routesOf, uncovered, uncoveredUser, validPermission } from './permissions.js';
 export type { IdentityRoute } from './permissions.js';
 export { DESCRIPTOR_VERSION, IdentityDescriptorError, parseIdentityDescriptor, quoteIdentifier } from './descriptor.js';
 export type { IdentityDescriptor } from './descriptor.js';
@@ -82,6 +83,7 @@ export {
   PERMISSION_USERS_READ,
   PERMISSION_USERS_WRITE,
   formatDateTime,
+  registerResultOf,
 } from './service.js';
 export type {
   Capabilities,
@@ -97,6 +99,9 @@ export type {
   LoginInput,
   LoginResult,
   RegisterInput,
+  RegisterResult,
+  Registered,
+  RegistrationOptions,
   RoleInput,
   RoleRef,
   SessionUser,

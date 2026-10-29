@@ -57,6 +57,9 @@
       "comment": "A named set of permissions users are granted.",
       "role": "DBTable",
       "userRole": {},
+      "seedRoles": [
+        { "name": "member", "permissions": ["identity.roles.read"] }
+      ],
       "fields": [
         {
           "name": "id",

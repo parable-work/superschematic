@@ -99,12 +99,12 @@ import (
 {{- if .Endpoint.Page }}
 //   - {{ .Endpoint.GoResultType }}: the page's items and the cursor of the next page, nil after the last
 {{- else if or .Endpoint.OutputIsMap .Endpoint.OutputIsArray }}
-//   - {{ .Endpoint.GoResultType }}: Success response
+//   - {{ .Endpoint.GoImplResultType }}: Success response
 {{- else }}
 //   - *{{ .Endpoint.OutputGoType }}: Success response
 {{- end }}
 //   - error: Error if operation fails
-func (impl *Implementation) {{ .Endpoint.ShortImplName }}(ctx context.Context{{- range .Endpoint.PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .Endpoint.ArgQueryParams }}, {{ .Name }} {{ if .IsArray }}[]{{ else if not .Required }}*{{ end }}{{ .GoType }}{{- end }}{{- if .Endpoint.Filterable }}, filters []filterparse.Filter{{- end }}{{- if .Endpoint.HasInput }}, input *types.{{ .Endpoint.InputType }}{{- else if .Endpoint.ScalarArgs }}{{- range .Endpoint.ScalarArgs }}, {{ .Name }} {{ .GoListType }}{{- end }}{{- end }}{{- if .Endpoint.HasFileUpload }}, files map[string]*api.FileUploadData{{- end }}{{- if .Endpoint.Page }}, page paging.Request{{- end }}) ({{ .Endpoint.GoResultType }}, error) {
+func (impl *Implementation) {{ .Endpoint.ShortImplName }}(ctx context.Context{{- range .Endpoint.PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .Endpoint.ArgQueryParams }}, {{ .Name }} {{ if .IsArray }}[]{{ else if not .Required }}*{{ end }}{{ .GoType }}{{- end }}{{- if .Endpoint.Filterable }}, filters []filterparse.Filter{{- end }}{{- if .Endpoint.HasInput }}, input *types.{{ .Endpoint.InputType }}{{- else if .Endpoint.ScalarArgs }}{{- range .Endpoint.ScalarArgs }}, {{ .Name }} {{ .GoListType }}{{- end }}{{- end }}{{- if .Endpoint.HasFileUpload }}, files map[string]*api.FileUploadData{{- end }}{{- if .Endpoint.Page }}, page paging.Request{{- end }}) ({{ .Endpoint.GoImplResultType }}, error) {
 	// TODO: Implement {{ .Endpoint.ShortImplName }}
 	//
 	// Example implementation patterns:

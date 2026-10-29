@@ -7,8 +7,9 @@
 // The fake platforms lower to resource types of a provider named `fake`,
 // shaped like the gcp target's (section 7.2): a server is a service with
 // its own account, a database an instance with a database per hosted
-// schema, a bucket a private bucket, a sql edge a client grant, an http
-// edge an invoker grant and a bucket edge an object user grant.
+// schema, a bucket a private bucket, a memory store an instance with TLS,
+// a sql edge a client grant, an http edge an invoker grant, a bucket edge
+// an object user grant and a memoryStore edge a connection user grant.
 package stacktest
 
 import (
@@ -34,8 +35,9 @@ const (
 	// (D63).
 	Provider = "fake"
 
-	// RunPlatform runs Go and TypeScript servers; SQLPlatform runs
-	// Postgres databases.
+	// RunPlatform runs Go, TypeScript and Rust servers, the last the
+	// servers of the Rust APIs whose apps AppPlatform runs (D78);
+	// SQLPlatform runs Postgres databases.
 	RunPlatform = "fake.run"
 	SQLPlatform = "fake.sql"
 
@@ -62,6 +64,24 @@ const (
 	RunnerPlatform     = "fake.runner"
 	RunnerSQLConnector = "fake.runner-sql"
 
+	// DeriverPlatform runs TypeScript and Rust derivers as a pool of one
+	// instance, as gcp runs one on a Cloud Run worker pool (D74);
+	// DeriverSQLConnector, DeriverHTTPConnector and DeriverBucketConnector
+	// connect it, whose edges are its API's, as a worker's connectors do.
+	DeriverPlatform        = "fake.deriver"
+	DeriverSQLConnector    = "fake.deriver-sql"
+	DeriverHTTPConnector   = "fake.deriver-run"
+	DeriverBucketConnector = "fake.deriver-storage"
+
+	// AppPlatform runs Rust apps as a service, as gcp runs a server on
+	// Cloud Run (D78); AppSQLConnector, AppHTTPConnector and
+	// AppBucketConnector connect it, whose edges are its API's, as a job's
+	// connectors do.
+	AppPlatform        = "fake.app"
+	AppSQLConnector    = "fake.app-sql"
+	AppHTTPConnector   = "fake.app-run"
+	AppBucketConnector = "fake.app-storage"
+
 	SQLConnector  = "fake.run-sql"
 	HTTPConnector = "fake.run-run"
 
@@ -83,6 +103,15 @@ const (
 	BucketConnector    = "fake.run-storage"
 	JobBucketConnector = "fake.job-storage"
 
+	// MemoryStorePlatform keeps a memory store, as gcp keeps one in
+	// Memorystore for Valkey; MemoryStoreConnector, JobMemoryStoreConnector
+	// and WorkerMemoryStoreConnector grant a server's, a job's or a
+	// worker's account a connection to it (D75).
+	MemoryStorePlatform        = "fake.memorystore"
+	MemoryStoreConnector       = "fake.run-memorystore"
+	JobMemoryStoreConnector    = "fake.job-memorystore"
+	WorkerMemoryStoreConnector = "fake.worker-memorystore"
+
 	// BundlePlatform runs TypeScript servers whose artifact is a bundle,
 	// as a Workers platform runs a Worker's files (D64): a script that reads
 	// each file of the bundle from the program's artifacts, with its hash.
@@ -93,6 +122,21 @@ const (
 	// Cloudflare's Cron Triggers run a job's Worker (D64): the same script
 	// as BundlePlatform's, for a job. CronD1Connector reaches from it.
 	CronPlatform = "fake.cron"
+
+	// DrainPlatform runs TypeScript workers whose artifact is a bundle, as
+	// the cloudflare target runs a worker's Worker under a Cron Trigger
+	// that drains its queue (D92): the same script as BundlePlatform's,
+	// for a worker. DrainHyperdriveConnector reaches from it.
+	DrainPlatform = "fake.drain"
+
+	// BundleHyperdriveConnector, CronHyperdriveConnector and
+	// DrainHyperdriveConnector connect a server on BundlePlatform, a job
+	// on CronPlatform and a worker on DrainPlatform to a database on
+	// SQLPlatform as a Worker reaches Postgres through Hyperdrive (D92):
+	// through a binding named after the field, of a config's id.
+	BundleHyperdriveConnector = "fake.bundle-hyperdrive"
+	CronHyperdriveConnector   = "fake.cron-hyperdrive"
+	DrainHyperdriveConnector  = "fake.drain-hyperdrive"
 
 	// WorkerSQLConnector, WorkerHTTPConnector and WorkerBucketConnector
 	// connect a worker, whose edges are its API's, as a job's connectors
@@ -152,6 +196,7 @@ const (
 	TypeSchedule      = "fake:scheduler/job:Job"
 	TypeSite          = "fake:storage/site:Site"
 	TypeBucket        = "fake:storage/bucket:Bucket"
+	TypeMemoryStore   = "fake:cache/instance:Instance"
 	TypePool          = "fake:run/pool:Pool"
 	TypeScript        = "fake:edge/script:Script"
 )
@@ -282,7 +327,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 		}
 	}
 	for _, spec := range []registry.PlatformSpec{
-		server(RunPlatform, registry.APILanguageGo, registry.APILanguageTypeScript),
+		server(RunPlatform, registry.APILanguageGo, registry.APILanguageTypeScript, registry.APILanguageRust),
 		server(EdgePlatform, registry.APILanguageTypeScript),
 		{
 			Name:      BundlePlatform,
@@ -300,6 +345,16 @@ func (e *Extension) Register(r *registry.Registry) error {
 			Name:      CronPlatform,
 			Extension: Name,
 			Kind:      ir.DeployableJob,
+			Languages: []string{registry.APILanguageTypeScript},
+			Artifact:  ir.ArtifactBundle,
+			NameOf:    serverName,
+			AddressOf: func(registry.PlatformContext) any { return nil },
+			Lower:     lowerBundle,
+		},
+		{
+			Name:      DrainPlatform,
+			Extension: Name,
+			Kind:      ir.DeployableWorker,
 			Languages: []string{registry.APILanguageTypeScript},
 			Artifact:  ir.ArtifactBundle,
 			NameOf:    serverName,
@@ -327,7 +382,8 @@ func (e *Extension) Register(r *registry.Registry) error {
 			PublicAddressOf: func(ctx registry.PlatformContext) any {
 				return publicAddress(ctx, ctx.Deployable.Name+".site")
 			},
-			Lower: lowerSite,
+			ServesOrigin: true,
+			Lower:        lowerSite,
 		},
 		{
 			Name:      BucketPlatform,
@@ -339,6 +395,17 @@ func (e *Extension) Register(r *registry.Registry) error {
 				return ir.Output{Resource: ctx.Deployable.Name + ".bucket", Name: "name"}
 			},
 			Lower: lowerBucket,
+		},
+		{
+			Name:      MemoryStorePlatform,
+			Extension: Name,
+			Kind:      ir.DeployableMemoryStore,
+			Settings:  json.RawMessage(memoryStoreSettings),
+			NameOf:    memoryStoreName,
+			AddressOf: func(ctx registry.PlatformContext) any {
+				return ir.Output{Resource: ctx.Deployable.Name + ".instance", Name: "url"}
+			},
+			Lower: lowerMemoryStore,
 		},
 		{
 			Name:      WorkerPlatform,
@@ -354,10 +421,43 @@ func (e *Extension) Register(r *registry.Registry) error {
 			Name:      RunnerPlatform,
 			Extension: Name,
 			Kind:      ir.DeployableRunner,
-			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript},
+			// A Rust API's engine runs its runner in Rust (D58), as its app
+			// does (D78).
+			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript, registry.APILanguageRust},
 			NameOf:    serverName,
 			AddressOf: func(registry.PlatformContext) any { return nil },
 			Lower:     lowerRunner,
+		},
+		{
+			Name:      DeriverPlatform,
+			Extension: Name,
+			Kind:      ir.DeployableDeriver,
+			Languages: []string{registry.APILanguageTypeScript, registry.APILanguageRust},
+			NameOf:    serverName,
+			AddressOf: func(registry.PlatformContext) any { return nil },
+			Lower:     lowerDeriver,
+		},
+		{
+			Name:      AppPlatform,
+			Extension: Name,
+			Kind:      ir.DeployableApp,
+			Languages: []string{registry.APILanguageRust},
+			Settings:  json.RawMessage(serverSettings),
+			NameOf:    serverName,
+			// An app turned off runs no service, so it has no address.
+			AddressOf: func(ctx registry.PlatformContext) any {
+				if app := ctx.Deployable.App; app == nil || !app.Enabled {
+					return nil
+				}
+				return ir.Output{Resource: ctx.Deployable.Name + ".service", Name: "url"}
+			},
+			PublicAddressOf: func(ctx registry.PlatformContext) any {
+				if app := ctx.Deployable.App; app == nil || !app.Enabled {
+					return nil
+				}
+				return publicAddress(ctx, ctx.Deployable.Name+".service")
+			},
+			Lower: lowerApp,
 		},
 	} {
 		spec.Provider = Provider
@@ -376,12 +476,24 @@ func (e *Extension) Register(r *registry.Registry) error {
 		{Name: WorkerSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: WorkerPlatform, To: SQLPlatform, Connect: connectSQL},
 		{Name: WorkerHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: WorkerPlatform, To: RunPlatform, Connect: connectHTTP},
 		{Name: WorkerBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: WorkerPlatform, To: BucketPlatform, Connect: connectBucket},
+		{Name: MemoryStoreConnector, Extension: Name, Edge: ir.EdgeMemoryStore, From: RunPlatform, To: MemoryStorePlatform, Connect: connectMemoryStore},
+		{Name: JobMemoryStoreConnector, Extension: Name, Edge: ir.EdgeMemoryStore, From: JobPlatform, To: MemoryStorePlatform, Connect: connectMemoryStore},
+		{Name: WorkerMemoryStoreConnector, Extension: Name, Edge: ir.EdgeMemoryStore, From: WorkerPlatform, To: MemoryStorePlatform, Connect: connectMemoryStore},
 		{Name: BundleD1Connector, Extension: Name, Edge: ir.EdgeSQL, From: BundlePlatform, To: LitePlatform, Connect: connectD1},
 		{Name: JobLiteConnector, Extension: Name, Edge: ir.EdgeSQL, From: JobPlatform, To: LitePlatform, Connect: connectLite},
 		{Name: WorkerLiteConnector, Extension: Name, Edge: ir.EdgeSQL, From: WorkerPlatform, To: LitePlatform, Connect: connectLite},
 		{Name: CronD1Connector, Extension: Name, Edge: ir.EdgeSQL, From: CronPlatform, To: LitePlatform, Connect: connectD1},
+		{Name: BundleHyperdriveConnector, Extension: Name, Edge: ir.EdgeSQL, From: BundlePlatform, To: SQLPlatform, Connect: connectHyperdrive},
+		{Name: CronHyperdriveConnector, Extension: Name, Edge: ir.EdgeSQL, From: CronPlatform, To: SQLPlatform, Connect: connectHyperdrive},
+		{Name: DrainHyperdriveConnector, Extension: Name, Edge: ir.EdgeSQL, From: DrainPlatform, To: SQLPlatform, Connect: connectHyperdrive},
 		{Name: BundleHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: BundlePlatform, To: BundlePlatform, Connect: connectBundleHTTP},
 		{Name: RunnerSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: RunnerPlatform, To: SQLPlatform, Connect: connectSQL},
+		{Name: DeriverSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: DeriverPlatform, To: SQLPlatform, Connect: connectSQL},
+		{Name: DeriverHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: DeriverPlatform, To: RunPlatform, Connect: connectHTTP},
+		{Name: DeriverBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: DeriverPlatform, To: BucketPlatform, Connect: connectBucket},
+		{Name: AppSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: AppPlatform, To: SQLPlatform, Connect: connectSQL},
+		{Name: AppHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: AppPlatform, To: RunPlatform, Connect: connectHTTP},
+		{Name: AppBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: AppPlatform, To: BucketPlatform, Connect: connectBucket},
 	} {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
@@ -405,13 +517,16 @@ func (e *Extension) Register(r *registry.Registry) error {
 		Name:      Target,
 		Extension: Name,
 		Platforms: map[ir.DeployableKind]string{
-			ir.DeployableServer:   RunPlatform,
-			ir.DeployableDatabase: SQLPlatform,
-			ir.DeployableJob:      JobPlatform,
-			ir.DeployableSite:     SitePlatform,
-			ir.DeployableBucket:   BucketPlatform,
-			ir.DeployableWorker:   WorkerPlatform,
-			ir.DeployableRunner:   RunnerPlatform,
+			ir.DeployableServer:      RunPlatform,
+			ir.DeployableDatabase:    SQLPlatform,
+			ir.DeployableJob:         JobPlatform,
+			ir.DeployableSite:        SitePlatform,
+			ir.DeployableBucket:      BucketPlatform,
+			ir.DeployableWorker:      WorkerPlatform,
+			ir.DeployableRunner:      RunnerPlatform,
+			ir.DeployableDeriver:     DeriverPlatform,
+			ir.DeployableMemoryStore: MemoryStorePlatform,
+			ir.DeployableApp:         AppPlatform,
 		},
 		Values:        json.RawMessage(targetValues),
 		DNS:           DNSPlatform,
@@ -489,6 +604,14 @@ const bucketSettings = `{
   "additionalProperties": false
 }`
 
+const memoryStoreSettings = `{
+  "type": "object",
+  "properties": {
+    "nodeType": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false
+}`
+
 const dnsValues = `{
   "type": "object",
   "properties": {"zone": {"type": "string", "minLength": 1}},
@@ -535,7 +658,9 @@ var resourceTypes = map[string]string{
 	  "additionalProperties": false}`,
 	TypeSite: `{"type": "object", "required": ["name", "prefix", "public"],
 	  "properties": {
-	    "name": {"type": "string"}, "prefix": {"type": "string"}, "fallback": {"type": "string"}, "public": {"type": "boolean"}
+	    "name": {"type": "string"}, "prefix": {"type": "string"}, "fallback": {"type": "string"}, "public": {"type": "boolean"},
+	    "routes": {"type": "array", "items": {"type": "object", "required": ["path", "upstream"],
+	      "properties": {"path": {"type": "string"}, "upstream": {}}, "additionalProperties": false}}
 	  },
 	  "additionalProperties": false}`,
 	TypeSchedule: `{"type": "object", "required": ["name", "schedule", "timeZone", "job", "account"],
@@ -549,6 +674,9 @@ var resourceTypes = map[string]string{
 	    "name": {"type": "string"}, "location": {"type": "string"}, "public": {"type": "boolean"},
 	    "versioning": {"type": "boolean"}, "forceDestroy": {"type": "boolean"}
 	  },
+	  "additionalProperties": false}`,
+	TypeMemoryStore: `{"type": "object", "required": ["name", "location", "tls"],
+	  "properties": {"name": {"type": "string"}, "location": {"type": "string"}, "tls": {"type": "boolean"}, "nodeType": {"type": "string"}},
 	  "additionalProperties": false}`,
 	TypeScript: `{"type": "object", "required": ["name", "account", "mainModule", "modules"],
 	  "properties": {
@@ -597,7 +725,7 @@ func lowerServer(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}
 	service := map[string]any{
 		"name":     d.ResourceName,
-		"image":    kebab(d.Name),
+		"image":    ImageRepository(d.Name),
 		"account":  member,
 		"language": strings.ToLower(d.Language),
 		"public":   d.Exposed || d.Settings["public"] == true,
@@ -737,7 +865,7 @@ func lowerJob(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}
 	job := map[string]any{
 		"name":           d.ResourceName,
-		"image":          kebab(d.Name),
+		"image":          ImageRepository(d.Name),
 		"account":        member,
 		"language":       strings.ToLower(d.Language),
 		"timeoutSeconds": d.Job.TimeoutSeconds,
@@ -774,8 +902,9 @@ func publicAddress(ctx registry.PlatformContext, id string) any {
 
 // lowerSite lowers a site (D55) to its storage, public, serving its files
 // under the prefix of their digest, which the deploy pins, with the
-// single-page fallback, and under the environment's domain a route and a
-// CNAME record, as an exposed server's.
+// single-page fallback, the routes of its origin (D91), each API's path
+// and the upstream its site edge derives, and under the environment's
+// domain a route and a CNAME record, as an exposed server's.
 func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 	d := ctx.Deployable
 	if d.Site == nil {
@@ -785,6 +914,17 @@ func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 	props := map[string]any{"name": d.ResourceName, "prefix": "/" + ir.SiteDigestToken + "/", "public": true}
 	if d.Site.Fallback != "" {
 		props["fallback"] = d.Site.Fallback
+	}
+	var routes []any
+	for _, api := range d.Site.Origin {
+		for _, b := range d.Bindings {
+			if value, _ := b.Value.(map[string]any); b.Field == api.Service && value["upstream"] != nil {
+				routes = append(routes, map[string]any{"path": api.Path, "upstream": value["upstream"]})
+			}
+		}
+	}
+	if len(routes) > 0 {
+		props["routes"] = routes
 	}
 	out := registry.Lowered{Resources: []*ir.Resource{{ID: id, Type: TypeSite, Properties: props}}}
 	if ctx.Environment.Domain != "" {
@@ -806,8 +946,13 @@ func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 
 // connectSite derives the public address of the server whose API a site
 // calls (D55). The browser carries its end user's token, so the edge
-// grants nothing.
+// grants nothing. For an API of the site's origin (D91) it derives the
+// same-origin URL, and the server's address as the upstream the site
+// forwards to, exposed or not.
 func connectSite(ctx registry.ConnectorContext) (registry.Connected, error) {
+	if ctx.From.Site.OriginAPI(ctx.Edge.Service.Name) != nil {
+		return registry.Connected{Value: ir.SiteEndpoint{URL: ir.SiteOriginURL(ctx.From.PublicAddress, ctx.Edge.Service.Name), Upstream: ctx.To.Address}}, nil
+	}
 	return registry.Connected{Value: ir.SiteEndpoint{URL: ctx.To.PublicAddress}}, nil
 }
 
@@ -826,7 +971,7 @@ func lowerWorker(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}
 	pool := map[string]any{
 		"name":        d.ResourceName,
-		"image":       kebab(d.Name),
+		"image":       ImageRepository(d.Name),
 		"account":     member,
 		"language":    strings.ToLower(d.Language),
 		"instances":   d.Worker.Instances,
@@ -855,7 +1000,7 @@ func lowerRunner(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}
 	pool := map[string]any{
 		"name":        d.ResourceName,
-		"image":       kebab(d.Name),
+		"image":       ImageRepository(d.Name),
 		"account":     member,
 		"language":    strings.ToLower(d.Language),
 		"instances":   d.Runner.Instances,
@@ -866,6 +1011,50 @@ func lowerRunner(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}
 	out.Resources = append(out.Resources, &ir.Resource{ID: d.Name + ".pool", Type: TypePool, Properties: pool})
 	return out, nil
+}
+
+// lowerDeriver lowers a deriver (D74) to an account and the secrets it
+// reads, as a server's, and a pool that runs its image with its
+// environment, one instance or none when the environment turns it off,
+// running its concurrency of answers.
+func lowerDeriver(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	if d.Deriver == nil {
+		return registry.Lowered{}, fmt.Errorf("deriver %s has no run", d.Name)
+	}
+	out, member, env, err := lowerAccount(ctx)
+	if err != nil {
+		return registry.Lowered{}, err
+	}
+	pool := map[string]any{
+		"name":        d.ResourceName,
+		"image":       ImageRepository(d.Name),
+		"account":     member,
+		"language":    strings.ToLower(d.Language),
+		"instances":   d.Deriver.Instances,
+		"concurrency": d.Deriver.Concurrency,
+	}
+	if len(env) > 0 {
+		pool["env"] = env
+	}
+	out.Resources = append(out.Resources, &ir.Resource{ID: d.Name + ".pool", Type: TypePool, Properties: pool})
+	return out, nil
+}
+
+// lowerApp lowers an app (D78) as a server: an account, the secrets it
+// reads, and a service that runs its image, with a route when it is
+// exposed. An app the environment turns off lowers to its account and
+// secrets alone, and runs nothing.
+func lowerApp(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	if d.App == nil {
+		return registry.Lowered{}, fmt.Errorf("app %s has no run", d.Name)
+	}
+	if !d.App.Enabled {
+		out, _, _, err := lowerAccount(ctx)
+		return out, err
+	}
+	return lowerServer(ctx)
 }
 
 // lowerDatabase lowers a database to an instance and a database per
@@ -910,6 +1099,16 @@ func connectD1(ctx registry.ConnectorContext) (registry.Connected, error) {
 	return registry.Connected{Value: ir.DatabaseConnection{D1: &ir.D1Connection{
 		Binding:  ctx.Edge.Field,
 		Database: ir.Output{Resource: ctx.To.Name + ".database." + ctx.Edge.Service.Name, Name: "id"},
+	}}}, nil
+}
+
+// connectHyperdrive derives the Hyperdrive binding a Worker reaches a
+// Postgres database through (D92): named after the field, of a config's
+// id, an output of the schema's database.
+func connectHyperdrive(ctx registry.ConnectorContext) (registry.Connected, error) {
+	return registry.Connected{Value: ir.DatabaseConnection{Hyperdrive: &ir.HyperdriveConnection{
+		Binding: ctx.Edge.Field,
+		Config:  ir.Output{Resource: ctx.To.Name + ".database." + ctx.Edge.Service.Name, Name: "id"},
 	}}}, nil
 }
 
@@ -1046,6 +1245,66 @@ func connectBucket(ctx registry.ConnectorContext) (registry.Connected, error) {
 	}, nil
 }
 
+// memoryStoreName names a memory store after the project, the stack and
+// the store. A member of a parameterized environment shares its parent's
+// store, so the name holds no parameter (D75).
+func memoryStoreName(ctx registry.PlatformContext) any {
+	project, _ := ctx.Environment.Values["project"].(string)
+	return Join(project, "-", kebab(ctx.Environment.Stack), "-", kebab(ctx.Deployable.Name))
+}
+
+// lowerMemoryStore lowers a memory store to an instance with TLS in the
+// environment's region, of the node type its settings name.
+func lowerMemoryStore(ctx registry.PlatformContext) (registry.Lowered, error) {
+	d := ctx.Deployable
+	region, _ := ctx.Environment.Values["region"].(string)
+	props := map[string]any{"name": d.ResourceName, "location": region, "tls": true}
+	if nodeType, ok := d.Settings["nodeType"].(string); ok {
+		props["nodeType"] = nodeType
+	}
+	return registry.Lowered{Resources: []*ir.Resource{{ID: d.Name + ".instance", Type: TypeMemoryStore, Properties: props}}}, nil
+}
+
+// connectMemoryStore grants the server's, the job's or the worker's
+// account a connection to the store and derives how to reach it: its
+// rediss URL, its CA, IAM authentication, and in a member of a
+// parameterized environment the member's name, each parameter's value
+// joined (D75).
+func connectMemoryStore(ctx registry.ConnectorContext) (registry.Connected, error) {
+	value := ir.MemoryStoreConnection{
+		Store: ctx.Edge.Service.Name,
+		URL:   ctx.To.Address,
+		CA:    ir.Output{Resource: ctx.To.Name + ".instance", Name: "ca"},
+		Auth:  ir.MemoryStoreAuthIAM,
+	}
+	switch params := ctx.Environment.Parameters; len(params) {
+	case 0:
+	case 1:
+		value.Member = ir.Parameter(params[0])
+	default:
+		parts := []any{}
+		for i, param := range params {
+			if i > 0 {
+				parts = append(parts, "-")
+			}
+			parts = append(parts, ir.Parameter(param))
+		}
+		value.Member = Join(parts...)
+	}
+	return registry.Connected{
+		Resources: []*ir.Resource{{
+			ID:   ctx.From.Name + ".memorystore." + ctx.Edge.Service.Name,
+			Type: TypeGrant,
+			Properties: map[string]any{
+				"role":     "memorystore.dbConnectionUser",
+				"member":   ir.Output{Resource: ctx.From.Name + ".account", Name: "email"},
+				"resource": ir.Output{Resource: ctx.To.Name + ".instance", Name: "id"},
+			},
+		}},
+		Value: value,
+	}, nil
+}
+
 // lowerRecords writes each record into the zone the values name, or the
 // environment's domain.
 func lowerRecords(ctx registry.DNSContext) ([]*ir.Resource, error) {
@@ -1142,6 +1401,17 @@ func Join(parts ...any) any {
 
 // kebab lowercases a name and joins its words with hyphens: Orders is
 // orders, shop-api stays shop-api.
+// ImageRepository is the repository path the fake platforms write as a
+// deployable's image, with no tag or digest, which a deploy pins
+// (stackdeploy.PinImages) and the fake builder returns at a digest. It
+// lies under a registry host, as a real platform's does, so that it
+// equals no other property of the deployable's nodes, such as its
+// account's name: a deploy that pins an image no node holds fails here
+// as it does on a real target.
+func ImageRepository(deployable string) string {
+	return "images.fake.test/" + kebab(deployable)
+}
+
 func kebab(name string) string {
 	var b strings.Builder
 	for i, r := range name {

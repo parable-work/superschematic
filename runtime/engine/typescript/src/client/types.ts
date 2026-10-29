@@ -113,6 +113,22 @@ export interface EventCause {
   depth: number;
 }
 
+/** One signal (D77), as a stream opened with signals delivers it. */
+export interface EngineSignal {
+  namespace: string;
+  schema: string;
+  instanceId: string;
+  /** The behavior that declares it. */
+  behavior: string;
+  name: string;
+  /** Its data, which the signal's paramsSchema accepted. */
+  data: unknown;
+  /** The sender's subject: the caller's, or the operation's principal's. */
+  from: string;
+  /** The engine's clock when it was sent, in epoch milliseconds. */
+  at: number;
+}
+
 /** One entry of the event log (runtime/engine/README.md, "The event log"). */
 export interface EngineEvent {
   /** The global cursor: every later event has a higher one. */
@@ -122,13 +138,17 @@ export interface EngineEvent {
   schema: string;
   /** Null for a publish and a define. */
   instanceId: string | null;
-  /** Null for a publish and a define. */
+  /** Null for a publish, a define and a beside operation's event. */
   seq: number | null;
+  /** True for a beside operation's event (D77), whose change is `{ behavior, operation, params, result }`; absent otherwise. */
+  beside?: true;
   /** Null for a define. */
   version: number | null;
   actor: string;
   /** The deployable of the service whose call made the change (D37). */
   service?: string;
+  /** The subject the principal that made the change acted for (D77). */
+  for?: string;
   at: number;
   /**
    * The instance for a create, `{ data, behaviors }`; a merge patch of that
@@ -153,6 +173,12 @@ export interface OperationChange {
   params: JSONObject;
   /** A merge patch of the instance's `{ data, behaviors }`: a part it does not change is absent. */
   patch: JSONObject;
+  /**
+   * Where the values of the own fields the operation changed came from, by
+   * field: the behavior whose update() wrote each, and the confidence and
+   * source it gave. Absent when the operation attributed none (D16, amended).
+   */
+  attribution?: Record<string, { behavior: string; confidence?: number; source?: string }>;
 }
 
 /** A page of the event log: read on from `next`; `more` is false once the page reached the head. */
@@ -213,11 +239,19 @@ export interface DisplayState {
 /** What a state means to a reader, which a UI maps onto its own colors. */
 export type DisplayTone = 'muted' | 'active' | 'success' | 'warning' | 'danger';
 
-/** One of the instance type's own fields: its key in an instance's data, with its title and icon where declared. */
+/** One of the instance type's own fields: its key in an instance's data, with its title, icon and display where declared. */
 export interface DescribedField {
   name: string;
   title?: string;
   icon?: string;
+  /** Its @display: `multiline`, and `currency`, a code or the own field that holds one, by its key. */
+  display?: FieldDisplay;
+}
+
+/** An own field's @display (D48), its currency's field by its key in an instance's data. */
+export interface FieldDisplay {
+  multiline?: boolean;
+  currency?: string | { field: string };
 }
 
 /** A behavior a schema composes, with its config as the schema holds it. */
@@ -227,9 +261,11 @@ export interface DescribedBehavior {
   config: unknown;
   /** What it does on the type under the config, as its guidance says; absent for a behavior that gives none. */
   summary?: string;
-  /** Its fields; volatile, true or absent, for one that can move without an event of its own instance. */
-  fields: Array<{ name: string; description?: string; volatile?: true }>;
+  /** Its fields; volatile, true or absent, for one that can move without an event of its own instance; perReader, true or absent, for a volatile one whose value is the caller's, which no event records. */
+  fields: Array<{ name: string; description?: string; volatile?: true; perReader?: true }>;
   operations: string[];
+  /** Its namespace operations (D77), which `behaviors.invoke` calls; absent when it has none. */
+  namespaceOperations?: string[];
   vetoes: Array<{ code: string; description?: string }>;
 }
 
@@ -266,10 +302,17 @@ export interface ToolManifest {
   tools: ToolDefinition[];
 }
 
-/** A visible tool's MCP record, or a hidden one's; the invocation policy sits under the policy's key. */
+/** Why the engine hides a tool from a caller, in the order `hiddenBy` lists them. */
+export type ToolHiddenBy = 'deployment' | 'archived' | 'policy' | 'handle' | 'filter';
+
+/**
+ * A visible tool's MCP record, or a hidden one's; the invocation policy sits
+ * under the policy's key. A hidden one's `hiddenBy` names every cause, and
+ * `hiddenReason` is the first one's.
+ */
 export type ToolMCPRecord =
   | { hidden: false; name: string; handle: string; description: string; _meta?: Record<string, unknown>; [policyKey: string]: unknown }
-  | { hidden: true; hiddenReason: string };
+  | { hidden: true; hiddenReason: string; hiddenBy: ToolHiddenBy[] };
 
 /** One tool of the tools document. */
 export interface ToolDefinition {
@@ -316,9 +359,11 @@ export interface BehaviorDocument {
   preconditionSchema?: JSONSchema;
   requires: string[];
   conflicts: string[];
-  /** Its fields; volatile, true or absent, for one that can move without an event of its own instance. */
-  fields: Array<{ name: string; description?: string; volatile?: true }>;
+  /** Its fields; volatile, true or absent, for one that can move without an event of its own instance; perReader, true or absent, for a volatile one whose value is the caller's, which no event records. */
+  fields: Array<{ name: string; description?: string; volatile?: true; perReader?: true }>;
   operations: BehaviorOperationDocument[];
+  /** Its signals (D77), present when it declares any. */
+  signals?: Array<{ name: string; description?: string; access: 'read' | 'write' | 'operation'; paramsSchema: JSONSchema }>;
   vetoes: Array<{ code: string; description?: string }>;
 }
 
@@ -326,8 +371,14 @@ export interface BehaviorDocument {
 export interface BehaviorOperationDocument {
   name: string;
   description?: string;
-  scope: 'instance' | 'schema';
+  scope: 'instance' | 'schema' | 'namespace';
   writes: boolean;
+  /** True for an operation beside the instance (D77). */
+  beside?: true;
+  /** False for a beside operation that appends no event. */
+  log?: false;
+  /** `read` for a beside operation the policy is asked read for (D77). */
+  asks?: 'read';
   paramsSchema: JSONSchema;
   resultSchema: JSONSchema;
   [policyKey: string]: unknown;

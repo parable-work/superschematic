@@ -1120,6 +1120,82 @@ async fn administer_passwords(h: &Harness, admin: &str, member: &str, clerk: &st
     );
 }
 
+/// Setting a user's password, disabling them and enabling them need the
+/// caller's permissions to cover every permission the user holds through
+/// their roles, as a grant does. A helpdesk holding identity.users may
+/// write a member, who holds nothing, and not the admin, whose role
+/// carries identity and orders: 403 listing them, the admin's password
+/// and session untouched.
+#[tokio::test]
+async fn a_user_write_needs_their_permissions() {
+    each_harness(TEST_CONFIG, |h| async move {
+        let admin = bearer(&h.login("admin@example.com", ADMIN_PASSWORD).await);
+        let a = [("authorization", admin.as_str())];
+        let role = json!({"name": "helpdesk", "permissions": ["identity.users"]});
+        let role = h.send("POST", "/auth/admin/roles", Some(role), &a).await;
+        expect(&role, 200, "");
+        let user =
+            json!({"login": "helpdesk@example.com", "name": "Helpdesk", "password": USER_PASSWORD});
+        let user = h.send("POST", "/auth/admin/users", Some(user), &a).await;
+        expect(&user, 200, "");
+        let grant = format!(
+            "/auth/admin/users/{}/roles/{}",
+            user.data()["id"].as_str().unwrap(),
+            role.data()["id"].as_str().unwrap()
+        );
+        expect(&h.send("PUT", &grant, None, &a).await, 200, "");
+        let helpdesk = bearer(&h.login("helpdesk@example.com", USER_PASSWORD).await);
+        let d = [("authorization", helpdesk.as_str())];
+
+        let target = format!("/auth/admin/users/{}", h.admin_id);
+        for (method, path, body) in [
+            (
+                "PUT",
+                format!("{target}/password"),
+                Some(json!({"password": "taken over"})),
+            ),
+            ("POST", format!("{target}/disable"), None),
+            ("POST", format!("{target}/enable"), None),
+        ] {
+            let refused = h.send(method, &path, body, &d).await;
+            expect(&refused, 403, CODE_FORBIDDEN);
+            assert_eq!(
+                refused.body["details"],
+                json!({"permissions": ["identity", "orders"]}),
+                "{method} {path}"
+            );
+        }
+        expect(&h.send("GET", "/auth/me", None, &a).await, 200, "");
+        h.login("admin@example.com", ADMIN_PASSWORD).await;
+        let missing = format!("/auth/admin/users/{MISSING}/password");
+        let reset = || Some(json!({"password": "reset password"}));
+        expect(
+            &h.send("PUT", &missing, reset(), &d).await,
+            404,
+            CODE_NOT_FOUND,
+        );
+
+        let member = format!("/auth/admin/users/{}", h.member_id);
+        let set = h
+            .send("PUT", &format!("{member}/password"), reset(), &d)
+            .await;
+        expect(&set, 200, "");
+        expect(
+            &h.send("POST", &format!("{member}/disable"), None, &d).await,
+            200,
+            "",
+        );
+        expect(
+            &h.send("POST", &format!("{member}/enable"), None, &d).await,
+            200,
+            "",
+        );
+        h.login("member@example.com", "reset password").await;
+        h
+    })
+    .await;
+}
+
 /// A login whose hash has another cost writes it again at the config's.
 #[tokio::test]
 async fn login_rehashes() {

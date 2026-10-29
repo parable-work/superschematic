@@ -1,0 +1,11 @@
+{
+  "name": "fixture-vault-db",
+  "kind": "DB",
+  "outputs": {
+    "types": {
+      "typescript": { "enabled": true },
+      "go": { "enabled": true }
+    },
+    "sql": { "encryption": { "key": "VaultKeys.VAULT_DB_FIELD_KEYS" } }
+  }
+}

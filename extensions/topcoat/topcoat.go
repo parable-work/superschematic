@@ -87,11 +87,15 @@ func (Extension) Register(r *registry.Registry) error {
 // dependency's calls that dependency's crate in-process. PagesPrefixes
 // turns on the pages of the listed services it names, each under its
 // prefix, as outputs.topcoat.pages would, and PagesLive their live lists,
-// as outputs.topcoat.pages.live would.
+// as outputs.topcoat.pages.live would. PagesEngine and PagesIdentity are
+// outputs.topcoat.pages.engine and .identity of those pages, nil when the
+// table leaves them out, which is on.
 type Table struct {
 	Services      []string
 	PagesPrefixes map[string]string
 	PagesLive     bool
+	PagesEngine   *bool
+	PagesIdentity *IdentityPagesConfig
 }
 
 // decodeTable decodes the [extension.topcoat] table, refusing a key it
@@ -102,10 +106,20 @@ type Table struct {
 // an app that links both crates would register a page twice, which
 // Topcoat's router refuses, or put one console's layout around the
 // other's pages. pages_live = true turns on the live lists of the pages
-// pages_prefix turns on.
+// pages_prefix turns on; pages_engine = false turns off their engine pages,
+// and pages_identity = false their sign-in, account, users and roles pages,
+// whose sign-up page pages_identity = { sign_up = true } turns on.
 func decodeTable(table map[string]any) (Table, error) {
 	var out Table
 	var prefix any
+	// pagesKey is the first, in order, of the keys that set the pages
+	// pages_prefix turns on, which a table without pages_prefix refuses.
+	var pagesKey string
+	setsPages := func(key string) {
+		if pagesKey == "" || key < pagesKey {
+			pagesKey = key
+		}
+	}
 	for key, value := range table {
 		switch key {
 		case "services":
@@ -128,19 +142,63 @@ func decodeTable(table map[string]any) (Table, error) {
 				return out, fmt.Errorf("[extension.topcoat] pages_live must be true or false, got %T", value)
 			}
 			out.PagesLive = live
+			if live {
+				setsPages(key)
+			}
+		case "pages_engine":
+			on, ok := value.(bool)
+			if !ok {
+				return out, fmt.Errorf("[extension.topcoat] pages_engine must be true or false, got %T", value)
+			}
+			out.PagesEngine = &on
+			setsPages(key)
+		case "pages_identity":
+			identity, err := identityTable(value)
+			if err != nil {
+				return out, err
+			}
+			out.PagesIdentity = identity
+			setsPages(key)
 		default:
-			return out, fmt.Errorf("[extension.topcoat]: unknown key %q (the table takes services, pages_prefix and pages_live)", key)
+			return out, fmt.Errorf("[extension.topcoat]: unknown key %q (the table takes services, pages_prefix, pages_live, pages_engine and pages_identity)", key)
 		}
 	}
 	if prefix == nil {
-		if out.PagesLive {
+		switch pagesKey {
+		case "":
+		case "pages_live":
 			return out, fmt.Errorf("[extension.topcoat] pages_live turns on the live lists of the pages pages_prefix turns on, and the table has no pages_prefix")
+		default:
+			return out, fmt.Errorf("[extension.topcoat] %s sets the pages pages_prefix turns on, and the table has no pages_prefix", pagesKey)
 		}
 		return out, nil
 	}
 	prefixes, err := pagesPrefixes(prefix, out.Services)
 	out.PagesPrefixes = prefixes
 	return out, err
+}
+
+// identityTable decodes pages_identity: true or false, or a table whose
+// sign_up turns on the sign-up page.
+func identityTable(value any) (*IdentityPagesConfig, error) {
+	switch value := value.(type) {
+	case bool:
+		return &IdentityPagesConfig{Enabled: value}, nil
+	case map[string]any:
+		out := &IdentityPagesConfig{Enabled: true}
+		for _, key := range sortedKeys(value) {
+			on, ok := value[key].(bool)
+			switch {
+			case key != "sign_up":
+				return nil, fmt.Errorf("[extension.topcoat] pages_identity: unknown key %q (the table takes sign_up)", key)
+			case !ok:
+				return nil, fmt.Errorf("[extension.topcoat] pages_identity.sign_up must be true or false, got %T", value[key])
+			}
+			out.SignUp = on
+		}
+		return out, nil
+	}
+	return nil, fmt.Errorf("[extension.topcoat] pages_identity must be true or false, or a table such as { sign_up = true }, got %T", value)
 }
 
 // pagesPrefixes is the prefix of each listed service whose pages
@@ -206,7 +264,22 @@ var OutputSchema = json.RawMessage(`{
       "properties": {
         "enabled": {"type": "boolean"},
         "prefix": {"type": "string", "description": "The path the pages are served under (default /console): it starts with /, ends without one, and is not under /api or /_superschematic."},
-        "live": {"type": "boolean", "description": "A list's filter updates its table in place through a Topcoat shard, for an app that loads Topcoat's runtime (default false)."}
+        "live": {"type": "boolean", "description": "A list's filter updates its table in place through a Topcoat shard, for an app that loads Topcoat's runtime (default false)."},
+        "engine": {"type": "boolean", "description": "Pages under <prefix>/engine for the types of the API's engine database, when the crate mounts its engine (default true)."},
+        "identity": {
+          "description": "Sign-in, sign-out, account, users and roles pages, when the API authenticates with the identity runtime (default true): true or false, or an object whose signUp adds the sign-up page.",
+          "oneOf": [
+            {"type": "boolean"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {"type": "boolean"},
+                "signUp": {"type": "boolean", "description": "A sign-up page, which the API's @userSessions({ register: true }) turns on too (default false)."}
+              }
+            }
+          ]
+        }
       }
     }
   }
@@ -254,6 +327,25 @@ func (c Config) WritesPages() bool { return c.Pages != nil && c.Pages.Enabled }
 // through a shard, for an app that loads Topcoat's runtime.
 func (c Config) PagesLive() bool { return c.WritesPages() && c.Pages.Live }
 
+// PagesEngine reports whether the pages include the engine's, under
+// <prefix>/engine: on unless pages.engine is false. The crate must also
+// mount an engine (engine_pages.go).
+func (c Config) PagesEngine() bool {
+	return c.WritesPages() && (c.Pages.Engine == nil || *c.Pages.Engine)
+}
+
+// PagesIdentity reports whether the pages include sign-in, sign-out, the
+// account, users and roles: on unless pages.identity is false. The API
+// must also authenticate with the identity runtime (identity_pages.go).
+func (c Config) PagesIdentity() bool {
+	return c.WritesPages() && (c.Pages.Identity == nil || c.Pages.Identity.Enabled)
+}
+
+// PagesSignUp reports whether pages.identity asks for the sign-up page.
+func (c Config) PagesSignUp() bool {
+	return c.PagesIdentity() && c.Pages.Identity != nil && c.Pages.Identity.SignUp
+}
+
 // PagesPrefix is the path the pages are served under.
 func (c Config) PagesPrefix() string {
 	if c.Pages != nil && c.Pages.Prefix != "" {
@@ -291,7 +383,7 @@ func configOf(c registry.GenerateContext, table Table) (Config, error) {
 	if c.Outputs == nil || c.Outputs.Raw[OutputKey] == nil {
 		cfg.Enabled = slices.Contains(table.Services, c.Config.Name)
 		if prefix, ok := table.PagesPrefixes[c.Config.Name]; cfg.Enabled && ok {
-			cfg.Pages = &PagesConfig{Enabled: true, Prefix: prefix, Live: table.PagesLive}
+			cfg.Pages = &PagesConfig{Enabled: true, Prefix: prefix, Live: table.PagesLive, Engine: table.PagesEngine, Identity: table.PagesIdentity}
 		}
 		return cfg, nil
 	}

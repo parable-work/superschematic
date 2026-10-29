@@ -20,6 +20,38 @@ pub struct Order {
     pub placed_at: TemporalDateTime,
 }
 
+fn default_order_changed_priority() -> Priority {
+    Priority::Low
+}
+
+/// Sent when an order's lines change: a newer change replaces the one that
+/// waits, and the worker handles one order's changes at a time.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OrderChanged {
+    #[serde(rename = "orderId")]
+    pub order_id: IdentityUUID,
+    #[serde(default, rename = "lineId", skip_serializing_if = "Option::is_none")]
+    pub line_id: Option<IdentityUUID>,
+    #[serde(default = "default_order_changed_priority")]
+    pub priority: Priority,
+}
+
+/// A line of an order. Whatever writes it, a change to its product or its
+/// quantity enqueues the order's OrderChanged, as does a new line or a
+/// deleted one, once it names a product.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OrderLine {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<IdentityUUID>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<Order>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub product: Option<Product>,
+    pub quantity: GenericInt64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
 fn default_order_placed_priority() -> Priority {
     Priority::Low
 }
@@ -46,4 +78,30 @@ pub struct OrderPlaced {
 pub struct Ping {
     #[serde(default, rename = "sentAt", skip_serializing_if = "Option::is_none")]
     pub sent_at: Option<TemporalDateTime>,
+}
+
+/// A product an order's line may name.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Product {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<IdentityUUID>,
+    pub name: String,
+}
+
+/// Sent when a stock count is asked for: one waits per SKU, and a later ask
+/// while it waits adds nothing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StockChecked {
+    pub sku: String,
+    pub quantity: GenericInt64,
+}
+
+/// Sent when an account's records are to be synced: every request is kept,
+/// and the worker syncs one account at a time.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SyncRequested {
+    #[serde(rename = "accountId")]
+    pub account_id: IdentityUUID,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }

@@ -394,6 +394,361 @@ class NoteBehaviors(BaseModel):
         """
         return self.model_dump(mode='json', by_alias=True, exclude_unset=True)
 
+class RequestState(str, Enum):
+    """
+    RequestState is a state of a Request's Workflow.
+    """
+
+    New = "new"
+    Triage = "triage"
+    Assigned = "assigned"
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type, handler):
+        return core_schema.no_info_before_validator_function(
+            cls,
+            handler(source_type),
+        )
+
+    def __str__(self) -> str:
+        """Return the string value of the enum."""
+        return self.value
+
+class RequestProvenanceFieldsSummaryReview(BaseModel):
+    """
+    RequestProvenanceFieldsSummaryReview types RequestProvenanceFieldsSummary.review.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    at: Optional[int] = Field(default=None, alias="at", serialization_alias="at")
+    by: Optional[str] = Field(default=None, alias="by", serialization_alias="by")
+    # One of "proposed", "accepted", "rejected", "edited".
+    state: Literal["proposed", "accepted", "rejected", "edited"] = Field(..., alias="state", serialization_alias="state")
+
+class RequestProvenanceFieldsSummary(BaseModel):
+    """
+    RequestProvenanceFieldsSummary types RequestProvenanceFields.summary.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    at: int = Field(..., alias="at", serialization_alias="at")
+    by: str = Field(..., alias="by", serialization_alias="by")
+    confidence: Optional[float] = Field(default=None, alias="confidence", serialization_alias="confidence")
+    for_: Optional[str] = Field(default=None, alias="for", serialization_alias="for")
+    review: Optional[RequestProvenanceFieldsSummaryReview] = Field(default=None, alias="review", serialization_alias="review")
+    source: str = Field(..., alias="source", serialization_alias="source")
+
+class RequestProvenanceFieldsSubjectReview(BaseModel):
+    """
+    RequestProvenanceFieldsSubjectReview types RequestProvenanceFieldsSubject.review.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    at: Optional[int] = Field(default=None, alias="at", serialization_alias="at")
+    by: Optional[str] = Field(default=None, alias="by", serialization_alias="by")
+    # One of "proposed", "accepted", "rejected", "edited".
+    state: Literal["proposed", "accepted", "rejected", "edited"] = Field(..., alias="state", serialization_alias="state")
+
+class RequestProvenanceFieldsSubject(BaseModel):
+    """
+    RequestProvenanceFieldsSubject types RequestProvenanceFields.subject.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    at: int = Field(..., alias="at", serialization_alias="at")
+    by: str = Field(..., alias="by", serialization_alias="by")
+    confidence: Optional[float] = Field(default=None, alias="confidence", serialization_alias="confidence")
+    for_: Optional[str] = Field(default=None, alias="for", serialization_alias="for")
+    review: Optional[RequestProvenanceFieldsSubjectReview] = Field(default=None, alias="review", serialization_alias="review")
+    source: str = Field(..., alias="source", serialization_alias="source")
+
+class RequestProvenanceFieldsCategoryReview(BaseModel):
+    """
+    RequestProvenanceFieldsCategoryReview types RequestProvenanceFieldsCategory.review.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    at: Optional[int] = Field(default=None, alias="at", serialization_alias="at")
+    by: Optional[str] = Field(default=None, alias="by", serialization_alias="by")
+    # One of "proposed", "accepted", "rejected", "edited".
+    state: Literal["proposed", "accepted", "rejected", "edited"] = Field(..., alias="state", serialization_alias="state")
+
+class RequestProvenanceFieldsCategory(BaseModel):
+    """
+    RequestProvenanceFieldsCategory types RequestProvenanceFields.category.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    at: int = Field(..., alias="at", serialization_alias="at")
+    by: str = Field(..., alias="by", serialization_alias="by")
+    confidence: Optional[float] = Field(default=None, alias="confidence", serialization_alias="confidence")
+    for_: Optional[str] = Field(default=None, alias="for", serialization_alias="for")
+    review: Optional[RequestProvenanceFieldsCategoryReview] = Field(default=None, alias="review", serialization_alias="review")
+    source: str = Field(..., alias="source", serialization_alias="source")
+
+class RequestProvenanceFieldsBodyReview(BaseModel):
+    """
+    RequestProvenanceFieldsBodyReview types RequestProvenanceFieldsBody.review.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    at: Optional[int] = Field(default=None, alias="at", serialization_alias="at")
+    by: Optional[str] = Field(default=None, alias="by", serialization_alias="by")
+    # One of "proposed", "accepted", "rejected", "edited".
+    state: Literal["proposed", "accepted", "rejected", "edited"] = Field(..., alias="state", serialization_alias="state")
+
+class RequestProvenanceFieldsBody(BaseModel):
+    """
+    RequestProvenanceFieldsBody types RequestProvenanceFields.body.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    at: int = Field(..., alias="at", serialization_alias="at")
+    by: str = Field(..., alias="by", serialization_alias="by")
+    confidence: Optional[float] = Field(default=None, alias="confidence", serialization_alias="confidence")
+    for_: Optional[str] = Field(default=None, alias="for", serialization_alias="for")
+    review: Optional[RequestProvenanceFieldsBodyReview] = Field(default=None, alias="review", serialization_alias="review")
+    source: str = Field(..., alias="source", serialization_alias="source")
+
+class RequestProvenanceFields(BaseModel):
+    """
+    RequestProvenanceFields types RequestProvenance.fields.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    body: Optional[RequestProvenanceFieldsBody] = Field(default=None, alias="body", serialization_alias="body")
+    category: Optional[RequestProvenanceFieldsCategory] = Field(default=None, alias="category", serialization_alias="category")
+    subject: Optional[RequestProvenanceFieldsSubject] = Field(default=None, alias="subject", serialization_alias="subject")
+    summary: Optional[RequestProvenanceFieldsSummary] = Field(default=None, alias="summary", serialization_alias="summary")
+
+class RequestProvenance(BaseModel):
+    """
+    RequestProvenance holds the fields a Request's Provenance adds, as a read returns them: a field with no value is absent.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    # By recorded field written since Provenance was added: { source, by, for?, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; for is the subject it acted for, when it acted for one (D77); review is { state, by?, at? }, state proposed, accepted, rejected or edited.
+    fields_: RequestProvenanceFields = Field(..., alias="fields", serialization_alias="fields")
+    # Whether any recorded field is proposed. A list filters on it.
+    in_review: bool = Field(..., alias="inReview", serialization_alias="inReview")
+
+class RequestDerivedFieldsSummaryOverridden(BaseModel):
+    """
+    RequestDerivedFieldsSummaryOverridden types RequestDerivedFieldsSummary.overridden.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    at: int = Field(..., alias="at", serialization_alias="at")
+    by: str = Field(..., alias="by", serialization_alias="by")
+
+class RequestDerivedFieldsSummary(BaseModel):
+    """
+    RequestDerivedFieldsSummary types RequestDerivedFields.summary.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    confidence: Optional[float] = Field(default=None, alias="confidence", serialization_alias="confidence")
+    model: Optional[str] = Field(default=None, alias="model", serialization_alias="model")
+    overridden: Optional[RequestDerivedFieldsSummaryOverridden] = Field(default=None, alias="overridden", serialization_alias="overridden")
+    settled_at: Optional[int] = Field(default=None, alias="settledAt", serialization_alias="settledAt")
+    settled_by: Optional[str] = Field(default=None, alias="settledBy", serialization_alias="settledBy")
+    source_hash: Optional[str] = Field(default=None, alias="sourceHash", serialization_alias="sourceHash")
+
+class RequestDerivedFieldsCategoryOverridden(BaseModel):
+    """
+    RequestDerivedFieldsCategoryOverridden types RequestDerivedFieldsCategory.overridden.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    at: int = Field(..., alias="at", serialization_alias="at")
+    by: str = Field(..., alias="by", serialization_alias="by")
+
+class RequestDerivedFieldsCategory(BaseModel):
+    """
+    RequestDerivedFieldsCategory types RequestDerivedFields.category.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    confidence: Optional[float] = Field(default=None, alias="confidence", serialization_alias="confidence")
+    model: Optional[str] = Field(default=None, alias="model", serialization_alias="model")
+    overridden: Optional[RequestDerivedFieldsCategoryOverridden] = Field(default=None, alias="overridden", serialization_alias="overridden")
+    settled_at: Optional[int] = Field(default=None, alias="settledAt", serialization_alias="settledAt")
+    settled_by: Optional[str] = Field(default=None, alias="settledBy", serialization_alias="settledBy")
+    source_hash: Optional[str] = Field(default=None, alias="sourceHash", serialization_alias="sourceHash")
+
+class RequestDerivedFields(BaseModel):
+    """
+    RequestDerivedFields types RequestDerived.fields.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    category: Optional[RequestDerivedFieldsCategory] = Field(default=None, alias="category", serialization_alias="category")
+    summary: Optional[RequestDerivedFieldsSummary] = Field(default=None, alias="summary", serialization_alias="summary")
+
+class RequestDerived(BaseModel):
+    """
+    RequestDerived holds the fields a Request's Derived adds, as a read returns them: a field with no value is absent.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    # The last value settled for each derived field, by field: { sourceHash, model, settledAt, settledBy, confidence? }, and overridden: { by, at } once a caller or another behavior's operation wrote it. A field with neither is absent.
+    fields_: RequestDerivedFields = Field(..., alias="fields", serialization_alias="fields")
+    # The derived fields whose inputs, instruction, model or type moved since their last value, or that rederive asked for, and that no write overrode, in the config's order. One of "category", "summary".
+    stale: List[Literal["category", "summary"]] = Field(..., alias="stale", serialization_alias="stale")
+
+class RequestWorkflow(BaseModel):
+    """
+    RequestWorkflow holds the fields a Request's Workflow adds, as a read returns them: a field with no value is absent.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    # The state the instance is in.
+    status: RequestState = Field(..., alias="status", serialization_alias="status")
+    # When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition.
+    entered_at: Optional[int] = Field(default=None, alias="enteredAt", serialization_alias="enteredAt")
+
+class RequestBehaviors(BaseModel):
+    """
+    RequestBehaviors holds the fields of a Request's behaviors as a read returns them, under behaviors: one member per behavior that declares a field, under the behavior's name.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    # The fields of Workflow.
+    workflow: RequestWorkflow = Field(..., alias="Workflow", serialization_alias="Workflow")
+    # The fields of Derived.
+    derived: RequestDerived = Field(..., alias="Derived", serialization_alias="Derived")
+    # The fields of Provenance.
+    provenance: RequestProvenance = Field(..., alias="Provenance", serialization_alias="Provenance")
+
+    @classmethod
+    def from_dict(cls, input_data: Dict[str, Any]) -> "RequestBehaviors":
+        """
+        Parse a read's behaviors from a dictionary using strict validation.
+        """
+        return cls.model_validate(input_data, strict=True)
+
+    @classmethod
+    def from_json(cls, input_data: str | bytes) -> "RequestBehaviors":
+        """
+        Parse a read's behaviors from JSON text/bytes using strict validation.
+        """
+        return cls.model_validate_json(input_data, strict=True)
+
+    def to_json_dict(self) -> Dict[str, Any]:
+        """
+        Convert the behaviors to the dictionary a read holds: each member by
+        its exact key, one that was never set left out.
+        """
+        return self.model_dump(mode='json', by_alias=True, exclude_unset=True)
+
 class TicketState(str, Enum):
     """
     TicketState is a state of a Ticket's Workflow.
@@ -678,6 +1033,21 @@ class TicketRevisions(BaseModel):
     # With review in the config, how many of the instance's proposals are pending; absent without review.
     pending_proposals: Any = Field(default=None, alias="pendingProposals", serialization_alias="pendingProposals")
 
+class TicketCommentsThreads(BaseModel):
+    """
+    TicketCommentsThreads types TicketComments.threads.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    open: int = Field(..., alias="open", serialization_alias="open")
+    resolved: int = Field(..., alias="resolved", serialization_alias="resolved")
+
 class TicketComments(BaseModel):
     """
     TicketComments holds the fields a Ticket's Comments adds, as a read returns them: a field with no value is absent.
@@ -690,8 +1060,16 @@ class TicketComments(BaseModel):
         populate_by_name=True,
     )
 
-    # How many comments the instance has.
-    comment_count: int = Field(..., alias="commentCount", serialization_alias="commentCount")
+    # How many posted and interrupted messages the conversation has, top-level and replies; composing, deleted and purged ones are not counted.
+    messages: int = Field(..., alias="messages", serialization_alias="messages")
+    # The greatest postedAt of a posted or interrupted message, in epoch milliseconds; absent while there is none.
+    last_message_at: Optional[int] = Field(default=None, alias="lastMessageAt", serialization_alias="lastMessageAt")
+    # The posted and interrupted top-level messages, each a thread, whether resolved or not: { open, resolved }.
+    threads: TicketCommentsThreads = Field(..., alias="threads", serialization_alias="threads")
+    # The subjects writing a message now: each subject with a composing message on the instance, once, in the order of its earliest composing message's id; empty while nobody is.
+    composing: List[str] = Field(..., alias="composing", serialization_alias="composing")
+    # The caller's: how many posted and interrupted top-level messages of others came to stand after the caller's read marker on the conversation. 0 until the caller first reads the conversation with markRead or posts in it top-level, so a conversation nobody opened is unread for nobody. Replies are read thread by thread, in the inbox, and not counted here.
+    unread: int = Field(..., alias="unread", serialization_alias="unread")
 
 class TicketWorkflow(BaseModel):
     """

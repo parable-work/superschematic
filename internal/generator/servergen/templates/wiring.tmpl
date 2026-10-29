@@ -2,7 +2,7 @@
 The wiring a server's main.go and a job's share (docs/stack-model.md,
 sections 8.1 and 8.7): the named templates below read each API's config,
 connect one pool per database, build one SDK client per API called, open
-one handle per bucket (D54), and fill an API's Deps. Both entrypoints execute them, so a job builds Deps
+one handle per bucket (D54) and one store per memory store (D75), and fill an API's Deps. Both entrypoints execute them, so a job builds Deps
 exactly as a server does.
 */ -}}
 
@@ -74,7 +74,7 @@ exactly as a server does.
 		return fmt.Errorf("database {{ .Service }}: %w", err)
 	}
 	defer {{ .Var }}Pool.Close()
-	{{ .Var }}, err := {{ .Package }}.ConnectWithPool({{ .Var }}Pool)
+	{{ .Var }}, err := {{ .Package }}.ConnectWithPool({{ .Var }}Pool{{ if .FieldKeys }}, {{ .Package }}.WithFieldKeys({{ .FieldKeys }}){{ end }})
 	if err != nil {
 		return fmt.Errorf("database {{ .Service }}: %w", err)
 	}
@@ -137,6 +137,18 @@ exactly as a server does.
 	}
 {{- end }}
 {{- end }}
+{{- if .MemoryStores }}
+
+	// One store per memory store, shared by every API that lists it
+	// (memorystores.go, D75). Opening never waits for the server: a store
+	// that is down reconnects in the background, and one whose field is
+	// unset, or whose connection it cannot use, is disabled, so every call refuses at once and the
+	// APIs take their paths without it.{{ if not .Background }} /readyz never waits for a store.{{ end }}
+{{- range .MemoryStores }}
+	{{ .Var }} := openMemoryStore(ctx, logger, {{ quote .Service }}, {{ quote .Field }}, {{ .From }})
+	defer {{ .Var }}.Close()
+{{- end }}
+{{- end }}
 {{- end }}
 
 {{- define "deps" }}
@@ -153,6 +165,9 @@ exactly as a server does.
 {{- end }}
 {{- range .Buckets }}
 		{{ .Field }}: {{ .Bucket.Var }},
+{{- end }}
+{{- range .MemoryStores }}
+		{{ .Field }}: {{ .Store.Var }},
 {{- end }}
 {{- if .Engine }}
 		Engine: {{ .Engine.Var }}.Background,

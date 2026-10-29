@@ -18,8 +18,8 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use superschematic_engine::api::{
-    self, ApiOptions, Body, Caller, EventStream, McpOptions, Pull, Refusal, Request, ServiceCaller,
-    StreamOptions,
+    self, ActingForHeader, ApiOptions, Body, Caller, EventStream, McpOptions, Pull, Refusal,
+    Request, ServiceCaller, StreamOptions,
 };
 use superschematic_engine::calls::{self, js_string};
 use superschematic_engine::storage::Dialect;
@@ -527,8 +527,11 @@ fn head_of(given: &Value) -> Result<(Request, ApiOptions), Failure> {
     Ok((request, api_options_of(options)?))
 }
 
-// api_options_of is how a mount serves: `stream` ({pageSize, heartbeatMs})
-// and `mcp` ({serverInfo: {name, version}, instructions}).
+// api_options_of is how a mount serves: `stream` ({pageSize, heartbeatMs}),
+// `mcp` ({serverInfo: {name, version}, instructions}) and `actingFor`,
+// true when the request's Acting-For header is honored (D77): a host whose
+// mount decides per request by a function passes the subject it decided,
+// a string, which the engine uses without reading the header again.
 fn api_options_of(options: Option<&Map<String, Value>>) -> Result<ApiOptions, Failure> {
     let object = |within: Option<&Map<String, Value>>, key: &str| {
         within
@@ -569,6 +572,17 @@ fn api_options_of(options: Option<&Map<String, Value>>) -> Result<ApiOptions, Fa
             .transpose()?,
     };
     stream.check().map_err(Failure::usage)?;
+    let acting_for = match options.and_then(|within| member(within, "actingFor")) {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => ActingForHeader::Ignore,
+        Some(Value::Bool(true)) => ActingForHeader::Honor,
+        Some(Value::String(subject)) => ActingForHeader::Decided(subject.clone()),
+        Some(given) => {
+            return Err(Failure::usage(format!(
+                "actingFor must be true, false or the subject the host decided, got {}",
+                js_string(given)
+            )))
+        }
+    };
     Ok(ApiOptions {
         stream,
         mcp: McpOptions {
@@ -577,6 +591,7 @@ fn api_options_of(options: Option<&Map<String, Value>>) -> Result<ApiOptions, Fa
             instructions: text(mcp.as_ref(), "instructions"),
         },
         tools: None,
+        acting_for,
     })
 }
 
@@ -649,8 +664,9 @@ pub unsafe fn wait(engine: u64, after: u64, timeout_ms: u32, epoch: *mut u64) ->
         if handle.engine.is_closed() {
             return None;
         }
+        // The wakes: a commit's and a signal's (D77), which a stream sends.
         let notifier = Arc::clone(handle.engine.db().notifier());
-        let moved = notifier.wait(after, Duration::from_millis(u64::from(timeout_ms)));
+        let moved = notifier.wait_wakes(after, Duration::from_millis(u64::from(timeout_ms)));
         // A shutdown moves the epoch to wake every waiter.
         (!handle.engine.is_closed()).then_some(moved)
     }));

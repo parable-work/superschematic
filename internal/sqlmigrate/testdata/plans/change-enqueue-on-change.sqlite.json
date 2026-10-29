@@ -1,0 +1,32 @@
+{
+  "dialect": "sqlite",
+  "from": "3cb22c127616ba19f079543c4b35c3a0f9af474762de67b81f1b9f5e3d3c2ec2",
+  "hash": "4af127f7998eacc35f40ebdbfba42f369bea289befd37ea9651ff40c24fe0da6",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createTrigger",
+      "phase": "expand",
+      "statements": [
+        "CREATE TRIGGER \"trg_order_enqueue_order_shipped_delete\" AFTER DELETE ON \"order\" FOR EACH ROW\nBEGIN\n  INSERT INTO \"order_shipped_queue\" (\"order_id\", \"note\") VALUES (OLD.\"id\", OLD.\"note\")\n    ON CONFLICT (order_id) WHERE state = 'ready' DO UPDATE SET note = excluded.note, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now');\nEND"
+      ],
+      "subject": "trigger/order/trg_order_enqueue_order_shipped_delete",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "replaceTrigger",
+      "phase": "expand",
+      "statements": [
+        "DROP TRIGGER IF EXISTS \"trg_order_enqueue_order_shipped_update\"",
+        "CREATE TRIGGER \"trg_order_enqueue_order_shipped_update\" AFTER UPDATE ON \"order\" FOR EACH ROW\nWHEN (OLD.\"note\" IS NOT NEW.\"note\" OR OLD.\"total\" IS NOT NEW.\"total\")\nBEGIN\n  INSERT INTO \"order_shipped_queue\" (\"order_id\", \"note\") VALUES (NEW.\"id\", NEW.\"note\")\n    ON CONFLICT (order_id) WHERE state = 'ready' DO UPDATE SET note = excluded.note, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now');\nEND"
+      ],
+      "subject": "trigger/order/trg_order_enqueue_order_shipped_update",
+      "transactional": true
+    }
+  ],
+  "to": "a1ea03d1dca743f192db18e6933bf5b8d80845b51314666d9f7bb4a2a7241f91",
+  "toModel": null,
+  "version": 1
+}

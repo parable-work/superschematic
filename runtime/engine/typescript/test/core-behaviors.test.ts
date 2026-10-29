@@ -56,7 +56,7 @@ for (const driver of drivers) {
   describe(`the core's behaviors with no extension (${driver})`, () => {
     test("an engine registers the core's behaviors when it opens, and no one else can take their names", () => {
       const engine = openTestEngine({ driver });
-      assert.deepEqual(engine.behaviors.names(), ['Approvals', 'Branches', 'Comments', 'Constants', 'Dependencies', 'Links', 'Numbering', 'Reactions', 'Revisions', 'Rollups', 'Search', 'StateRules', 'Timers', 'Variants', 'Workflow']);
+      assert.deepEqual(engine.behaviors.names(), ['Approvals', 'Branches', 'Comments', 'Constants', 'Dependencies', 'Derived', 'Links', 'Numbering', 'Provenance', 'Reactions', 'Revisions', 'Rollups', 'Search', 'StateRules', 'Timers', 'Variants', 'Workflow']);
       assert.deepEqual(
         engine.behaviors.declaration('Workflow')?.fields?.map((field) => field.name),
         ['status', 'enteredAt']
@@ -91,55 +91,71 @@ for (const driver of drivers) {
       assert.deepEqual(created.data, { title: 'Launch plan' });
       assert.deepEqual(created.behaviors, {
         Workflow: { status: 'draft', enteredAt: created.createdAt },
-        Comments: { commentCount: 0 },
+        Comments: { messages: 0, threads: { open: 0, resolved: 0 }, composing: [], unread: 0 },
         Revisions: { revision: 1, pendingProposals: 0 },
       });
 
-      engine.instances.invoke(writer, 'documents', 'doc-1', 'comment', { body: 'First pass is up.' });
+      engine.instances.invoke(writer, 'documents', 'doc-1', 'post', { body: 'First pass is up.' });
       engine.instances.invoke(writer, 'documents', 'doc-1', 'transition', { to: 'review' });
       engine.instances.invoke(writer, 'documents', 'doc-1', 'propose', { patch: { body: 'The plan, in full.' }, note: 'Adds the body.' });
       assert.equal(thrown(() => engine.instances.invoke(writer, 'documents', 'doc-1', 'approve', { proposal: 1 })).code, 'forbidden');
       engine.instances.invoke(reviewer, 'documents', 'doc-1', 'approve', { proposal: 1 });
-      engine.instances.invoke(reviewer, 'documents', 'doc-1', 'comment', { body: 'Approved the body.', replyTo: 1 });
+      engine.instances.invoke(reviewer, 'documents', 'doc-1', 'post', { body: 'Approved the body.', thread: 1 });
       assert.equal(thrown(() => engine.instances.invoke(reviewer, 'documents', 'doc-1', 'transition', { to: 'published' })).code, 'forbidden');
       engine.instances.invoke(publisher, 'documents', 'doc-1', 'transition', { to: 'published' });
 
       const read = engine.instances.get(alice, 'documents', 'doc-1');
       const events = engine.events.read(alice, { schema: 'documents', instanceId: 'doc-1' }).events;
       assert.deepEqual(read?.data, { title: 'Launch plan', body: 'The plan, in full.' });
-      // The status was last entered by the last transition, the seventh event.
+      // The status was last entered by the last transition, the seventh
+      // event; the posts are beside the instance, and took no sequence.
       assert.deepEqual(read?.behaviors, {
         Workflow: { status: 'published', enteredAt: events[6].at },
-        Comments: { commentCount: 2 },
+        Comments: { messages: 2, lastMessageAt: events[5].at, threads: { open: 1, resolved: 0 }, composing: [], unread: 0 },
         Revisions: { revision: 2, pendingProposals: 0 },
       });
-      assert.equal(read?.seq, 7);
+      assert.equal(read?.seq, 5);
 
       assert.deepEqual(
-        events.map((event) => [event.kind, event.actor, event.kind === 'operation' ? (event.change as { patch: unknown }).patch : event.change]),
+        events.map((event) => [
+          event.kind,
+          event.actor,
+          event.beside
+            ? { beside: (event.change as { operation: string }).operation, seq: event.seq }
+            : event.kind === 'operation'
+              ? (event.change as { patch: unknown }).patch
+              : event.change,
+        ]),
         [
           [
             'create',
             'wes',
             {
               data: { title: 'Launch plan' },
-              behaviors: { Workflow: { status: 'draft', enteredAt: events[0].at }, Comments: { commentCount: 0 }, Revisions: { revision: 1, pendingProposals: 0 } },
+              // Comments' unread is the reader's (perReader): no event records it.
+              behaviors: {
+                Workflow: { status: 'draft', enteredAt: events[0].at },
+                Comments: { messages: 0, threads: { open: 0, resolved: 0 }, composing: [] },
+                Revisions: { revision: 1, pendingProposals: 0 },
+              },
             },
           ],
-          ['operation', 'wes', { behaviors: { Comments: { commentCount: 1 } } }],
+          ['operation', 'wes', { beside: 'post', seq: null }],
           ['operation', 'wes', { behaviors: { Workflow: { status: 'review', enteredAt: events[2].at } } }],
           ['operation', 'wes', { behaviors: { Revisions: { pendingProposals: 1 } } }],
           ['operation', 'rae', { data: { body: 'The plan, in full.' }, behaviors: { Revisions: { revision: 2, pendingProposals: 0 } } }],
-          ['operation', 'rae', { behaviors: { Comments: { commentCount: 2 } } }],
+          ['operation', 'rae', { beside: 'post', seq: null }],
           ['operation', 'pat', { behaviors: { Workflow: { status: 'published', enteredAt: events[6].at } } }],
         ]
       );
-      // The log replays, a merge patch at a time, to the instance a read returns.
+      // The log replays, a merge patch at a time, to the instance a read
+      // returns, but for the volatile fields beside events move, and the
+      // reader's own unread, which no event records.
       let replayed: unknown = {};
-      for (const event of events) {
+      for (const event of events.filter((one) => !one.beside)) {
         replayed = mergePatch(replayed, event.kind === 'create' ? event.change : (event.change as { patch: unknown }).patch);
       }
-      assert.deepEqual(replayed, { data: read?.data, behaviors: read?.behaviors });
+      assert.deepEqual(replayed, { data: read?.data, behaviors: { ...read?.behaviors, Comments: { messages: 0, threads: { open: 0, resolved: 0 }, composing: [] } } });
 
       const revisions = engine.instances.invoke(alice, 'documents', 'doc-1', 'listRevisions') as { items: Array<{ revision: number; data: unknown; proposal?: number }> };
       assert.deepEqual(
@@ -149,8 +165,10 @@ for (const driver of drivers) {
           { revision: 2, data: { title: 'Launch plan', body: 'The plan, in full.' }, proposal: 1 },
         ]
       );
-      const comments = engine.instances.invoke(alice, 'documents', 'doc-1', 'listComments') as { items: Array<{ replyTo?: number; createdBy: string }> };
-      assert.deepEqual(comments.items.map(({ replyTo, createdBy }) => [replyTo, createdBy]), [
+      const threads = [{}, { thread: 1 }].flatMap(
+        (params) => (engine.instances.invoke(alice, 'documents', 'doc-1', 'listMessages', params) as { items: Array<{ thread?: number; author: string }> }).items
+      );
+      assert.deepEqual(threads.map(({ thread, author }) => [thread, author]), [
         [undefined, 'wes'],
         [1, 'rae'],
       ]);
@@ -171,7 +189,7 @@ for (const driver of drivers) {
       assert.deepEqual(retracted?.data, { title: 'Launch plan', body: 'The plan, in full.', summary: 'Withdrawn.' });
       assert.deepEqual(retracted?.behaviors, {
         Workflow: { status: 'retracted', enteredAt: engine.events.read(alice, { schema: 'documents', instanceId: 'doc-1' }).events[7].at },
-        Comments: { commentCount: 2 },
+        Comments: { messages: 2, lastMessageAt: events[5].at, threads: { open: 1, resolved: 0 }, composing: [], unread: 0 },
         Revisions: { revision: 3, pendingProposals: 0 },
       });
     });

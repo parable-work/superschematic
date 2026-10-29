@@ -347,6 +347,9 @@ func Generate(apiOutput *apigen.APIOutput, crateName, typesCrate string, clock c
 		if endpoint.IsWebhook {
 			continue
 		}
+		if endpoint.FileDownload != nil {
+			return nil, fmt.Errorf("rustsdkgen: operation %s.%s answers a FileDownload (D81), which the Rust SDK cannot read yet; the TypeScript, Go and Python SDKs return the file: generate those, or leave the Rust SDK out of the API's outputs.sdk; support follows", endpoint.Namespace, endpoint.Name)
+		}
 		nsName := endpoint.Namespace
 		if nsName == "" {
 			nsName = "root"

@@ -51,7 +51,19 @@ export const authenticate: Authenticator = async (ctx) => {
 const workOperations = new Set(['claimNext', 'claim', 'refresh', 'heartbeat', 'release', 'recordUsage', 'recordAttempt', 'transition', 'beat']);
 
 /** What each caller may do: the engine asks before every read and write. */
-export const policy: AccessPolicy = ({ principal, action, schema, operation }) => {
+export const policy: AccessPolicy = (request) => {
+  const { principal, action, schema, operation } = request;
+  // A caller acting for someone else (D77): this example's callers act
+  // only as themselves, and its server honors no Acting-For header.
+  if (principal.actingFor !== undefined) {
+    return false;
+  }
+  // A behavior's operation across the namespace (D77): one that reads keeps
+  // the schemas the caller may read, so anyone may call it; one that
+  // writes, a holder of <behavior>.<operation>.
+  if (request.behavior !== undefined) {
+    return action === 'read' || hasAnyPermission(principal.permissions, [`${request.behavior}.${request.operation}`]);
+  }
   // Making, archiving and listing namespaces: this example makes none
   // while it runs.
   if (action === 'manage') {

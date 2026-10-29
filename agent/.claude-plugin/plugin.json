@@ -1,0 +1,5 @@
+{
+  "name": "superschematic",
+  "version": "0.2.0",
+  "description": "Declare types, tables, routes, permissions, jobs, queues and stacks in superschematic schemas instead of writing SQL, validation, servers and clients by hand."
+}

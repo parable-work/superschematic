@@ -56,11 +56,11 @@ func queueTable(t *testing.T) string {
 		t.Fatal(err)
 	}
 	testdb.Exec(t, dbURL, string(createSQL), `INSERT INTO order_placed_queue
-  (id, order_id, priority, quantity, note, ship_to, tags, state, attempts, last_error, due_at, updated_at)
+  (id, order_id, placed_at, priority, quantity, note, ship_to, tags, state, attempts, last_error, due_at, updated_at)
 VALUES
-  ('`+deadID+`', gen_random_uuid(), 'high', 2, 'gift', '{"line1":"1 Main St","city":"Leeds"}', '{a,b}', 'dead', 4, 'the card was refused', now() - interval '3 hours', now() - interval '2 hours'),
-  ('`+dead2ID+`', gen_random_uuid(), 'low', 1, NULL, '{"line1":"2 Side St","city":"York"}', '{}', 'dead', 1, NULL, now() - interval '2 hours', now() - interval '1 hour'),
-  ('`+readyID+`', gen_random_uuid(), 'low', 1, NULL, '{"line1":"3 High St","city":"Hull"}', '{}', 'ready', 0, NULL, now() + interval '1 hour', now())`)
+  ('`+deadID+`', gen_random_uuid(), now(), 'high', 2, 'gift', '{"line1":"1 Main St","city":"Leeds"}', '{a,b}', 'dead', 4, 'the card was refused', now() - interval '3 hours', now() - interval '2 hours'),
+  ('`+dead2ID+`', gen_random_uuid(), now(), 'low', 1, NULL, '{"line1":"2 Side St","city":"York"}', '{}', 'dead', 1, NULL, now() - interval '2 hours', now() - interval '1 hour'),
+  ('`+readyID+`', gen_random_uuid(), now(), 'low', 1, NULL, '{"line1":"3 High St","city":"Hull"}', '{}', 'ready', 0, NULL, now() + interval '1 hour', now())`)
 	return dbURL
 }
 
@@ -172,7 +172,7 @@ func TestQueueOnPostgres(t *testing.T) {
 
 	// Every dead message, and the ready one stays as it was.
 	testdb.Exec(t, dbURL, `UPDATE order_placed_queue SET state = 'dead', attempts = 4 WHERE id = '`+deadID+`'`,
-		`INSERT INTO order_placed_queue (id, order_id, priority, quantity, ship_to, state, attempts) VALUES ('`+dead2ID+`', gen_random_uuid(), 'low', 1, '{}', 'dead', 2)`)
+		`INSERT INTO order_placed_queue (id, order_id, placed_at, priority, quantity, ship_to, state, attempts) VALUES ('`+dead2ID+`', gen_random_uuid(), now(), 'low', 1, '{}', 'dead', 2)`)
 	if got := result(queue("retry-all", exitOK)); !slices.Equal(got.IDs, []string{deadID, dead2ID}) {
 		t.Fatalf("retried %+v", got)
 	}
@@ -423,5 +423,116 @@ func TestQueueOnCloudSQL(t *testing.T) {
 	}
 	if !bytes.Equal(storage.objects["state/"+resultObject], written) {
 		t.Error("a second run replaced the result")
+	}
+}
+
+// TestQueueRetryOfAKeyedQueueOnPostgres runs the retries of fixture-queue-db's
+// StockChecked, which keeps one ready message per SKU (D80), on its tables
+// as sqlgen writes them: of two dead messages of one SKU a retry makes the
+// one that died last ready, so a retry that names both changes none and
+// says why; a retry of every dead message retries one per SKU, and none of
+// a SKU a ready message holds.
+func TestQueueRetryOfAKeyedQueueOnPostgres(t *testing.T) {
+	dbURL := testdb.NewPostgres(t)
+	createSQL, err := os.ReadFile(filepath.Join(repoRoot, "internal", "generator", "sqlgen", "testdata", "golden", "fixture-queue-db", "create.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const (
+		heldID    = "00000000-0000-4000-8000-000000000004"
+		waitingID = "00000000-0000-4000-8000-000000000005"
+		aloneID   = "00000000-0000-4000-8000-000000000006"
+	)
+	testdb.Exec(t, dbURL, string(createSQL), `INSERT INTO stock_checked_queue (id, sku, quantity, state, attempts, updated_at) VALUES
+  ('`+deadID+`', 'sku-1', 1, 'dead', 4, now() - interval '2 hours'),
+  ('`+dead2ID+`', 'sku-1', 2, 'dead', 4, now() - interval '1 hour'),
+  ('`+heldID+`', 'sku-2', 3, 'dead', 4, now() - interval '1 hour'),
+  ('`+waitingID+`', 'sku-2', 4, 'ready', 0, now()),
+  ('`+aloneID+`', 'sku-3', 5, 'dead', 4, now() - interval '1 hour')`)
+	states := func() string {
+		t.Helper()
+		return strings.Join(testdb.Strings(t, dbURL, "SELECT sku || ':' || quantity || ':' || state FROM stock_checked_queue ORDER BY sku, quantity"), " ")
+	}
+	const before = "sku-1:1:dead sku-1:2:dead sku-2:3:dead sku-2:4:ready sku-3:5:dead"
+	if got := states(); got != before {
+		t.Fatalf("the queue holds %s", got)
+	}
+
+	invoke(t, nil, "queue", "--queue", queueDocument(t, "retry-keyed"), "--database-url", dbURL).expect(t, exitFailed,
+		"superschematic-migrate: queue StockChecked of fixture-queue-db: 1 of the 2 message(s) named are not dead, so none was retried: "+
+			deadID+" is dead, and a ready message holds its key")
+	if got := states(); got != before {
+		t.Fatalf("a refused retry changed the queue: %s", got)
+	}
+
+	i := invoke(t, nil, "queue", "--queue", queueDocument(t, "retry-all-keyed"), "--database-url", dbURL).expect(t, exitOK)
+	var r migrate.QueueResult
+	if err := json.Unmarshal([]byte(i.stdout), &r); err != nil {
+		t.Fatalf("the result: %v\n%s", err, i.stdout)
+	}
+	if !slices.Equal(r.IDs, []string{dead2ID, aloneID}) {
+		t.Errorf("retried %q, want the last death of sku-1 and sku-3's", r.IDs)
+	}
+	if got, want := states(), "sku-1:1:dead sku-1:2:ready sku-2:3:dead sku-2:4:ready sku-3:5:ready"; got != want {
+		t.Errorf("the queue holds %s, want %s", got, want)
+	}
+}
+
+// TestQueueBackfillOnPostgres runs the golden backfill document of
+// fixture-queue-db's OrderChanged (D88) on its tables as sqlgen writes
+// them: of three orders, the first with two lines that name a product, the
+// second with one, and the third with a line that names none, the backfill
+// enqueues one ready message for each of the first two, keyed by order,
+// says it enqueued two, and holds no message for the third. Run again, it
+// makes each order's message fresh and adds none.
+func TestQueueBackfillOnPostgres(t *testing.T) {
+	dbURL := testdb.NewPostgres(t)
+	createSQL, err := os.ReadFile(filepath.Join(repoRoot, "internal", "generator", "sqlgen", "testdata", "golden", "fixture-queue-db", "create.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const (
+		first   = "00000000-0000-4000-8000-0000000000a1"
+		second  = "00000000-0000-4000-8000-0000000000a2"
+		third   = "00000000-0000-4000-8000-0000000000a3"
+		product = "00000000-0000-4000-8000-0000000000b1"
+	)
+	// The lines' trigger enqueues as they are written; the queue is then
+	// emptied, as it is of rows written before the trigger existed.
+	testdb.Exec(t, dbURL, string(createSQL),
+		`INSERT INTO product (id, "name") VALUES ('`+product+`', 'widget')`,
+		`INSERT INTO "order" (id, placed_at) VALUES ('`+first+`', now()), ('`+second+`', now()), ('`+third+`', now())`,
+		`INSERT INTO order_line (order_id, product_id, quantity) VALUES
+  ('`+first+`', '`+product+`', 1),
+  ('`+first+`', '`+product+`', 2),
+  ('`+second+`', '`+product+`', 3),
+  ('`+third+`', NULL, 4)`,
+		`DELETE FROM order_changed_queue`)
+	queued := func() string {
+		t.Helper()
+		return strings.Join(testdb.Strings(t, dbURL, "SELECT order_id::text || ':' || state || ':' || priority FROM order_changed_queue ORDER BY order_id"), " ")
+	}
+
+	i := invoke(t, nil, "queue", "--queue", queueDocument(t, "backfill"), "--database-url", dbURL).expect(t, exitOK)
+	var r migrate.QueueResult
+	decoder := json.NewDecoder(strings.NewReader(i.stdout))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&r); err != nil {
+		t.Fatalf("the result: %v\n%s", err, i.stdout)
+	}
+	if r.Operation != migrate.QueueBackfill || r.Total != 2 || strings.Contains(i.stdout, `"ids"`) {
+		t.Fatalf("backfilled %+v:\n%s", r, i.stdout)
+	}
+	want := first + ":ready:low " + second + ":ready:low"
+	if got := queued(); got != want {
+		t.Fatalf("the queue holds %s, want %s", got, want)
+	}
+
+	i = invoke(t, nil, "queue", "--queue", queueDocument(t, "backfill"), "--database-url", dbURL).expect(t, exitOK)
+	if !strings.Contains(i.stdout, `"total": 2`) {
+		t.Fatalf("a second backfill answered:\n%s", i.stdout)
+	}
+	if got := queued(); got != want {
+		t.Fatalf("a second backfill left %s, want %s", got, want)
 	}
 }

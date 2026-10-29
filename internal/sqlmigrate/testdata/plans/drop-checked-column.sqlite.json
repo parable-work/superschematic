@@ -1,0 +1,36 @@
+{
+  "dialect": "sqlite",
+  "expanded": "a1a5157a99e079ec242b4edd319ce2852b8e09bfa109f431bfa260e2e3d1adc6",
+  "from": "8dc9bf08abd4d449ce439c569e401fe6eb9288344b3c46277928059c5bdb4c1d",
+  "hash": "e4f339ffd60a766331a37b794a8bcf1e29e70b0780669547a9ca5e67ad4e2118",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/order/column/note",
+          "reason": "Dropping order.note deletes the values of Order.note.",
+          "subject": "table/order/column/note"
+        },
+        {
+          "class": "blocking",
+          "id": "blocking:table/order/column/note",
+          "reason": "SQLite rewrites order to drop the column, holding the database's write lock for time that grows with the table.",
+          "subject": "table/order/column/note"
+        }
+      ],
+      "index": 1,
+      "op": "dropColumn",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"order\" DROP COLUMN \"note\""
+      ],
+      "subject": "table/order/column/note",
+      "transactional": true
+    }
+  ],
+  "to": "559e2ab759a511b8a5986fca977529410eba310ffab77c83fd290d9eedd26aaf",
+  "toModel": null,
+  "version": 1
+}

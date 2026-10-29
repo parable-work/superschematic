@@ -5,6 +5,26 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "DEPS_CACHE_MEMORY_STORE_AUTH": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_CACHE_MEMORY_STORE, the memory store connection of deps-cache, which the platform sets."
+    },
+    "DEPS_CACHE_MEMORY_STORE_CA": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_CACHE_MEMORY_STORE, the memory store connection of deps-cache, which the platform sets."
+    },
+    "DEPS_CACHE_MEMORY_STORE_MEMBER": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_CACHE_MEMORY_STORE, the memory store connection of deps-cache, which the platform sets."
+    },
+    "DEPS_CACHE_MEMORY_STORE_STORE": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_CACHE_MEMORY_STORE, the memory store connection of deps-cache, which the platform sets."
+    },
+    "DEPS_CACHE_MEMORY_STORE_URL": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_CACHE_MEMORY_STORE, the memory store connection of deps-cache, which the platform sets."
+    },
     "DEPS_DB_DATABASE_CLOUD_SQL_DATABASE": {
       "type": "string",
       "description": "Derived: a member of DEPS_DB_DATABASE, the database connection of deps-db, which the platform sets."
@@ -22,6 +42,14 @@
       "description": "Derived: a member of DEPS_DB_DATABASE, the database connection of deps-db, which the platform sets."
     },
     "DEPS_DB_DATABASE_D1_DATABASE": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_DB_DATABASE, the database connection of deps-db, which the platform sets."
+    },
+    "DEPS_DB_DATABASE_HYPERDRIVE_BINDING": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_DB_DATABASE, the database connection of deps-db, which the platform sets."
+    },
+    "DEPS_DB_DATABASE_HYPERDRIVE_CONFIG": {
       "type": "string",
       "description": "Derived: a member of DEPS_DB_DATABASE, the database connection of deps-db, which the platform sets."
     },
@@ -176,6 +204,23 @@
     "typeName": "ShopConfig",
     "envVars": [
       {
+        "name": "DEPS_CACHE_MEMORY_STORE",
+        "irType": "MemoryStoreConnection",
+        "primitive": "object",
+        "required": false,
+        "hasDefault": false,
+        "description": "The memory store connection of deps-cache (rateLimitStore), one variable per member.",
+        "derived": "memoryStore",
+        "service": "deps-cache",
+        "variables": [
+          "DEPS_CACHE_MEMORY_STORE_STORE",
+          "DEPS_CACHE_MEMORY_STORE_URL",
+          "DEPS_CACHE_MEMORY_STORE_CA",
+          "DEPS_CACHE_MEMORY_STORE_AUTH",
+          "DEPS_CACHE_MEMORY_STORE_MEMBER"
+        ]
+      },
+      {
         "name": "DEPS_DB_DATABASE",
         "irType": "DatabaseConnection",
         "primitive": "object",
@@ -190,7 +235,9 @@
           "DEPS_DB_DATABASE_CLOUD_SQL_DATABASE",
           "DEPS_DB_DATABASE_CLOUD_SQL_USER",
           "DEPS_DB_DATABASE_D1_BINDING",
-          "DEPS_DB_DATABASE_D1_DATABASE"
+          "DEPS_DB_DATABASE_D1_DATABASE",
+          "DEPS_DB_DATABASE_HYPERDRIVE_BINDING",
+          "DEPS_DB_DATABASE_HYPERDRIVE_CONFIG"
         ]
       },
       {

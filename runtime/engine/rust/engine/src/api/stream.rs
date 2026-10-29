@@ -20,6 +20,20 @@
 //! scans again at most what one heartbeat let pass. The ready event's id
 //! does the same.
 //!
+//! A stream opened with signals (D77) also sends each signal on an
+//! instance its namespace, schema, instance and behavior filters keep,
+//! whose schema its principal may read (asked once per schema between two
+//! reads of the log, so a policy that stops letting it read a schema stops
+//! its signals by the next read), as one message `event: signal` with no
+//! `id:`, so `Last-Event-ID` and a reconnect's replay never see one. It holds up to 256 for a slow client,
+//! the oldest dropped first, and sends them once replay has caught up.
+//! Signals wake it (the notifier's wakes, not its epoch), and it reads the
+//! log again only when a commit moved the epoch since its last read, or a
+//! heartbeat went by since its last read, so a signal costs a waiting
+//! stream no read, and signals sent more often than a heartbeat, which
+//! put its keepalive off, never put off a read: a stream with no listener
+//! still hears another process's commits within a heartbeat.
+//!
 //! The stream is pulled: it reads the next page only when the host has
 //! taken the previous one, so it holds at most one page for a slow client.
 //! It ends when the host closes it (the client went away), when the engine
@@ -36,11 +50,13 @@ use serde_json::Value;
 
 use super::problems::Problem;
 use super::{ApiOptions, Body, Request, Response};
+use crate::access::SchemaAction;
 use crate::errors::{EngineError, Error};
 use crate::events::{EventPage, EventsAfter, ReadEvents};
 use crate::json;
 use crate::paging::MAX_PAGE_SIZE;
 use crate::principal::Principal;
+use crate::signals::{SignalFilter, SignalQueue};
 use crate::Engine;
 
 /// Events read per page unless configured.
@@ -52,6 +68,10 @@ pub const DEFAULT_HEARTBEAT_MS: u64 = 5_000;
 
 /// The name of the event a stream sends once replay has caught up.
 pub const READY_EVENT: &str = "ready";
+
+/// The name of the event a stream opened with signals sends for each
+/// signal (D77).
+pub const SIGNAL_EVENT: &str = "signal";
 
 /// The event stream's page size and heartbeat; each the default when
 /// absent.
@@ -101,6 +121,7 @@ struct Read {
     kinds: Option<Vec<String>>,
     behaviors: Option<Vec<String>>,
     exclude: Option<Vec<String>>,
+    beside: Option<bool>,
 }
 
 impl Read {
@@ -114,6 +135,7 @@ impl Read {
             kinds: self.kinds.clone(),
             behaviors: self.behaviors.clone(),
             exclude: self.exclude.clone(),
+            beside: self.beside,
         }
     }
 }
@@ -136,6 +158,27 @@ pub struct EventStream {
     done: bool,
     /// When the heartbeat is due, while the stream waits.
     beat_at: Option<Instant>,
+    /// The notifier's epoch when the stream last read the log.
+    read_epoch: u64,
+    /// Whether its last page was the last (`more` false).
+    caught_up: bool,
+    /// Whether it reads at its next pull whatever the epoch says: after a
+    /// heartbeat, so a stream with no listener still reads at each.
+    read_due: bool,
+    /// When it last read the log. Caught up, it reads again once a
+    /// heartbeat has gone by since, whatever the epoch says, even while
+    /// signals keep putting its heartbeat off.
+    last_read: Instant,
+    /// Its signals, when it was opened with them (D77).
+    signals: Option<StreamSignals>,
+}
+
+// A stream's signals: the queue the engine fills, and whether its
+// principal may read each schema, asked once per schema and asked again
+// after each read of the log.
+struct StreamSignals {
+    queue: Arc<SignalQueue>,
+    readable: HashMap<String, bool>,
 }
 
 impl std::fmt::Debug for EventStream {
@@ -158,11 +201,14 @@ pub(crate) fn open(
     request: &Request,
     principal: &Principal,
     read: &ReadEvents<'_>,
+    signals: bool,
 ) -> Result<Response, Problem> {
-    let stream = start(engine, &options.stream, principal, read).map_err(|error| match error {
-        Error::Engine(_) => Problem::of(&error),
-        _ => Problem::internal(),
-    })?;
+    let stream = start_with(engine, &options.stream, principal, read, signals).map_err(
+        |error| match error {
+            Error::Engine(_) => Problem::of(&error),
+            _ => Problem::internal(),
+        },
+    )?;
     Ok(Response {
         status: 200,
         headers: vec![
@@ -183,6 +229,18 @@ pub fn start(
     principal: &Principal,
     read: &ReadEvents<'_>,
 ) -> Result<EventStream, Error> {
+    start_with(engine, options, principal, read, false)
+}
+
+/// [`start`], with the signals (D77) of the instances its namespace,
+/// schema, instance and behavior filters keep when `signals` is true.
+pub fn start_with(
+    engine: &Engine,
+    options: &StreamOptions,
+    principal: &Principal,
+    read: &ReadEvents<'_>,
+    signals: bool,
+) -> Result<EventStream, Error> {
     let (page_size, heartbeat) = options.check().map_err(EngineError::invalid_argument)?;
     let Some(weak) = engine.weak() else {
         return Err(Error::usage(
@@ -196,8 +254,21 @@ pub fn start(
         kinds: read.kinds.clone(),
         behaviors: read.behaviors.clone(),
         exclude: read.exclude.clone(),
+        beside: read.beside,
     };
     let after = read.after.unwrap_or(EventsAfter::Cursor(0));
+    // The queue opens before the first page is read, so a signal sent
+    // from now on waits for the stream.
+    let signals = signals.then(|| StreamSignals {
+        queue: engine.signals.open(SignalFilter {
+            namespace: owned.namespace.clone(),
+            schema: owned.schema.clone(),
+            instance_id: owned.instance_id.clone(),
+            behaviors: owned.behaviors.clone(),
+        }),
+        readable: HashMap::new(),
+    });
+    let read_epoch = engine.db().notifier().epoch();
     let first = engine
         .events()
         .read(principal, &owned.at(after, page_size))?;
@@ -218,6 +289,11 @@ pub fn start(
         opened: false,
         done: false,
         beat_at: None,
+        read_epoch,
+        caught_up: false,
+        read_due: false,
+        last_read: Instant::now(),
+        signals,
     })
 }
 
@@ -281,60 +357,95 @@ impl EventStream {
                 return Pull::End;
             };
             let notifier = Arc::clone(engine.db().notifier());
+            let wakes = notifier.wakes();
             let epoch = notifier.epoch();
+            // Caught up, it reads again only for a commit since its last
+            // read, after a heartbeat, or once a heartbeat has gone by
+            // since its last read: a signal's wake reads nothing.
+            // The first page was read when the stream opened, at the epoch
+            // start noted; any other is read now, at this one.
+            let read_now = self.first.is_none();
             let page = match self.first.take() {
-                Some(page) => page,
+                Some(page) => Some(page),
+                None if self.caught_up
+                    && !self.read_due
+                    && epoch == self.read_epoch
+                    && self.last_read.elapsed() < self.heartbeat =>
+                {
+                    None
+                }
                 None => match engine.events().read(
                     &self.principal,
                     &self
                         .read
                         .at(EventsAfter::Cursor(self.cursor), self.page_size),
                 ) {
-                    Ok(page) => page,
+                    Ok(page) => Some(page),
                     Err(_) => {
                         self.done = true;
                         return Pull::End;
                     }
                 },
             };
-            drop(engine);
-            self.cursor = page.next;
             let mut frames = String::new();
-            for event in &page.events {
-                frames.push_str(&format!(
-                    "id: {}\ndata: {}\n\n",
-                    event.cursor,
-                    json::stringify(&serde_json::to_value(event).unwrap_or(Value::Null))
-                ));
+            if let Some(page) = page {
+                if read_now {
+                    self.read_epoch = epoch;
+                    self.read_due = false;
+                    self.last_read = Instant::now();
+                    // The policy is asked again for the signals that
+                    // follow a read.
+                    if let Some(signals) = self.signals.as_mut() {
+                        signals.readable.clear();
+                    }
+                }
+                self.caught_up = !page.more;
+                self.cursor = page.next;
+                for event in &page.events {
+                    frames.push_str(&format!(
+                        "id: {}\ndata: {}\n\n",
+                        event.cursor,
+                        json::stringify(&serde_json::to_value(event).unwrap_or(Value::Null))
+                    ));
+                }
+                if let Some(last) = page.events.last() {
+                    self.sent = last.cursor;
+                }
+                if !page.more && !self.ready {
+                    self.ready = true;
+                    self.sent = self.cursor;
+                    frames.push_str(&format!(
+                        "event: {READY_EVENT}\nid: {}\ndata: {{\"cursor\":{}}}\n\n",
+                        self.cursor, self.cursor
+                    ));
+                } else if self.cursor > self.sent && (!frames.is_empty() || page.more) {
+                    // Past the events the filters dropped: with the page's
+                    // events, or alone for a page of replay that kept none.
+                    self.sent = self.cursor;
+                    frames.push_str(&format!("id: {}\n\n", self.cursor));
+                }
             }
-            if let Some(last) = page.events.last() {
-                self.sent = last.cursor;
+            if self.ready {
+                self.signal_frames(&engine, &mut frames);
             }
-            if !page.more && !self.ready {
-                self.ready = true;
-                self.sent = self.cursor;
-                frames.push_str(&format!(
-                    "event: {READY_EVENT}\nid: {}\ndata: {{\"cursor\":{}}}\n\n",
-                    self.cursor, self.cursor
-                ));
-            } else if self.cursor > self.sent && (!frames.is_empty() || page.more) {
-                // Past the events the filters dropped: with the page's
-                // events, or alone for a page of replay that kept none.
-                self.sent = self.cursor;
-                frames.push_str(&format!("id: {}\n\n", self.cursor));
-            }
+            drop(engine);
             if !frames.is_empty() {
                 self.beat_at = None;
                 return Pull::Data(frames.into_bytes());
             }
-            // Caught up, with nothing to send: wait for a commit or a beat.
+            // Caught up, with nothing to send: wait for a commit, a signal,
+            // a beat, or the read a heartbeat since the last one is due.
             let now = Instant::now();
             let beat_at = *self.beat_at.get_or_insert(now + self.heartbeat);
-            let until = beat_at.min(deadline);
-            let moved = notifier.wait(epoch, until.saturating_duration_since(now)) > epoch;
+            let read_at = self.last_read + self.heartbeat;
+            let until = beat_at.min(read_at).min(deadline);
+            let moved = notifier.wait_wakes(wakes, until.saturating_duration_since(now)) > wakes;
             if moved {
-                // A commit woke it: read again, with a fresh heartbeat.
-                self.beat_at = None;
+                // A commit woke it: read again, with a fresh heartbeat. A
+                // signal keeps the heartbeat where it was.
+                if notifier.epoch() != epoch {
+                    self.beat_at = None;
+                }
                 continue;
             }
             if Instant::now() >= beat_at {
@@ -342,6 +453,7 @@ impl EventStream {
                     return Pull::End;
                 }
                 self.beat_at = None;
+                self.read_due = true;
                 // A heartbeat carries the cursor when the filters dropped
                 // what the stream read since its last write.
                 let moved = self.cursor > self.sent;
@@ -352,7 +464,41 @@ impl EventStream {
                     b": keepalive\n\n".to_vec()
                 });
             }
+            if Instant::now() >= read_at && Instant::now() < deadline {
+                // A heartbeat since the last read, with the keepalive put
+                // off by signals: read again.
+                continue;
+            }
             return Pull::Pending;
+        }
+    }
+
+    // signal_frames appends a message for each signal the stream holds
+    // whose schema its principal may read, asking the policy once per
+    // schema between two reads of the log.
+    fn signal_frames(&mut self, engine: &Engine, frames: &mut String) {
+        let Some(signals) = self.signals.as_mut() else {
+            return;
+        };
+        for signal in signals.queue.take() {
+            let readable = *signals
+                .readable
+                .entry(signal.schema.clone())
+                .or_insert_with(|| {
+                    engine.access.allows(
+                        &self.principal,
+                        SchemaAction::Read,
+                        &signal.namespace,
+                        &signal.schema,
+                    )
+                });
+            if !readable {
+                continue;
+            }
+            frames.push_str(&format!(
+                "event: {SIGNAL_EVENT}\ndata: {}\n\n",
+                json::stringify(&serde_json::to_value(&*signal).unwrap_or(Value::Null))
+            ));
         }
     }
 
@@ -368,7 +514,9 @@ impl EventStream {
     }
 
     /// The storage's notifier the stream waits on, while the engine is
-    /// open: what a host that waits for many streams at once blocks on.
+    /// open: what a host that waits for many streams at once blocks on,
+    /// for its wakes ([`superschematic_engine_storage::Notifier::wakes`]),
+    /// which a commit and a signal move.
     pub fn notifier(&self) -> Option<Arc<superschematic_engine_storage::Notifier>> {
         if self.done {
             return None;

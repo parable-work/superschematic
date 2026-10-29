@@ -99,6 +99,7 @@ func Schema(tb testing.TB, opts Options) *ir.Schema {
 			{Name: ir.IdentityCredentialPasswordHashField, TypeRef: ir.TypeRef{Name: "string"}, Required: true, Secret: true},
 			{Name: ir.IdentityCredentialPasswordChangedAtField, TypeRef: ir.TypeRef{Name: DateTime}, Required: true},
 			{Name: ir.IdentityCredentialDisabledAtField, TypeRef: ir.TypeRef{Name: DateTime}},
+			{Name: ir.IdentityCredentialPendingAtField, TypeRef: ir.TypeRef{Name: DateTime}},
 		},
 	})
 

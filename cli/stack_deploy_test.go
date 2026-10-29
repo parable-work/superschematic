@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -92,7 +94,7 @@ operationSets:
         typeRef: { name: OrderView }
         required: true
         httpMethod: GET
-        restPath: orders/:id
+        restPath: "orders/{id}"
         arguments:
           - name: id
             typeRef: { name: string }
@@ -167,7 +169,7 @@ func useTerminal(t *testing.T, term *fakeTerminal) {
 }
 
 func demoImage(n int) string {
-	return "demo-api=demo-api@sha256:" + strings.Repeat(fmt.Sprintf("%x", n), 64)
+	return "demo-api=" + stacktest.ImageRepository("demo-api") + "@sha256:" + strings.Repeat(fmt.Sprintf("%x", n), 64)
 }
 
 // TestStackCommands runs plan, deploy, secrets set, outputs, bootstrap and
@@ -375,7 +377,7 @@ func TestStackBuild(t *testing.T) {
 
 	out, err := run("build", "Staging")
 	require.NoError(t, err)
-	assert.Regexp(t, `^--image demo-api=demo-api@sha256:[0-9a-f]{64}\n$`, out)
+	assert.Regexp(t, `^--image demo-api=`+regexp.QuoteMeta(stacktest.ImageRepository("demo-api"))+`@sha256:[0-9a-f]{64}\n$`, out)
 	assert.Equal(t, []string{"build demo-api: schemas/dist/server/demo-stack/demo-api/Dockerfile"}, ext.Provisioner.Calls())
 	assert.Equal(t, []string{"schemas/dist/server/", "schemas/dist/server/demo-stack/", "schemas/dist/server/demo-stack/demo-api/",
 		"schemas/dist/server/demo-stack/demo-api/Dockerfile", "schemas/dist/server/demo-stack/demo-api/Dockerfile.dockerignore"},
@@ -522,5 +524,65 @@ func TestParseGitHubRemote(t *testing.T) {
 		"https://github.com/acme":                   "",
 	} {
 		assert.Equal(t, want, parseGitHubRemote(url), url)
+	}
+}
+
+// appDemoTree is demoTree with demo-api in Rust and declaring the app
+// Backoffice, which needs the topcoat extension (D78).
+func appDemoTree(t *testing.T) string {
+	t.Helper()
+	stackDir := demoTree(t)
+	services := filepath.Dir(stackDir)
+	edit := func(name, old, new string) {
+		t.Helper()
+		path := filepath.Join(services, filepath.FromSlash(name))
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
+		require.Contains(t, string(data), old)
+		require.NoError(t, os.WriteFile(path, []byte(strings.Replace(string(data), old, new, 1)), 0o644))
+	}
+	edit("demo-api/schema.config.yaml", "api: { enabled: true }", "api: { enabled: true, language: RUST }")
+	edit("demo-api/schema.config.yaml", "go: { enabled: true }", "rust: { enabled: true }")
+	edit("demo-api/src/api.schema.yaml", "operationSets:", "apps:\n  - name: Backoffice\n    extensions: [topcoat]\noperationSets:")
+	return stackDir
+}
+
+// TestStackCommandsRefuseAnAppsMissingExtension: a binary that does not
+// link the extension an app names refuses stack build, stack deploy and
+// stack prepare of its stack, which would build the app's image, as
+// build-all and stack dev refuse to build it; stack plan, a deploy with
+// --no-build and a prepare with --no-build build nothing and read it as
+// any deployable (D78).
+func TestStackCommandsRefuseAnAppsMissingExtension(t *testing.T) {
+	stackDir := appDemoTree(t)
+	ext := &stacktest.Extension{}
+	run := func(args ...string) error {
+		t.Helper()
+		root := New(Config{}, ext)
+		root.SetOut(io.Discard)
+		root.SetErr(io.Discard)
+		root.SetIn(strings.NewReader(""))
+		root.SetArgs(append([]string{"stack"}, append(args, "--stack", stackDir)...))
+		return root.Execute()
+	}
+	useTerminal(t, nil)
+	const refused = "app Backoffice of demo-api needs the topcoat extension, which this superschematic binary does not link; run superschematic-topcoat"
+
+	for _, args := range [][]string{
+		{"build", "Staging"},
+		{"deploy", "Staging", "--image", demoImage(1)},
+		{"prepare"},
+		{"prepare", "Staging"},
+	} {
+		err := run(args...)
+		require.Error(t, err, "stack %s", strings.Join(args, " "))
+		assert.Contains(t, err.Error(), refused, "stack %s", strings.Join(args, " "))
+	}
+	assert.Empty(t, ext.Provisioner.Calls(), "a refused command reached the target")
+
+	require.NoError(t, run("plan", "Staging"))
+	require.NoError(t, run("prepare", "--no-build"))
+	if err := run("deploy", "Staging", "--no-build"); err != nil {
+		assert.NotContains(t, err.Error(), refused)
 	}
 }

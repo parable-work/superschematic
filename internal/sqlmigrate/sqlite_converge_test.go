@@ -36,6 +36,10 @@ func TestConvergenceOnSQLite(t *testing.T) {
 	cases := t.TempDir()
 	covered := map[string]bool{}
 	for _, pc := range sqlitePlanCases() {
+		if pc.noConverge != "" {
+			t.Logf("%s: not applied: %s", pc.golden(), pc.noConverge)
+			continue
+		}
 		for what := range writeSQLitePlanCase(t, filepath.Join(cases, pc.golden()), pc) {
 			covered[what] = true
 		}
@@ -304,6 +308,12 @@ var sqliteSeeds = seeds{
 			return "x'07'", true
 		}
 		return "", false
+	},
+	checked: func(_ *Column, raw string, number bool) string {
+		if number {
+			return raw
+		}
+		return literal(raw)
 	},
 	same: "IS",
 }

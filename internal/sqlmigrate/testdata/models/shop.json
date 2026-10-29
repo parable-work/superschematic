@@ -129,7 +129,6 @@
           "type": "TEXT"
         },
         {
-          "default": "CURRENT_TIMESTAMP",
           "name": "placed_at",
           "origin": "Order.placedAt",
           "type": "TIMESTAMPTZ"

@@ -464,7 +464,7 @@ func (p *Prepared) build(ctx context.Context, s *session, src *Sources, envs []*
 	images, sites, bundles := map[string]*ir.ResolvedDeployable{}, map[string]*ir.ResolvedDeployable{}, map[string]*ir.ResolvedDeployable{}
 	for _, env := range envs {
 		for _, d := range env.Deployables {
-			if d.HasImage() && images[d.Name] == nil {
+			if runsImage(d) && images[d.Name] == nil {
 				images[d.Name] = d
 			}
 			if d.Kind == ir.DeployableSite && sites[d.Name] == nil {

@@ -359,8 +359,11 @@ an encrypted operation
 unless it is `@manualRouteRegistration`. The service's own handler for
 such an operation receives the envelope as its body and decrypts it, as
 the Go server's `PayloadDecryptor` does. The router has no multipart step
-either, so the build refuses an operation that uploads files unless it is
-`@manualRouteRegistration`; the service's handler reads the multipart body.
+either, and answers JSON alone, so the build refuses an operation that
+uploads files, or whose result is a `FileDownload`, unless it is
+`@manualRouteRegistration`; the service's handler reads the multipart body
+or answers the file. The Go and TypeScript servers serve both
+([Files](/superschematic/guides/api-routes/#files)); support here follows.
 
 An `@hmacVerified` operation's route
 ([Webhooks](/superschematic/guides/api-routes/#webhooks)) runs its
@@ -390,6 +393,33 @@ impl WebhookVerifier for GitHubVerifier {
         next.run(Request::from_parts(parts, Body::from(bytes))).await
     }
 }
+```
+
+For a provider that signs with a JWT carrying the body's SHA-256, such as
+Plaid, the runtime's `JwtBodyHashVerifier` does the checking
+([A JWT that carries the body's hash](/superschematic/guides/api-routes/#a-jwt-that-carries-the-bodys-hash)).
+`WebhookVerifier` is the generated crate's trait, so wrap it in a type of
+your own:
+
+```rust
+struct Plaid(JwtBodyHashVerifier);
+
+#[async_trait]
+impl WebhookVerifier for Plaid {
+    async fn verify(&self, request: Request, next: Next) -> Response {
+        self.0.verify(request, next).await
+    }
+}
+
+let plaid = JwtBodyHashVerifier::new(JwtBodyHashOptions {
+    header: "Plaid-Verification".into(),
+    keys: WebhookKeys::Lookup(Arc::new(plaid_key)), // async fn(String) -> Result<Option<Value>, String>
+    alg: JwsAlgorithm::Es256,
+    max_age: Duration::from_secs(300),
+    body_hash_claim: "request_body_sha256".into(),
+    clock_skew: None,
+    max_body_bytes: None,
+})?;
 ```
 
 `build_router_with_manual_routes` runs the verifier before a
@@ -568,6 +598,7 @@ one line each.
 | `<db>_database` | `stackconfig::Database` | the API's database, its `authDb` or its one DB dependency |
 | `<api>_service` | `stackconfig::Service` | each API it `calls` |
 | `<bucket>_bucket` | `stackconfig::Bucket` | each bucket it lists in `buckets` (D54) |
+| `<store>_memory_store` | `Option<stackconfig::MemoryStore>` | each memory store it lists in `memoryStores` (D75); `None` when the field is unset, a disabled store |
 | `<api>_callers` | `ServiceAuthConfig` | an API with `@requireService` or `@allowService`; `values-schema.json` lists its variables, which a deployment outside a stack sets |
 | `<api>_cors` | `stackconfig::Cors` | every API: the origins of the sites that call it, none where no site does |
 | `<api>_identity` | `identity::Config` | an API over the user model, parsed from `<API>_IDENTITY`'s JSON, the runtime's defaults when it is unset |
@@ -585,6 +616,8 @@ pub struct Deps {
     pub shop_api: schemas_shop_api_sdk::ShopApiSdk,
     // runtime::bucket::Bucket per buckets entry, here of shop-media
     pub shop_media: Arc<dyn Bucket>,
+    // runtime::memorystore::MemoryStore per memoryStores entry, here of shop-cache
+    pub shop_cache: Arc<dyn MemoryStore>,
     pub span: tracing::Span,
 }
 
@@ -608,7 +641,12 @@ deletes and lists objects and signs URLs for them
 ([Buckets](/superschematic/guides/buckets/)); the server, job or worker
 opens it on GCS, or on the emulator `stack dev` runs, with the runtime's
 `gcs` feature, which the entrypoint's crate turns on and the API crate
-does not. The crate turns on the
+does not. A memory store is the runtime's `memorystore::MemoryStore`,
+whose channels and keys the store's definitions crate builds
+([Memory stores](/superschematic/guides/memory-stores/)); the entrypoint
+opens it on Redis or Valkey with the runtime's `memorystore-redis`
+feature, which only an entrypoint whose APIs list a store turns on, or
+disabled when its field is unset. The crate turns on the
 runtime's `postgres` feature for a
 database, `identity-postgres` beside the user model, so the identity
 store runs over `Deps.db` (`runtime::identity::PostgresPool`), and
@@ -687,7 +725,20 @@ identity and service authenticators and passes them to
 `build_router_with_manual_routes`, and serves the routers with
 `/healthz`, `/readyz`, JSON logs and a drain on SIGTERM. A stack's build
 refuses an implementation that declares no `create_manual_routes` while
-its API declares a manual route, and says what to add. The build scaffolds a
+its API declares a manual route, and says what to add. One whose
+`Cargo.toml` lacks a dependency its scaffold would write now, as axum
+after the API gains a manual route, or a memory store's definitions after
+it lists one, draws a warning that names the entry to add (D100):
+
+```
+warning: stack shop-stack: the implementation of shop-stock, at rust/shop-stock, does not depend on axum, which its scaffold depends on now; the build wrote the crate's Cargo.toml once and does not write it again, so add
+
+    axum = "0.8.9"
+
+to its [dependencies] (D100)
+```
+
+The build scaffolds a
 missing implementation crate at the `rust` template, and the server's
 `Cargo.toml` depends on it by the package name its `Cargo.toml` gives it,
 so you may rename it. Each build of the stack copies the crate into the

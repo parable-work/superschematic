@@ -65,7 +65,7 @@ func TestColumnTypeByArrayDepth(t *testing.T) {
 		{ir.TypeRef{Name: "string", IsArray: true}, "TEXT[]"},
 		{ir.TypeRef{Name: "string", IsArray: true, IsArrayOfArrays: true}, "JSONB"},
 	} {
-		if got := sqlutil.ColumnType(&ir.FieldDef{Name: "f", TypeRef: tc.typeRef}, scalars); got != tc.want {
+		if got := sqlutil.ColumnType(nil, &ir.FieldDef{Name: "f", TypeRef: tc.typeRef}, scalars); got != tc.want {
 			t.Errorf("ColumnType(%+v) = %q, want %q", tc.typeRef, got, tc.want)
 		}
 	}

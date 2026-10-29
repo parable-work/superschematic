@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/registry"
@@ -50,6 +51,9 @@ type Narrowing struct {
 	// Params and Results are each operation's, by name.
 	Params  map[string]any
 	Results map[string]any
+	// Signals are each signal's data, its paramsSchema, by name (D77): a
+	// config narrows none.
+	Signals map[string]any
 	// CreateParams is the create parameters' schema, as the config
 	// narrows it; nil when the declaration takes none.
 	CreateParams any
@@ -91,6 +95,8 @@ var coreNarrowers = map[string]narrower{
 	"Approvals":    narrowApprovals,
 	"Numbering":    narrowNumbering,
 	"Timers":       narrowTimers,
+	"Derived":      narrowDerived,
+	"Provenance":   narrowProvenance,
 	"Assignment":   narrowAssignment,
 	"Lease":        narrowLease,
 	"Presence":     narrowPresence,
@@ -115,7 +121,7 @@ func NarrowerNames() []string {
 // Narrow starts from the declaration's shapes and applies the behavior's
 // core narrowing, when it has one.
 func Narrow(declaration registry.Behavior, config json.RawMessage, target Target) (Narrowing, error) {
-	n := Narrowing{Fields: map[string]FieldShape{}, Params: map[string]any{}, Results: map[string]any{}}
+	n := Narrowing{Fields: map[string]FieldShape{}, Params: map[string]any{}, Results: map[string]any{}, Signals: map[string]any{}}
 	for _, field := range declaration.Fields {
 		n.Fields[field.Name] = FieldShape{Schema: map[string]any{"description": field.Description}}
 	}
@@ -130,6 +136,13 @@ func Narrow(declaration registry.Behavior, config json.RawMessage, target Target
 		}
 		n.Params[op.Name] = params
 		n.Results[op.Name] = result
+	}
+	for _, signal := range declaration.Signals {
+		data, err := decodeSchema(signal.ParamsSchema)
+		if err != nil {
+			return n, fmt.Errorf("signal %s paramsSchema: %w", signal.Name, err)
+		}
+		n.Signals[signal.Name] = data
 	}
 	var err error
 	if n.CreateParams, err = decodeSchema(declaration.CreateParamsSchema); err != nil {
@@ -273,9 +286,241 @@ func narrowWorkflow(n *Narrowing, config map[string]any, target Target) error {
 	return nil
 }
 
-// Comments: the count is always there.
-func narrowComments(n *Narrowing, _ map[string]any, _ Target) error {
-	return setField(n, "commentCount", map[string]any{"type": "integer"}, true)
+// commentsMessageResults are Comments' operations whose result is one
+// message's record.
+var commentsMessageResults = []string{"post", "begin", "finish", "interrupt", "edit", "deleteMessage", "react", "unreact", "pin", "unpin", "resolve", "reopen", "moveAnchor", "getMessage"}
+
+// commentsBlocksGiven are Comments' operations whose parameters give a
+// message's blocks: post and finish, which take none when the config
+// allows none, and edit.
+var commentsBlocksGiven = []string{"post", "finish", "edit"}
+
+// Comments (D77): the count of messages, the threads' counts, who is
+// composing and the reader's unread count are always there, every instance
+// starting with an empty conversation; when the latest message stood is
+// absent while none has. A message's stand and listMessages' readUpTo are
+// as declared, optional. Its namespace operations (inbox, claimDeliveries,
+// settleDeliveries) belong to no type, and no config narrows them.
+// A block is one of the kinds post's parameters declare (<Base>CommentBlock),
+// and a message's record is post's result with its blocks typed as the
+// record holds them: <Base>CommentPostedBlock, the same kinds with a code
+// block's move members (moveAnchor's original, moves, movedAt, movedBy and
+// movedFor), which the parameters' closed code block does not declare.
+// <Base>CommentMessage is what every operation that returns a record
+// (begin, finish, interrupt and moveAnchor among them) returns and
+// listMessages' and listPinned's pages hold; listEdits' items hold posted
+// blocks too. A record keeps every kind of block, since narrowing the
+// config leaves posted blocks as they are; what post, finish and edit give
+// is of the kinds the config's blocks allow, and with none allowed post and
+// finish take no blocks.
+func narrowComments(n *Narrowing, config map[string]any, target Target) error {
+	given, err := at(n.Params["post"], "properties", "blocks", "items")
+	if err != nil {
+		return fmt.Errorf("operation post: %w", err)
+	}
+	kinds, _ := given["oneOf"].([]any)
+	if len(kinds) == 0 {
+		return fmt.Errorf("operation post: a block is not one of its kinds")
+	}
+	block := target.Base + "CommentBlock"
+	postedBlock := target.Base + "CommentPostedBlock"
+	message := target.Base + "CommentMessage"
+	n.Aliases = append(n.Aliases, Alias{
+		Name:   block,
+		Doc:    fmt.Sprintf("A block of a message of %s's Comments: a structured part beside its body, of a kind Comments declares.", An(target.Base)),
+		Schema: map[string]any{"oneOf": cloneValue(kinds)},
+	})
+	postedKinds, err := commentsPostedBlocks(kinds)
+	if err != nil {
+		return fmt.Errorf("operation post: %w", err)
+	}
+	n.Aliases = append(n.Aliases, Alias{
+		Name:   postedBlock,
+		Doc:    fmt.Sprintf("A block of a message of %s's Comments as the record holds it: a code block that moveAnchor moved also holds its first anchor and its last move.", An(target.Base)),
+		Schema: map[string]any{"oneOf": postedKinds},
+	})
+	posted, ok := n.Results["post"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("operation post has no result schema")
+	}
+	record := cloneSchema(posted)
+	delete(record, "description")
+	if err := setItems(record, ref(postedBlock, ""), "properties", "blocks"); err != nil {
+		return fmt.Errorf("operation post: %w", err)
+	}
+	n.Aliases = append(n.Aliases, Alias{
+		Name:   message,
+		Doc:    fmt.Sprintf("A message of %s's Comments, as every operation that returns one gives it.", An(target.Base)),
+		Schema: record,
+	})
+	for _, op := range commentsMessageResults {
+		result, ok := n.Results[op].(map[string]any)
+		if !ok {
+			return fmt.Errorf("operation %s has no result schema", op)
+		}
+		n.Results[op] = ref(message, DescriptionOf(result))
+	}
+	if err := setItems(n.Results["listMessages"], ref(message, ""), "properties", "items"); err != nil {
+		return fmt.Errorf("operation listMessages: %w", err)
+	}
+	root, err := at(n.Results["listMessages"], "properties", "root")
+	if err != nil {
+		return fmt.Errorf("operation listMessages: %w", err)
+	}
+	if err := setOperationProperty(n.Results, "listMessages", nil, "root", ref(message, DescriptionOf(root))); err != nil {
+		return err
+	}
+	if err := setItems(n.Results["listPinned"], ref(message, ""), "properties", "items"); err != nil {
+		return fmt.Errorf("operation listPinned: %w", err)
+	}
+	if err := setItems(n.Results["listEdits"], ref(postedBlock, ""), "properties", "items", "items", "properties", "blocks"); err != nil {
+		return fmt.Errorf("operation listEdits: %w", err)
+	}
+	allowed := kinds
+	if list, ok := config["blocks"].([]any); ok {
+		allowed = nil
+		for _, kind := range kinds {
+			if slices.Contains(stringsOf(list), blockKind(kind)) {
+				allowed = append(allowed, kind)
+			}
+		}
+	}
+	for _, op := range commentsBlocksGiven {
+		if len(allowed) == 0 && op != "edit" {
+			if err := deleteProperty(n.Params[op], "blocks"); err != nil {
+				return fmt.Errorf("operation %s: %w", op, err)
+			}
+			continue
+		}
+		if len(allowed) == 0 {
+			// An edit giving no blocks is the only way to clear the
+			// blocks a message was posted with before the config named
+			// none, so edit keeps blocks, as an empty array.
+			if err := emptyArray(n.Params[op], "properties", "blocks"); err != nil {
+				return fmt.Errorf("operation %s: %w", op, err)
+			}
+			continue
+		}
+		var items map[string]any
+		if len(allowed) == len(kinds) {
+			items = ref(block, "")
+		} else {
+			items = map[string]any{"oneOf": cloneValue(allowed)}
+		}
+		if err := setItems(n.Params[op], items, "properties", "blocks"); err != nil {
+			return fmt.Errorf("operation %s: %w", op, err)
+		}
+	}
+	return setFields(n,
+		typedField{"messages", integer(), true},
+		typedField{"lastMessageAt", integer(), false},
+		typedField{"threads", map[string]any{
+			"type": "object", "additionalProperties": false, "required": []any{"open", "resolved"},
+			"properties": map[string]any{"open": integer(), "resolved": integer()},
+		}, true},
+		typedField{"composing", map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, true},
+		typedField{"unread", integer(), true},
+	)
+}
+
+// commentsMoveMembers are what moveAnchor adds to a code block, in the
+// order it writes them: the anchor the block was given with, how many
+// times it moved, and when, by whom and for whom it last moved.
+var commentsMoveMembers = map[string]any{
+	"original": map[string]any{
+		"description":          "The anchor the block was given with, before its first move.",
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []any{"revision", "lines"},
+		"properties": map[string]any{
+			"revision": map[string]any{"type": "string"},
+			"lines":    map[string]any{"type": "array", "items": integer()},
+		},
+	},
+	"moves":    map[string]any{"description": "How many times moveAnchor moved it.", "type": "integer"},
+	"movedAt":  map[string]any{"description": "When it last moved, in epoch milliseconds.", "type": "integer"},
+	"movedBy":  map[string]any{"description": "The subject of the caller who last moved it.", "type": "string"},
+	"movedFor": map[string]any{"description": "The subject the caller who last moved it acted for, when it acted for someone.", "type": "string"},
+}
+
+// commentsPostedBlocks are the kinds of block a record holds: the kinds
+// given, the code kind with moveAnchor's members, each optional. The code
+// kind must be declared, so the members cannot drift from the declaration
+// unnoticed.
+func commentsPostedBlocks(kinds []any) ([]any, error) {
+	out := cloneValue(kinds).([]any)
+	for _, kind := range out {
+		if blockKind(kind) != "code" {
+			continue
+		}
+		properties, err := at(kind, "properties")
+		if err != nil {
+			return nil, err
+		}
+		for name, member := range commentsMoveMembers {
+			if _, ok := properties[name]; ok {
+				return nil, fmt.Errorf("a code block already declares %s", name)
+			}
+			properties[name] = cloneValue(member)
+		}
+		return out, nil
+	}
+	return nil, fmt.Errorf("a block is of no code kind")
+}
+
+// blockKind is the kind a block's schema holds: its kind's const.
+func blockKind(schema any) string {
+	kind, _ := at(schema, "properties", "kind")
+	text, _ := kind["const"].(string)
+	return text
+}
+
+// emptyArray narrows the array schema at a path of object keys to the
+// empty array: no items (never[] in TypeScript), and at most none.
+func emptyArray(schema any, path ...string) error {
+	array, err := at(schema, path...)
+	if err != nil {
+		return err
+	}
+	if _, ok := array["items"]; !ok {
+		return fmt.Errorf("the declaration's schema at %v holds no items", path)
+	}
+	array["items"] = false
+	array["maxItems"] = json.Number("0")
+	return nil
+}
+
+// setItems replaces the items of the array schema at a path of object
+// keys, keeping their description.
+func setItems(schema any, items map[string]any, path ...string) error {
+	array, err := at(schema, path...)
+	if err != nil {
+		return err
+	}
+	current, ok := array["items"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("the declaration's schema at %v holds no items", path)
+	}
+	if description, ok := current["description"].(string); ok {
+		if _, has := items["description"]; !has {
+			items["description"] = description
+		}
+	}
+	array["items"] = items
+	return nil
+}
+
+// deleteProperty removes a property of an object schema; it must exist.
+func deleteProperty(schema any, name string) error {
+	properties, err := at(schema, "properties")
+	if err != nil {
+		return err
+	}
+	if _, ok := properties[name]; !ok {
+		return fmt.Errorf("the declaration's schema has no property %s", name)
+	}
+	delete(properties, name)
+	return nil
 }
 
 // Revisions: a proposal's patch is the type's patch, a revision's data its
@@ -938,4 +1183,128 @@ func cloneValue(value any) any {
 		return out
 	}
 	return value
+}
+
+// fieldNames is a schema of a list of the names given, as an operation's
+// paramsSchema lists them: at least one, each once.
+func fieldNames(names []string) map[string]any {
+	return map[string]any{"type": "array", "minItems": 1, "uniqueItems": true, "items": EnumOf(names)}
+}
+
+// ownField is a node that renders as the TypeScript type of one of the
+// type's own fields, without the absence an optional field allows.
+func ownField(target Target, name string) map[string]any {
+	return ref(fmt.Sprintf("NonNullable<%sFields[%s]>", target.Base, strconv.Quote(name)), "")
+}
+
+// Derived: the fields field holds, by derived field of the config, its last
+// settled value's record and its override, so none is required; stale
+// lists derived fields. The operations name derived fields, and
+// applyDerived's values are of each field's own type (D74).
+func narrowDerived(n *Narrowing, config map[string]any, target Target) error {
+	fields, _ := config["fields"].(map[string]any)
+	names := SortedKeys(fields)
+	record := map[string]any{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]any{
+			"sourceHash": map[string]any{"type": "string"},
+			"model":      map[string]any{"type": "string"},
+			"settledAt":  integer(),
+			"settledBy":  map[string]any{"type": "string"},
+			"confidence": map[string]any{"type": "number"},
+			"overridden": map[string]any{
+				"type": "object", "additionalProperties": false, "required": []any{"by", "at"},
+				"properties": map[string]any{"by": map[string]any{"type": "string"}, "at": integer()},
+			},
+		},
+	}
+	properties := map[string]any{}
+	values := map[string]any{}
+	for _, name := range names {
+		properties[name] = record
+		values[name] = map[string]any{
+			"type": "object", "additionalProperties": false, "required": []any{"sourceHash", "value"},
+			"properties": map[string]any{
+				"sourceHash": map[string]any{"type": "string", "minLength": 1},
+				"value":      ownField(target, name),
+				"confidence": map[string]any{"type": "number", "minimum": 0, "maximum": 1},
+				"usage":      map[string]any{"type": "object"},
+			},
+		}
+	}
+	settledNames := map[string]any{"type": "array", "items": EnumOf(names)}
+	for _, step := range []error{
+		setOperationProperty(n.Params, "staleDerivations", nil, "field", EnumOf(names)),
+		setOperationProperty(n.Params, "applyDerived", nil, "fields", map[string]any{"type": "object", "minProperties": 1, "additionalProperties": false, "properties": values}),
+		setOperationProperty(n.Results, "applyDerived", nil, "settled", settledNames),
+		setOperationProperty(n.Params, "rederive", nil, "fields", fieldNames(names)),
+		setOperationProperty(n.Results, "rederive", nil, "stale", map[string]any{"type": "array", "items": EnumOf(names)}),
+		setField(n, "fields", map[string]any{"type": "object", "additionalProperties": false, "properties": properties}, true),
+	} {
+		if step != nil {
+			return step
+		}
+	}
+	return setField(n, "stale", map[string]any{"type": "array", "items": EnumOf(names)}, true)
+}
+
+// provenanceReviews are the states a recorded field's review takes.
+var provenanceReviews = []string{"proposed", "accepted", "rejected", "edited"}
+
+// Provenance: the fields field holds, by recorded field (the config's, or
+// every own field), its last write's record, so none is required; accept
+// and reject name recorded fields, and reject's patch holds their own
+// types (D74).
+func narrowProvenance(n *Narrowing, config map[string]any, target Target) error {
+	names := stringsOf(config["fields"])
+	if _, given := config["fields"]; !given && target.Instance != nil {
+		for _, field := range target.Instance.Fields {
+			if field == nil {
+				continue
+			}
+			if field.JSONTag != "" {
+				names = append(names, field.JSONTag)
+			} else {
+				names = append(names, field.Name)
+			}
+		}
+	}
+	slices.Sort(names)
+	record := map[string]any{
+		"type": "object", "additionalProperties": false, "required": []any{"source", "by", "at"},
+		"properties": map[string]any{
+			"source":     map[string]any{"type": "string"},
+			"by":         map[string]any{"type": "string"},
+			"for":        map[string]any{"type": "string"},
+			"at":         integer(),
+			"confidence": map[string]any{"type": "number"},
+			"review": map[string]any{
+				"type": "object", "additionalProperties": false, "required": []any{"state"},
+				"properties": map[string]any{"state": EnumOf(provenanceReviews), "by": map[string]any{"type": "string"}, "at": integer()},
+			},
+		},
+	}
+	properties := map[string]any{}
+	quoted := make([]string, 0, len(names))
+	for _, name := range names {
+		properties[name] = record
+		quoted = append(quoted, strconv.Quote(name))
+	}
+	picked := "never"
+	if len(quoted) > 0 {
+		picked = strings.Join(quoted, " | ")
+	}
+	for _, step := range []error{
+		setOperationProperty(n.Params, "accept", nil, "fields", fieldNames(names)),
+		setOperationProperty(n.Results, "accept", nil, "accepted", map[string]any{"type": "array", "items": EnumOf(names)}),
+		setOperationProperty(n.Params, "reject", nil, "fields", fieldNames(names)),
+		setOperationProperty(n.Params, "reject", nil, "patch", ref(fmt.Sprintf("Partial<Pick<%sFields, %s>>", target.Base, picked), "")),
+		setOperationProperty(n.Results, "reject", nil, "rejected", map[string]any{"type": "array", "items": EnumOf(names)}),
+		setField(n, "fields", map[string]any{"type": "object", "additionalProperties": false, "properties": properties}, true),
+	} {
+		if step != nil {
+			return step
+		}
+	}
+	return setField(n, "inReview", boolean(), true)
 }

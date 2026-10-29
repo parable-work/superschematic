@@ -26,8 +26,10 @@
 //!   the credentialed CORS of the trusted origins ([`CorsLayer`]).
 //! - Roles: the permission form ([`valid_permission`]), a principal's
 //!   permissions ([`effective_permissions`]), the rule that no one grants
-//!   what they do not hold ([`uncovered`]), and capabilities over the
-//!   router's operation table ([`Route`], [`capabilities_of`]).
+//!   what they do not hold ([`uncovered`]), nor sets the password of,
+//!   disables or enables a user who holds it ([`uncovered_user`]), and
+//!   capabilities over the router's operation table ([`Route`],
+//!   [`capabilities_of`]).
 //! - [`Store`], and [`SqlStore`], its implementation for Postgres and
 //!   SQLite built from the schema's identity descriptor, over a SQL
 //!   [`Client`]: [`TokioPostgres`] with the `identity-postgres` feature,
@@ -68,27 +70,30 @@ pub use descriptor::{
 };
 pub use errors::{
     CODE_CONFLICT, CODE_CROSS_ORIGIN, CODE_FORBIDDEN, CODE_INVALID_CREDENTIALS,
-    CODE_INVALID_PERMISSION, CODE_NOT_FOUND, CODE_UNAUTHORIZED,
+    CODE_INVALID_PERMISSION, CODE_NOT_FOUND, CODE_NOT_PENDING, CODE_PENDING_APPROVAL,
+    CODE_UNAUTHORIZED,
 };
 pub use handlers::{
     Cors, CorsLayer, IdentityAuthenticator, Operation, UserAdministration, UserSessions,
-    DEFAULT_USER_ADMINISTRATION_PATH, DEFAULT_USER_SESSIONS_PATH, OPERATIONS, OP_CAPABILITIES,
-    OP_CHANGE_PASSWORD, OP_CREATE_ROLE, OP_CREATE_USER, OP_DELETE_ROLE, OP_DISABLE_USER,
-    OP_ENABLE_USER, OP_GET_USER, OP_GRANT_ROLE, OP_LIST_ROLES, OP_LIST_USERS, OP_LOGIN, OP_LOGOUT,
-    OP_ME, OP_REGISTER, OP_REVOKE_ROLE, OP_SET_USER_PASSWORD, OP_UPDATE_ROLE,
+    DEFAULT_USER_ADMINISTRATION_PATH, DEFAULT_USER_SESSIONS_PATH, OPERATIONS, OP_APPROVE_USER,
+    OP_CAPABILITIES, OP_CHANGE_PASSWORD, OP_CREATE_ROLE, OP_CREATE_USER, OP_DELETE_ROLE,
+    OP_DISABLE_USER, OP_ENABLE_USER, OP_GET_USER, OP_GRANT_ROLE, OP_LIST_ROLES, OP_LIST_USERS,
+    OP_LOGIN, OP_LOGOUT, OP_ME, OP_REGISTER, OP_REVOKE_ROLE, OP_SET_USER_PASSWORD, OP_UPDATE_ROLE,
 };
 pub use password::{
     check_password, hash_password, hash_password_with_salt, verify_password, Argon2Params,
     HashError, MalformedHash, Verified, KEY_BYTES, PASSWORD_SCALAR, SALT_BYTES,
 };
-pub use permissions::{capabilities_of, effective_permissions, uncovered, valid_permission, Route};
+pub use permissions::{
+    capabilities_of, effective_permissions, uncovered, uncovered_user, valid_permission, Route,
+};
 pub use scalars::{parse_uuid, uuid_to_base62, Scalars};
 pub use service::{
     Capabilities, ChangePasswordInput, Clock, CreateUserInput, CurrentUser, IdentityPrincipal,
     IdentityRole, IdentityUser, Input, IssuedSession, LoginInput, LoginResult, Permits,
-    RegisterInput, RoleInput, RoleRef, Service, SessionUser, SetPasswordInput,
-    DEFAULT_PERMISSION_PREFIX, PERMISSION_ROLES_READ, PERMISSION_ROLES_WRITE,
-    PERMISSION_USERS_READ, PERMISSION_USERS_WRITE,
+    RegisterInput, RegisterResult, Registered, Registration, RoleInput, RoleRef, Service,
+    SessionUser, SetPasswordInput, DEFAULT_PERMISSION_PREFIX, PERMISSION_ROLES_READ,
+    PERMISSION_ROLES_WRITE, PERMISSION_USERS_READ, PERMISSION_USERS_WRITE,
 };
 #[cfg(all(feature = "identity-postgres", feature = "postgres"))]
 pub use sql::PostgresPool;
@@ -98,7 +103,8 @@ pub use sql::Rusqlite;
 pub use sql::TokioPostgres;
 pub use sql::{Client, ClientError, Conn, Dialect, SqlStore, SqlValue};
 pub use store::{
-    LoginRecord, NewSession, NewUser, Role, Session, SessionRecord, Store, StoreError, User,
+    FirstUser, LoginRecord, NewSession, NewUser, NewUserGrants, Role, Session, SessionRecord,
+    Store, StoreError, User,
 };
 pub use time::{format_rfc3339, format_sqlite, parse_timestamp};
 pub use token::{

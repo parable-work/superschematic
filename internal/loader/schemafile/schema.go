@@ -76,6 +76,13 @@ func generateDefinition(reg *registry.Registry) ([]byte, error) {
 			ir.ConflictUnitAtomic, ir.ConflictUnitKeyed, ir.ConflictUnitJSONSchema, ir.ConflictUnitExcluded,
 		}},
 		{"ServiceCallers", "mode", []string{string(ir.ServiceCallersRequire), string(ir.ServiceCallersAllow)}},
+		{"MemoryStoreDeclaration", "kind", []string{
+			string(ir.MemoryStoreChannel), string(ir.MemoryStoreCounter), string(ir.MemoryStoreClaim),
+		}},
+		{"MemoryStorePart", "format", []string{
+			string(ir.MemoryStorePartString), string(ir.MemoryStorePartInteger),
+			string(ir.MemoryStorePartBoolean), string(ir.MemoryStorePartEnum),
+		}},
 		{"OperationDocs", "lifecycle", []string{
 			string(ir.DocsLifecycleDraft), string(ir.DocsLifecycleExperimental),
 			string(ir.DocsLifecycleActive), string(ir.DocsLifecycleDeprecated),
@@ -346,7 +353,7 @@ func roleNames() []string {
 	return []string{
 		string(ir.RoleDBTable), string(ir.RoleAPIView), string(ir.RoleAPIInput),
 		string(ir.RoleEmbeddedStruct), string(ir.RoleAPIOperationSet),
-		string(ir.RoleTrait), string(ir.RoleProjection),
+		string(ir.RoleTrait), string(ir.RoleProjection), string(ir.RoleQuery),
 	}
 }
 
@@ -499,8 +506,9 @@ func closeBehaviors(defs map[string]any, reg *registry.Registry) error {
 
 // replaceDisplayDefs replaces the reflected $defs/TypeDisplay and
 // $defs/DisplayState with the $defs of the registered @display spec's Args
-// (D48), and $defs/FieldDisplay with the field @display spec's (D48,
-// amended): a type's display is the decorator's argument, so the data forms
+// (D48), and $defs/FieldDisplay and $defs/DisplayCurrency with the field
+// @display spec's (D48, amended), whose currency is a code or the
+// reflected DisplayCurrency's object, a field: a type's display is the decorator's argument, so the data forms
 // are held to the schema the TypeScript frontend holds the argument to,
 // which says what the reflection cannot (at least one member, the state
 // names, the transition keys, the closed tones). Each replacement must
@@ -509,7 +517,7 @@ func replaceDisplayDefs(defs map[string]any, reg *registry.Registry) error {
 	if err := replaceDefsWithArgs(defs, reg, "display", registry.TargetType, "TypeDisplay", "DisplayState"); err != nil {
 		return err
 	}
-	return replaceDefsWithArgs(defs, reg, "display", registry.TargetField, "FieldDisplay")
+	return replaceDefsWithArgs(defs, reg, "display", registry.TargetField, "FieldDisplay", "DisplayCurrency")
 }
 
 // replacePageDefs replaces the reflected $defs/OperationPage with the

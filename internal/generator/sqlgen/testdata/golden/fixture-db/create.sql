@@ -18,12 +18,13 @@ CREATE TABLE tenant (
   "name" VARCHAR(80) NOT NULL,
   slug CITEXT NOT NULL,
   email TEXT NOT NULL,
-  status TEXT NOT NULL,
-  is_active BOOLEAN NOT NULL,
-  seat_count DOUBLE PRECISION NOT NULL,
+  status TEXT DEFAULT 'active' NOT NULL,
+  is_active BOOLEAN DEFAULT true NOT NULL,
+  seat_count DOUBLE PRECISION DEFAULT 5 NOT NULL,
   metadata JSONB NOT NULL,
   _version BIGINT DEFAULT 1 NOT NULL,
-  UNIQUE (slug)
+  UNIQUE (slug),
+  CONSTRAINT ck_tenant_status CHECK (status IN ('active', 'suspended'))
 );
 
 -- Add search_text generated column for trigram search

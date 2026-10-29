@@ -284,7 +284,7 @@ func TestEngineEntrypointServes(t *testing.T) {
 	if !strings.Contains(account, `"createdBy":"`) || strings.Contains(account, `"createdBy":"desk-db-engine-runner"`) {
 		t.Errorf("the account was created as %s", account)
 	}
-	online.engine(t, token, http.MethodGet, accounts+"/acme", "", http.StatusOK, `"name":"Acme"`, `"Comments":{"commentCount":0}`)
+	online.engine(t, token, http.MethodGet, accounts+"/acme", "", http.StatusOK, `"name":"Acme"`, `"Comments":{"messages":0,"threads":{"open":0,"resolved":0},"composing":[],"unread":0}`)
 	online.engine(t, token, http.MethodPost, tickets, `{"id": "t1", "data": {"title": "The printer is out of toner", "contact": {"email": "bob@example.com"}}, "behaviors": {"Links": {"account": "acme"}}}`,
 		http.StatusCreated, `"status":"open"`, `"respond":{"dueAt":`)
 	// A service's credential with no session stands in for an end user,

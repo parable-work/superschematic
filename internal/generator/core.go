@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/parable-work/superschematic/internal/generator/cigen"
+	"github.com/parable-work/superschematic/internal/generator/memorystoregen"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/generator/sitegen"
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
@@ -22,7 +23,23 @@ var sqlOutputSchema = json.RawMessage(`{
 		"migrationsDir": {"type": "string"},
 		"viewOwner": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
 		"sourceSchema": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
-		"dialects": {"type": "array", "items": {"type": "string"}}
+		"dialects": {"type": "array", "items": {"type": "string"}},
+		"encryption": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["key"],
+			"properties": {"key": {"type": "string"}}
+		},
+		"systemActor": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["id"],
+			"properties": {
+				"id": {"type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"},
+				"name": {"type": "string", "minLength": 1}
+			}
+		},
+		"requireUpdatedBy": {"type": "boolean"}
 	}
 }`)
 
@@ -187,6 +204,22 @@ func RegisterCore(reg *registry.Registry) error {
 			Generate: func(c registry.GenerateContext) error {
 				r := run{c}
 				return r.measure("output.server", r.generateServers)
+			},
+		},
+		{
+			// The MemoryStore kind's one generator (D75): the store's
+			// inventory.json at memorystore/<service>, and the typed
+			// definitions of each language outputs.types enables at
+			// types/<lang>/<service> (internal/generator/memorystoregen).
+			// It reads outputs.types, which the types generator claims,
+			// and so takes no output key of its own.
+			Name:  memorystoregen.Name,
+			Kinds: []string{string(ir.SchemaKindMemoryStore)},
+			Dirs: func(c registry.GenerateContext) []string {
+				return memorystoregen.Dirs(c, TypesDir)
+			},
+			Generate: func(c registry.GenerateContext) error {
+				return run{c}.measure("output.memorystore", func() error { return memorystoregen.Generate(c, TypesDir) })
 			},
 		},
 		{

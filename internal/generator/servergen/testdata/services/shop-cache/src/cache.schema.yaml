@@ -1,0 +1,16 @@
+memoryStoreDeclarations:
+  - name: order-placed
+    symbol: OrderPlaced
+    kind: channel
+    doc: An order was placed; a waiter rereads it.
+    parts:
+      - name: orderId
+        type: { name: string }
+  - name: export-started
+    symbol: ExportStarted
+    kind: claim
+    doc: One export of an order at a time.
+    ttlSeconds: 300
+    parts:
+      - name: orderId
+        type: { name: string }

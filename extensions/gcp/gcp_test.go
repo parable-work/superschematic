@@ -130,13 +130,15 @@ func resolve(t *testing.T, reg *registry.Registry, s *ir.Stack, services []stack
 // type on the way. Staging runs shop-orders' job on every deploy (D52,
 // amended), and so do Preview's members, which extend it: the job's run
 // says so, and the deploy order runs it in a jobs step before the contract
-// phase, with no node of its own.
+// phase, with no node of its own. shop-api and shop-orders list the memory
+// store shop-cache (D75), which Production gives a larger node and two
+// replicas, and which Preview's members share with Staging.
 func TestGolden(t *testing.T) {
 	reg := assemble(t)
-	s := stacktest.WithJobOnDeploy(stacktest.WithSite(shop()), "Staging")
+	s := withCacheSettings(stacktest.WithJobOnDeploy(stacktest.WithSite(shop()), "Staging"))
 	for _, env := range s.Environments {
 		t.Run(env.Name, func(t *testing.T) {
-			checkGolden(t, reg, s, stacktest.SiteShop(), env.Name)
+			checkGolden(t, reg, s, withCache(stacktest.SiteShop()), env.Name)
 		})
 	}
 }

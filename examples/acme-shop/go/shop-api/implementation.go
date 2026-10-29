@@ -14,10 +14,11 @@ import (
 
 // New builds the implementation of shop-api from its dependencies. Its
 // signature is the generated one, api.Constructor. Products keep their
-// images in shop-media, the bucket shop-api lists (D54).
+// images in shop-media, the bucket shop-api lists (D54), and wake their
+// waiters through shop-cache, the memory store it lists (D75).
 func New(deps api.Deps) (api.Implementations, error) {
 	return api.Implementations{
-		Product: &Products{DB: deps.DB, Media: deps.ShopMedia},
+		Product: &Products{DB: deps.DB, Media: deps.ShopMedia, Cache: deps.ShopCache, Logger: deps.Logger},
 	}, nil
 }
 

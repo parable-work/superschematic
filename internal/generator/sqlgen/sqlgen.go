@@ -36,6 +36,14 @@ var postgresTypeExtensions = map[string]string{
 	"ltree":     "ltree",
 	"geography": "postgis",
 	"geometry":  "postgis",
+	"vector":    "vector",
+}
+
+// opclassExtensions maps an operator class an @index names (ops) to the
+// extension that defines it.
+var opclassExtensions = map[string]string{
+	"gin_trgm_ops":  "pg_trgm",
+	"gist_trgm_ops": "pg_trgm",
 }
 
 // Table represents a database table.
@@ -50,6 +58,10 @@ type Table struct {
 	ForeignKeys  []ForeignKey
 	Indexes      []Index
 
+	// Checks are the CHECK constraints the fields' enums and Validate rules
+	// give their columns, in column order (D83).
+	Checks []Check
+
 	// SearchFields lists column names marked @searchField; they feed the
 	// generated search_text column and its trigram index.
 	SearchFields []string
@@ -59,13 +71,57 @@ type Table struct {
 type Index struct {
 	Name    string
 	Columns []string
-	Type    string // BTREE, GIST, GIN, ...
+	Type    string // BTREE, GIST, GIN, BRIN, HNSW, IVFFLAT
 	Unique  bool
 
 	// Where is an optional partial-index predicate (without the WHERE
-	// keyword), e.g. "deleted_at IS NULL" for unique indexes on
-	// soft-deletable tables.
+	// keyword): @index's where, and "deleted_at IS NULL" for unique indexes
+	// on soft-deletable tables.
 	Where string
+
+	// Opclass is the operator class every element is indexed with (@index's
+	// ops); empty is the method's default.
+	Opclass string
+	// Expression is the raw expression the index covers instead of Columns
+	// (@index's expression); Columns are then the columns of its keys.
+	Expression string
+	// InTransaction is set by @index's concurrently: false: a migration plan
+	// builds the index inside its step's transaction.
+	InTransaction bool
+	// With are a vector index's storage parameters (@index's m,
+	// efConstruction and lists, D84), "m = 16, ef_construction = 64", or
+	// empty for the method's defaults.
+	With string
+}
+
+// Elements is the index's element list as CREATE INDEX writes it inside its
+// parentheses: each column, or the expression in parentheses, followed by
+// the operator class when there is one.
+func (idx Index) Elements() string {
+	elements := idx.Columns
+	if idx.Expression != "" {
+		elements = []string{"(" + idx.Expression + ")"}
+	}
+	out := make([]string, len(elements))
+	for i, element := range elements {
+		out[i] = element
+		if idx.Opclass != "" {
+			out[i] += " " + idx.Opclass
+		}
+	}
+	return strings.Join(out, ", ")
+}
+
+// Check is a CHECK constraint over one column: the values the field's enum
+// allows, or the bounds of its Validate rules (D83).
+type Check struct {
+	// Name is the identifier Postgres creates (sqlutil.CheckName, cut as a
+	// foreign key's is).
+	Name   string
+	Column string
+	// Spec is the rule; Expression its predicate as Postgres writes it.
+	Spec       sqlutil.Check
+	Expression string
 }
 
 // Column represents a table column.
@@ -124,6 +180,11 @@ type JoinTable struct {
 
 	// OriginalField is the schema field that declared the relationship.
 	OriginalField string
+
+	// QuotedLeftRef and QuotedRightRef are the key columns of the two
+	// tables the foreign keys reference.
+	QuotedLeftRef  string
+	QuotedRightRef string
 }
 
 // HistoryTable represents the generated append-only history table and capture
@@ -200,12 +261,24 @@ type DDLOutput struct {
 	HistoryTables []HistoryTable
 	// OptimisticTables are the @optimistic tables, in table order.
 	OptimisticTables []OptimisticTable
-	Projections      []ProjectionView
-	Timestamp        string
+	// EnqueueTriggers are the tables' @enqueueOnChange declarations, by
+	// table and queue (enqueue.go, D80).
+	EnqueueTriggers []EnqueueTrigger
+	Projections     []ProjectionView
+	Timestamp       string
+
+	// RawSQL is the schema's raw SQL that runs on Postgres, in the order it
+	// runs (sqlutil.OrderRawSQL, D83): the pieces that run after the tables,
+	// then those that run after every object the schema declares.
+	RawSQL []sqlutil.RawSQL
 
 	// MetadataKeyPrefix prefixes the keys of the projection Arrow schemas'
 	// metadata (Options.MetadataKeyPrefix).
 	MetadataKeyPrefix string
+
+	// RoleSeeds are the roles a UserRole table's @seedRoles declares, in
+	// declaration order (seeds.go, D88).
+	RoleSeeds []RoleSeed
 }
 
 // Options configures DDL generation.
@@ -283,7 +356,7 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 	tables := make([]Table, 0, len(tableTypes)+len(queueTypes))
 	usedScalars := make(map[string]bool)
 	for _, typeDef := range tableTypes {
-		table, err := convertTypeToTable(typeDef, schema, scalarMapping, compositeDefaults)
+		table, err := convertTypeToTable(typeDef, schema, opts.Dependencies, scalarMapping, compositeDefaults)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert type %s to table: %w", typeDef.Name, err)
 		}
@@ -313,7 +386,7 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 				continue
 			}
 
-			parentTableName := codegen.ToSnakeCase(typeDef.Name)
+			parentTableName := sqlutil.TableName(typeDef)
 			fkColumnName := parentTableName + "_id"
 
 			columnExists := false
@@ -331,16 +404,17 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 				Name:       fkColumnName,
 				QuotedName: sqlutil.QuoteIdentifier(fkColumnName),
 				Origin:     typeDef.Name + "." + field.Name,
-				Type:       keyFieldType(typeDef, scalarMapping),
+				Type:       keyFieldType(schema, typeDef, scalarMapping),
 				Nullable:   !field.Required,
 			})
+			parentKey := sqlutil.KeyColumnOf(typeDef)
 			targetTable.ForeignKeys = append(targetTable.ForeignKeys, ForeignKey{
 				Column:          fkColumnName,
 				QuotedColumn:    sqlutil.QuoteIdentifier(fkColumnName),
 				RefTable:        parentTableName,
 				QuotedRefTable:  sqlutil.QuoteIdentifier(parentTableName),
-				RefColumn:       "id",
-				QuotedRefColumn: sqlutil.QuoteIdentifier("id"),
+				RefColumn:       parentKey,
+				QuotedRefColumn: sqlutil.QuoteIdentifier(parentKey),
 				// @hasMany back-ref: no RelationDef to read; stays CASCADE.
 				OnDelete: "CASCADE",
 			})
@@ -365,6 +439,9 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 	// adding them.
 	for i := range tables {
 		if err := assignForeignKeyNames(&tables[i]); err != nil {
+			return nil, err
+		}
+		if err := assignCheckNames(&tables[i]); err != nil {
 			return nil, err
 		}
 	}
@@ -423,7 +500,7 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 			})
 			continue
 		}
-		historyTable, err := buildHistoryTable(*table, typeDef.VersionedConfig, historyActorSetting)
+		historyTable, err := buildHistoryTable(*table, typeDef, historyActorSetting)
 		if err != nil {
 			return nil, fmt.Errorf("failed to build history table for %s: %w", typeDef.Name, err)
 		}
@@ -434,7 +511,7 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 	// columns are in place: no table references it, and it references none
 	// (D53).
 	for _, typeDef := range queueTypes {
-		table, err := convertQueueToTable(typeDef, schema, scalarMapping, compositeDefaults)
+		table, err := convertQueueToTable(typeDef, schema, opts.Dependencies, scalarMapping, compositeDefaults)
 		if err != nil {
 			return nil, err
 		}
@@ -447,6 +524,14 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 		for _, col := range table.Columns {
 			usedScalars[col.Type] = true
 		}
+	}
+	enqueueTriggers, err := buildEnqueueTriggers(tableTypes, tables, schema)
+	if err != nil {
+		return nil, err
+	}
+	roleSeeds, err := buildRoleSeeds(tableTypes, tables)
+	if err != nil {
+		return nil, err
 	}
 	projections, err := buildProjections(schema, opts.Dependencies, tableMap, scalarMapping)
 
@@ -468,6 +553,11 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 		}
 		qualifier := sqlutil.QuoteIdentifier(opts.SourceSchema) + "."
 		for i := range projections {
+			if projections[i].Pool == "" {
+				// A view without a pool is created beside the tables (D90).
+				projections[i].Schema = opts.SourceSchema
+				projections[i].QualifiedView = qualifier + projections[i].QuotedName
+			}
 			projections[i].QuotedBaseTable = qualifier + projections[i].QuotedBaseTable
 			for j := range projections[i].Joins {
 				projections[i].Joins[j].QuotedTable = qualifier + projections[i].Joins[j].QuotedTable
@@ -478,6 +568,10 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 	if metadataKeyPrefix == "" {
 		metadataKeyPrefix = DefaultMetadataKeyPrefix
 	}
+	rawSQL, err := sqlutil.OrderRawSQL(schema, PostgresDialect)
+	if err != nil {
+		return nil, err
+	}
 
 	output := &DDLOutput{
 		SchemaName:       opts.SchemaName,
@@ -486,8 +580,11 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 		JoinTables:       joinTables,
 		HistoryTables:    historyTables,
 		OptimisticTables: optimisticTables,
+		EnqueueTriggers:  enqueueTriggers,
+		RoleSeeds:        roleSeeds,
 		Projections:      projections,
 		Timestamp:        opts.Clock.RFC3339(),
+		RawSQL:           rawSQL,
 
 		MetadataKeyPrefix: metadataKeyPrefix,
 	}
@@ -530,14 +627,19 @@ func isRelationalTarget(typeName string, schema *ir.Schema) bool {
 	return targetTypeDef != nil && targetTypeDef.Role == ir.RoleDBTable && !targetTypeDef.JsonField
 }
 
+// PostgresDialect is the dialect name a raw SQL piece runs on Postgres
+// under (ir.RawSQLDef.Dialects).
+const PostgresDialect = "postgres"
+
 // convertTypeToTable converts an IR type to a database table.
 func convertTypeToTable(
 	typeDef *ir.TypeDef,
 	schema *ir.Schema,
+	deps map[string]*ir.Schema,
 	scalarMapping map[string]string,
 	compositeDefaults map[string]*ir.CompositeDefaultDef,
 ) (Table, error) {
-	tableName := codegen.ToSnakeCase(typeDef.Name)
+	tableName := sqlutil.TableName(typeDef)
 	table := Table{
 		Name:         tableName,
 		QuotedName:   sqlutil.QuoteIdentifier(tableName),
@@ -588,13 +690,13 @@ func convertTypeToTable(
 		}
 
 		// Regular column.
-		columnName := codegen.ToSnakeCase(field.Name)
+		columnName := sqlutil.ColumnName(field)
 		irType := field.TypeRef.Name
 		column := Column{
 			Name:       columnName,
 			QuotedName: sqlutil.QuoteIdentifier(columnName),
 			Origin:     typeDef.Name + "." + field.Name,
-			Type:       sqlutil.ColumnType(field, scalarMapping),
+			Type:       sqlutil.ColumnType(schema, field, scalarMapping),
 			Nullable:   !field.Required,
 		}
 
@@ -637,15 +739,12 @@ func convertTypeToTable(
 			column.DefaultValue = "'" + escaped + "'::jsonb"
 		}
 
-		if !column.Nullable && !column.AutoGenerated && column.DefaultValue == "" && scalarColumn {
-			traits := codegen.GuessScalarTraits(irType)
-			if column.Type == "TIMESTAMPTZ" || traits.IsDateTimeLike {
-				column.DefaultValue = "CURRENT_TIMESTAMP"
-			} else if column.Type == "DATE" || traits.IsDateLike {
-				column.DefaultValue = "CURRENT_DATE"
-			} else if column.Type == "TIME" || traits.IsTimeLike {
-				column.DefaultValue = "CURRENT_TIME"
-			}
+		// A required date or time takes the time of the insert only where
+		// the generated code leaves it to the database: an audit timestamp
+		// and the loader's own tables. Any other declares Default<T, "now">,
+		// which ColumnDefault reads below (D88).
+		if !column.Nullable && !column.AutoGenerated && column.DefaultValue == "" && scalarColumn && sqlutil.ImpliedNowDefault(typeDef, field) {
+			column.DefaultValue = sqlutil.NowDefault(column.Type, irType)
 		}
 
 		if !column.Nullable && !column.AutoGenerated && column.DefaultValue == "" {
@@ -654,9 +753,27 @@ func convertTypeToTable(
 			}
 		}
 
+		// A required field's Default<T, V> is its column's DEFAULT, when V
+		// has a literal form in the column's type (D83).
+		if !column.AutoGenerated && column.DefaultValue == "" {
+			if def, ok := sqlutil.ColumnDefault(field, column.Type); ok {
+				column.DefaultValue = def
+			}
+		}
+
+		// The field's enum or Validate rules are its column's CHECK (D83).
+		if check, ok := sqlutil.ColumnCheck(field, columnName, column.Type, lookupEnum(schema, deps, irType)); ok {
+			table.Checks = append(table.Checks, Check{
+				Column:     columnName,
+				Spec:       check,
+				Expression: check.Expression(sqlutil.QuoteIdentifier),
+			})
+		}
+
 		// Explicit @relation: FK constraint on this scalar column.
 		if !field.JsonField && !field.TypeRef.IsMap && field.Relation != nil {
-			refTableName := codegen.ToSnakeCase(field.Relation.Type)
+			refTableName := sqlutil.TableNameOf(schema, field.Relation.Type)
+			refKey := sqlutil.KeyColumnOf(schema.Types[field.Relation.Type])
 			onDelete := "CASCADE"
 			if field.Relation.OnDelete != "" {
 				onDelete = field.Relation.OnDelete
@@ -666,8 +783,8 @@ func convertTypeToTable(
 				QuotedColumn:    sqlutil.QuoteIdentifier(columnName),
 				RefTable:        refTableName,
 				QuotedRefTable:  sqlutil.QuoteIdentifier(refTableName),
-				RefColumn:       "id",
-				QuotedRefColumn: sqlutil.QuoteIdentifier("id"),
+				RefColumn:       refKey,
+				QuotedRefColumn: sqlutil.QuoteIdentifier(refKey),
 				OnDelete:        onDelete,
 			})
 		}
@@ -689,7 +806,7 @@ func convertTypeToTable(
 		indexKeys := make([]string, 0, len(idx.Keys))
 
 		for _, key := range idx.Keys {
-			indexCol := findIndexColumn(table.Columns, key)
+			indexCol := fieldColumn(&table, key)
 			if indexCol == nil {
 				return table, fmt.Errorf("@index key %q of type %s names no column of table %s", key, typeDef.Name, table.Name)
 			}
@@ -698,18 +815,26 @@ func convertTypeToTable(
 			indexKeys = append(indexKeys, key)
 		}
 
+		method := strings.ToUpper(idx.Method)
+		if method == "" {
+			method = determineIndexType(indexTypes)
+		}
 		pending = append(pending, pendingIndex{
 			index: Index{
-				Columns: indexColumns,
-				Type:    determineIndexType(indexTypes),
-				Unique:  idx.Unique,
-				Where:   uniqueIndexPredicate(idx, table.Columns, indexColumns),
+				Columns:       indexColumns,
+				Type:          method,
+				Unique:        idx.Unique,
+				Where:         indexPredicate(idx, typeDef, table.Columns, indexColumns),
+				Opclass:       idx.Ops,
+				Expression:    idx.Expression,
+				InTransaction: idx.Concurrently != nil && !*idx.Concurrently,
+				With:          sqlutil.IndexWith(idx),
 			},
 			keys: indexKeys,
 			name: idx.Name,
 		})
 	}
-	indexes, err := assignIndexNames(table.Name, pending)
+	indexes, err := assignIndexNames(typeDef, pending)
 	if err != nil {
 		return table, err
 	}
@@ -748,34 +873,34 @@ func collectCompositeDefaults(schema *ir.Schema, dependencies map[string]*ir.Sch
 	return defaults, nil
 }
 
+// indexPredicate returns an index's partial-index predicate: @index's
+// where (D83), and for a unique index on a soft-deletable table
+// (uniqueIndexPredicate) "deleted_at IS NULL", ANDed with it, as an
+// upsert's conflict target names it (sqlutil.IndexPredicate).
+func indexPredicate(idx ir.IndexDef, typeDef *ir.TypeDef, columns []Column, indexColumns []string) string {
+	return sqlutil.IndexPredicate(idx.Where, uniqueIndexPredicate(idx, typeDef, columns, indexColumns))
+}
+
 // uniqueIndexPredicate returns the partial-index predicate for a unique
-// index on a soft-deletable table (one with a deleted_at column):
-// "deleted_at IS NULL", so soft-deleted tombstones do not permanently
-// occupy the unique slot. Non-unique indexes, tables without
-// deleted_at, and indexes that key on deleted_at itself get no predicate.
-func uniqueIndexPredicate(idx ir.IndexDef, columns []Column, indexColumns []string) string {
-	if !idx.Unique {
+// index on a soft-deletable table (one with a deletedAt field):
+// "deleted_at IS NULL", its column as @column names it (D85), so
+// soft-deleted tombstones do not permanently occupy the unique slot.
+// Non-unique indexes, tables without deletedAt, and indexes that key on
+// deletedAt itself get no predicate.
+func uniqueIndexPredicate(idx ir.IndexDef, typeDef *ir.TypeDef, columns []Column, indexColumns []string) string {
+	if !idx.Unique || sqlutil.FieldNamed(typeDef, sqlutil.AuditDeletedAt) == nil {
 		return ""
 	}
-
-	deletedAtQuoted := ""
-	for _, col := range columns {
-		if col.Name == "deleted_at" {
-			deletedAtQuoted = col.QuotedName
-			break
-		}
-	}
-	if deletedAtQuoted == "" {
+	deletedAt := columnNamed(Table{Columns: columns}, sqlutil.AuditColumnIn(typeDef, sqlutil.AuditDeletedAt))
+	if deletedAt == nil {
 		return ""
 	}
-
 	for _, quotedCol := range indexColumns {
-		if quotedCol == deletedAtQuoted {
+		if quotedCol == deletedAt.QuotedName {
 			return ""
 		}
 	}
-
-	return "deleted_at IS NULL"
+	return deletedAt.QuotedName + " IS NULL"
 }
 
 func injectVersionColumn(table *Table) {
@@ -793,7 +918,8 @@ func injectVersionColumn(table *Table) {
 	})
 }
 
-func buildHistoryTable(table Table, cfg *ir.VersionedConfig, actorSetting string) (HistoryTable, error) {
+func buildHistoryTable(table Table, typeDef *ir.TypeDef, actorSetting string) (HistoryTable, error) {
+	cfg := typeDef.VersionedConfig
 	keyColumn := primaryKeyColumn(table)
 	if keyColumn == nil {
 		return HistoryTable{}, fmt.Errorf("table %s has no primary key", table.Name)
@@ -822,7 +948,7 @@ func buildHistoryTable(table Table, cfg *ir.VersionedConfig, actorSetting string
 	}
 	// The retention, the exclusions and the actor column are the ones
 	// graphdesc gives a version graph's kind (sqlutil.VersionedHistory).
-	kept := sqlutil.VersionedHistory(cfg, func(column string) bool { return columnNamed(table, column) != nil })
+	kept := sqlutil.VersionedHistory(typeDef, func(column string) bool { return columnNamed(table, column) != nil })
 	history.RetentionDays = kept.RetentionDays
 	if len(kept.Exclude) > 0 {
 		literals := make([]string, 0, len(kept.Exclude))
@@ -872,18 +998,18 @@ func primaryKeyColumn(table Table) *Column {
 }
 
 // keyFieldType returns the SQL type of a type's primary key field.
-func keyFieldType(typeDef *ir.TypeDef, scalarMapping map[string]string) string {
+func keyFieldType(schema *ir.Schema, typeDef *ir.TypeDef, scalarMapping map[string]string) string {
 	if typeDef == nil {
 		return "UUID"
 	}
 	for _, field := range typeDef.Fields {
 		if field.Key {
-			return sqlutil.ColumnType(field, scalarMapping)
+			return sqlutil.ColumnType(schema, field, scalarMapping)
 		}
 	}
 	for _, field := range typeDef.Fields {
 		if field.Name == "id" {
-			return sqlutil.ColumnType(field, scalarMapping)
+			return sqlutil.ColumnType(schema, field, scalarMapping)
 		}
 	}
 	return "UUID"
@@ -893,13 +1019,13 @@ func keyFieldType(typeDef *ir.TypeDef, scalarMapping map[string]string) string {
 // referencing another table type.
 func buildForeignKey(field *ir.FieldDef, schema *ir.Schema, scalarMapping map[string]string) (Column, ForeignKey) {
 	typeName := field.TypeRef.Name
-	columnName := codegen.ToSnakeCase(field.Name) + "_id"
-	refTableName := codegen.ToSnakeCase(typeName)
+	columnName := sqlutil.ForeignKeyColumn(field)
+	refTableName := sqlutil.TableNameOf(schema, typeName)
 
 	column := Column{
 		Name:       columnName,
 		QuotedName: sqlutil.QuoteIdentifier(columnName),
-		Type:       keyFieldType(schema.Types[typeName], scalarMapping),
+		Type:       keyFieldType(schema, schema.Types[typeName], scalarMapping),
 		Nullable:   !field.Required,
 	}
 
@@ -907,13 +1033,14 @@ func buildForeignKey(field *ir.FieldDef, schema *ir.Schema, scalarMapping map[st
 	if field.Relation != nil && field.Relation.OnDelete != "" {
 		onDelete = field.Relation.OnDelete
 	}
+	refKey := sqlutil.KeyColumnOf(schema.Types[typeName])
 	fk := ForeignKey{
 		Column:          columnName,
 		QuotedColumn:    sqlutil.QuoteIdentifier(columnName),
 		RefTable:        refTableName,
 		QuotedRefTable:  sqlutil.QuoteIdentifier(refTableName),
-		RefColumn:       "id",
-		QuotedRefColumn: sqlutil.QuoteIdentifier("id"),
+		RefColumn:       refKey,
+		QuotedRefColumn: sqlutil.QuoteIdentifier(refKey),
 		OnDelete:        onDelete,
 	}
 
@@ -922,23 +1049,27 @@ func buildForeignKey(field *ir.FieldDef, schema *ir.Schema, scalarMapping map[st
 
 // buildJoinTable generates a join table for a many-to-many relationship.
 func buildJoinTable(parentTypeName string, field *ir.FieldDef, targetTypeName string, schema *ir.Schema, scalarMapping map[string]string) JoinTable {
-	parentTableName := codegen.ToSnakeCase(parentTypeName)
-	targetTableName := codegen.ToSnakeCase(targetTypeName)
+	parentTableName := sqlutil.TableNameOf(schema, parentTypeName)
+	targetTableName := sqlutil.TableNameOf(schema, targetTypeName)
 	joinTableName := parentTableName + "_" + targetTableName
 
+	leftKey := sqlutil.KeyColumnOf(schema.Types[parentTypeName])
+	rightKey := sqlutil.KeyColumnOf(schema.Types[targetTypeName])
 	return JoinTable{
 		Name:              joinTableName,
 		QuotedName:        sqlutil.QuoteIdentifier(joinTableName),
 		LeftTable:         parentTableName,
 		QuotedLeftTable:   sqlutil.QuoteIdentifier(parentTableName),
+		QuotedLeftRef:     sqlutil.QuoteIdentifier(leftKey),
+		QuotedRightRef:    sqlutil.QuoteIdentifier(rightKey),
 		LeftColumn:        parentTableName + "_id",
 		QuotedLeftColumn:  sqlutil.QuoteIdentifier(parentTableName + "_id"),
-		LeftColumnType:    keyFieldType(schema.Types[parentTypeName], scalarMapping),
+		LeftColumnType:    keyFieldType(schema, schema.Types[parentTypeName], scalarMapping),
 		RightTable:        targetTableName,
 		QuotedRightTable:  sqlutil.QuoteIdentifier(targetTableName),
 		RightColumn:       targetTableName + "_id",
 		QuotedRightColumn: sqlutil.QuoteIdentifier(targetTableName + "_id"),
-		RightColumnType:   keyFieldType(schema.Types[targetTypeName], scalarMapping),
+		RightColumnType:   keyFieldType(schema, schema.Types[targetTypeName], scalarMapping),
 		OriginalField:     field.Name,
 	}
 }
@@ -976,6 +1107,8 @@ func collectExtensions(tables []Table, historyTables []HistoryTable, usedScalars
 	sort.Strings(scalarTypes)
 	for _, pgType := range scalarTypes {
 		baseType := strings.ToLower(strings.TrimSuffix(pgType, "[]"))
+		// A type's modifiers, vector(1024)'s dimensions, name no extension.
+		baseType, _, _ = strings.Cut(baseType, "(")
 		if ext, ok := postgresTypeExtensions[baseType]; ok {
 			add(ext)
 		}
@@ -985,6 +1118,13 @@ func collectExtensions(tables []Table, historyTables []HistoryTable, usedScalars
 		if len(table.SearchFields) > 0 {
 			add("pg_trgm")
 			break
+		}
+	}
+	for _, table := range tables {
+		for _, idx := range table.Indexes {
+			if ext, ok := opclassExtensions[strings.ToLower(idx.Opclass)]; ok {
+				add(ext)
+			}
 		}
 	}
 
@@ -1073,13 +1213,20 @@ func determineIndexType(columnTypes []string) string {
 	return "BTREE"
 }
 
-// findIndexColumn returns the first of columns an @index key resolves to
-// (sqlutil.IndexKeyMatches), or nil.
-func findIndexColumn(columns []Column, key string) *Column {
-	for i := range columns {
-		col := &columns[i]
-		if sqlutil.IndexKeyMatches(key, col.Name) {
-			return col
+// fieldColumn returns table's column that stores its type's field, by the
+// column's origin, which @column does not change (D85); else the column a
+// field of that name has without @column (sqlutil.IndexKeyMatches); else
+// nil.
+func fieldColumn(table *Table, field string) *Column {
+	origin := table.OriginalName + "." + field
+	for i := range table.Columns {
+		if table.Columns[i].Origin == origin {
+			return &table.Columns[i]
+		}
+	}
+	for i := range table.Columns {
+		if sqlutil.IndexKeyMatches(field, table.Columns[i].Name) {
+			return &table.Columns[i]
 		}
 	}
 	return nil
@@ -1093,10 +1240,10 @@ type pendingIndex struct {
 	name  string
 }
 
-// indexName builds the identifier for one declared index
-// (sqlutil.IndexName).
-func indexName(tableName string, p pendingIndex) (string, error) {
-	return sqlutil.IndexName(tableName, p.keys, p.name, p.index.Unique)
+// indexName builds the identifier for one declared index of typeDef
+// (sqlutil.IndexNameIn).
+func indexName(typeDef *ir.TypeDef, p pendingIndex) (string, error) {
+	return sqlutil.IndexNameIn(typeDef, p.keys, p.name, p.index.Unique)
 }
 
 // serverConstraintName returns the identifier PostgreSQL will create for name.
@@ -1135,14 +1282,32 @@ func assignForeignKeyNames(table *Table) error {
 	return nil
 }
 
-func assignIndexNames(tableName string, pending []pendingIndex) ([]Index, error) {
+// assignCheckNames names each check of table (sqlutil.CheckName), cut as
+// Postgres cuts it, and fails when two collapse into one name.
+func assignCheckNames(table *Table) error {
+	seen := make(map[string]string, len(table.Checks))
+	for i := range table.Checks {
+		check := &table.Checks[i]
+		check.Name = serverConstraintName(sqlutil.CheckName(table.Name, check.Column))
+		if prev, dup := seen[check.Name]; dup {
+			return fmt.Errorf(
+				"checks on %s over %s and %s both generate the constraint name %q; PostgreSQL truncates identifiers to %d bytes, so shorten one of the column names",
+				table.Name, prev, check.Column, check.Name, postgresIdentifierLimit)
+		}
+		seen[check.Name] = check.Column
+	}
+	return nil
+}
+
+func assignIndexNames(typeDef *ir.TypeDef, pending []pendingIndex) ([]Index, error) {
 	if len(pending) == 0 {
 		return nil, nil
 	}
+	tableName := sqlutil.TableName(typeDef)
 	out := make([]Index, len(pending))
 	seen := make(map[string]int, len(pending))
 	for i, p := range pending {
-		name, err := indexName(tableName, p)
+		name, err := indexName(typeDef, p)
 		if err != nil {
 			return nil, err
 		}

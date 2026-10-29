@@ -124,6 +124,20 @@ func TestASiteBundlesItsAPIsSDKForTheBrowser(t *testing.T) {
 	run(site, filepath.Join(paths.HTTPRuntimeTypeScript, "node_modules", ".bin", "tsc"), "--noEmit", "-p", "tsconfig.json")
 	// The scaffold's own build bundles index.html and its script.
 	run(site, bun, "run", "build")
+	// It type-checks them first (D101): a type error fails it, which bun
+	// build alone would bundle.
+	broken := filepath.Join(site, "src", "broken.ts")
+	if err := os.WriteFile(broken, []byte("export const count: number = 'none';\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	refused := exec.Command(bun, "run", "build")
+	refused.Dir = site
+	if out, err := refused.CombinedOutput(); err == nil || !strings.Contains(string(out), "TS2322") {
+		t.Errorf("the scaffold's build of a site with a type error = %v, want it refused with TS2322:\n%s", err, out)
+	}
+	if err := os.Remove(broken); err != nil {
+		t.Fatal(err)
+	}
 
 	run(site, bun, "build", "--target=browser", "--outdir=probe", "src/probe.ts")
 	bundle, err := os.ReadFile(filepath.Join(site, "probe", "probe.js"))
@@ -143,6 +157,123 @@ func TestASiteBundlesItsAPIsSDKForTheBrowser(t *testing.T) {
 	out := run(site, node, filepath.Join("probe", "probe.js"))
 	want = `{"baseUrl":"https://ts-shop.example","cart":{"id":"tea","cents":300,"region":"eu"},"email":"ada@example.com","calls":["/__superschematic/config.json","https://ts-shop.example/api/carts/tea"]}`
 	if strings.TrimSpace(out) != want {
+		t.Errorf("the bundle printed\n%s\nwant\n%s", out, want)
+	}
+}
+
+// lazyProbe is siteProbe without its own import of superscalar: a page
+// whose code takes superscalar through the SDK alone.
+const lazyProbe = `import { loadApis } from '../config.generated';
+
+const shop = 'https://ts-shop.example';
+const calls: string[] = [];
+const answer = async (input: RequestInfo | URL): Promise<Response> => {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  calls.push(url);
+  if (url === '/__superschematic/config.json') {
+    return Response.json({ apis: { 'ts-shop': { url: shop + '/' } } });
+  }
+  if (url === shop + '/api/carts/tea') {
+    return Response.json({ data: { id: 'tea', cents: 300, region: 'eu' }, meta: { requestId: 'probe' } });
+  }
+  return new Response('{}', { status: 404 });
+};
+const fetcher = answer as typeof fetch;
+
+const { tsShop } = await loadApis(fetcher);
+const cart = await tsShop.client({ fetch: fetcher }).carts.getCart('tea');
+console.log(JSON.stringify({ cart, calls }));
+`
+
+// TestALazySDKKeepsSuperscalarOutOfTheSitesFirstLoad: with
+// outputs.sdk.typescript.lazyValidation (D82), ts-shop's SDK loads its
+// types package, and superscalar's browser build with its WebAssembly
+// module, on its first call. `bun build --target=browser --splitting`
+// puts them in a chunk of their own: the page's entry chunk holds no
+// WebAssembly module and is a few kilobytes, the module a chunk the first
+// call loads. Node runs the entry as a browser would, and the call reads
+// its cart through the lazily loaded parser. The test logs each chunk's
+// size, which D82 records.
+func TestALazySDKKeepsSuperscalarOutOfTheSitesFirstLoad(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping the site bundle in -short mode")
+	}
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun not available: %v", err))
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		testpaths.RequireOrSkipTS(t, fmt.Sprintf("node not available: %v", err))
+	}
+	paths := testpaths.Local(t)
+	if _, err := os.Stat(filepath.Join(paths.ScalarTypeScript, "dist", "browser", "backend.js")); err != nil {
+		testpaths.RequireOrSkipTS(t, fmt.Sprintf("superscalar's browser build is not built (scripts/superscalar-dep.sh): %v", err))
+	}
+	installTypeScriptRuntime(t, bun, paths)
+	repoRoot := testpaths.TempDir(t)
+	f := loadTypeScriptFixture(t)
+	sdk := f.configs["ts-shop"].Outputs["sdk"].(map[string]any)
+	sdk["typescript"] = map[string]any{"enabled": true, "lazyValidation": true}
+	f.build(t, repoRoot, paths, append(slices.Clone(tsOrder[:len(tsOrder)-1]), tsSite)...)
+
+	namespaces, err := filepath.Glob(filepath.Join(repoRoot, "schemas", "dist", "sdk", "typescript", "ts-shop", "namespaces", "*.ts"))
+	if err != nil || len(namespaces) == 0 {
+		t.Fatalf("ts-shop's SDK has no namespaces: %v", err)
+	}
+	for _, path := range namespaces {
+		source, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(source), "parse") && !strings.Contains(string(source), "import('@schemas/ts-shop-types')") {
+			t.Errorf("%s does not load the types package lazily", filepath.Base(path))
+		}
+	}
+	install := exec.Command(bun, "install")
+	install.Dir = filepath.Join(repoRoot, "schemas", "dist")
+	if out, err := install.CombinedOutput(); err != nil {
+		testpaths.RequireOrSkipTS(t, fmt.Sprintf("bun install failed at the output root (likely offline): %v\n%s", err, out))
+	}
+	site := naming.Default().SiteImplementationDir(repoRoot, tsSite)
+	if err := os.WriteFile(filepath.Join(site, "src", "probe.ts"), []byte(lazyProbe), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	build := exec.Command(bun, "build", "--target=browser", "--splitting", "--outdir=probe", "src/probe.ts")
+	build.Dir = site
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("bun build --splitting: %v\n%s", err, out)
+	}
+	chunks, err := filepath.Glob(filepath.Join(site, "probe", "*.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wasmChunks []string
+	for _, chunk := range chunks {
+		data, err := os.ReadFile(chunk)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%s: %d bytes", filepath.Base(chunk), len(data))
+		if strings.Contains(string(data), "AGFzbQ") {
+			wasmChunks = append(wasmChunks, filepath.Base(chunk))
+		}
+	}
+	entry, err := os.ReadFile(filepath.Join(site, "probe", "probe.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(entry), "AGFzbQ") || len(wasmChunks) != 1 {
+		t.Fatalf("the WebAssembly module is in %v, want one chunk other than the entry's", wasmChunks)
+	}
+	cmd := exec.Command(node, filepath.Join("probe", "probe.js"))
+	cmd.Dir = site
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("node probe.js: %v\n%s", err, out)
+	}
+	want := `{"cart":{"id":"tea","cents":300,"region":"eu"},"calls":["/__superschematic/config.json","https://ts-shop.example/api/carts/tea"]}`
+	if strings.TrimSpace(string(out)) != want {
 		t.Errorf("the bundle printed\n%s\nwant\n%s", out, want)
 	}
 }

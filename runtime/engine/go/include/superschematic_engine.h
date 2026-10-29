@@ -80,9 +80,9 @@ int32_t eng_stream_poll(eng_engine engine, eng_stream stream,
 /* Ends a stream: the client went away. */
 int32_t eng_stream_close(eng_engine engine, eng_stream stream);
 
-/* Waits until a commit moves the engine's epoch past after_epoch, or
- * timeout_ms passes, and writes the epoch: one waiting thread wakes every
- * stream of the engine. */
+/* Waits until a commit, or a signal a stream keeps, moves the engine's
+ * wakes past after_epoch, or timeout_ms passes, and writes the count: one
+ * waiting thread wakes every stream of the engine. */
 int32_t eng_wait(eng_engine engine, uint64_t after_epoch, uint32_t timeout_ms,
                  uint64_t *epoch);
 

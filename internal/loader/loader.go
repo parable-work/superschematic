@@ -75,6 +75,9 @@ type loadOptions struct {
 	// runModule runs a sidecar document's module (registry.LoadContext's
 	// RunModule); nil runs it with the document harness.
 	runModule ModuleRunner
+	// warn receives the verification pass's warnings (WithWarnings); nil
+	// prints them to WarningWriter.
+	warn func(*verify.Diagnostic)
 }
 
 // ModuleRunner runs the TypeScript module file of the service at
@@ -90,6 +93,15 @@ type ModuleRunner func(servicePath, file string) (json.RawMessage, []string, err
 func WithModuleRunner(run ModuleRunner) Option {
 	return func(o *loadOptions) {
 		o.runModule = run
+	}
+}
+
+// WithWarnings hands each warning the verification pass finds to warn
+// instead of printing it to [WarningWriter]: `check` reports them with the
+// errors, by file and line.
+func WithWarnings(warn func(*verify.Diagnostic)) Option {
+	return func(o *loadOptions) {
+		o.warn = warn
 	}
 }
 
@@ -236,7 +248,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 			var verified *ir.Schema
 			err = o.profile.Measure("loader.verify", func() error {
 				var err error
-				verified, err = runVerify(schema, vin)
+				verified, err = o.runVerify(schema, vin)
 				return err
 			})
 			return verified, cfg, err
@@ -341,7 +353,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 	var verified *ir.Schema
 	err = o.profile.Measure("loader.verify", func() error {
 		var err error
-		verified, err = runVerify(schema, vin)
+		verified, err = o.runVerify(schema, vin)
 		return err
 	})
 	return verified, cfg, err
@@ -400,7 +412,7 @@ func (o *loadOptions) authDBFor(servicePath string, schema *ir.Schema, reg *regi
 // read for this load's chain of references is refused, so a cycle of them
 // is an error, not an endless read.
 func (o *loadOptions) referenceDependenciesFor(servicePath string, schema *ir.Schema, dependencies map[string]ir.SchemaKind, reg *registry.Registry) (map[string]*ir.Schema, error) {
-	if schema.Kind != ir.SchemaKindAPI {
+	if schema.Kind != ir.SchemaKindAPI && schema.Kind != ir.SchemaKindMemoryStore {
 		return nil, nil
 	}
 	kind, _ := reg.Kind(string(schema.Kind))
@@ -429,6 +441,18 @@ func (o *loadOptions) referenceDependenciesFor(servicePath string, schema *ir.Sc
 	}
 	for _, held := range ir.ReferencesOf(schema) {
 		need(held.Ref.Type, "whose type a RefersTo names")
+	}
+	// A memory store's payloads and the enums of its parts (D75).
+	for _, decl := range schema.MemoryStoreDeclarations {
+		if decl == nil {
+			continue
+		}
+		if decl.Payload != nil {
+			need(decl.Payload.Name, "whose type a channel carries")
+		}
+		for _, part := range decl.Parts {
+			need(part.Type.Name, "whose type a part of a memory store's declaration names")
+		}
 	}
 	for _, set := range schema.OperationSets {
 		if set == nil {
@@ -472,15 +496,20 @@ func (o *loadOptions) referenceDependenciesFor(servicePath string, schema *ir.Sc
 }
 
 // runVerify executes the format-agnostic verification pass on the assembled
-// schema: warnings print to [WarningWriter], errors fail the load. A schema
-// that verifies has its version graphs expanded into ordinary types, the
+// schema: warnings go to WithWarnings's function or print to
+// [WarningWriter], errors fail the load. A schema that verifies has its
+// version graphs expanded into ordinary types, the
 // tables its User and UserRole traits own added and its user model route
 // sets filled from its authDb (D50), any scalar only the generated fields
 // use is hydrated from the registry, and the services its stack
 // declarations name join its references (D41).
-func runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema, error) {
+func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema, error) {
 	res := verify.Run(schema, vin)
 	for _, warning := range res.Warnings {
+		if o.warn != nil {
+			o.warn(warning)
+			continue
+		}
 		_, _ = fmt.Fprintf(WarningWriter, "warning: %s\n", warning.Error())
 	}
 	if err := res.Err(); err != nil {
@@ -498,6 +527,9 @@ func runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema, error) {
 			return nil, err
 		}
 	}
+	// Every MemoryStore schema holds the core's reserved declarations, the
+	// shared rate limit's (D75).
+	schema.AddReservedMemoryStoreDeclarations()
 	// The data forms write a stack's declarations as typed fields, which
 	// the TypeScript form's handle recording never sees.
 	for _, ref := range ir.StackReferences(schema) {

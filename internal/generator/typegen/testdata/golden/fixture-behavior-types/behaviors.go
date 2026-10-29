@@ -157,6 +157,168 @@ type JobRetriesClassAttempts struct {
 type NoteBehaviors struct {
 }
 
+// RequestState is a state of a Request's Workflow.
+type RequestState string
+
+// The values of RequestState.
+const (
+	RequestStateNew      RequestState = "new"
+	RequestStateTriage   RequestState = "triage"
+	RequestStateAssigned RequestState = "assigned"
+)
+
+// RequestBehaviors holds the fields of a Request's behaviors as a read returns them, under behaviors: one member per behavior that declares a field, under the behavior's name.
+type RequestBehaviors struct {
+	// The fields of Workflow.
+	Workflow RequestWorkflow `json:"Workflow"`
+	// The fields of Derived.
+	Derived RequestDerived `json:"Derived"`
+	// The fields of Provenance.
+	Provenance RequestProvenance `json:"Provenance"`
+}
+
+// RequestWorkflow holds the fields a Request's Workflow adds, as a read returns them: a field with no value is absent.
+type RequestWorkflow struct {
+	// The state the instance is in.
+	Status RequestState `json:"status"`
+	// When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition.
+	EnteredAt *int64 `json:"enteredAt,omitempty"`
+}
+
+// RequestDerived holds the fields a Request's Derived adds, as a read returns them: a field with no value is absent.
+type RequestDerived struct {
+	// The last value settled for each derived field, by field: { sourceHash, model, settledAt, settledBy, confidence? }, and overridden: { by, at } once a caller or another behavior's operation wrote it. A field with neither is absent.
+	Fields RequestDerivedFields `json:"fields"`
+	// The derived fields whose inputs, instruction, model or type moved since their last value, or that rederive asked for, and that no write overrode, in the config's order. One of "category", "summary".
+	Stale []string `json:"stale"`
+}
+
+// RequestDerivedFields types RequestDerived.fields.
+type RequestDerivedFields struct {
+	Category *RequestDerivedFieldsCategory `json:"category,omitempty"`
+	Summary  *RequestDerivedFieldsSummary  `json:"summary,omitempty"`
+}
+
+// RequestDerivedFieldsCategory types RequestDerivedFields.category.
+type RequestDerivedFieldsCategory struct {
+	Confidence *float64                                `json:"confidence,omitempty"`
+	Model      *string                                 `json:"model,omitempty"`
+	Overridden *RequestDerivedFieldsCategoryOverridden `json:"overridden,omitempty"`
+	SettledAt  *int64                                  `json:"settledAt,omitempty"`
+	SettledBy  *string                                 `json:"settledBy,omitempty"`
+	SourceHash *string                                 `json:"sourceHash,omitempty"`
+}
+
+// RequestDerivedFieldsCategoryOverridden types RequestDerivedFieldsCategory.overridden.
+type RequestDerivedFieldsCategoryOverridden struct {
+	At int64  `json:"at"`
+	By string `json:"by"`
+}
+
+// RequestDerivedFieldsSummary types RequestDerivedFields.summary.
+type RequestDerivedFieldsSummary struct {
+	Confidence *float64                               `json:"confidence,omitempty"`
+	Model      *string                                `json:"model,omitempty"`
+	Overridden *RequestDerivedFieldsSummaryOverridden `json:"overridden,omitempty"`
+	SettledAt  *int64                                 `json:"settledAt,omitempty"`
+	SettledBy  *string                                `json:"settledBy,omitempty"`
+	SourceHash *string                                `json:"sourceHash,omitempty"`
+}
+
+// RequestDerivedFieldsSummaryOverridden types RequestDerivedFieldsSummary.overridden.
+type RequestDerivedFieldsSummaryOverridden struct {
+	At int64  `json:"at"`
+	By string `json:"by"`
+}
+
+// RequestProvenance holds the fields a Request's Provenance adds, as a read returns them: a field with no value is absent.
+type RequestProvenance struct {
+	// By recorded field written since Provenance was added: { source, by, for?, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; for is the subject it acted for, when it acted for one (D77); review is { state, by?, at? }, state proposed, accepted, rejected or edited.
+	Fields RequestProvenanceFields `json:"fields"`
+	// Whether any recorded field is proposed. A list filters on it.
+	InReview bool `json:"inReview"`
+}
+
+// RequestProvenanceFields types RequestProvenance.fields.
+type RequestProvenanceFields struct {
+	Body     *RequestProvenanceFieldsBody     `json:"body,omitempty"`
+	Category *RequestProvenanceFieldsCategory `json:"category,omitempty"`
+	Subject  *RequestProvenanceFieldsSubject  `json:"subject,omitempty"`
+	Summary  *RequestProvenanceFieldsSummary  `json:"summary,omitempty"`
+}
+
+// RequestProvenanceFieldsBody types RequestProvenanceFields.body.
+type RequestProvenanceFieldsBody struct {
+	At         int64                              `json:"at"`
+	By         string                             `json:"by"`
+	Confidence *float64                           `json:"confidence,omitempty"`
+	For        *string                            `json:"for,omitempty"`
+	Review     *RequestProvenanceFieldsBodyReview `json:"review,omitempty"`
+	Source     string                             `json:"source"`
+}
+
+// RequestProvenanceFieldsBodyReview types RequestProvenanceFieldsBody.review.
+type RequestProvenanceFieldsBodyReview struct {
+	At *int64  `json:"at,omitempty"`
+	By *string `json:"by,omitempty"`
+	// One of "proposed", "accepted", "rejected", "edited".
+	State string `json:"state"`
+}
+
+// RequestProvenanceFieldsCategory types RequestProvenanceFields.category.
+type RequestProvenanceFieldsCategory struct {
+	At         int64                                  `json:"at"`
+	By         string                                 `json:"by"`
+	Confidence *float64                               `json:"confidence,omitempty"`
+	For        *string                                `json:"for,omitempty"`
+	Review     *RequestProvenanceFieldsCategoryReview `json:"review,omitempty"`
+	Source     string                                 `json:"source"`
+}
+
+// RequestProvenanceFieldsCategoryReview types RequestProvenanceFieldsCategory.review.
+type RequestProvenanceFieldsCategoryReview struct {
+	At *int64  `json:"at,omitempty"`
+	By *string `json:"by,omitempty"`
+	// One of "proposed", "accepted", "rejected", "edited".
+	State string `json:"state"`
+}
+
+// RequestProvenanceFieldsSubject types RequestProvenanceFields.subject.
+type RequestProvenanceFieldsSubject struct {
+	At         int64                                 `json:"at"`
+	By         string                                `json:"by"`
+	Confidence *float64                              `json:"confidence,omitempty"`
+	For        *string                               `json:"for,omitempty"`
+	Review     *RequestProvenanceFieldsSubjectReview `json:"review,omitempty"`
+	Source     string                                `json:"source"`
+}
+
+// RequestProvenanceFieldsSubjectReview types RequestProvenanceFieldsSubject.review.
+type RequestProvenanceFieldsSubjectReview struct {
+	At *int64  `json:"at,omitempty"`
+	By *string `json:"by,omitempty"`
+	// One of "proposed", "accepted", "rejected", "edited".
+	State string `json:"state"`
+}
+
+// RequestProvenanceFieldsSummary types RequestProvenanceFields.summary.
+type RequestProvenanceFieldsSummary struct {
+	At         int64                                 `json:"at"`
+	By         string                                `json:"by"`
+	Confidence *float64                              `json:"confidence,omitempty"`
+	For        *string                               `json:"for,omitempty"`
+	Review     *RequestProvenanceFieldsSummaryReview `json:"review,omitempty"`
+	Source     string                                `json:"source"`
+}
+
+// RequestProvenanceFieldsSummaryReview types RequestProvenanceFieldsSummary.review.
+type RequestProvenanceFieldsSummaryReview struct {
+	At *int64  `json:"at,omitempty"`
+	By *string `json:"by,omitempty"`
+	// One of "proposed", "accepted", "rejected", "edited".
+	State string `json:"state"`
+}
+
 // TicketState is a state of a Ticket's Workflow.
 type TicketState string
 
@@ -200,8 +362,22 @@ type TicketWorkflow struct {
 
 // TicketComments holds the fields a Ticket's Comments adds, as a read returns them: a field with no value is absent.
 type TicketComments struct {
-	// How many comments the instance has.
-	CommentCount int64 `json:"commentCount"`
+	// How many posted and interrupted messages the conversation has, top-level and replies; composing, deleted and purged ones are not counted.
+	Messages int64 `json:"messages"`
+	// The greatest postedAt of a posted or interrupted message, in epoch milliseconds; absent while there is none.
+	LastMessageAt *int64 `json:"lastMessageAt,omitempty"`
+	// The posted and interrupted top-level messages, each a thread, whether resolved or not: { open, resolved }.
+	Threads TicketCommentsThreads `json:"threads"`
+	// The subjects writing a message now: each subject with a composing message on the instance, once, in the order of its earliest composing message's id; empty while nobody is.
+	Composing []string `json:"composing"`
+	// The caller's: how many posted and interrupted top-level messages of others came to stand after the caller's read marker on the conversation. 0 until the caller first reads the conversation with markRead or posts in it top-level, so a conversation nobody opened is unread for nobody. Replies are read thread by thread, in the inbox, and not counted here.
+	Unread int64 `json:"unread"`
+}
+
+// TicketCommentsThreads types TicketComments.threads.
+type TicketCommentsThreads struct {
+	Open     int64 `json:"open"`
+	Resolved int64 `json:"resolved"`
 }
 
 // TicketRevisions holds the fields a Ticket's Revisions adds, as a read returns them: a field with no value is absent.

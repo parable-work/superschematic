@@ -47,7 +47,7 @@ var templatesFS embed.FS
 // GoVersion is the go directive of the modules this package writes and the
 // Go image the Dockerfile builds in: tools.env's GO_VERSION, which every
 // go.mod in the repository and every generated one states.
-const GoVersion = "1.26.4"
+const GoVersion = "1.27.3"
 
 // RustVersion is the Rust image the Dockerfile builds the static archives
 // in: tools.env's RUST_VERSION, which scripts/superscalar-dep.sh and
@@ -61,6 +61,7 @@ const (
 	MainFile         = "main.go"
 	CloudSQLFile     = "cloudsql.go"
 	BucketsFile      = "buckets.go"
+	MemoryStoresFile = "memorystores.go"
 	ModFile          = "go.mod"
 	DockerFile       = "Dockerfile"
 	DockerIgnoreFile = "Dockerfile.dockerignore"
@@ -87,6 +88,12 @@ const (
 	storageVersion   = "v1.69.0"
 	googleAPIModule  = "google.golang.org/api"
 	googleAPIVersion = "v0.288.0"
+)
+
+// The Redis client memorystores.go imports (D75).
+const (
+	redisModule  = "github.com/redis/go-redis/v9"
+	redisVersion = "v9.23.0"
 )
 
 // ZeroVersion is the version a go.mod requires a module at that a replace
@@ -240,6 +247,23 @@ type WorkerInput struct {
 	GraceSeconds int
 }
 
+// DeriverInput is the deriver a deriver's entrypoint runs (D74).
+type DeriverInput struct {
+	// Name is the deriver's @deriver class.
+	Name string
+}
+
+// AppInput is the app an app's entrypoint runs (D78).
+type AppInput struct {
+	// Name is the app's @app class.
+	Name string
+
+	// Implementation is the app's crate, the program the project writes
+	// at the naming file's [implementation_paths] rust_app template
+	// (ReadRustApp).
+	Implementation RustImplementation
+}
+
 // ServerDir is where the entrypoint of server in stack is written; a job's
 // is beside the servers', under the job's deployable name.
 func ServerDir(outputRoot, stack, server string) string {
@@ -310,6 +334,12 @@ type Server struct {
 	// that serves its API, and go.mod requires GCS's Go client; with none
 	// the server does not link it (D54).
 	Buckets []*Bucket
+
+	// MemoryStores are the memory stores the entrypoint opens once, for
+	// every API that lists it. With one, memorystores.go opens each on
+	// Redis, or disabled, and go.mod requires go-redis; with none the
+	// entrypoint does not link it (D75).
+	MemoryStores []*MemoryStore
 
 	// CloudSQL are the databases, by service and sorted, that some
 	// environment places on Cloud SQL. When there is one, cloudsql.go
@@ -439,6 +469,11 @@ type API struct {
 	// Buckets are Deps' buckets (D54).
 	Buckets []BucketUse
 
+	// MemoryStores are Deps' memory stores, and RateLimitStore the one the
+	// API's @rateLimit routes count in, its config's rateLimitStore (D75).
+	MemoryStores   []MemoryStoreUse
+	RateLimitStore *MemoryStore
+
 	// Engine is the engine Deps holds, of the API's engine database (D58),
 	// nil without one; MountsEngine is true for the API whose router
 	// mounts its routes, the first on the database, on a server.
@@ -471,6 +506,25 @@ type Bucket struct {
 	From  string
 }
 
+// MemoryStoreUse is a memory store in an API's Deps.
+type MemoryStoreUse struct {
+	Field string
+	Store *MemoryStore
+}
+
+// MemoryStore is a memory store the entrypoint opens once, for every API
+// that lists it (D75).
+type MemoryStore struct {
+	Service string
+	Var     string
+
+	// Field is the derived config field the store's connection is read
+	// from, and From the expression that reads it from the first listing
+	// API's config.
+	Field string
+	From  string
+}
+
 // Database is a database the server connects to once, for every API on it.
 type Database struct {
 	Service string
@@ -495,6 +549,12 @@ type Database struct {
 	// From the expression that reads it from the first API's config.
 	Field string
 	From  string
+
+	// FieldKeys is the expression of the first API's config that holds the
+	// keys of the database's Encrypted<T> fields, which the ORM opens with
+	// (D85): every API on the database holds the one secret. Empty for a
+	// database without one.
+	FieldKeys string
 }
 
 // Client is an SDK client of an API called, built once for every API
@@ -590,6 +650,8 @@ var reserved = []string{
 	"engineSetup", "deployEngine", "startRunner", "engineTimeout", "cloudSQLEngineURL", "cloudSQLProxy", "cloudSQLDialerOf",
 	"runner", "runtimemiddleware", "identity", "serviceauth", "streams", "filepath", "slog",
 	"openedEngine", "cloudSQLEngineSocket", "keywordValue", "apperror", "principal", "stop",
+	"openMemoryStore", "openRedisStore", "redisStore", "redisOptions", "memoryStoreRetryBackoff", "installRedisLog",
+	"isConnectionError", "redis", "maintnotifications", "memorystore", "tls", "strconv",
 }
 
 // names hands out identifiers no other declaration of main.go takes.
@@ -726,13 +788,14 @@ func Plan(in Input) (*Server, error) {
 	databases := map[string]*Database{}
 	clients := map[string]*Client{}
 	buckets := map[string]*Bucket{}
+	stores := map[string]*MemoryStore{}
 	for i, a := range in.APIs {
 		o, api := a.Output, apis[i]
 		derived := map[string]string{}
 		if o.EnvConfig != nil {
 			for _, f := range o.EnvConfig.Derived {
 				derived[string(f.Kind)+" "+f.Service] = f.GoName
-				if f.Kind == ir.EdgeSQL || f.Kind == ir.EdgeBucket {
+				if f.Kind == ir.EdgeSQL || f.Kind == ir.EdgeBucket || f.Kind == ir.EdgeMemoryStore {
 					derived[string(f.Kind)+" field "+f.Service] = f.Key
 				}
 			}
@@ -755,6 +818,9 @@ func Plan(in Input) (*Server, error) {
 					Module:  o.Deps.ORMModule,
 					Field:   derived[string(ir.EdgeSQL)+" field "+db],
 					From:    api.Var + "Config." + goName,
+				}
+				if keys := o.Deps.FieldKeys; keys != "" {
+					d.FieldKeys = api.Var + "Config." + keys
 				}
 				databases[db] = d
 				s.Databases = append(s.Databases, d)
@@ -813,6 +879,27 @@ func Plan(in Input) (*Server, error) {
 				s.Buckets = append(s.Buckets, h)
 			}
 			api.Buckets = append(api.Buckets, BucketUse{Field: b.Field, Bucket: h})
+		}
+		for _, m := range o.Deps.MemoryStores {
+			h := stores[m.Service]
+			if h == nil {
+				goName, ok := derived[string(ir.EdgeMemoryStore)+" "+m.Service]
+				if !ok || !api.Config {
+					return nil, fmt.Errorf("stack %s: %s %s serves %s, whose config has no field for memory store %s, which it lists", in.Stack, s.Kind, in.Server, o.SchemaName, m.Service)
+				}
+				h = &MemoryStore{
+					Service: m.Service,
+					Var:     taken.take(varStem(m.Service) + "Store"),
+					Field:   derived[string(ir.EdgeMemoryStore)+" field "+m.Service],
+					From:    api.Var + "Config." + goName,
+				}
+				stores[m.Service] = h
+				s.MemoryStores = append(s.MemoryStores, h)
+			}
+			api.MemoryStores = append(api.MemoryStores, MemoryStoreUse{Field: m.Field, Store: h})
+			if m.Service == o.Deps.RateLimitStore && !s.Background() {
+				api.RateLimitStore = h
+			}
 		}
 	}
 	if err := s.planEngines(in, apis, taken); err != nil {
@@ -880,6 +967,9 @@ func (s *Server) planModule(in Input, dir string) error {
 	}
 	if len(s.Buckets) > 0 {
 		direct = append(direct, Require{storageModule, storageVersion}, Require{googleAPIModule, googleAPIVersion})
+	}
+	if len(s.MemoryStores) > 0 {
+		direct = append(direct, Require{redisModule, redisVersion})
 	}
 	seen := map[string]bool{}
 	for _, r := range direct {
@@ -1080,7 +1170,8 @@ func checkRoutes(in Input) error {
 
 // Write writes the entrypoint module into dir: main.go, go.mod,
 // cloudsql.go when some environment places a database of the server on
-// Cloud SQL, buckets.go when its APIs list a bucket (D54), and the
+// Cloud SQL, buckets.go when its APIs list a bucket (D54), memorystores.go
+// when they list a memory store (D75), and the
 // Dockerfile with its ignore file when s.Docker is planned.
 //
 // A job's module holds the same files but serviceauth.go and identity.go,
@@ -1109,6 +1200,9 @@ func Write(s *Server, dir string) error {
 	}
 	if len(s.Buckets) > 0 {
 		files = append(files, struct{ template, name string }{"buckets.go.tmpl", BucketsFile})
+	}
+	if len(s.MemoryStores) > 0 {
+		files = append(files, struct{ template, name string }{"memorystores.go.tmpl", MemoryStoresFile})
 	}
 	if s.Docker != nil {
 		files = append(files, struct{ template, name string }{"Dockerfile.tmpl", DockerFile}, struct{ template, name string }{"dockerignore.tmpl", DockerIgnoreFile})

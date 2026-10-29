@@ -83,6 +83,11 @@ type Service struct {
 	// services its server's and jobs' code use (D54).
 	Buckets []ir.ServiceRef
 
+	// MemoryStores are the MemoryStore services an API service uses: the
+	// handles in its `memoryStores`, with its `rateLimitStore` (D75), as
+	// ir.Schema.MemoryStores holds them.
+	MemoryStores []ir.ServiceRef
+
 	// Language is an API service's `outputs.api.language`
 	// (registry.APILanguageGo, ...). Empty means Go.
 	Language string
@@ -90,6 +95,12 @@ type Service struct {
 	// Dialects are a DB service's `outputs.sql.dialects`. Empty means
 	// postgres.
 	Dialects []string
+
+	// FieldKeys is a DB service's `outputs.sql.encryption.key` (D85): the
+	// secret, by its ir.SecretID, that holds the keys of its Encrypted<T>
+	// fields, which every deployable that runs code on the database reads
+	// through its API's `@envVars`. Empty for a database without one.
+	FieldKeys string
 
 	// Config is the service's `@envVars` type, or nil when it has none.
 	Config *Config
@@ -119,15 +130,44 @@ type Service struct {
 	// ir.Schema.Workers holds them. Each is a deployable of the stack.
 	Workers []ir.Worker
 
+	// Derivers are an API service's derivers, its `@deriver` classes
+	// (D74), as ir.Schema.Derivers holds them. Each is a deployable of the
+	// stack.
+	Derivers []ir.Deriver
+
+	// Apps are an API service's apps, its `@app` classes (D78), as
+	// ir.Schema.Apps holds them. Each is a deployable of the stack.
+	Apps []ir.App
+
 	// Queues are the names of a DB service's queues, its `@queue` classes
 	// (D53), sorted. A worker's queue is one of its API's database.
 	Queues []string
+
+	// QueueKeys are the quoted key columns of a DB service's queues that
+	// keep one ready message per key (D80), by queue: an operator's retry
+	// of such a queue's dead messages leaves a key one ready message.
+	QueueKeys map[string]string
+
+	// QueueTables are the tables of a DB service's queues whose @table
+	// names them (D85), by queue, so the operator's statements name that
+	// table; every other queue's table is its class's name with _queue.
+	QueueTables map[string]string
 
 	// Engine reports that a DB service is an engine database (D58): a type
 	// of it composes a behavior. The servers of the APIs that connect to it
 	// open the engine on its database, and the stack runs the engine's
 	// runner over it, a deployable of its own.
 	Engine bool
+
+	// Derived are the names of a DB service's engine types that compose
+	// Derived (D73), sorted. A deriver's schemas are among those of its
+	// API's database (D74).
+	Derived []string
+
+	// Vectors reports that a DB service has a vector(n) column, an
+	// Embedding.Vector with dimensions, whose DDL enables pgvector's vector
+	// extension (D84).
+	Vectors bool
 }
 
 // Operation is what admits a caller to one operation of an API service.

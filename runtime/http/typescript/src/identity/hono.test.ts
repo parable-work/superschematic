@@ -388,7 +388,7 @@ for (const kind of databaseKinds) {
       const created = await h.do('POST', '/auth/admin/users', { login: 'clerk@example.com', name: 'Clerk', password: USER_PASSWORD }, ...admin);
       expectReply(created, 200);
       const clerkId = created.body.data.id as string;
-      expect(created.body.data).toEqual({ id: clerkId, login: 'clerk@example.com', name: 'Clerk', disabled: false, roles: [] });
+      expect(created.body.data).toEqual({ id: clerkId, login: 'clerk@example.com', name: 'Clerk', disabled: false, pending: false, roles: [] });
       expectReply(await h.do('POST', '/auth/admin/users', { login: 'CLERK@example.com', password: USER_PASSWORD }, ...admin), 409, 'conflict');
       expectReply(await h.do('POST', '/auth/admin/users', { login: 'x@example.com', password: USER_PASSWORD }, ...member), 403, 'forbidden');
 
@@ -450,6 +450,37 @@ for (const kind of databaseKinds) {
       expectReply(disabled, 200);
       expect(disabled.body.data.disabled).toBe(true);
       expectReply(await h.do('GET', '/auth/me', undefined, ...clerk), 401, 'unauthorized');
+    });
+
+    test("a user write needs the caller to cover the user's permissions: a helpdesk writes a member, not the admin", async () => {
+      const h = await newHarness();
+      const admin = bearer(await h.login('admin@example.com', ADMIN_PASSWORD));
+      const role = await h.do('POST', '/auth/admin/roles', { name: 'helpdesk', permissions: ['identity.users'] }, ...admin);
+      expectReply(role, 200);
+      const user = await h.do('POST', '/auth/admin/users', { login: 'helpdesk@example.com', name: 'Helpdesk', password: USER_PASSWORD }, ...admin);
+      expectReply(user, 200);
+      expectReply(await h.do('PUT', `/auth/admin/users/${user.body.data.id}/roles/${role.body.data.id}`, undefined, ...admin), 200);
+      const helpdesk = bearer(await h.login('helpdesk@example.com', USER_PASSWORD));
+
+      const target = `/auth/admin/users/${h.adminId}`;
+      for (const [method, path, body] of [
+        ['PUT', `${target}/password`, { password: 'taken over' }],
+        ['POST', `${target}/disable`, undefined],
+        ['POST', `${target}/enable`, undefined],
+      ] as const) {
+        const refused = await h.do(method, path, body, ...helpdesk);
+        expectReply(refused, 403, 'forbidden');
+        expect(refused.body.details).toEqual({ permissions: ['identity', 'orders'] });
+      }
+      expectReply(await h.do('GET', '/auth/me', undefined, ...admin), 200);
+      await h.login('admin@example.com', ADMIN_PASSWORD);
+      expectReply(await h.do('PUT', `/auth/admin/users/${MISSING}/password`, { password: 'reset password' }, ...helpdesk), 404, 'not_found');
+
+      const member = `/auth/admin/users/${h.memberId}`;
+      expectDone(await h.do('PUT', `${member}/password`, { password: 'reset password' }, ...helpdesk));
+      expectReply(await h.do('POST', `${member}/disable`, undefined, ...helpdesk), 200);
+      expectReply(await h.do('POST', `${member}/enable`, undefined, ...helpdesk), 200);
+      await h.login('member@example.com', 'reset password');
     });
 
     test('a login whose hash has another cost writes it again at the config cost', async () => {
@@ -565,6 +596,7 @@ describe('identity routes', () => {
       'GET /api/auth/admin/users/{id} identity.users.read 600',
       'POST /api/auth/admin/users/{id}/disable identity.users.write 600',
       'POST /api/auth/admin/users/{id}/enable identity.users.write 600',
+      'POST /api/auth/admin/users/{id}/approve identity.users.write 600',
       'PUT /api/auth/admin/users/{id}/password identity.users.write 600',
       'GET /api/auth/admin/roles identity.roles.read 600',
       'POST /api/auth/admin/roles identity.roles.write 600',

@@ -1,0 +1,21 @@
+# desk-app-api runs on its default server, beside its app Backoffice and
+# desk-db's engine runner, each a deployable of its own in Rust, on
+# stacktest's fake target, which places a Rust app as a service (D78). The
+# stack exposes the API and the app.
+kind: Stack
+types:
+  DeskApp:
+    name: DeskApp
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: desk-app-api, kind: API }
+      expose:
+        - service: { name: desk-app-api, kind: API }
+        - { service: { name: desk-app-api, kind: API }, app: Backoffice }
+  Cloud:
+    name: Cloud
+    role: EmbeddedStruct
+    environment:
+      target: fake
+      values: { project: acme-staging, region: us-east1 }

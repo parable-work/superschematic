@@ -2,8 +2,10 @@ package sqlmigrate
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/loader"
 	ir "github.com/parable-work/superschematic/ir"
@@ -36,7 +38,7 @@ type planCase struct {
 	readersAfter  []Read
 	// viewOwner is the new version's outputs.sql.viewOwner.
 	viewOwner string
-	// noConverge leaves the case out of the Postgres convergence test, and
+	// noConverge leaves the case out of the convergence tests, and
 	// noSeed applies it to tables with no rows, each with the reason.
 	noConverge string
 	noSeed     string
@@ -48,8 +50,9 @@ type planCase struct {
 	// lists are rows of product a SQLite case seeds with lists in its
 	// items column, each with the JSON text it holds after the plan.
 	lists listRows
-	// rows are more rows a SQLite case seeds, such as rows that reference
-	// one another, with the checks they pass after the plan.
+	// rows are more rows a case seeds, such as rows that reference one
+	// another or messages that share a key, with the checks they pass
+	// after the plan, in each dialect.
 	rows extraRows
 }
 
@@ -129,6 +132,26 @@ func (pc planCase) plan(t *testing.T) *Plan {
 }
 
 // Schema changes the cases make.
+
+// noPgvector is why a vector case is not applied to the convergence
+// Postgres, which has no pgvector (D84).
+const noPgvector = "the convergence Postgres has no pgvector; TestVectorPlansOnPostgres applies the case"
+
+// addProductEmbedding gives Product an optional vector of dimensions
+// numbers and an HNSW index over it by cosine distance (D84).
+func addProductEmbedding(s *ir.Schema, dimensions int) {
+	s.Scalars[ir.VectorScalarName] = &ir.ScalarDef{Name: ir.VectorScalarName, LanguagePrimitive: ir.LanguageString}
+	addField(s, "Product", &ir.FieldDef{Name: "embedding", TypeRef: ir.TypeRef{Name: ir.VectorScalarName}, ValidateDimensions: &dimensions})
+	m, ef := 16, 64
+	typeNamed(s, "Product").Indexes = []ir.IndexDef{{Keys: []string{"embedding"}, Method: ir.IndexMethodHNSW, Ops: "vector_cosine_ops", M: &m, EFConstruction: &ef}}
+}
+
+// addProductRate gives Product an optional Generic.Decimal of the
+// precision and scale, NUMERIC(p,s), or NUMERIC without them (D84).
+func addProductRate(s *ir.Schema, precision, scale *int) {
+	s.Scalars[ir.DecimalScalarName] = &ir.ScalarDef{Name: ir.DecimalScalarName, LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"sql": "NUMERIC"}}
+	addField(s, "Product", &ir.FieldDef{Name: "rate", TypeRef: ir.TypeRef{Name: ir.DecimalScalarName}, ValidatePrecision: precision, ValidateScale: scale})
+}
 
 func typeNamed(s *ir.Schema, name string) *ir.TypeDef {
 	td := s.Types[name]
@@ -247,6 +270,13 @@ var planCases = []planCase{
 	{name: "retype-column-narrow", after: func(s *ir.Schema) {
 		fieldNamed(s, "OrderLine", "sku").TypeRef = ir.TypeRef{Name: "Contact.PhoneNumber"}
 	}},
+	// A field whose type is a @jsonField class was a TEXT column before
+	// D83 and is JSONB now: the plan casts the text, which fails on text
+	// that is not JSON.
+	{name: "retype-text-to-jsonb",
+		before: func(s *ir.Schema) { addShippingAddress(s, stringRef) },
+		after:  func(s *ir.Schema) { addShippingAddress(s, ir.TypeRef{Name: "Address"}) },
+		noSeed: "the seeded text is not JSON"},
 	{name: "make-column-required", after: func(s *ir.Schema) {
 		fieldNamed(s, "Order", "note").Required = true
 	}},
@@ -272,6 +302,21 @@ var planCases = []planCase{
 	{name: "rename-table-with-dependents", after: func(s *ir.Schema) { renameType(s, "Order", "Purchase") },
 		renames:       []Rename{{From: "order", To: "purchase"}},
 		readersBefore: []Read{{Reader: "shop-api", Via: "OrderView.total", Table: "order", Column: "total"}}},
+	// A changed @table or @column renames the table or the column, with
+	// what is named after them, as a --rename would (D85).
+	{name: "rename-table-by-override", after: func(s *ir.Schema) { typeNamed(s, "Order").SQLName = "purchaseOrder" },
+		readersBefore: []Read{{Reader: "shop-api", Via: "OrderView.total", Table: "order", Column: "total"}}},
+	{name: "rename-column-by-override", after: func(s *ir.Schema) {
+		fieldNamed(s, "Customer", "email").SQLName = "emailAddress"
+		fieldNamed(s, "Order", "customer").SQLName = "customerId"
+	}},
+	{name: "rename-versioned-table-by-override", noSQLite: "sqlite does not support @versioned",
+		before: func(s *ir.Schema) { versioned(s, "Order", nil) },
+		after: func(s *ir.Schema) {
+			versioned(s, "Order", nil)
+			typeNamed(s, "Order").SQLName = "purchaseOrder"
+			fieldNamed(s, "Order", "note").SQLName = "orderNote"
+		}},
 	{name: "rename-versioned-table", noSQLite: "sqlite does not support @versioned",
 		before: func(s *ir.Schema) { versioned(s, "Order", &ir.VersionedConfig{RetentionDays: intPtr(30)}) },
 		after: func(s *ir.Schema) {
@@ -301,6 +346,11 @@ var planCases = []planCase{
 	{name: "change-on-delete", after: func(s *ir.Schema) {
 		fieldNamed(s, "Order", "customer").Relation.OnDelete = "CASCADE"
 	}},
+	// A nullable relation's rows lose the reference, not the row, when the
+	// referenced row goes (D83).
+	{name: "change-on-delete-to-set-null",
+		before: func(s *ir.Schema) { addLineProduct(s, "CASCADE") },
+		after:  func(s *ir.Schema) { addLineProduct(s, "SET NULL") }},
 	// Expand renames the foreign key with its column, so contract replaces
 	// it under its new name.
 	{name: "rename-column-and-change-on-delete", after: func(s *ir.Schema) {
@@ -382,6 +432,200 @@ var planCases = []planCase{
 		before: func(s *ir.Schema) { versioned(s, "Product", nil) },
 		after:  func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true }},
 
+	// Defaults and checks (D83).
+	{name: "add-default", after: func(s *ir.Schema) {
+		zero := "0"
+		fieldNamed(s, "Order", "total").Default = &zero
+	}},
+	{name: "drop-default", before: func(s *ir.Schema) {
+		zero := "0"
+		fieldNamed(s, "Order", "total").Default = &zero
+	}},
+	// A deployment built before D83 held the enum as text with no check.
+	{name: "add-enum-check",
+		before: func(s *ir.Schema) { addOrderStatus(s, stringRef) },
+		after:  func(s *ir.Schema) { addOrderStatus(s, statusRef, "placed", "shipped") }},
+	{name: "add-column-with-check", after: func(s *ir.Schema) { addOrderStatus(s, statusRef, "placed", "shipped") }},
+	{name: "widen-enum-check",
+		before: func(s *ir.Schema) { addOrderStatus(s, statusRef, "placed", "shipped") },
+		after:  func(s *ir.Schema) { addOrderStatus(s, statusRef, "placed", "shipped", "cancelled") }},
+	{name: "narrow-enum-check",
+		before: func(s *ir.Schema) { addOrderStatus(s, statusRef, "placed", "shipped", "cancelled") },
+		after:  func(s *ir.Schema) { addOrderStatus(s, statusRef, "placed", "shipped") }},
+	{name: "change-validate-check",
+		before: func(s *ir.Schema) { fieldNamed(s, "Order", "note").ValidateMaxLength = intPtr(100) },
+		after:  func(s *ir.Schema) { fieldNamed(s, "Order", "note").ValidateMaxLength = intPtr(50) }},
+	{name: "drop-validate-check",
+		before: func(s *ir.Schema) { fieldNamed(s, "Order", "note").ValidateMaxLength = intPtr(100) }},
+	// A column contract drops takes its check with it.
+	{name: "drop-checked-column", before: func(s *ir.Schema) { fieldNamed(s, "Order", "note").ValidateMaxLength = intPtr(100) },
+		after: func(s *ir.Schema) { dropField(s, "Order", "note") }},
+
+	// Richer indexes (D83).
+	{name: "add-expression-index", after: func(s *ir.Schema) {
+		typeNamed(s, "Customer").Indexes = []ir.IndexDef{{Keys: []string{"email"}, Name: "email_lower", Expression: "lower(email)"}}
+	}},
+	{name: "add-index-in-transaction", after: func(s *ir.Schema) {
+		no := false
+		typeNamed(s, "OrderLine").Indexes = []ir.IndexDef{{Keys: []string{"sku"}, Concurrently: &no}}
+	}},
+	{name: "add-partial-brin-index", noSQLite: "sqlite has no BRIN index", after: func(s *ir.Schema) {
+		typeNamed(s, "Order").Indexes = append(typeNamed(s, "Order").Indexes,
+			ir.IndexDef{Keys: []string{"placedAt"}, Method: ir.IndexMethodBRIN, Where: "total > 0"})
+	}},
+	{name: "add-opclass-index", noSQLite: "sqlite has no operator classes", after: func(s *ir.Schema) {
+		typeNamed(s, "Product").Indexes = []ir.IndexDef{{Keys: []string{"title"}, Name: "title_trgm", Method: ir.IndexMethodGIN, Ops: "gin_trgm_ops"}}
+	}},
+
+	// Vectors and decimals (D84). The convergence Postgres has no pgvector,
+	// so the vector cases are not applied to it; TestVectorPlansOnPostgres
+	// applies them to the one pgtest.VectorDatabaseURL names.
+	{name: "add-vector-column", noSQLite: "sqlite has no vector type", noConverge: noPgvector,
+		after: func(s *ir.Schema) { addProductEmbedding(s, 3) }},
+	{name: "change-vector-dimensions", noSQLite: "sqlite has no vector type", noConverge: noPgvector,
+		before: func(s *ir.Schema) { addProductEmbedding(s, 3) }, after: func(s *ir.Schema) { addProductEmbedding(s, 4) }},
+	// A changed @table and @column on a table's vector rename the table and
+	// the column, with the index named after them, and keep every vector: a
+	// rename, never the dimension change a vector(3) of another name would
+	// look like (D84, D85).
+	{name: "rename-vector-column-by-override", noSQLite: "sqlite has no vector type", noConverge: noPgvector,
+		before: func(s *ir.Schema) { addProductEmbedding(s, 3) },
+		after: func(s *ir.Schema) {
+			addProductEmbedding(s, 3)
+			typeNamed(s, "Product").SQLName = "catalogItem"
+			fieldNamed(s, "Product", "embedding").SQLName = "embeddingVector"
+		}},
+	{name: "narrow-decimal", noSQLite: "sqlite stores every decimal as NUMERIC",
+		before: func(s *ir.Schema) { addProductRate(s, nil, nil) },
+		after: func(s *ir.Schema) {
+			precision, scale := 6, 2
+			addProductRate(s, &precision, &scale)
+		}},
+
+	// Raw SQL (D83).
+	{name: "add-raw-sql", after: addOrderRawSQL},
+	{name: "change-raw-sql", before: addOrderRawSQL, after: func(s *ir.Schema) {
+		addOrderRawSQL(s)
+		// An index whose definition changes is dropped first: CREATE INDEX
+		// IF NOT EXISTS keeps the one it finds.
+		typeNamed(s, "Order").RawSQL[1].Up = "DROP INDEX IF EXISTS order_code_lower;\n" +
+			"CREATE INDEX IF NOT EXISTS order_code_lower ON \"order\" (lower(code), placed_at)"
+	}},
+	{name: "drop-raw-sql", before: addOrderRawSQL},
+	// With no down, nothing undoes the piece: a step with no SQL says so.
+	{name: "drop-raw-sql-without-down", before: func(s *ir.Schema) {
+		addOrderRawSQL(s)
+		typeNamed(s, "Order").RawSQL[1].Down = ""
+	}, noConverge: "a piece with no down leaves what it made, which create.sql of the new version does not make"},
+	// SQLite rebuilds order, which drops the index the raw SQL made on it,
+	// so the phase ends by running the raw SQL again.
+	{name: "raw-sql-after-rebuild", before: addOrderRawSQL, after: func(s *ir.Schema) {
+		addOrderRawSQL(s)
+		zero := "0"
+		fieldNamed(s, "Order", "total").Default = &zero
+	}},
+
+	// A queue's key, and the triggers that enqueue its messages (D80).
+	{name: "add-queue-key",
+		before: func(s *ir.Schema) { shipQueue(s, &ir.QueueDef{}) },
+		after: func(s *ir.Schema) {
+			shipQueue(s, &ir.QueueDef{Key: "orderId", OnDuplicate: ir.QueueOnDuplicateReplace, Serialize: true})
+		}, rows: waitingTwice},
+	{name: "change-queue-key",
+		before: func(s *ir.Schema) {
+			shipQueue(s, &ir.QueueDef{Key: "orderId", OnDuplicate: ir.QueueOnDuplicateReplace, Serialize: true})
+		},
+		after: func(s *ir.Schema) { shipQueue(s, &ir.QueueDef{Key: "orderId", Serialize: true}) }},
+	{name: "add-enqueue-on-change",
+		before: func(s *ir.Schema) { shipQueue(s, shipKey) },
+		after:  func(s *ir.Schema) { shipQueue(s, shipKey); enqueueShip(s, []string{"insert", "update"}, "note") }},
+	{name: "change-enqueue-on-change",
+		before: func(s *ir.Schema) { shipQueue(s, shipKey); enqueueShip(s, []string{"insert", "update"}, "note") },
+		after: func(s *ir.Schema) {
+			shipQueue(s, shipKey)
+			enqueueShip(s, []string{"insert", "update", "delete"}, "note", "total")
+		}},
+	{name: "drop-enqueue-on-change",
+		before: func(s *ir.Schema) { shipQueue(s, shipKey); enqueueShip(s, []string{"insert", "update"}, "note") },
+		after:  func(s *ir.Schema) { shipQueue(s, shipKey) }},
+	// backfill: true (D88): the step that creates the trigger enqueues one
+	// message for each order that meets when, so the orders with a note
+	// wait once each and the one with none does not.
+	{name: "add-enqueue-on-change-backfill",
+		before: func(s *ir.Schema) { shipQueue(s, shipKey) },
+		after: func(s *ir.Schema) {
+			shipQueue(s, shipKey)
+			enqueueShip(s, []string{"insert", "update"}, "note")
+			def := typeNamed(s, "Order").EnqueueOnChange[0]
+			def.Backfill, def.When = true, []*ir.EnqueueCondition{{Field: "note", NotNull: true}}
+		}, rows: backfilledOrders},
+	// A queue keyed by customer that replaces: the backfill leaves one
+	// waiting message per customer, however many orders each has.
+	{name: "add-enqueue-on-change-backfill-per-key",
+		before: customerQueue,
+		after: func(s *ir.Schema) {
+			customerQueue(s)
+			typeNamed(s, "Order").EnqueueOnChange = []*ir.EnqueueOnChange{{
+				Queue: "CustomerOrdered", On: []string{"insert"}, Backfill: true,
+				Message: map[string]string{"customerId": "customer", "note": "note"},
+			}}
+		}, rows: backfilledCustomers},
+
+	// Required timestamps default to now only when declared (D88): a plan
+	// from a database a compiler before D88 built drops the default it
+	// gave every required timestamp, with no hazard.
+	{name: "drop-implied-now-default",
+		before: func(s *ir.Schema) { fieldNamed(s, "Order", "placedAt").Default = nowDefault() }},
+	{name: "add-now-default",
+		after: func(s *ir.Schema) { fieldNamed(s, "Order", "placedAt").Default = nowDefault() }},
+
+	// The roles a UserRole table seeds (D88): a new seed is inserted, and
+	// fills a role of its name with no permissions, as the first
+	// registration makes one before a seed exists; one that gains a
+	// permission is updated in expand, and one that loses one in contract.
+	// The fixture seeds member with identity.roles.read: gain adds
+	// identity.users.write to it, and lose takes that away.
+	{name: "add-seed-roles", base: userModelDir, before: func(s *ir.Schema) { s.UserRoleTable().SeedRoles = nil }, rows: unseededMember},
+	{name: "seed-roles-gain", base: userModelDir, after: memberSeed("identity.roles.read", "identity.users.write")},
+	{name: "seed-roles-lose", base: userModelDir, before: memberSeed("identity.roles.read", "identity.users.write")},
+	// @table names the queue's table and @column its key's column (D85):
+	// the plan renames both, with the key's indexes, and replaces the
+	// trigger, which is named after the queue's table.
+	{name: "rename-queue-by-override",
+		before: func(s *ir.Schema) { shipQueue(s, shipKey); enqueueShip(s, []string{"insert", "update"}, "note") },
+		after: func(s *ir.Schema) {
+			shipQueue(s, shipKey)
+			enqueueShip(s, []string{"insert", "update"}, "note")
+			typeNamed(s, "OrderShipped").SQLName = "orderShipments"
+			fieldNamed(s, "OrderShipped", "orderId").SQLName = "orderId"
+		}},
+	// SQLite drops a table's triggers with it, so its rebuild creates them
+	// again.
+	{name: "enqueue-on-change-rebuilt",
+		before: func(s *ir.Schema) { shipQueue(s, shipKey); enqueueShip(s, []string{"insert", "update"}, "note") },
+		after: func(s *ir.Schema) {
+			shipQueue(s, shipKey)
+			enqueueShip(s, []string{"insert", "update"}, "note")
+			fieldNamed(s, "Order", "note").Required = true
+		}},
+	// SQLite rebuilds order for the check its note gains (D83), which
+	// drops the triggers its @enqueueOnChange made (D80) and the index raw
+	// SQL made on it: the copy creates the table with the check, the
+	// triggers after its indexes, and the phase ends by running the raw SQL
+	// again.
+	{name: "enqueue-on-change-rebuilt-with-check",
+		before: func(s *ir.Schema) {
+			shipQueue(s, shipKey)
+			enqueueShip(s, []string{"insert", "update"}, "note")
+			addOrderRawSQL(s)
+		},
+		after: func(s *ir.Schema) {
+			shipQueue(s, shipKey)
+			enqueueShip(s, []string{"insert", "update"}, "note")
+			addOrderRawSQL(s)
+			fieldNamed(s, "Order", "note").ValidateMaxLength = intPtr(100)
+		}},
+
 	// Projections.
 	{name: "add-projection", noSQLite: "sqlite does not support projections", after: func(s *ir.Schema) {
 		s.Types["CustomerDirectory"] = &ir.TypeDef{
@@ -416,6 +660,113 @@ var planCases = []planCase{
 	}},
 }
 
+// waitingTwice are two ready messages of one order, which the plan that
+// keys OrderShipped by order with replace leaves one: the latest waits,
+// and the other is done.
+var waitingTwice = extraRows{
+	seed: []string{
+		`INSERT INTO "order_shipped_queue" ("order_id", "note", "state", "created_at") VALUES ('a0000000-0000-4000-8000-00000000000a', 'first', 'ready', '2026-01-01T00:00:00.000Z')`,
+		`INSERT INTO "order_shipped_queue" ("order_id", "note", "state", "created_at") VALUES ('a0000000-0000-4000-8000-00000000000a', 'second', 'ready', '2026-01-02T00:00:00.000Z')`,
+	},
+	checks: []seedCheck{
+		{Name: "the latest message of the order waits",
+			SQL: `SELECT count(*) = 1 FROM "order_shipped_queue" WHERE "order_id" = 'a0000000-0000-4000-8000-00000000000a' AND "state" = 'ready' AND "note" = 'second'`},
+		{Name: "the earlier message of the order is done",
+			SQL: `SELECT count(*) = 1 FROM "order_shipped_queue" WHERE "order_id" = 'a0000000-0000-4000-8000-00000000000a' AND "state" = 'done' AND "note" = 'first' AND "last_error" LIKE 'another ready message of its key%'`},
+	},
+}
+
+// backfilledOrders are two more orders, one with a note and one without,
+// besides the seeded one, whose note is set: the backfill (D88) enqueues
+// a message for each order with a note, and none for the other.
+var backfilledOrders = extraRows{
+	seed: []string{
+		`INSERT INTO "order" ("code", "customer_id", "total", "note", "placed_at") SELECT 'gift', "id", 1, 'gift wrap', '2026-01-01T00:00:00.000Z' FROM "customer"`,
+		`INSERT INTO "order" ("code", "customer_id", "total", "placed_at") SELECT 'plain', "id", 2, '2026-01-01T00:00:00.000Z' FROM "customer"`,
+	},
+	checks: []seedCheck{
+		{Name: "each order with a note waits once",
+			SQL: `SELECT count(*) = 2 AND count(DISTINCT q."order_id") = 2 FROM "order_shipped_queue" q JOIN "order" o ON q."order_id" = o."id" WHERE q."state" = 'ready' AND q."note" = o."note"`},
+		{Name: "the order with no note waits not at all",
+			SQL: `SELECT count(*) = 0 FROM "order_shipped_queue" q JOIN "order" o ON q."order_id" = o."id" WHERE o."code" = 'plain'`},
+	},
+}
+
+// customerQueue adds the queue CustomerOrdered, a message of a customer
+// and a note, keyed by customer, whose newer message replaces the one that
+// waits.
+func customerQueue(s *ir.Schema) {
+	s.Types["CustomerOrdered"] = &ir.TypeDef{Name: "CustomerOrdered", Role: ir.RoleEmbeddedStruct,
+		Queue: &ir.QueueDef{Key: "customerId", OnDuplicate: ir.QueueOnDuplicateReplace},
+		Fields: []*ir.FieldDef{
+			{Name: "customerId", TypeRef: uuidRef, Required: true},
+			{Name: "note", TypeRef: stringRef},
+		}}
+}
+
+// backfilledCustomers are two more orders of the seeded customer, which
+// already has one: the backfill leaves the customer one waiting message.
+var backfilledCustomers = extraRows{
+	seed: []string{
+		`INSERT INTO "order" ("code", "customer_id", "total", "note", "placed_at") SELECT 'second', "id", 1, 'second', '2026-01-01T00:00:00.000Z' FROM "customer"`,
+		`INSERT INTO "order" ("code", "customer_id", "total", "note", "placed_at") SELECT 'third', "id", 2, 'third', '2026-01-01T00:00:00.000Z' FROM "customer"`,
+	},
+	checks: []seedCheck{
+		{Name: "the customer of three orders waits once",
+			SQL: `SELECT count(*) = 1 FROM "customer_ordered_queue" q JOIN "customer" c ON q."customer_id" = c."id" WHERE q."state" = 'ready'`},
+	},
+}
+
+// nowDefault is Default<T, "now"> (D88).
+func nowDefault() *string {
+	now := codegen.DefaultNow
+	return &now
+}
+
+// userModelDir is the user model's fixture, whose Role table seeds member
+// (D88).
+var userModelDir = filepath.Join(sqlgenFixtures, "fixture-user-model-db")
+
+// memberSeed seeds member with the permissions given.
+func memberSeed(permissions ...string) func(*ir.Schema) {
+	return func(s *ir.Schema) {
+		s.UserRoleTable().SeedRoles = []*ir.RoleSeed{{Name: "member", Permissions: permissions}}
+	}
+}
+
+// unseededMember is a member role with no permissions, as the first
+// registration creates a default role before a seed exists (D81), copied
+// from the seeded role, which has none: the plan that seeds member gives
+// it the seed's.
+var unseededMember = extraRows{
+	seed: []string{`INSERT INTO "role" ("name", "permissions") SELECT 'member', "permissions" FROM "role"`},
+	checks: []seedCheck{
+		{Name: "member holds the seed's permissions",
+			SQL: `SELECT count(*) = 1 FROM "role" m WHERE m."name" = 'member' AND m."permissions" <> (SELECT r."permissions" FROM "role" r WHERE r."name" <> 'member')`},
+	},
+}
+
+// shipKey keys OrderShipped by order, one waiting message per order.
+var shipKey = &ir.QueueDef{Key: "orderId", OnDuplicate: ir.QueueOnDuplicateReplace}
+
+// shipQueue adds the queue OrderShipped, a message of an order and a note,
+// declared with def.
+func shipQueue(s *ir.Schema, def *ir.QueueDef) {
+	s.Types["OrderShipped"] = &ir.TypeDef{Name: "OrderShipped", Role: ir.RoleEmbeddedStruct, Queue: def, Fields: []*ir.FieldDef{
+		{Name: "orderId", TypeRef: uuidRef, Required: true},
+		{Name: "note", TypeRef: stringRef},
+	}}
+}
+
+// enqueueShip has a change of Order's fields, on the writes on, enqueue
+// the order's OrderShipped.
+func enqueueShip(s *ir.Schema, on []string, fields ...string) {
+	typeNamed(s, "Order").EnqueueOnChange = []*ir.EnqueueOnChange{{
+		Queue: "OrderShipped", On: on, Fields: fields,
+		Message: map[string]string{"orderId": "id", "note": "note"},
+	}}
+}
+
 // addSupplierAndWarehouse adds two tables that reference each other: a
 // supplier's main warehouse, and the supplier that runs a warehouse.
 func addSupplierAndWarehouse(s *ir.Schema) {
@@ -429,6 +780,60 @@ func addSupplierAndWarehouse(s *ir.Schema) {
 		{Name: "city", TypeRef: stringRef, Required: true},
 		{Name: "supplier", TypeRef: ir.TypeRef{Name: "Supplier"}, Relation: &ir.RelationDef{Type: "Supplier", OnDelete: "CASCADE"}},
 	}}
+}
+
+// statusRef is the OrderStatus enum addOrderStatus declares.
+var statusRef = ir.TypeRef{Name: "OrderStatus"}
+
+// addOrderStatus adds the OrderStatus enum with the values given and
+// Order.status, a nullable field typed ref.
+func addOrderStatus(s *ir.Schema, ref ir.TypeRef, values ...string) {
+	enum := &ir.EnumDef{Name: "OrderStatus"}
+	for _, v := range values {
+		enum.Values = append(enum.Values, ir.EnumValueDef{Name: strings.ToUpper(v[:1]) + v[1:], SerializedAs: v})
+	}
+	if len(values) == 0 {
+		enum.Values = []ir.EnumValueDef{{Name: "Placed", SerializedAs: "placed"}}
+	}
+	s.Enums["OrderStatus"] = enum
+	addField(s, "Order", &ir.FieldDef{Name: "status", TypeRef: ref})
+}
+
+// addOrderRawSQL declares two pieces of raw SQL on Order: a materialized
+// view of each customer's total, on Postgres alone, and an index over an
+// expression, which runs after the tables on both dialects.
+func addOrderRawSQL(s *ir.Schema) {
+	typeNamed(s, "Order").RawSQL = []ir.RawSQLDef{
+		{
+			ID:       "customer_totals",
+			Dialects: []string{"postgres"},
+			Up: "DROP MATERIALIZED VIEW IF EXISTS customer_totals;\n" +
+				"CREATE MATERIALIZED VIEW IF NOT EXISTS customer_totals AS SELECT customer_id, sum(total) AS total FROM \"order\" GROUP BY customer_id",
+			Down: "DROP MATERIALIZED VIEW IF EXISTS customer_totals",
+		},
+		{
+			ID:    "order_code_lower",
+			After: ir.RawSQLAfterTables,
+			Up:    "CREATE INDEX IF NOT EXISTS order_code_lower ON \"order\" (lower(code))",
+			Down:  "DROP INDEX IF EXISTS order_code_lower",
+		},
+	}
+}
+
+// addLineProduct adds OrderLine.product, a nullable relation to Product
+// with the onDelete action given.
+func addLineProduct(s *ir.Schema, onDelete string) {
+	addField(s, "OrderLine", &ir.FieldDef{Name: "product", TypeRef: ir.TypeRef{Name: "Product"}, Relation: &ir.RelationDef{Type: "Product", OnDelete: onDelete}})
+}
+
+// addShippingAddress adds the @jsonField class Address and Order.shipTo,
+// typed ref: Address, or what the field was stored as before D83.
+func addShippingAddress(s *ir.Schema, ref ir.TypeRef) {
+	s.Types["Address"] = &ir.TypeDef{Name: "Address", Role: ir.RoleDBTable, JsonField: true, Fields: []*ir.FieldDef{
+		{Name: "line1", TypeRef: stringRef, Required: true},
+		{Name: "city", TypeRef: stringRef, Required: true},
+	}}
+	addField(s, "Order", &ir.FieldDef{Name: "shipTo", TypeRef: ref})
 }
 
 // renameCustomerToBuyer renames Order.customer, which a foreign key, an

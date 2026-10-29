@@ -19,6 +19,7 @@ var RouteTypes = []string{
 	ir.IdentityLoginInputType,
 	ir.IdentityRegisterInputType,
 	ir.IdentityLoginResultType,
+	ir.IdentityRegisterResultType,
 	ir.IdentitySessionUserType,
 	ir.IdentityRoleRefType,
 	ir.IdentityCurrentUserType,
@@ -134,8 +135,13 @@ func (e *routeExpansion) sessionOperations(cfg *ir.UserSessionsConfig) []*ir.Fie
 		ops = append(ops, change)
 	}
 	if cfg.Register && !cfg.NoLogin {
-		register := e.operation(ir.IdentityOpRegister, "POST", path+"/register", ir.IdentityLoginResultType,
-			"Creates a user with the login, name and password given and signs them in, as login does.")
+		result, comment := ir.IdentityLoginResultType, "Creates a user with the login, name and password given and signs them in, as login does."
+		if cfg.Approval() {
+			// Under approval the user waits for an administrator, with no
+			// session, unless they are the first administrator (D81).
+			result, comment = ir.IdentityRegisterResultType, "Creates a user with the login, name and password given, who waits for an administrator's approval: it answers 202 with pending true and starts no session. The first administrator, when the set names one, is signed in as login does."
+		}
+		register := e.operation(ir.IdentityOpRegister, "POST", path+"/register", result, comment)
 		e.input(register, ir.IdentityRegisterInputType)
 		public(register)
 		rateLimited(register, ir.IdentityRegisterRateLimit)
@@ -159,16 +165,23 @@ func (e *routeExpansion) administrationOperations(cfg *ir.UserAdministrationConf
 	listUsers := e.operation(ir.IdentityOpListUsers, "GET", users, ir.IdentityUserType,
 		"Lists the users and the roles each holds.")
 	listUsers.TypeRef.IsArray = true
+	listUsers.Arguments = append(listUsers.Arguments, &ir.ArgumentDef{
+		Name:    ir.IdentityPendingArgument,
+		Comment: "true lists the users waiting for approval alone, false the others; every user when absent.",
+		TypeRef: ir.TypeRef{Name: "boolean"},
+	})
 	getUser := e.operation(ir.IdentityOpGetUser, "GET", user, ir.IdentityUserType,
 		"One user and the roles they hold.")
 	disableUser := e.operation(ir.IdentityOpDisableUser, "POST", user+"/disable", ir.IdentityUserType,
 		"Disables a user, who can no longer sign in, and ends their sessions.")
 	enableUser := e.operation(ir.IdentityOpEnableUser, "POST", user+"/enable", ir.IdentityUserType,
 		"Enables a disabled user.")
+	approveUser := e.operation(ir.IdentityOpApproveUser, "POST", user+"/approve", ir.IdentityUserType,
+		"Approves a user who registered to wait for approval, who can then sign in with the roles register granted them. The caller's own permissions must cover those roles'.")
 	setPassword := e.operation(ir.IdentityOpSetUserPassword, "PUT", user+"/password", "boolean",
 		"Sets a user's password and ends their sessions. It answers true.")
 	hiddenTool(setPassword)
-	for _, op := range []*ir.FieldDef{getUser, disableUser, enableUser, setPassword} {
+	for _, op := range []*ir.FieldDef{getUser, disableUser, enableUser, approveUser, setPassword} {
 		e.pathArgument(op, ir.IdentityIDArgument, e.userKey)
 	}
 	e.input(setPassword, ir.IdentitySetPasswordInputType)
@@ -196,11 +209,11 @@ func (e *routeExpansion) administrationOperations(cfg *ir.UserAdministrationConf
 	}
 
 	e.permission(ir.IdentityPermissionUsersRead, listUsers, getUser)
-	e.permission(ir.IdentityPermissionUsersWrite, createUser, disableUser, enableUser, setPassword)
+	e.permission(ir.IdentityPermissionUsersWrite, createUser, disableUser, enableUser, approveUser, setPassword)
 	e.permission(ir.IdentityPermissionRolesRead, listRoles)
 	e.permission(ir.IdentityPermissionRolesWrite, createRole, updateRole, deleteRole, grantRole, revokeRole)
 	return []*ir.FieldDef{
-		createUser, listUsers, getUser, disableUser, enableUser, setPassword,
+		createUser, listUsers, getUser, disableUser, enableUser, approveUser, setPassword,
 		listRoles, createRole, updateRole, deleteRole, grantRole, revokeRole,
 	}
 }
@@ -367,6 +380,14 @@ func (e *routeExpansion) typeDef(name string) *ir.TypeDef {
 			field("user", ir.IdentitySessionUserType, true, "The signed-in user."),
 			field("expiresAt", "Temporal.DateTime", true, "When the session ends."),
 			token)
+	case ir.IdentityRegisterResultType:
+		expires := field("expiresAt", "Temporal.DateTime", false, "When the session ends; absent while the user waits for approval.")
+		token := field("token", "string", false, "The session's bearer token; absent for a cookie session and while the user waits for approval.")
+		token.Secret = true
+		td = output(name, "What register answers under registration approval: whether the user waits for an administrator's approval, and the session of one who does not.",
+			field("pending", "boolean", true, "Whether the user waits for an administrator's approval, with no session."),
+			field("user", ir.IdentitySessionUserType, true, "The registered user."),
+			expires, token)
 	case ir.IdentitySessionUserType:
 		td = output(name, "A signed-in user: their key, login and display name.",
 			id(e.userKey), login(), field("name", e.name, e.nameRequired, "The user's display name."))
@@ -395,6 +416,7 @@ func (e *routeExpansion) typeDef(name string) *ir.TypeDef {
 		td = output(name, "A user as the administration routes show it.",
 			id(e.userKey), login(), field("name", e.name, e.nameRequired, "The user's display name."),
 			field("disabled", "boolean", true, "Whether the user is disabled, and so cannot sign in."),
+			field("pending", "boolean", true, "Whether the user waits for an administrator's approval, and so cannot sign in."),
 			roleRefs("The roles the user holds."))
 	case ir.IdentityRoleInputType:
 		td = input(name, "What createRole and updateRole take: the role's name and the permissions it grants.",

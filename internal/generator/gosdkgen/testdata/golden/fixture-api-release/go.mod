@@ -1,6 +1,6 @@
 module example.com/schemas/sdk/go/fixture-api
 
-go 1.26.4
+go 1.27.3
 
 require example.com/schemas/types/go/fixture-api v0.0.0
 require github.com/parable-work/superschematic/runtime/http/go v1.2.3

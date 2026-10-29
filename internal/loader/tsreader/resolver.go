@@ -28,7 +28,8 @@ type typeInfo struct {
 	platformDefault bool
 
 	// validate holds the Validate<T, C> config keys (min, max,
-	// uploadMaxBytes, minLength, maxLength, listMin, listMax, pattern).
+	// uploadMaxBytes, minLength, maxLength, listMin, listMax, pattern,
+	// precision, scale, dimensions).
 	validate map[string]any
 
 	// listBoundsDepth is the list depth of the type a Validate config with
@@ -41,7 +42,8 @@ type typeInfo struct {
 	relation      bool
 
 	// relationOnDelete holds the Relation<T, { onDelete }> action when set
-	// (CASCADE|RESTRICT|NO ACTION); empty means the generator default.
+	// (CASCADE|RESTRICT|NO ACTION|SET NULL); empty means the generator
+	// default.
 	relationOnDelete string
 	hasMany          bool
 	manyToMany       bool
@@ -49,6 +51,10 @@ type typeInfo struct {
 	secret           bool
 	queryParam       bool
 	encrypted        bool
+	// encryptedAtRest is set by @superschematic/db's Encrypted<T> (D85),
+	// a stored field's ciphertext; encrypted is EncryptedField<T>'s
+	// request envelope.
+	encryptedAtRest bool
 
 	// references is set by RefersTo<T, Target, C> (D61): the target and
 	// the config's members as written.
@@ -62,6 +68,12 @@ type typeInfo struct {
 	// sortItem is Item's ref name, which the operation's result must list.
 	sortBy   []string
 	sortItem string
+
+	// fileUpload is set by FileUpload<C> and fileDownload by
+	// FileDownload<C> (D81): the constraints of a field that is a file, and
+	// an operation's result that is one.
+	fileUpload   *ir.FileUploadConfig
+	fileDownload *ir.FileDownloadDef
 
 	// Classification of the base reference.
 	isScalar    bool
@@ -87,8 +99,9 @@ type typeInfo struct {
 var wrapperNames = map[string]bool{
 	"Default": true, "PlatformDefault": true, "Nullable": true, "Validate": true, "Secret": true,
 	"Relation": true, "HasMany": true, "ManyToMany": true, "AutoGenerate": true,
-	"JsonField": true, "QueryParam": true, "EncryptedField": true,
+	"JsonField": true, "QueryParam": true, "EncryptedField": true, "Encrypted": true,
 	"RefersTo": true, "SearchQuery": true, "SortBy": true,
+	"FileUpload": true, "FileDownload": true,
 }
 
 // resolveTypeNode resolves a type expression into a typeInfo. It works
@@ -351,6 +364,13 @@ func (w *walker) resolveWrapper(node *astNode, id symbolIdentity) (*typeInfo, *S
 		// SearchQuery<T extends string = string>: a bare SearchQuery is text.
 		return &typeInfo{ref: ir.TypeRef{Name: "string"}, isPrimitive: true, queryParam: true, nullable: true, search: true}, nil
 	}
+	switch id.name {
+	case "FileUpload":
+		// FileUpload<C = {}>: C is the file's constraints, not a value's type.
+		return w.fileUploadFromTypeArgs(node, args)
+	case "FileDownload":
+		return w.fileDownloadFromTypeArgs(node, args)
+	}
 	if id.name == "SortBy" {
 		// SortBy<Item, Fields>: args[0] is the item type, not the value's.
 		var nodes []*astNode
@@ -443,6 +463,10 @@ func (w *walker) resolveWrapper(node *astNode, id symbolIdentity) (*typeInfo, *S
 		info.queryParam = true
 	case "EncryptedField":
 		info.encrypted = true
+	case "Encrypted":
+		// @superschematic/api's Encrypted is an operation set's base class,
+		// which takes no type argument, so only db's wrapper reaches here.
+		info.encryptedAtRest = true
 	case "RefersTo":
 		if info.references != nil {
 			return nil, errorAtNode(node, "RefersTo is written once on a value; this one already refers to %s", info.references.Type)
@@ -689,10 +713,10 @@ func (w *walker) validateConfigFromTypeNode(node *astNode) (map[string]any, *Sch
 				return nil, errorAtNode(node, "Validate uploadMaxBytes must be a finite JavaScript-safe integer literal")
 			}
 			cfg[prop.Name] = uploadMaxBytes
-		case "minLength", "maxLength", "listMin", "listMax":
-			// A length or item count is a whole number: the JSON and YAML
-			// forms type these bounds as integers, so a fraction is refused
-			// here rather than truncated.
+		case "minLength", "maxLength", "listMin", "listMax", "precision", "scale", "dimensions":
+			// A length, an item count, a digit count or a vector's length is
+			// a whole number: the JSON and YAML forms type these bounds as
+			// integers, so a fraction is refused here rather than truncated.
 			bound, valid := safeIntegerLiteral(v)
 			if !valid {
 				return nil, errorAtNode(node, "Validate %s must be a finite JavaScript-safe integer literal, got %s", prop.Name, formatLiteral(v))

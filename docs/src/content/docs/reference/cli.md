@@ -21,16 +21,215 @@ carries extensions. A binary hands the error `Execute` returns to
 that already said why, such as `superschematic-identity`, exits with that
 program's status.
 
-The core has ten commands: `build`, `build-all`, `migrate`,
-`json-schema`, `format`, `behaviors`, `engine-client`, `env` and the
-`stack` and `identity` groups, beside cobra's own `help` and
-`completion`. The
+The core has fifteen commands: `init`, `check`, `build`, `build-all`, `migrate`,
+`json-schema`, `format`, `behaviors`, `engine-client`, `env`, `catalog` and the
+`new`, `queries`, `stack` and `identity` groups, beside cobra's own `help` and
+`completion`. `--version` prints the binary's name and release,
+`superschematic version 1.2.3`, or `0.0.0` for a binary built from a
+checkout; a generated workflow checks the binary it installs with it. The
 installed `superschematic` links the official extensions (the gcp target, the Cloudflare DNS platform and
-target, and the Pulumi provisioner), which add none. The migration runner,
+target, and the Pulumi provisioner), which add none. Each release also
+ships `superschematic-topcoat`, the same binary with the
+[Topcoat](/superschematic/guides/topcoat/) extension linked too, which
+builds a stack whose app needs it. The migration runner,
 `superschematic-migrate`, is a binary of its own ([The runner](/superschematic/reference/migrations/#the-runner)),
 and so is the identity runner, `superschematic-identity`
 ([below](#the-identity-runner-superschematic-identity)): each holds the
 database drivers, which stay out of the compiler.
+
+## `init [<schemas-root>]`
+
+Write a schemas root, the directory every other command reads, so no one
+writes its boilerplate by hand (D71). Without a directory, it writes
+`./schemas`.
+
+| File | What it holds |
+| --- | --- |
+| `superschematic.toml` | `go_module_root` and `npm_scope`, and a [`[paths]`](/superschematic/reference/naming/#paths) table pointing the generated packages' path dependencies at a superschematic checkout, relative to the parent of the schemas root; `build_context` too when the checkout holds the project |
+| `tsconfig.base.json` | `strict`, `experimentalDecorators` and the options acme-shop's has, with `paths` mapping `@superschematic/*` and `superscalar` to the checkout's sources and `<npm_scope>/*` to `./services/*/src/index.ts` |
+| `.gitignore` | the output root's contents, but for the lockfiles of its Bun and Cargo workspaces: `!/dist/`, `/dist/*`, `!/dist/bun.lock`, `!/dist/Cargo.lock` (D51) |
+| `services/` | empty: [`new service`](#new-service-name---kind-dbapigeneralbucketsitememorystore) adds each service |
+
+Nothing of superschematic is published yet, so the schema files compile
+against a checkout that `make setup` has prepared: `--superschematic`
+names it, and without the flag init takes the checkout that holds the
+schemas root. Outside one, it asks at a terminal and otherwise refuses.
+At a terminal it asks for each value no flag gives, each with its
+default. Without one, the module root is `example.com/<project>` and the
+scope `@<project>`, the project being the directory that holds the
+schemas root, in lower case.
+
+init writes no file that exists: when any of the three does, it names
+each and writes nothing. It ends with the next command, `superschematic
+new service`.
+
+```
+superschematic init --superschematic ~/src/superschematic
+superschematic init ./schemas --go-module-root example.com/acme --npm-scope @acme
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--go-module-root` | `example.com/<project>` | the prefix of every generated Go module path |
+| `--npm-scope` | `@<project>` | the npm scope of the generated packages and of the services' own |
+| `--superschematic` | the checkout that holds the schemas root | the superschematic checkout the schema files and generated packages build against |
+
+## `new service <name> --kind DB|API|General|Bucket|Site|MemoryStore`
+
+Write a service into a schemas root and build it once (D71). The name is
+lower-case words joined by hyphens, such as `shop-db`; `--kind` takes the
+kind in any case. A Stack service is [`stack init`](#stack-init-services-root)'s.
+
+It writes `<schemas-root>/services/<name>/`:
+
+| File | What it holds |
+| --- | --- |
+| `schema.config.ts` | `defineConfig` with the name, the kind and an `outputs` block that loads |
+| `package.json` | `{ "name": "<npm_scope>/<name>", "private": true }`, the package other services import |
+| `tsconfig.json` | extends `../../tsconfig.base.json`; includes `schema.config.ts` and `src/**/*.ts` |
+| `src/index.ts` | re-exports the starter's declarations and `./service.generated` |
+| `src/<name>.schema.ts` | a starter to rename and grow: a table `Item` with a `@key` for a DB, an operation `ItemQueries.getItem` (`GET items/{id}`) returning `ItemView` for an API, an object type `Item` for General, a channel `ItemChanged` and a claim `ItemNoticeSent` (600 seconds) for a MemoryStore |
+
+| Kind | `outputs` |
+| --- | --- |
+| `DB` | Go and TypeScript types; a DB always needs Go types |
+| `API` | Go and TypeScript types, a Go server (`api`), Go and TypeScript SDKs |
+| `General` | Go and TypeScript types |
+| `Bucket` | `{}` |
+| `Site` | none |
+| `MemoryStore` | Go and TypeScript `types`, its definitions in each ([Memory stores](/superschematic/guides/memory-stores/#declare-a-store)) |
+
+A Bucket and a Site declare nothing in schema files, so they get no
+starter schema: an API lists a bucket in its `buckets`, and a site's
+config lists the APIs its browser code calls in `calls`. An API lists a
+MemoryStore in its `memoryStores`.
+
+Last, it builds the service as [`build`](#build-service-dir) does, into
+`<schemas-root>/dist`, which writes `src/service.generated.ts`, the
+handle other services' configs import. A Site's build also writes its
+code's mirror under `web/<name>`, as every build of a Site does. A build
+that fails leaves the files written and says so.
+
+It writes no file that exists: when any does, or a config in another
+form, it names each and writes nothing. It refuses a name another
+service's config has, and a schemas root with no `tsconfig.base.json`.
+
+```
+superschematic new service shop-db --kind DB
+superschematic new service shop-api --kind API --root ./schemas
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--kind` | (required) | the service's kind: `DB`, `API`, `General`, `Bucket`, `Site` or `MemoryStore` |
+| `--root` | the working directory when it holds `superschematic.toml`, else `./schemas` | the schemas root |
+| `--naming` | `<schemas-root>/superschematic.toml` | naming config file |
+
+## `check [<service-dir>|<services-root>]`
+
+Load and verify schema services without generating code, so a schema
+edit's verdict comes back in tens of milliseconds instead of a build's
+seconds (D72). Check reads each service through the loader every build
+command uses: the TypeScript compiler's diagnostics, the data forms' schema
+checks, the config rules (D34), the registry's kind, decorator and check
+rules, and the verification pass, warnings included. A DB service's
+declared queries are held to its `queries.lock`, which
+[`queries verify`](#queries-verify-service-dir) writes; a query the lock
+does not hold, as it is now, is an error on the lock, as it fails `build`
+too. Its projections' migration pairs are held to its `projections.lock`,
+which `build` writes: a pair that would change under a stamp the lock
+records is an error on that lock, naming the next stamp
+([The migration stamp](/superschematic/reference/projections/#the-migration-stamp)).
+It writes nothing
+under the output root. Like a build it writes each service's sentinel,
+`src/service.generated.ts`, the handle other services' configs import,
+when it is missing or stale.
+
+Given a service directory, it checks that service and every service it
+depends on (`dependencies`, `authDb`, `calls`, `buckets` and
+`memoryStores`), as `build
+--with-deps` would build them; given a services root, or a schemas root
+holding `services/`, every service under it. Without an argument it
+checks the working directory when it is a service, else
+`./schemas/services` when there is one, else the working directory as a
+services root.
+
+Each finding is printed as a compiler prints one, then a summary:
+
+```
+schemas/services/shop-db/src/shop-db.schema.ts:12:3: error: Cannot find name 'Money'.
+Checked 3 schema services in 41ms: 1 error; failed: shop-db; blocked: shop-api (by shop-db)
+```
+
+A service whose load fails only because a service it reads failed, such
+as an API whose user model reads its `authDb`, is `blocked` by that
+service rather than reported with the same errors again. A finding in a
+dependency's file is the dependency's. The command exits 1 when any
+finding is an error; warnings, such as a view that omits a
+`@sourceMustProject` field, leave it at 0.
+
+`--json` writes one document instead, for a coding agent or an editor to
+read:
+
+```json
+{
+  "ok": false,
+  "servicesRoot": "schemas/services",
+  "checked": ["shop-db", "shop-api"],
+  "errors": 1,
+  "warnings": 0,
+  "durationMs": 41,
+  "services": [
+    { "name": "shop-db", "kind": "DB", "dir": "schemas/services/shop-db", "status": "error" },
+    { "name": "shop-api", "kind": "API", "dir": "schemas/services/shop-api", "status": "blocked", "blockedBy": ["shop-db"] }
+  ],
+  "diagnostics": [
+    { "service": "shop-db", "file": "schemas/services/shop-db/src/shop-db.schema.ts", "line": 12, "column": 3, "severity": "error", "message": "Cannot find name 'Money'." }
+  ]
+}
+```
+
+Paths are relative to the working directory when they are under it, else
+absolute. A diagnostic has no `line` and `column` when its finding names a
+file and no position, as the JSON and YAML readers' findings do, and no
+`file` when it names none.
+
+### `check --watch`
+
+With `--watch`, check runs once, then looks for edits every `--interval`
+and, on each, re-checks the services the edited files belong to and every
+service that depends on them, transitively, through the configs' edges and
+the services a schema's decorator arguments name (D41). It prints each
+result as it lands, with the files that changed; with `--json`, one
+document per line, with `changed` listing them. An edit to a config, a
+service's `package.json` or `tsconfig.json`, the naming file, the base
+tsconfig or a new service directory discovers the services again and
+re-checks them all. It never exits on errors, and stops at Ctrl-C.
+
+It watches the `.ts`, `.json`, `.yaml`, `.yml` and `.toml` files and the
+`queries.lock` and `projections.lock` of each
+service outside `node_modules`, `dist`, `target` and hidden directories,
+the schemas root's `superschematic.toml` and `tsconfig.base.json`, and the
+file `--naming` names. It polls rather than subscribing to file events: a
+schema tree is small, the poll costs less than the check it starts, and it
+sees edits in a container or on a network file system that events miss.
+
+Watch checks; it does not build. Run `build-all` or `build --with-deps`
+when the schemas check clean and you want the generated code, and see
+[`stack dev`](#stack-dev-stack-service-dir) for a running stack.
+
+```
+superschematic check
+superschematic check ./schemas/services/shop-api --json
+superschematic check --watch ./schemas/services
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--json` | false | write the result as one JSON document; with `--watch`, one per line |
+| `--watch` | false | check, then re-check the services each edit affects until Ctrl-C |
+| `--interval` | `200ms` | with `--watch`, how often to look for edits |
+| `--naming` | `<services-root>/../superschematic.toml` | naming config file |
 
 ## `build <service-dir>`
 
@@ -160,6 +359,28 @@ as a committed language must. Pair it with `--out`, so the two servers do
 not share an output root; a build's cache stamps come from `build-all`,
 which has no such flag.
 
+A DB service's build records each projection migration stamp it writes in
+the service's `projections.lock`, and fails, writing nothing, when a
+projection's pair would change under a stamp the lock records, naming the
+next stamp to give it
+([The migration stamp](/superschematic/reference/projections/#the-migration-stamp)).
+`--rewrite-migration <stamp>` writes that stamp's pair again and records
+it in place of the old one, for a stamp no database has applied. It names
+a stamp a projection of the target declares, and builds a DB service
+alone, without `--with-deps`.
+
+`outputs.api.mcp: true` makes a TypeScript API's router serve the API's
+visible `@mcp` operations as MCP tools at `POST /api/mcp`, beside its
+OpenAPI document at `GET /api/openapi.json`, which every server serves
+([An API's MCP endpoint](/superschematic/reference/mcp-tools/#an-apis-mcp-endpoint)).
+The Go and Rust servers serve no MCP endpoint yet, so the config fails to
+load with it on another language, `--api-language` included:
+`outputs.api.mcp is on and the API's language is RUST: a TypeScript API serves the MCP endpoint; Go and Rust follow; set outputs.api.language to TYPESCRIPT, or remove mcp (D81)`.
+With a tool whose `invocationPolicy` is `"ask"`, the build needs
+`outputs.api.mcpConfirmationKey`, the `@envVars` secret the endpoint signs
+its confirmations with
+([Confirming a tool that asks](/superschematic/reference/mcp-tools/#confirming-a-tool-that-asks)).
+
 `--scaffold` writes the implementation of each Go API the command builds
 whose package is missing: an `implementation.go` at the naming file's
 `[implementation_paths]` `go` template (`go/{service}` from the parent of
@@ -175,7 +396,8 @@ Rust API's is a crate at the `rust` template (`rust/{service}`): a
 crate's `Handlers`, written only while the directory holds no
 `Cargo.toml`.
 Without the flag a build writes nothing outside the output root, except a
-stack's: building a `Stack` service writes each Go and TypeScript server's
+DB service's `projections.lock` and the projection pairs `outputs.sql.migrationsDir`
+places, and a stack's: building a `Stack` service writes each Go and TypeScript server's
 entrypoint under `server/<stack>/<server>` in the output root and
 scaffolds, with no
 flag, each API its servers serve whose implementation is missing, with a
@@ -197,6 +419,7 @@ superschematic build ./schemas/services/shop-db
 superschematic build ./schemas/services/shop-db --emit-ir | jq .types
 superschematic build --with-deps ./schemas/services/shop-api
 superschematic build --with-deps --api-language RUST --out ./schemas/dist-rust ./schemas/services/shop-api
+superschematic build ./schemas/services/finances-db --rewrite-migration 20261028120000
 ```
 
 | Flag | Default | Meaning |
@@ -209,6 +432,7 @@ superschematic build --with-deps --api-language RUST --out ./schemas/dist-rust .
 | `--naming` | `<service-dir>/../../superschematic.toml` | naming config file |
 | `--api-language` | the config's | build the target's API server in this language (`GO`, `RUST` or `TYPESCRIPT`) |
 | `--scaffold` | false | write the implementation scaffold of each Go, TypeScript or Rust API built whose package is missing, at the `[implementation_paths]` template of its language |
+| `--rewrite-migration` | none | a projection's migration stamp whose pair the build writes and records again although `projections.lock` records other files under it, for a stamp no database has applied; repeatable; a DB service alone, not with `--with-deps` |
 
 ## `build-all <services-root>`
 
@@ -340,6 +564,13 @@ version's when it is a service directory or a git ref. A database whose
 previous version was not built for SQLite plans from the model it
 recorded (`--from <model.json>`).
 
+A Postgres plan of a service that declares queries (`@query`) prepares
+each of them on the new version's `create.sql` before it prints, as
+[`queries verify`](#queries-verify-service-dir) does, and fails naming
+each query that no longer prepares or no longer returns its row. It
+reaches Postgres through `--database-url`, else
+`SUPERSCHEMATIC_QUERIES_DATABASE_URL`, else Docker, and writes no lock.
+
 After a rollout that failed between a plan's phases, the database holds
 the model between them. Plan from that model (`--from <model.json>`, as
 `superschematic-migrate status --model` prints it): the new plan supersedes
@@ -371,6 +602,37 @@ superschematic migrate plan ./schemas/services/shop-db --print-model > model.jso
 | `--fail-on` | none | hazard classes, comma-separated, or `all`; exit 1 when the plan has a hazard of one that no `--allow` names |
 | `--allow` | none | a hazard id `--fail-on` lets pass; repeatable |
 | `--print-model` | false | print the new version's model as canonical JSON, for `superschematic-migrate adopt`, and plan nothing; takes none of the plan flags |
+| `--database-url` | `$SUPERSCHEMATIC_QUERIES_DATABASE_URL`, else Postgres in Docker | a Postgres server whose role may create a database, which the new version's queries are prepared on |
+| `--naming` | `<service-dir>/../../superschematic.toml` | naming config file |
+
+## `queries verify <service-dir>`
+
+Prepare each declared query (`@query`) of the DB service on Postgres and
+write its `queries.lock` ([Declared queries](/superschematic/reference/declared-queries/#verification)).
+It applies the service's `create.sql` to a database of its own, prepares
+each statement of each query, every order's and both of a page's, and
+compares what Postgres describes with the declared types: each
+parameter's type, each result column's name and type, and that a row
+field that is not `Nullable<T>` reads a column that is never null (a
+projection's view's column of a required field is). Each
+problem names its query; a statement Postgres refuses is reported with
+its message. A query that returns one row, or one or none, whose SQL
+shows it may return more fails the load first, as it fails `check`. With none it writes `queries.lock` beside the schema config,
+which `check` and `build` then hold the queries to with no database; a
+service with no queries has its lock removed.
+
+The statements are prepared by the migration runner,
+`superschematic-migrate describe`, on `PATH` or where
+`SUPERSCHEMATIC_MIGRATE` names it.
+
+```
+superschematic queries verify ./schemas/services/finances-db
+superschematic queries verify ./schemas/services/finances-db --database-url postgres://postgres:secret@localhost:5432/postgres
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--database-url` | `$SUPERSCHEMATIC_QUERIES_DATABASE_URL`, else Postgres in Docker | a Postgres server whose role may create a database: verify creates one there and drops it. Without either, it runs the image `stack dev` runs, pgvector's when a table has a vector column |
 | `--naming` | `<service-dir>/../../superschematic.toml` | naming config file |
 
 ## `json-schema`
@@ -522,16 +784,19 @@ exports:
 | `<T>Behaviors` | an instance's behaviors as a read returns them: by behavior name, each behavior that declares a field, with its fields `readonly`, optional where the engine can leave one out |
 | `<T>Patch` | a merge patch of the own fields |
 | `<T>State`, `<T>LinkName` | a `Workflow`'s states and a `Links` config's names, where the type composes them |
+| `<T>CommentMessage`, `<T>CommentBlock`, `<T>CommentPostedBlock` | a `Comments` message as every operation that returns one gives it (`listPinned`'s items too), a block a post, a finish or an edit gives (`ref`, `action`, `code` or `attachment`), and a block as the record and `listEdits` hold it, a code block with the members `moveAnchor` adds, where the type composes `Comments` |
 | `<T>CreateParams`, `<T>Preconditions` | each behavior's create parameters and preconditions, by behavior name; an entry is required when its schema requires something, such as a required link |
 | `<T><Op>Params`, `<T><Op>Result`, `<T>Operations` | each behavior operation's parameters and result |
 | `<T>Vetoes`, `is<T>Veto` | the codes each behavior's vetoes carry, and `isVeto` typed by them |
-| `<Schema>Client`, `<schema>Client(client)` | the wrapper: `create`, `get`, `list`, `update`, `delete`, `operate` and a method per behavior operation |
+| `<T><Signal>Signal`, `<T>Signals`, `<T>SignalMessage`, `is<T>Signal` | where a behavior declares signals (D77): each signal's data, `<T><Behavior><Signal>Signal` when two behaviors declare its name; the data by behavior and name; a stream's signal message narrowed to them; and a guard that tells the type's signals from a stream's other messages, by behavior and name when given, and types their data |
+| `<Schema>Client`, `<schema>Client(client)` | the wrapper: `create`, `get`, `list`, `update`, `delete`, `operate`, a method per behavior operation, and `send<Signal>(id, data?, options?)` per signal a caller may send (access `read` or `write`; `send<Behavior><Signal>` when an operation or another signal takes the name) |
 
 `<T>` is the instance type's name, the type named like the schema or its
 only type, and `<Schema>` the schema's name in PascalCase. A behavior's
 config narrows its declaration's shapes for the core's behaviors:
 `Workflow`'s states, `Links`' names and targets, `Dependencies`' blocker
-schemas, `Rollups`' values, `Revisions`' patches and `Variants`' types.
+schemas, `Rollups`' values, `Revisions`' patches, the kinds of block
+`Comments` lets a post or a finish give and `Variants`' types.
 Another behavior, an extension's among them, is typed by its declaration,
 and its fields hold any JSON. A scalar is typed by the JSON its values
 are on the wire (`Temporal.DateTime` a string), not by its scalar
@@ -583,7 +848,8 @@ walks through it.
    that has a `tsconfig.json` also has one, `tsconfig.json` extending
    that API's base, `schema.config.ts`, `src/stack.schema.ts`, whose
    `@stack` deploys every API and every Site service and exposes as step 2
-   decided, with `Dev` on the local target and the cloud environment, and
+   decided, and every app of an API it deploys, `{ of: <Api>, app:
+   "<Class>" }`, since no one reaches an app it does not expose (D78), with `Dev` on the local target and the cloud environment, and
    the cloud target's values and settings types read from the JSON Schemas
    it registers: `src/gcp-target.ts` for a gcp environment,
    `src/cloudflare-target.ts` for a cloudflare one (D64).
@@ -659,7 +925,12 @@ design is section 8.3 of
    so each checkout of the repository runs containers of its own, and
    keeps them from run to run. A container of the environment that an
    older superschematic named without a checkout is left as it is, with
-   its data: dev prints the `docker rm` that removes it.
+   its data: dev prints the `docker rm` that removes it. A stack with a
+   bucket also gets a fake-gcs-server container, and one with a memory
+   store a Valkey container,
+   `superschematic-<stack>-<environment>-<checkout>-memorystore`, with no
+   persistence, which every store of the environment shares
+   ([Memory stores](/superschematic/guides/memory-stores/#run-it-locally)).
 4. Migrate each database to its schema's model: a plan from the model the
    database recorded, applied with `superschematic-migrate`, expand and
    contract back to back. The runner must be on `PATH`, or named by
@@ -700,13 +971,21 @@ design is section 8.3 of
    the site's config at `/__superschematic/config.json`, each API it calls
    at its loopback URL, and its fallback for a path that names no file.
    The summary prints each site's URL. A rebuilt site needs another `stack
-   dev`.
+   dev`. A site whose config names a dev server (`site.dev`) runs it
+   instead, unless `--build-sites`: `bun run <command>` in its package,
+   with `PORT` its port, behind a proxy on the site's port that serves the
+   dev server, WebSocket upgrades among its requests, and each API the site
+   calls under `/api/<service>`, so the page, its hot reload and its APIs
+   share one origin and a cookie session needs no CORS (D82;
+   [static sites](/superschematic/guides/static-sites/#with-a-dev-server)).
 
-Dev stays in the foreground until Ctrl-C or until a server or a worker
-exits, then stops the sites, the servers and the workers, callers first,
+Dev stays in the foreground until Ctrl-C or until a server, a worker or a
+site's dev server exits, then stops the sites, the servers and the workers, callers first,
 and the containers, which keep their data for the next run: the
-databases, and the buckets' objects. `--remove-data` removes the
-checkout's containers and their data instead, and no other checkout's.
+databases, and the buckets' objects. The memory store's container keeps
+none: its keys go when it stops. `--remove-data` removes the
+checkout's containers and their data instead, and no other checkout's,
+the memory store's container among them.
 
 A secret a server reads comes from
 `<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env`, a
@@ -720,6 +999,13 @@ Without a directory, dev runs the working directory when it is a Stack
 service, else the one Stack service under `./schemas/services`. It needs
 Docker and Go.
 
+Dev builds once. A schema edit while it runs reaches the servers only
+through another `stack dev`, which rebuilds the stack's services and
+migrates the databases again; dev does not watch the tree or restart the
+servers an edit affects (D72). Run [`check --watch`](#check---watch) beside
+it to see each edit's verdict as you make it, and restart dev once the
+schemas check clean.
+
 ```
 superschematic stack dev ./schemas/services/shop-stack
 superschematic stack dev ./schemas/services/shop-stack --environment Dev --remove-data
@@ -729,11 +1015,13 @@ superschematic stack dev ./schemas/services/shop-stack --environment Dev --remov
 | --- | --- | --- |
 | `--environment`, `-e` | the stack's one local environment | the environment to run; it must be on the `local` target |
 | `--out` | `<schemas-root>/dist` | output root for generated artifacts; the provisioner renders its program to `<out>/program/<stack>/<environment>` |
-| `--remove-data` | false | on exit, remove the checkout's containers of the environment and their data, the Postgres databases and the buckets' objects, instead of stopping them; `--remove-database` is its earlier name |
+| `--remove-data` | false | on exit, remove the checkout's containers of the environment and their data, the Postgres databases and the buckets' objects, and the SQLite files, instead of stopping them (a memory store keeps no data either way); `--remove-database` is its earlier name |
+| `--build-sites` | false | build each site once and serve its files, a site with a dev server too, as a deploy does, in place of running its dev server |
 | `--naming` | `<stack-service-dir>/../../superschematic.toml` | naming config file |
 
 A local environment sets each container's image and host port with its
-values, Postgres's and the storage emulator's, and a server's port with
+values, Postgres's, the storage emulator's and the memory store's
+(`memoryStoreImage`, `memoryStorePort`), and a server's port with
 its settings; a port it leaves out comes from a hash of the stack, the
 environment and the server, shifted by the checkout, so it stays the same
 from run to run and two checkouts run the environment side by side. A
@@ -794,10 +1082,11 @@ It takes the flags of the commands below, `--stack`, `--naming`,
 | --- | --- | --- |
 | `--out` | `<schemas-root>/dist` | the output root the build wrote, `stack dev`'s `--out`: where `run` reads a local environment and the job's entrypoint module |
 
-## `stack queue dead|retry|drop <environment> <queue>`
+## `stack queue dead|retry|drop|backfill <environment> <queue>`
 
 List, retry and drop the dead messages of a queue a DB service declares
-([Dead messages](/superschematic/guides/queues/#dead-messages)). `<queue>`
+([Dead messages](/superschematic/guides/queues/#dead-messages)), and
+backfill it ([Backfill](/superschematic/guides/queues/#backfill)). `<queue>`
 is the DB service and its `@queue` class, `shop-db.OrderPlaced`. The design
 is section 8.8 of
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md).
@@ -806,6 +1095,7 @@ is section 8.8 of
 superschematic stack queue dead Dev shop-db.OrderPlaced [--limit 100]
 superschematic stack queue retry Dev shop-db.OrderPlaced <id>... | --all
 superschematic stack queue drop Dev shop-db.OrderPlaced <id>... | --all --yes
+superschematic stack queue backfill Dev shop-db.OrderPlaced
 superschematic stack queue dead Preview shop-db.OrderPlaced --param pr=123
 ```
 
@@ -817,6 +1107,12 @@ superschematic stack queue dead Preview shop-db.OrderPlaced --param pr=123
   kept until the next failure replaces it.
 - `drop` deletes the dead messages named, or every one with `--all`,
   which takes `--yes`.
+- `backfill` enqueues a message for each row of each table whose
+  `@enqueueOnChange` names the queue that meets the trigger's `when`, as
+  the trigger's insert of the row would, under the queue's `onDuplicate`,
+  in one transaction that locks no table, and says how many it enqueued
+  (D88). A queue no trigger enqueues is refused. The runner must be a
+  release that reads a backfill.
 
 An ID is a message's UUID, in either case. A `retry` or a `drop` that
 names a message that is not dead changes none of them, and says what each
@@ -850,6 +1146,16 @@ from Cloud Logging as a failed migration's is. The `deployer` account, or
 an owner, runs it; a project bootstrapped before this needs `stack
 bootstrap` again, which grants the `migrator` its write.
 
+On cloudflare the queue's database is a Postgres outside Cloudflare on
+Hyperdrive, and the runner runs on this machine against its origin, as
+the deploy's migrations do (D96): with the connection string the shell
+holds in `HYPERDRIVE_ORIGIN_<DB>` (`HYPERDRIVE_ORIGIN_FINANCES_DB` for
+`finances-db`), passed to the runner in `DATABASE_URL` alone. It first
+reads the database's Hyperdrive config with `CLOUDFLARE_API_TOKEN`, and
+refuses a connection string whose host, port, database or user is not
+the config's, and a shell that holds none, naming the variable. The log
+says which database it ran on, never the result.
+
 It refuses a queue no DB service of the stack declares, and a queue whose
 database the environment places on another dialect than Postgres, on
 which no queue is claimed.
@@ -878,6 +1184,14 @@ target only when it links the target's extension and the provisioner's
 `bootstrap`, `destroy`, `outputs` and `unlock` refuse it, `secrets set`
 writes its `secrets.env`, and `stack run` runs a job against it.
 `prepare` reaches no target and takes its own flags.
+
+A stack with an app whose `@app` names an extension the binary does not
+link (D78) is refused by `prepare`, `build` and `deploy`, a deploy with
+`--prepared` included, since each builds images: `app Backoffice of
+shop-stock needs the topcoat extension, which this superschematic binary
+does not link; run superschematic-topcoat`. `prepare` and `deploy` with
+`--no-build` build nothing and are not refused. `plan` and the rest read
+the app as usual.
 
 Each of the others takes these flags:
 
@@ -1313,6 +1627,40 @@ and a project built with them names its checkouts in `[paths]`, whose
 ```
 eval "$(superschematic env)" && go build ./...
 go env -w CGO_LDFLAGS="$(superschematic env CGO_LDFLAGS)"
+```
+
+## `catalog scalars|decorators|behaviors|capabilities`
+
+Print a Markdown reference of what the binary knows, written from the
+registry it assembles, so the reference lists an extension's scalars,
+decorators and behaviors beside the core's. It is for whoever authors
+schemas with the binary, a coding agent among them, which reads it in
+place of documentation that could describe another version.
+
+- `scalars`: every scalar a field can have, one table per namespace,
+  with what it checks, its SQL type and its types in Go, TypeScript,
+  Python and Rust. The [scalar reference](/superschematic/reference/scalars/)
+  is this table for the core.
+- `decorators`: which kinds may import each authoring package, then each
+  decorator by package, with the TypeScript declaration `tsc` checks a
+  schema file against, its comment, the nodes it may sit on and the kinds
+  it is limited to; the type wrappers; and the exported types those name.
+  An extension's decorator has no declaration in the binary, so its entry
+  gives the JSON Schema of its argument instead. The core's declarations
+  are the binary's copy of `packages/`.
+- `behaviors`: every engine behavior, with its config's type, what it
+  requires and conflicts with, the fields and operations it adds and the
+  codes its refusals carry, then the core's config types. An extension's
+  behavior gives its config's JSON Schema.
+- `capabilities`: the [capability map](/superschematic/start/capabilities/),
+  with its links pointing at this site.
+
+`--naming` reads a naming file first, for a binary whose extensions read
+it. A name that is not one of the four fails, listing them.
+
+```
+superschematic catalog decorators | grep -A 12 '^### `@paginated`'
+superschematic catalog scalars > scalars.md
 ```
 
 ## Extension commands

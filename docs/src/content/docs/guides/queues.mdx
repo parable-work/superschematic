@@ -23,13 +23,15 @@ schema's instances into claimable work, are another thing.
 | --- | --- |
 | `@queue` on a DB service's message class; its table in every dialect the service lists, which the migration plan carries | |
 | a backoff that doubles with each failure up to a maximum, and done messages removed after a retention | |
+| a message's `key`: one waiting message per key (`onDuplicate`), one claim per key (`serialize`), in every language, on Postgres and SQLite | a key over several fields; a delay on enqueue |
+| `@enqueueOnChange` on a table: a trigger, on Postgres and SQLite, that enqueues a message whatever writes the row; its `backfill` in the migration step that adds it, and `stack queue backfill` | `stack queue backfill` on SQLite |
 | the Go ORM's `Enqueue<Queue>` in your transaction, and its claims on Postgres; its `Enqueue<Queue>SQLite` and claims on SQLite, which the TypeScript and Rust runtimes run too | claims on D1, and `stack queue` on SQLite |
-| the TypeScript types' `./queues` entry and the HTTP runtime's `enqueue` and `postgresQueue`, which run the Go ORM's statements; the Rust types' `queues` module and the Rust HTTP runtime's `queue::enqueue` and `PostgresQueue`, which run them too; a location (`POINT`) and a duration (`INTERVAL`) in a message, in every language | a list of locations or durations (`POINT[]`, `INTERVAL[]`) in a queue's message |
+| the TypeScript types' `./queues` entry and the HTTP runtime's `enqueue`, in a transaction of the generated repositories (`Deps.orm`, D79), and `postgresQueue`, which run the Go ORM's statements; the Rust types' `queues` module and the Rust HTTP runtime's `queue::enqueue` and `PostgresQueue`, which run them too; a location (`POINT`) and a duration (`INTERVAL`) in a message, in every language | a list of locations or durations (`POINT[]`, `INTERVAL[]`) in a queue's message |
 | `@worker` on an API, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers`, Rust's `Workers` and `create_workers`, the `worker` deployable, its entrypoint and image | |
-| `stack dev`'s worker processes, a TypeScript one on the environment's SQLite file too; on gcp a Cloud Run worker pool; a worker's `maxInstances` | scaling a worker with its queue's depth, which `maxInstances` sets the ceiling for |
-| `stack queue dead`, `retry` and `drop` on a local environment's queues, and on gcp through the migration job | the same on another cloud target |
+| `stack dev`'s worker processes, a TypeScript one on the environment's SQLite file too; on gcp a Cloud Run worker pool; on Cloudflare a TypeScript worker's Worker, which drains its queue from Postgres through Hyperdrive at each firing of a Cron Trigger every minute; a worker's `maxInstances` | scaling a worker with its queue's depth, which `maxInstances` sets the ceiling for; a Cloudflare worker woken sooner than its next firing |
+| `stack queue dead`, `retry`, `drop` and `backfill` on a local environment's queues, on gcp through the migration job, and on Cloudflare from your machine on the database's origin | |
 
-D53 and D68 in `docs/DECISIONS.md` record the decisions, and section 8.8 of
+D53, D68, D80, D88 and D96 in `docs/DECISIONS.md` record the decisions, and section 8.8 of
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md)
 the design.
 
@@ -51,6 +53,9 @@ Every argument is optional:
 | `maxBackoff` | the longest a failed message waits, however many times it failed; the backoff or more, and an hour unless set, or the backoff when that is longer. Set it to the backoff for a wait that never grows |
 | `lease` | how long a claim holds a message unless its worker extends it, which it does while the handler runs; a minute unless set |
 | `retain` | how long a done message stays in the table before a worker removes it, as `168h`; a week unless set. `0s` keeps none: completing a message deletes it |
+| `key` | the message's field that keys it, a required scalar or enum field; it takes effect with `onDuplicate` or `serialize`. See [One message per key](#one-message-per-key) |
+| `onDuplicate` | what an enqueue does when a message of its key waits: `append` adds another, as a queue without a key does; `replace` overwrites the one that waits; `skip` keeps it and adds none. `append` unless set |
+| `serialize` | `true` holds the queue to one claim per key at a time |
 
 Every duration is whole seconds as Go writes one: `90s`, `10m`, `1h30m`
 or `168h`, with no days. After its attempt `n` fails, a message waits
@@ -67,11 +72,19 @@ export abstract class InvoiceIssued {
 A message's fields are values a column holds: a scalar, an enum, a list
 or map of them, or a JSON value such as a `@jsonField` type. A message
 names an order by its key, not by a relation to its table. The build
-refuses a `@key`, a generated field, a relation, an index, and a field
-named like a column the queue keeps.
+refuses a `@key`, a generated field, a relation, an index, a field
+named like a column the queue keeps, an
+[`Encrypted<T>`](/superschematic/guides/database-tables/#encrypted-fields)
+field, whose envelope no worker opens, and a `Generic.Decimal` or an
+`Embedding.Vector`, which the queue clients do not read alike yet: carry
+the key of the row that holds one instead, or a decimal's text as a
+string.
 
 The DB service's build writes the queue's table, after its tables, named
-after the class with `_queue`. It holds a column per field, and the
+after the class with `_queue`, or as `@table` names it, whose columns
+`@column` names too
+([Table and column names](/superschematic/guides/database-tables/#table-and-column-names)).
+It holds a column per field, and the
 columns the queue keeps: the message's `id`, its `state` (`ready`,
 `claimed`, `done` or `dead`), its `attempts`, when it is next due, when
 its claim expires and the claim's token, its last error, and when it was
@@ -86,6 +99,140 @@ message, so its `updated_at` is when it was done.
 [Schema migrations](/superschematic/reference/migrations/) plan the table
 as any table, in each dialect the service lists.
 
+## One message per key
+
+A message's `key` names the field of the message that says what it is
+about: the order, the product, the account. `onDuplicate` keeps one
+message waiting per key, and `serialize` lets one worker at a time handle
+a key. In the acme shop, `shop-db`'s `StockLow` does both:
+
+<Snippet file="schemas/services/shop-db/src/stock.schema.ts" symbol="StockLow" />
+
+A message waits while it is `ready`: due now, or after a failure's
+backoff. One a worker holds, `claimed`, is not waiting, so a message
+enqueued while one of its key runs waits beside it for the next run: the
+one that runs read the row before the change.
+
+- `replace` overwrites the waiting message with the new one: every field
+  but the key, one the new message leaves out taking its column's
+  default; it is due at once, with no attempts and no last error. It
+  keeps its ID and when it was first enqueued. A burst of changes leaves
+  one message, the latest.
+- `skip` keeps the waiting message as it is and adds none.
+- `append`, the default, adds every message, as a queue without a key
+  does.
+
+A partial unique index of the waiting messages by key,
+`uq_<table>_ready_key` (`uq_stock_low_queue_ready_key`), holds the rule, and the enqueue ends with
+`ON CONFLICT (key) WHERE state = 'ready'`, which every language's client
+appends, so a message one language enqueues dedupes against another's. A
+claimed message that fails, or is given back by a stopping worker, while
+a newer message of its key waits gives way to it: it is `done`, its error
+kept in `last_error`, and the newer one runs in its place.
+
+`serialize: true` holds a key to one claim at a time: a claim takes no
+message whose key another live claim holds, and of a key's waiting
+messages takes the first due. A message whose claim expired, because its
+worker died, is claimed again before the others of its key. A partial
+unique index of the claimed messages by key, `uq_<table>_claimed_key`,
+holds it whatever two workers do at once: on Postgres, a claim that loses
+that race takes nothing that time, and the worker claims again.
+
+On a queue's table that exists, the [migration plan](/superschematic/reference/migrations/)
+that adds a key builds these indexes. The step that builds the index of
+waiting messages first marks `done` every waiting message of a key but
+one, the latest under `replace` and the earliest under `skip`, a
+destructive hazard. It is a compat hazard too: a server built from the
+previous version enqueues without `ON CONFLICT`, so once the index is
+built its enqueue of a message whose key a message waits under fails,
+with the write it was part of, until the rollout replaces it.
+
+## Enqueue on a change
+
+`@enqueueOnChange` on a DB table enqueues a message of a queue of the same
+schema after a write to the table's rows, whatever writes them: a
+repository, a bulk import, a script or `psql`. The database runs it, in
+the writer's transaction, so the message commits with the write. In the
+acme shop, an order put back to placed is fulfilled again:
+
+<Snippet file="schemas/services/shop-db/src/orders.schema.ts" from="@enqueueOnChange<OrderPlaced, Order>" to="})" />
+
+| Option | What it sets |
+| --- | --- |
+| `on` | the writes that enqueue: `insert`, `update` and `delete`. An insert and an update enqueue from the row as written, a delete from the row as it was |
+| `fields` | the fields whose change makes an update enqueue, compared with `IS DISTINCT FROM`; every update enqueues unless set. A relation is its key's column |
+| `when` | conditions the row must meet, all of them: `{ field, isNull: true }`, `{ field, notNull: true }` or `{ field, equals: literal }`, the literal an enum's member, a text, a number or a boolean |
+| `message` | each field of the message the trigger sets, and the table's field whose value it takes |
+| `backfill` | `true` makes the migration step that adds the trigger also enqueue a message for each row the table already holds that meets `when`, as an insert of the row would ([Backfill](#backfill)); needs `insert` or `update` in `on` |
+
+An update that changes nothing is still a write, which a trigger without
+`fields` enqueues for. An upsert with `onlyIfChanged` writes no row whose
+fields already hold the update's values, so a sync that sends the same
+rows again enqueues nothing for them
+([Upserts](/superschematic/guides/database-tables/#upserts)).
+
+The build checks the declaration against the table and the queue: each
+field has a column, a null test is of a nullable field, a literal fits
+its field, and each field of the message takes a table's field of its
+type, or of a relation's key. A required field of the message takes a
+value the row always has, so one from a nullable field needs a `notNull`
+condition on it, and every required field it leaves out has its
+column's default: a list, a `Default<T, V>` the column carries
+([Columns](/superschematic/guides/database-tables/#columns)), or an enum's
+schema default, which the trigger writes. A required time the message
+leaves out has none: map it from the table's (a queue's own `created_at`
+holds when a message was enqueued). `when` names fields rather
+than SQL, since the trigger is written for Postgres and SQLite alike. An
+[`Encrypted<T>`](/superschematic/guides/database-tables/#encrypted-fields)
+field's column holds an envelope the trigger cannot open, sealed anew on
+every write: the message takes no such field, `fields` compares none, and
+`when` tests only whether one is null.
+
+On Postgres the trigger is a function, `<table>_enqueue_<queue>`, named
+after the tables, `@table`'s names among them, and the
+trigger that runs it after each write, as a
+[versioned table's](/superschematic/reference/versioned-tables/) history
+triggers are. On SQLite it is a trigger per write. The insert ends with
+the queue's `ON CONFLICT`, so with `replace` or `skip` repeated changes
+of a row keep one waiting message, and the trigger's and your code's
+messages dedupe against each other. A migration plan adds, replaces and
+drops the trigger with the declaration; the rows a table holds when the
+trigger is added enqueue nothing until they change, unless the
+declaration backfills.
+
+### Backfill
+
+After an import, the rows already there need the work the trigger does
+for new ones: an embedding per categorized line item, say. With
+`backfill: true`
+([D88](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)),
+the step that creates the trigger on a table the database already has
+also inserts one message for each row that meets `when`, written as the
+trigger's insert of the row would write it and ending with the queue's
+`ON CONFLICT`. A queue that appends gets a message per row; one that
+replaces or skips keeps one waiting message per key, so a table of N
+qualifying rows leaves N ready messages, or one per key. On Postgres the
+backfill runs in the trigger's transaction, under the lock `CREATE
+TRIGGER` takes, so no write is missed or enqueued twice; the step is
+`blocking`, since that lock keeps writes to the table out for as long as
+the insert takes. A table the plan creates is empty and gets no backfill,
+and a plan that only changes a trigger backfills nothing.
+
+For a table too large to backfill inside a migration, add the trigger
+without `backfill`, deploy, and enqueue the messages afterwards:
+
+```sh
+superschematic stack queue backfill Dev shop-db.OrderPlaced
+```
+
+`stack queue backfill` runs the same insert for each table whose
+`@enqueueOnChange` names the queue, whatever its `backfill` says, in one
+transaction that takes no lock on the tables, and says how many messages
+it enqueued. A row written while it runs may be enqueued by its trigger
+too, which a queue that appends then holds twice. It runs where the other
+`stack queue` commands run ([Dead messages](#dead-messages)): on Postgres,
+with the migration runner.
+
 ## Enqueue a message
 
 The DB service's Go ORM writes a typed `Enqueue` per queue, which takes
@@ -99,32 +246,23 @@ an optional field you leave unset takes its column's default.
 
 ### From TypeScript
 
-There is no TypeScript ORM, so the DB service's TypeScript types package
-carries each queue as data in its `./queues` entry: `orderPlacedQueue`,
-the queue's table, its arguments, the column each field writes, and the
-statements the Go ORM runs, written from one place, so a message one
-language enqueues the other claims alike. Enable the database's
-TypeScript types (`outputs.types` for TypeScript), and enqueue with the
-HTTP runtime's `enqueue`, which takes the client of the transaction you
-write in:
+The DB service's TypeScript types package carries each queue as data in
+its `./queues` entry: `orderPlacedQueue`, the queue's table, its
+arguments, the column each field writes, and the statements the Go ORM
+runs, written from one place, so a message one language enqueues the
+other claims alike. Enable the database's TypeScript types
+(`outputs.types` for TypeScript), and enqueue with the HTTP runtime's
+`enqueue`, which takes the transaction you write in: a transaction of the
+database's repositories, `Deps.orm`
+([Database tables](/superschematic/guides/database-tables/#typescript)).
+`shop-cart`'s reorder writes an order, its lines and its `OrderPlaced` in
+one, which `shop-orders`' Go worker fulfils:
 
-```ts
-import { enqueue } from '@superschematic/http-runtime/postgres';
-import { orderPlacedQueue } from '@acme/shop-db-types/queues';
+<Snippet file="typescript/shop-cart/index.ts" symbol="reorders" />
 
-const client = await deps.db.connect();
-try {
-  await client.query('BEGIN');
-  const orderId = await placeOrder(client, input); // your writes, on the same client
-  await enqueue(client, orderPlacedQueue, { orderId });
-  await client.query('COMMIT');
-} catch (error) {
-  await client.query('ROLLBACK');
-  throw error;
-} finally {
-  client.release();
-}
-```
+The transaction's `query` takes the statement `enqueue` passes it, as a
+`pg` client does, so `enqueue` takes a `pg` client of your own too, in a
+transaction you began on it.
 
 `enqueue` is typed by the definition: the message is `OrderPlaced` from
 the database's types. A field writes its column as the Go ORM writes
@@ -140,7 +278,8 @@ list of either, a `POINT[]` or an `INTERVAL[]` column, stays out of
 `./queues` for now, which says so, and the Go ORM refuses it; hold such a
 list in a `@jsonField` type. The implementation's
 `package.json` depends on the database's types package by its name, with
-`workspace:*`; the scaffold adds it for an API with workers.
+`workspace:*`; the scaffold adds it for an API with workers, or whose
+`Deps` holds the repositories.
 
 ### From Rust
 
@@ -199,9 +338,10 @@ Rust runtime's `sqlite` feature adds `queue::enqueue_sqlite` and
 `queue::SqliteQueue`.
 
 A Worker or a Cron job on Cloudflare enqueues on D1 this way, but no
-worker claims there: Workers runs no claim loop, so an environment that
-places a worker on the cloudflare target does not resolve, and says that
-gcp or `stack dev` runs one.
+worker claims there: a worker on Workers claims on Postgres through
+Hyperdrive ([On Cloudflare](#on-cloudflare)), so an environment that places
+a worker of a queue on D1 does not resolve, and says to list postgres
+first or claim where a SQLite file is the database, as under `stack dev`.
 
 ## Write a worker
 
@@ -269,6 +409,20 @@ it to, so a message that comes again files none:
 <Snippet file="schemas/services/shop-stock/src/workers.schema.ts" symbol="ReorderStock" />
 
 <Snippet file="rust-impl/shop-stock/src/lib.rs" from="    /// Files an open restock request" to="        Ok(())" />
+
+A worker serves no request, so its writes act as no one: the ORM refuses
+a create of a table with `createdBy`, and a soft delete, until the method
+names whom they act as. `orm.AsSystem(ctx)` in Go and
+`deps.orm.asSystem()` in TypeScript act as the database's system actor
+([Who wrote a row](/superschematic/guides/database-tables/#who-wrote-a-row)):
+
+```ts
+async syncItem(message) {
+  await deps.orm.asSystem().transaction(async tx => {
+    await tx.lineItem.createOne({ ...row });
+  });
+},
+```
 
 A method that returns nil, or resolves, or returns `Ok`, completes its
 message. One that returns an error, or panics, or rejects, fails it: the
@@ -377,7 +531,10 @@ superschematic stack queue drop Dev shop-db.OrderPlaced 8a41c6e2-7d3b-4f19-a0c5-
 
 A retry or a drop that names a message that is not dead, one a worker
 already took again or one that is not in the queue, changes none of the
-messages it names and says what each such one is. `--format json` prints
+messages it names and says what each such one is. On a queue that keeps
+one waiting message per key, a retry leaves dead a message whose key a
+message waits under, and of the dead messages of one key retries the one
+that died last. `--format json` prints
 the result as JSON.
 
 Each command resolves the environment from your schemas and runs the
@@ -413,6 +570,30 @@ more, which lets the migrator write the result; without it the runner
 stops before it changes the queue, and says so. `--timeout`, 30 minutes
 unless set, bounds the wait.
 
+On Cloudflare the queue's database is a Postgres outside Cloudflare,
+which the Workers reach through its Hyperdrive config, and the command
+runs the migration runner on your machine against that origin, as a
+deploy's migrations do (D96). It takes the connection string from
+`HYPERDRIVE_ORIGIN_<DB>`, `HYPERDRIVE_ORIGIN_FINANCES_DB` for
+`finances-db`, and your `CLOUDFLARE_API_TOKEN`, which reads the deploy
+manifest and the config:
+
+```sh
+export HYPERDRIVE_ORIGIN_FINANCES_DB='postgres://finances:...@db.example.com:5432/finances'
+superschematic stack queue dead CfStaging finances-db.PlaidSyncRequested
+superschematic stack queue retry CfStaging finances-db.PlaidSyncRequested 3f2c8a10-5b1e-4c7a-9d2e-8f6b4a1c0e93
+superschematic stack queue backfill CfStaging finances-db.EmbedLineItem
+```
+
+Before it changes anything it reads the database's Hyperdrive config and
+refuses a connection string whose host, port, database or user is not
+the config's, so it never retries the messages of one database while the
+Workers drain another's; without the variable it says which to set and
+what it must match. The runner gets the connection string in
+`DATABASE_URL` alone, so no argument or file holds the password, and the
+result comes back to the command alone: the log says only which database
+it ran on.
+
 ## Change it per environment
 
 An environment sets how many instances of a worker run, and how many
@@ -441,7 +622,9 @@ The claims run on Postgres, or on SQLite where `stack dev` places the
 queue's database on the environment's SQLite file and the worker is in
 TypeScript; a Go or Rust worker there does not resolve, since its `Deps`
 reach Postgres alone. An environment that places the queue's database on
-a platform of another dialect, or on D1, does not resolve either.
+a platform of another dialect, or on D1, does not resolve either. On
+Cloudflare the database is a Postgres reached through Hyperdrive
+([On Cloudflare](#on-cloudflare)).
 
 ## On gcp
 
@@ -460,3 +643,50 @@ worker pool takes `cpu` and `memory`, one CPU and `512Mi` unless set:
 ```ts
 settings: [{ of: ShopOrders, worker: "FulfilOrders", instances: 3, memory: "1Gi" }],
 ```
+
+## On Cloudflare
+
+A Worker runs per request or per firing, not until it is stopped, so the
+cloudflare target runs a TypeScript worker as a Worker of its own,
+`cloudflare.drainer`, under a Cron Trigger that fires it every minute
+(D92). At each firing its generated `drain.ts` builds the API's `Deps`,
+with the database reached through its Hyperdrive config
+([Databases on Hyperdrive](/superschematic/guides/stacks/#databases-on-hyperdrive)),
+and runs the same claim loop `stack dev` runs for a window,
+`WORKER_DRAIN_SECONDS`, 50 seconds unless `drainSeconds` says otherwise;
+then it stops as a process stops at SIGTERM: it claims no more, lets the
+running handlers finish within the worker's `grace`, and gives back the
+rest. The next firing begins a minute after this one did, so a message
+waits at most for the gap between a window and the minute, and for the
+claim loop's one-second poll within a window.
+
+The queue is still its Postgres table, so nothing about it changes on
+Cloudflare: a message you enqueue in your transaction commits with it,
+`@enqueueOnChange`'s triggers enqueue whatever writes a row, `key`,
+`onDuplicate` and `serialize` hold one waiting message and one claim per
+key, and the backoff, the retention and the dead messages are the
+table's. A firing prunes the done messages as it starts.
+
+```ts
+settings: [{ of: FinancesApi, worker: "EmbedLineItems", concurrency: 4, drainSeconds: 40 }],
+```
+
+| Setting | Default | |
+| --- | --- | --- |
+| `concurrency` | the `@worker`'s | how many messages a firing handles at a time, which its version binds as `WORKER_CONCURRENCY` |
+| `drainSeconds` | `50` | how long each firing claims; the window and the `grace` must fit in a Cron Trigger's 15 minutes |
+| `cpuMs` | Cloudflare's, 30 seconds | the CPU time a firing may take, up to 300000: a handler's work counts, its waits on the database and on fetches do not |
+| `logs`, `telemetry` | as a job's | Workers Logs, and trace export, a span per message |
+
+`instances` over one, and `maxInstances`, do not resolve: each
+firing runs one claim loop, so a worker grows by its concurrency, within
+the six connections a Worker's invocation may hold open at once, which
+its database's and its fetches share. `enabled: false`, or `instances: 0`,
+leaves the Worker with no Cron Trigger. A Go or Rust worker does not
+resolve, and neither does one whose queue is on D1.
+
+A deploy migrates the database from the deploying machine
+([Databases on Hyperdrive](/superschematic/guides/stacks/#databases-on-hyperdrive)),
+so a trigger's `backfill: true` runs in the plan's step there as anywhere,
+and `stack queue`, `backfill` among its commands, runs from your machine on
+the origin too ([Dead messages](#dead-messages), D96).

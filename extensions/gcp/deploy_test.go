@@ -794,10 +794,25 @@ func TestBootstrapGraph(t *testing.T) {
 		t.Errorf("a graph without a repository has %v", ids)
 	}
 
+	// A stack whose name is too long for its accounts' ids and its pool's
+	// shortens it alike in each (D97).
 	long := *env
 	long.Stack = "AVeryLongStackNameForAnAccount"
-	if _, err := gcp.BootstrapEnvironment(&long, gcp.GitHubCI{Repository: "acme/shop"}); err == nil || !strings.Contains(err.Error(), "GCP allows 30") {
-		t.Errorf("a stack name too long for an account id: %v", err)
+	graph, err := gcp.BootstrapEnvironment(&long, gcp.GitHubCI{Repository: "acme/shop"})
+	if err != nil {
+		t.Fatalf("a stack name too long for an account id: %v", err)
+	}
+	var prefix string
+	for _, role := range []string{"deployer", "planner", "builder", "migrator"} {
+		id, _ := graph.Resources.Resource(role).Properties["accountId"].(string)
+		stackPart, ok := strings.CutSuffix(id, "-"+role)
+		if !ok || len(id) > 30 || !strings.HasPrefix(id, "a-very-long-") || prefix != "" && stackPart != prefix {
+			t.Errorf("%s's account id is %q, want the stack's name shortened alike, then the role, in 30 characters", role, id)
+		}
+		prefix = stackPart
+	}
+	if pool, _ := graph.Resources.Resource("github").Properties["workloadIdentityPoolId"].(string); len(pool) > 32 || !strings.HasSuffix(pool, "-github") {
+		t.Errorf("the pool's id is %q, want the stack's name shortened, then -github, in 32 characters", pool)
 	}
 }
 

@@ -1,5 +1,7 @@
 # The Topcoat extension's engine database (D58): its Note composes the
-# core's Comments, so it is an engine type, beside a table of its own.
+# core's Comments, so it is an engine type, beside a table of its own. Its
+# Request composes Workflow and Approvals, and its Document Branches, the
+# types of the engine pages' core panels (D44, amended).
 name: fixture-engine-db
 kind: DB
 outputs:

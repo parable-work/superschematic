@@ -58,7 +58,7 @@ small enough to review (about 4 MB):
 - the client's tests (`client*.test.ts`) drive the HTTP API, which `../http`
   records from the HTTP tests.
 
-A scenario whose JSON is longer than 100,000 characters (one that creates
+A scenario whose JSON is longer than 200,000 characters (one that creates
 hundreds of instances to reach a limit) is not written; its file names it in
 `omitted`.
 
@@ -157,7 +157,7 @@ with, and a refund instance asked, approved and settled.
 ```json
 {
   "name": "core-comments",
-  "description": "Comments, the core's comments on an instance: ...",
+  "description": "Comments, the core's conversation on an instance (D77, batch 1): ...",
   "source": "runtime/engine/typescript/test/core-comments.test.ts",
   "omitted": ["..."],
   "shared": {"s1": {...}},
@@ -170,7 +170,7 @@ with, and a refund instance asked, approved and settled.
 | `name` | The test file's name without `.test.ts`, and the file's. |
 | `description` | The test file's leading comment: what its tests cover. |
 | `source` | The test file, from the repository's root. |
-| `omitted` | The names of the scenarios past 100,000 characters, in the test file's order; absent when none. |
+| `omitted` | The names of the scenarios past 200,000 characters, in the test file's order; absent when none. |
 | `shared` | Values that appear more than once in the file's scenarios, each written once (below); absent when none. |
 | `scenarios` | One per test that called the engine, in the order the tests ran. |
 
@@ -236,8 +236,8 @@ recorder to this.
 
 ```json
 {"call": "open", "as": "e1", "args": [{"path": "{{dir:1}}/engine.db", "policy": "allowAll", "ids": "seeded", "clock": "fixed"}], "now": 1000},
-{"call": "instances.invoke", "principal": "alice", "args": ["Review", "r1", "comment", {"body": "Looks right."}], "expect": {"id": 1, "body": "Looks right.", "createdBy": "alice", "createdAt": 1000}},
-{"call": "instances.invoke", "principal": "bob", "args": ["Review", "r9", "comment", {}], "error": {"class": "EngineError", "code": "not_found", "message": "..."}}
+{"call": "instances.invoke", "principal": "alice", "args": ["Review", "r1", "getMessage", {"message": 1}], "expect": {"id": 1, "author": "alice", "state": "posted", "body": "Looks right.", ...}},
+{"call": "instances.invoke", "principal": "bob", "args": ["Review", "r9", "post", {"body": "x"}], "error": {"class": "EngineError", "code": "not_found", "message": "..."}}
 ```
 
 | Member | What it holds |
@@ -252,7 +252,7 @@ recorder to this.
 | `now` | For an engine with a fixed clock: the time the clock read during the step, in epoch milliseconds, when it read one time and that time differs from the last `now` of the engine. A replayer sets the engine's clock to it before the step. |
 | `clock` | For a fixed clock that read several times during the step (a test clock that counts up each time it is read): the times, in order. A replayer's clock returns them in order, then the last. |
 | `ids` | For an engine opened with `ids`: the ids the engine drew during the step, in order. A replayer's id source returns them in order. |
-| `dialect` | `"sqlite"` for a step whose answer is SQLite's: a call of Search's `search` or `similar` operations, the search across schemas (`search`), or a tool call of one, which rank with FTS5's bm25; and a read through the file's own SQL (`storage.get`, `storage.all`). On Postgres, a replayer makes the call but does not compare its answer, and skips a `storage` read. |
+| `dialect` | `"sqlite"` for a step whose answer is SQLite's: a call of Search's `search` or `similar` operations, the search across schemas (`search`), or a tool call of one, which rank with FTS5's bm25; a call of Comments' `searchMessages` (`behaviors.invoke`, or its tool), whose order and snippets are each database's own; and a read through the file's own SQL (`storage.get`, `storage.all`). On Postgres, a replayer makes the call but does not compare its answer, and skips a `storage` read. |
 | `js` | `true` for a step only the recording's own host can run. |
 
 The methods a step calls are the components' of `Engine` (`typescript/src/native/engine.ts`):

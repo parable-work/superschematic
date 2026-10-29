@@ -66,10 +66,14 @@ import { {{ join .EngineImports ", " }} } from '{{ .Naming.EngineNpmPackage }}/s
 {{- if .Buckets }}
 import { openBucket } from '{{ .Naming.HTTPRuntimeNpmPackage }}/gcs';
 {{- end }}
+{{- if .MemoryStores }}
+import { openRedisMemoryStore } from '{{ .Naming.HTTPRuntimeNpmPackage }}/redis';
+{{- end }}
 {{- range .APIs }}
 import * as {{ .Module }} from '{{ .Package }}';
 import * as {{ .Impl }} from '{{ .ImplPackage }}';
 {{- end }}
+{{- template "ts-orm-imports" . }}
 {{- range .Clients }}
 import * as {{ .Module }} from '{{ .Package }}';
 {{- end }}
@@ -235,6 +239,10 @@ async function main(): Promise<void> {
   const {{ .Var }} = openBucket({{ .From }});
 {{- end }}
 {{- end }}
+{{- template "ts-memory-stores" . }}
+{{- if .MemoryStores }}
+  const memoryStores: readonly MemoryStore[] = [{{ range $i, $m := .MemoryStores }}{{ if $i }}, {{ end }}{{ $m.Var }}{{ end }}];
+{{- end }}
 
   const app = new Hono();
   // With trace export on, each request but the probes is a server span.
@@ -364,6 +372,10 @@ async function main(): Promise<void> {
 {{- end }}
     // The spans still buffered are flushed once the requests are done.
     drain(server{{ if .SQLiteDatabases }}, dependencies{{ else if .Databases }}, pools{{ end }}{{ if .Engines }}, engines{{ end }})
+{{- if .MemoryStores }}
+      // The memory stores close once the requests are done.
+      .finally(() => Promise.allSettled(memoryStores.map(store => store.close())))
+{{- end }}
       .finally(() => telemetry.shutdown())
       .then(
         () => {
@@ -414,6 +426,10 @@ function identityConfig(field: string): IdentityConfig | undefined {
 {{- end }}
 
 {{ template "ts-construct" . }}
+{{- if .MemoryStores }}
+
+{{ template "ts-open-memory-store" . }}
+{{- end }}
 {{- if .PostgresDatabases }}
 
 {{ template "ts-connect" . }}

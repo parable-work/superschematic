@@ -27,10 +27,24 @@ export const IdentityErrorCode = {
   CONFLICT: ErrorCode.CONFLICT,
   /** A role's permission is not dotted segments of letters, digits, '_' and '-'. 422, with the permissions in details. */
   INVALID_PERMISSION: 'invalid_permission',
+  /** A login whose password verifies for a user who waits for an administrator's approval (D81). 403. */
+  PENDING_APPROVAL: 'pending_approval',
+  /** approveUser for a user who is not waiting for approval (D81). 409. */
+  NOT_PENDING: 'not_pending',
 } as const;
 
 export function invalidCredentials(cause?: unknown): HttpProblem {
   return new HttpProblem(401, 'Invalid login or password', { code: IdentityErrorCode.INVALID_CREDENTIALS, cause });
+}
+
+/** A pending user's login once the password verifies (D81). */
+export function pendingApproval(): HttpProblem {
+  return new HttpProblem(403, "The user waits for an administrator's approval", { code: IdentityErrorCode.PENDING_APPROVAL });
+}
+
+/** approveUser for a user who is not pending (D81). */
+export function notPending(): HttpProblem {
+  return new HttpProblem(409, 'The user is not waiting for approval', { code: IdentityErrorCode.NOT_PENDING });
 }
 
 export function unauthenticated(cause?: unknown, headers?: Record<string, string>): HttpProblem {
@@ -43,6 +57,11 @@ export function unauthenticated(cause?: unknown, headers?: Record<string, string
 
 export function identityForbidden(message: string, details?: unknown): HttpProblem {
   return new HttpProblem(403, message, { code: IdentityErrorCode.FORBIDDEN, ...(details !== undefined ? { details } : {}) });
+}
+
+/** A write to a user who holds permissions the caller does not, listing them. */
+export function notCovered(permissions: string[]): HttpProblem {
+  return identityForbidden('No one administers a user holding a permission they do not hold', { permissions });
 }
 
 export function crossOrigin(): HttpProblem {

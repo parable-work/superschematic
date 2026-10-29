@@ -14,6 +14,12 @@
 // It also declares Workers, a method per worker of {{ .SchemaName }}, and the type
 // of the implementation's createWorkers (D53; section 8.8).
 {{- end }}
+{{- if .HasDerivers }}
+//
+// It also declares Derivers, a member per deriver of {{ .SchemaName }}, each with a
+// method per derived field it fills, and the type of the implementation's
+// createDerivers (D74).
+{{- end }}
 {{- if .HasManualRoutes }}
 //
 // It also declares ManualRoutes, a handler per @manualRouteRegistration
@@ -23,7 +29,7 @@
 {{ if .DepsPool }}
 import type { Pool } from 'pg';
 {{- end }}
-import type { {{ if .ChecksEndUsers }}Authenticator, {{ end }}{{ if .Deps.Buckets }}Bucket, {{ end }}Logger } from '{{ .RuntimePackage }}';
+import type { {{ if .ChecksEndUsers }}Authenticator, {{ end }}{{ if .Deps.Buckets }}Bucket, {{ end }}Logger{{ if .Deps.MemoryStores }}, MemoryStore{{ end }} } from '{{ .RuntimePackage }}';
 {{- if .DepsSQLite }}
 import type { SqlDatabase } from '{{ .RuntimePackage }}/d1';
 {{- end }}
@@ -33,8 +39,11 @@ import type { ManualRouteHandler } from '{{ .RuntimePackage }}/hono';
 {{- range .Deps.Calls }}
 import type { {{ .Client }} } from '{{ .Package }}';
 {{- end }}
-{{- if .HasWorkers }}
-import type { {{ join .WorkerQueues ", " }} } from '{{ .Deps.DatabaseTypesPackage }}';
+{{- if or .HasWorkers .HasDerivers }}
+import type { {{ join .DatabaseTypeImports ", " }} } from '{{ .Deps.DatabaseTypesPackage }}';
+{{- end }}
+{{- if .DepsORM }}
+import type { {{ .Deps.ORM }} } from '{{ .Deps.DatabaseTypesPackage }}/orm';
 {{- end }}
 {{- if .Deps.Engine }}
 import type { EngineBackground } from '{{ .Deps.Engine.Package }}/server';
@@ -51,8 +60,23 @@ export interface Deps {
   readonly config: EnvConfig;
 {{- end }}
 {{- if .DepsPool }}
+{{- if .DepsORM }}
+  /** A pool of {{ .Deps.Database }}, the API's database, for the SQL the repositories do not express. */
+  readonly db: Pool;
+  /**
+   * The repositories of {{ .Deps.Database }}'s tables over db (D79), a table's rows
+   * read and written as its types' ./orm entry declares them, with no SQL of
+   * the implementation's. In an operation it acts as the caller, whom
+   * createdBy, updatedBy and deletedBy record, and in a job or a worker as
+   * no one: orm.asSystem() acts as the database's system actor, and
+   * orm.withUser(id) as another user (D87). orm.transaction(fn) writes in
+   * one transaction, which enqueue takes.
+   */
+  readonly orm: {{ .Deps.ORM }};
+{{- else }}
   /** A pool of {{ .Deps.Database }}, the API's database. */
   readonly db: Pool;
+{{- end }}
 {{- else if .DepsSQLite }}
   /**
    * {{ .Deps.Database }}, the API's database, whose DB service lists sqlite first: D1's
@@ -68,6 +92,15 @@ export interface Deps {
 {{- range .Deps.Buckets }}
   /** {{ .Service }}, a bucket the API lists: private object storage it puts, gets, deletes and lists objects in, and signs URLs for (D54). */
   readonly {{ .Field }}: Bucket;
+{{- end }}
+{{- range .Deps.MemoryStores }}
+  /**
+   * {{ .Service }}, a memory store the API lists (D75): use it through the store's
+   * generated definitions. It refuses every call at once while it is
+   * disabled or unreachable, and the caller takes its fallback path; a
+   * subscribe while it is unreachable is held until it reconnects.
+   */
+  readonly {{ .Field }}: MemoryStore;
 {{- end }}
 {{- with .Deps.Engine }}
   /**
@@ -166,4 +199,68 @@ export interface Workers {
  * exports createWorkers: WorkersConstructor.
  */
 export type WorkersConstructor = (deps: Deps) => Workers | Promise<Workers>;
+{{- end }}
+{{- if .HasDerivers }}
+
+/**
+ * A stale derived field, as a deriver's method gets it (D74): the instance's
+ * id, which attempt this is, from 1, the model label and the instruction of
+ * the field's Derived config, the inputs that hold a value, by field
+ * name, and the field's JSON Schema, which a model is held to. I is the
+ * inputs' type.
+ */
+export interface DerivedItem<I> {
+  readonly id: string;
+  readonly attempt: number;
+  readonly model: string;
+  readonly instruction: string;
+  readonly inputs: I;
+  readonly output: unknown;
+}
+
+/**
+ * What a deriver's method answers: a value of the field's type T, with how
+ * sure the model is, from 0 to 1, and what the call cost, which the
+ * settle's event keeps; or why there is none. A failure, and a method that
+ * rejects, count an attempt, and the field waits once its attempts are
+ * spent until its inputs move.
+ */
+export type DerivedAnswer<T> =
+  | {
+      readonly value: T;
+      readonly confidence?: number;
+      readonly usage?: { readonly inputTokens?: number; readonly outputTokens?: number; readonly costMicros?: number; readonly modelId?: string };
+    }
+  | { readonly failure: { readonly class?: string; readonly message: string } };
+
+/**
+ * The derivers of {{ .SchemaName }}, a member per @deriver class. A deriver's
+ * entrypoint pulls the stale derived fields of its schemas and calls the
+ * method of each with a signal that aborts when the deriver stops. A value
+ * of the wrong type fails to compile; one the engine still refuses counts
+ * an attempt.
+ */
+export interface Derivers {
+{{- range .Derivers }}
+  /** The deriver {{ .Name }}, which fills the derived fields of {{ join .Schemas ", " }}. */
+  readonly {{ .Member }}: {{ .Interface }};
+{{- end }}
+}
+{{- range .Derivers }}
+
+/** The methods of the deriver {{ .Name }}, one per derived field it fills. */
+export interface {{ .Interface }} {
+{{- range .Methods }}
+  /** Derives {{ .Schema }}.{{ .Field }} from {{ .FromList }}, with the model {{ jsdoc .Model }}: {{ jsdoc .Instruction }} */
+  {{ .Method }}(item: DerivedItem<{{ .InputsType }}>, signal: AbortSignal): Promise<DerivedAnswer<{{ .ValueType }}>>;
+{{- end }}
+}
+{{- end }}
+
+/**
+ * The type of the implementation's createDerivers, which a deriver's
+ * entrypoint calls with the API's Deps. The scaffolded implementation
+ * exports createDerivers: DeriversConstructor.
+ */
+export type DeriversConstructor = (deps: Deps) => Derivers | Promise<Derivers>;
 {{- end }}

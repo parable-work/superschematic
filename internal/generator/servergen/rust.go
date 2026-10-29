@@ -49,6 +49,16 @@ import (
 // Shutdown that SIGTERM cancels, and exits 1 when it fails; a worker's
 // (worker.rs.tmpl) calls `create_workers` and runs the HTTP runtime's claim
 // loop over its queue, by the descriptor its database's Rust types carry.
+//
+// A Rust app's entrypoint (D78) is a crate beside the servers' too,
+// `<output-root>/server/<stack>/<app>/`. Its main.rs (app_main.rs.tmpl)
+// builds its one API's Deps, identity service, service authenticator and
+// Implementations as a server's does, opens the engine of the API's engine
+// database and deploys its document as a server's does, waits for it to
+// open, and calls the app's program, the project's crate at the naming
+// file's [implementation_paths] rust_app template, with the app's parts
+// (rustrestgen's apps.rs). It mounts no routes of its own: the program
+// serves every route, and the process ends when its `serve` returns.
 
 // The files of a Rust entrypoint crate.
 const (
@@ -156,6 +166,14 @@ type RustInput struct {
 	// APIs (D65): Server is then the worker's deployable.
 	Worker *WorkerInput
 
+	// Deriver, when set, plans the entrypoint of a deriver of the one API
+	// in APIs (D74): Server is then the deriver's deployable.
+	Deriver *DeriverInput
+
+	// App, when set, plans the entrypoint of an app of the one API in APIs
+	// (D78): Server is then the app's deployable.
+	App *AppInput
+
 	// EngineTypes are the directories of the Rust types crate of each
 	// engine database an API connects to, which holds its engine document
 	// (D58), by service.
@@ -173,16 +191,23 @@ type RustServer struct {
 	Stack string
 	Name  string
 
-	// Kind is "server", "job", "worker" or "runner".
+	// Kind is "server", "job", "worker", "runner", "deriver" or "app".
 	Kind string
 
 	// Job is what a job's entrypoint runs, nil for a server and a worker
 	// (D65).
 	Job *Job
 
+	// Deriver is what a deriver's entrypoint runs, nil for every other
+	// (D74).
+	Deriver *RustDeriver
+
 	// Worker is what a worker's entrypoint runs, nil for a server and a
 	// job (D65).
 	Worker *RustWorker
+
+	// App is what an app's entrypoint runs, nil for every other (D78).
+	App *RustApp
 
 	// Runner is what an engine's runner's entrypoint runs, nil for every
 	// other (D58).
@@ -218,6 +243,10 @@ type RustServer struct {
 	// Buckets are the buckets main.rs opens once, for every API that lists
 	// them (D54).
 	Buckets []*RustBucket
+
+	// MemoryStores are the memory stores main.rs opens once, for every API
+	// that lists them, and closes when it stops (D75).
+	MemoryStores []*RustMemoryStore
 
 	// Dependencies are Cargo.toml's, the registry crates first, then the
 	// HTTP runtime and the crates of the workspace, each in name order.
@@ -261,6 +290,35 @@ type RustWorker struct {
 	// message type and its descriptor constant by, through the API crate.
 	Message    string
 	Descriptor string
+}
+
+// RustDeriver is the deriver a Rust deriver's entrypoint runs (D74): its
+// @deriver class, the field of the API's Derivers that holds it, and the
+// engine it pulls from and settles to, the API's Deps' engine, as the
+// principal Subject and Permissions name.
+type RustDeriver struct {
+	rustrestgen.DeriverInfo
+
+	// Engine is the engine of the API's engine database, which Deps holds.
+	Engine *RustEngine
+}
+
+// RustApp is the app a Rust app's entrypoint runs (D78): its @app class
+// and the struct of its parts, from the API crate's apps.rs; its program,
+// the crate Crate, whose library Rust source names Lib, at Dir from the
+// repository root, which main.rs uses as Alias; and the engine of the
+// API's engine database, nil without one, which main.rs waits for and
+// holds open in the variable Opened.
+type RustApp struct {
+	rustrestgen.AppInfo
+
+	Crate string
+	Lib   string
+	Alias string
+	Dir   string
+
+	Engine *RustEngine
+	Opened string
 }
 
 // RustAPI is a served API in main.rs.
@@ -333,6 +391,13 @@ type RustAPI struct {
 
 	// Buckets are Deps' buckets (D54).
 	Buckets []RustBucketUse
+
+	// MemoryStores are Deps' memory stores (D75), and RateLimitStore the
+	// one its @rateLimit routes count in, nil without one, whose router
+	// options RouterOptions is the variable of.
+	MemoryStores   []RustMemoryStoreUse
+	RateLimitStore *RustMemoryStore
+	RouterOptions  string
 }
 
 // MountsEngine reports whether the API's server mounts the routes of its
@@ -365,6 +430,66 @@ type RustBucket struct {
 	// From the expression that reads it from the first API's config.
 	Field string
 	From  string
+}
+
+// RustMemoryStoreUse is a memory store in an API's Deps.
+type RustMemoryStoreUse struct {
+	Field string
+	Store *RustMemoryStore
+}
+
+// RustMemoryStore is a memory store main.rs opens once, for every API that
+// lists it, on Redis through the HTTP runtime's memorystore-redis feature,
+// or disabled when its field is unset or its connection refused (D75).
+type RustMemoryStore struct {
+	Service string
+	Var     string
+
+	// Field is the derived config field the connection is read from, and
+	// From the expression of its value in the first API's config, an
+	// Option<MemoryStore>.
+	Field string
+	From  string
+}
+
+// OpenLet is main.rs's statement that opens the store, as rustfmt lays
+// it out.
+func (m *RustMemoryStore) OpenLet() string {
+	const indent = "    "
+	fn := "memorystore::redis::open_or_disabled"
+	args := []string{rustString(m.Service), rustString(m.Field), m.From + ".as_ref()"}
+	list := strings.Join(args, ", ")
+	if len(list) <= rustCallWidth {
+		if line := indent + "let " + m.Var + " = " + fn + "(" + list + ").await;"; len(line) <= rustWidth {
+			return line
+		}
+		if line := indent + indent + fn + "(" + list + ").await;"; len(line) <= rustWidth {
+			return indent + "let " + m.Var + " =\n" + line
+		}
+	}
+	return indent + "let " + m.Var + " = " + fn + "(\n" + indent + indent + strings.Join(args, ",\n"+indent+indent) + ",\n" + indent + ")\n" + indent + ".await;"
+}
+
+// RouterOptionsLet is main.rs's statement that builds the router options
+// of an API with a rateLimitStore: a registry whose limiters count in the
+// store (D75).
+func (a *RustAPI) RouterOptionsLet() string {
+	const indent = "    "
+	limits := "RateLimits::with_store(" + rustString(a.Service) + ", Arc::clone(&" + a.RateLimitStore.Var + "))"
+	field := indent + indent + "rate_limits: " + limits + ","
+	if len(field) > rustWidth {
+		field = indent + indent + "rate_limits: RateLimits::with_store(\n" + indent + indent + indent + rustString(a.Service) + ",\n" + indent + indent + indent + "Arc::clone(&" + a.RateLimitStore.Var + "),\n" + indent + indent + "),"
+	}
+	return indent + "let " + a.RouterOptions + " = " + a.Alias + "::RouterOptions {\n" + field + "\n" + indent + indent + ".." + a.Alias + "::RouterOptions::default()\n" + indent + "};"
+}
+
+// RouterOptionsExpr is the router options main.rs builds the API's router
+// with: its own, or the defaults.
+func (a *RustAPI) RouterOptionsExpr() string {
+	if a.RouterOptions != "" {
+		return a.RouterOptions
+	}
+	return a.Alias + "::RouterOptions::default()"
 }
 
 // RustDatabase is a database the server opens one pool to, for every API
@@ -442,7 +567,13 @@ var rustReserved = []string{
 	"api", "apis", "request", "router", "endpoint", "credential", "service_credential", "err",
 	"jobs", "workers", "worker", "queue", "shutdown", "started", "definition", "concurrency", "options",
 	"handle", "message", "bucket", "gcs", "open_bucket", "field", "service", "connection",
+	"memorystore", "open_or_disabled",
 	"token", "headers",
+	// A deriver's (D74).
+	"derive", "derivers", "deriver", "answer", "derived", "item", "schema", "schemas", "principal", "engine",
+	"unread", "derivation_answer",
+	// An app's (D78).
+	"parts", "served", "addr",
 }
 
 // rustNames hands out snake_case identifiers no other declaration of
@@ -532,6 +663,35 @@ func PlanRust(in RustInput) (*RustServer, error) {
 			GraceSeconds: grace,
 		}
 		s.Package = n.RustWorkerCrate(in.Stack, in.Server)
+	case in.Deriver != nil:
+		if len(in.APIs) != 1 {
+			return nil, fmt.Errorf("stack %s: deriver %s runs a deriver of %d APIs; a deriver belongs to one", in.Stack, in.Server, len(in.APIs))
+		}
+		o := in.APIs[0].Output
+		d := o.Deriver(in.Deriver.Name)
+		if d == nil {
+			return nil, fmt.Errorf("stack %s: deriver %s runs %s of %s, which declares no such deriver", in.Stack, in.Server, in.Deriver.Name, o.SchemaName)
+		}
+		s.Kind = "deriver"
+		s.Deriver = &RustDeriver{DeriverInfo: *d}
+		s.Package = n.RustDeriverCrate(in.Stack, in.Server)
+	case in.App != nil:
+		if len(in.APIs) != 1 {
+			return nil, fmt.Errorf("stack %s: app %s runs an app of %d APIs; an app belongs to one", in.Stack, in.Server, len(in.APIs))
+		}
+		o := in.APIs[0].Output
+		info := o.App(in.App.Name)
+		if info == nil || !o.HasApps() {
+			return nil, fmt.Errorf("stack %s: app %s runs %s of %s, which declares no such app", in.Stack, in.Server, in.App.Name, o.SchemaName)
+		}
+		s.Kind = "app"
+		s.App = &RustApp{AppInfo: *info, Crate: in.App.Implementation.Crate, Lib: in.App.Implementation.Lib}
+		if in.ImplementationRoot != "" {
+			if rel, err := filepath.Rel(in.ImplementationRoot, in.App.Implementation.Dir); err == nil {
+				s.App.Dir = filepath.ToSlash(rel)
+			}
+		}
+		s.Package = n.RustAppCrate(in.Stack, in.Server)
 	case len(in.APIs) == 0:
 		return nil, fmt.Errorf("stack %s: server %s serves no API", in.Stack, in.Server)
 	default:
@@ -556,6 +716,11 @@ func PlanRust(in RustInput) (*RustServer, error) {
 	databases := map[string]*RustDatabase{}
 	clients := map[string]*RustClient{}
 	buckets := map[string]*RustBucket{}
+	if s.App != nil {
+		// The app's program, as main.rs names it.
+		s.App.Alias = taken.take(rustStem(in.Server) + "_app")
+	}
+	stores := map[string]*RustMemoryStore{}
 	for _, a := range in.APIs {
 		o := a.Output
 		stem := rustStem(o.SchemaName)
@@ -573,7 +738,8 @@ func PlanRust(in RustInput) (*RustServer, error) {
 			Webhooks:        len(o.WebhookProviders) > 0 && !background,
 			ConfigLoader:    "load_env_config",
 		}
-		if len(o.ManualEndpoints) > 0 && !background {
+		// An app mounts no routes of the API's: its program serves them.
+		if len(o.ManualEndpoints) > 0 && !background && s.App == nil {
 			api.ManualRoutes = taken.take(stem + "_manual_routes")
 		}
 		if in.ImplementationRoot != "" {
@@ -684,6 +850,30 @@ func PlanRust(in RustInput) (*RustServer, error) {
 			}
 			api.Buckets = append(api.Buckets, RustBucketUse{Field: b.Field, Bucket: h})
 		}
+		for _, m := range o.Deps.MemoryStores {
+			h := stores[m.Service]
+			if h == nil {
+				key, ok := derived[string(ir.EdgeMemoryStore)+" "+m.Service]
+				if !ok || api.Config == "" {
+					return nil, fmt.Errorf("stack %s: %s %s serves %s, whose config has no field for memory store %s, which it lists", in.Stack, s.Kind, in.Server, o.SchemaName, m.Service)
+				}
+				h = &RustMemoryStore{
+					Service: m.Service,
+					Var:     taken.take(rustStem(m.Service) + "_store"),
+					Field:   key,
+					From:    api.Config + "." + envgen.RustFieldName(key),
+				}
+				stores[m.Service] = h
+				s.MemoryStores = append(s.MemoryStores, h)
+			}
+			api.MemoryStores = append(api.MemoryStores, RustMemoryStoreUse{Field: m.Field, Store: h})
+			// A job or a worker serves no route, whose rate limit it would
+			// count.
+			if o.Deps.RateLimitStore == m.Service && !background {
+				api.RateLimitStore = h
+				api.RouterOptions = taken.take(stem + "_router_options")
+			}
+		}
 		if s.Worker != nil {
 			if api.Database == nil {
 				return nil, fmt.Errorf("stack %s: worker %s of %s opens no pool on %s, whose queue it claims", in.Stack, in.Server, o.SchemaName, o.Deps.Database)
@@ -697,6 +887,17 @@ func PlanRust(in RustInput) (*RustServer, error) {
 	if err := s.planRustEngines(in, taken); err != nil {
 		return nil, err
 	}
+	if s.Deriver != nil {
+		if s.APIs[0].Engine == nil {
+			return nil, fmt.Errorf("stack %s: deriver %s of %s opens no engine, whose Derived fields it fills (D74)", in.Stack, in.Server, s.APIs[0].Service)
+		}
+		s.Deriver.Engine = s.APIs[0].Engine
+	}
+	if s.App != nil && s.APIs[0].Engine != nil {
+		// The app's parts hold the engine once it has opened (D78).
+		s.App.Engine = s.APIs[0].Engine
+		s.App.Opened = taken.take(rustStem(s.App.Engine.Service) + "_opened")
+	}
 	s.planLoopback(taken)
 	for _, a := range in.APIs {
 		if a.Implementation.Dir == "" {
@@ -705,6 +906,13 @@ func PlanRust(in RustInput) (*RustServer, error) {
 		m, err := planRustMirror(in.OutputRoot, a)
 		if err != nil {
 			return nil, fmt.Errorf("stack %s: %s %s: %w", in.Stack, s.Kind, in.Server, err)
+		}
+		s.Mirrors = append(s.Mirrors, m)
+	}
+	if s.App != nil && in.App.Implementation.Dir != "" {
+		m, err := planRustAppMirror(in.OutputRoot, in.APIs[0], in.App)
+		if err != nil {
+			return nil, fmt.Errorf("stack %s: app %s: %w", in.Stack, in.Server, err)
 		}
 		s.Mirrors = append(s.Mirrors, m)
 	}
@@ -728,7 +936,10 @@ func PlanRust(in RustInput) (*RustServer, error) {
 // none: an API it calls is served by another deployable, whose connector
 // gives the call its credential.
 func (s *RustServer) planLoopback(taken rustNames) {
-	if s.Background() {
+	// An app serves none of its API's routes, which its API's servers
+	// serve: a call to its API reaches one of them, whose connector gives
+	// the call its credential (D78).
+	if s.Background() || s.App != nil {
 		return
 	}
 	serves := make([]string, len(s.APIs))
@@ -811,7 +1022,9 @@ func (s *RustServer) planManifest(in RustInput, dir string) error {
 		{"serde_json", quoteToml(rustSerdeJSONVersion)},
 		{"tokio", fmt.Sprintf(`{ version = %s, features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }`, quoteToml(rustTokioVersion))},
 	}
-	if s.Background() {
+	if s.Background() || s.App != nil {
+		// An app's main.rs serves nothing itself either: its program does
+		// (D78).
 		registry = []CargoDependency{{"tokio", fmt.Sprintf(`{ version = %s, features = ["macros", "rt-multi-thread"] }`, quoteToml(rustTokioVersion))}}
 		if len(s.Engines) > 0 {
 			// engine.rs reads the engine document's JSON.
@@ -837,6 +1050,11 @@ func (s *RustServer) planManifest(in RustInput, dir string) error {
 		// too, so the build decides by the bucket, as Go's and
 		// TypeScript's do (D54).
 		features["gcs"] = true
+	}
+	if len(s.MemoryStores) > 0 {
+		// Only an entrypoint whose APIs list a store links the Redis
+		// client (D75).
+		features["memorystore-redis"] = true
 	}
 	for _, a := range in.APIs {
 		for _, f := range a.Output.RuntimeFeatures() {
@@ -882,6 +1100,15 @@ func (s *RustServer) planManifest(in RustInput, dir string) error {
 			return err
 		}
 		if local[a.Implementation.Crate], err = pathDep(MirrorDir(in.OutputRoot, a.Output.SchemaName)); err != nil {
+			return err
+		}
+	}
+	if s.App != nil {
+		// The app's program, through its mirror (D78).
+		if _, clash := local[s.App.Crate]; clash {
+			return fmt.Errorf("stack %s: app %s: its crate, at %s, is named %s, like a crate the entrypoint depends on beside it; rename it in its Cargo.toml", in.Stack, in.Server, in.App.Implementation.Dir, s.App.Crate)
+		}
+		if local[s.App.Crate], err = pathDep(AppMirrorDir(in.OutputRoot, in.APIs[0].Output.SchemaName, in.App.Name)); err != nil {
 			return err
 		}
 	}
@@ -1004,9 +1231,102 @@ func planRustDocker(in RustInput, s *RustServer, dir string) (*RustDocker, strin
 		return nil, why, nil
 	}
 	d.Include = append(d.Include, engines...)
+	if s.App != nil {
+		crates, why, err := appDockerIncludes(in, s, d.Include, rel)
+		if err != nil || why != "" {
+			return nil, why, err
+		}
+		d.Include = append(d.Include, crates...)
+	}
 	slices.Sort(d.Include)
 	d.Include = slices.Compact(d.Include)
 	return d, "", nil
+}
+
+// appDockerIncludes are the crates an app's image reads that the context
+// takes in for no other entrypoint (D78): each crate the app's crate
+// reaches by path, through its mirror's re-based path dependencies and
+// theirs in turn, that no pattern of include already holds. A crate an
+// extension writes under the output root, such as the Topcoat crate at
+// <output-root>/topcoat/<api>, is one; so is a crate of the project's own
+// beside the app's. Each is taken in whole. A crate not yet written is
+// left out, so cargo, not the context, says it is missing.
+func appDockerIncludes(in RustInput, s *RustServer, include []string, rel func(string) (string, bool)) ([]string, string, error) {
+	var mirror *RustMirror
+	for _, m := range s.Mirrors {
+		if m.App != "" {
+			mirror = m
+		}
+	}
+	if mirror == nil || in.App == nil || in.App.Implementation.Manifest == nil {
+		return nil, "", nil
+	}
+	queue, err := mirror.pathDependencies(in.App.Implementation.Manifest)
+	if err != nil {
+		return nil, "", err
+	}
+	var out []string
+	seen := map[string]bool{}
+	for len(queue) > 0 {
+		dir := queue[0]
+		queue = queue[1:]
+		if seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		r, ok := rel(dir)
+		if !ok {
+			return nil, fmt.Sprintf("the crate at %s, which %s reaches by path, lies outside the repository root, the build context", dir, mirror.what()), nil
+		}
+		// A crate whose manifest the context already takes in, such as
+		// its API's crate, is the other patterns' to take in whole.
+		if manifest := r + "/" + RustManifestFile; includes(include, manifest) || includes(out, manifest) {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, RustManifestFile))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return nil, "", err
+		}
+		out = append(out, r)
+		var doc map[string]any
+		if _, err := toml.Decode(string(data), &doc); err != nil {
+			return nil, "", fmt.Errorf("the crate at %s, which %s reaches by path: Cargo.toml: %w", dir, mirror.what(), err)
+		}
+		for _, dep := range pathDependencies(doc) {
+			p := filepath.FromSlash(dep.path)
+			if !filepath.IsAbs(p) {
+				p = filepath.Join(dir, p)
+			}
+			queue = append(queue, filepath.Clean(p))
+		}
+	}
+	return out, "", nil
+}
+
+// includes reports whether a pattern of include, as the ignore file
+// takes it in, holds p: p is the pattern's path or lies under it, each
+// segment matched as a glob.
+func includes(include []string, p string) bool {
+	segments := strings.Split(p, "/")
+	for _, pattern := range include {
+		parts := strings.Split(pattern, "/")
+		if len(parts) > len(segments) {
+			continue
+		}
+		matched := true
+		for i, part := range parts {
+			if ok, err := path.Match(part, segments[i]); err != nil || !ok {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
 }
 
 // ReadRustImplementation reads the names of the Rust implementation crate
@@ -1015,6 +1335,20 @@ func planRustDocker(in RustInput, s *RustServer, dir string) (*RustDocker, strin
 // itself. The server's Cargo.toml depends on the implementation's mirror
 // by that name, so a Cargo.toml without one fails.
 func ReadRustImplementation(n naming.Naming, service, dir string) (RustImplementation, error) {
+	return readRustCrate(dir, n.OrDefault().RustImplementationCrate(service), "the implementation of "+service, "the server's")
+}
+
+// ReadRustApp reads the names of the crate of app, an @app class of the
+// Rust API service, at dir (D78), as ReadRustImplementation reads an
+// implementation's: the app's entrypoint depends on its mirror by name.
+func ReadRustApp(n naming.Naming, service, app, dir string) (RustImplementation, error) {
+	return readRustCrate(dir, n.OrDefault().RustAppImplementationCrate(service, app), "the crate of app "+app+" of "+service, "the app's")
+}
+
+// readRustCrate reads the names of the crate at dir, what, whose scaffold
+// names it scaffolded; whose names the Cargo.toml of an entrypoint, by
+// whom, depends on it by.
+func readRustCrate(dir, scaffolded, what, by string) (RustImplementation, error) {
 	impl := RustImplementation{Dir: dir}
 	var manifest struct {
 		Package struct {
@@ -1032,11 +1366,11 @@ func ReadRustImplementation(n naming.Naming, service, dir string) (RustImplement
 	}
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		impl.Crate = n.OrDefault().RustImplementationCrate(service)
+		impl.Crate = scaffolded
 	case err != nil:
-		return impl, fmt.Errorf("the implementation of %s: %s: %w", service, file, err)
+		return impl, fmt.Errorf("%s: %s: %w", what, file, err)
 	case manifest.Package.Name == "":
-		return impl, fmt.Errorf("the implementation of %s, at %s, has a Cargo.toml with no [package] name, and the server's Cargo.toml depends on it by name; name it, as the scaffold names it %s", service, dir, n.OrDefault().RustImplementationCrate(service))
+		return impl, fmt.Errorf("%s, at %s, has a Cargo.toml with no [package] name, and %s Cargo.toml depends on it by name; name it, as the scaffold names it %s", what, dir, by, scaffolded)
 	default:
 		impl.Crate = manifest.Package.Name
 	}
@@ -1051,7 +1385,7 @@ func ReadRustImplementation(n naming.Naming, service, dir string) (RustImplement
 // engine runner's, which serves no request: it mounts no routes, listens on
 // no port, and verifies no end user or caller.
 func (s *RustServer) Background() bool {
-	return s.Job != nil || s.Worker != nil || s.Runner != nil
+	return s.Job != nil || s.Worker != nil || s.Runner != nil || s.Deriver != nil
 }
 
 // Sections are the sections of docs/stack-model.md the entrypoint's
@@ -1064,6 +1398,10 @@ func (s *RustServer) Sections() string {
 		return "sections 8.6 and 8.8"
 	case s.Runner != nil:
 		return "sections 3.1 and 8.6"
+	case s.Deriver != nil:
+		return "section 8.6"
+	case s.App != nil:
+		return "sections 8.1 and 8.6"
 	}
 	return "sections 8.1 and 8.6"
 }
@@ -1086,6 +1424,12 @@ func (s *RustServer) AnyCORS() bool {
 	return slices.ContainsFunc(s.APIs, func(a *RustAPI) bool { return a.CORS != "" })
 }
 
+// Closes reports whether main.rs closes anything once it stops serving or
+// running: an engine, or a memory store (D75).
+func (s *RustServer) Closes() bool {
+	return len(s.Engines) > 0 || len(s.MemoryStores) > 0
+}
+
 // Dispatches reports whether the server serves more than one API, whose
 // routers it dispatches between.
 func (s *RustServer) Dispatches() bool {
@@ -1098,11 +1442,15 @@ func (s *RustServer) RuntimeUses() []string {
 	if s.Background() {
 		return s.backgroundUses(runtime)
 	}
+	if s.App != nil {
+		return s.appUses(runtime)
+	}
 	uses := s.bucketUses(runtime)
 	if s.AnyIdentity() {
 		uses = append(uses, rustutil.UseLine(runtime+"::identity", []string{"PostgresPool", "Store"}))
 	}
 	uses = append(uses, rustutil.UseLine(runtime+"::logging", []string{"self", "tracing"}))
+	uses = append(uses, s.memoryStoreUses(runtime)...)
 	if len(s.Databases) > 0 {
 		uses = append(uses, rustutil.UseLine(runtime+"::postgres", []string{"self", "Pool"}))
 	}
@@ -1126,6 +1474,9 @@ func (s *RustServer) RuntimeUses() []string {
 	if s.Dispatches() {
 		root = append(root, "OperationInfo")
 	}
+	if slices.ContainsFunc(s.APIs, func(a *RustAPI) bool { return a.RateLimitStore != nil }) {
+		root = append(root, "RateLimits")
+	}
 	if len(root) > 0 {
 		uses = append(uses, rustutil.UseLine(runtime, root))
 	}
@@ -1139,6 +1490,7 @@ func (s *RustServer) RuntimeUses() []string {
 // stops on.
 func (s *RustServer) backgroundUses(runtime string) []string {
 	uses := append(s.bucketUses(runtime), rustutil.UseLine(runtime+"::logging", []string{"self", "tracing"}))
+	uses = append(uses, s.memoryStoreUses(runtime)...)
 	if len(s.Databases) > 0 {
 		uses = append(uses, rustutil.UseLine(runtime+"::postgres", []string{"self", "Pool"}))
 	}
@@ -1152,7 +1504,40 @@ func (s *RustServer) backgroundUses(runtime string) []string {
 	if s.Worker != nil {
 		uses = append(uses, rustutil.UseLine(runtime+"::worker", []string{"self", "Options"}))
 	}
+	if s.Deriver != nil {
+		// The deriver reads its concurrency as a worker does (D74).
+		uses = append(uses, "use "+runtime+"::worker;")
+	}
 	return append(uses, "use "+runtime+"::Shutdown;")
+}
+
+// appUses are the use declarations of an app's main.rs from the HTTP
+// runtime (D78), in the order rustfmt sorts them: a server's, but for the
+// router's, the loopback key's and the dispatch's.
+func (s *RustServer) appUses(runtime string) []string {
+	uses := s.bucketUses(runtime)
+	if s.AnyIdentity() {
+		uses = append(uses, rustutil.UseLine(runtime+"::identity", []string{"PostgresPool", "Store"}))
+	}
+	uses = append(uses, rustutil.UseLine(runtime+"::logging", []string{"self", "tracing"}))
+	if len(s.Databases) > 0 {
+		uses = append(uses, rustutil.UseLine(runtime+"::postgres", []string{"self", "Pool"}))
+	}
+	if stackconfig := s.stackconfigUses(); len(stackconfig) > 0 {
+		uses = append(uses, rustutil.UseLine(runtime+"::stackconfig", stackconfig))
+	}
+	uses = append(uses, rustutil.UseLine(runtime+"::telemetry", []string{"self", "Defaults"}))
+	var root []string
+	if s.AnyIdentity() {
+		root = append(root, "IdentityAuthenticator")
+	}
+	if s.AnyServiceAuth() {
+		root = append(root, "JwtServiceAuthenticator")
+	}
+	if len(root) > 0 {
+		uses = append(uses, rustutil.UseLine(runtime, root))
+	}
+	return uses
 }
 
 // bucketUses are the use declarations of main.rs from the HTTP runtime for
@@ -1163,6 +1548,16 @@ func (s *RustServer) bucketUses(runtime string) []string {
 		return nil
 	}
 	return []string{"use " + runtime + "::bucket::Bucket;", "use " + runtime + "::gcs;"}
+}
+
+// memoryStoreUses are the use declarations of main.rs from the HTTP
+// runtime for its memory stores (D75): the memorystore module, whose redis
+// opens each, none without a store.
+func (s *RustServer) memoryStoreUses(runtime string) []string {
+	if len(s.MemoryStores) == 0 {
+		return nil
+	}
+	return []string{"use " + runtime + "::memorystore;"}
 }
 
 // stackconfigUses are what main.rs names from the HTTP runtime's
@@ -1194,6 +1589,9 @@ func (s *RustServer) CrateUses() []string {
 	}
 	for _, e := range s.Engines {
 		uses = append(uses, "use "+crateIdent(e.TypesCrate)+" as "+e.TypesAlias+";")
+	}
+	if s.App != nil {
+		uses = append(uses, "use "+s.App.Lib+" as "+s.App.Alias+";")
 	}
 	slices.Sort(uses)
 	return slices.Compact(uses)
@@ -1251,6 +1649,10 @@ func WriteRust(s *RustServer, dir string) error {
 		main = "worker.rs.tmpl"
 	case s.Runner != nil:
 		main = "runner.rs.tmpl"
+	case s.Deriver != nil:
+		main = "deriver.rs.tmpl"
+	case s.App != nil:
+		main = "app_main.rs.tmpl"
 	}
 	files := []struct{ template, name string }{
 		{main, RustMainFile},
@@ -1398,7 +1800,7 @@ func (s *RustServer) ServerSpans() string {
 func (s *RustServer) JobRun() string {
 	const indent = "    "
 	lead, end := "", ""
-	if len(s.Engines) > 0 {
+	if s.Closes() {
 		lead, end = "let ran = ", ";"
 	}
 	args := []string{rustString(s.Job.Name), "jobs." + s.Job.Method + "(shutdown)"}

@@ -42,6 +42,7 @@ import type { Pool } from 'pg';
 import { openEngineInBackground, engineApp, engineMcp, type AsyncEngine, type EngineBackground, type EngineHttpOptions, type EngineOptions, type Principal } from '@superschematic/engine/server';
 import * as deskTsApiApi from '@schemas/desk-ts-api-api';
 import * as deskTsApiImpl from '@schemas/desk-ts-api-implementation';
+import { createOrm as createDeskDbOrm } from '@schemas/desk-db-types/orm';
 import { identityDescriptor as deskDbIdentityDescriptor } from '@schemas/desk-db-types/identity';
 import { engineDocument as deskDbEngineDocument } from '@schemas/desk-db-types/engine';
 
@@ -144,6 +145,7 @@ async function main(): Promise<void> {
   const deskTsApiDeps: deskTsApiApi.Deps = {
     config: deskTsApiConfig,
     db: deskDbPool,
+    orm: createDeskDbOrm(deskDbPool),
     engine: deskDbEngine.background,
     logger: logger.child({ api: 'desk-ts-api' }),
   };

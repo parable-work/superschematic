@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -15,9 +16,10 @@ import (
 // that name. A @searchField's search_text column keeps its expression,
 // with each field quoted as SQLite quotes it, and loses the trigram index,
 // which SQLite has no operator class for (D27, amended). SQLite keeps no
-// comments, so the model has none. The model refuses what SQLite has no
-// form of (D27), naming the feature: @versioned, @optimistic, projections,
-// GIN and GIST indexes, and types it has no storage for.
+// comments, so the model has none. A table's @enqueueOnChange (D80) is a
+// trigger per write, which holds its insert. The model refuses what SQLite
+// has no form of (D27), naming the feature: @versioned, @optimistic,
+// projections, GIN and GIST indexes, and types it has no storage for.
 func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, error) {
 	m := &Model{Version: ModelVersion, Dialect: SQLite, Service: opts.SchemaName}
 	out, err := sqlgen.Generate(schema, opts)
@@ -34,6 +36,12 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 	if err := sqliteRefusals(out, types); err != nil {
 		return nil, err
 	}
+	// A declared query is verified and run on Postgres alone (D86).
+	for _, td := range schema.Queries() {
+		if td.Query.RunsOn(string(SQLite)) {
+			return nil, fmt.Errorf("sqlmigrate: query %s runs on the sqlite dialect, which no query is verified or run on yet: limit it to postgres (dialects: [\"postgres\"]), or build the service for postgres alone (outputs.sql.dialects: [\"postgres\"])", td.Query.Name)
+		}
+	}
 
 	ns := newPGNamespace()
 	var errs []error
@@ -49,6 +57,7 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 			// SQLite's keywords are not Postgres's, so every field is quoted.
 			columnNamed(table, sqlgen.SearchTextColumn).Generated = sqlgen.SearchTextExprQuoted(fields, qs)
 		}
+		table.Queue = queueKeyOf(schema, &out.Tables[i])
 		errs = append(errs, sqliteTable(table))
 		m.Tables = append(m.Tables, table)
 	}
@@ -60,12 +69,31 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 	if err := errors.Join(errs...); err != nil {
 		return nil, err
 	}
+	for _, e := range out.EnqueueTriggers {
+		for i, t := range e.SQLiteTriggers(qs) {
+			trigger := &Trigger{Name: t.Name, Table: t.Table, Definition: t.Definition, Origin: e.Origin}
+			// The first trigger is the insert's or the update's, which
+			// backfill needs one of (D88).
+			if e.Backfill && i == 0 {
+				trigger.Backfill = e.SQLiteBackfillSQL(qs)
+			}
+			m.Triggers = append(m.Triggers, trigger)
+		}
+	}
 
 	graphs, err := modelGraphs(schema, m)
 	if err != nil {
 		return nil, err
 	}
 	m.Graphs = graphs
+	pieces, err := sqlutil.OrderRawSQL(schema, string(SQLite))
+	if err != nil {
+		return nil, err
+	}
+	m.RawSQL = modelRawSQL(pieces)
+	for _, s := range out.RoleSeeds {
+		m.Roles = append(m.Roles, modelRole(s, s.SQLiteInsertSQL(qs), s.SQLiteUpdateSQL(qs)))
+	}
 	m.sort()
 	return m, nil
 }
@@ -79,8 +107,11 @@ func sqliteRefusals(out *sqlgen.DDLOutput, types map[string]string) error {
 	}
 	for _, t := range out.Tables {
 		for _, idx := range t.Indexes {
-			if idx.Type == "GIN" || idx.Type == "GIST" {
+			if idx.Type != "BTREE" {
 				refuse("the index %s of %s is a %s index", idx.Name, t.OriginalName, idx.Type)
+			}
+			if idx.Opclass != "" {
+				refuse("the index %s of %s names the operator class %s", idx.Name, t.OriginalName, idx.Opclass)
 			}
 		}
 	}
@@ -104,6 +135,12 @@ func sqliteTable(t *Table) error {
 	var errs []error
 	for _, col := range t.Columns {
 		pg := col.Type
+		if sqlutil.IsVectorType(pg) {
+			// SQLite has no vector type or index, and no nearest (D84).
+			errs = append(errs, fmt.Errorf("sqlmigrate: column %s.%s%s is %s, an Embedding.Vector, which the sqlite dialect has no storage for: build the service for postgres alone (outputs.sql.dialects: [\"postgres\"]), or keep the vector as JSON (JsonField<Embedding.Vector>); vectors on SQLite follow",
+				t.Name, col.Name, originNote(col), pg))
+			continue
+		}
 		sqlite, err := sqliteType(pg)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("sqlmigrate: column %s.%s%s is %s, which the sqlite dialect has no storage for",

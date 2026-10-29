@@ -20,6 +20,57 @@ Until they are published, resolve them from the checkout (`packages/` and
 the superscalar TypeScript binding). `examples/acme-schematic/schemas` shows
 the `tsconfig` paths.
 
+## A TypeScript project without Rust
+
+A project whose servers, jobs and sites are all TypeScript needs Go, Bun,
+Node and Docker, and no Rust (D82). The Rust build products a checkout
+takes, superscalar's static archive and TypeScript binding and the
+version-graph core, come prebuilt for linux and darwin on x64 and arm64,
+built from the commits the checkout pins by its prebuilt-deps workflow:
+
+```
+git clone https://github.com/parable-work/superschematic && cd superschematic
+scripts/superscalar-dep.sh --prebuilt
+make cli
+(cd runtime/http/typescript && bun install && bun run build)
+```
+
+1. `scripts/superscalar-dep.sh --prebuilt` downloads superscalar's Go
+   binding with its static archive, and its TypeScript binding with the
+   napi addon for your platform and the browser and workerd builds over
+   its WebAssembly core. It checks the manifest against the digest
+   `prebuilt.pin` pins and each file against the manifest, refuses any
+   that differs, and stages them under `third_party/superscalar` as a
+   build from source leaves them. With no `cargo` on `PATH`, the script
+   does this unasked, and so does `make cli`.
+2. `make cli` builds `bin/superschematic`, which links superscalar's
+   archive alone, and the migration runner, `bin/superschematic-migrate`,
+   which needs no cgo. Put `bin/` on `PATH`, or name the runner with
+   `SUPERSCHEMATIC_MIGRATE`, for `stack dev`.
+3. The HTTP runtime, `@superschematic/http-runtime`, is TypeScript: its
+   build links the superscalar binding the first step staged.
+
+Then `superschematic init --superschematic <checkout>` writes a schemas
+root whose naming file points at the checkout, and `superschematic stack
+dev` runs the project: Postgres in Docker, each TypeScript server on Bun,
+and each site's build, or its dev server
+([static sites](/superschematic/guides/static-sites/#with-a-dev-server)).
+
+A schema with a [version graph](/superschematic/reference/version-graphs/)
+takes the version-graph core too: `bun run build` in
+`runtime/versiongraph/typescript` stages its prebuilt wasm32 module when
+`cargo` is missing, and `scripts/versiongraph-archive.sh --prebuilt`
+stages its static archive for a Go binary. A schema whose types compose
+engine behaviors needs the engine's Node-API addon, which a checkout still
+builds with Rust (`scripts/engine-napi.sh`). An API's
+[app](/superschematic/guides/stacks/#apps) is the project's own Rust program,
+which `stack dev` builds with cargo, so a project with one needs Rust too:
+no prebuilt stands in for the project's code.
+
+`SUPERSCHEMATIC_PREBUILT_URL` points the scripts at another copy of the
+prebuilt releases, a URL or a directory holding `<tag>/<file>`
+(`scripts/prebuilt_deps.py` says how they are laid out).
+
 ## Install
 
 From `v0.1.0-alpha.1`:
@@ -110,8 +161,9 @@ checkout. The install resolves the whole workspace, so one schema with a
 version graph and no path breaks the install of every types package
 beside it. The version-graph package loads from its `dist/`: build it in
 the checkout first (`bun install && bun run build` in
-`runtime/versiongraph/typescript`, which needs cargo with the
-`wasm32-unknown-unknown` target). Its engine runs as `Engine`, whose
+`runtime/versiongraph/typescript`, which builds the core with cargo and
+its `wasm32-unknown-unknown` target, or without cargo stages the prebuilt
+module, as [above](#a-typescript-project-without-rust)). Its engine runs as `Engine`, whose
 operations return promises, or `SyncEngine`, over a driver that blocks,
 and keeps a graph in Postgres (`pg`) or SQLite (`node:sqlite` or
 `bun:sqlite`); see
@@ -348,7 +400,14 @@ returns a Hono app. The router decodes path and query parameters, parses
 JSON bodies with the generated `parse<Input>Json` decoder, applies
 `@publicRoute`, `@auth` and `@requirePermission`, `@bodyLimit`,
 `@rateLimit` and `@timeout`, and writes the `{data, meta: {requestId}}` and
-RFC 9457 problem envelopes. It is built on `@superschematic/http-runtime`
+RFC 9457 problem envelopes. It serves the OpenAPI document at
+`GET /api/openapi.json`, with its page at `GET /api/docs`, as the Go and
+Rust servers do
+([OpenAPI](/superschematic/guides/api-routes/#openapi)), and, with
+`outputs.api.mcp: true`, the API's visible `@mcp` tools at
+`POST /api/mcp`
+([An API's MCP endpoint](/superschematic/reference/mcp-tools/#an-apis-mcp-endpoint)).
+It is built on `@superschematic/http-runtime`
 (the `http_runtime_npm_package` naming key) and Hono, which are its peer
 dependencies.
 
@@ -357,7 +416,10 @@ server's does
 ([Start an implementation](/superschematic/guides/api-routes/#start-an-implementation)).
 `deps.ts` declares `Deps`, which holds the API's `config` when it has
 one, a `pg` Pool `db` for its database (its `authDb`, or its one DB
-dependency), a TypeScript SDK client of each API it `calls` (`shopApi`
+dependency), and `orm`, the database's generated repositories, when the
+database has tables and TypeScript types
+([Database tables](/superschematic/guides/database-tables/#typescript)),
+a TypeScript SDK client of each API it `calls` (`shopApi`
 for `shop-api`) and a `logger`, the HTTP runtime's JSON-lines logger.
 `Constructor`, `(deps: Deps) => Implementations | Promise<Implementations>`,
 is the type of the implementation's `create`, and an API with a route
@@ -400,6 +462,27 @@ and a `createWorkers` whose handlers and methods throw it too. It never
 writes into a directory that holds a `.ts` file, so an implementation
 that predates its manual routes, jobs or workers fails the stack's build,
 which says what to add.
+
+The scaffold's `package.json` depends on the API's package and types
+package, the database's types package when the API has a worker, a
+deriver or the ORM in its `Deps`, the definitions of each memory store it
+lists, and the runtime. When the API gains one of these after the
+scaffold, as a worker that names its database's queue, the stack's build
+warns, naming the line to add, and leaves the file as it is:
+
+```
+warning: stack shop-stack: the implementation of shop-api, at typescript/shop-api, does not depend on @acme/shop-db-types, which its scaffold depends on now; the build wrote the package's package.json once and does not write it again, so add
+
+    "@acme/shop-db-types": "workspace:*"
+
+to its dependencies (D100)
+```
+
+To make a branded scalar value, import its constructor from the types
+package the implementation already depends on, which re-exports
+superscalar's `parse<Scalar>Strict` and `normalize<Scalar>Strict` for each
+scalar its schema uses
+([branded values](/superschematic/guides/modeling-types/#branded-values-in-typescript)).
 
 In a [stack](/superschematic/guides/stacks/), the build writes each
 TypeScript server's entrypoint at `schemas/dist/server/<stack>/<server>`:
@@ -530,17 +613,24 @@ and puts the caller on `ctx.serviceCaller`, and a route with an
 limit and before `authenticate`. Without it, such a route answers 401
 `service_unauthorized`.
 
-Two kinds of operation must be `@manualRouteRegistration`, and the build
-fails with the operation named when one is not:
+An encrypted operation must be `@manualRouteRegistration`, and the build
+fails with the operation named when one is not: one in an `Encrypted`
+operation set, one declared `@encrypted`, or one whose result or an
+argument is an `EncryptedField<T>`
+([Encrypted payloads](/superschematic/guides/api-routes/#encrypted-payloads)).
+The Go server decrypts such a body with its `PayloadDecryptor` before it
+parses it. The TypeScript router has no decryption step and would hand the
+ciphertext to the body parser, so the service's handler decrypts the
+payload and decodes it.
 
-- An encrypted operation: one in an `Encrypted` operation set, one declared
-  `@encrypted`, or one whose result or an argument is an
-  `EncryptedField<T>` ([Encrypted payloads](/superschematic/guides/api-routes/#encrypted-payloads)).
-  The Go server decrypts such a body with its `PayloadDecryptor` before it
-  parses it. The TypeScript router has no decryption step and would hand the
-  ciphertext to the body parser, so the service's handler decrypts the
-  payload and decodes it.
-- An operation that uploads files. The router has no multipart adapter.
+An operation that uploads files is an ordinary route
+([Files](/superschematic/guides/api-routes/#files)): the router reads its
+`multipart/form-data` body, checks each file against its field and hands
+the method the files in `args.files`, beside `args.input` without the file
+fields. Its body cap is `@bodyLimit`, or without one the files' limits
+beside `bodyLimitBytes`. An operation whose result is a `FileDownload`
+returns `{ body, filename }`, and the router answers the file with its
+`Content-Type` and `Content-Disposition`.
 
 An `@hmacVerified` operation
 ([Webhooks](/superschematic/guides/api-routes/#webhooks)) runs its
@@ -570,6 +660,11 @@ const implementations: Implementations = {
   webhookVerifiers: { github: verifyGitHub },
 };
 ```
+
+For a provider that signs with a JWT carrying the body's SHA-256, such as
+Plaid, `jwtBodyHashVerifier` from the same module is the verifier
+([A JWT that carries the body's hash](/superschematic/guides/api-routes/#a-jwt-that-carries-the-bodys-hash)).
+It verifies with WebCrypto, so it runs on Node.js, Bun and Workers.
 
 The generated package ships TypeScript sources, so run it with Bun, a
 bundler or a TypeScript loader. The runtime ships compiled JavaScript with

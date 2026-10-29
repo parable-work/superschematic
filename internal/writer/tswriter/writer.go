@@ -16,6 +16,7 @@
 package tswriter
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -115,7 +116,8 @@ var symbolPackages = map[string]string{
 	"Default": "@superschematic/schema", "Nullable": "@superschematic/schema",
 	"Validate": "@superschematic/schema", "Secret": "@superschematic/schema", "trait": "@superschematic/schema",
 	"source": "@superschematic/schema", "temporalFormat": "@superschematic/schema", "virtual": "@superschematic/schema",
-	"denyUnknownFields": "@superschematic/schema", "strictJSON": "@superschematic/schema",
+	"decrypted":         "@superschematic/schema",
+	"denyUnknownFields": "@superschematic/schema", "strictJSON": "@superschematic/schema", "allowUnknownFields": "@superschematic/schema",
 	"purpose": "@superschematic/schema", "behavior": "@superschematic/schema", "display": "@superschematic/schema",
 	"uiControl": "@superschematic/schema",
 	// jsonField is exported by both @superschematic/schema and @superschematic/db; emit the
@@ -123,10 +125,11 @@ var symbolPackages = map[string]string{
 	// round-trip.
 	"jsonField": "@superschematic/schema",
 	// @superschematic/db
-	"index": "@superschematic/db", "key": "@superschematic/db",
+	"index": "@superschematic/db", "rawSql": "@superschematic/db", "key": "@superschematic/db",
 	"searchField": "@superschematic/db", "sourceMustProject": "@superschematic/db", "unique": "@superschematic/db",
-	"versioned": "@superschematic/db", "optimistic": "@superschematic/db", "queue": "@superschematic/db",
-	"projection": "@superschematic/db", "join": "@superschematic/db", "column": "@superschematic/db",
+	"versioned": "@superschematic/db", "optimistic": "@superschematic/db", "queue": "@superschematic/db", "enqueueOnChange": "@superschematic/db",
+	"seedRoles":  "@superschematic/db",
+	"projection": "@superschematic/db", "join": "@superschematic/db", "query": "@superschematic/db", "column": "@superschematic/db", "table": "@superschematic/db",
 	"versionGraph": "@superschematic/db", "graphMember": "@superschematic/db", "conflictUnit": "@superschematic/db",
 	"AutoGenerate": "@superschematic/db", "HasMany": "@superschematic/db", "JsonField": "@superschematic/db",
 	"ManyToMany": "@superschematic/db", "Relation": "@superschematic/db",
@@ -140,8 +143,9 @@ var symbolPackages = map[string]string{
 	"timeout": "@superschematic/api", "uiHidden": "@superschematic/api",
 	"HttpMethod": "@superschematic/api", "EncryptedField": "@superschematic/api", "QueryParam": "@superschematic/api",
 	"RefersTo": "@superschematic/api", "SearchQuery": "@superschematic/api", "SortBy": "@superschematic/api",
+	"FileUpload": "@superschematic/api", "FileDownload": "@superschematic/api",
 	"mcp": "@superschematic/api", "userSessions": "@superschematic/api", "userAdministration": "@superschematic/api",
-	"job": "@superschematic/api", "worker": "@superschematic/api",
+	"job": "@superschematic/api", "worker": "@superschematic/api", "deriver": "@superschematic/api", "app": "@superschematic/api",
 	"paginated": "@superschematic/api",
 	// @superschematic/schema-config
 	"envVars": "@superschematic/schema-config",
@@ -225,6 +229,63 @@ func (e *emitter) emitDocument() {
 	for _, worker := range e.doc.Workers {
 		e.emitWorker(worker)
 	}
+	for _, deriver := range e.doc.Derivers {
+		e.emitDeriver(deriver)
+	}
+	for _, app := range e.doc.Apps {
+		e.emitApp(app)
+	}
+	for _, decl := range e.doc.MemoryStoreDeclarations {
+		e.emitMemoryStoreDeclaration(decl)
+	}
+}
+
+// emitApp renders an app as the class the reader reads it from (D78):
+// `@app({ extensions: ["<extension>", ...] })` on an abstract class with no
+// members, or `@app()` when it names no extension.
+func (e *emitter) emitApp(app *ir.App) {
+	if app == nil {
+		return
+	}
+	args := ""
+	if len(app.Extensions) > 0 {
+		args = objectLiteral([]string{"extensions: " + stringListLiteral(app.Extensions)})
+	}
+	e.body.WriteString("\n")
+	e.comment("", app.Comment)
+	fmt.Fprintf(&e.body, "@%s(%s)\nexport abstract class %s {}\n", e.use("app"), args, e.ident(app.Name, "app"))
+}
+
+// emitDeriver renders a deriver as the class the reader reads it from
+// (D74): `@deriver({ schemas: ["<type>", ...], ... })` on an abstract class
+// with no members, or `@deriver()` when it sets nothing. Each schema is the
+// name of an engine type of the API's database, which the schema does not
+// import.
+func (e *emitter) emitDeriver(deriver *ir.Deriver) {
+	if deriver == nil {
+		return
+	}
+	var parts []string
+	if len(deriver.Schemas) > 0 {
+		var schemas []string
+		for _, schema := range deriver.Schemas {
+			schemas = append(schemas, quote(schema))
+		}
+		parts = append(parts, "schemas: ["+strings.Join(schemas, ", ")+"]")
+	}
+	if deriver.Concurrency != 0 {
+		parts = append(parts, fmt.Sprintf("concurrency: %d", deriver.Concurrency))
+	}
+	if deriver.BatchSize != 0 {
+		parts = append(parts, fmt.Sprintf("batchSize: %d", deriver.BatchSize))
+	}
+	args := ""
+	if len(parts) > 0 {
+		args = objectLiteral(parts)
+	}
+	e.body.WriteString("\n")
+	e.comment("", deriver.Comment)
+	fmt.Fprintf(&e.body, "@%s(%s)\nexport abstract class %s {}\n", e.use("deriver"), args, e.ident(deriver.Name, "deriver"))
 }
 
 // emitWorker renders a worker as the class the reader reads it from (D53):
@@ -276,10 +337,75 @@ func queueArgs(def *ir.QueueDef) string {
 	if def.Retain != "" {
 		parts = append(parts, "retain: "+quote(def.Retain))
 	}
+	if def.Key != "" {
+		parts = append(parts, "key: "+quote(def.Key))
+	}
+	if def.OnDuplicate != "" {
+		parts = append(parts, "onDuplicate: "+quote(def.OnDuplicate))
+	}
+	if def.Serialize {
+		parts = append(parts, "serialize: true")
+	}
 	if len(parts) == 0 {
 		return ""
 	}
 	return objectLiteral(parts)
+}
+
+// enqueueOnChangeArgs renders @enqueueOnChange's arguments (D80): the
+// queue's class, then its writes, fields, conditions and message.
+func enqueueOnChangeArgs(def *ir.EnqueueOnChange) string {
+	strs := func(items []string) string {
+		quoted := make([]string, len(items))
+		for i, item := range items {
+			quoted[i] = quote(item)
+		}
+		return "[" + strings.Join(quoted, ", ") + "]"
+	}
+	parts := []string{"on: " + strs(def.On)}
+	if len(def.Fields) > 0 {
+		parts = append(parts, "fields: "+strs(def.Fields))
+	}
+	if len(def.When) > 0 {
+		conditions := make([]string, len(def.When))
+		for i, c := range def.When {
+			cond := []string{"field: " + quote(c.Field)}
+			switch {
+			case c.IsNull:
+				cond = append(cond, "isNull: true")
+			case c.NotNull:
+				cond = append(cond, "notNull: true")
+			default:
+				literal, _ := json.Marshal(c.Equals)
+				cond = append(cond, "equals: "+string(literal))
+			}
+			conditions[i] = objectLiteral(cond)
+		}
+		parts = append(parts, "when: ["+strings.Join(conditions, ", ")+"]")
+	}
+	var message []string
+	for _, field := range sortedKeys(def.Message) {
+		message = append(message, propertyName(field)+": "+quote(def.Message[field]))
+	}
+	parts = append(parts, "message: "+objectLiteral(message))
+	if def.Backfill {
+		parts = append(parts, "backfill: true")
+	}
+	return def.Queue + ", " + objectLiteral(parts)
+}
+
+// seedRolesArgs renders @seedRoles's list (D88): each role's name and
+// permissions, in declaration order.
+func seedRolesArgs(seeds []*ir.RoleSeed) string {
+	roles := make([]string, 0, len(seeds))
+	for _, seed := range seeds {
+		permissions := make([]string, len(seed.Permissions))
+		for i, p := range seed.Permissions {
+			permissions[i] = quote(p)
+		}
+		roles = append(roles, objectLiteral([]string{"name: " + quote(seed.Name), "permissions: [" + strings.Join(permissions, ", ") + "]"}))
+	}
+	return "[" + strings.Join(roles, ", ") + "]"
 }
 
 // emitJob renders a job as the class the reader reads it from (D52):
@@ -425,11 +551,11 @@ func equalOptionalInt64(left, right *int64) bool {
 	return *left == *right
 }
 
-// sortedTypes returns type names topologically sorted so heritage, @source
-// and @graphMember targets, and the classes a Stack declaration names, are
-// declared before the classes that reference them (decorator arguments and
-// extends clauses are value positions in TypeScript: forward references do
-// not compile). The @environment classes come last, in declaration order
+// sortedTypes returns type names topologically sorted so heritage, @source,
+// @graphMember and @enqueueOnChange targets, and the classes a Stack
+// declaration names, are declared before the classes that reference them
+// (decorator arguments and extends clauses are value positions in
+// TypeScript: forward references do not compile). The @environment classes come last, in declaration order
 // (ir.EnvironmentNames), since the reader numbers them by their place.
 func (e *emitter) sortedTypes() []string {
 	var names []string
@@ -469,6 +595,12 @@ func (e *emitter) sortedTypes() []string {
 				if _, ok := e.doc.Types[target]; ok && target != name {
 					d = append(d, target)
 				}
+			}
+		}
+		// @enqueueOnChange names its queue's class as a value.
+		for _, change := range def.EnqueueOnChange {
+			if _, ok := e.doc.Types[change.Queue]; ok && change.Queue != name {
+				d = append(d, change.Queue)
 			}
 		}
 		// A Stack declaration names a declared deployable by its class.

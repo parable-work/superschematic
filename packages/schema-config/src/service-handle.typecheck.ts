@@ -30,6 +30,12 @@ const ordersAsApi: ServiceHandle<"API"> = ShopOrders;
 const ShopFulfilment = service<"API", unknown, never, "FulfilOrders">({ name: "shop-fulfilment", kind: SchemaKind.API });
 const fulfilmentAsApi: ServiceHandle<"API"> = ShopFulfilment;
 
+// An API with @deriver classes: the sentinel writes their names as the
+// fifth type argument, with the jobs and the workers `never` when it
+// declares none, and the handle is still an API handle (D74).
+const ShopSupport = service<"API", unknown, never, never, "TriageTickets">({ name: "shop-support", kind: SchemaKind.API });
+const supportAsApi: ServiceHandle<"API"> = ShopSupport;
+
 // Every handle is a ServiceHandle, so authDb and dependencies take any kind.
 const anyHandles: readonly ServiceHandle[] = [ShopApi, ShopDb, ShopCommon, ShopCatalog, handWrittenApi, ShopOrders];
 
@@ -47,6 +53,18 @@ const untypedJobs: ServiceHandle<"API", unknown, "ExpireCarts"> = handWrittenApi
 
 // @ts-expect-error a handle that may have any worker does not stand for one whose workers are named
 const untypedWorkers: ServiceHandle<"API", unknown, never, "FulfilOrders"> = handWrittenApi;
+
+// An API with @app classes: the sentinel writes their names as the sixth
+// type argument, with the jobs, the workers and the derivers `never` when
+// it declares none, and the handle is still an API handle (D78).
+const ShopStock = service<"API", unknown, never, never, never, "Backoffice">({ name: "shop-stock", kind: SchemaKind.API });
+const stockAsApi: ServiceHandle<"API"> = ShopStock;
+
+// @ts-expect-error a handle that may have any app does not stand for one whose apps are named
+const untypedApps: ServiceHandle<"API", unknown, never, never, never, "Backoffice"> = handWrittenApi;
+
+// @ts-expect-error a handle that may have any deriver does not stand for one whose derivers are named
+const untypedDerivers: ServiceHandle<"API", unknown, never, never, "TriageTickets"> = handWrittenApi;
 
 export const refusedDbCall = defineConfig({
   name: "shop-storefront",
@@ -101,6 +119,40 @@ export const refusedBucketCall = defineConfig({
   outputs: {}
 });
 
+// A MemoryStore service's sentinel, and the APIs that list it (D75).
+const ShopCache = service({ name: "shop-cache", kind: SchemaKind.MemoryStore });
+const memoryStoreHandle: ServiceHandle<"MemoryStore"> = ShopCache;
+
+export const memoryStore = defineConfig({
+  name: "shop-cache",
+  kind: SchemaKind.MemoryStore,
+  outputs: { types: { go: { enabled: true } } }
+});
+
+export const acceptedMemoryStores = defineConfig({
+  name: "shop-api",
+  kind: SchemaKind.API,
+  memoryStores: [ShopCache],
+  rateLimitStore: ShopCache,
+  outputs: {}
+});
+
+export const refusedApiMemoryStore = defineConfig({
+  name: "shop-api",
+  kind: SchemaKind.API,
+  // @ts-expect-error memoryStores takes MemoryStore handles, and ShopMedia is a Bucket handle
+  memoryStores: [ShopMedia],
+  outputs: {}
+});
+
+export const refusedRateLimitStore = defineConfig({
+  name: "shop-api",
+  kind: SchemaKind.API,
+  // @ts-expect-error rateLimitStore takes a MemoryStore handle, and ShopApi is an API handle
+  rateLimitStore: ShopApi,
+  outputs: {}
+});
+
 // @ts-expect-error a handle with no config type does not stand for one with
 const untypedForTyped: ServiceHandle<"API", ShopApiConfig> = handWrittenApi;
 
@@ -120,6 +172,11 @@ export const checked = {
   ordersAsApi,
   untypedJobs,
   bucketHandle,
+  memoryStoreHandle,
   fulfilmentAsApi,
-  untypedWorkers
+  untypedWorkers,
+  supportAsApi,
+  untypedDerivers,
+  stockAsApi,
+  untypedApps
 };

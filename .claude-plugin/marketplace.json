@@ -1,0 +1,13 @@
+{
+  "name": "superschematic",
+  "owner": { "name": "superschematic maintainers" },
+  "description": "Agent skills for building software with superschematic, the schema compiler.",
+  "plugins": [
+    {
+      "name": "superschematic",
+      "source": "./agent",
+      "description": "Declare types, tables, routes, permissions, jobs, queues and stacks in superschematic schemas instead of writing SQL, validation, servers and clients by hand.",
+      "version": "0.2.0"
+    }
+  ]
+}

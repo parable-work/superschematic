@@ -52,5 +52,5 @@ func LoadDocument(doc *schemafile.Document, source string, opts ...Option) (*ir.
 	if err := validateDefaultValues(schema, nil); err != nil {
 		return nil, err
 	}
-	return runVerify(schema, verify.Input{Naming: o.naming, Registry: reg})
+	return o.runVerify(schema, verify.Input{Naming: o.naming, Registry: reg})
 }

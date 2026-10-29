@@ -479,7 +479,8 @@ fn prune(
 ) -> Result<()> {
     let mut by_instance: Vec<((String, String), Vec<&EngineEvent>)> = Vec::new();
     for event in events {
-        let Some(id) = &event.instance_id else {
+        // A beside operation's event changes nothing the base holds (D77).
+        let Some(id) = event.instance_id.as_ref().filter(|_| !event.beside) else {
             continue;
         };
         let key = (event.schema.clone(), id.clone());

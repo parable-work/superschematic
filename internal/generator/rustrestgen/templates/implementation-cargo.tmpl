@@ -14,15 +14,17 @@ publish = false
 
 # The generated API crate, and the HTTP runtime it is built on.
 [dependencies]
-async-trait = "0.1.89"
-{{- if .ManualEndpoints }}
-axum = "0.8.9"
+{{- range .Dependencies }}
+{{ .Line }}
 {{- end }}
-{{- if .ChecksEndUsers }}
-http = "1"
+{{- with .DefinitionDependencies }}
+
+# The definitions of the channels and keys of each memory store the API
+# lists (D75).
+{{- range . }}
+{{ .Line }}
 {{- end }}
-{{ .CrateName }} = { path = "{{ .APIPath }}" }
-{{ .RuntimeCrate }} = { path = "{{ .RuntimePath }}" }
+{{- end }}
 
 # Its own workspace, so no Cargo.toml above this directory claims it.
 [workspace]

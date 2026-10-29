@@ -28,8 +28,8 @@ use serde_json::{Map, Value};
 
 use super::config::ConfigTarget;
 use super::context::{
-    InstanceCx, InstanceView, OperationCx, PublishCx, ReactionCx, ReferenceCx, ScheduleCx,
-    SchemaCx, ValidationCx,
+    InstanceCx, InstanceView, NamespaceCx, OperationCx, PublishCx, ReactionCx, ReferenceCx,
+    ScheduleCx, SchemaCx, ValidationCx,
 };
 use crate::errors::{Error, Result, ValidationIssue, Veto};
 use crate::events::EngineEvent;
@@ -246,6 +246,11 @@ pub enum InstanceChange<'a> {
         /// The own fields before the operation, when it changed them with
         /// update(); `None` when they did not change.
         before: Option<&'a Map<String, Value>>,
+        /// Where the values of the own fields it changed came from, by
+        /// field, as its update()s attributed them (D16, amended): each
+        /// `{ behavior, confidence?, source? }`. `None` when it attributed
+        /// none.
+        attribution: Option<&'a Map<String, Value>>,
     },
 }
 
@@ -274,12 +279,16 @@ impl InstanceChange<'_> {
                 operation,
                 params,
                 before,
+                attribution,
             } => {
                 out.insert("behavior".into(), Value::from(*behavior));
                 out.insert("operation".into(), Value::from(*operation));
                 out.insert("params".into(), (*params).clone());
                 if let Some(before) = before {
                     out.insert("before".into(), Value::Object((*before).clone()));
+                }
+                if let Some(attribution) = attribution {
+                    out.insert("attribution".into(), Value::Object((*attribution).clone()));
                 }
             }
             InstanceChange::Create | InstanceChange::Delete => {}
@@ -378,6 +387,10 @@ pub struct DescribedTypeOperation {
     /// The behavior that adds it; `None` for the built-in ones.
     pub behavior: Option<String>,
     pub writes: bool,
+    /// Whether it runs beside the instance (D77): it moves no seq and asks
+    /// no other behavior's guard, so a guard that holds the instance's
+    /// writes does not hold it.
+    pub beside: bool,
     pub scope: super::declaration::OperationScope,
 }
 
@@ -424,6 +437,11 @@ pub type OperationFn<B> =
 /// A schema-level operation's handler.
 pub type SchemaOperationFn<B> =
     fn(&B, &SchemaCx<'_, <B as Behavior>::Config>, &Value) -> Result<Value>;
+/// A namespace operation's handler (D77): it has no one config, since it
+/// runs across every schema that composes the behavior, each with its own
+/// ([`NamespaceCx::configs`]).
+pub type NamespaceOperationFn<B> =
+    fn(&B, &NamespaceCx<'_, <B as Behavior>::Config>, &Value) -> Result<Value>;
 /// Reads one declared field: a JSON value, or `None` (or null) for none.
 pub type FieldFn<B> = fn(&B, &InstanceView<'_, <B as Behavior>::Config>) -> Result<Option<Value>>;
 /// May veto a change: a [`Veto`] to refuse, `None` to allow.
@@ -562,6 +580,8 @@ pub struct Hooks<B: Behavior> {
     pub operations: Vec<(&'static str, OperationFn<B>)>,
     /// A handler per declared schema-level operation, by name.
     pub schema_operations: Vec<(&'static str, SchemaOperationFn<B>)>,
+    /// A handler per declared namespace operation (D77), by name.
+    pub namespace_operations: Vec<(&'static str, NamespaceOperationFn<B>)>,
     /// A reader per declared field, by name.
     pub fields: Vec<(&'static str, FieldFn<B>)>,
     /// What a list may filter on, by a declared field's name or
@@ -598,6 +618,7 @@ impl<B: Behavior> Default for Hooks<B> {
             create_params_schema: None,
             operations: Vec::new(),
             schema_operations: Vec::new(),
+            namespace_operations: Vec::new(),
             fields: Vec::new(),
             filters: Vec::new(),
             after_change: None,

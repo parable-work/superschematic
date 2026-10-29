@@ -14,6 +14,8 @@ from superscalar import (
     normalize_design_color,
     normalize_temporal_duration,
     parse_finance_money,
+    parse_finance_signed_money,
+    parse_generic_decimal,
     parse_generic_int64,
     parse_generic_string_map,
     parse_geo_location,
@@ -45,6 +47,8 @@ def _validator(canonical_name: str) -> Callable[[str], list]:
 
 DEFAULT_PARSE_FUNCTIONS: dict[str, Callable[[str], str]] = {
     "Finance.Money": parse_finance_money,
+    "Finance.SignedMoney": parse_finance_signed_money,
+    "Generic.Decimal": parse_generic_decimal,
     "Generic.Int64": parse_generic_int64,
     "Generic.StringMap": parse_generic_string_map,
     "Geo.Location": parse_geo_location,
@@ -82,7 +86,9 @@ DEFAULT_VALIDATE_FUNCTIONS: dict[str, Callable[[str], list]] = {
     "File.SizeBytes": _validator("File.SizeBytes"),
     "Finance.Currency": _validator("Finance.Currency"),
     "Finance.Money": _validator("Finance.Money"),
+    "Finance.SignedMoney": _validator("Finance.SignedMoney"),
     "Generic.Boolean": _validator("Generic.Boolean"),
+    "Generic.Decimal": _validator("Generic.Decimal"),
     "Generic.Float64": _validator("Generic.Float64"),
     "Generic.Int64": _validator("Generic.Int64"),
     "Generic.JSON": _validator("Generic.JSON"),

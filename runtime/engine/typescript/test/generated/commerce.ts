@@ -2,7 +2,8 @@
 //
 // Typed wrappers over the engine's client: each schema's instances, create
 // input and patches, and its behaviors' create parameters, preconditions,
-// operations and veto codes, as their configs narrow them.
+// operations, signals and veto codes, as their configs narrow them; then
+// each composed behavior's namespace operations, which belong to no schema.
 //
 // Schema Checkout: CheckoutClient, checkoutClient.
 // Schema CollectionPoint: CollectionPointClient, collectionPointClient.

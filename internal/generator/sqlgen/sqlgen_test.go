@@ -23,7 +23,7 @@ const fixturesDir = "../../loader/tsreader/testdata/services"
 // against their golden copies. Regenerate with:
 // go test ./internal/generator/sqlgen -run TestWriteDDLGolden -update
 func TestWriteDDLGolden(t *testing.T) {
-	for _, svc := range []string{"fixture-db", "fixture-nested-arrays-db", "fixture-version-graph-db", "fixture-optimistic-db", "fixture-list-defaults-db", "fixture-user-model-db", "fixture-queue-db"} {
+	for _, svc := range []string{"fixture-db", "fixture-nested-arrays-db", "fixture-version-graph-db", "fixture-optimistic-db", "fixture-list-defaults-db", "fixture-user-model-db", "fixture-queue-db", "fixture-ddl-db", "fixture-vault-db", "fixture-naming-db", "fixture-vectors-db", "fixture-queries-db"} {
 		t.Run(svc, func(t *testing.T) {
 			schema, err := loader.LoadService(filepath.Join(fixturesDir, svc))
 			if err != nil {
@@ -826,7 +826,7 @@ func TestIndexNameKeepsDerivedNamesUnchanged(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := indexName(tt.tableName, pendingIndex{keys: tt.keys, index: Index{Unique: tt.unique}})
+			got, err := indexName(&ir.TypeDef{SQLName: tt.tableName}, pendingIndex{keys: tt.keys, index: Index{Unique: tt.unique}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -843,7 +843,7 @@ func TestIndexNameKeepsDerivedNamesUnchanged(t *testing.T) {
 // TestIndexNameRejectsOverlongDerivedName proves the generator stops instead of
 // packing or hashing, and that the failure names the remedy.
 func TestIndexNameRejectsOverlongDerivedName(t *testing.T) {
-	_, err := indexName("ingestion_parent_output_groups", pendingIndex{
+	_, err := indexName(&ir.TypeDef{SQLName: "ingestion_parent_output_groups"}, pendingIndex{
 		keys:  []string{"workUnitId", "parentTap", "childTap", "groupDigest"},
 		index: Index{Unique: true},
 	})
@@ -868,7 +868,7 @@ func TestIndexNameUsesPurposeToken(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.purpose, func(t *testing.T) {
-			got, err := indexName("ingestion_parent_output_groups", pendingIndex{
+			got, err := indexName(&ir.TypeDef{SQLName: "ingestion_parent_output_groups"}, pendingIndex{
 				name:  tt.purpose,
 				index: Index{Unique: tt.unique},
 			})
@@ -895,7 +895,7 @@ func TestIndexNameRejectsUnusablePurposeNames(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := indexName("ingestion_parent_output_groups", pendingIndex{
+			if _, err := indexName(&ir.TypeDef{SQLName: "ingestion_parent_output_groups"}, pendingIndex{
 				name:  tt.purpose,
 				index: Index{Unique: true},
 			}); err == nil {
@@ -908,7 +908,7 @@ func TestIndexNameRejectsUnusablePurposeNames(t *testing.T) {
 // TestAssignIndexNamesRejectsCollision covers two indexes whose derived names
 // are equal because the derived form ignores uniqueness.
 func TestAssignIndexNamesRejectsCollision(t *testing.T) {
-	_, err := assignIndexNames("jobs", []pendingIndex{
+	_, err := assignIndexNames(&ir.TypeDef{Name: "Jobs"}, []pendingIndex{
 		{keys: []string{"tenantId"}, index: Index{}},
 		{keys: []string{"tenantId"}, index: Index{Unique: true}},
 	})
@@ -924,7 +924,7 @@ func TestAssignIndexNamesRejectsCollision(t *testing.T) {
 // Regression: four indexes on a 30-byte table name, all readable and distinct
 // once each one carries a purpose.
 func TestAssignIndexNamesOnIngestionParentOutputGroups(t *testing.T) {
-	indexes, err := assignIndexNames("ingestion_parent_output_groups", []pendingIndex{
+	indexes, err := assignIndexNames(&ir.TypeDef{Name: "IngestionParentOutputGroups"}, []pendingIndex{
 		{keys: []string{"workUnitId", "parentTap", "childTap", "groupDigest"}, index: Index{Unique: true}, name: "digest"},
 		{keys: []string{"workUnitId", "parentTap", "childTap"}, index: Index{}, name: "edge"},
 		{keys: []string{"id", "workUnitId", "tenantId", "childTap"}, index: Index{Unique: true}, name: "child_identity"},

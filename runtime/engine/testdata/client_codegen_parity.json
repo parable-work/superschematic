@@ -154,7 +154,15 @@
               }
             },
             {
-              "name": "Comments"
+              "name": "Comments",
+              "config": {
+                "blocks": [
+                  "action"
+                ],
+                "maxBodyLength": 2000,
+                "resolvePermission": "tasks.resolve",
+                "deliverPermission": "tasks.deliver"
+              }
             },
             {
               "name": "Links",
@@ -470,6 +478,116 @@
                 "name": "string"
               },
               "required": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "kind": "General",
+      "name": "Request",
+      "description": "A request whose category and summary a model fills (D73): a model outside the engine fills its category and summary from its subject and body, while it is new or in triage; a category under 0.8 confidence waits in review, and the request moves to assigned only once its category is reviewed.",
+      "types": {
+        "Request": {
+          "name": "Request",
+          "role": "EmbeddedStruct",
+          "behaviors": [
+            {
+              "name": "Workflow",
+              "config": {
+                "states": [
+                  "new",
+                  "triage",
+                  "assigned"
+                ],
+                "transitions": [
+                  {
+                    "from": "new",
+                    "to": "triage"
+                  },
+                  {
+                    "from": "new",
+                    "to": "assigned"
+                  },
+                  {
+                    "from": "triage",
+                    "to": "assigned"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "Derived",
+              "config": {
+                "fields": {
+                  "category": {
+                    "from": [
+                      "subject",
+                      "body"
+                    ],
+                    "instruction": "Classify the request.",
+                    "model": "standard",
+                    "states": [
+                      "new",
+                      "triage"
+                    ]
+                  },
+                  "summary": {
+                    "from": [
+                      "body"
+                    ],
+                    "instruction": "Summarize it in one sentence.",
+                    "model": "simple"
+                  }
+                },
+                "permission": "requests.derive"
+              }
+            },
+            {
+              "name": "Provenance",
+              "config": {
+                "review": {
+                  "sources": [
+                    "Derived"
+                  ],
+                  "below": 0.8,
+                  "permission": "requests.review"
+                },
+                "gates": {
+                  "assigned": {
+                    "reviewed": [
+                      "category"
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          "fields": [
+            {
+              "name": "subject",
+              "typeRef": {
+                "name": "string"
+              },
+              "required": true
+            },
+            {
+              "name": "body",
+              "typeRef": {
+                "name": "string"
+              }
+            },
+            {
+              "name": "category",
+              "typeRef": {
+                "name": "string"
+              }
+            },
+            {
+              "name": "summary",
+              "typeRef": {
+                "name": "string"
+              }
             }
           ]
         }
@@ -2172,6 +2290,351 @@
         }
       }
     },
+    "Request": {
+      "createParams": {},
+      "fields": {
+        "Derived": {
+          "fields": {
+            "schema": {
+              "additionalProperties": false,
+              "description": "The last value settled for each derived field, by field: { sourceHash, model, settledAt, settledBy, confidence? }, and overridden: { by, at } once a caller or another behavior's operation wrote it. A field with neither is absent.",
+              "properties": {
+                "category": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "confidence": {
+                      "type": "number"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "overridden": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "at": {
+                          "type": "integer"
+                        },
+                        "by": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "by",
+                        "at"
+                      ],
+                      "type": "object"
+                    },
+                    "settledAt": {
+                      "type": "integer"
+                    },
+                    "settledBy": {
+                      "type": "string"
+                    },
+                    "sourceHash": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "summary": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "confidence": {
+                      "type": "number"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "overridden": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "at": {
+                          "type": "integer"
+                        },
+                        "by": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "by",
+                        "at"
+                      ],
+                      "type": "object"
+                    },
+                    "settledAt": {
+                      "type": "integer"
+                    },
+                    "settledBy": {
+                      "type": "string"
+                    },
+                    "sourceHash": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "present": true
+          },
+          "stale": {
+            "schema": {
+              "description": "The derived fields whose inputs, instruction, model or type moved since their last value, or that rederive asked for, and that no write overrode, in the config's order.",
+              "items": {
+                "enum": [
+                  "category",
+                  "summary"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "present": true
+          }
+        },
+        "Provenance": {
+          "fields": {
+            "schema": {
+              "additionalProperties": false,
+              "description": "By recorded field written since Provenance was added: { source, by, for?, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; for is the subject it acted for, when it acted for one (D77); review is { state, by?, at? }, state proposed, accepted, rejected or edited.",
+              "properties": {
+                "body": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "at": {
+                      "type": "integer"
+                    },
+                    "by": {
+                      "type": "string"
+                    },
+                    "confidence": {
+                      "type": "number"
+                    },
+                    "for": {
+                      "type": "string"
+                    },
+                    "review": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "at": {
+                          "type": "integer"
+                        },
+                        "by": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "enum": [
+                            "proposed",
+                            "accepted",
+                            "rejected",
+                            "edited"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ],
+                      "type": "object"
+                    },
+                    "source": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "by",
+                    "at"
+                  ],
+                  "type": "object"
+                },
+                "category": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "at": {
+                      "type": "integer"
+                    },
+                    "by": {
+                      "type": "string"
+                    },
+                    "confidence": {
+                      "type": "number"
+                    },
+                    "for": {
+                      "type": "string"
+                    },
+                    "review": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "at": {
+                          "type": "integer"
+                        },
+                        "by": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "enum": [
+                            "proposed",
+                            "accepted",
+                            "rejected",
+                            "edited"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ],
+                      "type": "object"
+                    },
+                    "source": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "by",
+                    "at"
+                  ],
+                  "type": "object"
+                },
+                "subject": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "at": {
+                      "type": "integer"
+                    },
+                    "by": {
+                      "type": "string"
+                    },
+                    "confidence": {
+                      "type": "number"
+                    },
+                    "for": {
+                      "type": "string"
+                    },
+                    "review": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "at": {
+                          "type": "integer"
+                        },
+                        "by": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "enum": [
+                            "proposed",
+                            "accepted",
+                            "rejected",
+                            "edited"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ],
+                      "type": "object"
+                    },
+                    "source": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "by",
+                    "at"
+                  ],
+                  "type": "object"
+                },
+                "summary": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "at": {
+                      "type": "integer"
+                    },
+                    "by": {
+                      "type": "string"
+                    },
+                    "confidence": {
+                      "type": "number"
+                    },
+                    "for": {
+                      "type": "string"
+                    },
+                    "review": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "at": {
+                          "type": "integer"
+                        },
+                        "by": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "enum": [
+                            "proposed",
+                            "accepted",
+                            "rejected",
+                            "edited"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ],
+                      "type": "object"
+                    },
+                    "source": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "by",
+                    "at"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "present": true
+          },
+          "inReview": {
+            "schema": {
+              "description": "Whether any recorded field is proposed. A list filters on it.",
+              "type": "boolean"
+            },
+            "present": true
+          }
+        },
+        "Workflow": {
+          "enteredAt": {
+            "schema": {
+              "description": "When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition.",
+              "type": "integer"
+            },
+            "present": false
+          },
+          "status": {
+            "schema": {
+              "description": "The state the instance is in.",
+              "enum": [
+                "new",
+                "triage",
+                "assigned"
+              ],
+              "type": "string"
+            },
+            "present": true
+          }
+        }
+      }
+    },
     "Spec": {
       "createParams": {
         "Dependencies": {
@@ -2416,9 +2879,53 @@
       },
       "fields": {
         "Comments": {
-          "commentCount": {
+          "composing": {
             "schema": {
-              "description": "How many comments the instance has.",
+              "description": "The subjects writing a message now: each subject with a composing message on the instance, once, in the order of its earliest composing message's id; empty while nobody is.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "present": true
+          },
+          "lastMessageAt": {
+            "schema": {
+              "description": "The greatest postedAt of a posted or interrupted message, in epoch milliseconds; absent while there is none.",
+              "type": "integer"
+            },
+            "present": false
+          },
+          "messages": {
+            "schema": {
+              "description": "How many posted and interrupted messages the conversation has, top-level and replies; composing, deleted and purged ones are not counted.",
+              "type": "integer"
+            },
+            "present": true
+          },
+          "threads": {
+            "schema": {
+              "additionalProperties": false,
+              "description": "The posted and interrupted top-level messages, each a thread, whether resolved or not: { open, resolved }.",
+              "properties": {
+                "open": {
+                  "type": "integer"
+                },
+                "resolved": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "open",
+                "resolved"
+              ],
+              "type": "object"
+            },
+            "present": true
+          },
+          "unread": {
+            "schema": {
+              "description": "The caller's: how many posted and interrupted top-level messages of others came to stand after the caller's read marker on the conversation. 0 until the caller first reads the conversation with markRead or posts in it top-level, so a conversation nobody opened is unread for nobody. Replies are read thread by thread, in the inbox, and not counted here.",
               "type": "integer"
             },
             "present": true
@@ -2657,9 +3164,53 @@
       "createParams": {},
       "fields": {
         "Comments": {
-          "commentCount": {
+          "composing": {
             "schema": {
-              "description": "How many comments the instance has.",
+              "description": "The subjects writing a message now: each subject with a composing message on the instance, once, in the order of its earliest composing message's id; empty while nobody is.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "present": true
+          },
+          "lastMessageAt": {
+            "schema": {
+              "description": "The greatest postedAt of a posted or interrupted message, in epoch milliseconds; absent while there is none.",
+              "type": "integer"
+            },
+            "present": false
+          },
+          "messages": {
+            "schema": {
+              "description": "How many posted and interrupted messages the conversation has, top-level and replies; composing, deleted and purged ones are not counted.",
+              "type": "integer"
+            },
+            "present": true
+          },
+          "threads": {
+            "schema": {
+              "additionalProperties": false,
+              "description": "The posted and interrupted top-level messages, each a thread, whether resolved or not: { open, resolved }.",
+              "properties": {
+                "open": {
+                  "type": "integer"
+                },
+                "resolved": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "open",
+                "resolved"
+              ],
+              "type": "object"
+            },
+            "present": true
+          },
+          "unread": {
+            "schema": {
+              "description": "The caller's: how many posted and interrupted top-level messages of others came to stand after the caller's read marker on the conversation. 0 until the caller first reads the conversation with markRead or posts in it top-level, so a conversation nobody opened is unread for nobody. Replies are read thread by thread, in the inbox, and not counted here.",
               "type": "integer"
             },
             "present": true

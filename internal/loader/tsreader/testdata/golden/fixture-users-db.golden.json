@@ -171,7 +171,7 @@
     "Role": {
       "name": "Role",
       "owner": "src/account.schema.ts",
-      "comment": "A named set of permissions granted to accounts.",
+      "comment": "A named set of permissions granted to accounts. Every database holds a\nreader, who reads notes, and an editor, who writes them too.",
       "role": "DBTable",
       "extends": "Auditable",
       "rawHeritage": {
@@ -219,7 +219,22 @@
           "required": true
         }
       ],
-      "userRole": {}
+      "userRole": {},
+      "seedRoles": [
+        {
+          "name": "reader",
+          "permissions": [
+            "notes.read"
+          ]
+        },
+        {
+          "name": "editor",
+          "permissions": [
+            "notes.read",
+            "notes.write"
+          ]
+        }
+      ]
     }
   }
 }

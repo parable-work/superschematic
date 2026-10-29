@@ -55,7 +55,7 @@ export type DocsConfig = {
   readonly title: string;
   /** The OpenAPI description; it replaces the operation's comment there. */
   readonly description: string;
-  /** Stable dotted identifier, at least two lowercase segments: "orders.returns.create". */
+  /** Stable dotted identifier, at least two segments of lowercase letters, digits and hyphens (never underscores): "orders.returns.create", "finances.line-items.list". */
   readonly capability: string;
   /** deprecated and retired mark the OpenAPI operation deprecated. */
   readonly lifecycle: DocsLifecycle;
@@ -145,14 +145,17 @@ const noopMethodDecorator: MethodDecorator = () => {};
 const noopPropertyDecorator: PropertyDecorator = () => {};
 const noopClassOrMethodDecorator: ClassDecorator & MethodDecorator = () => {};
 
+/** The route's HTTP method and path, under `/api`. */
 export function rest(_method: HttpMethod, _path?: string): MethodDecorator {
   return noopMethodDecorator;
 }
 
+/** The operation's documentation. */
 export function docs(_config: DocsConfig): MethodDecorator {
   return noopMethodDecorator;
 }
 
+/** Publishes the operation as an MCP tool, or says why it is not one. */
 export function mcp(_config: MCPConfig): MethodDecorator {
   return noopMethodDecorator;
 }
@@ -162,16 +165,29 @@ export function icon(_name: string): MethodDecorator {
   return noopMethodDecorator;
 }
 
+/** The route needs a caller holding one of the permissions. */
 export function requirePermission(_perms: readonly string[]): MethodDecorator {
   return noopMethodDecorator;
 }
 
+/** The route needs a caller; the implementation checks that the caller owns what it touches. */
 export const requireOwnership: MethodDecorator = noopMethodDecorator;
+/** The route needs a caller. */
 export const auth: MethodDecorator = noopMethodDecorator;
+/** The route's request body travels as an encrypted envelope. */
 export const encrypted: MethodDecorator = noopMethodDecorator;
+/**
+ * Anyone may call the route, in an `Authenticated` set too. Refused with
+ * `@auth`, `@requirePermission` or `@requireOwnership`.
+ */
 export const publicRoute: MethodDecorator = noopMethodDecorator;
+/** An operation a third party calls: no SDK has a method or a tool for it. */
 export const webhook: MethodDecorator = noopMethodDecorator;
 
+/**
+ * Every server checks the request's signature with the provider's verifier
+ * first, before the rate limit, the body limit and the permission check.
+ */
 export function hmacVerified(_cfg: HmacVerifiedConfig): MethodDecorator {
   return noopMethodDecorator;
 }
@@ -214,18 +230,22 @@ export function allowService(_cfg?: ServiceCallersConfig): ClassDecorator & Meth
   return noopClassOrMethodDecorator;
 }
 
+/** Bounds a route's requests per minute; on a class, each route of the set's. */
 export function rateLimit(_cfg: RateLimitConfig): ClassDecorator & MethodDecorator {
   return noopClassOrMethodDecorator;
 }
 
+/** Bounds the size of a route's request body; on a class, each route of the set's. */
 export function bodyLimit(_cfg: BodyLimitConfig): ClassDecorator & MethodDecorator {
   return noopClassOrMethodDecorator;
 }
 
+/** Bounds how long a route's request may take; on a class, each route of the set's. */
 export function timeout(_cfg: TimeoutConfig): ClassDecorator & MethodDecorator {
   return noopClassOrMethodDecorator;
 }
 
+/** The class is a view of a table: its fields are checked against the table's. */
 export function source(_target: unknown): ClassDecorator {
   return noopClassDecorator;
 }
@@ -235,19 +255,48 @@ export function source(_target: unknown): ClassDecorator {
  * `login`, true by default, adds login, logout and changePassword; false
  * leaves me and capabilities, for an API whose users sign in through
  * another API of the same authDb. `register`, false by default, adds
- * register, which anyone may call, and needs the login.
+ * register, which anyone may call, and needs the login; the
+ * RegistrationConfig members shape it.
  */
 export type UserSessionsConfig =
   | {
       readonly path?: string;
       readonly login?: true;
-      readonly register?: boolean;
+      readonly register?: false;
     }
+  | ({
+      readonly path?: string;
+      readonly login?: true;
+      readonly register: true;
+    } & RegistrationConfig)
   | {
       readonly path?: string;
       readonly login: false;
       readonly register?: false;
     };
+
+/**
+ * How register admits a user (D81).
+ *
+ * - `registration`: "open", the default, signs the user in. "approval"
+ *   creates them pending: register answers 202 with no session, and login
+ *   refuses them with 403 pending_approval until an administrator calls
+ *   approveUser.
+ * - `defaultRoles`: the roles each new user holds, by name, each created
+ *   with no permissions when no role has the name. Under approval they
+ *   take effect at approval.
+ * - `firstUser`: the registration that finds no role grant, as `identity
+ *   bootstrap` would, makes the database's first administrator, active
+ *   even under approval, holding `role`, created with `permissions` when
+ *   no role has the name, beside the default roles. Two at once make one.
+ *
+ * defaultRoles and firstUser need a UserRole table in the authDb.
+ */
+export type RegistrationConfig = {
+  readonly registration?: 'open' | 'approval';
+  readonly defaultRoles?: readonly string[];
+  readonly firstUser?: { readonly role: string; readonly permissions: readonly string[] };
+};
 
 /** The routes @userAdministration adds. `path` prefixes them, "auth/admin" by default. */
 export type UserAdministrationConfig = {
@@ -338,6 +387,68 @@ export function worker(_options: WorkerOptions): ClassDecorator {
   return noopClassDecorator;
 }
 
+/** The options of a deriver: the engine types whose Derived fields it fills, and how. */
+export type DeriverOptions = {
+  /** The names of the engine types of the API's database whose Derived fields the deriver fills; every type of it that composes Derived unless set. An API imports no engine type, so it names them. */
+  readonly schemas?: readonly string[];
+  /** How many answers an instance runs at a time; four unless set. An environment's settings change it. */
+  readonly concurrency?: number;
+  /** How many stale fields a pull asks for, 1 to 100; fifty unless set. */
+  readonly batchSize?: number;
+};
+
+/**
+ * Declares a deriver of the API service: a deployable that fills the
+ * Derived fields of the engine types of the API's database (D74). It pulls
+ * the stale fields, calls the project's generated Derivers for each, which
+ * asks a model, and settles the answers. The class's name is the
+ * deriver's, and the class holds nothing:
+ *
+ * ```ts
+ * @deriver({ schemas: ["Ticket"], concurrency: 4 })
+ * export abstract class TriageTickets {}
+ * ```
+ */
+export function deriver(_options?: DeriverOptions): ClassDecorator {
+  return noopClassDecorator;
+}
+
+/** The options of an app: the extensions its build needs. */
+export type AppOptions = {
+  /** The names of the superschematic extensions the app's build needs (`["topcoat"]`). A binary that does not link one refuses to build the app, and resolves and plans the stack as usual. */
+  readonly extensions?: readonly string[];
+};
+
+/**
+ * Declares an app of the API service: the project's own HTTP program over
+ * the API's Deps, implementations, identity and engine, which the stack
+ * runs as a deployable of its own where the API's servers run (D78). The
+ * program is a library crate the project writes, exporting `serve(parts)`,
+ * and the API is written in Rust. The class's name is the app's, and the
+ * class holds nothing:
+ *
+ * ```ts
+ * @app({ extensions: ["topcoat"] })
+ * export abstract class Backoffice {}
+ * ```
+ */
+export function app(_options?: AppOptions): ClassDecorator {
+  return noopClassDecorator;
+}
+
+/** A field of a `@source` view with no column behind it, which the implementation fills in. */
 export const virtual: PropertyDecorator = noopPropertyDecorator;
+/**
+ * A field of a `@source` view that carries the plaintext of its table's
+ * `Encrypted<T>` field (D85). A view leaves such a field out unless it says
+ * so: whatever the view holds, a response sends.
+ */
+export const decrypted: PropertyDecorator = noopPropertyDecorator;
+/** A UI schema renderer hides the field. */
 export const uiHidden: PropertyDecorator = noopPropertyDecorator;
+/**
+ * Each router gates the route and hands it to a handler the implementation
+ * writes: TypeScript's from `manualRoutes`, Go's from `Config.ManualRoutes`,
+ * Rust's from `build_router_with_manual_routes`.
+ */
 export const manualRouteRegistration: MethodDecorator = noopMethodDecorator;

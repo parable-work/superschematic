@@ -22,6 +22,14 @@
         "language": {
           "$ref": "#/definitions/ApiLanguage"
         },
+        "mcp": {
+          "description": "Serve the operations the mcp decorator makes visible tools over MCP at POST /api/mcp (D81): the caller authenticates as on the API's other routes, and each tools/call runs through the route of its operation. A TypeScript API serves it; the build refuses it on a Go or Rust API, where support follows. Unset is off.",
+          "type": "boolean"
+        },
+        "mcpConfirmationKey": {
+          "description": "The Secret<string> config field the MCP endpoint signs the confirmations of its ask tools with (D93), by the envVars class that declares it and the field's name, as a stack names the secret: \"McpKeys.MCP_CONFIRMATION_KEY\". The API's envVars class holds the field, its own or one it extends; its value is a random string of at least 32 bytes, one per environment. Required with mcp when a visible tool's invocation policy is ask.",
+          "type": "string"
+        },
         "scaffoldsOutputDir": {
           "type": "string"
         }
@@ -263,6 +271,13 @@
         "kind": {
           "$ref": "#/definitions/SchemaKindName"
         },
+        "memoryStores": {
+          "description": "The MemoryStore services this API's implementation uses: each is a MemoryStore in its Deps, and a memoryStore edge from its server, jobs and workers. Only an API service sets it, and each entry names a MemoryStore service.",
+          "items": {
+            "$ref": "#/definitions/ServiceDependencyRef"
+          },
+          "type": "array"
+        },
         "name": {
           "type": "string"
         },
@@ -272,6 +287,10 @@
         },
         "public": {
           "type": "boolean"
+        },
+        "rateLimitStore": {
+          "$ref": "#/definitions/ServiceDependencyRef",
+          "description": "The MemoryStore service this API's rate-limited routes count in, so its replicas share one budget per client; while the store is unavailable each replica counts in process. It is listed in memoryStores whether or not that list names it. Only an API service sets it."
         },
         "site": {
           "$ref": "#/definitions/SiteConfig",
@@ -285,14 +304,15 @@
       "type": "object"
     },
     "SchemaKind": {
-      "description": "The kinds the core compiler registers. Closed: an extension adds a kind by registering it with superschematic, not by extending this enum. A Stack service declares what runs where over the others (`@superschematic/stack`) and is named by none, so it has no sentinel. A Site service is a static site: its config names the APIs it calls and how it builds, and its code sits at its implementation path (D55). A Bucket service is private object storage that APIs list in their `buckets` (D54): its config is all it has, `{ name, kind: SchemaKind.Bucket, outputs: {} }`.",
+      "description": "The kinds the core compiler registers. Closed: an extension adds a kind by registering it with superschematic, not by extending this enum. A Stack service declares what runs where over the others (`@superschematic/stack`) and is named by none, so it has no sentinel. A Site service is a static site: its config names the APIs it calls and how it builds, and its code sits at its implementation path (D55). A Bucket service is private object storage that APIs list in their `buckets` (D54): its config is all it has, `{ name, kind: SchemaKind.Bucket, outputs: {} }`. A MemoryStore service is a Redis or Valkey server the replicas of a stack share, which holds no fact (D75): its schema declares each channel and key it carries (`@superschematic/memory-store`), and APIs list it in their `memoryStores`.",
       "enum": [
         "DB",
         "API",
         "General",
         "Stack",
         "Site",
-        "Bucket"
+        "Bucket",
+        "MemoryStore"
       ],
       "type": "string"
     },
@@ -345,14 +365,14 @@
           "$ref": "#/definitions/TargetOutputConfig"
         },
         "typescript": {
-          "$ref": "#/definitions/TargetOutputConfig"
+          "$ref": "#/definitions/TypeScriptSdkOutputConfig"
         }
       },
       "type": "object"
     },
     "ServiceDependencyRef": {
       "additionalProperties": false,
-      "description": "A service reference in the JSON/YAML config forms, in dependencies, calls and buckets. The TypeScript form builds ServiceHandle sentinels with the service() helper; the data forms carry the same name + kind pair as a plain object.",
+      "description": "A service reference in the JSON/YAML config forms, in dependencies, calls, buckets, memoryStores and rateLimitStore. The TypeScript form builds ServiceHandle sentinels with the service() helper; the data forms carry the same name + kind pair as a plain object.",
       "properties": {
         "kind": {
           "$ref": "#/definitions/SchemaKindName"
@@ -375,6 +395,10 @@
           "description": "The script of the site's package.json that builds it, which a deploy runs with bun run after a frozen install of the workspace. Unset is \"build\".",
           "type": "string"
         },
+        "dev": {
+          "$ref": "#/definitions/SiteDevConfig",
+          "description": "The site's dev server, which stack dev runs in place of building the site once, behind a proxy that serves the site and each API it calls on one origin (D82). A deploy builds the site whether it is set or not. Unset, stack dev builds the site once."
+        },
         "fallback": {
           "description": "The file, relative to output, served for a path that names no file: \"index.html\" for a single-page application, whose router reads the path. Unset answers such a path 404.",
           "type": "string"
@@ -382,6 +406,21 @@
         "output": {
           "description": "The directory the build writes, relative to the site's directory and inside it. Unset is \"dist\".",
           "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "SiteDevConfig": {
+      "additionalProperties": false,
+      "description": "How a site's dev server runs under stack dev (D82): Vite, Bun's own (bun ./index.html), or any server that serves the site's code and reloads it on an edit.",
+      "properties": {
+        "command": {
+          "description": "The script of the site's package.json, or a binary of its dependencies, that runs the dev server, which stack dev runs with bun run after the workspace's install. Arguments go in the script. Unset is \"dev\".",
+          "type": "string"
+        },
+        "port": {
+          "description": "The port the dev server listens on, on loopback, for a command that picks its own. Unset, stack dev picks a port per checkout and hands it to the command in PORT, which the script passes on: \"vite --port $PORT --strictPort\".",
+          "type": "number"
         }
       },
       "type": "object"
@@ -394,6 +433,20 @@
       ],
       "type": "string"
     },
+    "SqlEncryptionConfig": {
+      "additionalProperties": false,
+      "description": "The keys of a DB service's Encrypted<T> fields (D85).",
+      "properties": {
+        "key": {
+          "description": "The Secret<string> field of an env vars class that holds the keys, by the type that declares the field and the field's name, as a stack names the secret: \"FieldKeys.FINANCES_DB_KEY\". Its value is one or more 32-byte keys in base64, separated by commas; the first encrypts, and each decrypts what it encrypted. Every API whose servers, jobs and workers open the service's ORM must hold the field in its env vars class.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "type": "object"
+    },
     "SqlOutputConfig": {
       "additionalProperties": false,
       "description": "The DB kind's sql output. The DDL and the ORM are implied by the kind; this block places and owns the generated projection view migrations and lists the dialects the DDL is written for.",
@@ -405,13 +458,25 @@
           },
           "type": "array"
         },
+        "encryption": {
+          "$ref": "#/definitions/SqlEncryptionConfig",
+          "description": "Where the keys of the schema's Encrypted<T> fields come from (D85). A schema with one needs it."
+        },
         "migrationsDir": {
           "description": "Where the projection view migrations are written, relative to the service directory. Unset keeps them under <out>/sql/<service>/projections/migrations.",
           "type": "string"
         },
+        "requireUpdatedBy": {
+          "description": "An update of a table with an updatedBy field needs an acting user, as a create of a table with createdBy does: without one the ORMs refuse it (NoUserError in TypeScript, ErrNoUserInContext in Go) where they would leave a nullable updatedBy as it was (D87). Unset is false.",
+          "type": "boolean"
+        },
         "sourceSchema": {
           "description": "The Postgres schema that holds the tables the views read: each view selects <sourceSchema>.<table> for its source table and every joined table, so it does not depend on the migration runner's search_path. Unset leaves the tables unqualified.",
           "type": "string"
+        },
+        "systemActor": {
+          "$ref": "#/definitions/SqlSystemActorConfig",
+          "description": "Who the ORMs act as for a write no request's caller makes, a job's or a worker's: orm.asSystem() in TypeScript and orm.AsSystem(ctx) in Go stamp createdBy, updatedBy and deletedBy with its id (D87). The audit fields hold a user's id with no foreign key, so it needs no user row. Unset is { id: \"00000000-0000-4000-8000-000000000000\", name: \"system\" }."
         },
         "viewOwner": {
           "description": "The Postgres role the migrations create the views as: SET ROLE around the view DDL and RESET ROLE after it, so the schema's default privileges for that role apply. The migration runner must be a member of the role. Unset creates the views as the runner.",
@@ -420,10 +485,46 @@
       },
       "type": "object"
     },
+    "SqlSystemActorConfig": {
+      "additionalProperties": false,
+      "description": "The system actor of a DB service's ORMs (D87).",
+      "properties": {
+        "id": {
+          "description": "The actor's user id: a UUID, hyphenated.",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+          "type": "string"
+        },
+        "name": {
+          "description": "The name an app shows for the actor. Unset is \"system\".",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "TargetOutputConfig": {
       "additionalProperties": false,
       "properties": {
         "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "TypeScriptSdkOutputConfig": {
+      "additionalProperties": false,
+      "description": "The TypeScript SDK. With lazyValidation, the SDK loads its types package's validators and parsers, and with them superscalar's WebAssembly core, on its first call rather than when it is imported (D82): a browser bundle that splits code (Vite, bun build --splitting) carries them in a chunk of its own, out of the page's first load.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "lazyValidation": {
           "type": "boolean"
         }
       },

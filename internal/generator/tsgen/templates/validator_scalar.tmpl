@@ -11,6 +11,12 @@ import type { {{.Scalar.TSType}} } from '{{$.Module.Naming.ScalarNpmPackage}}/sc
 import { {{if .Scalar.UsesLibValidate}}validate{{.Scalar.Symbol}} as validate{{.Scalar.Symbol}}FromLib{{end}}{{if and .Scalar.UsesLibValidate (or .Scalar.HasCustomNormalize .Scalar.HasCustomParse)}}, {{end}}{{if .Scalar.HasCustomNormalize}}normalize{{.Scalar.Symbol}} as normalize{{.Scalar.Symbol}}FromLib{{end}}{{if and .Scalar.HasCustomNormalize .Scalar.HasCustomParse}}, {{end}}{{if .Scalar.HasCustomParse}}parse{{.Scalar.Symbol}} as parse{{.Scalar.Symbol}}FromLib{{end}} } from '{{$.Module.Naming.ScalarNpmPackage}}/scalars';
 {{end}}
 
+// The constructors of {{.Scalar.Symbol}}, the scalar library's own, which the
+// package hands out beside the type: each returns the value as
+// {{.Scalar.Symbol}} and throws on a value {{.Scalar.Name}} refuses (D25,
+// amended; D100).
+export { parse{{.Scalar.Symbol}}Strict, normalize{{.Scalar.Symbol}}Strict } from '{{$.Module.Naming.ScalarNpmPackage}}/scalars';
+
 {{if .Scalar.Pattern}}
 const {{.Scalar.Symbol}}Pattern = new RegExp({{jsonString .Scalar.Pattern}}, "u");
 {{end}}

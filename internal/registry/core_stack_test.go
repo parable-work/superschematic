@@ -148,6 +148,39 @@ func TestStackDecoratorsWriteTheirDeclarations(t *testing.T) {
 		t.Errorf("runner: false: %v", err)
 	}
 
+	// An app is exposed beside its API's handle, and its element names it
+	// there and turns it on or off; its other keys are the app platform's
+	// settings (D78).
+	withApp := &ir.TypeDef{Name: "WithApp"}
+	if err := applyStackDecorator(t, "stack", withApp, map[string]any{
+		"expose": []any{handle("shop-api", "API"), map[string]any{"of": handle("shop-orders", "API"), "app": "Backoffice"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if want := []ir.DeployableRef{{Service: &api}, {Service: &orders, App: "Backoffice"}}; !reflect.DeepEqual(withApp.Stack.Expose, want) {
+		t.Errorf("@stack wrote expose %+v, want %+v", withApp.Stack.Expose, want)
+	}
+	app := &ir.TypeDef{Name: "App"}
+	if err := applyStackDecorator(t, "environment", app, map[string]any{"settings": []any{
+		map[string]any{"of": handle("shop-orders", "API"), "app": "Backoffice", "enabled": false, "port": float64(3000)},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	wantApp := &ir.DeployableSettings{Of: ir.DeployableRef{Service: &orders, App: "Backoffice"}, Enabled: &off, Values: map[string]any{"port": float64(3000)}}
+	if got := app.Environment.Settings; len(got) != 1 || !reflect.DeepEqual(got[0], wantApp) {
+		t.Errorf("@environment wrote app settings %+v, want %+v", got, wantApp)
+	}
+	if err := applyStackDecorator(t, "environment", &ir.TypeDef{Name: "E"}, map[string]any{"settings": []any{
+		map[string]any{"of": class("Backend"), "app": "Backoffice"},
+	}}); err == nil || !strings.Contains(err.Error(), "app Backoffice names an app of the API service of names, but of names no service") {
+		t.Errorf("an app beside a class: %v", err)
+	}
+	if err := applyStackDecorator(t, "stack", &ir.TypeDef{Name: "S"}, map[string]any{
+		"expose": []any{map[string]any{"of": class("Backend"), "app": "Backoffice"}},
+	}); err == nil || !strings.Contains(err.Error(), "@stack argument") {
+		t.Errorf("an exposed app beside a class: %v", err)
+	}
+
 	// A DNS platform with no values and an environment with no target
 	// values leave both out, as the data forms do.
 	manual := &ir.TypeDef{Name: "Manual"}
@@ -161,6 +194,39 @@ func TestStackDecoratorsWriteTheirDeclarations(t *testing.T) {
 
 // TestStackDecoratorsRefuseWhatTheyCannotDeclare: each refusal names what
 // is wrong.
+// TestStackDecoratorReadsOrigins: @stack's origins name a site and the
+// APIs its origin serves, or none for every API it calls (D91); an origin
+// without a site, with an empty list of APIs or with a member it does not
+// have is refused.
+func TestStackDecoratorReadsOrigins(t *testing.T) {
+	shop := &ir.TypeDef{Name: "Shop"}
+	if err := applyStackDecorator(t, "stack", shop, map[string]any{
+		"deploy": []any{handle("shop-web", "Site")},
+		"origins": []any{
+			map[string]any{"site": handle("shop-web", "Site"), "apis": []any{handle("shop-api", "API")}},
+			map[string]any{"site": handle("shop-admin", "Site")},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	want := []*ir.Origin{
+		{Site: ir.ServiceRef{Name: "shop-web", Kind: ir.SchemaKindSite}, APIs: []ir.ServiceRef{{Name: "shop-api", Kind: ir.SchemaKindAPI}}},
+		{Site: ir.ServiceRef{Name: "shop-admin", Kind: ir.SchemaKindSite}},
+	}
+	if !reflect.DeepEqual(shop.Stack.Origins, want) {
+		t.Errorf("@stack wrote origins %+v, want %+v", shop.Stack.Origins, want)
+	}
+	for _, arg := range []map[string]any{
+		{"origins": []any{map[string]any{"apis": []any{handle("shop-api", "API")}}}},
+		{"origins": []any{map[string]any{"site": handle("shop-web", "Site"), "apis": []any{}}}},
+		{"origins": []any{map[string]any{"site": handle("shop-web", "Site"), "path": "/api"}}},
+	} {
+		if err := applyStackDecorator(t, "stack", &ir.TypeDef{Name: "C"}, arg); err == nil || !strings.Contains(err.Error(), "@stack argument") {
+			t.Errorf("@stack(%v) = %v, want a refusal of its argument", arg, err)
+		}
+	}
+}
+
 func TestStackDecoratorsRefuseWhatTheyCannotDeclare(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -223,6 +289,27 @@ func TestVerifyStack(t *testing.T) {
 	spec.Verify(valid(), &f)
 	if len(f.errs) > 0 {
 		t.Fatalf("a valid stack: %v", f.errs)
+	}
+	// A memory store's element turns it off (D75).
+	off := false
+	withStoreOff := valid()
+	withStoreOff.Types["Staging"].Environment.Settings = append(withStoreOff.Types["Staging"].Environment.Settings,
+		&ir.DeployableSettings{Of: ir.DeployableRef{Service: &ir.ServiceRef{Name: "shop-cache", Kind: ir.SchemaKindMemoryStore}}, Enabled: &off})
+	spec.Verify(withStoreOff, &f)
+	if len(f.errs) > 0 {
+		t.Fatalf("a stack that turns a memory store off: %v", f.errs)
+	}
+
+	// An app is exposed, and turned off, beside its API's handle (D78).
+	withApp := valid()
+	backoffice := ir.DeployableRef{Service: &api, App: "Backoffice"}
+	off = false
+	withApp.Types["Shop"].Stack.Expose = append(withApp.Types["Shop"].Stack.Expose, backoffice)
+	withApp.Types["Staging"].Environment.Settings = append(withApp.Types["Staging"].Environment.Settings, &ir.DeployableSettings{Of: backoffice, Enabled: &off})
+	f = findings{}
+	spec.Verify(withApp, &f)
+	if len(f.errs) > 0 {
+		t.Fatalf("a stack with an app: %v", f.errs)
 	}
 
 	for _, tc := range []struct {
@@ -287,12 +374,44 @@ func TestVerifyStack(t *testing.T) {
 		}, "names the runner of shop-api, a API service; an engine's runner belongs to a DB service"},
 		{"a runner and a worker", func(s *ir.Schema) {
 			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &shopDB, Runner: true, Worker: "FulfilOrders"}}
-		}, "names the runner and a job or a worker; an element names one"},
+		}, "names the runner and a job, a worker, a deriver or an app; an element names one"},
 		{"instances on a runner", func(s *ir.Schema) {
 			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &shopDB, Runner: true}, Instances: new(int)}
-		}, "sets instances, which only a worker takes"},
+		}, "sets instances, which only a worker or a deriver takes"},
 		{"a schedule on a runner", func(s *ir.Schema) {
 			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &shopDB, Runner: true}, Schedule: "0 * * * *"}
+		}, "sets schedule, which only a job takes"},
+		{"two instances of a deriver", func(s *ir.Schema) {
+			two := 2
+			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &api, Deriver: "TriageTickets"}, Instances: &two}
+		}, "@environment class Staging settings[0] instances is 2; a deriver runs zero instances or one"},
+		{"a schedule on a deriver", func(s *ir.Schema) {
+			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &api, Deriver: "TriageTickets"}, Schedule: "0 * * * *"}
+		}, "sets a schedule or a time zone on deriver TriageTickets, which runs until it is stopped"},
+		{"a deriver and a worker", func(s *ir.Schema) {
+			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &api, Deriver: "TriageTickets", Worker: "FulfilOrders"}}
+		}, "names deriver TriageTickets and a job or a worker; an element names one"},
+		{"an exposed deriver", func(s *ir.Schema) {
+			s.Types["Shop"].Stack.Expose = []ir.DeployableRef{{Service: &api, Deriver: "TriageTickets"}}
+		}, "@stack class Shop expose[0] names deriver TriageTickets; only a server is exposed"},
+		{"enabled on a bucket", func(s *ir.Schema) {
+			off := false
+			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &ir.ServiceRef{Name: "shop-media", Kind: ir.SchemaKindBucket}}, Enabled: &off}
+		}, "sets enabled, which only a job takes"},
+		{"an app and a worker", func(s *ir.Schema) {
+			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &api, App: "Backoffice", Worker: "FulfilOrders"}}
+		}, "names app Backoffice and a job, a worker or a deriver; an element names one"},
+		{"an app of a declared deployable", func(s *ir.Schema) {
+			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Deployable: "Backend", App: "Backoffice"}}
+		}, "names app Backoffice of deployable Backend; an app belongs to an API service, so name the API's handle"},
+		{"the runner and an app", func(s *ir.Schema) {
+			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &shopDB, Runner: true, App: "Backoffice"}}
+		}, "names the runner and a job, a worker, a deriver or an app; an element names one"},
+		{"instances on an app", func(s *ir.Schema) {
+			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &api, App: "Backoffice"}, Instances: new(int)}
+		}, "sets instances, which only a worker or a deriver takes"},
+		{"a schedule on an app", func(s *ir.Schema) {
+			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &api, App: "Backoffice"}, Schedule: "0 * * * *"}
 		}, "sets schedule, which only a job takes"},
 		{"two environments with one order", func(s *ir.Schema) { s.Types["Preview"].Environment.Order = 1 }, "@environment classes Preview and Staging both have order 1"},
 		{"a negative order", func(s *ir.Schema) { s.Types["Preview"].Environment.Order = -1 }, "@environment class Preview has order -1; an order counts from 1"},

@@ -2,6 +2,12 @@
 
 import type { ScalarValidationResult, ValidationError } from 'superscalar/validation';
 
+// The constructors of CryptoSHA256, the scalar library's own, which the
+// package hands out beside the type: each returns the value as
+// CryptoSHA256 and throws on a value Crypto.SHA256 refuses (D25,
+// amended; D100).
+export { parseCryptoSHA256Strict, normalizeCryptoSHA256Strict } from 'superscalar/scalars';
+
 const CryptoSHA256Pattern = new RegExp("^[0-9a-f]{64}$", "u");
 
 /**

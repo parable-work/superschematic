@@ -85,6 +85,7 @@ var userRouteOperations = map[string]userRouteOperation{
 	"getUser":         {"account-admin", "GET", "/api/auth/admin/users/{id}", "identity.users.read", false},
 	"disableUser":     {"account-admin", "POST", "/api/auth/admin/users/{id}/disable", "identity.users.write", false},
 	"enableUser":      {"account-admin", "POST", "/api/auth/admin/users/{id}/enable", "identity.users.write", false},
+	"approveUser":     {"account-admin", "POST", "/api/auth/admin/users/{id}/approve", "identity.users.write", false},
 	"setUserPassword": {"account-admin", "PUT", "/api/auth/admin/users/{id}/password", "identity.users.write", true},
 	"listRoles":       {"account-admin", "GET", "/api/auth/admin/roles", "identity.roles.read", false},
 	"createRole":      {"account-admin", "POST", "/api/auth/admin/roles", "identity.roles.write", false},

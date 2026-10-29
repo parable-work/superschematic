@@ -5,7 +5,9 @@
 //! publish, and the define of a draft, which carries the draft's hash and
 //! not its document. An event has a global cursor, which orders the whole
 //! log, and an instance's events also a per-instance sequence, 1, 2, 3, ...
-//! across its life, a re-create after a delete included.
+//! across its life, a re-create after a delete included, but for a beside
+//! operation's (D77), which changes nothing a read of the instance returns
+//! and has none.
 //!
 //! The cursor is the key the database gives the row (SQLite's
 //! AUTOINCREMENT, Postgres's identity), read back with `RETURNING`. On
@@ -109,8 +111,8 @@ pub(crate) fn append_event(tx: &Tx<'_>, event: &NewEvent<'_>) -> Result<i64> {
         .unwrap_or_default();
     let row = tx.get(
         "INSERT INTO engine_events
-           (kind, namespace, schema, instance_id, seq, version, actor, service, at, change, cause_behavior, cause_event, cause_schedule, depth, value_refs)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           (kind, namespace, schema, instance_id, seq, version, actor, service, for_subject, at, change, cause_behavior, cause_event, cause_schedule, depth, value_refs)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          RETURNING cursor",
         &[
             SqlValue::from(event.kind),
@@ -121,6 +123,7 @@ pub(crate) fn append_event(tx: &Tx<'_>, event: &NewEvent<'_>) -> Result<i64> {
             SqlValue::from(event.version),
             SqlValue::from(event.actor.actor.as_str()),
             SqlValue::from(event.actor.service.as_deref()),
+            SqlValue::from(event.actor.for_subject.as_deref()),
             SqlValue::Integer(event.at),
             SqlValue::from(event.change.as_deref()),
             SqlValue::from(event.cause.map(|cause| cause.behavior.as_str())),
@@ -239,8 +242,13 @@ pub struct EngineEvent {
     pub schema: String,
     /// `None` for a publish and a define.
     pub instance_id: Option<String>,
-    /// The instance's sequence; `None` for a publish and a define.
+    /// The instance's sequence; `None` for a publish, a define and a beside
+    /// operation's event.
     pub seq: Option<i64>,
+    /// True for a beside operation's event (D77): an operation event of an
+    /// instance with no sequence, which replay skips. Absent otherwise.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub beside: bool,
     /// The schema version the change was made with, or the one a publish
     /// made live; `None` for a define.
     pub version: Option<i64>,
@@ -249,6 +257,10 @@ pub struct EngineEvent {
     /// The deployable of the service whose call made the change (D37).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service: Option<String>,
+    /// The subject the principal that made the change acted for (D77),
+    /// `for` beside `actor`.
+    #[serde(rename = "for", skip_serializing_if = "Option::is_none")]
+    pub for_subject: Option<String>,
     /// When, in epoch milliseconds.
     pub at: i64,
     /// create: the instance as a read returns it, `{ data, behaviors }`;
@@ -293,6 +305,9 @@ pub struct ReadEvents<'a> {
     pub behaviors: Option<Vec<String>>,
     /// No operation events of operations by these names.
     pub exclude: Option<Vec<String>>,
+    /// `false` drops beside operations' events, for a consumer that
+    /// rebuilds instances; `true` keeps only them. Absent, both.
+    pub beside: Option<bool>,
 }
 
 /// One page of the log.
@@ -306,7 +321,7 @@ pub struct EventPage {
 }
 
 /// The `engine_events` columns [`to_event`] reads.
-pub(crate) const EVENT_COLUMNS: &str = "cursor, kind, namespace, schema, instance_id, seq, version, actor, service, at, change, cause_behavior, cause_event, cause_schedule, depth, value_refs";
+pub(crate) const EVENT_COLUMNS: &str = "cursor, kind, namespace, schema, instance_id, seq, version, actor, service, for_subject, at, change, cause_behavior, cause_event, cause_schedule, depth, value_refs";
 
 /// An `engine_events` row of [`EVENT_COLUMNS`].
 pub(crate) fn to_event(row: &Row) -> Result<EngineEvent> {
@@ -325,21 +340,32 @@ pub(crate) fn to_event(row: &Row) -> Result<EngineEvent> {
         }),
     };
     let refs = refs_of(row.opt_text("value_refs")?)?;
+    let kind = row.text("kind")?;
+    let instance_id = row.opt_text("instance_id")?.map(str::to_owned);
+    let seq = row.opt_i64("seq")?;
     Ok(EngineEvent {
         cursor: row.i64("cursor")?,
-        kind: row.text("kind")?.to_owned(),
+        kind: kind.to_owned(),
         namespace: row.text("namespace")?.to_owned(),
         schema: row.text("schema")?.to_owned(),
-        instance_id: row.opt_text("instance_id")?.map(str::to_owned),
-        seq: row.opt_i64("seq")?,
+        beside: is_beside(kind, instance_id.is_some(), seq),
+        instance_id,
+        seq,
         version: row.opt_i64("version")?,
         actor: row.text("actor")?.to_owned(),
         service: row.opt_text("service")?.map(str::to_owned),
+        for_subject: row.opt_text("for_subject")?.map(str::to_owned),
         at: row.i64("at")?,
         change,
         cause,
         value_refs: (!refs.is_empty()).then_some(refs),
     })
+}
+
+/// Whether an event of the log is a beside operation's (D77): an operation
+/// event of an instance with no sequence.
+pub(crate) fn is_beside(kind: &str, instance: bool, seq: Option<i64>) -> bool {
+    kind == "operation" && instance && seq.is_none()
 }
 
 /// The cursor a log's head is: its last event's, or the last one retention
@@ -506,11 +532,13 @@ fn is_operation_name(name: &str) -> bool {
         && bytes.iter().all(u8::is_ascii_alphanumeric)
 }
 
-// What keeps a scanned row: its kinds, behaviors and exclude, checked.
+// What keeps a scanned row: its kinds, behaviors, exclude and beside,
+// checked.
 struct EventFilter {
     kinds: Option<BTreeSet<String>>,
     behaviors: Option<BTreeSet<String>>,
     exclude: Option<BTreeSet<String>>,
+    beside: Option<bool>,
 }
 
 impl EventFilter {
@@ -529,6 +557,7 @@ impl EventFilter {
             kinds: filter_list(&FILTERS[0], kinds.as_deref())?,
             behaviors: filter_list(&FILTERS[1], behaviors.as_deref())?,
             exclude: filter_list(&FILTERS[2], exclude.as_deref())?,
+            beside: options.beside,
         })
     }
 
@@ -547,6 +576,9 @@ impl EventFilter {
             return Ok(None);
         }
         let event = to_event(row)?;
+        if self.beside.is_some_and(|beside| beside != event.beside) {
+            return Ok(None);
+        }
         if kind == "operation" {
             let behavior = event
                 .change
@@ -639,11 +671,13 @@ impl Events<'_> {
             let from = after.max(floor);
             let rows = match (options.instance_id, options.schema) {
                 (Some(instance_id), Some(schema)) => tx.all(
+                    // In log order, which is the sequence's, with the
+                    // instance's beside events among them.
                     Sql::per(
-                        format!("SELECT {EVENT_COLUMNS} FROM engine_events INDEXED BY engine_events_instance
-         WHERE namespace = ? AND schema = ? AND instance_id = ? AND cursor > ? ORDER BY seq LIMIT ?"),
+                        format!("SELECT {EVENT_COLUMNS} FROM engine_events INDEXED BY engine_events_instance_cursor
+         WHERE namespace = ? AND schema = ? AND instance_id = ? AND cursor > ? ORDER BY cursor LIMIT ?"),
                         format!("SELECT {EVENT_COLUMNS} FROM engine_events
-         WHERE namespace = ? AND schema = ? AND instance_id = ? AND cursor > ? ORDER BY seq LIMIT ?"),
+         WHERE namespace = ? AND schema = ? AND instance_id = ? AND cursor > ? ORDER BY cursor LIMIT ?"),
                     ),
                     &[
                         SqlValue::from(namespace.as_str()),

@@ -15,7 +15,7 @@
 //! | `eng_http(engine, head, body)` | `{method, prefix, path, query, headers, caller, requestId, options}` and the body's bytes | `{status, headers, stream}` and the body's bytes |
 //! | `eng_stream_poll(engine, stream)` | | the bytes to send, empty for none yet; `ENG_CLOSED` once over |
 //! | `eng_stream_close(engine, stream)` | | |
-//! | `eng_wait(engine, after, timeout_ms, *epoch)` | | the notifier's epoch |
+//! | `eng_wait(engine, after, timeout_ms, *epoch)` | | the notifier's wakes: its commits and the signals its streams kept (D77) |
 //! | `eng_runner(engine, request)` | `{action: start, stop, run_due or status}` | the pass or the status, empty for start and stop |
 //! | `eng_free(ptr, len)` | an output | |
 //!
@@ -49,8 +49,9 @@
 //! mount's (`{stream: {pageSize, heartbeatMs}, mcp: {serverInfo: {name,
 //! version}, instructions}}`). A response whose body is an event stream
 //! carries the stream's handle and no body; `eng_stream_poll` pulls it
-//! without waiting, and the host waits for a commit on `eng_wait`, one
-//! thread for every stream of the engine, or for the heartbeat.
+//! without waiting, and the host waits for a commit or a signal on
+//! `eng_wait`, one thread for every stream of the engine, or for the
+//! heartbeat.
 //!
 //! An archive crate expands [`export_engine_c_abi!`] once, at its root,
 //! over its [`Project`]: the behaviors its engine runs, or a configure of

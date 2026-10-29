@@ -99,7 +99,7 @@ const engineAppTest = `use std::sync::Arc;
 use async_trait::async_trait;
 use http::request::Parts;
 use schemas_fixture_engine_api_topcoat::api::runtime::{ApiError, Authenticator, Principal, RequestContext};
-use schemas_fixture_engine_api_topcoat::api::{types, Implementations, NotesImplementation};
+use schemas_fixture_engine_api_topcoat::api::{types, Implementations, NotesImplementation, NotesListNotesArgs};
 use schemas_fixture_engine_api_topcoat::{engine, PageAuthenticator, RouterBuilderFixtureEngineApiExt, Setup};
 use topcoat::context::{Cx, app_context};
 use topcoat::router::{page, to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
@@ -139,6 +139,10 @@ struct Notes;
 impl NotesImplementation for Notes {
     async fn note_count(&self, _ctx: RequestContext) -> Result<types::NoteCount, ApiError> {
         Ok(types::NoteCount { count: 0.0 })
+    }
+
+    async fn list_notes(&self, _ctx: RequestContext, _args: NotesListNotesArgs) -> Result<Vec<types::NoteTitle>, ApiError> {
+        Ok(Vec::new())
     }
 }
 
@@ -190,7 +194,7 @@ async fn the_engine_serves_at_its_mount_behind_the_apis_authenticator() {
     assert!(body.contains(r#""createdBy":"ada""#), "{body}");
     let (status, body) = send(&router, "GET", &format!("{NOTES}/n1"), Some("ada"), "").await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert!(body.contains(r#""title":"Hello""#) && body.contains(r#""Comments":{"commentCount":0}"#), "{body}");
+    assert!(body.contains(r#""title":"Hello""#) && body.contains(r#""Comments":{"messages":0,"threads":{"open":0,"resolved":0},"composing":[],"unread":0}"#), "{body}");
     let (status, body) = send(&router, "GET", &format!("{NOTES}/n1"), Some("nobody"), "").await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
     let (status, body) = send(&router, "GET", &format!("{NOTES}/n1"), None, "").await;

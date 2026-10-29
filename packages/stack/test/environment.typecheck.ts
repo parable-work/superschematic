@@ -16,6 +16,7 @@ declare module "../src/index" {
       bucket: { versioning?: boolean };
       worker: { memory?: string };
       runner: { memory?: string };
+      memoryStore: { nodeType?: string };
     };
   }
 }
@@ -44,12 +45,20 @@ const ShopDb = service({ name: "shop-db", kind: SchemaKind.DB });
 const ShopCommon = service({ name: "shop-common", kind: SchemaKind.General });
 // A Bucket service's handle (D54).
 const ShopMedia = service({ name: "shop-media", kind: SchemaKind.Bucket });
+// A MemoryStore service's handle (D75).
+const ShopCache = service({ name: "shop-cache", kind: SchemaKind.MemoryStore });
 // An API with @job classes, whose names the sentinel writes as the third
 // type argument.
 const ShopCart = service<"API", ShopApiConfig, "ExpireCarts" | "SendDigest">({ name: "shop-cart", kind: SchemaKind.API });
 // An API with @worker classes and no @job class, whose workers the
 // sentinel writes as the fourth type argument, with the jobs never.
 const ShopFulfilment = service<"API", ShopApiConfig, never, "FulfilOrders">({ name: "shop-fulfilment", kind: SchemaKind.API });
+// An API with @deriver classes and no @job or @worker class, whose
+// derivers the sentinel writes as the fifth type argument (D74).
+const ShopSupport = service<"API", ShopApiConfig, never, never, "TriageTickets">({ name: "shop-support", kind: SchemaKind.API });
+// An API with @app classes and no @job, @worker or @deriver class, whose
+// apps the sentinel writes as the sixth type argument (D78).
+const ShopStock = service<"API", ShopApiConfig, never, never, never, "Backoffice">({ name: "shop-stock", kind: SchemaKind.API });
 
 @stack({ deploy: [ShopApi, ShopOrders], expose: [ShopApi] })
 export abstract class Shop {}
@@ -76,6 +85,8 @@ export abstract class Data {}
     { of: Data, tier: "small" },
     // A bucket takes the target's bucket settings.
     { of: ShopMedia, versioning: true },
+    // A memory store takes the target's memoryStore settings.
+    { of: ShopCache, nodeType: "SHARED_CORE_NANO" },
     // A platform outside the target takes its own settings, which the
     // loader checks.
     { of: ShopDb, platform: "other.sql", storageGb: 10 },
@@ -170,6 +181,31 @@ export abstract class ServerSettingOnBucket {}
 })
 export abstract class EnvOnBucket {}
 
+// A memory store an environment turns off (D75).
+@environment({ target: "fake", settings: [{ of: ShopCache, enabled: false }] })
+export abstract class NoCache {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error a bucket's settings on a memory store
+  settings: [{ of: ShopCache, versioning: true }],
+})
+export abstract class BucketSettingOnMemoryStore {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error a bucket is not turned off
+  settings: [{ of: ShopMedia, enabled: false }],
+})
+export abstract class BucketOff {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error a memory store has no env
+  settings: [{ of: ShopCache, env: { LOG_LEVEL: "warn" } }],
+})
+export abstract class EnvOnMemoryStore {}
+
 @environment({
   target: "fake",
   // @ts-expect-error a General service is no deployable
@@ -196,7 +232,7 @@ export abstract class Dev {}
 
 @environment({
   target: "local",
-  local: { postgresImage: "postgres:17-alpine", postgresPort: 55432, storagePort: 54443 },
+  local: { postgresImage: "postgres:17-alpine", postgresPort: 55432, storagePort: 54443, memoryStorePort: 56379 },
   settings: [{ of: ShopApi, port: 8080, env: { LOG_LEVEL: "debug" } }, { of: Backend, port: 8081 }],
 })
 export abstract class PinnedDev {}
@@ -221,6 +257,17 @@ export abstract class LocalDatabaseSetting {}
   settings: [{ of: ShopMedia, versioning: true }],
 })
 export abstract class LocalBucketSetting {}
+
+// The local target's memory store takes no settings, and is turned off.
+@environment({ target: "local", settings: [{ of: ShopCache, enabled: false }] })
+export abstract class LocalNoCache {}
+
+@environment({
+  target: "local",
+  // @ts-expect-error a local memory store takes no settings
+  settings: [{ of: ShopCache, nodeType: "x" }],
+})
+export abstract class LocalMemoryStoreSetting {}
 
 @environment({
   target: "local",
@@ -330,6 +377,22 @@ export abstract class SiteEnv {}
 })
 export abstract class DatabaseSettingOnSite {}
 
+// An origin (D91): a site and the APIs it serves on its own origin, or
+// every API it calls with apis left out.
+@stack({ deploy: [ShopApi, ShopWeb], origins: [{ site: ShopWeb, apis: [ShopApi] }] })
+export abstract class OriginShop {}
+
+@stack({ deploy: [ShopApi, ShopWeb], origins: [{ site: ShopWeb }] })
+export abstract class OriginOfEveryCall {}
+
+// @ts-expect-error an origin's site is a Site service's handle
+@stack({ deploy: [ShopApi, ShopWeb], origins: [{ site: ShopApi }] })
+export abstract class OriginOfAnAPI {}
+
+// @ts-expect-error an origin serves APIs
+@stack({ deploy: [ShopApi, ShopWeb], origins: [{ site: ShopWeb, apis: [ShopWeb] }] })
+export abstract class OriginServingASite {}
+
 // A worker's element names its API's handle and the worker's class; it
 // sets how many instances run and how many messages each handles, takes
 // the target's worker settings, and an env of its API's config (D53).
@@ -350,6 +413,40 @@ export abstract class WorkerSettings {}
   settings: [{ of: ShopFulfilment, worker: "FulfilOrders", concurrency: 2 }],
 })
 export abstract class LocalWorker {}
+
+// A deriver's element names its API's handle and the deriver's class; it
+// turns the deriver on or off, runs one instance or none, sets how many
+// answers it runs at a time, and takes an env of its API's config (D74).
+@environment({
+  target: "fake",
+  fake: { project: "acme-staging", region: "us-east1" },
+  settings: [
+    { of: ShopSupport, deriver: "TriageTickets", instances: 1, concurrency: 8, env: { LOG_LEVEL: "warn" } },
+    { of: ShopOrders, deriver: "Anything", enabled: false },
+  ],
+})
+export abstract class DeriverSettings {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error a deriver the API does not declare
+  settings: [{ of: ShopSupport, deriver: "TriageTicket" }],
+})
+export abstract class UnknownDeriver {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error a deriver runs one instance or none
+  settings: [{ of: ShopSupport, deriver: "TriageTickets", instances: 2 }],
+})
+export abstract class TwoDerivers {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error a schedule is a job's setting, not a deriver's
+  settings: [{ of: ShopSupport, deriver: "TriageTickets", schedule: "0 * * * *" }],
+})
+export abstract class ScheduleOnDeriver {}
 
 @environment({
   target: "fake",
@@ -457,3 +554,44 @@ export abstract class EnvOnRunner {}
   settings: [{ of: ShopDb, runner: true, memory: "1Gi" }],
 })
 export abstract class LocalRunnerMemory {}
+
+// An app is exposed beside its API's handle, which types its name (D78).
+@stack({ deploy: [ShopStock], expose: [ShopApi, { of: ShopStock, app: "Backoffice" }] })
+export abstract class ShopWithApp {}
+
+// @ts-expect-error an app the API does not declare
+@stack({ deploy: [ShopStock], expose: [{ of: ShopStock, app: "Kiosk" }] })
+export abstract class UnknownExposedApp {}
+
+// An app's element names its API's handle and the app's class; it turns
+// the app on or off, takes the target's app settings and an env of its
+// API's config (D78).
+@environment({
+  target: "local",
+  settings: [
+    { of: ShopStock, app: "Backoffice", enabled: false, port: 3000, env: { LOG_LEVEL: "warn" } },
+    { of: ShopOrders, app: "Anything" },
+  ],
+})
+export abstract class AppSettings {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error an app the API does not declare
+  settings: [{ of: ShopStock, app: "Kiosk" }],
+})
+export abstract class UnknownApp {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error instances are a worker's or a deriver's setting, not an app's
+  settings: [{ of: ShopStock, app: "Backoffice", instances: 2 }],
+})
+export abstract class InstancesOnApp {}
+
+@environment({
+  target: "fake",
+  // @ts-expect-error an app belongs to an API, not a database
+  settings: [{ of: ShopDb, app: "Backoffice" }],
+})
+export abstract class AppOfDb {}

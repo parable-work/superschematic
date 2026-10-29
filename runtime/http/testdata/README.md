@@ -7,9 +7,12 @@ behave alike.
 |---|---|
 | `serviceauth_parity.json` | The service step's vectors (D37), and in `signing` the signed-token source's, over a private JWK and an Ed25519 key's PKCS#8 and SubjectPublicKeyInfo PEMs (D63). Its `comment` states the harness; `runtime/http/go/README.md` describes it. |
 | `cors_parity.json` | The decisions of a site's CORS (D55, amended): Go's `cors.Policy.Decide`, TypeScript's `corsDecision` and Rust's `cors::Policy::decide`. Its `comment` states the harness; `runtime/http/go/cors` writes it with `-update`. |
-| `stackconfig_parity.json` | The vectors of the readers of a stack's derived fields (D51, D57): `LoadDatabase`, `LoadService`, `LoadBucket`, `LoadCallers` and `LoadCORS` and their TypeScript and Rust twins. Its `comment` states the harness; `runtime/http/go/stackconfig` writes it with `-update`. |
+| `stackconfig_parity.json` | The vectors of the readers of a stack's derived fields (D51, D57): `LoadDatabase`, `LoadService`, `LoadBucket`, `LoadMemoryStore` (D75), `LoadCallers` and `LoadCORS` and their TypeScript and Rust twins. Its `comment` states the harness; `runtime/http/go/stackconfig` writes it with `-update`. |
+| `memorystore_parity.json` | The memory store's vectors (D75): `names`, a declaration's name built from its parts' wire strings and refused when a segment breaks the rule, with the store's or a member's prefix; and `rateLimit`, the shared rate limit's sliding window (`windows`) and its counters' names (`keys`). Its `comment` states the harness; `ir` writes it with `go test -run TestWriteMemoryStoreParityVectors -update`. |
 | `page_parity.json` | The page of a `@paginated` operation (D60): the reader of `cursor`, `limit` and a sort (Go's `paging.Parse`, TypeScript's `readPage`, Rust's `PageSpec::query` then `PageSpec::unbind`), cursors encoded and read back, cursors refused, and pages built from rows; and a sorted operation's cursor (D60, amended) bound to its sort and back (`bindings`), refused under another sort or as no envelope (`refusedBindings`), and past 1024 characters once bound (`unbindable`). Its `comment` states the harness; `runtime/http/go/paging` writes it with `-update`. |
 | `search_parity.json` | The answers of the search helpers (D62): Go's `search.Terms`, `LikePattern`, `Fold` and `Matches`, TypeScript's `searchTerms`, `likePattern`, `foldText` and `searchMatches`, and Rust's `search::terms`, `like_pattern`, `fold` and `matches`. Its `comment` states the harness; `runtime/http/go/search` writes it with `-update`. |
+| `webhook_jwt_parity.json` | The JWT body-hash webhook verifier's vectors (D81): Go's `webhook.JWTBodyHashVerifier`, TypeScript's `jwtBodyHashVerifier` and Rust's `JwtBodyHashVerifier`. It holds no key: each runtime signs the tokens with keys it generates for the run. Its `comment` states the harness; `runtime/http/go/webhook` writes it with `-update`. |
+| `content_disposition_parity.json` | The `Content-Disposition` of a `FileDownload` result (D81) for each filename: TypeScript's `contentDisposition` and Go's `response.ContentDisposition`. Its `description` states the rule. |
 | `identity_parity.json` | The identity runtime's vectors (D50), described below. |
 | `identity/` | The fixture the identity stores run against: `fixture-user-model-db.json` (its identity descriptor), `create.sql` (its Postgres DDL) and `sqlite/create.sql` (its SQLite DDL). `TestIdentityStoreFixtureIsCurrent` in `internal/generator` fails when they are stale and rewrites them with `-update`. |
 
@@ -203,6 +206,18 @@ no held permission covers. A held permission covers a required one when
 they are equal or the required one continues it after a dot (`orders`
 covers `orders.read`, not `ordersx` or `order`). Refused, the route
 answers 403 `forbidden`.
+
+### userWrites
+
+`{name, held, roles, want}`: no one sets the password of, disables or
+enables a user who holds what they do not. A caller whose permissions are
+`held` may write a user holding `roles` (each `{name, permissions}`) when
+`want.allowed`; `want.uncovered` lists, in the order of the roles'
+effective permissions (`effectivePermissions`) and once each, the ones no
+held permission covers, by the rule of `grants`. Refused, the route
+answers 403 `forbidden` with `details.permissions` the uncovered ones, after
+`users.write` is checked, and a password's rule, and 404 for a user that
+is not there.
 
 ### capabilities
 

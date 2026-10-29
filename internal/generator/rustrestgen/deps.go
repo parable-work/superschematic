@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/BurntSushi/toml"
+
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/rustgen"
@@ -43,6 +45,13 @@ type DepsInfo struct {
 
 	// Buckets are the API's buckets entries, in order (D54).
 	Buckets []DepsBucket
+
+	// MemoryStores are the API's memoryStores entries, its rateLimitStore
+	// among them, in order (D75), and RateLimitStore the service of its
+	// rateLimitStore, "" without one: the store its server's entrypoint
+	// counts its @rateLimit routes in.
+	MemoryStores   []DepsMemoryStore
+	RateLimitStore string
 
 	// DatabaseTypesCrate is the Rust types crate of Database when the API
 	// declares a worker (D65): it declares the queues' messages, which the
@@ -130,6 +139,25 @@ type DepsBucket struct {
 
 	// Field is the Deps field that holds the bucket.
 	Field string
+}
+
+// DepsMemoryStore is a memory store in Deps (D75): an Arc of the HTTP
+// runtime's memorystore::MemoryStore, which the entrypoint opens once, on
+// Redis through the runtime's memorystore-redis feature, or disabled while
+// the store's field is unset.
+type DepsMemoryStore struct {
+	// Service is the MemoryStore service.
+	Service string
+
+	// Field is the Deps field that holds the store.
+	Field string
+
+	// Definitions is the crate of the store's Rust definitions, which the
+	// implementation's crate depends on to name a channel or a key, and
+	// DefinitionsPath its directory relative to the API crate's; both are
+	// empty when the store's outputs write none.
+	Definitions     string
+	DefinitionsPath string
 }
 
 // CrateIdent is the SDK crate as Rust source spells it.
@@ -247,6 +275,11 @@ func (o *APIOutput) HasWorkers() bool { return o.Deps != nil && len(o.Workers) >
 // BoxError, the error their methods return.
 func (o *APIOutput) HasBackgroundWork() bool { return o.HasJobs() || o.HasWorkers() }
 
+// HasTraits reports whether deps.rs declares a trait an implementation
+// implements beside a namespace's, whose methods fail with BoxError: Jobs,
+// Workers or a deriver's (D74).
+func (o *APIOutput) HasTraits() bool { return o.HasBackgroundWork() || o.HasDerivers() }
+
 // The functions an implementation of an API with jobs or workers declares
 // in its src/lib.rs, which a job's and a worker's entrypoint call with the
 // API's Deps (D65).
@@ -283,7 +316,7 @@ func (o *APIOutput) ManualSignature(endpoint EndpointInfo) string {
 // Handlers, and Jobs, Workers and BoxError for an API with either.
 func (o *APIOutput) DepsExports() string {
 	names := []string{"Deps", "Handlers"}
-	if o.HasBackgroundWork() {
+	if o.HasTraits() {
 		names = append(names, "BoxError")
 	}
 	if o.HasJobs() {
@@ -292,6 +325,7 @@ func (o *APIOutput) DepsExports() string {
 	if o.HasWorkers() {
 		names = append(names, "Workers")
 	}
+	names = append(names, o.DeriverExports()...)
 	return strings.TrimPrefix(rustutil.UseLine("deps", names), "use ")
 }
 
@@ -299,7 +333,7 @@ func (o *APIOutput) DepsExports() string {
 // Rust types for an API with workers, nil without one or when the crate
 // depends on them already for a dependency's validators.
 func (o *APIOutput) DatabaseTypesDependency() *DependencyCrate {
-	if !o.HasWorkers() || o.Deps.DatabaseTypesCrate == "" {
+	if (!o.HasWorkers() && !o.HasDerivers()) || o.Deps.DatabaseTypesCrate == "" {
 		return nil
 	}
 	for _, crate := range o.DependencyCrates {
@@ -330,15 +364,25 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 		}
 		seen[b.Field] = b.Service
 	}
+	for _, m := range deps.MemoryStores {
+		if prev, clash := seen[m.Field]; clash {
+			return fmt.Errorf("rustrestgen: %s lists memory store %s, which would be Deps.%s, the field of %s", o.SchemaName, m.Service, m.Field, prev)
+		}
+		seen[m.Field] = m.Service
+	}
 	if len(o.Workers) > 0 && deps.DatabaseTypesCrate == "" {
 		return fmt.Errorf("rustrestgen: %s declares workers, whose messages are its database's Rust types, and its Deps names none", o.SchemaName)
+	}
+	if len(o.Derivers) > 0 && (deps.DatabaseTypesCrate == "" || deps.Engine == nil) {
+		return fmt.Errorf("rustrestgen: %s declares derivers, whose methods its database's Rust types type and whose engine its Deps holds, and its Deps names neither", o.SchemaName)
 	}
 	o.Deps = &deps
 	return nil
 }
 
 // DepsField is the Deps field of the client of the API service named
-// service, or of the bucket of the Bucket service named service: its name
+// service, of the bucket of the Bucket service named service, or of the
+// store of the MemoryStore service named service: its name
 // in snake_case (shop-api is shop_api).
 func DepsField(service string) string {
 	return rustutil.ToSnakeCase(service)
@@ -386,15 +430,25 @@ func (o *APIOutput) DepsUses() []string {
 	if len(o.WebhookProviders) > 0 {
 		interfaces = append(interfaces, "WebhookVerifier")
 	}
+	if o.HasDerivers() {
+		// The database's types, which type the derivers' methods (D74).
+		uses = append(uses, "use crate::"+DatabaseTypesModule+";")
+	}
 	uses = append(uses, rustutil.UseLine("crate::interfaces", interfaces))
-	if o.HasBackgroundWork() {
-		// The Jobs and Workers traits, after crate's paths, as rustfmt
-		// orders them.
+	if o.HasTraits() {
+		// The Jobs, Workers and derivers' traits, after crate's paths, as
+		// rustfmt orders them.
 		uses = append(uses, "use async_trait::async_trait;")
+	}
+	if o.HasDerivers() {
+		uses = append(uses, "use serde::{Deserialize, Serialize};")
 	}
 	var runtime []string
 	if o.Deps != nil && len(o.Deps.Buckets) > 0 {
 		runtime = append(runtime, "bucket::Bucket")
+	}
+	if o.Deps != nil && len(o.Deps.MemoryStores) > 0 {
+		runtime = append(runtime, "memorystore::MemoryStore")
 	}
 	if o.Deps != nil && o.Deps.Database != "" {
 		runtime = append(runtime, "postgres::Pool")
@@ -411,8 +465,19 @@ func (o *APIOutput) DepsUses() []string {
 	if o.HasJobs() {
 		runtime = append(runtime, "Shutdown")
 	}
+	engine := ""
+	if o.HasDerivers() {
+		engine = rustutil.UseLine(o.Deps.Engine.CrateIdent()+"::derive", []string{"DerivationAnswer", "DerivationItem"})
+	}
+	if engine != "" && o.Deps.Engine.CrateIdent() < o.RuntimeCrateIdent {
+		uses = append(uses, engine)
+		engine = ""
+	}
 	if len(runtime) > 0 {
 		uses = append(uses, rustutil.UseLine(o.RuntimeCrateIdent, runtime))
+	}
+	if engine != "" {
+		uses = append(uses, engine)
 	}
 	return uses
 }
@@ -502,6 +567,60 @@ type ImplementationScaffold struct {
 	// depends on.
 	APIPath     string
 	RuntimePath string
+	// Definitions are the crates of the Rust definitions of the memory
+	// stores the API lists (D75), by their paths relative to the
+	// implementation's directory, which its Cargo.toml depends on.
+	Definitions []ScaffoldDependency
+}
+
+// ScaffoldDependency is a crate the implementation's Cargo.toml depends on
+// by path.
+type ScaffoldDependency struct {
+	Crate string
+	Path  string
+}
+
+// CargoDependency is an entry of a Cargo.toml's [dependencies]: a crate
+// and the value it is given, a version or an inline table.
+type CargoDependency struct {
+	Crate string
+	Value string
+}
+
+// Line is the entry as Cargo.toml writes it.
+func (d CargoDependency) Line() string { return d.Crate + " = " + d.Value }
+
+// Dependencies are the [dependencies] the scaffold's Cargo.toml writes
+// first: async-trait, axum for an API with a manual route, http for one
+// whose routes check an end user, and the API crate and the HTTP runtime
+// by their paths.
+func (s ImplementationScaffold) Dependencies() []CargoDependency {
+	deps := []CargoDependency{{Crate: "async-trait", Value: `"0.1.89"`}}
+	if len(s.ManualEndpoints) > 0 {
+		deps = append(deps, CargoDependency{Crate: "axum", Value: `"0.8.9"`})
+	}
+	if s.ChecksEndUsers() {
+		deps = append(deps, CargoDependency{Crate: "http", Value: `"1"`})
+	}
+	return append(deps,
+		CargoDependency{Crate: s.CrateName, Value: pathDependency(s.APIPath)},
+		CargoDependency{Crate: s.RuntimeCrate, Value: pathDependency(s.RuntimePath)})
+}
+
+// DefinitionDependencies are the [dependencies] the scaffold's Cargo.toml
+// writes after Dependencies: the definitions of each memory store the API
+// lists, by their paths (D75).
+func (s ImplementationScaffold) DefinitionDependencies() []CargoDependency {
+	var deps []CargoDependency
+	for _, d := range s.Definitions {
+		deps = append(deps, CargoDependency{Crate: d.Crate, Value: pathDependency(d.Path)})
+	}
+	return deps
+}
+
+// pathDependency is the inline table of a dependency on the crate at path.
+func pathDependency(path string) string {
+	return `{ path = "` + path + `" }`
 }
 
 // CrateIdent is the API crate as Rust source spells it.
@@ -533,7 +652,7 @@ func (s ImplementationScaffold) APIUse() string {
 			names = append(names, endpoint.ArgsName)
 		}
 	}
-	if s.HasBackgroundWork() {
+	if s.HasTraits() {
 		names = append(names, "BoxError")
 	}
 	if s.HasJobs() {
@@ -541,6 +660,18 @@ func (s ImplementationScaffold) APIUse() string {
 	}
 	if s.HasWorkers() {
 		names = append(names, "Workers", DatabaseTypesModule)
+	}
+	if s.HasDerivers() {
+		if !s.HasWorkers() {
+			names = append(names, DatabaseTypesModule)
+		}
+		names = append(names, "DerivedAnswer", "DerivedItem", "Derivers")
+		for _, d := range s.Derivers {
+			names = append(names, d.Trait)
+		}
+		for _, m := range s.DerivedInputs() {
+			names = append(names, m.Inputs)
+		}
 	}
 	if len(s.ManualEndpoints) > 0 {
 		names = append(names, "ManualRoutes")
@@ -589,7 +720,7 @@ func (s ImplementationScaffold) ManualMethodSignature(endpoint EndpointInfo) str
 // #[async_trait] and hold their deps in an Arc: a namespace's, the
 // authenticator's, Jobs, Workers or ManualRoutes.
 func (s ImplementationScaffold) Async() bool {
-	return len(s.Namespaces) > 0 || s.ChecksEndUsers() || s.HasBackgroundWork() || len(s.ManualEndpoints) > 0
+	return len(s.Namespaces) > 0 || s.ChecksEndUsers() || s.HasTraits() || len(s.ManualEndpoints) > 0
 }
 
 // RuntimeUse is the use declaration of what the implementation names from
@@ -647,22 +778,13 @@ var ImplementationLib = filepath.Join("src", "lib.rs")
 // returns the Handlers, each method answering 501 Not Implemented. The
 // output must have its Deps (SetDeps).
 func WriteImplementationScaffold(output *APIOutput, dir, apiDir string, paths naming.LocalPaths, names naming.Naming) (bool, error) {
-	if output.Deps == nil {
-		return false, fmt.Errorf("rustrestgen: the implementation scaffold of %s needs its Deps", output.SchemaName)
-	}
 	exists, err := ImplementationExists(dir)
 	if err != nil || exists {
 		return false, err
 	}
-	if paths.HTTPRuntimeRust == "" {
-		return false, fmt.Errorf("rustrestgen: [paths] http_runtime_rust is required to locate the http-runtime crate from the implementation of %s", output.SchemaName)
-	}
-	view := ImplementationScaffold{APIOutput: output, Crate: names.OrDefault().RustImplementationCrate(output.SchemaName)}
-	if view.APIPath, err = naming.RelPath(dir, apiDir); err != nil {
-		return false, fmt.Errorf("rustrestgen: the API crate's path from the implementation of %s: %w", output.SchemaName, err)
-	}
-	if view.RuntimePath, err = naming.RelPath(dir, paths.HTTPRuntimeRust); err != nil {
-		return false, fmt.Errorf("rustrestgen: the runtime crate's path from the implementation of %s: %w", output.SchemaName, err)
+	view, err := implementationScaffold(output, dir, apiDir, paths, names)
+	if err != nil {
+		return false, err
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
 		return false, fmt.Errorf("create implementation crate %s: %w", dir, err)
@@ -676,6 +798,80 @@ func WriteImplementationScaffold(output *APIOutput, dir, apiDir string, paths na
 		}
 	}
 	return true, nil
+}
+
+// implementationScaffold is what the scaffold of the API's implementation
+// at dir is written from: its crate's name and the paths from dir of the
+// API crate at apiDir, the runtime and each memory store's definitions.
+func implementationScaffold(output *APIOutput, dir, apiDir string, paths naming.LocalPaths, names naming.Naming) (ImplementationScaffold, error) {
+	view := ImplementationScaffold{APIOutput: output, Crate: names.OrDefault().RustImplementationCrate(output.SchemaName)}
+	if output.Deps == nil {
+		return view, fmt.Errorf("rustrestgen: the implementation scaffold of %s needs its Deps", output.SchemaName)
+	}
+	if paths.HTTPRuntimeRust == "" {
+		return view, fmt.Errorf("rustrestgen: [paths] http_runtime_rust is required to locate the http-runtime crate from the implementation of %s", output.SchemaName)
+	}
+	var err error
+	if view.APIPath, err = naming.RelPath(dir, apiDir); err != nil {
+		return view, fmt.Errorf("rustrestgen: the API crate's path from the implementation of %s: %w", output.SchemaName, err)
+	}
+	if view.RuntimePath, err = naming.RelPath(dir, paths.HTTPRuntimeRust); err != nil {
+		return view, fmt.Errorf("rustrestgen: the runtime crate's path from the implementation of %s: %w", output.SchemaName, err)
+	}
+	for _, m := range output.Deps.MemoryStores {
+		if m.Definitions == "" {
+			continue
+		}
+		path, err := naming.RelPath(dir, filepath.Join(apiDir, m.DefinitionsPath))
+		if err != nil {
+			return view, fmt.Errorf("rustrestgen: the definitions of %s from the implementation of %s: %w", m.Service, output.SchemaName, err)
+		}
+		view.Definitions = append(view.Definitions, ScaffoldDependency{Crate: m.Definitions, Path: path})
+	}
+	return view, nil
+}
+
+// ImplementationDependencies are what the scaffold of the API's
+// implementation at dir depends on now, by the entries its Cargo.toml
+// writes (Dependencies, DefinitionDependencies). A stack's build warns of
+// one an implementation it no longer writes lacks (D100).
+func ImplementationDependencies(output *APIOutput, dir, apiDir string, paths naming.LocalPaths, names naming.Naming) ([]CargoDependency, error) {
+	view, err := implementationScaffold(output, dir, apiDir, paths, names)
+	if err != nil {
+		return nil, err
+	}
+	return append(view.Dependencies(), view.DefinitionDependencies()...), nil
+}
+
+// MissingCargoDependencies returns each of deps that the Cargo.toml in dir
+// names in none of its [dependencies], [dev-dependencies] and
+// [build-dependencies], by its key or as the package a renamed one takes,
+// in the order of deps (D100).
+func MissingCargoDependencies(dir string, deps []CargoDependency) ([]CargoDependency, error) {
+	path := filepath.Join(dir, ImplementationManifest)
+	var manifest map[string]any
+	if _, err := toml.DecodeFile(path, &manifest); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	listed := map[string]bool{}
+	for _, table := range []string{"dependencies", "dev-dependencies", "build-dependencies"} {
+		entries, _ := manifest[table].(map[string]any)
+		for crate, value := range entries {
+			listed[crate] = true
+			if inline, ok := value.(map[string]any); ok {
+				if pkg, ok := inline["package"].(string); ok {
+					listed[pkg] = true
+				}
+			}
+		}
+	}
+	var missing []CargoDependency
+	for _, dep := range deps {
+		if !listed[dep.Crate] {
+			missing = append(missing, dep)
+		}
+	}
+	return missing, nil
 }
 
 // fnPattern matches a public function at the top of a file, by its name in

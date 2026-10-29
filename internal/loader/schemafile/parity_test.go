@@ -362,7 +362,7 @@ var parityInputs = []struct{ name, registry, input string }{
 	{"a core behavior config its schema rejects", "core", `{"name": "Document", "role": "EmbeddedStruct", "behaviors": [
 		{"name": "Workflow", "config": {"states": [], "transitions": []}}]}`},
 	{"a missing required core behavior config", "core", `{"name": "Document", "role": "EmbeddedStruct", "behaviors": [{"name": "Workflow"}]}`},
-	{"a config for a core behavior that takes none", "core", `{"name": "Document", "role": "EmbeddedStruct", "behaviors": [{"name": "Comments", "config": {"threads": true}}]}`},
+	{"a core behavior config with a key its schema lacks", "core", `{"name": "Document", "role": "EmbeddedStruct", "behaviors": [{"name": "Comments", "config": {"threads": true}}]}`},
 	{"an unregistered behavior", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": "acme.Ghost"}]}`},
 	{"an unregistered behavior in a document", "extended", `{"types": {"Item": {"name": "Item", "role": "DBTable", "behaviors": [{"name": "acme.Ghost"}]}}}`},
 	{"a behavior config its schema rejects", "extended", `{"name": "Item", "role": "DBTable", "behaviors": [{"name": "acme.Stock", "config": {"aisles": 0}}]}`},
@@ -408,6 +408,18 @@ var parityInputs = []struct{ name, registry, input string }{
 	{"a field display that declares nothing", "core", `{"name": "Note", "role": "APIInput", "fields": [{"name": "text", "typeRef": {"name": "String"}, "display": {}}]}`},
 	{"a field display multiline that is not a boolean", "core", `{"name": "Note", "role": "APIInput", "fields": [{"name": "text", "typeRef": {"name": "String"}, "display": {"multiline": "yes"}}]}`},
 	{"a field display key the schema lacks", "core", `{"name": "Note", "role": "APIInput", "fields": [{"name": "text", "typeRef": {"name": "String"}, "display": {"rows": 6}}]}`},
+	// A field display's currency (D48, amended): a code, three capital
+	// letters, or {field}, a non-blank name.
+	{"a field display currency", "core", `{"name": "Price", "role": "APIInput", "fields": [
+		{"name": "amount", "typeRef": {"name": "Finance.Money"}, "display": {"currency": "GBP"}},
+		{"name": "fee", "typeRef": {"name": "Finance.Money"}, "display": {"currency": {"field": "currency"}}},
+		{"name": "currency", "typeRef": {"name": "Finance.Currency"}}]}`},
+	{"a field display currency in lower case", "core", `{"name": "Price", "role": "APIInput", "fields": [{"name": "amount", "typeRef": {"name": "Finance.Money"}, "display": {"currency": "gbp"}}]}`},
+	{"a field display currency of four letters", "core", `{"name": "Price", "role": "APIInput", "fields": [{"name": "amount", "typeRef": {"name": "Finance.Money"}, "display": {"currency": "GBPX"}}]}`},
+	{"a field display currency that is a number", "core", `{"name": "Price", "role": "APIInput", "fields": [{"name": "amount", "typeRef": {"name": "Finance.Money"}, "display": {"currency": 826}}]}`},
+	{"a field display currency field that is blank", "core", `{"name": "Price", "role": "APIInput", "fields": [{"name": "amount", "typeRef": {"name": "Finance.Money"}, "display": {"currency": {"field": " "}}}]}`},
+	{"a field display currency without its field", "core", `{"name": "Price", "role": "APIInput", "fields": [{"name": "amount", "typeRef": {"name": "Finance.Money"}, "display": {"currency": {}}}]}`},
+	{"a field display currency with a code and a field", "core", `{"name": "Price", "role": "APIInput", "fields": [{"name": "amount", "typeRef": {"name": "Finance.Money"}, "display": {"currency": {"field": "currency", "code": "GBP"}}}]}`},
 	{"enum member titles in an enum file", "core", `{"kind": "Enum", "name": "OrderStatus", "values": [
 		{"name": "Placed", "serializedAs": "placed"}, {"name": "OnHold", "title": "Held for a stock check", "serializedAs": "on_hold"}]}`},
 	{"enum member titles in a document", "core", `{"kind": "DB", "name": "orders", "enums": {"OrderStatus": {"name": "OrderStatus", "values": [

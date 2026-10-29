@@ -370,6 +370,22 @@ describe('permissionPolicy', () => {
     }
   });
 
+  test("allows a behavior's namespace operation that reads, and one that writes to a holder of <behavior>.<operation> (D77)", () => {
+    const nobody: Principal = { subject: 'u', permissions: [] };
+    const claimer: Principal = { subject: 'c', permissions: ['Comments.claimDeliveries'] };
+    const policy = permissionPolicy();
+    for (const listing of [undefined, true] as const) {
+      const ask = (principal: Principal, action: 'read' | 'write', operation: string) =>
+        policy({ principal, action, namespace: 'default', behavior: 'Comments', operation, ...(listing ? { listing } : {}) });
+      assert.equal(ask(nobody, 'read', 'inbox'), true);
+      assert.equal(ask(nobody, 'write', 'claimDeliveries'), false);
+      assert.equal(ask(claimer, 'write', 'claimDeliveries'), true);
+      assert.equal(ask(claimer, 'write', 'settleDeliveries'), false);
+    }
+    const own = permissionPolicy({ permissionMatcher: (held, required) => held.includes('root') || required.length === 0 });
+    assert.equal(own({ principal: { subject: 'r', permissions: ['root'] }, action: 'write', namespace: 'default', behavior: 'Comments', operation: 'claimDeliveries' }), true);
+  });
+
   test("in an engine it matches with the engine's permissionMatcher, unless it was given its own", () => {
     const rooted = (held: readonly string[]) => held.includes('root');
     const root: Principal = { subject: 'root', permissions: ['root'] };

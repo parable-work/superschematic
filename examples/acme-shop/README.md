@@ -3,9 +3,12 @@
 The project the docs site's tutorial and guides build: a small shop,
 generated with the installed superschematic binary, the core with the
 official targets linked, since `storefront-stack` runs the storefront on
-the cloudflare target; and the Topcoat app's crate, which
-`superschematic-topcoat` (the core with `extensions/topcoat` linked)
-writes. The
+the cloudflare target; and the Topcoat crates, which
+`superschematic-topcoat` (the installed binary with `extensions/topcoat`
+linked beside the official extensions) writes. `shop-stack` deploys
+`shop-stock`'s app `Backoffice` (D78), whose build needs Topcoat, so the
+installed binary refuses to build that stack, and `superschematic-topcoat`
+builds every service and runs the stack. The
 "Start here", "Your first project" and "Guides" pages of the
 [docs site](https://parable-work.github.io/superschematic/) quote these
 files; `examples/acme-schematic` is the same shop extended with its own
@@ -14,41 +17,43 @@ kind, decorators and auth provider.
 | Path | What it is |
 |---|---|
 | `schemas/services/shop-common` | General: `Price`, `Currency` and the `@strictJSON` `FeedItem`, in all four languages |
-| `schemas/services/shop-db` | DB: users and roles, with the core `User` and `UserRole` traits (D50), products, restock requests, one open per product, orders, each with the checkout it was placed from, and reviews, and the queues `OrderPlaced` and `StockLow`, built for Postgres and SQLite; and in `src/commerce.schema.ts` four engine types (D58, D70), which the engine keeps beside the tables: `Inventory`, a product's units (`Stock`), `CollectionPoint`, a counter's pickup slots (`Calendar`), `Checkout`, a shopper's checkout, which holds both while it waits for payment (`Holds`, `Timers`, `Payments`) and is placed once paid, and `Refund`, which two members of staff sign off (`Approvals`). Its `outputs.engine` names the access policy's rules and the invocation policy of each operation that moves money or stock ([Commerce](#commerce)) |
-| `schemas/services/shop-api` | API over `shop-db`, served in Go, with Go and TypeScript SDKs: products, and the user model's sign-in and administration routes |
+| `schemas/services/shop-db` | DB: users and roles, with the core `User` and `UserRole` traits (D50), products, restock requests, one open per product, orders, each with the checkout it was placed from, and reviews, and the queues `OrderPlaced`, one waiting per order, which a trigger on `Order` enqueues too when an order is put back to placed (`@enqueueOnChange`), and `StockLow`, one waiting per product and handled one product at a time (D80), built for Postgres and SQLite; and in `src/commerce.schema.ts` four engine types (D58, D70), which the engine keeps beside the tables: `Inventory`, a product's units (`Stock`), `CollectionPoint`, a counter's pickup slots (`Calendar`), `Checkout`, a shopper's checkout, which holds both while it waits for payment (`Holds`, `Timers`, `Payments`) and is placed once paid, and `Refund`, which two members of staff sign off (`Approvals`); and in `src/support.schema.ts` `Ticket`, a shopper's support ticket whose category, priority and summary a model fills (`Derived`) and support staff confirm when the model is unsure (`Provenance`, D73). Its `outputs.engine` names the access policy's rules and the invocation policy of each operation that moves money or stock ([Commerce](#commerce)) |
+| `schemas/services/shop-api` | API over `shop-db`, served in Go, with Go and TypeScript SDKs: products, a request that waits for a product's image, and the user model's sign-in and administration routes; it lists `shop-cache` and counts its `@rateLimit` routes there (`rateLimitStore`), so its replicas share one budget |
+| `schemas/services/shop-cache` | MemoryStore (D75): a Valkey server `shop-api`'s replicas share and can lose, declaring the signal `ProductChanged`, which wakes a request waiting for a product, and the claim `ImageUploadSigning`, one image upload signed at a time per product; its build writes the Go definitions `go/shop-api` names them with |
 | `schemas/services/shop-orders` | API over `shop-db`, served in Go and in Rust, with SDKs in Go, TypeScript, Python and Rust; a shopper starts the checkout `shop-cart` filled, pays for it at acmepay and asks for a refund, acmepay's webhook (`@webhook @hmacVerified`) records each payment event, and its job `SettlePayments` makes the payment actions the engine holds at acmepay; it calls `shop-stock`, which it tells what each placed checkout sold; its worker `FulfilOrders` fulfils each order placed, from `OrderPlaced`, and its job `ShipOrders` ships the fulfilled ones. A shopper, who holds `orders.read` and `orders.write`, lists, reads and cancels their own orders, another customer's answering 404 (`@requireOwnership`), and staff, who hold `orders.read`, `orders.write` and `orders.any` (or simply `orders`), every customer's: `orders.any` opens no route alone, and since only the implementations check it, it is missing from `permissions.json`, so `identity bootstrap --permission orders.any` warns that it is uncatalogued. Its lists of orders, of a product's reviews and of the catalog page by cursor (D60), each in a sort (D60, amended), an order's lines and the reviews' routes refer to the catalog's products (D61), and the reviews and the products are searched by their words (D62) |
 | `schemas/services/shop-stock` | API over `shop-db`'s `Inventory`, served in Rust (D57), with Go and Rust SDKs: anyone lists the stock, staff with `stock.write` count a product's shelf and set the level it is low at, and book deliveries in, and only `shop-orders` tells it what a checkout sold (`@requireService`); a sale that leaves a product low enqueues `StockLow`, from which its Rust worker `ReorderStock` files a restock request, and its Rust job `OrderRestocks` files one for each product the engine lists low (`Stock.low`) and orders the open ones (D65) |
-| `schemas/services/shop-cart` | API over `shop-db`'s engine, served in TypeScript, with a TypeScript SDK: a shopper's cart, which is a `Checkout` in `cart`, and the pickup slots each `CollectionPoint` has free (`findAvailability`). It is a service of its own because `storefront-stack` runs the storefront as a Cloudflare Worker, which cannot load the engine |
-| `schemas/services/shop-storefront` | API served in TypeScript, with a TypeScript SDK; uses `Price` |
-| `schemas/services/shop-web` | Site: the shop's static site, which calls `shop-api` from the browser (D55) |
-| `schemas/services/shop-stack` | Stack: deploys `shop-api` and `shop-orders`, each on a Go server, `shop-stock`, on a Rust server cargo builds, and `shop-cart` and `shop-storefront`, on TypeScript servers Bun runs, each on an entrypoint the build writes, `shop-orders`' Go worker and jobs and `shop-stock`'s Rust ones, `shop-db`'s engine runner, and the site `shop-web`; its `Dev` environment runs on the `local` target, `ShipOrders` and `SettlePayments` every minute and `OrderRestocks` only on demand |
+| `schemas/services/shop-cart` | API over `shop-db`'s engine, served in TypeScript, with a TypeScript SDK: a shopper's cart, which is a `Checkout` in `cart`, and the pickup slots each `CollectionPoint` has free (`findAvailability`); a shopper's support tickets, a `Ticket`; a shopper's own reviews, paged, searched, written twice as one and deleted, and reorders of their orders, rows of `shop-db`'s tables through its generated TypeScript repositories (`Deps.orm`, D79); and its deriver `TriageTickets` (`@deriver`, D74), a deployable of its own that fills each ticket's derived fields. It is a service of its own because `storefront-stack` runs the storefront as a Cloudflare Worker, which cannot load the engine |
+| `schemas/services/shop-storefront` | API served in TypeScript, with a TypeScript SDK; uses `Price`; a cart's lines import from a CSV file (`FileUpload`) and export as one (`FileDownload`, D81) |
+| `schemas/services/shop-web` | Site: the shop's static site, which calls `shop-api` from the browser (D55), with a dev server `stack dev` runs (D82) |
+| `schemas/services/shop-stack` | Stack: deploys `shop-api` and `shop-orders`, each on a Go server, `shop-stock`, on a Rust server cargo builds, and `shop-cart` and `shop-storefront`, on TypeScript servers Bun runs, each on an entrypoint the build writes, `shop-orders`' Go worker and jobs and `shop-stock`'s Rust ones, `shop-db`'s engine runner, `shop-cart`'s deriver `TriageTickets`, `shop-stock`'s app `Backoffice` (D78), exposed, and the site `shop-web`; its `Dev` environment runs on the `local` target, `ShipOrders` and `SettlePayments` every minute and `OrderRestocks` only on demand |
 | `schemas/services/storefront-stack` | Stack: deploys `shop-storefront` alone, exposed: on Bun in `Dev`, on the `local` target, and in `Staging` as a Cloudflare Worker at workers.dev, on the `cloudflare` target with the docs' placeholder account (D64), whose build adds the Workers entrypoint `fetch.ts` and `bundle.ts` beside the server's `main.ts`; `src/cloudflare-target.ts` types the target's values and settings |
 | `schemas/services/shop-wishlist-db` | DB: a shopper's wishlist, one row per shopper and product with their note, built for SQLite first and Postgres, so the API over it gets D1's interface (D64) |
 | `schemas/services/shop-wishlist` | API over `shop-wishlist-db`, served in TypeScript: read a shopper's wishlist, keep a product with a note, drop one; no user model, since an identity store over SQLite is not built |
 | `schemas/services/wishlist-stack` | Stack: deploys `shop-wishlist` alone, exposed: on Bun over a SQLite file in `Dev`, on the `local` target with no container, and in `Staging` as a Cloudflare Worker over a D1 database, on the `cloudflare` target with the docs' placeholder account (D64) |
 | `go/` | the Go module and its tests, which sign in through `shop-api`'s login, call each API through the Go SDK, run every language's client against `shop-orders`, served in Go and in Rust, and run the stack with `stack dev` |
-| `go/shop-api`, `go/shop-orders` | each API's implementation over the generated ORM, at the naming file's `[implementation_paths]` default, `go/{service}`: `New(deps)`, which the generated entrypoints call, and `shop-orders`' `NewJobs(deps)` and `NewWorkers(deps)`, which its jobs' and its worker's do. `shop-orders`' checkouts call `shop-db`'s engine in-process (`checkouts.go`), and its acmepay adapter is `payments.go`: the webhook's verifier, the mapping of acmepay's events to `recordPaymentEvent`, and `SettlePayments`. No package authenticates a caller: both servers do it with the identity runtime |
+| `go/shop-api`, `go/shop-orders` | each API's implementation over the generated ORM; `shop-api`'s wakes its image waiters and claims its uploads through `shop-cache`, with a path for when the store is unavailable, at the naming file's `[implementation_paths]` default, `go/{service}`: `New(deps)`, which the generated entrypoints call, and `shop-orders`' `NewJobs(deps)` and `NewWorkers(deps)`, which its jobs' and its worker's do. `shop-orders`' checkouts call `shop-db`'s engine in-process (`checkouts.go`), and its acmepay adapter is `payments.go`: the webhook's verifier, the mapping of acmepay's events to `recordPaymentEvent`, and `SettlePayments`. No package authenticates a caller: both servers do it with the identity runtime |
 | `go/acmepay` | acmepay, a fake payment provider: intents, captures, cancellations, refunds and webhooks signed `t=…,v1=…` as a card provider signs them, with idempotency keys; it takes a payer's test token (`tok_succeeds`, `tok_declines`, `tok_processing`) and never a card number. `go/acmepay/cmd/acmepay` runs it on this machine; the tests run it in-process |
 | `rust-impl/shop-stock` | `shop-stock`'s implementation, at the `[implementation_paths]` `rust` template the naming file sets, `rust-impl/{service}`, since the default, `rust/{service}`, would put it inside the client crate in `rust/`: `create(deps)`, which the generated entrypoint calls, keeping the stock in `shop-db`'s `Inventory` through the engine its `Deps` holds, reading the `product` table with tokio-postgres over the pool its `Deps` holds, as there is no Rust ORM, and enqueueing `StockLow` with the HTTP runtime's queue client; and `create_workers(deps)` and `create_jobs(deps)`, which its worker's and its job's entrypoints call, filing and ordering `restock_request` rows |
-| `typescript/shop-cart` | `shop-cart`'s implementation: `create(deps)`, which keeps a shopper's cart as a `Checkout` and lists the pickup slots, calling `shop-db`'s engine in-process through the `Background` its `Deps` holds |
-| `typescript/shop-storefront` | `shop-storefront`'s implementation, at the naming file's `[implementation_paths]` default, `typescript/{service}`: `create(deps)` and `authenticate(deps)`, which the generated entrypoint calls; its tests call it through the TypeScript SDK |
+| `apps/backoffice` | `shop-stock`'s app `Backoffice`, at the naming file's `[implementation_paths]` default, `apps/{app}` (D78): its `serve(parts)`, which the generated entrypoint calls with `shop-stock`'s implementations, identity and `shop-db`'s open engine, binds `parts.addr` and serves the Topcoat router `shop_stock_with_parts` sets up from them: `shop-stock`'s pages under `/stock`, the engine console under `/stock/engine` and the sign-in, account, users and roles pages, and neither `shop-stock`'s JSON API nor the engine's routes |
+| `typescript/shop-cart` | `shop-cart`'s implementation: `create(deps)`, which keeps a shopper's cart as a `Checkout`, lists the pickup slots and opens tickets, calling `shop-db`'s engine in-process through the `Background` its `Deps` holds, and keeps their reviews and reorders through `Deps.orm`, with no SQL of its own, a reorder writing the order, its lines and its `OrderPlaced` in one transaction; and `createDerivers(deps)`, `TriageTickets`' answers, keyword rules that stand in for a model so `stack dev` and CI run with no provider |
+| `typescript/shop-storefront` | `shop-storefront`'s implementation, at the naming file's `[implementation_paths]` default, `typescript/{service}`: `create(deps)` and `authenticate(deps)`, which the generated entrypoint calls; its tests call it through the TypeScript SDK, importing a CSV of cart lines and exporting the cart as one |
 | `typescript/shop-wishlist` | `shop-wishlist`'s implementation: `create(deps)`, whose statements run on `Deps.db`, a `SqlDatabase`, alike over the SQLite file `stack dev` opens and the Worker's D1 binding |
 | `testdata/wishlist-v2` | the wishlist's second version, a schemas root of its own and an implementation: a quantity in place of the note ([The wishlist, on SQLite and on D1](#the-wishlist-on-sqlite-and-on-d1)) |
 | `scripts/workerd` | what `scripts/check.sh` runs the Workers bundles with under workerd: the storefront's, and the wishlist's with `d1-binding.js`, a stand-in for its d1 binding |
 | `typescript/clients` | a `shop-orders` client and type tests; like the implementation, a member of `schemas/dist`'s Bun workspace |
-| `web/shop-web` | `shop-web`'s code, at the naming file's `[implementation_paths]` default, `web/{service}`: a page and a script that list `shop-api`'s products, bundled with `bun build`; the build writes its typed browser config, `config.generated.ts`, which reads `shop-api`'s address from the config each environment serves |
+| `web/shop-web` | `shop-web`'s code, at the naming file's `[implementation_paths]` default, `web/{service}`: a page and a script that list `shop-api`'s products, type-checked and bundled with `bun build`, and served by Bun's dev server under `stack dev`; the build writes its typed browser config, `config.generated.ts`, which reads `shop-api`'s address from the config each environment serves |
 | `python/` | a `shop-orders` client and type tests |
 | `rust/` | a `shop-orders` client and type tests |
 | `rust-server/` | implements `shop-orders` on the generated Rust server, its catalog, orders and reviews in memory, its checkouts and acmepay's webhook unserved (501), since only the stack's Go server sells through the engine, or with its `sqlite` feature in a SQLite file of `shop-db`'s tables, and authenticates with the identity runtime over the shop's users in SQLite: in `identity.sql`'s tables (`shop-db`'s identity tables), or in the shop's file; built from `schemas/dist-rust` (`build --api-language RUST`); a library its `main` and the Topcoat app share |
-| `topcoat/` | a [Topcoat](https://github.com/tokio-rs/topcoat) app whose pages call `shop-orders` in-process, through the crate `extensions/topcoat` writes into `schemas/dist-rust` (`superschematic-topcoat`, listed in `superschematic.toml`), which mounts `shop-db`'s engine at `/engine`, on a SQLite file the app opens (`ENGINE_DB`, `shop.engine.db` unless set), though the app keeps its own orders and sells nothing through the engine yet: a shopper signs in with their password, places, filters, pages through and cancels orders, picking each line's product from the catalog `shop-orders` lists, and writes reviews through the crate's forms, and the pages render reviews and orders with its display components; the crate's console at `/console` lists, pages and searches `shop-orders`' resources, in place when Topcoat's runtime is loaded; one session cookie signs the shopper in on the pages and the mounted JSON API; it keeps the shop and its users in memory, or in the SQLite file `DATABASE_URL` names |
+| `topcoat/` | a [Topcoat](https://github.com/tokio-rs/topcoat) app whose pages call `shop-orders` in-process, through the crate `extensions/topcoat` writes into `schemas/dist-rust` (`superschematic-topcoat`, listed in `superschematic.toml`), which mounts `shop-db`'s engine at `/engine`, on a SQLite file the app opens (`ENGINE_DB`, `shop.engine.db` unless set), whose types the console pages at `/console/engine` for staff, though the app keeps its own orders and sells nothing through the engine: a shopper signs in with their password, places, filters, pages through and cancels orders, picking each line's product from the catalog `shop-orders` lists, and writes reviews through the crate's forms, and the pages render reviews and orders with its display components; the crate's console at `/console` lists, pages and searches `shop-orders`' resources, in place when Topcoat's runtime is loaded; one session cookie signs the shopper in on the pages and the mounted JSON API; it keeps the shop and its users in memory, or in the SQLite file `DATABASE_URL` names |
 | `testdata/generated/` | committed copies of the generated files the docs quote, under their `schemas/dist` paths |
 | `schemas/dist/bun.lock`, `schemas/dist/Cargo.lock` | the lockfiles of `schemas/dist`'s Bun and Cargo workspaces, the generated files committed, so the storefront's and `shop-stock`'s images and every install and build take the same versions; `schemas/.gitignore` ignores the rest of `schemas/dist` |
 | `scripts/check.sh` | builds, compiles and tests all of it |
 
 ## Run it
 
-`superschematic stack dev schemas/services/shop-stack`, from this directory, runs `shop-stack`'s `Dev`
-environment: Postgres in a container with `shop-db` migrated, `shop-api`
+`superschematic-topcoat stack dev schemas/services/shop-stack`, from this directory, runs `shop-stack`'s `Dev`
+environment: Postgres in a container with `shop-db` migrated, Valkey in one for `shop-cache`, `shop-api`
 and `shop-orders` on their generated Go entrypoints, `shop-stock` on its
 generated Rust one, which cargo builds frozen to `schemas/dist/Cargo.lock`,
 `shop-cart` and `shop-storefront` on their generated TypeScript ones, on
@@ -56,13 +61,21 @@ Bun, `shop-db`'s engine runner, which runs its engine types' reactions and
 deadlines, `shop-orders`' worker `FulfilOrders`, which fulfils each order
 as it is placed, its jobs `ShipOrders` and `SettlePayments` every minute,
 `shop-stock`'s Rust worker `ReorderStock`, which files a restock request
-for each product a sale runs low, its Rust job `OrderRestocks`, and the
-site `shop-web`, built once and served on its own port with its config.
+for each product a sale runs low, its Rust job `OrderRestocks`,
+`shop-stock`'s app `Backoffice`, a Topcoat app on its generated Rust
+entrypoint over `apps/backoffice` (D78), and the site `shop-web`'s dev
+server, Bun's, which reloads the page as you edit `web/shop-web`, behind
+a proxy on the site's port that serves `shop-api` under `/api/shop-api`
+on the same origin (D82); `--build-sites` builds the site once and serves
+its files instead. Staff sign in to the Backoffice at
+`<its address>/stock/sign-in`, which `stack dev` prints, with a user of
+`shop-db` who holds `stock.write`, and receive stock at
+`/stock/engine/Inventory/<product id>`.
 It needs Docker, Go, Bun, cargo and the migration runner,
 `superschematic-migrate`, on `PATH`; it derives every connection string,
 URL, port and service credential, and Ctrl-C stops it. While it runs,
-`superschematic stack run Dev shop-orders-ship-orders --stack schemas/services/shop-stack`
-runs `ShipOrders` once, and `superschematic stack run Dev
+`superschematic-topcoat stack run Dev shop-orders-ship-orders --stack schemas/services/shop-stack`
+runs `ShipOrders` once, and `superschematic-topcoat stack run Dev
 shop-stock-order-restocks --stack schemas/services/shop-stack` runs
 `OrderRestocks`, which `Dev` runs only on demand, filing a restock
 request for each product the engine lists low and ordering the open
@@ -164,7 +177,29 @@ It serves `http://127.0.0.1:3000`, each page linking to the others:
   columns' headers linking it in their order. Its lists are live
   (`pages_live` in `superschematic.toml`): with Topcoat's runtime loaded,
   a filter, a search, a header, a page's links and its size render the
-  list again in place.
+  list again in place;
+- `/console/engine` pages `shop-db`'s engine types for staff, each call
+  made as the signed-in caller under `shop-db`'s engine policy: an
+  Inventory's stock with forms to receive, adjust and count it and its
+  movements, a CollectionPoint's week, closures and bookings, a Checkout's
+  holds and payment, and a Refund's sign-offs and moves;
+- `/console/users` and `/console/roles` administer the shop's users and
+  roles, for staff who hold `identity.users.*` and `identity.roles.*`.
+
+`shop-orders`' amounts are in pence, and say so with
+`@display({ currency: "GBP" })`, or `{ field: "currency" }` beside a
+currency field, so the pages show them as money: `GBP 39.98`, in
+`<data value="3998">`, and the refund form takes a decimal. The engine
+pages' panels show the commerce amounts, which name their currency, the
+same way.
+
+The app sells nothing through the engine: the shop's checkouts are the
+stack's, on `shop-orders`' Go server, and this engine has no payment
+adapter. Its back office shows what is written to it, which the app's
+tests (`topcoat/tests/back_office.rs`) do as the stack's `shop-orders` and
+acmepay's adapter would: an Inventory, a CollectionPoint, a Checkout that
+held and paid for two anvils, and a Refund of it, which two staff who hold
+`refunds.approve` sign off before it moves to approved.
 
 `shop-orders`' lists sort by an argument, `sort` (`SortBy`, D60 amended):
 the orders by `placedAt`, the default, or `totalCents`, the products by
@@ -177,7 +212,7 @@ schema's `Default` fills in the decoders' value, not the column's, and a
 backfill is a migration written by hand, which `stack dev` does not run.
 So a database that already holds orders cannot take the column; the step
 fails on its first order. Purge a `Dev` environment made before it: run
-`superschematic stack dev --remove-data` once, which removes its
+`superschematic-topcoat stack dev --remove-data` once, which removes its
 containers and their data as it stops, after the failed migration too,
 then run `stack dev` again. A `shop.db` made before it is deleted and
 planned anew ([The Topcoat app on SQLite](#the-topcoat-app-on-sqlite)).
@@ -239,7 +274,13 @@ operation needs a signed-in shopper shows a Sign in button, which opens
 the sign-in page and then comes back to the page: sign in as
 grace@example.com, a shopper, with the password in `topcoat/src/main.rs`,
 or as ada@example.com, staff, who see and cancel every customer's orders
-on the same pages. The JSON API at `/api` admits the same session.
+on the same pages, and hold the back office's roles (`BACK_OFFICE_ROLES`
+in `topcoat/src/lib.rs`): `staff` (`orders.any`), `refunds`
+(`refunds.approve`), `stock` (`stock.write`), `collection-points`
+(`calendar.manage`) and `admin` (`identity.users.*`, `identity.roles.*`).
+The console links to this sign-in page, which the app's settings name,
+rather than the identity pages' own `/console/sign-in`, and signs out at
+`/console/sign-out`. The JSON API at `/api` admits the same session.
 
 ### The Topcoat app on SQLite
 
@@ -328,7 +369,7 @@ From the repository root, after `make setup`:
 examples/acme-shop/scripts/check.sh
 ```
 
-It builds every service with `build-all`, builds `shop-db`'s engine
+It builds every service with `superschematic-topcoat build-all`, builds `shop-db`'s engine
 archive from the project's engine crate the build writes, which every Go
 module that opens the engine then links, compiles every generated Go
 module, type-checks the generated TypeScript, imports the generated Python
@@ -338,12 +379,16 @@ all four languages (the Go tests run each language's client against the Go
 server and against the Rust server, sell, book and refund through
 `shop-db`'s engine on SQLite, and, when Docker runs, `stack dev` on
 `shop-stack`, calling each Go API and `shop-stock`'s Rust one over
-Postgres and `shop-cart` and the storefront on Bun), builds `schemas/dist-rust`
+Postgres and `shop-cart` and the storefront on Bun, and receiving stock
+through the Backoffice's engine console), builds `schemas/dist-rust`
 again with `superschematic-topcoat` and runs the Topcoat app's tests, in
 memory and on a SQLite file the migration runner migrates with `shop-db`'s
 SQLite plan (they serve the runtime from a catalog of its script alone, so
 the check needs no asset bundle), and fails
-when a file under `testdata/generated/` differs from the run. `make setup`
+when a file under `testdata/generated/` differs from the run; last, it
+runs `cmd/superschematic`'s `TestStackInitOverAcmeShop`, so the installed
+binary, which links no Topcoat, still inits and resolves a stack over these
+services. `make setup`
 stands up everything it uses, the Python schema runtime's uv environment
 included; the Rust client and server fetch their crates on their first
 build. It installs `schemas/dist`'s Bun workspace frozen to its committed
@@ -385,6 +430,9 @@ placed, its order written and the sale reported to `shop-stock` in one
 trace, a sale reported with the shopper's session alone refused 401, and
 a refund two members of staff sign off made by `SettlePayments` with
 `stack run`,
+signs a shopper in with a cookie session through `shop-web`'s origin,
+where the dev server's proxy serves `shop-api`, with no CORS set, and
+opens the page's hot-reload socket through it (D82),
 signs two shoppers in, each of whom lists and pages their own orders
 alone and gets 404 for the other's, while staff list everyone's,
 sees `shop-stock`'s Rust worker file the product's restock request and
@@ -393,7 +441,7 @@ and the job once more, into an output root of its own, where
 `shop-stock`'s server, worker and job build against that root's mirror of
 `rust-impl/shop-stock`, `shop-cart` and the storefront against their
 copies of `typescript/shop-cart` and `typescript/shop-storefront`, and
-`shop-web` in its copy of
+`shop-web`, which `--build-sites` builds, in its copy of
 `web/shop-web`, while the packages under `typescript/` and
 `web/` keep the links `schemas/dist`'s install made. The
 clients take the shopper's bearer token as their second argument, from a

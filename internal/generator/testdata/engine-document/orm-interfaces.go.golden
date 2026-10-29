@@ -19,6 +19,9 @@ type AgentRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *AgentFilter, opts *AgentPageOptions) (*AgentPage, error)
 	CreateOne(ctx context.Context, input *types.Agent) (*types.Agent, error)
 	CreateMany(ctx context.Context, inputs []*types.Agent) ([]*types.Agent, error)
+	UpsertOne(ctx context.Context, input *types.Agent, on AgentUniqueKey, update *AgentUpdate) (*types.Agent, error)
+	UpsertOneResult(ctx context.Context, input *types.Agent, on AgentUniqueKey, update *AgentUpdate, opts *UpsertOptions) (UpsertResult[*types.Agent], error)
+	UpsertMany(ctx context.Context, inputs []*types.Agent, on AgentUniqueKey, update AgentFields, opts *UpsertOptions) ([]UpsertResult[*types.Agent], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *AgentUpdate) (*types.Agent, error)
 	UpdateMany(ctx context.Context, filter *AgentFilter, update *AgentUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -34,6 +37,9 @@ type CustomerRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *CustomerFilter, opts *CustomerPageOptions) (*CustomerPage, error)
 	CreateOne(ctx context.Context, input *types.Customer) (*types.Customer, error)
 	CreateMany(ctx context.Context, inputs []*types.Customer) ([]*types.Customer, error)
+	UpsertOne(ctx context.Context, input *types.Customer, on CustomerUniqueKey, update *CustomerUpdate) (*types.Customer, error)
+	UpsertOneResult(ctx context.Context, input *types.Customer, on CustomerUniqueKey, update *CustomerUpdate, opts *UpsertOptions) (UpsertResult[*types.Customer], error)
+	UpsertMany(ctx context.Context, inputs []*types.Customer, on CustomerUniqueKey, update CustomerFields, opts *UpsertOptions) ([]UpsertResult[*types.Customer], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *CustomerUpdate) (*types.Customer, error)
 	UpdateMany(ctx context.Context, filter *CustomerFilter, update *CustomerUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
@@ -43,6 +49,7 @@ type CustomerRepositoryInterface interface {
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
+	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
 	Ping(ctx context.Context) error
 	Close()
 	GetAgentRepository() AgentRepositoryInterface
@@ -53,6 +60,7 @@ type DatabaseInterface interface {
 type TxInterface interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetAgentRepository() AgentRepositoryInterface
 	GetCustomerRepository() CustomerRepositoryInterface
 }
@@ -84,6 +92,17 @@ func NewNoOpDatabase() *NoOpDatabase {
 // Transaction executes the callback with a deterministic no-op transaction.
 func (db *NoOpDatabase) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(db.tx)
+}
+
+// TransactionWith executes the callback with a deterministic no-op
+// transaction, whatever its options.
+func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(TxInterface) error) error {
+	return fn(db.tx)
+}
+
+// Transaction executes the callback with the same no-op transaction.
+func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
+	return fn(tx)
 }
 
 // Ping always succeeds for no-op database.
@@ -156,6 +175,22 @@ func (r *NoOpAgentRepository) CreateMany(_ context.Context, inputs []*types.Agen
 	return inputs, nil
 }
 
+func (r *NoOpAgentRepository) UpsertOne(_ context.Context, input *types.Agent, _ AgentUniqueKey, _ *AgentUpdate) (*types.Agent, error) {
+	return input, nil
+}
+
+func (r *NoOpAgentRepository) UpsertOneResult(_ context.Context, input *types.Agent, _ AgentUniqueKey, _ *AgentUpdate, _ *UpsertOptions) (UpsertResult[*types.Agent], error) {
+	return UpsertResult[*types.Agent]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpAgentRepository) UpsertMany(_ context.Context, inputs []*types.Agent, _ AgentUniqueKey, _ AgentFields, _ *UpsertOptions) ([]UpsertResult[*types.Agent], error) {
+	results := make([]UpsertResult[*types.Agent], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Agent]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
 func (r *NoOpAgentRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *AgentUpdate) (*types.Agent, error) {
 	return nil, ErrNotFound
 }
@@ -212,6 +247,22 @@ func (r *NoOpCustomerRepository) CreateMany(_ context.Context, inputs []*types.C
 		return []*types.Customer{}, nil
 	}
 	return inputs, nil
+}
+
+func (r *NoOpCustomerRepository) UpsertOne(_ context.Context, input *types.Customer, _ CustomerUniqueKey, _ *CustomerUpdate) (*types.Customer, error) {
+	return input, nil
+}
+
+func (r *NoOpCustomerRepository) UpsertOneResult(_ context.Context, input *types.Customer, _ CustomerUniqueKey, _ *CustomerUpdate, _ *UpsertOptions) (UpsertResult[*types.Customer], error) {
+	return UpsertResult[*types.Customer]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpCustomerRepository) UpsertMany(_ context.Context, inputs []*types.Customer, _ CustomerUniqueKey, _ CustomerFields, _ *UpsertOptions) ([]UpsertResult[*types.Customer], error) {
+	results := make([]UpsertResult[*types.Customer], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Customer]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
 }
 
 func (r *NoOpCustomerRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *CustomerUpdate) (*types.Customer, error) {

@@ -34,6 +34,8 @@ type StringFilter struct {
 	// the empty slice and getting every row back.
 	In    []string
 	ILike *string // Case-insensitive LIKE
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // Int64Filter provides filtering operations for integer fields
@@ -44,6 +46,11 @@ type Int64Filter struct {
 	Lt      *int64
 	Lte     *int64
 	Between *Int64Range
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []int64
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // Int64Range represents a range for int64 values
@@ -60,6 +67,11 @@ type FloatFilter struct {
 	Lt      *float64
 	Lte     *float64
 	Between *FloatRange
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []float64
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // FloatRange represents a range for float values
@@ -71,6 +83,11 @@ type FloatRange struct {
 // BoolFilter provides filtering operations for boolean fields
 type BoolFilter struct {
 	Eq *bool
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In []bool
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // DateTimeFilter provides filtering operations for DateTime fields
@@ -81,7 +98,10 @@ type DateTimeFilter struct {
 	Lt      *time.Time
 	Lte     *time.Time
 	Between *DateTimeRange
-	IsNull  *bool // true for IS NULL, false for IS NOT NULL
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In     []time.Time
+	IsNull *bool // true for IS NULL, false for IS NOT NULL
 }
 
 // DateTimeRange represents a range for DateTime values
@@ -98,6 +118,11 @@ type DateFilter struct {
 	Lt      *string
 	Lte     *string
 	Between *DateRange
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []string
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // DateRange represents a range for Date values
@@ -106,6 +131,31 @@ type DateRange struct {
 	End   string
 }
 
+{{ if .HasDecimalFilters -}}
+// DecimalFilter provides filtering operations for decimal fields stored as
+// NUMERIC (D84). Each value is a decimal's text, bound as it is, and
+// Postgres compares them as numbers: "1.50" equals "1.5".
+type DecimalFilter struct {
+	Eq      *string
+	Gt      *string
+	Gte     *string
+	Lt      *string
+	Lte     *string
+	Between *DecimalRange
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition.
+	In []string
+	// IsNull is true for IS NULL, false for IS NOT NULL.
+	IsNull *bool
+}
+
+// DecimalRange represents a range for decimal values, both included.
+type DecimalRange struct {
+	Min string
+	Max string
+}
+
+{{ end -}}
 // DurationFilter provides filtering operations for duration fields stored as
 // INTERVAL. Each value goes as its whole microseconds, as a duration is
 // written, and Postgres compares intervals with a day as 24 hours and a
@@ -271,7 +321,9 @@ type {{ $typeName }}OrderByField string
 
 const (
 	{{- range .Fields }}
+	{{- if not .IsEncrypted }}
 	{{ $typeName }}OrderBy{{ toGoName .Name }} {{ $typeName }}OrderByField = "{{ .DBName }}"
+	{{- end }}
 	{{- end }}
 )
 
@@ -299,6 +351,9 @@ type {{ $typeName }}FindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 {{- $pk := .PrimaryKeySortField }}
 
@@ -331,6 +386,17 @@ func Parse{{ $typeName }}Sort(text string) ({{ $typeName }}Sort, error) {
 	}
 	return {{ $typeName }}Sort{}, fmt.Errorf("orm: {{ $typeName }} sorts by {{ .SortFieldList }}, not %q", text)
 }
+
+// {{ $typeName }}UniqueKey names a unique key of {{ $typeName }} that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
+type {{ $typeName }}UniqueKey string
+
+const (
+	{{- range .UniqueKeys }}
+	{{ .Const }} {{ $typeName }}UniqueKey = "{{ .Name }}"
+	{{- end }}
+)
 
 // {{ $typeName }}PageKey is the position of a {{ $typeName }} row in a FindPage order: the
 // row's {{ $pk.Name }}, as a cursor holds it, {"{{ $pk.Name }}": ...}. FindPage reads the row's
@@ -410,6 +476,9 @@ type {{ .TypeName }}Filter struct {
 	{{- if or (not .IsAuditField) .IsAuditTimestamp }}
 	{{- if .IsArray }}
 	{{ toGoName .Name }} *ArrayStringFilter
+	{{- else if .IsVector }}
+	{{- else if .IsDecimal }}
+	{{ toGoName .Name }} *DecimalFilter
 	{{- else if .IsGeoPoint }}
 	{{ toGoName .Name }} *GeoPointFilter
 	{{- else if .IsInterval }}
@@ -439,6 +508,12 @@ type {{ .TypeName }}Filter struct {
 	{{ toGoName .FieldName }}ID *UUIDFilter
 	{{- end }}
 	{{- end }}
+	{{- range .PathRelations }}
+	// {{ .GoField }} keeps the rows whose {{ .Field }} is among the{{ if .TargetLive }} live{{ end }} {{ .Target }} rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows{{ if .Nullable }}, so a row whose {{ .Field }} is null is not kept{{ end }}.
+	{{ .GoField }} *{{ .Target }}Filter
+	{{- end }}
 	{{- range .ReferencedBy }}
 	// {{ .FilterField }} filters on the presence or absence of a
 	// {{ .SourceTypeName }} whose {{ .FieldName }} points at this row.
@@ -453,6 +528,17 @@ type {{ .TypeName }}Filter struct {
 	// words, such as a blank one, keeps every row, and nil filters nothing.
 	SearchText *string
 	{{- end }}
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []{{ .TypeName }}Filter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []{{ .TypeName }}Filter
 }
 
 // {{ .TypeName }}Update provides fields that can be updated
@@ -588,7 +674,11 @@ func (u *{{ .TypeName }}Update) ApplyTo(row *types.{{ .TypeName }}) {
 	{{- range .Fields }}
 	{{- if eq .Name "updatedBy" }}
 	if u.UpdatedBy != nil {
+		{{- if .IsRequired }}
 		row.UpdatedBy = *u.UpdatedBy
+		{{- else }}
+		row.UpdatedBy = u.UpdatedBy
+		{{- end }}
 	}
 	{{- end }}
 	{{- end }}
@@ -630,216 +720,53 @@ func (f *{{ .TypeName }}Filter) conditions(args *[]interface{}, paramOffset int)
 	paramNum := paramOffset
 
 	{{- range .Fields }}
-	{{- if or (not .IsAuditField) .IsAuditTimestamp }}
-	{{- if .IsArray }}
-	{{- /* Array filters carry no WHERE support yet. */}}
-	{{- else if .IsGeoPoint }}
-	if f.{{ toGoName .Name }} != nil && f.{{ toGoName .Name }}.IsNull != nil {
-		if *f.{{ toGoName .Name }}.IsNull {
-			conditions = append(conditions, `{{ $quotedTableName }}.{{ .QuotedDBName }} IS NULL`)
-		} else {
-			conditions = append(conditions, `{{ $quotedTableName }}.{{ .QuotedDBName }} IS NOT NULL`)
-		}
-	}
-	{{- else if .IsInterval }}
+	{{- if .FilterKind }}
 	if f.{{ toGoName .Name }} != nil {
-		// Each duration goes as its microseconds, which pgx encodes from a
-		// time.Duration.
-		for _, comparison := range []struct {
-			op    string
-			value *time.Duration
-		}{
-			{"=", f.{{ toGoName .Name }}.Eq},
-			{">", f.{{ toGoName .Name }}.Gt},
-			{">=", f.{{ toGoName .Name }}.Gte},
-			{"<", f.{{ toGoName .Name }}.Lt},
-			{"<=", f.{{ toGoName .Name }}.Lte},
-		} {
-			if comparison.value != nil {
-				paramNum++
-				conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedDBName }} %s $%d`, comparison.op, paramNum))
-				*args = append(*args, *comparison.value)
-			}
-		}
-		if f.{{ toGoName .Name }}.Between != nil {
-			paramNum++
-			conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedDBName }} >= $%d`, paramNum))
-			*args = append(*args, f.{{ toGoName .Name }}.Between.Min)
-			paramNum++
-			conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedDBName }} <= $%d`, paramNum))
-			*args = append(*args, f.{{ toGoName .Name }}.Between.Max)
-		}
-		if f.{{ toGoName .Name }}.IsNull != nil {
-			if *f.{{ toGoName .Name }}.IsNull {
-				conditions = append(conditions, `{{ $quotedTableName }}.{{ .QuotedDBName }} IS NULL`)
-			} else {
-				conditions = append(conditions, `{{ $quotedTableName }}.{{ .QuotedDBName }} IS NOT NULL`)
-			}
-		}
-	}
-	{{- else if .IsUUIDLike }}
-	if f.{{ toGoName .Name }} != nil {
-		if f.{{ toGoName .Name }}.Eq != nil {
-			paramNum++
-			conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedDBName }} = $%d`, paramNum))
-			*args = append(*args, f.{{ toGoName .Name }}.Eq.ToUUID())
-		}
-		if len(f.{{ toGoName .Name }}.In) > 0 {
-			placeholders := make([]string, len(f.{{ toGoName .Name }}.In))
-			for i, id := range f.{{ toGoName .Name }}.In {
-				paramNum++
-				placeholders[i] = fmt.Sprintf("$%d", paramNum)
-				*args = append(*args, id.ToUUID())
-			}
-			conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedDBName }} IN (%s)`, strings.Join(placeholders, ", ")))
-		}
-		if f.{{ toGoName .Name }}.IsNull != nil {
-			if *f.{{ toGoName .Name }}.IsNull {
-				conditions = append(conditions, `{{ $quotedTableName }}.{{ .QuotedDBName }} IS NULL`)
-			} else {
-				conditions = append(conditions, `{{ $quotedTableName }}.{{ .QuotedDBName }} IS NOT NULL`)
-			}
-		}
-	}
-	{{- else if and .IsStringLike (not .IsDateTimeLike) (not .IsDateLike) }}
-	if f.{{ toGoName .Name }} != nil {
-		if f.{{ toGoName .Name }}.Eq != nil {
-			paramNum++
-			conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedDBName }} = $%d`, paramNum))
-			*args = append(*args, *f.{{ toGoName .Name }}.Eq)
-		}
-		if len(f.{{ toGoName .Name }}.In) > 0 {
-			placeholders := make([]string, len(f.{{ toGoName .Name }}.In))
-			for i, value := range f.{{ toGoName .Name }}.In {
-				paramNum++
-				placeholders[i] = fmt.Sprintf("$%d", paramNum)
-				*args = append(*args, value)
-			}
-			conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedDBName }} IN (%s)`, strings.Join(placeholders, ", ")))
-		}
-		if f.{{ toGoName .Name }}.ILike != nil {
-			paramNum++
-			conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedDBName }} ILIKE $%d`, paramNum))
-			*args = append(*args, "%"+*f.{{ toGoName .Name }}.ILike+"%")
-		}
-	}
-	{{- else if or .IsIntLike .IsFloatLike .IsDateTimeLike .IsDateLike }}
-	if f.{{ toGoName .Name }} != nil {
-		if f.{{ toGoName .Name }}.Eq != nil {
-			paramNum++
-			conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedDBName }} = $%d`, paramNum))
-			*args = append(*args, *f.{{ toGoName .Name }}.Eq)
-		}
-		if f.{{ toGoName .Name }}.Gt != nil {
-			paramNum++
-			conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedDBName }} > $%d`, paramNum))
-			*args = append(*args, *f.{{ toGoName .Name }}.Gt)
-		}
-		if f.{{ toGoName .Name }}.Gte != nil {
-			paramNum++
-			conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedDBName }} >= $%d`, paramNum))
-			*args = append(*args, *f.{{ toGoName .Name }}.Gte)
-		}
-		if f.{{ toGoName .Name }}.Lt != nil {
-			paramNum++
-			conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedDBName }} < $%d`, paramNum))
-			*args = append(*args, *f.{{ toGoName .Name }}.Lt)
-		}
-		if f.{{ toGoName .Name }}.Lte != nil {
-			paramNum++
-			conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedDBName }} <= $%d`, paramNum))
-			*args = append(*args, *f.{{ toGoName .Name }}.Lte)
-		}
-		if f.{{ toGoName .Name }}.Between != nil {
-			paramNum++
-			conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedDBName }} >= $%d`, paramNum))
-			*args = append(*args, f.{{ toGoName .Name }}.Between.{{ if or .IsIntLike .IsFloatLike }}Min{{ else }}Start{{ end }})
-			paramNum++
-			conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedDBName }} <= $%d`, paramNum))
-			*args = append(*args, f.{{ toGoName .Name }}.Between.{{ if or .IsIntLike .IsFloatLike }}Max{{ else }}End{{ end }})
-		}
-		{{- if .IsDateTimeLike }}
-		if f.{{ toGoName .Name }}.IsNull != nil {
-			if *f.{{ toGoName .Name }}.IsNull {
-				conditions = append(conditions, `{{ $quotedTableName }}.{{ .QuotedDBName }} IS NULL`)
-			} else {
-				conditions = append(conditions, `{{ $quotedTableName }}.{{ .QuotedDBName }} IS NOT NULL`)
-			}
-		}
-		{{- end }}
-	}
-	{{- else if .IsBoolLike }}
-	if f.{{ toGoName .Name }} != nil && f.{{ toGoName .Name }}.Eq != nil {
-		paramNum++
-		conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedDBName }} = $%d`, paramNum))
-		*args = append(*args, *f.{{ toGoName .Name }}.Eq)
-	}
-	{{- else if not (or .IsJSONLike .IsJSONField) }}
-	if f.{{ toGoName .Name }} != nil {
-		if f.{{ toGoName .Name }}.Eq != nil {
-			paramNum++
-			conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedDBName }} = $%d`, paramNum))
-			*args = append(*args, *f.{{ toGoName .Name }}.Eq)
-		}
-		if len(f.{{ toGoName .Name }}.In) > 0 {
-			placeholders := make([]string, len(f.{{ toGoName .Name }}.In))
-			for i, value := range f.{{ toGoName .Name }}.In {
-				paramNum++
-				placeholders[i] = fmt.Sprintf("$%d", paramNum)
-				*args = append(*args, value)
-			}
-			conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedDBName }} IN (%s)`, strings.Join(placeholders, ", ")))
-		}
-		if f.{{ toGoName .Name }}.ILike != nil {
-			paramNum++
-			conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedDBName }} ILIKE $%d`, paramNum))
-			*args = append(*args, "%"+*f.{{ toGoName .Name }}.ILike+"%")
-		}
-	}
+	{{- range .FilterConditions }}
+	{{- template "filterCondition" . }}
 	{{- end }}
+	}
 	{{- end }}
 	{{- end }}
 
 	{{- range .Relationships }}
 	{{- if not .IsArray }}
 	if f.{{ toGoName .FieldName }}ID != nil {
-		if f.{{ toGoName .FieldName }}ID.Eq != nil {
-			paramNum++
-			conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedDBColumn }} = $%d`, paramNum))
-			*args = append(*args, f.{{ toGoName .FieldName }}ID.Eq.ToUUID())
-		}
-		if len(f.{{ toGoName .FieldName }}ID.In) > 0 {
-			placeholders := make([]string, len(f.{{ toGoName .FieldName }}ID.In))
-			for i, id := range f.{{ toGoName .FieldName }}ID.In {
-				paramNum++
-				placeholders[i] = fmt.Sprintf("$%d", paramNum)
-				*args = append(*args, id.ToUUID())
-			}
-			conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedDBColumn }} IN (%s)`, strings.Join(placeholders, ", ")))
-		}
-		if f.{{ toGoName .FieldName }}ID.IsNull != nil {
-			if *f.{{ toGoName .FieldName }}ID.IsNull {
-				conditions = append(conditions, `{{ $quotedTableName }}.{{ .QuotedDBColumn }} IS NULL`)
-			} else {
-				conditions = append(conditions, `{{ $quotedTableName }}.{{ .QuotedDBColumn }} IS NOT NULL`)
-			}
-		}
+	{{- range .FilterConditions }}
+	{{- template "filterCondition" . }}
+	{{- end }}
 	}
 	{{- end }}
 	{{- end }}
 
+	{{- range .PathRelations }}
+	if f.{{ .GoField }} != nil {
+		before := len(*args)
+		through := f.{{ .GoField }}.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		{{- if .TargetLive }}
+		through = append(through, {{ goRawString .TargetLive }})
+		{{- end }}
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf({{ goRawString .Probe }}, where))
+	}
+	{{- end }}
+
 	{{- range .ReferencedBy }}
 	if f.{{ .FilterField }} != nil {
-		probe := `SELECT 1 FROM {{ .QuotedSourceTable }} WHERE {{ .QuotedSourceTable }}.{{ .QuotedSourceColumn }} = {{ $quotedTableName }}.{{ $quotedPrimaryKey }}`
+		probe := {{ goRawString .Probe.Probe }}
 		{{- if .SourceHasSoftDelete }}
 		if !f.{{ .FilterField }}.IncludeDeleted {
-			probe += ` AND {{ .QuotedSourceTable }}.deleted_at IS NULL`
+			probe += {{ goRawString .Probe.Live }}
 		}
 		{{- end }}
 		if f.{{ .FilterField }}.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf({{ goRawString .Probe.Exists }}, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf({{ goRawString .Probe.NotExists }}, probe))
 		}
 	}
 	{{- end }}
@@ -848,12 +775,82 @@ func (f *{{ .TypeName }}Filter) conditions(args *[]interface{}, paramOffset int)
 	if f.SearchText != nil {
 		for _, term := range searchTerms(*f.SearchText) {
 			paramNum++
-			conditions = append(conditions, fmt.Sprintf(`{{ $quotedTableName }}.{{ .QuotedSearchColumn }} ILIKE $%d ESCAPE '\'`, paramNum))
+			conditions = append(conditions, fmt.Sprintf({{ goRawString .SearchCondition }}, paramNum))
 			*args = append(*args, searchLikePattern(term))
 		}
 	}
 	{{- end }}
 
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
 	return conditions
 }
+{{- end }}
+
+
+{{- define "filterCondition" }}
+{{- if eq .Op "in" }}
+		if len({{ .Field }}.In) > 0 {
+			placeholders := make([]string, len({{ .Field }}.In))
+			for i, {{ .Loop }} := range {{ .Field }}.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, {{ .Value }})
+			}
+			conditions = append(conditions, fmt.Sprintf({{ goRawString .SQL }}, strings.Join(placeholders, ", ")))
+		}
+{{- else if eq .Op "between" }}
+		if {{ .Field }}.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf({{ goRawString .SQL }}, paramNum))
+			*args = append(*args, {{ .Field }}.Between.{{ .Min }})
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf({{ goRawString .SQL2 }}, paramNum))
+			*args = append(*args, {{ .Field }}.Between.{{ .Max }})
+		}
+{{- else if eq .Op "isNull" }}
+		if {{ .Field }}.IsNull != nil {
+			if *{{ .Field }}.IsNull {
+				conditions = append(conditions, {{ goRawString .SQL }})
+			} else {
+				conditions = append(conditions, {{ goRawString .SQL2 }})
+			}
+		}
+{{- else }}
+		if {{ .Field }}.{{ .Member }} != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf({{ goRawString .SQL }}, paramNum))
+			*args = append(*args, {{ .Value }})
+		}
+{{- end }}
 {{- end }}

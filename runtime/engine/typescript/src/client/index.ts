@@ -16,22 +16,26 @@ export {
   InstanceCalls,
   NamespaceCalls,
   SchemaCalls,
+  SignalCalls,
 } from './client.js';
-export type { CreateOptions, EngineClientOptions, ListOptions, OperationOutcome, ReadEventsOptions, WriteOptions } from './client.js';
+export type { CreateOptions, EngineClientOptions, ListOptions, OperationOutcome, ReadEventsOptions, SendSignalInput, WriteOptions } from './client.js';
 export { EngineProblem, EngineTransportError, EngineVeto, isProblem, isVeto } from './errors.js';
 export type { ProblemChange, ProblemDocument, ProblemIssue } from './errors.js';
 export { Reconciler, memoryCursor, reconcile } from './reconcile.js';
+export { runDeriver } from './deriver.js';
+export type { DerivationAnswer, DerivationItem, DerivationSource, DeriverOptions, SettleResult } from './deriver.js';
 export type { CursorStore, ReconcileOptions } from './reconcile.js';
 export {
   DEFAULT_RECONNECT_INITIAL_MS,
   DEFAULT_RECONNECT_MAX_MS,
   EventSubscription,
   READY_EVENT,
+  SIGNAL_EVENT,
   SseParser,
   StreamEnded,
 } from './stream.js';
-export type { EventFilters, SseMessage, StreamMessage, SubscribeOptions } from './stream.js';
-export { DEFAULT_TIMEOUT_MS, SERVICE_AUTHORIZATION_HEADER } from './transport.js';
+export type { EventFilters, SignalMessage, SseMessage, StreamMessage, SubscribeOptions } from './stream.js';
+export { ACTING_FOR_HEADER, DEFAULT_TIMEOUT_MS, SERVICE_AUTHORIZATION_HEADER } from './transport.js';
 export type { CallOptions, EndUserAuth, FetchLike, ForwardedUser, ServiceCredential } from './transport.js';
 export type {
   BehaviorDocument,
@@ -45,9 +49,11 @@ export type {
   DisplayState,
   DisplayTone,
   EngineEvent,
+  EngineSignal,
   EventCause,
   EventKind,
   EventPage,
+  FieldDisplay,
   Instance,
   InstancePage,
   JSONObject,
@@ -63,6 +69,7 @@ export type {
   SearchParams,
   ToolDefinition,
   ToolGuidance,
+  ToolHiddenBy,
   ToolMCPRecord,
   ToolManifest,
   TypeDisplay,

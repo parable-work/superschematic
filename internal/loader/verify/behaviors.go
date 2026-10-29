@@ -1,6 +1,7 @@
 package verify
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 
@@ -46,6 +47,8 @@ func checkTypeBehaviors(td *ir.TypeDef, reg *registry.Registry, r *Result) {
 		}
 		if err := behavior.ValidateConfig(ref.Config); err != nil {
 			r.errorf(td.Owner, "type %s: %s", td.Name, err)
+		} else if ref.Name == "Derived" {
+			checkDerivedInputs(td, ref.Config, r)
 		}
 		declared = append(declared, behavior)
 	}
@@ -63,11 +66,53 @@ func checkTypeBehaviors(td *ir.TypeDef, reg *registry.Registry, r *Result) {
 			}
 		}
 		for _, op := range behavior.Operations {
+			// A namespace operation (D77) is called by its behavior's
+			// name, not on the type, so it shares no name with the type's
+			// operations, as the engine composes them.
+			if op.Scope == registry.OperationScopeNamespace {
+				continue
+			}
 			if prev, taken := opOwner[op.Name]; taken {
 				r.errorf(td.Owner, "type %s: behaviors %s and %s both add operation %s", td.Name, prev, behavior.Name, op.Name)
 				continue
 			}
 			opOwner[op.Name] = behavior.Name
+		}
+	}
+}
+
+// checkDerivedInputs refuses a secret field as an input of a Derived field:
+// a deriver sends its inputs to a model outside the engine, and a secret
+// never leaves it (D74). The engine refuses the same at define; this
+// refuses it at build, before anything deploys.
+func checkDerivedInputs(td *ir.TypeDef, config json.RawMessage, r *Result) {
+	var parsed struct {
+		Fields map[string]struct {
+			From []string `json:"from"`
+		} `json:"fields"`
+	}
+	if json.Unmarshal(config, &parsed) != nil {
+		return
+	}
+	secret := map[string]bool{}
+	for _, field := range td.Fields {
+		if field != nil && field.Secret {
+			secret[field.Name] = true
+			if field.JSONTag != "" {
+				secret[field.JSONTag] = true
+			}
+		}
+	}
+	names := make([]string, 0, len(parsed.Fields))
+	for name := range parsed.Fields {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	for _, name := range names {
+		for _, input := range parsed.Fields[name].From {
+			if secret[input] {
+				r.errorf(td.Owner, "type %s: Derived field %s is derived from %s, which is secret: a secret never goes to a model", td.Name, name, input)
+			}
 		}
 	}
 }

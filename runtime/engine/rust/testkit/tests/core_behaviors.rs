@@ -232,7 +232,7 @@ fn it_runs_the_document_the_core_binary_builds_with_all_three_composed_on_one_ty
             Value::Object(created.behaviors.clone()),
             json!({
                 "Workflow": {"status": "draft", "enteredAt": created.created_at},
-                "Comments": {"commentCount": 0},
+                "Comments": {"messages": 0, "threads": {"open": 0, "resolved": 0}, "composing": [], "unread": 0},
                 "Revisions": {"revision": 1, "pendingProposals": 0}
             })
         );
@@ -247,7 +247,7 @@ fn it_runs_the_document_the_core_binary_builds_with_all_three_composed_on_one_ty
                 WriteOptions::default(),
             )
         };
-        invoke(&writer(), "comment", json!({"body": "First pass is up."})).expect("comment");
+        invoke(&writer(), "post", json!({"body": "First pass is up."})).expect("post");
         invoke(&writer(), "transition", json!({"to": "review"})).expect("transition");
         invoke(
             &writer(),
@@ -264,8 +264,8 @@ fn it_runs_the_document_the_core_binary_builds_with_all_three_composed_on_one_ty
         invoke(&reviewer, "approve", json!({"proposal": 1})).expect("approve");
         invoke(
             &reviewer,
-            "comment",
-            json!({"body": "Approved the body.", "replyTo": 1}),
+            "post",
+            json!({"body": "Approved the body.", "thread": 1}),
         )
         .expect("reply");
         assert_eq!(
@@ -304,23 +304,25 @@ fn it_runs_the_document_the_core_binary_builds_with_all_three_composed_on_one_ty
             json!({"title": "Launch plan", "body": "The plan, in full."})
         );
         // The status was last entered by the last transition, the seventh
-        // event.
+        // event; the posts are beside the instance, and took no sequence.
         assert_eq!(
             Value::Object(record.behaviors.clone()),
             json!({
                 "Workflow": {"status": "published", "enteredAt": log[6].at},
-                "Comments": {"commentCount": 2},
+                "Comments": {"messages": 2, "lastMessageAt": log[5].at, "threads": {"open": 1, "resolved": 0}, "composing": [], "unread": 0},
                 "Revisions": {"revision": 2, "pendingProposals": 0}
             })
         );
-        assert_eq!(record.seq, 7);
+        assert_eq!(record.seq, 5);
         let changes: Vec<Value> = log
             .iter()
             .map(|event| {
                 json!([
                     event.kind,
                     event.actor,
-                    if event.kind == "operation" {
+                    if event.beside {
+                        json!({"beside": event.change["operation"], "seq": event.seq})
+                    } else if event.kind == "operation" {
                         event.change["patch"].clone()
                     } else {
                         event.change.clone()
@@ -331,22 +333,25 @@ fn it_runs_the_document_the_core_binary_builds_with_all_three_composed_on_one_ty
         assert_eq!(
             changes,
             [
+                // Comments' unread is the reader's (perReader): no event
+                // records it.
                 json!(["create", "wes", {
                     "data": {"title": "Launch plan"},
-                    "behaviors": {"Workflow": {"status": "draft", "enteredAt": log[0].at}, "Comments": {"commentCount": 0}, "Revisions": {"revision": 1, "pendingProposals": 0}}
+                    "behaviors": {"Workflow": {"status": "draft", "enteredAt": log[0].at}, "Comments": {"messages": 0, "threads": {"open": 0, "resolved": 0}, "composing": []}, "Revisions": {"revision": 1, "pendingProposals": 0}}
                 }]),
-                json!(["operation", "wes", {"behaviors": {"Comments": {"commentCount": 1}}}]),
+                json!(["operation", "wes", {"beside": "post", "seq": null}]),
                 json!(["operation", "wes", {"behaviors": {"Workflow": {"status": "review", "enteredAt": log[2].at}}}]),
                 json!(["operation", "wes", {"behaviors": {"Revisions": {"pendingProposals": 1}}}]),
                 json!(["operation", "rae", {"data": {"body": "The plan, in full."}, "behaviors": {"Revisions": {"revision": 2, "pendingProposals": 0}}}]),
-                json!(["operation", "rae", {"behaviors": {"Comments": {"commentCount": 2}}}]),
+                json!(["operation", "rae", {"beside": "post", "seq": null}]),
                 json!(["operation", "pat", {"behaviors": {"Workflow": {"status": "published", "enteredAt": log[6].at}}}]),
             ]
         );
         // The log replays, a merge patch at a time, to the instance a read
-        // returns.
+        // returns, but for the volatile fields beside events move, and the
+        // reader's own unread, which no event records.
         let mut replayed = json!({});
-        for event in &log {
+        for event in log.iter().filter(|event| !event.beside) {
             let patch = if event.kind == "create" {
                 &event.change
             } else {
@@ -354,9 +359,14 @@ fn it_runs_the_document_the_core_binary_builds_with_all_three_composed_on_one_ty
             };
             replayed = merge_patch(&replayed, patch);
         }
+        let mut behaviors = record.behaviors.clone();
+        behaviors.insert(
+            "Comments".to_owned(),
+            json!({"messages": 0, "threads": {"open": 0, "resolved": 0}, "composing": []}),
+        );
         assert_eq!(
             replayed,
-            json!({"data": record.data, "behaviors": record.behaviors})
+            json!({"data": record.data, "behaviors": behaviors})
         );
 
         let revisions = invoke(&alice(), "listRevisions", json!({})).expect("listRevisions");
@@ -373,12 +383,15 @@ fn it_runs_the_document_the_core_binary_builds_with_all_three_composed_on_one_ty
                 json!([2, {"title": "Launch plan", "body": "The plan, in full."}, 1]),
             ]
         );
-        let comments = invoke(&alice(), "listComments", json!({})).expect("listComments");
-        let threads: Vec<Value> = comments["items"]
-            .as_array()
-            .expect("items")
-            .iter()
-            .map(|item| json!([item.get("replyTo"), item["createdBy"]]))
+        let threads: Vec<Value> = [json!({}), json!({"thread": 1})]
+            .into_iter()
+            .flat_map(|params| {
+                invoke(&alice(), "listMessages", params).expect("listMessages")["items"]
+                    .as_array()
+                    .expect("items")
+                    .clone()
+            })
+            .map(|item| json!([item.get("thread"), item["author"]]))
             .collect();
         assert_eq!(threads, [json!([null, "wes"]), json!([1, "rae"])]);
 
@@ -430,7 +443,7 @@ fn it_runs_the_document_the_core_binary_builds_with_all_three_composed_on_one_ty
             Value::Object(retracted.behaviors),
             json!({
                 "Workflow": {"status": "retracted", "enteredAt": events("doc-1")[7].at},
-                "Comments": {"commentCount": 2},
+                "Comments": {"messages": 2, "lastMessageAt": log[5].at, "threads": {"open": 1, "resolved": 0}, "composing": [], "unread": 0},
                 "Revisions": {"revision": 3, "pendingProposals": 0}
             })
         );

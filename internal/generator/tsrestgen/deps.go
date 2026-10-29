@@ -54,6 +54,15 @@ type DepsInfo struct {
 	// Buckets are the API's buckets entries, in order (D54).
 	Buckets []DepsBucket
 
+	// MemoryStores are the memory stores the API lists, its rateLimitStore
+	// among them, sorted by service (D75).
+	MemoryStores []DepsMemoryStore
+
+	// RateLimitStore is the memory store the API's @rateLimit routes count
+	// in, its config's rateLimitStore, which MemoryStores lists; empty
+	// keeps each replica's in-process limiter (D75).
+	RateLimitStore string
+
 	// Engine is the engine Deps holds when Database is an engine database
 	// (D58), nil otherwise.
 	Engine *DepsEngine
@@ -62,8 +71,27 @@ type DepsInfo struct {
 	// when the API declares a worker (D53): it declares the queues'
 	// messages, which the Workers interface takes, and exports their
 	// definitions from its ./queues entry, which a worker claims with and
-	// an implementation enqueues with. Empty otherwise.
+	// an implementation enqueues with. It is set too when Deps holds the
+	// database's repositories (ORM). Empty otherwise.
 	DatabaseTypesPackage string
+
+	// ORM is the type of the repositories Deps.orm holds (D79), which
+	// DatabaseTypesPackage's ./orm entry exports: ShopDbOrm. Set when
+	// Deps.db is a pool and Database's TypeScript types write orm.ts;
+	// empty otherwise.
+	ORM string
+
+	// ORMFieldKeys is the field of the API's env config that holds the keys
+	// of Database's Encrypted<T> fields, which the entrypoints open Deps.orm
+	// with (D85): its key. Empty for a database without one.
+	ORMFieldKeys string
+
+	// MCPConfirmationKey is the field of the API's env config that holds
+	// the key its MCP endpoint signs confirmations with, which a server's
+	// entrypoint builds the router with (D93): its key, the field
+	// outputs.api.mcpConfirmationKey names. Empty for an API whose
+	// endpoint serves no tool that asks.
+	MCPConfirmationKey string
 }
 
 // DepsEngine is the engine in Deps (D58): the engine of the API's engine
@@ -88,6 +116,22 @@ type DepsBucket struct {
 
 	// Field is the Deps member that holds the bucket.
 	Field string
+}
+
+// DepsMemoryStore is a memory store in Deps: the HTTP runtime's
+// MemoryStore, which the entrypoint opens on Redis, or disabled when its
+// field is unset (D75).
+type DepsMemoryStore struct {
+	// Service is the MemoryStore service.
+	Service string
+
+	// Field is the Deps member that holds the store.
+	Field string
+
+	// Definitions is the npm package of the store's TypeScript
+	// definitions, which the implementation's package depends on to name a
+	// channel or a key; empty when the store's outputs write none.
+	Definitions string
 }
 
 // DepsCall is an SDK client in Deps.
@@ -115,6 +159,12 @@ func (o *APIOutput) DepsPool() bool {
 	return o.Deps.Database != "" && !o.DepsSQLite()
 }
 
+// DepsORM reports whether Deps holds the database's repositories, orm
+// (D79): Deps.db is a pool, and the database's types write orm.ts.
+func (o *APIOutput) DepsORM() bool {
+	return o.DepsPool() && o.Deps.ORM != "" && o.Deps.DatabaseTypesPackage != ""
+}
+
 // DepsSQLite reports whether Deps.db is a SqlDatabase: the API has a
 // database whose DB service lists sqlite first (D64).
 func (o *APIOutput) DepsSQLite() bool {
@@ -123,9 +173,10 @@ func (o *APIOutput) DepsSQLite() bool {
 
 // depsFields are the members every Deps may hold beside its clients and
 // its buckets.
-var depsFields = []string{"config", "db", "engine", "logger"}
+var depsFields = []string{"config", "db", "orm", "engine", "logger"}
 
-// SetDeps sets what Deps holds, refusing a client or a bucket whose member
+// SetDeps sets what Deps holds, refusing a client, a bucket or a memory
+// store whose member
 // would take the name of another of its members.
 func (o *APIOutput) SetDeps(deps DepsInfo) error {
 	seen := map[string]string{}
@@ -143,6 +194,12 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 			return fmt.Errorf("tsrestgen: %s lists bucket %s, which would be Deps.%s, the member of %s", o.SchemaName, b.Service, b.Field, prev)
 		}
 		seen[b.Field] = b.Service
+	}
+	for _, m := range deps.MemoryStores {
+		if prev, clash := seen[m.Field]; clash {
+			return fmt.Errorf("tsrestgen: %s lists memory store %s, which would be Deps.%s, the member of %s", o.SchemaName, m.Service, m.Field, prev)
+		}
+		seen[m.Field] = m.Service
 	}
 	o.Deps = deps
 	return nil
@@ -169,13 +226,15 @@ func (o *APIOutput) ChecksEndUsers() bool {
 // DepsPeerPackages lists the packages deps.ts imports beside the runtime:
 // each callee's SDK, in order, then the types of the database whose queues
 // the Workers interface's messages are, when the API declares a worker,
-// then the engine's package, when Deps holds the engine (D58).
+// whose engine types the Derivers interface's methods fill (D74), or whose
+// repositories Deps.orm holds (D79), then the engine's package, when Deps
+// holds the engine (D58).
 func (o *APIOutput) DepsPeerPackages() []string {
 	var out []string
 	for _, call := range o.Deps.Calls {
 		out = append(out, call.Package)
 	}
-	if o.HasWorkers() && o.Deps.DatabaseTypesPackage != "" && !slices.Contains(o.PeerPackages, o.Deps.DatabaseTypesPackage) {
+	if (o.HasWorkers() || o.HasDerivers() || o.DepsORM()) && o.Deps.DatabaseTypesPackage != "" && !slices.Contains(o.PeerPackages, o.Deps.DatabaseTypesPackage) {
 		out = append(out, o.Deps.DatabaseTypesPackage)
 	}
 	if o.Deps.Engine != nil && !slices.Contains(o.PeerPackages, o.Deps.Engine.Package) {
@@ -357,6 +416,27 @@ func WriteImplementationScaffold(output *APIOutput, dir string) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+// ImplementationDependencies are what the scaffold's package.json depends
+// on: the API's package and its types, the database's types when Deps
+// reaches them and they are other than the API's, the definitions of each
+// memory store the API lists that writes them, and the runtime. A stack's
+// build warns of one an implementation it no longer writes lacks (D100).
+func (o *APIOutput) ImplementationDependencies() []tsutil.Dependency {
+	deps := []tsutil.Dependency{
+		{Name: o.PackageName, Spec: tsutil.WorkspaceSpec},
+		{Name: o.TypesPackage, Spec: tsutil.WorkspaceSpec},
+	}
+	if o.Deps.DatabaseTypesPackage != "" && o.Deps.DatabaseTypesPackage != o.TypesPackage {
+		deps = append(deps, tsutil.Dependency{Name: o.Deps.DatabaseTypesPackage, Spec: tsutil.WorkspaceSpec})
+	}
+	for _, store := range o.Deps.MemoryStores {
+		if store.Definitions != "" {
+			deps = append(deps, tsutil.Dependency{Name: store.Definitions, Spec: tsutil.WorkspaceSpec})
+		}
+	}
+	return append(deps, tsutil.Dependency{Name: o.RuntimePackage, Spec: "*"})
 }
 
 // ImplementationExists reports whether dir holds a TypeScript package: a
