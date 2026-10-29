@@ -763,13 +763,15 @@ spell its own way, so a registry holds one `ToolInvocationPolicy`
 | `Key` | the key inside `@mcp({...})`, in the data forms' `mcp` record, in the IR and in every tool document |
 | `Values` | the allowed values, in the order `tools/index.ts` types them |
 | `Default` | the value a visible tool gets when `@mcp` omits `Key` |
+| `Confirm` | the values whose tools an API's MCP endpoint runs only once the person confirms the call (D93); empty confirms every value but `Default` |
 
-The core's is `invocationPolicy`, `auto` or `ask`, `auto` by default.
+The core's is `invocationPolicy`, `auto` or `ask`, `auto` by default, `ask`
+confirmed.
 `RegisterToolInvocationPolicy` replaces it. A second registration is an
 error that names both extensions, so two extensions that disagree fail
 assembly. `Registry.ToolInvocationPolicy()` returns the one in force.
 
-The policy is read in four places, all through the registry:
+The policy is read in five places, all through the registry:
 
 - The core `@mcp` decorator's `Apply` accepts `Key` with a value from
   `Values`, fills in `Default` for a visible tool, and names the build's
@@ -781,6 +783,8 @@ The policy is read in four places, all through the registry:
   the tool hooks, for IR that did not come through the loader.
 - The SDK generators write `Key` at fixed positions and type it in
   `tools/index.ts` as the union of `Values`.
+- The TypeScript API generator marks each tool of `mcp.ts` whose value
+  `Confirm` lists, and the endpoint confirms its calls (D93).
 
 In the IR the policy is `OperationMCP.Invocation`, an `ir.MCPInvocation`
 holding the key and the value, which `OperationMCP`'s JSON and YAML
@@ -892,16 +896,24 @@ shape is `BehaviorDeclaration`:
 | `configSchema` | the JSON Schema of the config a type gives the behavior; absent, the behavior takes none |
 | `createParamsSchema` | the JSON Schema of the parameters a create gives the behavior for the new instance, which an engine passes to its `initialize`: an object schema whose `additionalProperties` is `false` or a schema; absent, a create gives it none |
 | `requires`, `conflicts` | behaviors a type that lists this one must also list, or may not |
-| `fields` | the fields it adds: `name`, `description` and `volatile`, true for a field that can move without an event of its own instance |
-| `operations` | the operations it adds: `name` (camelCase), `description`, `paramsSchema` (an object schema with `"additionalProperties": false`), `resultSchema`, `writes`, `scope` (`instance`, the default, or `schema`), `beside` and `log` (below), and `invocationPolicy`, a value of the registry's policy (section 3.15) or absent for its default |
+| `fields` | the fields it adds: `name`, `description`, `volatile`, true for a field that can move without an event of its own instance, and `perReader`, true for a volatile one whose value is the caller's (below) |
+| `operations` | the operations it adds: `name` (camelCase), `description`, `paramsSchema` (an object schema with `"additionalProperties": false`), `resultSchema`, `writes`, `scope` (`instance`, the default, `schema` or `namespace`), `beside`, `log` and `asks` (below), and `invocationPolicy`, a value of the registry's policy (section 3.15) or absent for its default |
+| `signals` | the messages about an instance an engine delivers to the event streams open on it and keeps nowhere (D77): `name` (camelCase, unique among its signals), `description`, `paramsSchema` (the JSON Schema of its data) and `access`, who may send it: `read` or `write`, a caller the policy lets read or write the schema, or `operation`, the behavior's own operations alone |
 | `preconditionSchema` | the JSON Schema of the entry a caller sends for the behavior in the preconditions of an update, a delete or an operation, which an engine checks and hands to the behavior's guard: an object schema with `"additionalProperties": false`; absent, the behavior takes none |
 | `vetoes` | the codes its refusals carry, each `code` (lowercase snake case, at most 64 characters) and `description`; an engine refuses a veto whose code is not listed |
 
 An operation's `scope` says what a call names: `instance`, one instance
 by id, or `schema`, the schema as a whole with no instance, which an
 engine serves at `POST /namespaces/{ns}/schemas/{name}/operations/{op}`
-and as a tool that takes its parameters and no `id` (D16, amended).
-`RegisterBehavior` refuses any other value, and the engine does too.
+and as a tool that takes its parameters and no `id` (D16, amended); or
+`namespace`, the behavior's own tables across every schema of a
+namespace that composes it, with no instance and no schema, which an
+engine calls by the behavior's name, at `POST
+/namespaces/{ns}/behaviors/{behavior}/operations/{op}` and as a tool of
+the behavior's (D77; "Namespace operations" under "Behaviors" in
+`runtime/engine/README.md`). A namespace operation sets neither `beside`
+nor `log`. `RegisterBehavior` refuses any other value, and the engine
+does too.
 
 An instance operation that writes may say `"beside": true`: it writes
 only its behavior's own tables and columns, so an engine moves no
@@ -911,7 +923,11 @@ appends none (D77; "Instances and events" under "Behaviors" in
 `runtime/engine/README.md`). `RegisterBehavior` refuses a beside
 operation that does not write or has scope `schema`, `"log": false` on
 one that is not beside, and a behavior with a beside operation and a
-field that is not volatile, and the engine does too.
+field that is not volatile, and the engine does too. A beside operation
+with `"log": false` that writes only its caller's own state, a read
+marker, may say `"asks": "read"`: an engine asks the access policy
+`read` for it rather than `write`. `RegisterBehavior` refuses any other
+value of `asks`, and `asks` on any other operation.
 
 A field carries a name, a description and whether it is volatile, no
 type. A field's type can depend on the behavior's config, and the loader
@@ -920,7 +936,12 @@ needs only the name to refuse a collision. A volatile field
 is computed when the instance is read, from other instances, the clock
 or the config, as `Rollups.values` and `Dependencies.blocked` are. No
 event records such a move, so `Reactions`' `changes`, which hears a
-field through its instance's events, refuses one (D56).
+field through its instance's events, refuses one (D56). A volatile field
+whose value is the caller's, not the instance's, as Comments' `unread`
+is, also says `"perReader": true` (D77): an engine computes it at each
+read for that reader, and leaves it out of every event and of the moves
+a referring behavior hears. `RegisterBehavior` refuses `perReader` on a
+field that is not volatile, and the engine does too.
 
 `RegisterBehavior` rejects what section 3.2 lists. The name after the dot
 follows the bare-name rule (`^[A-Z][A-Za-z0-9]*$`), and the prefix is the

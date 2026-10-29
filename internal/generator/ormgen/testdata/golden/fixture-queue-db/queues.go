@@ -30,6 +30,7 @@ import (
 
 	types "example.com/schemas/types/go/fixture-queue-db"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -56,6 +57,23 @@ func (u *queueUnreadable) Error() string { return u.err.Error() }
 
 func (u *queueUnreadable) Unwrap() error { return u.err }
 
+// errKeyHeld is what claim returns when another worker's claim took a key
+// a message it would claim holds, as two workers claiming at once can on a
+// queue that holds one claim per key: the claim took nothing, and the next
+// one tries again.
+var errKeyHeld = errors.New("another claim holds the key")
+
+// keyHeld reports whether err is the unique violation of a queue's index
+// of claimed or of ready messages by key (D80). A claim on a queue that
+// holds one claim per key meets it when another worker's claim of the key
+// commits first; a fail or a release on a queue that keeps one ready
+// message per key, when a concurrent enqueue of the key commits first,
+// and then runs once more, when the ready message it sees takes its place.
+func keyHeld(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
 // queueTable is a queue's table, its arguments and its statements on
 // Postgres, which the TypeScript types' queues.ts carries too, so the two
 // claim alike.
@@ -73,12 +91,13 @@ type queueTable struct {
 }
 
 // queueStatements are a queue's statements on Postgres: insert begins an
-// enqueue; expire marks dead each message whose last attempt's claim
+// enqueue, and conflict ends one on a queue that keeps one ready message
+// per key; expire marks dead each message whose last attempt's claim
 // expired; claim claims up to $1 due messages for $2 seconds; complete,
 // fail, extend and release change message $1 while token $2 claims it;
 // prune deletes up to $2 messages done $1 seconds ago or more.
 type queueStatements struct {
-	insert, expire, claim, complete, fail, extend, release, prune string
+	insert, conflict, expire, claim, complete, fail, extend, release, prune string
 	// due reads whether a message is due, on SQLite alone, where a claim
 	// runs it before it takes the write lock.
 	due string
@@ -86,7 +105,8 @@ type queueStatements struct {
 
 // insert writes one message into the table in tx: the columns its fields
 // set, with their values, or the defaults of every column when it sets
-// none.
+// none. On a queue that keeps one ready message per key, the conflict
+// clause replaces or keeps the ready message of the key.
 func (t queueTable) insert(ctx context.Context, tx TxInterface, columns []string, values []any) error {
 	sql := t.statements.insert + " DEFAULT VALUES"
 	if len(columns) > 0 {
@@ -95,6 +115,9 @@ func (t queueTable) insert(ctx context.Context, tx TxInterface, columns []string
 			placeholders[i] = fmt.Sprintf("$%d", i+1)
 		}
 		sql = t.statements.insert + " (" + strings.Join(columns, ", ") + ") VALUES (" + strings.Join(placeholders, ", ") + ")"
+	}
+	if t.statements.conflict != "" {
+		sql += " " + t.statements.conflict
 	}
 	if _, err := tx.Exec(ctx, sql, values...); err != nil {
 		return fmt.Errorf("enqueue on %s: %w", t.name, err)
@@ -129,6 +152,9 @@ func (t queueTable) claim(ctx context.Context, pool *pgxpool.Pool, n int, lease 
 		}
 	}
 	if err := rows.Err(); err != nil {
+		if keyHeld(err) {
+			return errKeyHeld
+		}
 		return fmt.Errorf("claim on %s: %w", t.name, err)
 	}
 	rows.Close()
@@ -152,6 +178,9 @@ func (t queueTable) complete(ctx context.Context, pool *pgxpool.Pool, id, token 
 func (t queueTable) fail(ctx context.Context, pool *pgxpool.Pool, id, token, cause string) (bool, error) {
 	var state string
 	err := pool.QueryRow(ctx, t.statements.fail, id, token, t.retries, t.backoff.Seconds(), cause, t.maxBackoff.Seconds()).Scan(&state)
+	if keyHeld(err) {
+		err = pool.QueryRow(ctx, t.statements.fail, id, token, t.retries, t.backoff.Seconds(), cause, t.maxBackoff.Seconds()).Scan(&state)
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, fmt.Errorf("fail message %s on %s: %w", id, t.name, ErrClaimLost)
 	}
@@ -189,6 +218,9 @@ func (t queueTable) prune(ctx context.Context, pool *pgxpool.Pool, limit int) (i
 // it.
 func (t queueTable) update(ctx context.Context, pool *pgxpool.Pool, what, statement, id, token string, args ...any) error {
 	tag, err := pool.Exec(ctx, statement, append([]any{id, token}, args...)...)
+	if keyHeld(err) {
+		tag, err = pool.Exec(ctx, statement, append([]any{id, token}, args...)...)
+	}
 	if err != nil {
 		return fmt.Errorf("%s message %s on %s: %w", what, id, t.name, err)
 	}
@@ -196,6 +228,163 @@ func (t queueTable) update(ctx context.Context, pool *pgxpool.Pool, what, statem
 		return fmt.Errorf("%s message %s on %s: %w", what, id, t.name, ErrClaimLost)
 	}
 	return nil
+}
+
+// orderChangedQueue is the table of the queue OrderChanged.
+var orderChangedQueue = queueTable{
+	name:       `order_changed_queue`,
+	retries:    5,
+	backoff:    30 * time.Second,
+	maxBackoff: 3600 * time.Second,
+	retain:     604800 * time.Second,
+	statements: queueStatements{
+		insert:   `INSERT INTO order_changed_queue`,
+		conflict: `ON CONFLICT (order_id) WHERE state = 'ready' DO UPDATE SET line_id = excluded.line_id, priority = excluded.priority, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = now()`,
+		expire: `UPDATE order_changed_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
+  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
+WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
+		claim: `WITH due AS (
+  SELECT m.id FROM order_changed_queue AS m
+  WHERE ((m.state = 'ready' AND m.due_at <= now()) OR (m.state = 'claimed' AND m.claim_expires_at <= now()))
+    AND NOT EXISTS (SELECT 1 FROM order_changed_queue AS o WHERE o.order_id = m.order_id AND o.id <> m.id
+      AND (o.state = 'claimed' OR (m.state = 'ready' AND o.state = 'ready' AND (o.due_at, o.id) < (m.due_at, m.id))))
+  ORDER BY m.due_at, m.id
+  LIMIT $1
+  FOR UPDATE OF m SKIP LOCKED
+)
+UPDATE order_changed_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),
+  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()
+FROM due WHERE q.id = due.id
+RETURNING q.id::text, q.claim_token::text, q.attempts, q.order_id, q.line_id, q.priority`,
+		complete: `UPDATE order_changed_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+		fail: `UPDATE order_changed_queue SET
+  state = CASE WHEN attempts > $3 THEN 'dead' WHEN EXISTS (SELECT 1 FROM order_changed_queue AS p WHERE p.order_id = order_changed_queue.order_id AND p.state = 'ready') THEN 'done' ELSE 'ready' END,
+  due_at = CASE WHEN attempts > $3 OR EXISTS (SELECT 1 FROM order_changed_queue AS p WHERE p.order_id = order_changed_queue.order_id AND p.state = 'ready') THEN due_at ELSE now() + make_interval(secs => LEAST($4 * power(2, LEAST(attempts - 1, 40)), $6)) END,
+  last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'
+RETURNING state`,
+		extend: `UPDATE order_changed_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+		release: `UPDATE order_changed_queue SET state = CASE WHEN EXISTS (SELECT 1 FROM order_changed_queue AS p WHERE p.order_id = order_changed_queue.order_id AND p.state = 'ready') THEN 'done' ELSE 'ready' END,
+  attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+		prune: `DELETE FROM order_changed_queue WHERE id IN (
+  SELECT id FROM order_changed_queue
+  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)
+  ORDER BY updated_at
+  LIMIT $2
+  FOR UPDATE SKIP LOCKED
+)`,
+	},
+}
+
+// OrderChangedLease is how long a claim on a message of OrderChanged holds it: a
+// worker extends the claim while its handler runs.
+const OrderChangedLease = 60 * time.Second
+
+// EnqueueOrderChanged writes msg into the queue OrderChanged in tx, the caller's
+// transaction: the message is due once tx commits, and never if it rolls
+// back. A field writes its column as a table's field does.
+func EnqueueOrderChanged(ctx context.Context, tx TxInterface, msg *types.OrderChanged) error {
+	var columns []string
+	var values []any
+	columns = append(columns, `order_id`)
+	values = append(values, msg.OrderId.ToUUID())
+	if msg.LineId != nil {
+		columns = append(columns, `line_id`)
+		values = append(values, msg.LineId.ToUUID())
+	}
+	columns = append(columns, `priority`)
+	// An unset enum takes its schema default; "" is never a member.
+	if msg.Priority == "" {
+		values = append(values, types.Priority("low"))
+	} else {
+		values = append(values, msg.Priority)
+	}
+	return orderChangedQueue.insert(ctx, tx, columns, values)
+}
+
+// OrderChangedQueue claims the messages of the queue OrderChanged for a worker. A
+// message whose handler fails is due again after 30s, doubled for each
+// attempt before, up to 3600s, and is dead after 5 such retries. A done
+// message stays 604800s, then Prune removes it.
+//
+// Sent when an order's lines change: a newer change replaces the one that
+// waits, and the worker handles one order's changes at a time.
+type OrderChangedQueue struct {
+	pool *pgxpool.Pool
+}
+
+// OrderChangedQueue returns the queue OrderChanged of the database.
+func (db *Database) OrderChangedQueue() *OrderChangedQueue {
+	return &OrderChangedQueue{pool: db.pool}
+}
+
+// OrderChangedClaim is a claimed message of OrderChanged: its ID, the token of
+// the claim, which attempt this is, from 1, and the message.
+type OrderChangedClaim struct {
+	ID      string
+	Token   string
+	Attempt int
+	Message types.OrderChanged
+}
+
+// Claim claims up to n due messages for lease; a message that does not read
+// into its type it fails alone, recording Unreadable and why. Each field
+// reads its column as a table's field does.
+func (q *OrderChangedQueue) Claim(ctx context.Context, n int, lease time.Duration) ([]OrderChangedClaim, error) {
+	var claims []OrderChangedClaim
+	err := orderChangedQueue.claim(ctx, q.pool, n, lease, func(rows pgx.Rows) error {
+		var claim OrderChangedClaim
+		msg := &claim.Message
+		var tempLineId *types.IdentityUUID
+		if err := rows.Scan(&claim.ID, &claim.Token, &claim.Attempt, &msg.OrderId, &tempLineId, &msg.Priority); err != nil {
+			return err
+		}
+		if tempLineId != nil {
+			msg.LineId = tempLineId
+		}
+		claims = append(claims, claim)
+		return nil
+	})
+	if errors.Is(err, errKeyHeld) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return claims, nil
+}
+
+// Complete marks the message id, which token claims, done.
+func (q *OrderChangedQueue) Complete(ctx context.Context, id, token string) error {
+	return orderChangedQueue.complete(ctx, q.pool, id, token)
+}
+
+// Fail records cause on the message id, which token claims, and makes it
+// due again after the backoff, doubled for each attempt before and capped at
+// the maximum backoff, or dead when its retries are spent. It reports
+// whether the message is dead.
+func (q *OrderChangedQueue) Fail(ctx context.Context, id, token, cause string) (bool, error) {
+	return orderChangedQueue.fail(ctx, q.pool, id, token, cause)
+}
+
+// Extend holds the message id, which token claims, for lease from now.
+func (q *OrderChangedQueue) Extend(ctx context.Context, id, token string, lease time.Duration) error {
+	return orderChangedQueue.extend(ctx, q.pool, id, token, lease)
+}
+
+// Release gives the message id, which token claims, back, due at once.
+func (q *OrderChangedQueue) Release(ctx context.Context, id, token string) error {
+	return orderChangedQueue.release(ctx, q.pool, id, token)
+}
+
+// Prune deletes up to limit messages done 604800s ago or more, the oldest
+// first, and returns how many it deleted; a worker runs it again while it
+// deletes limit. It never deletes a dead message.
+func (q *OrderChangedQueue) Prune(ctx context.Context, limit int) (int, error) {
+	return orderChangedQueue.prune(ctx, q.pool, limit)
 }
 
 // orderPlacedQueue is the table of the queue OrderPlaced.
@@ -338,6 +527,9 @@ func (q *OrderPlacedQueue) Claim(ctx context.Context, n int, lease time.Duration
 		claims = append(claims, claim)
 		return nil
 	})
+	if errors.Is(err, errKeyHeld) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -478,6 +670,9 @@ func (q *PingQueue) Claim(ctx context.Context, n int, lease time.Duration) ([]Pi
 		claims = append(claims, claim)
 		return nil
 	})
+	if errors.Is(err, errKeyHeld) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -513,4 +708,294 @@ func (q *PingQueue) Release(ctx context.Context, id, token string) error {
 // never deletes a dead message.
 func (q *PingQueue) Prune(ctx context.Context, limit int) (int, error) {
 	return pingQueue.prune(ctx, q.pool, limit)
+}
+
+// stockCheckedQueue is the table of the queue StockChecked.
+var stockCheckedQueue = queueTable{
+	name:       `stock_checked_queue`,
+	retries:    5,
+	backoff:    30 * time.Second,
+	maxBackoff: 3600 * time.Second,
+	retain:     604800 * time.Second,
+	statements: queueStatements{
+		insert:   `INSERT INTO stock_checked_queue`,
+		conflict: `ON CONFLICT (sku) WHERE state = 'ready' DO NOTHING`,
+		expire: `UPDATE stock_checked_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
+  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
+WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
+		claim: `WITH due AS (
+  SELECT id FROM stock_checked_queue
+  WHERE (state = 'ready' AND due_at <= now()) OR (state = 'claimed' AND claim_expires_at <= now())
+  ORDER BY due_at, id
+  LIMIT $1
+  FOR UPDATE SKIP LOCKED
+)
+UPDATE stock_checked_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),
+  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()
+FROM due WHERE q.id = due.id
+RETURNING q.id::text, q.claim_token::text, q.attempts, q.sku, q.quantity`,
+		complete: `UPDATE stock_checked_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+		fail: `UPDATE stock_checked_queue SET
+  state = CASE WHEN attempts > $3 THEN 'dead' WHEN EXISTS (SELECT 1 FROM stock_checked_queue AS p WHERE p.sku = stock_checked_queue.sku AND p.state = 'ready') THEN 'done' ELSE 'ready' END,
+  due_at = CASE WHEN attempts > $3 OR EXISTS (SELECT 1 FROM stock_checked_queue AS p WHERE p.sku = stock_checked_queue.sku AND p.state = 'ready') THEN due_at ELSE now() + make_interval(secs => LEAST($4 * power(2, LEAST(attempts - 1, 40)), $6)) END,
+  last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'
+RETURNING state`,
+		extend: `UPDATE stock_checked_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+		release: `UPDATE stock_checked_queue SET state = CASE WHEN EXISTS (SELECT 1 FROM stock_checked_queue AS p WHERE p.sku = stock_checked_queue.sku AND p.state = 'ready') THEN 'done' ELSE 'ready' END,
+  attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+		prune: `DELETE FROM stock_checked_queue WHERE id IN (
+  SELECT id FROM stock_checked_queue
+  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)
+  ORDER BY updated_at
+  LIMIT $2
+  FOR UPDATE SKIP LOCKED
+)`,
+	},
+}
+
+// StockCheckedLease is how long a claim on a message of StockChecked holds it: a
+// worker extends the claim while its handler runs.
+const StockCheckedLease = 60 * time.Second
+
+// EnqueueStockChecked writes msg into the queue StockChecked in tx, the caller's
+// transaction: the message is due once tx commits, and never if it rolls
+// back. A field writes its column as a table's field does.
+func EnqueueStockChecked(ctx context.Context, tx TxInterface, msg *types.StockChecked) error {
+	var columns []string
+	var values []any
+	columns = append(columns, `sku`)
+	values = append(values, msg.Sku)
+	columns = append(columns, `quantity`)
+	values = append(values, msg.Quantity)
+	return stockCheckedQueue.insert(ctx, tx, columns, values)
+}
+
+// StockCheckedQueue claims the messages of the queue StockChecked for a worker. A
+// message whose handler fails is due again after 30s, doubled for each
+// attempt before, up to 3600s, and is dead after 5 such retries. A done
+// message stays 604800s, then Prune removes it.
+//
+// Sent when a stock count is asked for: one waits per SKU, and a later ask
+// while it waits adds nothing.
+type StockCheckedQueue struct {
+	pool *pgxpool.Pool
+}
+
+// StockCheckedQueue returns the queue StockChecked of the database.
+func (db *Database) StockCheckedQueue() *StockCheckedQueue {
+	return &StockCheckedQueue{pool: db.pool}
+}
+
+// StockCheckedClaim is a claimed message of StockChecked: its ID, the token of
+// the claim, which attempt this is, from 1, and the message.
+type StockCheckedClaim struct {
+	ID      string
+	Token   string
+	Attempt int
+	Message types.StockChecked
+}
+
+// Claim claims up to n due messages for lease; a message that does not read
+// into its type it fails alone, recording Unreadable and why. Each field
+// reads its column as a table's field does.
+func (q *StockCheckedQueue) Claim(ctx context.Context, n int, lease time.Duration) ([]StockCheckedClaim, error) {
+	var claims []StockCheckedClaim
+	err := stockCheckedQueue.claim(ctx, q.pool, n, lease, func(rows pgx.Rows) error {
+		var claim StockCheckedClaim
+		msg := &claim.Message
+		if err := rows.Scan(&claim.ID, &claim.Token, &claim.Attempt, &msg.Sku, &msg.Quantity); err != nil {
+			return err
+		}
+		claims = append(claims, claim)
+		return nil
+	})
+	if errors.Is(err, errKeyHeld) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return claims, nil
+}
+
+// Complete marks the message id, which token claims, done.
+func (q *StockCheckedQueue) Complete(ctx context.Context, id, token string) error {
+	return stockCheckedQueue.complete(ctx, q.pool, id, token)
+}
+
+// Fail records cause on the message id, which token claims, and makes it
+// due again after the backoff, doubled for each attempt before and capped at
+// the maximum backoff, or dead when its retries are spent. It reports
+// whether the message is dead.
+func (q *StockCheckedQueue) Fail(ctx context.Context, id, token, cause string) (bool, error) {
+	return stockCheckedQueue.fail(ctx, q.pool, id, token, cause)
+}
+
+// Extend holds the message id, which token claims, for lease from now.
+func (q *StockCheckedQueue) Extend(ctx context.Context, id, token string, lease time.Duration) error {
+	return stockCheckedQueue.extend(ctx, q.pool, id, token, lease)
+}
+
+// Release gives the message id, which token claims, back, due at once.
+func (q *StockCheckedQueue) Release(ctx context.Context, id, token string) error {
+	return stockCheckedQueue.release(ctx, q.pool, id, token)
+}
+
+// Prune deletes up to limit messages done 604800s ago or more, the oldest
+// first, and returns how many it deleted; a worker runs it again while it
+// deletes limit. It never deletes a dead message.
+func (q *StockCheckedQueue) Prune(ctx context.Context, limit int) (int, error) {
+	return stockCheckedQueue.prune(ctx, q.pool, limit)
+}
+
+// syncRequestedQueue is the table of the queue SyncRequested.
+var syncRequestedQueue = queueTable{
+	name:       `sync_requested_queue`,
+	retries:    5,
+	backoff:    30 * time.Second,
+	maxBackoff: 3600 * time.Second,
+	retain:     604800 * time.Second,
+	statements: queueStatements{
+		insert: `INSERT INTO sync_requested_queue`,
+		expire: `UPDATE sync_requested_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
+  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
+WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
+		claim: `WITH due AS (
+  SELECT m.id FROM sync_requested_queue AS m
+  WHERE ((m.state = 'ready' AND m.due_at <= now()) OR (m.state = 'claimed' AND m.claim_expires_at <= now()))
+    AND NOT EXISTS (SELECT 1 FROM sync_requested_queue AS o WHERE o.account_id = m.account_id AND o.id <> m.id
+      AND (o.state = 'claimed' OR (m.state = 'ready' AND o.state = 'ready' AND (o.due_at, o.id) < (m.due_at, m.id))))
+  ORDER BY m.due_at, m.id
+  LIMIT $1
+  FOR UPDATE OF m SKIP LOCKED
+)
+UPDATE sync_requested_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),
+  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()
+FROM due WHERE q.id = due.id
+RETURNING q.id::text, q.claim_token::text, q.attempts, q.account_id, q.reason`,
+		complete: `UPDATE sync_requested_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+		fail: `UPDATE sync_requested_queue SET
+  state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,
+  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => LEAST($4 * power(2, LEAST(attempts - 1, 40)), $6)) END,
+  last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'
+RETURNING state`,
+		extend: `UPDATE sync_requested_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+		release: `UPDATE sync_requested_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+		prune: `DELETE FROM sync_requested_queue WHERE id IN (
+  SELECT id FROM sync_requested_queue
+  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)
+  ORDER BY updated_at
+  LIMIT $2
+  FOR UPDATE SKIP LOCKED
+)`,
+	},
+}
+
+// SyncRequestedLease is how long a claim on a message of SyncRequested holds it: a
+// worker extends the claim while its handler runs.
+const SyncRequestedLease = 60 * time.Second
+
+// EnqueueSyncRequested writes msg into the queue SyncRequested in tx, the caller's
+// transaction: the message is due once tx commits, and never if it rolls
+// back. A field writes its column as a table's field does.
+func EnqueueSyncRequested(ctx context.Context, tx TxInterface, msg *types.SyncRequested) error {
+	var columns []string
+	var values []any
+	columns = append(columns, `account_id`)
+	values = append(values, msg.AccountId.ToUUID())
+	if !reflect.ValueOf(msg.Reason).IsZero() {
+		columns = append(columns, `reason`)
+		values = append(values, msg.Reason)
+	}
+	return syncRequestedQueue.insert(ctx, tx, columns, values)
+}
+
+// SyncRequestedQueue claims the messages of the queue SyncRequested for a worker. A
+// message whose handler fails is due again after 30s, doubled for each
+// attempt before, up to 3600s, and is dead after 5 such retries. A done
+// message stays 604800s, then Prune removes it.
+//
+// Sent when an account's records are to be synced: every request is kept,
+// and the worker syncs one account at a time.
+type SyncRequestedQueue struct {
+	pool *pgxpool.Pool
+}
+
+// SyncRequestedQueue returns the queue SyncRequested of the database.
+func (db *Database) SyncRequestedQueue() *SyncRequestedQueue {
+	return &SyncRequestedQueue{pool: db.pool}
+}
+
+// SyncRequestedClaim is a claimed message of SyncRequested: its ID, the token of
+// the claim, which attempt this is, from 1, and the message.
+type SyncRequestedClaim struct {
+	ID      string
+	Token   string
+	Attempt int
+	Message types.SyncRequested
+}
+
+// Claim claims up to n due messages for lease; a message that does not read
+// into its type it fails alone, recording Unreadable and why. Each field
+// reads its column as a table's field does.
+func (q *SyncRequestedQueue) Claim(ctx context.Context, n int, lease time.Duration) ([]SyncRequestedClaim, error) {
+	var claims []SyncRequestedClaim
+	err := syncRequestedQueue.claim(ctx, q.pool, n, lease, func(rows pgx.Rows) error {
+		var claim SyncRequestedClaim
+		msg := &claim.Message
+		var tempReason sql.NullString
+		if err := rows.Scan(&claim.ID, &claim.Token, &claim.Attempt, &msg.AccountId, &tempReason); err != nil {
+			return err
+		}
+		if tempReason.Valid {
+			msg.Reason = tempReason.String
+		}
+		claims = append(claims, claim)
+		return nil
+	})
+	if errors.Is(err, errKeyHeld) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return claims, nil
+}
+
+// Complete marks the message id, which token claims, done.
+func (q *SyncRequestedQueue) Complete(ctx context.Context, id, token string) error {
+	return syncRequestedQueue.complete(ctx, q.pool, id, token)
+}
+
+// Fail records cause on the message id, which token claims, and makes it
+// due again after the backoff, doubled for each attempt before and capped at
+// the maximum backoff, or dead when its retries are spent. It reports
+// whether the message is dead.
+func (q *SyncRequestedQueue) Fail(ctx context.Context, id, token, cause string) (bool, error) {
+	return syncRequestedQueue.fail(ctx, q.pool, id, token, cause)
+}
+
+// Extend holds the message id, which token claims, for lease from now.
+func (q *SyncRequestedQueue) Extend(ctx context.Context, id, token string, lease time.Duration) error {
+	return syncRequestedQueue.extend(ctx, q.pool, id, token, lease)
+}
+
+// Release gives the message id, which token claims, back, due at once.
+func (q *SyncRequestedQueue) Release(ctx context.Context, id, token string) error {
+	return syncRequestedQueue.release(ctx, q.pool, id, token)
+}
+
+// Prune deletes up to limit messages done 604800s ago or more, the oldest
+// first, and returns how many it deleted; a worker runs it again while it
+// deletes limit. It never deletes a dead message.
+func (q *SyncRequestedQueue) Prune(ctx context.Context, limit int) (int, error) {
+	return syncRequestedQueue.prune(ctx, q.pool, limit)
 }

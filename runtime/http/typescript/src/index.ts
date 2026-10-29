@@ -15,7 +15,10 @@ node: so they run on Workers too. It also holds what a generated server's
 entrypoint reads (D51): the readers of the config fields a stack derives
 (stackconfig.ts), which map a loaded credential onto those sources, the
 JSON-lines logger, and the provider-neutral Bucket an API's Deps holds per
-bucket it lists (bucket.ts, D54). ./hono.ts binds it to Hono,
+bucket it lists (bucket.ts, D54), and the MemoryStore it holds per memory
+store it lists, with its typed layer and the shared rate limit
+(memorystore.ts, memorystore-ratelimit.ts, D75), whose Redis
+implementation is ./redis. ./hono.ts binds it to Hono,
 ./postgres.ts opens a database's pg Pool and runs a queue's enqueue and
 claims (queue.ts, D53), ./worker.ts is a worker's claim loop and ./gcs.ts
 opens a bucket on GCS; nothing in this file imports a framework, pg or a
@@ -45,6 +48,47 @@ export {
 } from './problem.js';
 export { MemoryRateLimitStore, clientIpKey, clientIpOf, remoteAddressKey } from './ratelimit.js';
 export type { RateLimitDecision, RateLimitOptions, RateLimitStore } from './ratelimit.js';
+export {
+  Channel,
+  InProcessMemoryStore,
+  Key,
+  MAX_MESSAGE_BYTES,
+  MAX_SEGMENT_BYTES,
+  MAX_TTL_MS,
+  MemoryStoreNameError,
+  MemoryStoreUnavailableError,
+  checkMessage,
+  checkTtl,
+  disabledMemoryStore,
+  integerPart,
+  jsonCodec,
+  memoryStoreName,
+  memoryStorePrefix,
+  segmentProblem,
+  signal,
+  signalChannel,
+  signalCodec,
+} from './memorystore.js';
+export type {
+  ChannelSubscribeOptions,
+  InProcessMemoryStoreOptions,
+  MemoryStore,
+  MessageCodec,
+  MessageHandler,
+  Ref,
+  Signal,
+  Subscription,
+} from './memorystore.js';
+export {
+  MemoryStoreRateLimitStore,
+  RATE_LIMIT_DECLARATION,
+  RATE_LIMIT_SLACK_MS,
+  RATE_LIMIT_WINDOW_MS,
+  memoryStoreRateLimitStore,
+  rateLimitKeyName,
+  rateLimitWindow,
+} from './memorystore-ratelimit.js';
+export type { MemoryStoreRateLimitOptions, RateLimitWindowDecision } from './memorystore-ratelimit.js';
 export { OperationResult, envelope, envelopeResponse, requestIdOf } from './envelope.js';
 export type { Envelope, EnvelopeMeta } from './envelope.js';
 export { decodeJsonParam, decodeListOfLists, decodeMap, decodeParam, decodeParams } from './params.js';
@@ -95,17 +139,42 @@ export type {
   SignedTokenSourceOptions,
   TokenFileSourceOptions,
 } from './credentials.js';
-export type { OperationAuth, OperationInput, OperationServiceCallers, OperationSpec, RequestContext } from './operation.js';
+export { declaredKeysOnly } from './operation.js';
+export type {
+  OperationAuth,
+  OperationDownload,
+  OperationInput,
+  OperationServiceCallers,
+  OperationSpec,
+  OperationUpload,
+  RequestContext,
+} from './operation.js';
+export {
+  BODY_NOT_MULTIPART,
+  DATA_PART,
+  DEFAULT_PART_CONTENT_TYPE,
+  UploadInputError,
+  checkUpload,
+  decodeUploads,
+  mediaTypeOf,
+  parseUploadFields,
+  uploadBodyLimitBytes,
+} from './upload.js';
+export type { UploadInput, UploadedFiles } from './upload.js';
+export { contentDisposition, downloadFilename, downloadResponse } from './download.js';
+export type { FileDownload } from './download.js';
 export {
   CALLERS_SUFFIX,
   CORS_SUFFIX,
   CREDENTIAL_SOURCES,
+  MEMORY_STORE_AUTHS,
   SERVICE_AUTHORIZATION_HEADER,
   StackConfigError,
   loadBucket,
   loadCallers,
   loadCors,
   loadDatabase,
+  loadMemoryStore,
   loadService,
   serviceCredentialFor,
 } from './stackconfig.js';
@@ -123,10 +192,13 @@ export {
 export type { CorsApi, CorsDecision, CorsOperation, CorsPolicy } from './cors.js';
 export type {
   BucketConnection,
+  MemoryStoreAuth,
+  MemoryStoreConnection,
   CloudSqlConnection,
   D1Connection,
   Database,
   DatabaseConnection,
+  HyperdriveConnection,
   R2Credential,
   Service,
   ServiceBinding,
@@ -150,4 +222,6 @@ export type {
 } from './bucket.js';
 export { MAX_SEARCH_TERMS, foldText, likePattern, searchMatches, searchTerms } from './search.js';
 export { LOG_LEVELS, createLogger } from './logger.js';
+export { SECRET_MASK, SecretValue, revealed } from './secret.js';
+export type { Revealable } from './secret.js';
 export type { LogFields, LogLevel, Logger, LoggerOptions } from './logger.js';

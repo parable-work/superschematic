@@ -1,0 +1,12 @@
+# The memory store ts-shop lists and counts its rate limits in, and
+# ts-pricing and ts-reports list (D75). Each server opens it once from its
+# config field, on Redis: the local target's Valkey in each Local. It is
+# disabled where an environment turns it off: Edge, on a platform whose
+# artifact is a bundle, which reaches no store. Its TypeScript definitions,
+# @schemas/ts-cache-types, are a dependency of each listing API's
+# implementation scaffold.
+name: ts-cache
+kind: MemoryStore
+outputs:
+  types:
+    typescript: { enabled: true }

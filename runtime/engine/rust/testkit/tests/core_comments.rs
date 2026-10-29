@@ -199,12 +199,12 @@ fn post_numbers_messages_per_instance_and_the_fields_count_them() {
         let world = world(&target, json!({}));
         assert_eq!(
             world.fields(),
-            json!({"messages": 0, "threads": {"open": 0, "resolved": 0}})
+            json!({"messages": 0, "threads": {"open": 0, "resolved": 0}, "composing": [], "unread": 0})
         );
         assert_eq!(
             world.post(&alice(), json!({"body": "Looks right."})),
             json!({"id": 1, "author": "alice", "state": "posted", "body": "Looks right.", "blocks": [], "mentions": [],
-                   "reactions": {}, "createdAt": 1000, "edits": 0, "pinned": false, "replies": 0, "participants": ["alice"]})
+                   "reactions": {}, "createdAt": 1000, "postedAt": 1000, "stand": 1, "edits": 0, "pinned": false, "replies": 0, "participants": ["alice"]})
         );
         world.set_clock(2000);
         assert_eq!(
@@ -213,7 +213,7 @@ fn post_numbers_messages_per_instance_and_the_fields_count_them() {
                 json!({"body": "Agreed.", "thread": 1, "mentions": ["alice", "role:leads"]})
             ),
             json!({"id": 2, "thread": 1, "author": "bob", "state": "posted", "body": "Agreed.", "blocks": [],
-                   "mentions": ["alice", "role:leads"], "reactions": {}, "createdAt": 2000, "edits": 0, "pinned": false})
+                   "mentions": ["alice", "role:leads"], "reactions": {}, "createdAt": 2000, "postedAt": 2000, "stand": 2, "edits": 0, "pinned": false})
         );
         world.set_clock(3000);
         // A service acting for an end user posts as the user, through it.
@@ -249,11 +249,11 @@ fn post_numbers_messages_per_instance_and_the_fields_count_them() {
         );
         assert_eq!(
             world.fields(),
-            json!({"messages": 4, "lastMessageAt": 3000, "threads": {"open": 2, "resolved": 0}})
+            json!({"messages": 4, "lastMessageAt": 3000, "threads": {"open": 2, "resolved": 0}, "composing": [], "unread": 0})
         );
         assert_eq!(
             world.get("r2").behaviors["Comments"],
-            json!({"messages": 1, "lastMessageAt": 3000, "threads": {"open": 1, "resolved": 0}})
+            json!({"messages": 1, "lastMessageAt": 3000, "threads": {"open": 1, "resolved": 0}, "composing": [], "unread": 0})
         );
         let counts: Vec<Value> = world
             .engine
@@ -611,7 +611,7 @@ fn edit_replaces_what_it_gives_and_list_edits_reads_what_each_edit_replaced() {
             vetoed(world.call(&alice(), "edit", json!({"message": 1, "body": "Late."}))),
             (
                 "edit_window_passed".to_owned(),
-                json!({"message": 1, "createdAt": 1000, "editWindowMs": 60000})
+                json!({"message": 1, "postedAt": 1000, "editWindowMs": 60000})
             )
         );
         assert_eq!(
@@ -702,7 +702,7 @@ fn delete_message_keeps_its_place_and_purge_removes_a_thread_for_good() {
         assert_eq!(
             world.ok(&alice(), "deleteMessage", json!({"message": 1})),
             json!({"id": 1, "author": "alice", "state": "deleted", "body": "", "blocks": [], "mentions": [], "reactions": {},
-                   "createdAt": 1000, "edits": 0, "pinned": false, "replies": 2, "lastReplyAt": 1000, "participants": ["carol", "bob"]})
+                   "createdAt": 1000, "postedAt": 1000, "stand": 1, "edits": 0, "pinned": false, "replies": 2, "lastReplyAt": 1000, "participants": ["carol", "bob"]})
         );
         assert_eq!(
             world.ok(&alice(), "listEdits", json!({"message": 1})),
@@ -719,13 +719,13 @@ fn delete_message_keeps_its_place_and_purge_removes_a_thread_for_good() {
         );
         assert_eq!(
             world.fields(),
-            json!({"messages": 3, "lastMessageAt": 5000, "threads": {"open": 1, "resolved": 0}})
+            json!({"messages": 3, "lastMessageAt": 5000, "threads": {"open": 1, "resolved": 0}, "composing": [], "unread": 1})
         );
         // A moderator deletes another's.
         world.ok(&moderator(), "deleteMessage", json!({"message": 4}));
         assert_eq!(
             world.fields(),
-            json!({"messages": 2, "lastMessageAt": 1000, "threads": {"open": 0, "resolved": 0}})
+            json!({"messages": 2, "lastMessageAt": 1000, "threads": {"open": 0, "resolved": 0}, "composing": [], "unread": 0})
         );
         assert_eq!(
             refusal(world.call(&bob(), "purge", json!({"message": 1}))).message(),
@@ -749,7 +749,7 @@ fn delete_message_keeps_its_place_and_purge_removes_a_thread_for_good() {
         );
         assert_eq!(
             world.fields(),
-            json!({"messages": 0, "threads": {"open": 0, "resolved": 0}})
+            json!({"messages": 0, "threads": {"open": 0, "resolved": 0}, "composing": [], "unread": 0})
         );
         for operation in ["getMessage", "deleteMessage", "purge"] {
             assert_eq!(
@@ -1363,7 +1363,7 @@ fn deleting_the_instance_deletes_its_conversation_and_keeps_its_numbering() {
         create(&world.engine, "Q3 plan, again", "r1");
         assert_eq!(
             world.fields(),
-            json!({"messages": 0, "threads": {"open": 0, "resolved": 0}})
+            json!({"messages": 0, "threads": {"open": 0, "resolved": 0}, "composing": [], "unread": 0})
         );
         assert_eq!(
             world.ok(&alice(), "listMessages", json!({})),
@@ -1376,7 +1376,7 @@ fn deleting_the_instance_deletes_its_conversation_and_keeps_its_numbering() {
         assert_eq!(world.say(&alice(), "Fresh."), 3);
         assert_eq!(
             world.fields(),
-            json!({"messages": 1, "lastMessageAt": 1000, "threads": {"open": 1, "resolved": 0}})
+            json!({"messages": 1, "lastMessageAt": 1000, "threads": {"open": 1, "resolved": 0}, "composing": [], "unread": 0})
         );
         assert_eq!(world.message(3)["reactions"], json!({}));
         assert_eq!(
@@ -1410,7 +1410,7 @@ fn comments_joins_a_schema_that_has_instances_and_does_not_leave_one() {
             (Value::Object(joined.data), Value::Object(joined.behaviors)),
             (
                 json!({"title": "Q3 plan"}),
-                json!({"Comments": {"messages": 0, "threads": {"open": 0, "resolved": 0}}})
+                json!({"Comments": {"messages": 0, "threads": {"open": 0, "resolved": 0}, "composing": [], "unread": 0}})
             )
         );
         engine
@@ -1592,7 +1592,7 @@ fn migration_2_moves_version_1s_comments_into_threads_one_level_deep() {
         assert_eq!(
             top["items"][0],
             json!({"id": 1, "author": "alice", "state": "posted", "body": "One.", "blocks": [], "mentions": [], "reactions": {},
-                   "createdAt": 1001, "edits": 0, "pinned": false, "replies": 4, "lastReplyAt": 1005, "participants": ["bob", "alice", "carol"]})
+                   "createdAt": 1001, "postedAt": 1001, "stand": 1, "edits": 0, "pinned": false, "replies": 4, "lastReplyAt": 1005, "participants": ["bob", "alice", "carol"]})
         );
         let thread = r1("listMessages", json!({"thread": 1}));
         let shape: Vec<(Value, Value)> = thread["items"]
@@ -1630,15 +1630,15 @@ fn migration_2_moves_version_1s_comments_into_threads_one_level_deep() {
         };
         assert_eq!(
             fields("r1"),
-            json!({"messages": 8, "lastMessageAt": 1008, "threads": {"open": 3, "resolved": 0}})
+            json!({"messages": 8, "lastMessageAt": 1008, "threads": {"open": 3, "resolved": 0}, "composing": [], "unread": 0})
         );
         assert_eq!(
             fields("r2"),
-            json!({"messages": 1, "lastMessageAt": 1009, "threads": {"open": 1, "resolved": 0}})
+            json!({"messages": 1, "lastMessageAt": 1009, "threads": {"open": 1, "resolved": 0}, "composing": [], "unread": 0})
         );
         assert_eq!(
             fields("r3"),
-            json!({"messages": 0, "threads": {"open": 0, "resolved": 0}})
+            json!({"messages": 0, "threads": {"open": 0, "resolved": 0}, "composing": [], "unread": 0})
         );
         // The conversation goes on from the greatest id.
         assert_eq!(r1("post", json!({"body": "Nine."}))["id"], json!(9));
@@ -1674,6 +1674,6 @@ fn migration_2_moves_version_1s_comments_into_threads_one_level_deep() {
                     .collect::<superschematic_engine::storage::Result<Vec<_>>>()
             })
             .unwrap();
-        assert_eq!(ledger, [1, 2]);
+        assert_eq!(ledger, [1, 2, 3, 4, 5, 6]);
     }
 }

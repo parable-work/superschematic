@@ -55,6 +55,11 @@ This crate provides:
   calling, from a JWT in `Service-Authorization`. `JwtServiceAuthenticator`
   verifies RS256, ES256 and EdDSA tokens against a `ServiceAuthConfig`,
   with static keys or a JWKS it caches per URL
+- `JwtBodyHashVerifier` (D81): the checks of an `@hmacVerified` provider
+  that signs each webhook with an ES256 JWT carrying the body's SHA-256,
+  as Plaid does, over a `WebhookKeys` lookup by `kid` or a JWKS URL. Its
+  `verify(request, next)` is the body of a generated crate's
+  `WebhookVerifier`
 - `RouteControls`: a route's `@rateLimit`, `@bodyLimit`, service step
   (`@requireService`, `@allowService`), permission check and `@timeout`,
   applied with `route_layer` in that order. A generated router gives a

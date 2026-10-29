@@ -34,6 +34,8 @@ type StringFilter struct {
 	// the empty slice and getting every row back.
 	In    []string
 	ILike *string // Case-insensitive LIKE
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // Int64Filter provides filtering operations for integer fields
@@ -44,6 +46,11 @@ type Int64Filter struct {
 	Lt      *int64
 	Lte     *int64
 	Between *Int64Range
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []int64
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // Int64Range represents a range for int64 values
@@ -60,6 +67,11 @@ type FloatFilter struct {
 	Lt      *float64
 	Lte     *float64
 	Between *FloatRange
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []float64
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // FloatRange represents a range for float values
@@ -71,6 +83,11 @@ type FloatRange struct {
 // BoolFilter provides filtering operations for boolean fields
 type BoolFilter struct {
 	Eq *bool
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In []bool
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // DateTimeFilter provides filtering operations for DateTime fields
@@ -81,7 +98,10 @@ type DateTimeFilter struct {
 	Lt      *time.Time
 	Lte     *time.Time
 	Between *DateTimeRange
-	IsNull  *bool // true for IS NULL, false for IS NOT NULL
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In     []time.Time
+	IsNull *bool // true for IS NULL, false for IS NOT NULL
 }
 
 // DateTimeRange represents a range for DateTime values
@@ -98,6 +118,11 @@ type DateFilter struct {
 	Lt      *string
 	Lte     *string
 	Between *DateRange
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []string
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // DateRange represents a range for Date values
@@ -293,6 +318,9 @@ type ShelfFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // ShelfSortField is a field FindPage orders Shelf rows by, by its
@@ -325,6 +353,15 @@ func ParseShelfSort(text string) (ShelfSort, error) {
 	}
 	return ShelfSort{}, fmt.Errorf("orm: Shelf sorts by id, label, createdAt and updatedAt, not %q", text)
 }
+
+// ShelfUniqueKey names a unique key of Shelf that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
+type ShelfUniqueKey string
+
+const (
+	ShelfUniqueById ShelfUniqueKey = "id"
+)
 
 // ShelfPageKey is the position of a Shelf row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
@@ -482,6 +519,9 @@ type StockFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // StockSortField is a field FindPage orders Stock rows by, by its
@@ -513,6 +553,15 @@ func ParseStockSort(text string) (StockSort, error) {
 	}
 	return StockSort{}, fmt.Errorf("orm: Stock sorts by id, ingredient and quantity, not %q", text)
 }
+
+// StockUniqueKey names a unique key of Stock that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
+type StockUniqueKey string
+
+const (
+	StockUniqueById StockUniqueKey = "id"
+)
 
 // StockPageKey is the position of a Stock row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
@@ -577,6 +626,17 @@ type ShelfFilter struct {
 	// ReferencedByStockShelf filters on the presence or absence of a
 	// Stock whose shelf points at this row.
 	ReferencedByStockShelf *ReferencedByFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []ShelfFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []ShelfFilter
 }
 
 // ShelfUpdate provides fields that can be updated
@@ -685,6 +745,13 @@ func (f *ShelfFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			conditions = append(conditions, fmt.Sprintf(`shelf.label ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Label.ILike+"%")
 		}
+		if f.Label.IsNull != nil {
+			if *f.Label.IsNull {
+				conditions = append(conditions, `shelf.label IS NULL`)
+			} else {
+				conditions = append(conditions, `shelf.label IS NOT NULL`)
+			}
+		}
 	}
 	if f.CreatedAt != nil {
 		if f.CreatedAt.Eq != nil {
@@ -719,6 +786,15 @@ func (f *ShelfFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`shelf.created_at <= $%d`, paramNum))
 			*args = append(*args, f.CreatedAt.Between.End)
+		}
+		if len(f.CreatedAt.In) > 0 {
+			placeholders := make([]string, len(f.CreatedAt.In))
+			for i, value := range f.CreatedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`shelf.created_at IN (%s)`, strings.Join(placeholders, ", ")))
 		}
 		if f.CreatedAt.IsNull != nil {
 			if *f.CreatedAt.IsNull {
@@ -762,6 +838,15 @@ func (f *ShelfFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			conditions = append(conditions, fmt.Sprintf(`shelf.updated_at <= $%d`, paramNum))
 			*args = append(*args, f.UpdatedAt.Between.End)
 		}
+		if len(f.UpdatedAt.In) > 0 {
+			placeholders := make([]string, len(f.UpdatedAt.In))
+			for i, value := range f.UpdatedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`shelf.updated_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
 		if f.UpdatedAt.IsNull != nil {
 			if *f.UpdatedAt.IsNull {
 				conditions = append(conditions, `shelf.updated_at IS NULL`)
@@ -804,13 +889,61 @@ func (f *ShelfFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			conditions = append(conditions, fmt.Sprintf(`shelf._version <= $%d`, paramNum))
 			*args = append(*args, f.Version.Between.Max)
 		}
+		if len(f.Version.In) > 0 {
+			placeholders := make([]string, len(f.Version.In))
+			for i, value := range f.Version.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`shelf._version IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Version.IsNull != nil {
+			if *f.Version.IsNull {
+				conditions = append(conditions, `shelf._version IS NULL`)
+			} else {
+				conditions = append(conditions, `shelf._version IS NOT NULL`)
+			}
+		}
 	}
 	if f.ReferencedByStockShelf != nil {
 		probe := `SELECT 1 FROM stock WHERE stock.shelf_id = shelf.id`
 		if f.ReferencedByStockShelf.Exists {
-			conditions = append(conditions, `EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
 		} else {
-			conditions = append(conditions, `NOT EXISTS (`+probe+`)`)
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
+		}
+	}
+
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
 		}
 	}
 
@@ -825,6 +958,21 @@ type StockFilter struct {
 	Version    *Int64Filter
 	// ShelfID allows filtering by foreign key
 	ShelfID *UUIDFilter
+	// Shelf keeps the rows whose shelf is among the live Shelf rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Shelf *ShelfFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []StockFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []StockFilter
 }
 
 // StockUpdate provides fields that can be updated
@@ -937,6 +1085,13 @@ func (f *StockFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			conditions = append(conditions, fmt.Sprintf(`stock.ingredient ILIKE $%d`, paramNum))
 			*args = append(*args, "%"+*f.Ingredient.ILike+"%")
 		}
+		if f.Ingredient.IsNull != nil {
+			if *f.Ingredient.IsNull {
+				conditions = append(conditions, `stock.ingredient IS NULL`)
+			} else {
+				conditions = append(conditions, `stock.ingredient IS NOT NULL`)
+			}
+		}
 	}
 	if f.Quantity != nil {
 		if f.Quantity.Eq != nil {
@@ -971,6 +1126,22 @@ func (f *StockFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			paramNum++
 			conditions = append(conditions, fmt.Sprintf(`stock.quantity <= $%d`, paramNum))
 			*args = append(*args, f.Quantity.Between.Max)
+		}
+		if len(f.Quantity.In) > 0 {
+			placeholders := make([]string, len(f.Quantity.In))
+			for i, value := range f.Quantity.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`stock.quantity IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Quantity.IsNull != nil {
+			if *f.Quantity.IsNull {
+				conditions = append(conditions, `stock.quantity IS NULL`)
+			} else {
+				conditions = append(conditions, `stock.quantity IS NOT NULL`)
+			}
 		}
 	}
 	if f.Version != nil {
@@ -1007,6 +1178,22 @@ func (f *StockFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			conditions = append(conditions, fmt.Sprintf(`stock._version <= $%d`, paramNum))
 			*args = append(*args, f.Version.Between.Max)
 		}
+		if len(f.Version.In) > 0 {
+			placeholders := make([]string, len(f.Version.In))
+			for i, value := range f.Version.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`stock._version IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if f.Version.IsNull != nil {
+			if *f.Version.IsNull {
+				conditions = append(conditions, `stock._version IS NULL`)
+			} else {
+				conditions = append(conditions, `stock._version IS NOT NULL`)
+			}
+		}
 	}
 	if f.ShelfID != nil {
 		if f.ShelfID.Eq != nil {
@@ -1029,6 +1216,49 @@ func (f *StockFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			} else {
 				conditions = append(conditions, `stock.shelf_id IS NOT NULL`)
 			}
+		}
+	}
+	if f.Shelf != nil {
+		before := len(*args)
+		through := f.Shelf.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		through = append(through, `shelf.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`stock.shelf_id IN (SELECT shelf.id FROM shelf%s)`, where))
+	}
+
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
 		}
 	}
 

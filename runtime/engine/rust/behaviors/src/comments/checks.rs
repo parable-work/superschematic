@@ -4,7 +4,10 @@
 //! details; and the checks the operations share, in the order their tables
 //! list them.
 
+use std::sync::LazyLock;
+
 use serde_json::{json, Map, Value};
+use superschematic_schema_ir::ajv::AjvSchema;
 
 use superschematic_engine::behaviors::InstanceView;
 use superschematic_engine::errors::{SchemaIssue, Veto};
@@ -19,6 +22,21 @@ pub(super) const MAX_ACTION_DATA: usize = 8192;
 pub(super) const MAX_EDITS: i64 = 500;
 /// The most distinct emoji a message holds reactions with.
 pub(super) const MAX_EMOJI: i64 = 20;
+/// The most bytes an appendDraft's `text` takes written as a JSON string,
+/// its quotes included, so its draft signal fits a signal's 4096 bytes.
+pub(super) const MAX_APPEND_BYTES: usize = 4000;
+
+// The pattern post's body declares: a text has text when it matches.
+static HAS_TEXT: LazyLock<AjvSchema> = LazyLock::new(|| {
+    AjvSchema::compile(&json!({"type": "string", "pattern": "\\S"}))
+        .expect("the pattern \\S compiles")
+});
+
+/// Whether a text has text: it holds a code point that is not white space,
+/// decided as the engine decides post's body pattern `\S`.
+pub(super) fn has_text(text: &str) -> bool {
+    HAS_TEXT.is_valid(&Value::from(text))
+}
 
 /// A veto of one of Comments' operations, with its code and details.
 pub(super) fn veto<C>(
@@ -109,6 +127,44 @@ pub(super) fn deleted<C>(view: &InstanceView<'_, C>, operation: &str, id: i64) -
     )
 }
 
+/// `composing` for a composing message an operation names, or a post's or
+/// a begin's thread or quotes.
+pub(super) fn composing<C>(view: &InstanceView<'_, C>, operation: &str, id: i64) -> Error {
+    veto(
+        view,
+        operation,
+        "composing",
+        format!(
+            "message {id} of {} {} is composing: it is being written, and stands once finished",
+            view.schema(),
+            view.id()
+        ),
+        json!({ "message": id }),
+    )
+}
+
+/// `not_composing` for an appendDraft, finish or interrupt of a message
+/// that is posted, interrupted or deleted.
+pub(super) fn not_composing<C>(
+    view: &InstanceView<'_, C>,
+    operation: &str,
+    message: &Message,
+) -> Error {
+    veto(
+        view,
+        operation,
+        "not_composing",
+        format!(
+            "message {} of {} {} is {}, not composing",
+            message.id,
+            view.schema(),
+            view.id(),
+            message.state
+        ),
+        json!({ "message": message.id, "state": message.state }),
+    )
+}
+
 /// `not_a_thread` for a reply named as a thread.
 pub(super) fn not_a_thread<C>(
     view: &InstanceView<'_, C>,
@@ -169,31 +225,11 @@ pub(super) fn check_body(
     }
 }
 
-/// Each action block's `data`, as compact JSON, is at most 8192 bytes.
-pub(super) fn check_action_data(operation: &str, blocks: Option<&Value>) -> Result<()> {
-    for (index, block) in blocks_of(blocks).iter().enumerate() {
-        if block.get("kind").and_then(Value::as_str) != Some("action") {
-            continue;
-        }
-        if let Some(data) = block.get("data") {
-            let size = serde_json::to_vec(data)
-                .map(|bytes| bytes.len())
-                .unwrap_or(0);
-            if size > MAX_ACTION_DATA {
-                return Err(invalid(
-                    operation,
-                    format!("/blocks/{index}/data"),
-                    format!("is more than {MAX_ACTION_DATA} bytes of JSON"),
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-/// The blocks a post or an edit gives: each kind one the config allows,
-/// then each ref block's instance one the caller may read. A ref block
-/// whose schema and id one of `before` holds is not read again.
+/// The blocks a post, a finish or an edit gives: each kind one the config
+/// allows, then each attachment one the config's `attachments` allows,
+/// then each ref block's instance one the caller may read. An attachment
+/// equal to one of `before`'s, and a ref block whose schema and id one of
+/// `before` holds, are not checked again.
 pub(super) fn check_blocks(
     view: &InstanceView<'_, CommentsConfig>,
     operation: &str,
@@ -227,6 +263,7 @@ pub(super) fn check_blocks(
         }
     }
     let held = blocks_of(before);
+    super::blocks::check_attachments(view, operation, blocks, held)?;
     for (index, block) in blocks.iter().enumerate() {
         if block.get("kind").and_then(Value::as_str) != Some("ref") {
             continue;

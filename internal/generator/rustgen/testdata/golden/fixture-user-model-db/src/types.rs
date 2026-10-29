@@ -64,6 +64,9 @@ pub struct UserCredential {
     /// When the user was disabled; a disabled user cannot sign in.
     #[serde(default, rename = "disabledAt", skip_serializing_if = "Option::is_none")]
     pub disabled_at: Option<TemporalDateTime>,
+    /// When the user registered to wait for an administrator's approval; a pending user cannot sign in (D81).
+    #[serde(default, rename = "pendingAt", skip_serializing_if = "Option::is_none")]
+    pub pending_at: Option<TemporalDateTime>,
 }
 
 /// A role a user holds.

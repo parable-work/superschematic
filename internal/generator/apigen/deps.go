@@ -29,6 +29,11 @@ type DepsInfo struct {
 	// ORMModule is Database's Go ORM module.
 	ORMModule string
 
+	// FieldKeys is the field of the API's EnvConfig that holds the keys
+	// of Database's Encrypted<T> fields, which the entrypoints open its ORM
+	// with (D85): its Go name. Empty for a database without one.
+	FieldKeys string
+
 	// VersionGraph reports whether Database declares a version graph: its
 	// ORM then imports the version-graph core's Go binding, which go.mod
 	// replaces.
@@ -45,6 +50,32 @@ type DepsInfo struct {
 
 	// Buckets are the API's buckets entries, in order (D54).
 	Buckets []DepsBucket
+
+	// MemoryStores are the memory stores the API lists, its rateLimitStore
+	// among them, sorted (D75).
+	MemoryStores []DepsMemoryStore
+
+	// RateLimitStore is the memory store the API's @rateLimit routes count
+	// in, its config's rateLimitStore; empty when they count in process.
+	RateLimitStore string
+}
+
+// DepsMemoryStore is a memory store in Deps: the HTTP runtime's
+// provider-neutral memorystore.Store, which the entrypoint opens on Redis,
+// or disabled (D75).
+type DepsMemoryStore struct {
+	// Service is the MemoryStore service.
+	Service string
+
+	// Field is the Deps field that holds the store.
+	Field string
+
+	// Definitions is the module of the store's Go definitions, which an
+	// implementation imports to name a channel or a key, empty when its
+	// outputs write none; Modules are the Go types modules they reach,
+	// which a server's go.mod replaces.
+	Definitions string
+	Modules     []string
 }
 
 // DepsBucket is a bucket in Deps: the HTTP runtime's provider-neutral
@@ -74,8 +105,8 @@ type DepsCall struct {
 	Client string
 }
 
-// depsFields are the fields every Deps may hold beside its clients and its
-// buckets.
+// depsFields are the fields every Deps may hold beside its clients, its
+// buckets and its memory stores.
 var depsFields = []string{"Config", "DB", "Logger"}
 
 // JobInfo is a job of the API (D52): a method of the generated Jobs
@@ -170,6 +201,12 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 			return fmt.Errorf("apigen: %s lists bucket %s, which would be Deps.%s, the field of %s", o.SchemaName, b.Service, b.Field, prev)
 		}
 		seen[b.Field] = b.Service
+	}
+	for _, m := range deps.MemoryStores {
+		if prev, clash := seen[m.Field]; clash {
+			return fmt.Errorf("apigen: %s lists memory store %s, which would be Deps.%s, the field of %s", o.SchemaName, m.Service, m.Field, prev)
+		}
+		seen[m.Field] = m.Service
 	}
 	o.Deps = deps
 	return nil

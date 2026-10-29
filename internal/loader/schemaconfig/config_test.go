@@ -278,6 +278,72 @@ outputs: {}
 	}
 }
 
+// TestMemoryStoresAndTheMemoryStoreKind: an API's config lists
+// MemoryStore services in memoryStores and may name one its
+// rateLimitStore, which the IR lists among its memory stores whether or
+// not memoryStores names it; a MemoryStore service's config names no
+// authDb, is not public and has types alone among its outputs (D75).
+func TestMemoryStoresAndTheMemoryStoreKind(t *testing.T) {
+	kinds := append(kindList{}, coreKinds...)
+	kinds = append(kinds, string(ir.SchemaKindMemoryStore), string(ir.SchemaKindBucket))
+	dir := writeConfig(t, "schema.config.yaml", `name: shop-api
+kind: API
+memoryStores:
+  - { name: shop-cache, kind: MemoryStore }
+rateLimitStore: { name: shop-limits, kind: MemoryStore }
+outputs: {}
+`)
+	cfg, err := ReadFile(dir, kinds)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	schema := cfg.NewSchema()
+	want := []ir.ServiceRef{{Name: "shop-cache", Kind: ir.SchemaKindMemoryStore}, {Name: "shop-limits", Kind: ir.SchemaKindMemoryStore}}
+	if !reflect.DeepEqual(schema.MemoryStores, want) {
+		t.Errorf("schema memory stores = %+v, want %+v", schema.MemoryStores, want)
+	}
+	if !reflect.DeepEqual(schema.RateLimitStore, &ir.ServiceRef{Name: "shop-limits", Kind: ir.SchemaKindMemoryStore}) {
+		t.Errorf("schema rate limit store = %+v", schema.RateLimitStore)
+	}
+	listed := &SchemaConfig{Name: "shop-api", Kind: ir.SchemaKindAPI,
+		MemoryStores:   []ServiceDependency{{Name: "shop-cache", Kind: ir.SchemaKindMemoryStore}},
+		RateLimitStore: &ServiceDependency{Name: "shop-cache", Kind: ir.SchemaKindMemoryStore}}
+	if got := listed.NewSchema().MemoryStores; len(got) != 1 {
+		t.Errorf("a rateLimitStore memoryStores lists is listed once: %+v", got)
+	}
+	if _, err := ReadFile(writeConfig(t, "schema.config.yaml", "name: shop-cache\nkind: MemoryStore\ndependencies:\n  - { name: shop-common, kind: General }\noutputs:\n  types:\n    go: { enabled: true }\n"), kinds); err != nil {
+		t.Errorf("a MemoryStore service's config: %v", err)
+	}
+
+	cache := ServiceDependency{Name: "shop-cache", Kind: ir.SchemaKindMemoryStore}
+	api := func(stores ...ServiceDependency) *SchemaConfig {
+		return &SchemaConfig{Name: "shop-api", Kind: ir.SchemaKindAPI, MemoryStores: stores}
+	}
+	for _, tc := range []struct {
+		name string
+		cfg  *SchemaConfig
+		want string
+	}{
+		{"on a DB service", &SchemaConfig{Name: "shop-db", Kind: ir.SchemaKindDB, MemoryStores: []ServiceDependency{cache}}, "schema config for shop-db sets memoryStores or rateLimitStore, which only an API service may set (this service is kind DB)"},
+		{"a rateLimitStore on a General service", &SchemaConfig{Name: "shop-common", Kind: ir.SchemaKindGeneral, RateLimitStore: &cache}, "schema config for shop-common sets memoryStores or rateLimitStore, which only an API service may set (this service is kind General)"},
+		{"a Bucket handle", api(ServiceDependency{Name: "shop-media", Kind: ir.SchemaKindBucket}), `schema config for shop-api lists shop-media in memoryStores, a handle of kind "Bucket"; memoryStores names MemoryStore services only`},
+		{"no name", api(ServiceDependency{Kind: ir.SchemaKindMemoryStore}), "schema config for shop-api has a memoryStores entry with no name"},
+		{"twice", api(cache, cache), "schema config for shop-api lists memory store shop-cache more than once"},
+		{"a rateLimitStore of another kind", &SchemaConfig{Name: "shop-api", Kind: ir.SchemaKindAPI, RateLimitStore: &ServiceDependency{Name: "shop-media", Kind: ir.SchemaKindBucket}}, `schema config for shop-api names shop-media its rateLimitStore, a handle of kind "Bucket"; rateLimitStore names a MemoryStore service`},
+		{"a store with an authDb", &SchemaConfig{Name: "shop-cache", Kind: ir.SchemaKindMemoryStore, AuthDB: "shop-db"}, "schema config for shop-cache sets authDb; a MemoryStore service authenticates no one, and the APIs that use it list it in their memoryStores"},
+		{"a public store", &SchemaConfig{Name: "shop-cache", Kind: ir.SchemaKindMemoryStore, Public: true}, "schema config for shop-cache sets public; a MemoryStore service is reached only by the workloads of the APIs that list it"},
+		{"a store with an api", &SchemaConfig{Name: "shop-cache", Kind: ir.SchemaKindMemoryStore, Outputs: map[string]any{"api": map[string]any{"enabled": true}}}, "schema config for shop-cache sets outputs.api; a MemoryStore service's outputs are its definitions, outputs.types, in go, typescript or rust"},
+		{"a store in Python", &SchemaConfig{Name: "shop-cache", Kind: ir.SchemaKindMemoryStore, Outputs: map[string]any{"types": map[string]any{"python": map[string]any{"enabled": true}}}}, "schema config for shop-cache sets outputs.types.python; a MemoryStore service's definitions are written in go, typescript or rust"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ValidateShapeWith(tc.cfg, kinds)
+			if err == nil || err.Error() != tc.want {
+				t.Errorf("ValidateShapeWith error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
 // TestValidateShapeTakesCIOnAStackOnly: outputs.ci writes a stack's
 // workflow (D47), so a config of another kind that sets it is refused.
 func TestValidateShapeTakesCIOnAStackOnly(t *testing.T) {
@@ -376,5 +442,29 @@ func TestEmbeddedDefinitionIsCurrent(t *testing.T) {
 	}
 	if strings.TrimSuffix(string(regenerated), "\n") != strings.TrimSuffix(string(definitionBytes), "\n") {
 		t.Error("embedded schema-config.schema.json is stale; run: cd packages/schema-config && bun run gen-json-schema")
+	}
+}
+
+// TestReadFileReadsASitesDevServer: the data forms carry a Site's dev
+// server as the TypeScript form does (D82), and the schema refuses a
+// member it does not take.
+func TestReadFileReadsASitesDevServer(t *testing.T) {
+	kinds := append(kindList{"Site"}, coreKinds...)
+	dir := writeConfig(t, "schema.config.yaml", `name: shop-web
+kind: Site
+site:
+  build: build
+  dev: { command: vite, port: 5173 }
+`)
+	cfg, err := ReadFile(dir, kinds)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if cfg.Site == nil || cfg.Site.Dev == nil || *cfg.Site.Dev != (ir.SiteDevConfig{Command: "vite", Port: 5173}) {
+		t.Fatalf("site = %+v", cfg.Site)
+	}
+	dir = writeConfig(t, "schema.config.json", `{"name": "shop-web", "kind": "Site", "site": {"dev": {"script": "dev"}}}`)
+	if _, err := ReadFile(dir, kinds); err == nil || !strings.Contains(err.Error(), "script") {
+		t.Fatalf("ReadFile of a dev server with a script: %v", err)
 	}
 }

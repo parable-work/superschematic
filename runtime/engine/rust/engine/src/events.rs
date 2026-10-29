@@ -111,8 +111,8 @@ pub(crate) fn append_event(tx: &Tx<'_>, event: &NewEvent<'_>) -> Result<i64> {
         .unwrap_or_default();
     let row = tx.get(
         "INSERT INTO engine_events
-           (kind, namespace, schema, instance_id, seq, version, actor, service, at, change, cause_behavior, cause_event, cause_schedule, depth, value_refs)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           (kind, namespace, schema, instance_id, seq, version, actor, service, for_subject, at, change, cause_behavior, cause_event, cause_schedule, depth, value_refs)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          RETURNING cursor",
         &[
             SqlValue::from(event.kind),
@@ -123,6 +123,7 @@ pub(crate) fn append_event(tx: &Tx<'_>, event: &NewEvent<'_>) -> Result<i64> {
             SqlValue::from(event.version),
             SqlValue::from(event.actor.actor.as_str()),
             SqlValue::from(event.actor.service.as_deref()),
+            SqlValue::from(event.actor.for_subject.as_deref()),
             SqlValue::Integer(event.at),
             SqlValue::from(event.change.as_deref()),
             SqlValue::from(event.cause.map(|cause| cause.behavior.as_str())),
@@ -256,6 +257,10 @@ pub struct EngineEvent {
     /// The deployable of the service whose call made the change (D37).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service: Option<String>,
+    /// The subject the principal that made the change acted for (D77),
+    /// `for` beside `actor`.
+    #[serde(rename = "for", skip_serializing_if = "Option::is_none")]
+    pub for_subject: Option<String>,
     /// When, in epoch milliseconds.
     pub at: i64,
     /// create: the instance as a read returns it, `{ data, behaviors }`;
@@ -316,7 +321,7 @@ pub struct EventPage {
 }
 
 /// The `engine_events` columns [`to_event`] reads.
-pub(crate) const EVENT_COLUMNS: &str = "cursor, kind, namespace, schema, instance_id, seq, version, actor, service, at, change, cause_behavior, cause_event, cause_schedule, depth, value_refs";
+pub(crate) const EVENT_COLUMNS: &str = "cursor, kind, namespace, schema, instance_id, seq, version, actor, service, for_subject, at, change, cause_behavior, cause_event, cause_schedule, depth, value_refs";
 
 /// An `engine_events` row of [`EVENT_COLUMNS`].
 pub(crate) fn to_event(row: &Row) -> Result<EngineEvent> {
@@ -349,6 +354,7 @@ pub(crate) fn to_event(row: &Row) -> Result<EngineEvent> {
         version: row.opt_i64("version")?,
         actor: row.text("actor")?.to_owned(),
         service: row.opt_text("service")?.map(str::to_owned),
+        for_subject: row.opt_text("for_subject")?.map(str::to_owned),
         at: row.i64("at")?,
         change,
         cause,

@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
+	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -21,6 +24,29 @@ const (
 )
 
 var indexPurposeName = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+// sqlIdentifier is a table or column name @table and @column take (D85):
+// letters, digits and underscores, not starting with a digit, which every
+// statement quotes where Postgres and SQLite need it (QuoteIdentifier).
+var sqlIdentifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// sqlIdentifierArg reads the one SQL identifier decorator takes.
+func sqlIdentifierArg(decorator string, args []any) (string, error) {
+	if len(args) != 1 {
+		return "", fmt.Errorf("%s takes exactly one name", decorator)
+	}
+	name, ok := args[0].(string)
+	if !ok {
+		return "", ArgErrorf(0, "%s takes a string literal", decorator)
+	}
+	if !sqlIdentifier.MatchString(name) {
+		return "", ArgErrorf(0, "%s(%q): a name is letters, digits and underscores, not starting with a digit", decorator, name)
+	}
+	if len(name) > sqlutil.PostgresIdentifierLimit {
+		return "", ArgErrorf(0, "%s(%q) is %d bytes, over PostgreSQL's %d-byte limit", decorator, name, len(name), sqlutil.PostgresIdentifierLimit)
+	}
+	return name, nil
+}
 
 // coreDecorators returns one DecoratorSpec per (name, target) the tsreader
 // walker used to switch on. Each Apply sets the typed IR field the walker's
@@ -78,6 +104,7 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	flag(TargetType, "jsonField", []string{pkgDB, pkgSchema}, func(n Node) { n.Type.JsonField = true })
 	flag(TargetType, "denyUnknownFields", []string{pkgSchema}, func(n Node) { n.Type.DenyUnknownFields = true })
 	flag(TargetType, "strictJSON", []string{pkgSchema}, func(n Node) { n.Type.StrictJSON = true })
+	flag(TargetType, "allowUnknownFields", []string{pkgSchema}, func(n Node) { n.Type.AllowUnknownFields = true })
 	specs = append(specs, DecoratorSpec{
 		Name: "index", Packages: []string{pkgDB}, Target: TargetType,
 		Apply: func(n Node, args []any, _ Site) error {
@@ -86,6 +113,36 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 				return err
 			}
 			n.Type.Indexes = append(n.Type.Indexes, idx)
+			return nil
+		},
+	})
+	// The table a DB type is stored in, in place of its name in snake case
+	// (D85).
+	specs = append(specs, DecoratorSpec{
+		Name: "table", Packages: []string{pkgDB}, Target: TargetType,
+		Kinds: []string{string(ir.SchemaKindDB)},
+		Apply: func(n Node, args []any, _ Site) error {
+			name, err := sqlIdentifierArg("@table", args)
+			if err != nil {
+				return err
+			}
+			if n.Type.SQLName != "" {
+				return fmt.Errorf("a class takes one @table")
+			}
+			n.Type.SQLName = name
+			return nil
+		},
+	})
+	// Raw SQL the DB service runs after its own objects (D83).
+	specs = append(specs, DecoratorSpec{
+		Name: "rawSql", Packages: []string{pkgDB}, Target: TargetType,
+		Kinds: []string{string(ir.SchemaKindDB)},
+		Apply: func(n Node, args []any, _ Site) error {
+			raw, err := rawSQLDef(args)
+			if err != nil {
+				return err
+			}
+			n.Type.RawSQL = append(n.Type.RawSQL, raw)
 			return nil
 		},
 	})
@@ -102,12 +159,24 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	specs = append(specs, jobDecorator())
 
 	// A DB service's queues, a message class each, and an API service's
-	// workers, which handle them (core_queues.go, D53).
-	specs = append(specs, queueDecorator(), workerDecorator())
+	// workers, which handle them (core_queues.go, D53); and the triggers
+	// that enqueue a queue's message on a write to a table
+	// (core_enqueue.go, D80).
+	specs = append(specs, queueDecorator(), workerDecorator(), enqueueOnChangeDecorator())
+
+	// A DB service's declared queries, a class each (core_queries.go, D86).
+	specs = append(specs, queryDecorator())
+
+	// The roles a UserRole table holds from its first migration on
+	// (core_seed_roles.go, D88).
+	specs = append(specs, seedRolesDecorator())
 
 	// An API service's derivers, which fill the Derived fields of its
 	// engine database's types (core_derivers.go, D74).
 	specs = append(specs, deriverDecorator())
+	// A MemoryStore service's channels and keys, a class each
+	// (core_memorystore.go, D75).
+	specs = append(specs, memoryStoreDecorators()...)
 
 	// An API service's apps, the project's own HTTP programs over its Deps
 	// (core_apps.go, D78).
@@ -124,6 +193,7 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	fieldFlag("uiHidden", []string{pkgAPI, pkgSchema}, func(f *ir.FieldDef) { f.UIHidden = true })
 	fieldFlag("internalMetadata", []string{pkgSchema}, func(f *ir.FieldDef) { f.InternalMetadata = true })
 	fieldFlag("virtual", []string{pkgAPI, pkgSchema}, func(f *ir.FieldDef) { f.Virtual = true })
+	fieldFlag("decrypted", []string{pkgAPI, pkgSchema}, func(f *ir.FieldDef) { f.Decrypted = true })
 	fieldFlag("sourceMustProject", []string{pkgDB}, func(f *ir.FieldDef) { f.SourceMustProject = true })
 	specs = append(specs, DecoratorSpec{
 		Name: "conflictUnit", Packages: []string{pkgDB}, Target: TargetField,
@@ -338,6 +408,47 @@ func indexDef(args []any) (ir.IndexDef, error) {
 						return ir.IndexDef{}, ArgErrorf(1, "@index name %q must be a lowercase identifier (e.g. digest)", s)
 					}
 					idx.Name = s
+				case "method":
+					s, ok := value.(string)
+					if !ok || !slices.Contains(ir.IndexMethods, s) {
+						return ir.IndexDef{}, ArgErrorf(1, "@index method must be one of %s", strings.Join(ir.IndexMethods, ", "))
+					}
+					idx.Method = s
+				case "ops":
+					s, ok := value.(string)
+					if !ok || !sqlutil.ValidOpclass(s) {
+						return ir.IndexDef{}, ArgErrorf(1, "@index ops must name an operator class, a lowercase identifier such as gin_trgm_ops, optionally schema-qualified")
+					}
+					idx.Ops = s
+				case "where", "expression":
+					s, ok := value.(string)
+					if !ok || strings.TrimSpace(s) == "" {
+						return ir.IndexDef{}, ArgErrorf(1, "@index %s must be a non-empty string of SQL", key)
+					}
+					if key == "where" {
+						idx.Where = strings.TrimSpace(s)
+					} else {
+						idx.Expression = strings.TrimSpace(s)
+					}
+				case "concurrently":
+					b, ok := value.(bool)
+					if !ok {
+						return ir.IndexDef{}, ArgErrorf(1, "@index concurrently must be a boolean literal")
+					}
+					idx.Concurrently = &b
+				case "m", "efConstruction", "lists":
+					n, ok := wholeNumber(value)
+					if !ok {
+						return ir.IndexDef{}, ArgErrorf(1, "@index %s must be a whole number literal", key)
+					}
+					switch key {
+					case "m":
+						idx.M = &n
+					case "efConstruction":
+						idx.EFConstruction = &n
+					default:
+						idx.Lists = &n
+					}
 				default:
 					return ir.IndexDef{}, ArgErrorf(1, "@index options has unknown key %q", key)
 				}
@@ -347,6 +458,73 @@ func indexDef(args []any) (ir.IndexDef, error) {
 		}
 	}
 	return idx, nil
+}
+
+// wholeNumber is a decorator argument's number literal as an int, when it
+// is a whole one.
+func wholeNumber(value any) (int, bool) {
+	switch n := value.(type) {
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case float64:
+		if n == float64(int(n)) {
+			return int(n), true
+		}
+	}
+	return 0, false
+}
+
+// rawSQLDef reads @rawSql's options object: id and up, and down, after and
+// dialects when given. Verification checks the SQL and the order
+// (sqlutil.CheckRawSQL).
+func rawSQLDef(args []any) (ir.RawSQLDef, error) {
+	if len(args) != 1 {
+		return ir.RawSQLDef{}, fmt.Errorf("@rawSql takes one options object: { id, up, down?, after?, dialects? }")
+	}
+	opts, ok := args[0].(map[string]any)
+	if !ok {
+		return ir.RawSQLDef{}, ArgErrorf(0, "@rawSql takes one options object: { id, up, down?, after?, dialects? }")
+	}
+	var raw ir.RawSQLDef
+	for key, value := range opts {
+		switch key {
+		case "id", "up", "down", "after":
+			s, ok := value.(string)
+			if !ok {
+				return ir.RawSQLDef{}, ArgErrorf(0, "@rawSql %s must be a string literal", key)
+			}
+			switch key {
+			case "id":
+				raw.ID = s
+			case "up":
+				raw.Up = s
+			case "down":
+				raw.Down = s
+			case "after":
+				raw.After = s
+			}
+		case "dialects":
+			list, ok := value.([]any)
+			if !ok {
+				return ir.RawSQLDef{}, ArgErrorf(0, "@rawSql dialects must be a list of dialect names")
+			}
+			for _, e := range list {
+				d, ok := e.(string)
+				if !ok {
+					return ir.RawSQLDef{}, ArgErrorf(0, "@rawSql dialects must be a list of dialect names")
+				}
+				raw.Dialects = append(raw.Dialects, d)
+			}
+		default:
+			return ir.RawSQLDef{}, ArgErrorf(0, "@rawSql options has unknown key %q", key)
+		}
+	}
+	if raw.ID == "" || raw.Up == "" {
+		return ir.RawSQLDef{}, ArgErrorf(0, "@rawSql needs an id and its up SQL")
+	}
+	return raw, nil
 }
 
 // applyMiddleware folds one of @rateLimit/@bodyLimit/@timeout into a
@@ -470,6 +648,9 @@ func applyRest(args []any, op *ir.FieldDef) error {
 		path, ok := args[1].(string)
 		if !ok {
 			return fmt.Errorf("@rest path must be a string literal")
+		}
+		if err := ir.ValidateRestPath(path); err != nil {
+			return ArgErrorf(1, "%s", err)
 		}
 		op.RestPath = path
 	}

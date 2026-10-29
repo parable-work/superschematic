@@ -64,6 +64,12 @@ function webhookImplementation(deps: Deps): WebhookImplementation {
     async receiveGithubEvent() {
       throw notImplemented('webhook.receiveGithubEvent');
     },
+    async receiveLedgerEvent() {
+      throw notImplemented('webhook.receiveLedgerEvent');
+    },
+    async receivePlaidEvent() {
+      throw notImplemented('webhook.receivePlaidEvent');
+    },
     async receiveStripeEvent() {
       throw notImplemented('webhook.receiveStripeEvent');
     },

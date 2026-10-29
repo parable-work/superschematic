@@ -28,14 +28,22 @@ export interface Targets {
 /**
  * The core's `local` target, which `superschematic stack dev` runs
  * (docs/stack-model.md, section 8.3). Its values set the image and the host
- * port of the environment's Postgres container and of its storage emulator
- * (D54), a server's, an app's (D78) and a site's settings its port, and a
- * database, a job, a worker, a bucket, an engine's runner (D58) and a
- * deriver (D74) take no settings. A port left out is derived from the
+ * port of the environment's Postgres container, of its storage emulator
+ * (D54) and of its memory stores' Valkey container (D75), a server's, an
+ * app's (D78) and a site's settings its port, and a database, a job, a
+ * worker, a bucket, an engine's runner (D58), a deriver (D74) and a memory
+ * store (D75) take no settings. A port left out is derived from the
  * stack, the environment and the deployable.
  */
 export interface LocalTarget {
-  values: { postgresImage?: string; postgresPort?: number; storageImage?: string; storagePort?: number };
+  values: {
+    postgresImage?: string;
+    postgresPort?: number;
+    storageImage?: string;
+    storagePort?: number;
+    memoryStoreImage?: string;
+    memoryStorePort?: number;
+  };
   server: { port?: number };
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   database: {};
@@ -50,6 +58,7 @@ export interface LocalTarget {
   runner: {};
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   deriver: {};
+  memoryStore: {};
   app: { port?: number };
 }
 
@@ -57,7 +66,7 @@ export interface LocalTarget {
 export type TargetName = Extract<keyof Targets, string>;
 
 /** A deployable kind: what a target gives a settings type for. */
-export type DeployableKind = "server" | "database" | "job" | "site" | "bucket" | "worker" | "runner" | "deriver" | "app";
+export type DeployableKind = "server" | "database" | "job" | "site" | "bucket" | "worker" | "runner" | "deriver" | "memoryStore" | "app";
 
 /**
  * A declared deployable, an `@server` or `@database` class, named as a value
@@ -124,9 +133,22 @@ type ElementOf<T, Of> = { readonly of: Of; readonly platform?: string } & (Of ex
       ? SettingsOf<T, "site">
       : Of extends ServiceHandle<"Bucket">
         ? SettingsOf<T, "bucket">
-        : Of extends DeployableClass
-          ? { readonly env?: EnvOf<unknown> } & (SettingsOf<T, "server"> | SettingsOf<T, "database">)
-          : never);
+        : Of extends ServiceHandle<"MemoryStore">
+          ? MemoryStoreRun & SettingsOf<T, "memoryStore">
+          : Of extends DeployableClass
+            ? { readonly env?: EnvOf<unknown> } & (SettingsOf<T, "server"> | SettingsOf<T, "database">)
+            : never);
+
+/**
+ * Whether a memory store runs in an environment (D75). A store that is
+ * off is placed nowhere: no target needs a platform for it, no workload's
+ * field is set, and each opens the store disabled and takes the paths it
+ * had before the store existed.
+ */
+export type MemoryStoreRun = {
+  /** Turns the store on or off; on unless set. */
+  readonly enabled?: boolean;
+};
 
 /**
  * When a job runs in an environment (D52): its schedule, a five-field cron
@@ -307,7 +329,7 @@ export type SettingsElement<T, E> = E extends { readonly of: infer Of }
       E
     > &
       (E extends { readonly env: infer V } ? { readonly env: Exact<EnvFor<Of>, V> } : {})
-  : { readonly of: ServiceHandle<"API" | "DB" | "Site" | "Bucket"> | DeployableClass };
+  : { readonly of: ServiceHandle<"API" | "DB" | "Site" | "Bucket" | "MemoryStore"> | DeployableClass };
 
 /** The argument of `@environment`. */
 export type EnvironmentOptions<T extends TargetName | undefined, S extends readonly unknown[]> = {
@@ -317,7 +339,7 @@ export type EnvironmentOptions<T extends TargetName | undefined, S extends reado
   readonly domain?: string;
   /** The DNS platform that holds the domain's records, with its values: `{ cloudflare: { zone, zoneId } }`. */
   readonly dns?: { readonly [platform: string]: { readonly [value: string]: unknown } };
-  /** Settings per deployable; `of` is a service handle, a Bucket's among them (D54), or a declared deployable's class, with `job`, `worker`, `deriver`, `app` or `runner: true` beside a handle for a job, a worker, a deriver, an app or an engine's runner. */
+  /** Settings per deployable; `of` is a service handle, a Bucket's (D54) and a MemoryStore's (D75) among them, or a declared deployable's class, with `job`, `worker`, `deriver`, `app` or `runner: true` beside a handle for a job, a worker, a deriver, an app or an engine's runner. */
   readonly settings?: S & { readonly [I in keyof S]: SettingsElement<T, S[I]> };
   /** Makes the environment a family, one member per value. */
   readonly parameters?: readonly string[];
@@ -326,10 +348,24 @@ export type EnvironmentOptions<T extends TargetName | undefined, S extends reado
 const noop: ClassDecorator = () => {};
 
 /**
+ * A site and the APIs it calls that it serves on its own origin (D91): each
+ * API under `/api/<service>` on the site's origin, in every environment, as
+ * `superschematic stack dev` serves it, so the page calls it with no CORS
+ * and a cookie session needs no trusted origin and no shared domain.
+ */
+export type Origin = {
+  /** The Site service whose origin it is. */
+  readonly site: ServiceHandle<"Site">;
+  /** The APIs the origin serves, each one the site calls; every API it calls unless set. */
+  readonly apis?: readonly ServiceHandle<"API">[];
+};
+
+/**
  * Declares the stack: its entry points and what is reachable from outside.
  * A site (a Site service's handle) is always exposed, named in `expose` or
- * not, and each API it calls must be exposed (D55). An app is exposed
- * beside its API's handle, `{ of: ShopStock, app: "Backoffice" }` (D78).
+ * not, and each API it calls must be exposed (D55), unless the site's
+ * origin serves it (`origins`, D91). An app is exposed beside its API's
+ * handle, `{ of: ShopStock, app: "Backoffice" }` (D78).
  */
 export function stack<const X extends readonly unknown[] = readonly []>(_options: {
   readonly deploy?: readonly ServiceHandle<"API" | "DB" | "Site">[];
@@ -338,6 +374,8 @@ export function stack<const X extends readonly unknown[] = readonly []>(_options
       ? ExposedApp<H>
       : ServiceHandle<"API" | "Site"> | DeployableClass;
   };
+  /** Sites that serve APIs they call on their own origin (D91). */
+  readonly origins?: readonly Origin[];
 }): ClassDecorator {
   return noop;
 }

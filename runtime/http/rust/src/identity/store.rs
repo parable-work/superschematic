@@ -18,6 +18,8 @@ pub enum StoreError {
     RoleNameTaken,
     /// The schema has no `UserRole` table.
     NoRoles,
+    /// `approve_user` found the user not waiting for approval (D81).
+    NotPending,
     /// A login the login scalar does not parse, with the scalar's reason.
     InvalidLogin { scalar: String, reason: String },
     /// A display name the name scalar does not parse, with its reason.
@@ -41,6 +43,7 @@ impl fmt::Display for StoreError {
             StoreError::LoginTaken => f.write_str("identity: the login is taken"),
             StoreError::RoleNameTaken => f.write_str("identity: the role name is taken"),
             StoreError::NoRoles => f.write_str("identity: the schema has no roles"),
+            StoreError::NotPending => f.write_str("identity: the user is not pending"),
             StoreError::InvalidLogin { scalar, reason } => {
                 write!(f, "identity: the login is not a {scalar}: {reason}")
             }
@@ -71,6 +74,9 @@ pub struct User {
     pub name: String,
     /// The user's credential has `disabledAt` set.
     pub disabled: bool,
+    /// The user's credential has `pendingAt` set: they wait for an
+    /// administrator's approval (D81).
+    pub pending: bool,
     /// The roles the user holds, by name. `get_user` and `list_users` fill
     /// them in; other methods leave them empty.
     pub roles: Vec<Role>,
@@ -124,6 +130,32 @@ pub struct NewUser {
     pub at: SystemTime,
 }
 
+/// What [`Store::create_user_with`] marks a new user with and grants
+/// them (D81), beside [`NewUser`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NewUserGrants {
+    /// Writes `pendingAt`: the user waits for an administrator's approval
+    /// ([`Store::approve_user`]) before they sign in.
+    pub pending: bool,
+    /// The names of the roles the user is granted with their row, each
+    /// created with no permissions when no role has the name.
+    pub roles: Vec<String>,
+    /// When no role grant exists yet, makes the user the database's first
+    /// administrator, as `identity bootstrap` would: never pending, and
+    /// granted the role, created with its permissions when no role has the
+    /// name, beside `roles`. Two users created at once make one
+    /// administrator.
+    pub first: Option<FirstUser>,
+}
+
+/// [`NewUserGrants::first`]: the first administrator's role and the
+/// permissions it is created with.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FirstUser {
+    pub role: String,
+    pub permissions: Vec<String>,
+}
+
 /// A session the store creates.
 #[derive(Clone, Debug)]
 pub struct NewSession {
@@ -154,6 +186,18 @@ pub trait Store: Send + Sync + 'static {
     /// user's key. A taken login is [`StoreError::LoginTaken`], and a name
     /// the name scalar refuses [`StoreError::InvalidName`].
     async fn create_user(&self, user: NewUser) -> Result<User, StoreError>;
+    /// [`Store::create_user`] with `grants` (D81), in the same transaction.
+    /// The user it returns holds the roles it granted and is `pending`
+    /// when it wrote `pendingAt`. Roles without a `UserRole` table are
+    /// [`StoreError::NoRoles`].
+    async fn create_user_with(
+        &self,
+        user: NewUser,
+        grants: NewUserGrants,
+    ) -> Result<User, StoreError>;
+    /// Clears the credential's `pendingAt` (D81). A user who is not
+    /// pending is [`StoreError::NotPending`].
+    async fn approve_user(&self, user_id: &str) -> Result<(), StoreError>;
 
     /// Writes the user's password hash and `passwordChangedAt`, and revokes
     /// the user's sessions but `keep_session` (none when `None`).

@@ -1,9 +1,12 @@
 package shop_test
 
 import (
+	"bufio"
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,11 +15,13 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -43,7 +48,9 @@ import (
 // (section 14) on this example. `superschematic stack dev` runs
 // shop-stack's Dev environment from examples/acme-shop, as the tutorial
 // does: Postgres in a container with shop-db migrated; fake-gcs-server in a
-// container with shop-media, the bucket shop-api lists (D54); shop-api and
+// container with shop-media, the bucket shop-api lists (D54); Valkey in a
+// container, shop-cache, the memory store shop-api lists and counts its
+// rate limits in (D75); shop-api and
 // shop-orders each on its generated Go entrypoint, built with the
 // implementations in go/shop-api and go/shop-orders; shop-stock on its
 // generated Rust entrypoint, which cargo builds with the implementation in
@@ -59,7 +66,11 @@ import (
 // and Rust API through its generated Go SDK with the session and the
 // storefront over HTTP. shop-api signs an upload of a product's image,
 // which the test PUTs to the emulator through the signed URL, as a browser
-// would, and reads back from shop-media. Anyone lists shop-stock's stock,
+// would, and reads back from shop-media. A request waiting for another
+// product's image is woken through shop-cache's channel once its upload is
+// signed; a claim another replica holds refuses an upload 409; and
+// getProduct's requests count in shop-cache, so the counts other replicas
+// add there refuse it 429 (D75). Anyone lists shop-stock's stock,
 // and staff count the product's shelf, which gives it an Inventory in
 // shop-db's engine (D70). Staff open a collection point through the
 // engine's routes; a cart on shop-cart takes two units and a pickup slot
@@ -75,10 +86,16 @@ import (
 // routes is made at acmepay by SettlePayments, run with stack run.
 // shop-orders' worker FulfilOrders, a process of its own on its generated
 // entrypoint with the implementation's NewWorkers, claims the OrderPlaced
-// message and fulfils the order (section 8.8, D53). It reads the static site shop-web, which
-// stack dev built and serves with its config, and asks shop-api, as a
-// browser would, whether the site's origin may call it, and another origin
-// (D55). Then shop-orders' job ShipOrders, on its generated entrypoint with
+// message and fulfils the order (section 8.8, D53). shop-cart, through
+// shop-db's generated TypeScript repositories (D79), upserts, searches and
+// soft-deletes the shopper's review, and reorders the order in one
+// transaction with its OrderPlaced, which FulfilOrders fulfils too. It
+// reads the static site shop-web, whose dev server stack dev runs behind a
+// proxy that serves shop-api on the site's origin, opens the page's
+// hot-reload socket through it, signs a shopper in with a cookie session
+// there with no CORS to set (D82), and asks shop-api, as a browser on
+// another origin would, whether the site's origin may call it, and another
+// origin (D55). Then shop-orders' job ShipOrders, on its generated entrypoint with
 // the implementation's NewJobs, ships the order fulfilled: once on demand
 // with `superschematic stack run`, and again on the every-minute schedule
 // Dev's settings give it, which stack dev runs
@@ -103,8 +120,10 @@ import (
 // the containers. Last, it runs stack dev once more, into an output root
 // of its own (--out), where shop-stock's server, worker and job build
 // against that root's mirror of rust-impl/shop-stock and its own API
-// crates, and shop-cart and shop-storefront against their mirrors of
-// typescript/shop-cart and typescript/shop-storefront, and runs the job there with stack run. The
+// crates, shop-cart and shop-storefront against their mirrors of
+// typescript/shop-cart and typescript/shop-storefront, and shop-web, which
+// --build-sites builds, in its mirror of web/shop-web, and runs the job
+// there with stack run. The
 // project's own TypeScript packages keep the links the default output
 // root's install made.
 //
@@ -223,6 +242,10 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	if err != nil || back.StatusCode != http.StatusOK || !bytes.Equal(stored, image) || back.Header.Get("Content-Type") != "image/png" {
 		t.Fatalf("read the image back from shop-media: %s %s %q, %v", back.Status, back.Header.Get("Content-Type"), stored, err)
 	}
+
+	// shop-cache, the memory store shop-api lists (D75), on stack dev's
+	// Valkey container.
+	checkTheMemoryStore(ctx, t, env, products, token, n)
 
 	// shop-stock, on its Rust server (D57), over shop-db's Inventory, which
 	// the engine keeps (D70): anyone reads the stock, which holds none of
@@ -470,6 +493,70 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		return s.Service() == fulfilOrders && s.Kind == otlptest.KindConsumer && s.Name == "process OrderPlaced"
 	})
 
+	// shop-cart keeps a shopper's own reviews and reorders in shop-db's
+	// tables through Deps.orm, the database's generated TypeScript
+	// repositories (D79), with no SQL of its own: a review written twice is
+	// one row, by the review's unique key, which a search of the shopper's
+	// reviews finds and a delete hides, the row kept; a reorder writes an
+	// order, its lines and its OrderPlaced in one transaction, which
+	// shop-orders' Go worker FulfilOrders fulfils.
+	myReview := carts + "/api/my/reviews/" + product.Id.String()
+	type reviewView struct {
+		ID     string `json:"id"`
+		Rating int    `json:"rating"`
+		Title  string `json:"title"`
+	}
+	var written, rewritten struct {
+		Data reviewView `json:"data"`
+	}
+	status, body = call(t, http.MethodPut, myReview, token, `{"rating": 4, "title": "Grassy", "body": "A bright green tea."}`)
+	if status != http.StatusOK || json.Unmarshal(body, &written) != nil || written.Data.ID == "" {
+		t.Fatalf("write a review on shop-cart: %d %s", status, body)
+	}
+	status, body = call(t, http.MethodPut, myReview, token, `{"rating": 5, "title": "Grassy and sweet", "body": "A bright green tea."}`)
+	if status != http.StatusOK || json.Unmarshal(body, &rewritten) != nil || rewritten.Data.ID != written.Data.ID || rewritten.Data.Rating != 5 {
+		t.Fatalf("write the review again: %d %s, want the review %s changed", status, body, written.Data.ID)
+	}
+	var mine struct {
+		Data struct {
+			Items []reviewView `json:"items"`
+			Next  *string      `json:"next"`
+		} `json:"data"`
+	}
+	status, body = call(t, http.MethodGet, carts+"/api/my/reviews?q=SWEET&sort=-rating&limit=1", token, "")
+	if status != http.StatusOK || json.Unmarshal(body, &mine) != nil || len(mine.Data.Items) != 1 || mine.Data.Items[0].ID != written.Data.ID || mine.Data.Next != nil {
+		t.Fatalf("the shopper's reviews that hold sweet: %d %s", status, body)
+	}
+	if status, body := call(t, http.MethodDelete, carts+"/api/my/reviews/"+written.Data.ID, token, ""); status != http.StatusOK {
+		t.Fatalf("delete the review: %d %s", status, body)
+	}
+	status, body = call(t, http.MethodGet, carts+"/api/my/reviews", token, "")
+	if status != http.StatusOK || json.Unmarshal(body, &mine) != nil || len(mine.Data.Items) != 0 {
+		t.Fatalf("the shopper's reviews after the delete: %d %s, want none", status, body)
+	}
+	reviews, err := pgx.Connect(ctx, env.database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var deletedBy string
+	err = reviews.QueryRow(ctx, "SELECT deleted_by::text FROM review WHERE id = $1", mustUUID(t, written.Data.ID).ToUUID().String()).Scan(&deletedBy)
+	reviews.Close(ctx)
+	if err != nil || deletedBy == "" {
+		t.Fatalf("the deleted review's row: deleted by %q, %v; want it kept and stamped", deletedBy, err)
+	}
+	status, body = call(t, http.MethodPost, carts+"/api/orders/"+order.Id.String()+"/reorder", token, "")
+	var reordered struct {
+		Data struct {
+			OrderID    string `json:"orderId"`
+			TotalCents int64  `json:"totalCents"`
+			LineCount  int64  `json:"lineCount"`
+		} `json:"data"`
+	}
+	if status != http.StatusCreated || json.Unmarshal(body, &reordered) != nil || reordered.Data.TotalCents != 900 || reordered.Data.LineCount != 1 {
+		t.Fatalf("reorder the order on shop-cart: %d %s, want two teas at 450", status, body)
+	}
+	waitForStatus(ctx, t, orders, mustUUID(t, reordered.Data.OrderID), orderstypes.OrderStatus_Fulfilled, time.Minute)
+
 	// shop-stock's worker ReorderStock, a Rust process (D65), claims the
 	// StockLow message the sale enqueued, and files the product's one open
 	// restock request, for enough units to bring its level of one back to
@@ -525,22 +612,28 @@ func TestStackDevRunsTheShop(t *testing.T) {
 			strings.HasPrefix(s.Name, "POST /api/carts/{") && strings.HasSuffix(s.Name, "}/lines")
 	})
 
-	// shop-web, the static site, which stack dev built once and serves
-	// from a file server of its own (D55): its page, its config with
-	// shop-api's address, and the page again for a route of the
-	// application. shop-api answers CORS for the site's origin, which its
-	// CORS field lists, and for no other: the site's CORS answers that
-	// origin's preflight itself, 204, and hands another origin's on to
-	// shop-api's router (D55, amended). There the identity runtime's CORS
-	// answers the trusted origins of its config, which in Dev trusts none,
-	// and the router, which routes no OPTIONS, answers 405 with no
-	// Access-Control-Allow-Origin, so the browser refuses it.
+	// shop-web, the static site, whose dev server, Bun's, stack dev runs
+	// behind a proxy on the site's origin (D82): the dev server's page, the
+	// page again for a route of the application, and the config, which
+	// names shop-api under /api/shop-api on the site's own origin. The
+	// page's hot-reload socket upgrades through the proxy and opens with the
+	// dev server's version message. A shopper signs in with a cookie session
+	// through the proxy: the login is same-origin, so the identity runtime's
+	// cross-origin check passes though Dev trusts no origin, and the session
+	// cookie alone lists the products. The same login sent to shop-api's own
+	// port from the site's origin is cross-origin, and refused.
 	site := env.site
 	if site == "" {
 		t.Fatalf("environment Dev has no site shop-web")
 	}
-	if status, body := call(t, http.MethodGet, site+"/", "", ""); status != http.StatusOK || !strings.Contains(string(body), "<title>acme shop</title>") {
-		t.Fatalf("the site's page: %d %s", status, body)
+	if !strings.Contains(output.String(), "  site     shop-web                 "+site+", its dev server (bun run dev) and its APIs under /api/<service>") {
+		t.Fatalf("stack dev's summary does not say it runs shop-web's dev server at %s", site)
+	}
+	for _, path := range []string{"/", "/products/42"} {
+		if status, body := call(t, http.MethodGet, site+path, "", ""); status != http.StatusOK ||
+			!strings.Contains(string(body), "<title>acme shop</title>") || !strings.Contains(string(body), "/_bun/client/") {
+			t.Fatalf("GET %s on the site: %d %s, want the dev server's page", path, status, body)
+		}
 	}
 	status, body = call(t, http.MethodGet, site+"/__superschematic/config.json", "", "")
 	var config struct {
@@ -548,12 +641,48 @@ func TestStackDevRunsTheShop(t *testing.T) {
 			URL string `json:"url"`
 		} `json:"apis"`
 	}
-	if status != http.StatusOK || json.Unmarshal(body, &config) != nil || config.APIs["shop-api"].URL != env.servers["shop-api"] {
-		t.Fatalf("the site's config: %d %s, want shop-api at %s", status, body, env.servers["shop-api"])
+	if status != http.StatusOK || json.Unmarshal(body, &config) != nil || config.APIs["shop-api"].URL != site+"/api/shop-api" {
+		t.Fatalf("the site's config: %d %s, want shop-api at %s/api/shop-api", status, body, site)
 	}
-	if status, body := call(t, http.MethodGet, site+"/products/42", "", ""); status != http.StatusOK || !strings.Contains(string(body), "<title>acme shop</title>") {
-		t.Fatalf("a route of the site's application: %d %s, want the page", status, body)
+	if version := hotReloadVersion(t, site); version == "" {
+		t.Fatalf("the site's hot-reload socket sent no version")
 	}
+	shopper := addUserOnTheStack(ctx, t, env.database, "Grace Hopper", "products.read")
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	browser := &http.Client{Jar: jar}
+	loginBody := fmt.Sprintf(`{"login": %q, "password": %q, "session": "cookie"}`, shopper.login, shopper.password)
+	if status := browserPost(t, browser, site, site+"/api/shop-api/api/auth/login", "same-origin", loginBody); status != http.StatusOK {
+		t.Fatalf("a cookie login through the site's origin answered %d, want 200", status)
+	}
+	if status := browserPost(t, http.DefaultClient, site, env.servers["shop-api"]+"/api/auth/login", "same-site", loginBody); status != http.StatusForbidden {
+		t.Fatalf("a cookie login from the site's origin to shop-api's own port answered %d, want 403", status)
+	}
+	response, err := browser.Get(site + "/api/shop-api/api/products?inStock=true")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var productsPage struct {
+		Data []apitypes.ProductView `json:"data"`
+	}
+	err = json.NewDecoder(response.Body).Decode(&productsPage)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK || err != nil {
+		t.Fatalf("list the products with the session cookie through the site's origin: %s, %v", response.Status, err)
+	}
+	if status, body := call(t, http.MethodGet, site+"/api/shop-api/api/products?inStock=true", "", ""); status != http.StatusUnauthorized {
+		t.Fatalf("list the products through the site's origin with no session: %d %s, want 401", status, body)
+	}
+	// shop-api answers CORS for the site's origin, which its CORS field
+	// lists, as a deploy's site, on an origin of its own, needs, and for no
+	// other: the site's CORS answers that origin's preflight itself, 204,
+	// and hands another origin's on to shop-api's router (D55, amended).
+	// There the identity runtime's CORS answers the trusted origins of its
+	// config, which in Dev trusts none, and the router, which routes no
+	// OPTIONS, answers 405 with no Access-Control-Allow-Origin, so the
+	// browser refuses it.
 	listing := env.servers["shop-api"] + "/api/products?inStock=true"
 	if status, allowed := preflight(t, listing, site); status != http.StatusNoContent ||
 		allowed.Get("Access-Control-Allow-Origin") != site || allowed.Get("Access-Control-Allow-Credentials") != "true" ||
@@ -694,7 +823,8 @@ func TestStackDevRunsTheShop(t *testing.T) {
 
 	// The orders, oldest first: a page of one order at a time holds each
 	// order once, in the order of one page of them all, the two staff
-	// placed last, and a status filter holds on every page.
+	// placed last with the shopper's reorder between them, and a status
+	// filter holds on every page.
 	var paged []orderstypes.IdentityUUID
 	for listed, err := range orders.OrderNamespace.ListOrdersAll(ctx, nil, orderspages.PageRequest{Limit: 1}) {
 		if err != nil {
@@ -711,8 +841,9 @@ func TestStackDevRunsTheShop(t *testing.T) {
 			t.Fatalf("order %d is %s on a page of 100 and %s on the pages of one", i, listed.Id, paged[i])
 		}
 	}
-	if len(paged) < 2 || paged[len(paged)-2] != order.Id || paged[len(paged)-1] != next.Id {
-		t.Fatalf("ListOrdersAll = %v, want %s and %s last", paged, order.Id, next.Id)
+	reorder := mustUUID(t, reordered.Data.OrderID)
+	if len(paged) < 3 || paged[len(paged)-3] != order.Id || paged[len(paged)-2] != reorder || paged[len(paged)-1] != next.Id {
+		t.Fatalf("ListOrdersAll = %v, want %s, %s and %s last", paged, order.Id, reorder, next.Id)
 	}
 	placedOnly := &ordersns.OrderListOrdersQueryParams{Statuses: []orderstypes.OrderStatus{orderstypes.OrderStatus_Placed}}
 	for listed, err := range orders.OrderNamespace.ListOrdersAll(ctx, placedOnly, orderspages.PageRequest{Limit: 1}) {
@@ -927,12 +1058,13 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	// cargo compiles the crates the root generates and reuses every other.
 	// It mirrors typescript/shop-storefront into impl/shop-storefront too,
 	// and the site web/shop-web into impl/shop-web, where the site builds,
-	// and its Bun workspace lists the mirrors in place of the project's
-	// packages, so its install leaves their node_modules as the first
-	// run's install linked them, to outputRoot (D65, amended).
+	// since --build-sites builds it once in place of running its dev
+	// server (D82), and its Bun workspace lists the mirrors in place of the
+	// project's packages, so its install leaves their node_modules as the
+	// first run's install linked them, to outputRoot (D65, amended).
 	links := projectLinks(t, outputRoot)
 	otherRoot := otherOutputRoot(t, outputRoot)
-	again := startStackDev(t, binary, shopStack, "--out", otherRoot)
+	again := startStackDev(t, binary, shopStack, "--out", otherRoot, "--build-sites")
 	againEnv := again.waitUntilRunning(t, otherRoot, "shop-stack", "shop-api", "shop-orders", "shop-stock", "shop-cart", "shop-storefront")
 	if status := get(t, againEnv.apps[backoffice]+"/stock/engine"); status != http.StatusUnauthorized {
 		t.Fatalf("the Backoffice built in %s answered GET /stock/engine %d, want 401", otherRoot, status)
@@ -955,13 +1087,18 @@ func TestStackDevRunsTheShop(t *testing.T) {
 	if status := get(t, againEnv.servers["shop-storefront"]+"/readyz"); status != http.StatusOK {
 		t.Fatalf("shop-storefront built in %s answered GET /readyz %d", otherRoot, status)
 	}
-	// shop-web built in its mirror, which its file server serves, and not
-	// in the project's package.
+	// shop-web built in its mirror, which its file server serves, with
+	// shop-api's own address in its config and the page for a route of the
+	// application, and not in the project's package.
 	if _, err := os.Stat(filepath.Join(otherRoot, "impl", "shop-web", "dist", "index.html")); err != nil {
 		t.Fatalf("shop-web's build in %s wrote no page into its mirror: %v", otherRoot, err)
 	}
-	if status := get(t, againEnv.site+"/"); status != http.StatusOK {
-		t.Fatalf("shop-web built in %s answered GET / %d", otherRoot, status)
+	if status, body := call(t, http.MethodGet, againEnv.site+"/products/42", "", ""); status != http.StatusOK || !strings.Contains(string(body), "<title>acme shop</title>") || strings.Contains(string(body), "/_bun/client/") {
+		t.Fatalf("shop-web built in %s answered a route of the application %d %s, want the built page", otherRoot, status, body)
+	}
+	status, body = call(t, http.MethodGet, againEnv.site+"/__superschematic/config.json", "", "")
+	if status != http.StatusOK || json.Unmarshal(body, &config) != nil || config.APIs["shop-api"].URL != againEnv.servers["shop-api"] {
+		t.Fatalf("the built site's config: %d %s, want shop-api at %s", status, body, againEnv.servers["shop-api"])
 	}
 	if got := projectLinks(t, outputRoot); !maps.Equal(got, links) {
 		t.Fatalf("stack dev --out %s relinked the project's TypeScript packages:\n%v\nwas\n%v", otherRoot, got, links)
@@ -1075,8 +1212,8 @@ func (dev *stackDev) waitUntilRunning(t *testing.T, outputRoot, stack string, se
 	path := filepath.Join(outputRoot, "stack", stack, "Dev", "environment.json")
 	env := readEnvironment(t, path)
 	dev.containers = env.containers
-	if stack == "shop-stack" && (env.database == "" || env.bucket == "" || len(env.containers) != 2) {
-		t.Fatalf("%s names no shop-db database, no shop-media bucket, or not two containers", path)
+	if stack == "shop-stack" && (env.database == "" || env.bucket == "" || env.memoryStore == "" || len(env.containers) != 3) {
+		t.Fatalf("%s names no shop-db database, no shop-media bucket, no shop-cache store, or not three containers", path)
 	}
 	for _, server := range servers {
 		if env.servers[server] == "" {
@@ -1096,7 +1233,7 @@ func (dev *stackDev) waitUntilRunning(t *testing.T, outputRoot, stack string, se
 
 // stop stops stack dev as Ctrl-C does, which stops the servers, then
 // removes the containers and their data, Postgres's and the storage
-// emulator's.
+// emulator's, and Valkey's, which keeps none.
 func (dev *stackDev) stop(t *testing.T) {
 	t.Helper()
 	dev.stopped = true
@@ -1291,16 +1428,18 @@ func orderStatus(ctx context.Context, t *testing.T, orders *orderssdk.ShopOrders
 }
 
 // environment is what the test reads from the environment the build
-// resolved: each server's URL and each app's, the site's origin, shop-db's connection
-// string, shop-media's URL on the storage emulator, and the names of the
-// containers, Postgres's and the emulator's.
+// resolved: each server's URL and each app's, the site's origin, shop-db's
+// connection string, shop-media's URL on the storage emulator, shop-cache's
+// redis URL on the Valkey container, and the names of the containers,
+// Postgres's, the emulator's and Valkey's.
 type environment struct {
-	servers    map[string]string
-	apps       map[string]string
-	site       string
-	database   string
-	bucket     string
-	containers []string
+	servers     map[string]string
+	apps        map[string]string
+	site        string
+	database    string
+	bucket      string
+	memoryStore string
+	containers  []string
 }
 
 func readEnvironment(t *testing.T, path string) environment {
@@ -1335,6 +1474,8 @@ func readEnvironment(t *testing.T, path string) environment {
 			env.apps[d.Name] = d.PublicAddress
 		case d.Kind == "site" && d.Name == "shop-web":
 			env.site = d.PublicAddress
+		case d.Kind == "memoryStore" && d.Name == "shop-cache":
+			env.memoryStore = d.Address
 		}
 	}
 	for _, r := range resolved.Resources.Resources {
@@ -1436,6 +1577,61 @@ func signInAs(ctx context.Context, t *testing.T, shopAPI string, user stackUser)
 		t.Fatalf("a cookie login on the local target answered %d with %v, want the session cookie without Secure", response.StatusCode, cookies)
 	}
 	return result.Token
+}
+
+// browserPost posts body to url as JSON as a page on origin would, its
+// fetch's Sec-Fetch-Site fetchSite, and returns the answer's status.
+func browserPost(t *testing.T, client *http.Client, origin, url, fetchSite, body string) int {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Origin", origin)
+	request.Header.Set("Sec-Fetch-Site", fetchSite)
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	return response.StatusCode
+}
+
+// hotReloadVersion opens the page's hot-reload socket on the site's
+// origin, /_bun/hmr, where Bun's dev server takes it, as the page's script
+// does, and returns the first message it sends, Bun's version ("V" and a
+// hash). It speaks just enough of RFC 6455 to read one unmasked frame.
+func hotReloadVersion(t *testing.T, site string) string {
+	t.Helper()
+	host := strings.TrimPrefix(site, "http://")
+	conn, err := net.Dial("tcp", host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+	fmt.Fprintf(conn, "GET /_bun/hmr HTTP/1.1\r\nHost: %s\r\nOrigin: %s\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n", host, site)
+	reader := bufio.NewReader(conn)
+	response, err := http.ReadResponse(reader, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("the hot-reload socket's upgrade through the site's origin answered %s", response.Status)
+	}
+	header := make([]byte, 2)
+	if _, err := io.ReadFull(reader, header); err != nil || header[1]&0x7f >= 126 {
+		t.Fatalf("the hot-reload socket's first frame: %v %v", header, err)
+	}
+	payload := make([]byte, header[1]&0x7f)
+	if _, err := io.ReadFull(reader, payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload) == 0 || payload[0] != 'V' {
+		t.Fatalf("the hot-reload socket opened with %q, not Bun's version", payload)
+	}
+	return string(payload)
 }
 
 // receiveThroughTheBackoffice receives a delivery of the product in
@@ -1716,4 +1912,189 @@ func waitForRefund(ctx context.Context, t *testing.T, orders *orderssdk.ShopOrde
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
+}
+
+// checkTheMemoryStore checks shop-cache under stack dev (D75), talking to
+// its Valkey container directly as another replica of shop-api would:
+//   - a request waiting for a product's image subscribes to the product's
+//     channel on the server, and the upload's signing wakes it, well before
+//     its ten-second poll;
+//   - an upload whose claim another replica holds is refused 409, and
+//     signed once the claim is gone;
+//   - getProduct's requests count in the store, under the reserved
+//     rate-limit key of shop-api, the operation, the minute and the
+//     client's address, hashed, so the counts other replicas add there
+//     refuse it 429, with httprate's Retry-After.
+func checkTheMemoryStore(ctx context.Context, t *testing.T, env environment, products *apisdk.ShopApiSDK, token string, n int64) {
+	t.Helper()
+	store, err := url.Parse(env.memoryStore)
+	if err != nil || store.Scheme != "redis" {
+		t.Fatalf("shop-cache's address %q is no redis URL", env.memoryStore)
+	}
+	valkey := store.Host
+	product, err := products.ProductNamespace.CreateProduct(ctx, apitypes.CreateProductInput{
+		Sku:        apitypes.IdentitySlug(fmt.Sprintf("oolong-%d", n)),
+		Name:       "Oolong",
+		PriceCents: 520,
+	})
+	if err != nil {
+		t.Fatalf("CreateProduct: %v", err)
+	}
+	// A UUID part is its wire form, the compact string the API's JSON holds.
+	id := product.Id.String()
+	shopAPI := env.servers["shop-api"]
+
+	type waited struct {
+		status int
+		body   []byte
+		took   time.Duration
+	}
+	done := make(chan waited, 1)
+	go func() {
+		start := time.Now()
+		status, body := call(t, http.MethodGet, shopAPI+"/api/products/"+id+"/image?waitSeconds=25", token, "")
+		done <- waited{status, body, time.Since(start)}
+	}()
+	channel := "shop-cache:product-changed:" + id
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		if reply := valkeyCommand(t, valkey, "PUBSUB", "NUMSUB", channel); len(reply) == 2 && reply[1] == "1" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the waiter did not subscribe to %s in 10s", channel)
+		}
+	}
+	signed := time.Now()
+	if _, err := products.ProductNamespace.CreateProductImageUpload(ctx, id, apitypes.ProductImageUploadInput{ContentType: "image/png"}); err != nil {
+		t.Fatalf("CreateProductImageUpload: %v", err)
+	}
+	select {
+	case w := <-done:
+		var view struct {
+			Data struct {
+				ImageObject string `json:"imageObject"`
+			} `json:"data"`
+		}
+		_ = json.Unmarshal(w.body, &view)
+		if w.status != http.StatusOK || view.Data.ImageObject == "" {
+			t.Fatalf("the waiter answered %d %s", w.status, w.body)
+		}
+		if woke := time.Since(signed); woke > 5*time.Second {
+			t.Fatalf("the waiter answered %s after the upload was signed, by its poll, not the channel", woke)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("the waiter did not answer")
+	}
+
+	// Another replica's claim on the product's upload refuses this one.
+	claim := "shop-cache:image-upload-signing:" + id
+	valkeyCommand(t, valkey, "SET", claim, "another-replica", "PX", "10000")
+	if status, body := call(t, http.MethodPost, shopAPI+"/api/products/"+id+"/image-upload", token, `{"contentType": "image/png"}`); status != http.StatusConflict {
+		t.Fatalf("an upload another replica is signing: %d %s, want 409", status, body)
+	}
+	valkeyCommand(t, valkey, "DEL", claim)
+	if status, body := call(t, http.MethodPost, shopAPI+"/api/products/"+id+"/image-upload", token, `{"contentType": "image/png"}`); status != http.StatusOK {
+		t.Fatalf("an upload once the claim is gone: %d %s", status, body)
+	}
+
+	// getProduct counts in the store. The test reaches shop-api from
+	// loopback, the address the limiter keys the client by.
+	host, _, _ := net.SplitHostPort(strings.TrimPrefix(strings.TrimPrefix(shopAPI, "http://"), "https://"))
+	sum := sha256.Sum256([]byte(host))
+	client := hex.EncodeToString(sum[:])
+	for attempt := 0; ; attempt++ {
+		window := time.Now().UTC().Truncate(time.Minute)
+		key := fmt.Sprintf("shop-cache:rate-limit:shop-api:product.getProduct:%d:%s", window.Unix(), client)
+		before := valkeyCount(t, valkey, key)
+		if status, body := call(t, http.MethodGet, shopAPI+"/api/products/"+id, token, ""); status != http.StatusOK {
+			t.Fatalf("getProduct: %d %s", status, body)
+		}
+		after := valkeyCount(t, valkey, key)
+		// The other replicas' requests this minute fill the budget.
+		valkeyCommand(t, valkey, "SET", key, "120", "PX", "125000")
+		status, body := call(t, http.MethodGet, shopAPI+"/api/products/"+id, token, "")
+		valkeyCommand(t, valkey, "DEL", key)
+		if time.Now().UTC().Truncate(time.Minute) != window && attempt == 0 {
+			continue // the minute turned; count again in the next one
+		}
+		if after != before+1 {
+			t.Fatalf("shop-cache counted getProduct %d to %d under %s, want one more", before, after, key)
+		}
+		if status != http.StatusTooManyRequests || !strings.Contains(string(body), "too_many_requests") {
+			t.Fatalf("getProduct over the shared budget: %d %s, want 429", status, body)
+		}
+		break
+	}
+}
+
+// valkeyCount is the counter key holds on the Valkey server at addr, 0
+// when there is none.
+func valkeyCount(t *testing.T, addr, key string) int64 {
+	t.Helper()
+	reply := valkeyCommand(t, addr, "GET", key)
+	if len(reply) == 0 || reply[0] == "" {
+		return 0
+	}
+	n, err := strconv.ParseInt(reply[0], 10, 64)
+	if err != nil {
+		t.Fatalf("%s holds %q, no count", key, reply[0])
+	}
+	return n
+}
+
+// valkeyCommand sends one command to the Valkey server at addr over a
+// connection of its own and returns its reply: a simple string, an
+// integer or a bulk string as one element, "" for a null, and an array's
+// elements; an error reply fails the test.
+func valkeyCommand(t *testing.T, addr string, args ...string) []string {
+	t.Helper()
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	var b strings.Builder
+	fmt.Fprintf(&b, "*%d\r\n", len(args))
+	for _, a := range args {
+		fmt.Fprintf(&b, "$%d\r\n%s\r\n", len(a), a)
+	}
+	if _, err := io.WriteString(conn, b.String()); err != nil {
+		t.Fatal(err)
+	}
+	r := bufio.NewReader(conn)
+	var read func() []string
+	read = func() []string {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		line = strings.TrimRight(line, "\r\n")
+		switch line[0] {
+		case '+', ':':
+			return []string{line[1:]}
+		case '-':
+			t.Fatalf("%v: %s", args, line[1:])
+		case '$':
+			size, _ := strconv.Atoi(line[1:])
+			if size < 0 {
+				return []string{""}
+			}
+			buf := make([]byte, size+2)
+			if _, err := io.ReadFull(r, buf); err != nil {
+				t.Fatal(err)
+			}
+			return []string{string(buf[:size])}
+		case '*':
+			count, _ := strconv.Atoi(line[1:])
+			var out []string
+			for range count {
+				out = append(out, read()...)
+			}
+			return out
+		}
+		t.Fatalf("%v: a reply %q", args, line)
+		return nil
+	}
+	return read()
 }

@@ -17,8 +17,8 @@ use super::behavior::{
 };
 use super::config::ConfigTarget;
 use super::context::{
-    Core, InstanceCx, InstanceView, OperationCx, PublishCx, ReactionCx, ReferenceCx, ScheduleCx,
-    SchemaCx, Scope, ValidationCx,
+    Core, InstanceCx, InstanceView, NamespaceCx, OperationCx, PublishCx, ReactionCx, ReferenceCx,
+    ScheduleCx, SchemaCx, Scope, ValidationCx,
 };
 use crate::errors::{Error, Result, ValidationIssue, Veto};
 use crate::events::EngineEvent;
@@ -52,6 +52,7 @@ pub(crate) struct HookSet {
     pub watches: bool,
     pub operations: Vec<String>,
     pub schema_operations: Vec<String>,
+    pub namespace_operations: Vec<String>,
     pub fields: Vec<String>,
     pub filters: Vec<(String, super::behavior::BehaviorFilter)>,
     /// Each schedule's name and its fixed interval (`None` for one the
@@ -111,6 +112,13 @@ pub(crate) trait Erased: Send + Sync {
         name: &str,
         core: &dyn Core,
         config: &ConfigBox,
+        params: &Value,
+    ) -> Option<Result<Value>>;
+    /// A namespace operation's handler (D77), which takes no config.
+    fn namespace_operation(
+        &self,
+        name: &str,
+        core: &dyn Core,
         params: &Value,
     ) -> Option<Result<Value>>;
     fn field(
@@ -270,6 +278,11 @@ impl<B: Behavior> Erased for Implementation<B> {
                 .collect(),
             schema_operations: hooks
                 .schema_operations
+                .iter()
+                .map(|(name, _)| (*name).to_owned())
+                .collect(),
+            namespace_operations: hooks
+                .namespace_operations
                 .iter()
                 .map(|(name, _)| (*name).to_owned())
                 .collect(),
@@ -439,6 +452,26 @@ impl<B: Behavior> Erased for Implementation<B> {
             self.run(&format!("operation {name}"), || {
                 handler(&self.behavior, &cx, params)
             })
+        }))
+    }
+
+    fn namespace_operation(
+        &self,
+        name: &str,
+        core: &dyn Core,
+        params: &Value,
+    ) -> Option<Result<Value>> {
+        let (_, handler) = self
+            .hooks
+            .namespace_operations
+            .iter()
+            .find(|(declared, _)| *declared == name)?;
+        let cx = NamespaceCx {
+            core,
+            config: std::marker::PhantomData,
+        };
+        Some(self.run(&format!("operation {name}"), || {
+            handler(&self.behavior, &cx, params)
         }))
     }
 

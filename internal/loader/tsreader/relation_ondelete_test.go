@@ -23,6 +23,7 @@ func TestRelationOnDeleteParses(t *testing.T) {
 		"parentBare":     "",
 		"parentRestrict": "RESTRICT",
 		"parentNoAction": "NO ACTION",
+		"parentSetNull":  "SET NULL",
 	}
 	seen := map[string]bool{}
 	for _, fd := range child.Fields {
@@ -60,6 +61,20 @@ func TestRelationOnDeleteInvalidValueFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "BOGUS") {
 		t.Errorf("error must name the bad value BOGUS; got: %s", err.Error())
+	}
+}
+
+// TestRelationOnDeleteSetNullNeedsNullable: SET NULL writes null into the
+// foreign key column, so on a required relation, whose column is NOT NULL,
+// the loader refuses it and names the nullable form (D83).
+func TestRelationOnDeleteSetNullNeedsNullable(t *testing.T) {
+	_, _, err := LoadService(filepath.Join("testdata", "services", "broken-relation-ondelete-set-null"))
+	if err == nil {
+		t.Fatal("expected schema error for SET NULL on a required relation")
+	}
+	want := `Child.parent relation onDelete "SET NULL" needs a nullable relation: declare it Nullable<Relation<Parent, { onDelete: "SET NULL" }>>, or pick CASCADE, RESTRICT or NO ACTION`
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("error must name the fix %q; got: %s", want, err.Error())
 	}
 }
 

@@ -12,7 +12,7 @@ from enum import Enum
 {{- end}}
 from typing import TYPE_CHECKING, Any, Mapping, TypedDict
 
-from ..client import EncryptedRequestOptions, FilePart,{{if .Namespace.HasFilterableEndpoints}} FilterSpec,{{end}} SyncHTTPClient{{if .Namespace.HasUnsetArgs}}, UNSET, Unset{{end}}{{if .Namespace.HasPathParams}}, path_segment{{end}}
+from ..client import DownloadedFile, EncryptedRequestOptions, FilePart,{{if .Namespace.HasFilterableEndpoints}} FilterSpec,{{end}} SyncHTTPClient{{if .Namespace.HasUnsetArgs}}, UNSET, Unset{{end}}{{if .Namespace.HasPathParams}}, path_segment{{end}}
 from ..errors import SDKError, ValidationError
 {{- if .Namespace.HasPagedEndpoints}}
 from ..page import Page{{if ne .Namespace.PageType "Page"}} as {{.Namespace.PageType}}{{end}}
@@ -827,6 +827,9 @@ class {{.Namespace.ClassName}}:
             requires_auth={{if .RequiresAuth}}True{{else}}False{{end}},
             timeout_seconds=timeout_seconds,
             extra_headers=extra_headers,
+{{- if .FileDownload}}
+            response_file=True,
+{{- end}}
         )
         return {{template "coerceResponse" .}}
 {{- else if .HasEncryptedBody}}
@@ -849,6 +852,9 @@ class {{.Namespace.ClassName}}:
             requires_auth={{if .RequiresAuth}}True{{else}}False{{end}},
             timeout_seconds=timeout_seconds,
             extra_headers=extra_headers,
+{{- if .FileDownload}}
+            response_file=True,
+{{- end}}
         )
         return {{template "coerceResponse" .}}
 {{- else}}
@@ -868,6 +874,9 @@ class {{.Namespace.ClassName}}:
             requires_auth={{if .RequiresAuth}}True{{else}}False{{end}},
             timeout_seconds=timeout_seconds,
             extra_headers=extra_headers,
+{{- if .FileDownload}}
+            response_file=True,
+{{- end}}
         )
         return {{template "coerceResponse" .}}
 {{- else}}
@@ -922,6 +931,9 @@ class {{.Namespace.ClassName}}:
             requires_auth={{if .RequiresAuth}}True{{else}}False{{end}},
             timeout_seconds=timeout_seconds,
             extra_headers=extra_headers,
+{{- if .FileDownload}}
+            response_file=True,
+{{- end}}
         )
         return {{template "coerceResponse" .}}
 {{- else}}
@@ -933,6 +945,9 @@ class {{.Namespace.ClassName}}:
             requires_auth={{if .RequiresAuth}}True{{else}}False{{end}},
             timeout_seconds=timeout_seconds,
             extra_headers=extra_headers,
+{{- if .FileDownload}}
+            response_file=True,
+{{- end}}
         )
         return {{template "coerceResponse" .}}
 {{- end}}
@@ -966,7 +981,7 @@ a list of lists of them row by row, and any other response as
 _coerce_response reads it.
 */ -}}
 {{- define "coerceResponse" -}}
-{{if .Paged}}self._coerce_page(response, "{{.OutputModelName}}"){{else if and .OutputIsMap .OutputModelName}}self._coerce_map_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{else if and .OutputIsArrayOfArrays .OutputModelName}}self._coerce_list_of_lists_response(response, "{{.OutputModelName}}"){{else}}self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{end}}
+{{if .FileDownload}}response{{else if .Paged}}self._coerce_page(response, "{{.OutputModelName}}"){{else if and .OutputIsMap .OutputModelName}}self._coerce_map_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{else if and .OutputIsArrayOfArrays .OutputModelName}}self._coerce_list_of_lists_response(response, "{{.OutputModelName}}"){{else}}self._coerce_response(response, "{{.OutputModelName}}", {{if .OutputIsArray}}True{{else}}False{{end}}){{end}}
 {{- end}}
 {{- /*
 scalarArgsPayload builds the JSON body of an endpoint's scalar arguments.

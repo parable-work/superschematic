@@ -235,13 +235,18 @@ func CatalogLanguagePrimitive(primitive string) (lp LanguagePrimitive, known boo
 }
 
 // FileUploadConfig defines upload constraints for file-type scalars
-// (File, Image, LogoImage, etc.).
+// (File, Image, LogoImage, etc.) and for a FileUpload<C> field (D81).
 type FileUploadConfig struct {
 	// MaxSize is the maximum file size in bytes.
 	MaxSize int `json:"maxSize,omitempty" yaml:"maxSize,omitempty"`
 
 	// AllowedTypes lists permitted MIME types. An empty list means all types are allowed.
 	AllowedTypes []string `json:"allowedTypes,omitempty" yaml:"allowedTypes,omitempty"`
+
+	// AllowedExtensions lists the filename extensions a part's filename may
+	// end in, each with its dot (".csv"), matched without regard to case
+	// (D81). An empty list means any filename.
+	AllowedExtensions []string `json:"allowedExtensions,omitempty" yaml:"allowedExtensions,omitempty"`
 
 	// Category is a file category hint for UI and processing
 	// ("file", "image", "document", etc.).

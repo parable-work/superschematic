@@ -1,17 +1,18 @@
 import { Identity, Temporal } from "superscalar";
+import { Default } from "@superschematic/schema";
 import { AutoGenerate, JsonField, jsonField, key } from "@superschematic/db";
 
 // A tasting whose required columns hold temporal values. A required
-// temporal scalar defaults to the current date or time; a required list of
-// one defaults to an empty array; a list of lists, a map or a JSON field
-// holding one has no default.
+// temporal scalar declared Default<T, "now"> defaults to the current date
+// or time; a required list of one defaults to an empty array; a list of
+// lists, a map or a JSON field holding one has no default.
 export abstract class Tasting {
   @key
   id: AutoGenerate<Identity.UUID>;
 
-  tastedAt: Temporal.DateTime;
-  tastedOn: Temporal.Date;
-  pouredAt: Temporal.Time;
+  tastedAt: Default<Temporal.DateTime, "now">;
+  tastedOn: Default<Temporal.Date, "now">;
+  pouredAt: Default<Temporal.Time, "now">;
 
   retastedAt: Temporal.DateTime[];
   retastedOn: Temporal.Date[];

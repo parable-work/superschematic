@@ -1,8 +1,8 @@
 {
   "dialect": "sqlite",
-  "expanded": "1b4e0aa7402286048abb87a4ecdb43fdeb641f54101db19828a3d5b78bd72fdb",
-  "from": "17bd156134f9bc031e491f427775ca4c6089cbdfb136747219a92c639979d53a",
-  "hash": "6a61517710e56796ee18bb8f16c2035f78f76f79034886872b38c9265809a781",
+  "expanded": "bbab3022c51cdf3ffe52c805c729ffaed93c04bd4356fbd0bbb9f6e888301ef1",
+  "from": "d9697f8b128d88e9877145068feef31d9bdfa8a6c367bd3cdbd76a76318119f0",
+  "hash": "772e81aff79b25f287de4f3eacd3eca574b648675c554e3109ef339a8118e9de",
   "service": "shop-db",
   "steps": [
     {
@@ -37,7 +37,7 @@
       "phase": "expand",
       "statements": [
         "PRAGMA defer_foreign_keys = ON",
-        "CREATE TABLE \"_new_order\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"code\" TEXT NOT NULL,\n  \"buyer_id\" TEXT NOT NULL,\n  \"total\" INTEGER NOT NULL,\n  \"reference\" TEXT,\n  \"note\" TEXT,\n  \"placed_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  \"customer_id\" TEXT,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"buyer_id\") REFERENCES \"customer\" (\"id\") ON DELETE RESTRICT,\n  FOREIGN KEY (\"customer_id\") REFERENCES \"customer\" (\"id\") ON DELETE RESTRICT\n)",
+        "CREATE TABLE \"_new_order\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"code\" TEXT NOT NULL,\n  \"buyer_id\" TEXT NOT NULL,\n  \"total\" INTEGER NOT NULL,\n  \"reference\" TEXT,\n  \"note\" TEXT,\n  \"placed_at\" TEXT NOT NULL,\n  \"customer_id\" TEXT,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"buyer_id\") REFERENCES \"customer\" (\"id\") ON DELETE RESTRICT,\n  FOREIGN KEY (\"customer_id\") REFERENCES \"customer\" (\"id\") ON DELETE RESTRICT\n)",
         "CREATE TABLE \"_new_order_label\" (\n  \"order_id\" TEXT NOT NULL,\n  \"label_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"order_id\", \"label_id\"),\n  FOREIGN KEY (\"label_id\") REFERENCES \"label\" (\"id\") ON DELETE CASCADE,\n  FOREIGN KEY (\"order_id\") REFERENCES \"_new_order\" (\"id\") ON DELETE CASCADE\n)",
         "CREATE TABLE \"_new_order_line\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"sku\" TEXT NOT NULL,\n  \"quantity\" INTEGER NOT NULL,\n  \"order_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"order_id\") REFERENCES \"_new_order\" (\"id\") ON DELETE CASCADE\n)",
         "INSERT INTO \"_new_order\" (\"id\", \"code\", \"total\", \"reference\", \"note\", \"placed_at\", \"customer_id\")\nSELECT \"id\", \"code\", \"total\", \"reference\", \"note\", \"placed_at\", \"customer_id\"\nFROM \"order\"",
@@ -81,7 +81,7 @@
       "phase": "contract",
       "statements": [
         "PRAGMA defer_foreign_keys = ON",
-        "CREATE TABLE \"_new_order\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"code\" TEXT NOT NULL,\n  \"buyer_id\" TEXT NOT NULL,\n  \"total\" INTEGER NOT NULL,\n  \"reference\" TEXT,\n  \"note\" TEXT,\n  \"placed_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"buyer_id\") REFERENCES \"customer\" (\"id\") ON DELETE RESTRICT\n)",
+        "CREATE TABLE \"_new_order\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"code\" TEXT NOT NULL,\n  \"buyer_id\" TEXT NOT NULL,\n  \"total\" INTEGER NOT NULL,\n  \"reference\" TEXT,\n  \"note\" TEXT,\n  \"placed_at\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"buyer_id\") REFERENCES \"customer\" (\"id\") ON DELETE RESTRICT\n)",
         "CREATE TABLE \"_new_order_label\" (\n  \"order_id\" TEXT NOT NULL,\n  \"label_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"order_id\", \"label_id\"),\n  FOREIGN KEY (\"label_id\") REFERENCES \"label\" (\"id\") ON DELETE CASCADE,\n  FOREIGN KEY (\"order_id\") REFERENCES \"_new_order\" (\"id\") ON DELETE CASCADE\n)",
         "CREATE TABLE \"_new_order_line\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"sku\" TEXT NOT NULL,\n  \"quantity\" INTEGER NOT NULL,\n  \"order_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"order_id\") REFERENCES \"_new_order\" (\"id\") ON DELETE CASCADE\n)",
         "INSERT INTO \"_new_order\" (\"id\", \"code\", \"buyer_id\", \"total\", \"reference\", \"note\", \"placed_at\")\nSELECT \"id\", \"code\", \"buyer_id\", \"total\", \"reference\", \"note\", \"placed_at\"\nFROM \"order\"",
@@ -99,7 +99,7 @@
       "transactional": true
     }
   ],
-  "to": "6ace3e16a8e660f06f8024d715b36e6464e8f248663ed2964f3a0283b4b303a8",
+  "to": "666e6fff38cbcd7599c8018ec19b55d717808eb4d50f7e52750fa9fa18d18075",
   "toModel": null,
   "version": 1
 }

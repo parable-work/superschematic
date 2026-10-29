@@ -1906,13 +1906,7 @@ func CollectionPointFromYAMLNonStrict(data []byte) (*CollectionPoint, error) {
 	return decoded, nil
 }
 
-// Inventory - The shop's commerce, kept by the engine (D58, D70): these types compose
-// behaviors, so they are engine types, whose instances the engine keeps in
-// shop-db's database beside the tables, and which the SQL and the ORM
-// leave out. Every server, job and worker of an API on shop-db opens the
-// engine; the shop's implementations call it in-process, and staff reach
-// it at /engine/shop-db, under the policy in schema.config.ts.
-// The units the warehouse holds of a product: one instance per product,
+// Inventory - The units the warehouse holds of a product: one instance per product,
 // whose id is the product's. shop-stock's staff routes receive and count
 // them, and a checkout holds them at the price they sell for, in pounds.
 // A count at or below reorderAt makes Stock.low true, which shop-stock's
@@ -2174,7 +2168,10 @@ func InventoryFromYAMLNonStrict(data []byte) (*Inventory, error) {
 	return decoded, nil
 }
 
-// Order - A shopper's order. Staff look orders up by customer, newest first.
+// Order - A shopper's order. Staff look orders up by customer, newest first. An
+// order put back to placed, by staff or by a script in psql, is fulfilled
+// again: the database's trigger enqueues its OrderPlaced, whatever wrote
+// the row.
 type Order struct {
 	CreatedAt TemporalDateTime `json:"createdAt"`
 
@@ -2855,9 +2852,11 @@ func OrderLineFromYAMLNonStrict(data []byte) (*OrderLine, error) {
 	return decoded, nil
 }
 
-// OrderPlaced - Placed with each order, in the transaction that writes it: shop-orders'
-// worker FulfilOrders handles each message, and a message whose handler
-// fails is retried every half minute, five times at most.
+// OrderPlaced - Placed with each order, in the transaction that writes it, and by the
+// trigger on an order put back to placed: shop-orders' worker FulfilOrders
+// handles each message, and a message whose handler fails is retried every
+// half minute, five times at most. One waits per order: an order placed
+// again while its message waits adds none.
 type OrderPlaced struct {
 	OrderId IdentityUUID `json:"orderId"`
 }
@@ -5265,9 +5264,11 @@ func ShippingAddressFromYAMLNonStrict(data []byte) (*ShippingAddress, error) {
 // available units at or below its reorderAt (Stock.low, D70), and by its
 // job OrderRestocks for one a count left low: shop-stock's worker
 // ReorderStock files a restock request for the product. The message holds
-// the units available and the reorder level as the sale left them. A
-// message whose handler fails is retried every half minute, five times at
-// most.
+// the units available and the reorder level as the sale left them. One
+// waits per product: a later sale that leaves the product low replaces it,
+// so the worker reads the latest level, and the worker handles one
+// product's message at a time. A message whose handler fails is retried
+// every half minute, five times at most.
 type StockLow struct {
 	ProductId IdentityUUID `json:"productId"`
 
@@ -6126,6 +6127,8 @@ type UserCredential struct {
 	PasswordChangedAt TemporalDateTime `json:"passwordChangedAt"`
 
 	DisabledAt *TemporalDateTime `json:"disabledAt,omitempty"`
+
+	PendingAt *TemporalDateTime `json:"pendingAt,omitempty"`
 }
 
 // MaskSecrets returns a copy of UserCredential with secret fields cleared.
@@ -6150,6 +6153,8 @@ func (t *UserCredential) MaskSecrets() *UserCredential {
 
 	masked.DisabledAt = t.DisabledAt
 
+	masked.PendingAt = t.PendingAt
+
 	return masked
 }
 
@@ -6157,7 +6162,7 @@ func (t *UserCredential) MaskSecrets() *UserCredential {
 // route refuses an input body with any other top-level key, as every
 // generated server does.
 func (*UserCredential) JSONFieldNames() []string {
-	return []string{"id", "user", "passwordHash", "passwordChangedAt", "disabledAt"}
+	return []string{"id", "user", "passwordHash", "passwordChangedAt", "disabledAt", "pendingAt"}
 }
 
 // Validate validates all fields in UserCredential
@@ -6191,6 +6196,15 @@ func (t *UserCredential) Validate() ValidationErrors {
 	if t.DisabledAt != nil {
 		if valid, fieldErrs := t.DisabledAt.Validate(); !valid {
 			errors.SetFieldErrors("disabledAt", fieldErrs)
+		}
+	}
+
+	// Validate pendingAt (optional)
+
+	// Validate optional pointer field
+	if t.PendingAt != nil {
+		if valid, fieldErrs := t.PendingAt.Validate(); !valid {
+			errors.SetFieldErrors("pendingAt", fieldErrs)
 		}
 	}
 

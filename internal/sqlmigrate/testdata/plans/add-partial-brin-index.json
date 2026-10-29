@@ -1,0 +1,24 @@
+{
+  "dialect": "postgres",
+  "from": "c6787cdef058267033f38e38e6c4e788b8fc54fcc00776b78d8b4db345c93d96",
+  "hash": "70b3c8eaf65e48de2b4a275e9f5e7f4d6e4f24dd5f681d1d7bc723f8d864e952",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createIndex",
+      "phase": "expand",
+      "recovery": [
+        "DROP INDEX CONCURRENTLY IF EXISTS idx_order_placed_at"
+      ],
+      "statements": [
+        "CREATE INDEX CONCURRENTLY idx_order_placed_at ON \"order\" USING BRIN (placed_at) WHERE total \u003e 0"
+      ],
+      "subject": "table/order/index/idx_order_placed_at",
+      "transactional": false
+    }
+  ],
+  "to": "f49b473c08511e3ae40cc1e57d728b1b2d577a693fc35841bcda7880aab921d2",
+  "toModel": null,
+  "version": 1
+}

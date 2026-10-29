@@ -22,10 +22,20 @@
   "operationSets": [
     {
       "name": "Account",
-      "comment": "Signs users in and out, and lets anyone register.",
+      "comment": "Signs users in and out, and lets anyone register: a new user waits for\nan administrator's approval as a member, and the first is the\nadministrator (D81).",
       "operations": [],
       "userSessions": {
-        "register": true
+        "register": true,
+        "registration": "approval",
+        "defaultRoles": [
+          "member"
+        ],
+        "firstUser": {
+          "role": "admin",
+          "permissions": [
+            "identity"
+          ]
+        }
       }
     },
     {

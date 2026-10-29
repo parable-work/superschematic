@@ -104,6 +104,11 @@ const (
 	// serves.
 	CodeCallCycle Code = "call-cycle"
 
+	// CodeOrigin is an origin of @stack that names a site the stack does
+	// not deploy, a site another origin names, an API twice, or an API its
+	// site does not call (D91).
+	CodeOrigin Code = "origin"
+
 	// CodeLowering is an error a platform, connector or DNS platform
 	// returned, or a result it should not have returned.
 	CodeLowering Code = "lowering"

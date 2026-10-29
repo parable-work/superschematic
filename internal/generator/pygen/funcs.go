@@ -33,6 +33,8 @@ func customTemplateFuncs(output *ModuleOutput) template.FuncMap {
 		"pythonScalarSymbol":    pythonScalarSymbol,
 		"pythonScalarModule":    pythonScalarModule,
 		"pythonParsesJSON":      pythonParsesJSON,
+		"isPythonDecimal":       isPythonDecimal,
+		"ruleText":              ruleText,
 		"pythonScalarLibType":   pythonScalarLibType,
 		"pythonExample":         pythonExample,
 		"scalarDoc": func(s codegen.ScalarInfo) string {
@@ -227,9 +229,32 @@ func buildModelFieldLookup(output *ModuleOutput) func(codegen.FieldInfo) bool {
 	}
 }
 
+// ruleText is the Python that renders value, a value of field, as the text
+// a length or pattern rule checks: str(value), but a Generic.Decimal's in
+// plain notation, which str writes as 1E-7 (D84).
+func ruleText(field codegen.FieldInfo, value string) string {
+	if field.ScalarInfo != nil && isPythonDecimal(*field.ScalarInfo) {
+		return "_decimal_text(" + value + ")"
+	}
+	return "str(" + value + ")"
+}
+
+// pythonDecimalType is Generic.Decimal's Python type, the catalog's
+// mapping (D84).
+const pythonDecimalType = "decimal.Decimal"
+
+// isPythonDecimal reports whether scalar maps to decimal.Decimal.
+func isPythonDecimal(scalar codegen.ScalarInfo) bool {
+	return scalar.TargetType == pythonDecimalType
+}
+
 // hasNonRequiredValidations reports whether the field carries validation
-// rules beyond the implicit "required" rule.
+// rules beyond the implicit "required" rule, its digit rules (D84) among
+// them.
 func hasNonRequiredValidations(field codegen.FieldInfo) bool {
+	if field.Digits != nil {
+		return true
+	}
 	for _, rule := range field.Validations {
 		if rule.Validator != "required" {
 			return true
@@ -502,6 +527,9 @@ func pythonScalarType(targetType string) string {
 	case "uuid.UUID":
 		// Keep UUID-compatible values as strings in generated scalar aliases.
 		return "str"
+	case pythonDecimalType:
+		// Generic.Decimal (D84): scalars.py imports the decimal module.
+		return pythonDecimalType
 	}
 
 	if strings.HasPrefix(targetType, "Dict[") || strings.HasPrefix(targetType, "List[") || strings.HasPrefix(targetType, "Optional[") {

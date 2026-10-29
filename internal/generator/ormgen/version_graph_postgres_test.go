@@ -47,8 +47,9 @@ func generateORMModule(t *testing.T, fixture string) string {
 }
 
 // generateORMModuleAt is generateORMModule for the service in serviceDir,
-// named fixture.
-func generateORMModuleAt(t *testing.T, serviceDir, fixture string) string {
+// named fixture, its ORM generated with the options each of configure
+// sets.
+func generateORMModuleAt(t *testing.T, serviceDir, fixture string, configure ...func(*Options)) string {
 	t.Helper()
 	paths := testpaths.Local(t)
 
@@ -77,12 +78,16 @@ func generateORMModuleAt(t *testing.T, serviceDir, fixture string) string {
 		t.Fatalf("write types: %v", err)
 	}
 
-	ormOutput, err := Generate(schema, Options{
+	opts := Options{
 		SchemaName:  fixture,
 		ModulePath:  "example.com/schemas/orm/" + fixture,
 		TypesModule: typesModule,
 		Clock:       fixedClock,
-	})
+	}
+	for _, set := range configure {
+		set(&opts)
+	}
+	ormOutput, err := Generate(schema, opts)
 	if err != nil {
 		t.Fatalf("generate orm: %v", err)
 	}

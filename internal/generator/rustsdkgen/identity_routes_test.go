@@ -22,7 +22,7 @@ import (
 // sets the loader fills from fixture-user-model-db (D50).
 const userRoutesService = "fixture-user-routes-api"
 
-// loadUserRoutesAPI loads fixture-user-routes-api: the 18 operations of
+// loadUserRoutesAPI loads fixture-user-routes-api: the 19 operations of
 // the user model's route sets and the project's greeting.greet.
 func loadUserRoutesAPI(t *testing.T) (*ir.Schema, *apigen.APIOutput) {
 	t.Helper()
@@ -77,7 +77,7 @@ func TestUserRoutesAreSDKMethodsAndTools(t *testing.T) {
 	}
 	slices.Sort(methods)
 	want := []string{
-		"account-admin.create_role", "account-admin.create_user", "account-admin.delete_role",
+		"account-admin.approve_user", "account-admin.create_role", "account-admin.create_user", "account-admin.delete_role",
 		"account-admin.disable_user", "account-admin.enable_user", "account-admin.get_user",
 		"account-admin.grant_role", "account-admin.list_roles", "account-admin.list_users",
 		"account-admin.revoke_role", "account-admin.set_user_password", "account-admin.update_role",
@@ -259,7 +259,7 @@ fn serve(responses: Vec<Value>) -> (String, mpsc::Receiver<Request>) {
 #[tokio::test]
 async fn the_user_model_operations_cross_the_wire() {
     let session_user = json!({"id": USER_ID, "login": "ada@example.com", "name": "Ada"});
-    let user = json!({"id": USER_ID, "login": "ada@example.com", "name": "Ada", "disabled": false, "roles": [{"id": ROLE_ID, "name": "admin"}]});
+    let user = json!({"id": USER_ID, "login": "ada@example.com", "name": "Ada", "disabled": false, "pending": false, "roles": [{"id": ROLE_ID, "name": "admin"}]});
     let (base_url, requests) = serve(vec![
         json!({"user": session_user, "expiresAt": "2026-01-02T03:04:05Z", "token": "session-token"}),
         json!({"operations": {"AccountMeHandler": true, "AccountAdminCreateUserHandler": false}}),

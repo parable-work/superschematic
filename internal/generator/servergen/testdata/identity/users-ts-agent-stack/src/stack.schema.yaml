@@ -1,0 +1,17 @@
+# users-ts-agent on its default TypeScript server, over users-db, on the
+# local target.
+kind: Stack
+types:
+  Agents:
+    name: Agents
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: users-ts-agent, kind: API }
+      expose:
+        - service: { name: users-ts-agent, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

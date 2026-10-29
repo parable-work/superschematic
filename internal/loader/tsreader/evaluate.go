@@ -38,11 +38,13 @@ func (h serviceHandle) MarshalJSON() ([]byte, error) {
 const maxEvalDepth = 16
 
 // evaluateExpression statically evaluates a decorator or config argument.
-// Only literals are supported: strings, numbers, booleans, null, arrays,
-// object literals, enum member references, service sentinel constants
-// (identifiers whose initializer is a service({...}) call) and, in a
-// decorator argument, classes named as values. Anything computed is
-// rejected -- the execution path is the backstop for runtime values.
+// Only literals are supported: strings (a template literal too, as
+// @rawSql's multi-line SQL, whose substitutions are string constants, as a
+// @query's shared SQL is (D95)), numbers, booleans, null, arrays, object
+// literals, enum member references, constants (a const's initializer, a
+// service sentinel's service({...}) call among them) and, in a decorator
+// argument, classes named as values. Anything computed is rejected -- the
+// execution path is the backstop for runtime values.
 //
 // Results are Go values: string, float64, bool, nil, []any, map[string]any,
 // and serviceHandle. Only the null literal evaluates to nil: [] and {}
@@ -61,7 +63,7 @@ func (w *walker) evaluateExpressionDepth(node *astNode, depth int) (any, *Schema
 	}
 
 	switch node.Kind {
-	case kindStringLiteral:
+	case kindStringLiteral, kindNoSubstitutionTemplate:
 		return node.Text(), nil
 
 	case kindNumericLiteral:
@@ -150,9 +152,76 @@ func (w *walker) evaluateExpressionDepth(node *astNode, depth int) (any, *Schema
 
 	case kindCallExpression:
 		return w.evaluateCall(node, depth)
+
+	case kindTemplateExpression:
+		return w.evaluateTemplate(node, depth)
+
+	case kindBinaryExpression:
+		return nil, errorAtNode(node, "argument must be a literal; join strings with a template literal whose ${...} are string constants, as `${FILTER} AND x`, not with an operator; computed values are read by the execution path, not the static walk")
 	}
 
-	return nil, errorAtNode(node, "argument must be a literal; computed values are read by the execution path, not the static walk")
+	return nil, errorAtNode(node, "argument must be a literal: a string, a number, a boolean, null, an array or object of them, an enum member, a class, a const whose initializer is one, or a template literal whose ${...} are string constants; computed values are read by the execution path, not the static walk")
+}
+
+// templateSubstitutions says what a template literal's ${...} may be, for
+// its errors (D95).
+const templateSubstitutions = "a template literal's ${...} names a string constant: a const declared with a string, or with a template literal of such constants, in this file or one it imports"
+
+// evaluateTemplate evaluates a template literal with substitutions, the
+// way a @query's SQL shares a fragment with other queries (D95): each
+// ${...} is a string constant, which evaluates through its const's
+// initializer to a string, a template literal of constants itself among
+// them, and the text is the template's with each in place. A substitution
+// that does not evaluate statically, or evaluates to anything but a
+// string, is refused, saying what one may be.
+func (w *walker) evaluateTemplate(node *astNode, depth int) (any, *SchemaError) {
+	template := node.AsTemplateExpression()
+	var b strings.Builder
+	b.WriteString(template.Head.Text())
+	if template.TemplateSpans != nil {
+		for _, span := range template.TemplateSpans.Nodes {
+			sub := span.AsTemplateSpan()
+			v, serr := w.evaluateExpressionDepth(sub.Expression, depth+1)
+			if serr != nil {
+				// The reason, located where it is when that is elsewhere: in
+				// a constant's initializer, in this file or another.
+				reason := serr.Error()
+				if file, line, col := locationOfNode(sub.Expression); serr.File == file && serr.Line == line && serr.Col == col {
+					reason = serr.Msg
+				}
+				return nil, errorAtNode(sub.Expression, "${%s} does not evaluate statically (%s); %s", w.nodeText(sub.Expression), reason, templateSubstitutions)
+			}
+			text, ok := v.(string)
+			if !ok {
+				return nil, errorAtNode(sub.Expression, "${%s} is %s, not a string; %s", w.nodeText(sub.Expression), describeValue(v), templateSubstitutions)
+			}
+			b.WriteString(text)
+			b.WriteString(sub.Literal.Text())
+		}
+	}
+	return b.String(), nil
+}
+
+// describeValue names the kind of an evaluated value, for an error.
+func describeValue(v any) string {
+	switch v := v.(type) {
+	case nil:
+		return "null"
+	case float64:
+		return "a number"
+	case bool:
+		return "a boolean"
+	case []any:
+		return "an array"
+	case serviceHandle:
+		return "a service sentinel"
+	case map[string]any:
+		if _, ok := ir.AsClassRef(v); ok {
+			return "a class"
+		}
+		return "an object"
+	}
+	return "not a string"
 }
 
 // evaluatePropertyName evaluates an object literal key: identifiers, string
@@ -206,6 +275,13 @@ func (w *walker) evaluateReference(node *astNode, depth int) (any, *SchemaError)
 	}
 
 	if decl := sym.ValueDeclaration; decl != nil && decl.Kind == kindVariableDeclaration {
+		if list := decl.Parent; list != nil && list.Kind == kindVariableDeclarationList && list.Flags&nodeFlagsConst == 0 {
+			keyword := "var"
+			if list.Flags&nodeFlagsLet != 0 {
+				keyword = "let"
+			}
+			return nil, errorAtNode(node, "%q is declared with %s; the static walk reads a const's initializer, which no assignment changes: declare it const", sym.Name, keyword)
+		}
 		init := decl.AsVariableDeclaration().Initializer
 		if init == nil {
 			return nil, errorAtNode(node, "const %q has no initializer to evaluate", sym.Name)

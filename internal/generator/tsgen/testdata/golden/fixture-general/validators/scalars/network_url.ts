@@ -2,6 +2,12 @@
 
 import type { ScalarValidationResult, ValidationError } from 'superscalar/validation';
 
+// The constructors of NetworkUrl, the scalar library's own, which the
+// package hands out beside the type: each returns the value as
+// NetworkUrl and throws on a value Network.Url refuses (D25,
+// amended; D100).
+export { parseNetworkUrlStrict, normalizeNetworkUrlStrict } from 'superscalar/scalars';
+
 const NetworkUrlPattern = new RegExp("^https?://[\\w\\-\\{\\}]+(\\.[\\w\\-\\{\\}]+)+([:/?#][\\w\\-\\._~:/?#\\[\\]@!\\$&'\\(\\)\\*\\+,;=\\{\\}%]*)?$", "u");
 
 /**

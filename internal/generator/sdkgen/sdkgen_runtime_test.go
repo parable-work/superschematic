@@ -87,3 +87,33 @@ func TestFetchTransportRuntime_TypeScript(t *testing.T) {
 		})
 	}
 }
+
+// TestFileDownloadRuntime_TypeScript runs test_file_download.js against a
+// generated SDK: a FileDownload result (D81) is a Blob with the filename
+// and media type the server sent, a refused one an ApiError, and
+// filenameOf reads the name each Content-Disposition of
+// runtime/http/testdata/content_disposition_parity.json offers.
+func TestFileDownloadRuntime_TypeScript(t *testing.T) {
+	bunPath, err := exec.LookPath("bun")
+	if err != nil {
+		requireOrSkipTSTooling(t, fmt.Sprintf("bun is required for the TypeScript file download runtime test: %v", err))
+	}
+	_, currentFile, _, ok := runtime.Caller(0)
+	require.True(t, ok, "resolve current test file path")
+	tempRoot, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err, "resolve temp dir")
+
+	fixedClock := codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
+	_, apiOutput, parseable := loadFixtureAPI(t)
+	apiOutput.IsPublic = false
+	sdkOutput, err := Generate(apiOutput, parseable, fixedClock)
+	require.NoError(t, err)
+	sdkDir := filepath.Join(tempRoot, "sdk")
+	require.NoError(t, WriteSDKWithTools(sdkOutput, apiOutput, sdkDir, fixedClock))
+
+	parity := filepath.Join(filepath.Dir(currentFile), "..", "..", "..", "runtime", "http", "testdata", "content_disposition_parity.json")
+	cmd := exec.Command(bunPath, "test", filepath.Join(filepath.Dir(currentFile), "test_file_download.js"))
+	cmd.Env = append(os.Environ(), "SDK_DIR="+sdkDir, "PARITY="+parity)
+	output, err := cmd.CombinedOutput()
+	require.NoErrorf(t, err, "TypeScript file download runtime test failed:\n%s", string(output))
+}

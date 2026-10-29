@@ -1,0 +1,30 @@
+{
+  "dialect": "sqlite",
+  "from": "38890b710ee2d56f53bf96160cca4d2579b7c2319fbd52780d217281f22ba4a1",
+  "hash": "fa8bc9f5d0cd360960b86385d0dff4e0e25aa5711834ed444c971f575a647f2d",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "raw-sql",
+          "id": "raw-sql:rawSql/order_code_lower",
+          "reason": "The raw SQL order_code_lower (Order) changed: the step runs its statements again, over what the previous ones made; the planner cannot judge what they do.",
+          "subject": "rawSql/order_code_lower"
+        }
+      ],
+      "index": 1,
+      "op": "runRawSQL",
+      "phase": "expand",
+      "statements": [
+        "DROP INDEX IF EXISTS order_code_lower",
+        "CREATE INDEX IF NOT EXISTS order_code_lower ON \"order\" (lower(code), placed_at)"
+      ],
+      "subject": "rawSql/order_code_lower",
+      "transactional": true
+    }
+  ],
+  "to": "7fba839860c596d7cadda705196a9c09bfce6e9a21e751543d3fd39a182ef2d6",
+  "toModel": null,
+  "version": 1
+}

@@ -1,0 +1,29 @@
+{
+  "dialect": "postgres",
+  "from": "c6787cdef058267033f38e38e6c4e788b8fc54fcc00776b78d8b4db345c93d96",
+  "hash": "2c4383415b2cd6dc6703d585ab33126e63fd17b79c36945c591c7b5e15655cc3",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/order_line/index/idx_order_line_sku",
+          "reason": "The index declares concurrently: false, so it is built inside the step's transaction and blocks writes to order_line for the length of the build.",
+          "subject": "table/order_line/index/idx_order_line_sku"
+        }
+      ],
+      "index": 1,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX idx_order_line_sku ON order_line USING BTREE (sku)"
+      ],
+      "subject": "table/order_line/index/idx_order_line_sku",
+      "transactional": true
+    }
+  ],
+  "to": "ed576675bbac11beb5da615d2d3357769b9a3f51cf8193c4c05af7eefbba3fd2",
+  "toModel": null,
+  "version": 1
+}

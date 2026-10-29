@@ -1,0 +1,44 @@
+{
+  "dialect": "postgres",
+  "from": "c6787cdef058267033f38e38e6c4e788b8fc54fcc00776b78d8b4db345c93d96",
+  "hash": "9d3f783d1fbe75465c7e0cc3e65aa06634ae54779247fd6148e39806c35b4a42",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createExtension",
+      "phase": "expand",
+      "statements": [
+        "CREATE EXTENSION IF NOT EXISTS vector"
+      ],
+      "subject": "extension/vector",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE product ADD COLUMN embedding vector(3)"
+      ],
+      "subject": "table/product/column/embedding",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "createIndex",
+      "phase": "expand",
+      "recovery": [
+        "DROP INDEX CONCURRENTLY IF EXISTS idx_product_embedding"
+      ],
+      "statements": [
+        "CREATE INDEX CONCURRENTLY idx_product_embedding ON product USING HNSW (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64)"
+      ],
+      "subject": "table/product/index/idx_product_embedding",
+      "transactional": false
+    }
+  ],
+  "to": "83fb203dfcd654b5a414b5afb557fecb6b76faeffb2272579e0ec7c241819108",
+  "toModel": null,
+  "version": 1
+}

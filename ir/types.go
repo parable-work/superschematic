@@ -114,15 +114,33 @@ type TypeDef struct {
 	// Indexes lists database indexes defined on this type.
 	Indexes []IndexDef `json:"indexes,omitempty" yaml:"indexes,omitempty"`
 
+	// RawSQL lists the raw SQL the DB service declares on this type
+	// (@rawSql, D83). A piece belongs to the service, not the table: the
+	// type is only where it is written.
+	RawSQL []RawSQLDef `json:"rawSql,omitempty" yaml:"rawSql,omitempty"`
+
 	// JsonField marks this type as a JSON-only payload that should not be
 	// materialized as a relational table.
 	JsonField bool `json:"jsonField,omitempty" yaml:"jsonField,omitempty"`
+
+	// SQLName is the table a DB table type is stored in, from
+	// @table("name") (D85). Empty means the type's name in snake case.
+	SQLName string `json:"sqlName,omitempty" yaml:"sqlName,omitempty"`
 
 	// StrictJSON (@strictJSON) makes every generated decoder of this type,
 	// in Go, TypeScript, Python and Rust, reject a key the type does not
 	// declare and a required field that is absent or null. It applies to
 	// this object only; a nested object type opts in on its own.
 	StrictJSON bool `json:"strictJSON,omitempty" yaml:"strictJSON,omitempty"`
+
+	// AllowUnknownFields (@allowUnknownFields) makes every decoder of this
+	// type, in Go, TypeScript, Python and Rust, the servers' input decoding
+	// and the schema runtimes' strict parse, accept a key the type does not
+	// declare and drop it, wherever the type is decoded: as an operation's
+	// input or nested in another type. The declared keys are checked as
+	// before. A type is never both this and StrictJSON or
+	// DenyUnknownFields (D87).
+	AllowUnknownFields bool `json:"allowUnknownFields,omitempty" yaml:"allowUnknownFields,omitempty"`
 
 	// Versioned marks a DB table for generated history tracking.
 	Versioned bool `json:"versioned,omitempty" yaml:"versioned,omitempty"`
@@ -162,6 +180,11 @@ type TypeDef struct {
 	// trait (D50). Nil for every other type. See [UserRoleTrait].
 	UserRole *UserRoleTrait `json:"userRole,omitempty" yaml:"userRole,omitempty"`
 
+	// SeedRoles are the roles a UserRole table's @seedRoles declares (D88),
+	// which create.sql inserts and a migration plan keeps in step. Empty
+	// for every other type. See [RoleSeed].
+	SeedRoles []*RoleSeed `json:"seedRoles,omitempty" yaml:"seedRoles,omitempty"`
+
 	// Origin names the declaration the loader expanded this type from:
 	// [OriginVersionGraph] for the graph tables a version graph adds.
 	// Empty for every authored type. The data forms have no key for it.
@@ -178,6 +201,17 @@ type TypeDef struct {
 	// (D53). Its role is RoleEmbeddedStruct. Nil for every other type. See
 	// [QueueDef].
 	Queue *QueueDef `json:"queue,omitempty" yaml:"queue,omitempty"`
+
+	// EnqueueOnChange are the @enqueueOnChange declarations of a DB table:
+	// each a trigger that enqueues a message of a queue of the schema after
+	// a write to the table's rows (D80), at most one per queue. Empty for
+	// every other type. See [EnqueueOnChange].
+	EnqueueOnChange []*EnqueueOnChange `json:"enqueueOnChange,omitempty" yaml:"enqueueOnChange,omitempty"`
+
+	// Query is the @query declaration of a RoleQuery type: a named SQL
+	// statement of the DB service, with its params and row types (D86).
+	// Nil for every other type. See [QueryDef].
+	Query *QueryDef `json:"query,omitempty" yaml:"query,omitempty"`
 
 	// Stack, Server, Database and Environment are the declarations of a
 	// Stack schema's classes: @stack, @server, @database and @environment
@@ -389,6 +423,14 @@ type FieldDef struct {
 	// scalar's own upload limit.
 	ValidateUploadMaxBytes *int64 `json:"validateUploadMaxBytes,omitempty" yaml:"validateUploadMaxBytes,omitempty"`
 
+	// FileUpload is FileUpload<C> (D81): the field is a file the request
+	// sends as a multipart part of its own, named as the field, under the
+	// constraints C names. Its TypeRef is string, which every language's
+	// types hold it as. Only on a single field of an operation's input
+	// type; nil for every other field. A field of a file-upload scalar
+	// takes the scalar's FileUpload instead.
+	FileUpload *FileUploadConfig `json:"fileUpload,omitempty" yaml:"fileUpload,omitempty"`
+
 	// ValidateMinLength is the minimum character length for string-like fields
 	// (@validateMinLength). Nil means no minimum.
 	ValidateMinLength *int `json:"validateMinLength,omitempty" yaml:"validateMinLength,omitempty"`
@@ -408,6 +450,19 @@ type FieldDef struct {
 	// ValidatePattern is the regex pattern enforced for this field
 	// (@validatePattern). Empty string means no pattern.
 	ValidatePattern string `json:"validatePattern,omitempty" yaml:"validatePattern,omitempty"`
+
+	// ValidatePrecision and ValidateScale bound a Generic.Decimal field
+	// (Validate<Generic.Decimal, { precision, scale }>, D84): its value has at
+	// most ValidateScale digits after the point and at most precision minus
+	// scale before it, and a DB column of it is NUMERIC(p,s). The scale is 0
+	// unless set, and needs a precision. Nil means unbounded.
+	ValidatePrecision *int `json:"validatePrecision,omitempty" yaml:"validatePrecision,omitempty"`
+	ValidateScale     *int `json:"validateScale,omitempty" yaml:"validateScale,omitempty"`
+
+	// ValidateDimensions is the length of every value of an Embedding.Vector
+	// field (Validate<Embedding.Vector, { dimensions }>, D84), and a DB
+	// column of it is vector(n). Nil means any length.
+	ValidateDimensions *int `json:"validateDimensions,omitempty" yaml:"validateDimensions,omitempty"`
 
 	// Arguments lists field arguments (primarily used for operation fields).
 	Arguments []*ArgumentDef `json:"arguments,omitempty" yaml:"arguments,omitempty"`
@@ -493,6 +548,22 @@ type FieldDef struct {
 	// transport (@encrypted).
 	Encrypted bool `json:"encrypted,omitempty" yaml:"encrypted,omitempty"`
 
+	// EncryptedAtRest marks a DB table field whose column holds ciphertext
+	// (Encrypted<T>, D85): the ORMs encrypt it on write and decrypt it on
+	// read with the DB service's field keys. It implies Secret. Unrelated
+	// to Encrypted, which is a request body's envelope (D20).
+	EncryptedAtRest bool `json:"encryptedAtRest,omitempty" yaml:"encryptedAtRest,omitempty"`
+
+	// Decrypted marks a field of a @source view that carries the plaintext
+	// of its source's Encrypted<T> field (@decrypted, D85), an opt-in a view
+	// needs to hold such a field at all.
+	Decrypted bool `json:"decrypted,omitempty" yaml:"decrypted,omitempty"`
+
+	// SQLName is the column a DB table field is stored in, from
+	// @column("name") (D85): a to-one relation's foreign key column itself.
+	// Empty means the field's name in snake case (with _id for a relation).
+	SQLName string `json:"sqlName,omitempty" yaml:"sqlName,omitempty"`
+
 	// Filterable marks this endpoint as accepting bracket-notation filter
 	// query parameters (@filterable). When true, the generated handler parses
 	// filter[field]=value and filter[field][op]=value params.
@@ -543,6 +614,12 @@ type FieldDef struct {
 	// explicit content type and optional response headers that must be
 	// available at stream start (@httpBinaryStream).
 	HTTPBinaryStream *HTTPBinaryStreamDef `json:"httpBinaryStream,omitempty" yaml:"httpBinaryStream,omitempty"`
+
+	// FileDownload is a FileDownload<C> result (D81): the operation answers
+	// a file, not the JSON envelope, of the media type C names, offered
+	// under a filename in Content-Disposition. Its TypeRef names no type.
+	// Nil for every other operation and for data fields.
+	FileDownload *FileDownloadDef `json:"fileDownload,omitempty" yaml:"fileDownload,omitempty"`
 
 	// ManualRouteRegistration marks an operation that should be registered
 	// manually instead of the generated route registration chain
@@ -637,9 +714,112 @@ type IndexDef struct {
 	// Name is an optional purpose token used to build {idx|uq}_{table}_{name}.
 	Name string `json:"name,omitempty" yaml:"name,omitempty"`
 
+	// Method is the index's access method (D83): btree, gin, gist, brin,
+	// hnsw or ivfflat. Empty picks one from the key columns' types: GIST for
+	// ltree and geometric types, GIN for JSONB, arrays and tsvector, else
+	// BTREE.
+	Method string `json:"method,omitempty" yaml:"method,omitempty"`
+
+	// Ops is the operator class every key is indexed with ("gin_trgm_ops",
+	// "text_pattern_ops"). Empty is the method's default for each column.
+	Ops string `json:"ops,omitempty" yaml:"ops,omitempty"`
+
+	// Where makes the index partial: a raw SQL predicate, without WHERE, over
+	// the table's column names.
+	Where string `json:"where,omitempty" yaml:"where,omitempty"`
+
+	// Expression indexes a raw SQL expression over the table's column names
+	// ("lower(email)") instead of the keys' columns. The keys then name the
+	// fields the expression reads, and the index's default name.
+	Expression string `json:"expression,omitempty" yaml:"expression,omitempty"`
+
+	// Concurrently false builds the index, on a table a migration plan does
+	// not create, inside the plan step's transaction, which blocks writes to
+	// the table while it builds. Nil or true builds it concurrently.
+	Concurrently *bool `json:"concurrently,omitempty" yaml:"concurrently,omitempty"`
+
+	// M and EFConstruction are an hnsw index's build parameters (D84),
+	// pgvector's m and ef_construction: the links each vector keeps to its
+	// neighbours, and the candidates a build weighs for them. Lists is an
+	// ivfflat index's, the lists it divides the vectors into. Nil keeps
+	// pgvector's default.
+	M              *int `json:"m,omitempty" yaml:"m,omitempty"`
+	EFConstruction *int `json:"efConstruction,omitempty" yaml:"efConstruction,omitempty"`
+	Lists          *int `json:"lists,omitempty" yaml:"lists,omitempty"`
+
 	// Origin is [OriginVersionGraph] for an index a version graph adds;
 	// empty for an authored index.
 	Origin string `json:"origin,omitempty" yaml:"origin,omitempty" jsonschema:"-"`
+}
+
+// Index access methods (IndexDef.Method).
+const (
+	IndexMethodBTree   = "btree"
+	IndexMethodGIN     = "gin"
+	IndexMethodGIST    = "gist"
+	IndexMethodBRIN    = "brin"
+	IndexMethodHNSW    = "hnsw"
+	IndexMethodIVFFlat = "ivfflat"
+)
+
+// IndexMethods lists every IndexDef.Method value.
+var IndexMethods = []string{IndexMethodBTree, IndexMethodGIN, IndexMethodGIST, IndexMethodBRIN, IndexMethodHNSW, IndexMethodIVFFlat}
+
+// HasTableOptions reports whether the index sets an option only a table's
+// index has (D83): a method, an operator class, a predicate, an expression,
+// the concurrency of its build or a vector method's parameter (D84). The
+// engine indexes an engine type's listed fields and reads none of them.
+func (idx IndexDef) HasTableOptions() bool {
+	return idx.Method != "" || idx.Ops != "" || idx.Where != "" || idx.Expression != "" || idx.Concurrently != nil ||
+		idx.M != nil || idx.EFConstruction != nil || idx.Lists != nil
+}
+
+// RawSQLDef is a piece of raw SQL a DB service declares (@rawSql, D83):
+// statements its create.sql runs after the objects the schema declares,
+// which a migration plan records by id and checksum and runs again when
+// they change.
+type RawSQLDef struct {
+	// ID names the piece in the migration model: a lowercase identifier,
+	// unique in the service.
+	ID string `json:"id" yaml:"id"`
+
+	// Up is the SQL: one or more statements separated by semicolons, each of
+	// which can run again over what it made (CREATE ... IF NOT EXISTS,
+	// CREATE OR REPLACE, DROP ... IF EXISTS, ...), since a plan runs the
+	// piece again when it changes.
+	Up string `json:"up" yaml:"up"`
+
+	// Down is the SQL a plan runs when the piece is removed, under the same
+	// rules as Up. Empty runs nothing.
+	Down string `json:"down,omitempty" yaml:"down,omitempty"`
+
+	// After places the piece: RawSQLAfterTables runs it after the tables,
+	// before the indexes; RawSQLAfterIndexes, the default, after every object
+	// the schema declares; the id of another piece, right after that piece.
+	After string `json:"after,omitempty" yaml:"after,omitempty"`
+
+	// Dialects lists the dialects the piece runs on ("postgres", "sqlite").
+	// Empty runs it on every dialect the service is built for.
+	Dialects []string `json:"dialects,omitempty" yaml:"dialects,omitempty"`
+}
+
+// The positions of RawSQLDef.After that name no other piece.
+const (
+	RawSQLAfterTables  = "tables"
+	RawSQLAfterIndexes = "indexes"
+)
+
+// RunsOn reports whether the piece runs on dialect.
+func (r RawSQLDef) RunsOn(dialect string) bool {
+	if len(r.Dialects) == 0 {
+		return true
+	}
+	for _, d := range r.Dialects {
+		if d == dialect {
+			return true
+		}
+	}
+	return false
 }
 
 // RelationDef represents a foreign key relation to another type.
@@ -651,8 +831,9 @@ type RelationDef struct {
 	// Field is the foreign key field name. If empty, it is inferred by the generator.
 	Field string `json:"field,omitempty" yaml:"field,omitempty"`
 
-	// OnDelete is the FK ON DELETE action (CASCADE|RESTRICT|NO ACTION). Empty
-	// means the generator default (CASCADE).
+	// OnDelete is the FK ON DELETE action (CASCADE|RESTRICT|NO ACTION|SET
+	// NULL; SET NULL only on a relation that is not required). Empty means
+	// the generator default (CASCADE).
 	OnDelete string `json:"onDelete,omitempty" yaml:"onDelete,omitempty"`
 }
 

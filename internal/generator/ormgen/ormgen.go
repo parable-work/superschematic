@@ -84,6 +84,22 @@ type ORMOutput struct {
 	// of durations to and from []time.Duration.
 	HasIntervalLists bool
 
+	// HasVectors is true when a table has a vector(n) column (D84); it
+	// writes nearest.go, the vector's text form and each such
+	// repository's Nearest. HasVectorHistory and HasDecimalHistory are true
+	// when a versioned table has a vector or a NUMERIC column, whose
+	// to_jsonb text and number utils.go's history helpers read.
+	// HasDecimalFilters is true when a table has a single NUMERIC column,
+	// whose filter is a DecimalFilter. NearestMetrics are the metrics
+	// Nearest orders by, sqlutil's, and DefaultNearestK the rows it reads
+	// unless told.
+	HasVectors        bool
+	HasVectorHistory  bool
+	HasDecimalHistory bool
+	HasDecimalFilters bool
+	NearestMetrics    []sqlutil.NearestMetric
+	DefaultNearestK   int
+
 	// HasIntervalHistory is true when a versioned table has an INTERVAL or
 	// INTERVAL[] column; utils.go emits the helpers that read the interval
 	// text to_jsonb writes in a history row.
@@ -99,6 +115,10 @@ type ORMOutput struct {
 	// assigned to createdBy/updatedBy audit fields. Resolved from the audit
 	// fields' own scalar, falling back to UUIDGoType.
 	UserIDGoType string
+
+	// Actor is the system actor AsSystem acts as and whether an update
+	// needs an acting user (D87).
+	Actor sqlutil.Actor
 
 	// Naming supplies the scalar and schema-ir module paths go.mod requires.
 	Naming naming.Naming
@@ -137,10 +157,81 @@ type ORMOutput struct {
 	Queues []Queue
 
 	// HasSearch is true when a repository's table has search fields
-	// (Repository.HasSearch); it writes search.go, the words of a search
-	// text and each word's LIKE pattern, which the filters' SearchText
-	// conditions take (D62, amended).
+	// (Repository.HasSearch), or a projection's view searches its source's
+	// (D99); it writes search.go, the words of a search text and each
+	// word's LIKE pattern, which the filters' SearchText conditions take
+	// (D62, amended).
 	HasSearch bool
+
+	// HistoryActorCTE and ClearHistoryActor are the statements a hard
+	// delete of a versioned table with an actor column runs
+	// (sqlutil.HistoryActorCTE), over Naming.HistoryActorSetting.
+	HistoryActorCTE   string
+	ClearHistoryActor string
+
+	// HasEncryptedFields is a schema with an Encrypted<T> field (D85): it
+	// writes encrypted.go, the Database takes Options (WithFieldKeys), and
+	// go.mod requires the schema runtime, whose fieldcrypt package seals
+	// and opens the envelopes. SchemaRuntimeReplacePath is that module's
+	// replace target, relative to the output directory; empty omits it.
+	HasEncryptedFields       bool
+	SchemaRuntimeReplacePath string
+
+	// DefaultLimit is the rows a read or a Reencrypt batch takes unless
+	// told (sqlutil.DefaultLimit).
+	DefaultLimit int
+
+	// Clauses are the clauses upsert.go writes an upsert's WHERE and a
+	// read of the rows that hold keys with (D89), TxStatements the
+	// statements transaction.go begins a transaction of options and nests
+	// a savepoint with, and NearestSettings the settings of a vector
+	// index's scan Nearest's options set, NearestSettingsStatement the
+	// statement that sets them.
+	Clauses                  sqlutil.Clauses
+	TxStatements             TxStatements
+	NearestSettings          []sqlutil.NearestSetting
+	NearestSettingsStatement string
+
+	// Projections are the schema's projections with a key, which
+	// projections.go reads through read-only repositories (D90).
+	Projections []ProjectionRepository
+
+	// Queries are the database's declared queries (D86), which queries.go
+	// runs; none for a database that declares none.
+	Queries []Query
+}
+
+// TxStatements are sqlutil's statements of a transaction of options and a
+// nested one (D89), as transaction.go writes them.
+type TxStatements struct {
+	IsolationLevels                                 []IsolationLevel
+	Begin, Isolation, ReadOnly                      string
+	Savepoint, Release, RollbackTo, SavepointPrefix string
+}
+
+// IsolationLevel is an isolation level as transaction.go writes it: its
+// constant's name, ReadCommitted, and sqlutil's.
+type IsolationLevel struct {
+	sqlutil.IsolationLevel
+	GoName string
+}
+
+// txStatements are sqlutil's.
+func txStatements() TxStatements {
+	var levels []IsolationLevel
+	for _, level := range sqlutil.IsolationLevels() {
+		levels = append(levels, IsolationLevel{IsolationLevel: level, GoName: codegen.ToPascalCase(strings.ReplaceAll(level.Name, " ", "_"))})
+	}
+	return TxStatements{
+		IsolationLevels: levels,
+		Begin:           sqlutil.Begin,
+		Isolation:       sqlutil.Isolation,
+		ReadOnly:        sqlutil.ReadOnly,
+		Savepoint:       sqlutil.Savepoint,
+		Release:         sqlutil.ReleaseSavepoint,
+		RollbackTo:      sqlutil.RollbackToSavepoint,
+		SavepointPrefix: sqlutil.SavepointPrefix,
+	}
 }
 
 // ModuleDependencyReplace keeps local generated type dependencies resolvable
@@ -172,6 +263,7 @@ type Repository struct {
 	PrimaryKeyField        string // schema field name, e.g. "id" or "orderId"
 	LookupKeyType          string // GetManyByIDs key: UUIDGoType for a UUID key, else PrimaryKeyType
 	HasSoftDelete          bool   // deletedAt field present
+	DeletedAtCol           string // deletedAt's column, as @column names it (D85), which a history image keys
 	HasDeletedBy           bool   // deletedBy field present (soft deletes stamp it)
 	Versioned              bool   // history table/read methods should be generated
 	HasVersion             bool   // _version column and the fenced UpdateOneIfVersion/DeleteOneIfVersion (@versioned or @optimistic)
@@ -211,6 +303,48 @@ type Repository struct {
 	// a sort that FindPage writes into SQL.
 	SortFields []Field
 
+	// Table is the table as sqlutil models it for both ORMs (D79), and SQL
+	// its statements, which the repository runs as the TypeScript
+	// repositories run them.
+	Table *sqlutil.TableModel
+	SQL   sqlutil.TableStatements
+
+	// UniqueKeys are the keys UpsertOne may be keyed by (D79), each with
+	// the name of its <Type>UniqueKey constant.
+	UniqueKeys []UniqueKey
+
+	// SearchCondition is the condition of one word of the filter's
+	// SearchText, sqlutil.SearchConditionOf; empty without search fields.
+	SearchCondition string
+
+	// Clauses are sqlutil.PostgresClauses, which an upsert's update writes
+	// a NULL it compares with (D89), and BatchRows the most rows one
+	// statement of UpsertMany writes (sqlutil.TableModel.BatchRows).
+	// QualifiedKey is the primary key's column qualified by the table, which
+	// Nearest's ExcludeIDs leaves out the keys of.
+	Clauses      sqlutil.Clauses
+	BatchRows    int
+	QualifiedKey string
+
+	// PathRelations are the to-one relations a filter reaches through
+	// (D90), sqlutil's ToOne: the filter's <Field> keeps the rows whose
+	// relation points at a live row its target's filter finds.
+	PathRelations []PathRelation
+
+	// EncryptedFields are the table's Encrypted<T> fields (D85), which
+	// encrypted.go seals and opens; GeneratesKey is a table whose create
+	// generates a UUID key the input leaves unset, since each envelope is
+	// bound to its row's key (sqlutil.TableModel.GeneratesKey); and
+	// PrimaryKeyIsPointer a key the Go type holds as a pointer.
+	EncryptedFields     []Field
+	GeneratesKey        bool
+	PrimaryKeyIsPointer bool
+
+	// VectorFields are the table's vector(n) fields (D84), which Nearest
+	// orders its rows by; a table with one gets Nearest, and findRows
+	// collects the distance Nearest selects.
+	VectorFields []Field
+
 	// Import requirements computed from the field/relationship shapes so the
 	// repository template emits exactly the imports it uses.
 	NeedsTime               bool
@@ -218,6 +352,25 @@ type Repository struct {
 	NeedsReflect            bool
 	NeedsPgtype             bool
 	HasJSONUnionCollections bool
+}
+
+// PathRelation is a to-one relation a filter reaches through (D90):
+// sqlutil's, with its member of the filter, GoField.
+type PathRelation struct {
+	sqlutil.ToOne
+	GoField string
+}
+
+// UniqueKey is a key UpsertOne may be keyed by: sqlutil's, with the Go
+// constant that names it, <Type>UniqueBy<Fields>. QuotedColumns are its
+// columns as a batch insert's cells name them, and KeyParts the Go
+// expressions of a row's values of it, row a *types.<Type>, which UpsertMany
+// matches the rows a statement returns to its inputs by (D89).
+type UniqueKey struct {
+	sqlutil.UniqueKey
+	Const         string
+	QuotedColumns []string
+	KeyParts      []string
 }
 
 // HasArrayRelationships reports whether any relationship is a hasMany.
@@ -249,6 +402,7 @@ type Field struct {
 	IsInternalMetadata bool // superschematic-managed metadata column such as _version
 	IsAutoGenerated    bool
 	HasDefault         bool
+	DefaultsToNow      bool   // Default<T, "now"> (D88): a create that leaves it zero leaves it to the database
 	IsJSONField        bool   // stored as JSONB (maps, @jsonField, T[][]); scanned via []byte + JSON codec
 	IsScalarType       bool   // scalar or enum (value type in typegen output)
 	JSONUnionDecoder   string // generated per-repository decoder for a closed-union JSON field
@@ -261,6 +415,9 @@ type Field struct {
 	IsGeoPointList     bool   // list of a scalar stored as POINT, a native POINT[] column: values convert through []pgtype.Point
 	IsInterval         bool   // single scalar stored as INTERVAL (Temporal.Duration): values convert through time.Duration, whole microseconds
 	IsIntervalList     bool   // list of a scalar stored as INTERVAL, a native INTERVAL[] column: values convert through []time.Duration
+	IsVector           bool   // an Embedding.Vector stored as vector(n) (D84): values cross as pgvector's text, [1,2,3], which pgx sends and reads for a type it does not know
+	IsDecimal          bool   // a scalar stored as NUMERIC (Generic.Decimal, D84), or each element of a NUMERIC[]: superscalar's GenericDecimal binds and scans its canonical text
+	Dimensions         int    // a vector's dimensions, from its vector(n) column; 0 for any other field
 	IsUUIDLike         bool
 	IsStringLike       bool
 	IsIntLike          bool
@@ -271,9 +428,13 @@ type Field struct {
 	IsJSONLike         bool
 	IsEnum             bool // the field's type is an enum, local or imported
 	IsSecret           bool // @secret: never sent to a client
+	// IsEncrypted is an Encrypted<T> field (D85), whose column holds its
+	// envelope: a write seals it and a read opens it (encrypted.go).
+	IsEncrypted bool
 
 	// Sortable is true when FindPage can order the table's rows by the
-	// field's column (D60, amended): the primary key, or a required column
+	// field's column (D60, amended), as sqlutil's column says
+	// (sqlutil.ColumnModel.Sortable): the primary key, or a required column
 	// of one value of text, times and UUIDs among it, or a number, as
 	// ir.SortValue says of an API's sort field. A column that may be null,
 	// or is an enum, a boolean, JSON, a map, a list, a union or a point, is
@@ -308,6 +469,97 @@ type Field struct {
 	// field at its Go zero value, the empty string, which is never an enum
 	// member; without it a struct literal that omits the field inserts ''.
 	EnumDefault string
+
+	// FilterKind is the kind of the field's filter (sqlutil.FilterKind),
+	// whose operations the filter writes conditions for, in the order
+	// sqlutil.FilterOps gives; empty for a field it holds no condition on.
+	FilterKind sqlutil.FilterKind
+
+	// SQL is the column's parts of the table's statements (D79).
+	SQL sqlutil.ColumnStatements
+}
+
+// FilterCondition is one operation of a filter as query.go writes its
+// condition (D79): Field is the filter's member of the <Type>Filter, f.Rating
+// or f.CustomerID, Member the operation's member of it, SQL its condition
+// and SQL2 the second one, Between's <= and IsNull's IS NOT NULL. Value is
+// the Go expression of the value it binds, of the element Loop names for In,
+// and Min and Max are Between's bounds.
+type FilterCondition struct {
+	Op       string
+	Field    string
+	Member   string
+	SQL      string
+	SQL2     string
+	Value    string
+	Loop     string
+	Min, Max string
+}
+
+// FilterConditions are the conditions of the field's filter, in the order
+// sqlutil.FilterOps gives its kind's operations.
+func (f Field) FilterConditions() []FilterCondition {
+	return filterConditions("f."+codegen.ToPascalCase(f.Name), f.FilterKind, f.SQL.Filter)
+}
+
+// FilterConditions are the conditions of the relationship's foreign key
+// filter, f.<Field>ID, a UUID filter.
+func (r Relationship) FilterConditions() []FilterCondition {
+	return filterConditions("f."+codegen.ToPascalCase(r.FieldName)+"ID", sqlutil.FilterUUID, r.SQL.Filter)
+}
+
+// goFilterKind is the Go ORM's filter of a column of kind: kind, but for a
+// Generic.JSON column (sqlutil.FilterJSON), whose StringFilter predates D79
+// and stays the Go API: its Eq and In bind JSON text, which pgx sends as
+// such, so they compare JSONB values as the TypeScript filter's eq and in
+// do, and its ILike, which Postgres has no operator for on JSONB, fails.
+func goFilterKind(kind sqlutil.FilterKind) sqlutil.FilterKind {
+	if kind == sqlutil.FilterJSON {
+		return sqlutil.FilterString
+	}
+	return kind
+}
+
+// filterConditions are the conditions of a filter of kind on the member
+// field, over its column's conditions sql.
+func filterConditions(field string, kind sqlutil.FilterKind, sql sqlutil.FilterConditions) []FilterCondition {
+	uuid := kind == sqlutil.FilterUUID
+	min, max := "Min", "Max"
+	if kind == sqlutil.FilterDateTime || kind == sqlutil.FilterDate {
+		min, max = "Start", "End"
+	}
+	var out []FilterCondition
+	for _, op := range sqlutil.FilterOps(kind) {
+		c := FilterCondition{Op: op, Field: field}
+		switch op {
+		case sqlutil.FilterEq:
+			c.Member, c.SQL, c.Value = "Eq", sql.Eq, "*"+field+".Eq"
+			if uuid {
+				c.Value = field + ".Eq.ToUUID()"
+			}
+		case sqlutil.FilterGt:
+			c.Member, c.SQL, c.Value = "Gt", sql.Gt, "*"+field+".Gt"
+		case sqlutil.FilterGte:
+			c.Member, c.SQL, c.Value = "Gte", sql.Gte, "*"+field+".Gte"
+		case sqlutil.FilterLt:
+			c.Member, c.SQL, c.Value = "Lt", sql.Lt, "*"+field+".Lt"
+		case sqlutil.FilterLte:
+			c.Member, c.SQL, c.Value = "Lte", sql.Lte, "*"+field+".Lte"
+		case sqlutil.FilterILike:
+			c.Member, c.SQL, c.Value = "ILike", sql.ILike, `"%"+*`+field+`.ILike+"%"`
+		case sqlutil.FilterIn:
+			c.Member, c.SQL, c.Loop, c.Value = "In", sql.In, "value", "value"
+			if uuid {
+				c.Loop, c.Value = "id", "id.ToUUID()"
+			}
+		case sqlutil.FilterBetween:
+			c.Member, c.SQL, c.SQL2, c.Min, c.Max = "Between", sql.Gte, sql.Lte, min, max
+		case sqlutil.FilterIsNull:
+			c.Member, c.SQL, c.SQL2 = "IsNull", sql.IsNull, sql.IsNotNull
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 // ArrayDepth is 0 for T, 1 for T[] and 2 for T[][], as ir.TypeRef reports it.
@@ -512,22 +764,6 @@ func (r Repository) PrimaryKeySortField() Field {
 	return r.SortFields[0]
 }
 
-// sortable reports whether FindPage can order a table's rows by the
-// field's column (Field.Sortable). sortValue is ir.SortValue of the
-// field's type, the rule a SortBy field of an API's item keeps too: one
-// value of text, times among it, or a number. The column must also hold
-// it alone, never null, and be the table's own data.
-func sortable(f Field, sortValue bool) bool {
-	if f.IsPrimaryKey {
-		return true
-	}
-	if !sortValue || !f.IsRequired || f.IsArray || f.IsMap || f.IsUnion || f.IsJSONField || f.IsJSONLike {
-		return false
-	}
-	return !f.IsEnum && !f.IsBoolLike && !f.IsGeoPoint && !f.IsSecret && !f.IsInternalMetadata &&
-		(!f.IsAuditField || f.IsAuditTimestamp)
-}
-
 // sortFields are the fields FindPage orders a table's rows by
 // (Repository.SortFields): the primary key first, then each sortable
 // field in schema order.
@@ -567,6 +803,10 @@ type Relationship struct {
 	// candidate probing is used at runtime.
 	HasManyParentRelationField string
 	HasManyParentFilterField   string
+
+	// SQL is the foreign key column's parts of the table's statements
+	// (D79), for a to-one relationship.
+	SQL sqlutil.ColumnStatements
 }
 
 // InboundReference is a to-one relationship on another table that points at
@@ -590,6 +830,9 @@ type InboundReference struct {
 
 	// SourceHasSoftDelete gates the IncludeDeleted knob on the probe.
 	SourceHasSoftDelete bool
+
+	// Probe is the filter's subquery (sqlutil.ReferenceProbeOf).
+	Probe sqlutil.ReferenceProbe
 }
 
 // ColumnMember is either a Field or a to-one Relationship in schema order.
@@ -632,6 +875,11 @@ type Options struct {
 	// database/sql (D53, amended).
 	SQLite bool
 
+	// Actor is the DB service's system actor and whether an update needs
+	// an acting user (D87). A zero Actor acts as
+	// registry.DefaultSystemActorID.
+	Actor sqlutil.Actor
+
 	// Clock stamps the generated output.
 	Clock codegen.Clock
 }
@@ -648,23 +896,32 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	schema = codegen.WithoutEngineTypes(schema)
 
 	tableTypes := tableTypeDefs(schema)
-	if len(tableTypes) == 0 && len(schema.Queues()) == 0 {
+	if len(tableTypes) == 0 && len(schema.Queues()) == 0 && len(schema.Queries()) == 0 {
 		return nil, nil
 	}
 
 	scalarMap := buildScalarLookup(schema)
-	unionNames := collectUnionTypeNames(schema, opts.Dependencies)
-	enumNames := collectEnumTypeNames(schema, opts.Dependencies)
+	unionNames := sqlutil.UnionNames(schema, opts.Dependencies)
+	enumNames := sqlutil.EnumNames(schema, opts.Dependencies)
 	uuidGoType, err := resolveUUIDGoType(schema, tableTypes, scalarMap)
+	if err != nil {
+		return nil, err
+	}
+	// The tables as sqlutil models them, and their statements, which the
+	// TypeScript repositories run too (D79).
+	tables, err := sqlutil.TablesOf(schema, opts.Dependencies)
 	if err != nil {
 		return nil, err
 	}
 
 	repositories := make([]Repository, 0, len(tableTypes))
-	for _, typeDef := range tableTypes {
+	for i, typeDef := range tableTypes {
 		repo, err := extractRepository(typeDef, schema, scalarMap, unionNames, enumNames, uuidGoType)
 		if err != nil {
 			return nil, fmt.Errorf("failed to extract table from type %s: %w", typeDef.Name, err)
+		}
+		if err := attachTable(&repo, &tables[i]); err != nil {
+			return nil, err
 		}
 		repositories = append(repositories, repo)
 	}
@@ -680,11 +937,23 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	if err != nil {
 		return nil, err
 	}
+	queries, err := queriesOf(schema, scalarMap, unionNames, opts.Dependencies)
+	if err != nil {
+		return nil, err
+	}
 	// A queue's field reads and writes its column as a table's does, with
 	// the same helpers.
 	queueRepositories := make([]Repository, len(queues))
 	for i, q := range queues {
 		queueRepositories[i] = Repository{Fields: q.Fields}
+	}
+	// So does a projection's column, which it reads (D90).
+	projections, err := projectionRepositories(schema, opts.Dependencies, scalarMap, unionNames)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range projections {
+		queueRepositories = append(queueRepositories, Repository{Fields: p.Fields})
 	}
 
 	hasSoftDeletes := false
@@ -699,10 +968,21 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	hasElementPointerLists := false
 	hasIntervalLists := false
 	hasIntervalHistory := false
+	hasVectors, hasVectorHistory, hasDecimalHistory, hasDecimalFilters := false, false, false, false
 	hasSearch := false
+	hasEncryptedFields := false
+	for _, p := range projections {
+		// A view searches its source's search column (D99).
+		if p.SearchProbe != "" {
+			hasSearch = true
+		}
+	}
 	for _, repo := range repositories {
 		if repo.HasSearch {
 			hasSearch = true
+		}
+		if len(repo.EncryptedFields) > 0 {
+			hasEncryptedFields = true
 		}
 	}
 	geoPointListGoTypes := make(map[string]string)
@@ -747,6 +1027,18 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 			if field.IsGeoPointList {
 				geoPointListGoTypes[field.GeoPointListSymbol()] = field.GoType
 			}
+			if field.IsDecimal && !field.IsArray {
+				hasDecimalFilters = true
+			}
+			if field.IsVector && repo.Versioned {
+				hasVectorHistory = true
+			}
+			if field.IsDecimal && repo.Versioned {
+				hasDecimalHistory = true
+			}
+		}
+		if len(repo.VectorFields) > 0 {
+			hasVectors = true
 		}
 	}
 	geoPointListTypes := make([]GeoPointListType, 0, len(geoPointListGoTypes))
@@ -779,12 +1071,41 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		Timestamp:                opts.Clock.RFC3339(),
 		UUIDGoType:               uuidGoType,
 		UserIDGoType:             resolveUserIDGoType(tableTypes, scalarMap, uuidGoType),
+		Actor:                    actorOf(opts.Actor),
 		VersionGraphs:            graphs,
 		Queues:                   queues,
 		HasSearch:                hasSearch,
+		HasVectors:               hasVectors,
+		HasVectorHistory:         hasVectorHistory,
+		HasDecimalHistory:        hasDecimalHistory,
+		HasDecimalFilters:        hasDecimalFilters,
+		NearestMetrics:           sqlutil.NearestMetrics(),
+		DefaultNearestK:          sqlutil.DefaultNearestK,
+		HistoryActorCTE:          sqlutil.HistoryActorCTE(opts.Naming.HistoryActorSetting),
+		ClearHistoryActor:        sqlutil.ClearHistoryActor(opts.Naming.HistoryActorSetting),
+		HasEncryptedFields:       hasEncryptedFields,
+		DefaultLimit:             sqlutil.DefaultLimit,
+		Clauses:                  sqlutil.PostgresClauses(),
+		TxStatements:             txStatements(),
+		NearestSettings:          sqlutil.NearestSettingsOf(),
+		NearestSettingsStatement: sqlutil.NearestSettings,
+		Projections:              projections,
+		Queries:                  queries,
 	}
 
 	return output, nil
+}
+
+// actorOf is actor with the system actor defaulted: the ID the generated
+// Go APIs export as SystemUserID, named "system".
+func actorOf(actor sqlutil.Actor) sqlutil.Actor {
+	if actor.SystemID == "" {
+		actor.SystemID = "00000000-0000-4000-8000-000000000000"
+	}
+	if actor.SystemName == "" {
+		actor.SystemName = "system"
+	}
+	return actor
 }
 
 // dependencyTypeModuleReplaces returns a replace line per declared
@@ -832,6 +1153,11 @@ func SetReplacePaths(output *ORMOutput, paths naming.LocalPaths, outputDir strin
 			return fmt.Errorf("version-graph binding replace path: %w", err)
 		}
 	}
+	if output.HasEncryptedFields {
+		if output.SchemaRuntimeReplacePath, err = naming.RelPath(outputDir, paths.SchemaRuntimeGo); err != nil {
+			return fmt.Errorf("schema runtime replace path: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -844,6 +1170,9 @@ func SetReleasePins(output *ORMOutput, pins naming.Pins) {
 	modules := []string{output.Naming.ScalarGoModule, output.Naming.SchemaIRGoModule}
 	if len(output.VersionGraphs) > 0 {
 		modules = append(modules, output.Naming.VersionGraphGoModule)
+	}
+	if output.HasEncryptedFields {
+		modules = append(modules, output.Naming.SchemaRuntimeGoModule)
 	}
 	output.Pins = pins.Of(modules...)
 }
@@ -944,59 +1273,6 @@ func resolveUserIDGoType(tableTypes []*ir.TypeDef, scalars map[string]scalarLook
 	return uuidGoType
 }
 
-// collectEnumTypeNames returns locally declared enums plus imported enum
-// symbols whose dependency schemas are available to ormgen.
-func collectEnumTypeNames(schema *ir.Schema, dependencies map[string]*ir.Schema) map[string]bool {
-	enums := make(map[string]bool, len(schema.Enums))
-	for name := range schema.Enums {
-		enums[name] = true
-	}
-	for _, imported := range schema.Imports {
-		depName := imported.Package
-		if slash := strings.LastIndex(depName, "/"); slash >= 0 {
-			depName = depName[slash+1:]
-		}
-		dependency := dependencies[depName]
-		if dependency == nil {
-			continue
-		}
-		for _, name := range imported.Types {
-			if dependency.Enums[name] != nil {
-				enums[name] = true
-			}
-		}
-	}
-	return enums
-}
-
-// collectUnionTypeNames returns locally declared unions plus imported union
-// symbols whose dependency schemas are available to ormgen.
-func collectUnionTypeNames(schema *ir.Schema, dependencies map[string]*ir.Schema) map[string]bool {
-	unions := make(map[string]bool, len(schema.Unions))
-	for name := range schema.Unions {
-		unions[name] = true
-	}
-	for _, imported := range schema.Imports {
-		depName := imported.Package
-		if slash := strings.LastIndex(depName, "/"); slash >= 0 {
-			depName = depName[slash+1:]
-		}
-		dependency := dependencies[depName]
-		if dependency == nil {
-			continue
-		}
-		for _, name := range imported.Types {
-			if unions[name] || schema.Types[name] != nil || schema.Enums[name] != nil || schema.Scalars[name] != nil {
-				continue
-			}
-			if dependency.Unions[name] != nil {
-				unions[name] = true
-			}
-		}
-	}
-	return unions
-}
-
 // isRelationalTarget reports whether typeName names a table-backed type in
 // this schema.
 func isRelationalTarget(typeName string, schema *ir.Schema) bool {
@@ -1006,7 +1282,7 @@ func isRelationalTarget(typeName string, schema *ir.Schema) bool {
 
 // extractRepository extracts repository information from an IR TypeDef.
 func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[string]scalarLookup, unionNames, enumNames map[string]bool, uuidGoType string) (Repository, error) {
-	tableName := codegen.ToSnakeCase(typeDef.Name)
+	tableName := sqlutil.TableName(typeDef)
 	repo := Repository{
 		Name:            typeDef.Name + "Repository",
 		TypeName:        typeDef.Name,
@@ -1033,6 +1309,7 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 	for _, field := range typeDef.Fields {
 		if field.Name == "deletedAt" {
 			repo.HasSoftDelete = true
+			repo.DeletedAtCol = sqlutil.ColumnName(field)
 		}
 		if field.Name == "deletedBy" {
 			repo.HasDeletedBy = true
@@ -1081,9 +1358,7 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 
 		field := extractField(fieldDef, schema, scalars, unionNames)
 		if enumNames[field.IRType] && !field.IsEnum {
-			// An imported enum is no sort field either.
 			field.IsEnum = true
-			field.Sortable = false
 		}
 		if fieldDef.SearchField {
 			repo.HasSearch = true
@@ -1108,6 +1383,7 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 			repo.QuotedPrimaryKey = field.QuotedDBName
 			repo.PrimaryKeyType = field.GoType
 			repo.PrimaryKeyIsUUID = field.IsUUIDScalar
+			repo.PrimaryKeyIsPointer = field.DerefValue || field.IsAutoGenerated
 		}
 	}
 
@@ -1125,6 +1401,7 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 			IsUUIDScalar:    true,
 			IsUUIDLike:      true,
 			Sortable:        true,
+			FilterKind:      sqlutil.FilterUUID,
 		}
 
 		repo.Fields = append([]Field{idField}, repo.Fields...)
@@ -1146,6 +1423,7 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 		repo.QuotedPrimaryKey = sqlutil.QuoteIdentifier("id")
 		repo.PrimaryKeyType = uuidGoType
 		repo.PrimaryKeyIsUUID = true
+		repo.PrimaryKeyIsPointer = true
 	}
 	repo.LookupKeyType = uuidGoType
 	if !repo.PrimaryKeyIsUUID {
@@ -1155,7 +1433,7 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 		appendVersionField(&repo)
 	}
 	if repo.Versioned {
-		repo.HistoryActorCol = historyActorColumn(repo.Fields, typeDef.VersionedConfig)
+		repo.HistoryActorCol = historyActorColumn(repo.Fields, typeDef)
 	}
 
 	repo.SortFields = sortFields(repo.Fields)
@@ -1182,6 +1460,7 @@ func appendVersionField(repo *Repository) {
 		IsAutoGenerated:    true,
 		IsScalarType:       true,
 		IsIntLike:          true,
+		FilterKind:         sqlutil.FilterInt,
 	}
 	repo.Fields = append(repo.Fields, versionField)
 	repo.OrderedMembers = append(repo.OrderedMembers, ColumnMember{
@@ -1218,14 +1497,21 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 	irType := fieldDef.TypeRef.Name
 	isArray := fieldDef.TypeRef.IsArray
 	isRequired := fieldDef.Required
-	dbName := codegen.ToSnakeCase(fieldDef.Name)
+	dbName := sqlutil.ColumnName(fieldDef)
 
 	scalar, isScalar := scalars[irType]
 	isUnion := unionNames[irType]
 	_, isEnum := schema.Enums[irType]
-	targetTypeDef := schema.Types[irType]
-	isJSONPayloadType := targetTypeDef != nil && targetTypeDef.JsonField
-
+	// What the column holds, as the TypeScript repositories classify it too
+	// (D79): its traits, and whether it is JSONB, a POINT or an INTERVAL.
+	// sqlgen stores a scalar mapped to POINT as POINT, and a list of it as
+	// POINT[]; a list of lists, a map and @jsonField are JSONB. Likewise a
+	// scalar mapped to INTERVAL (Temporal.Duration), whose Go type is a
+	// time.Duration. Its Valuer and Scanner write and read Go's duration
+	// text, which Postgres reads wrongly or refuses and does not write, so
+	// its values cross as time.Duration, which pgx writes as an interval of
+	// microseconds (D53, amended).
+	class := sqlutil.ClassifyColumn(fieldDef, schema, sqlutil.ScalarClass{Traits: scalar.traits, SQLType: scalar.sqlType}, isScalar, isEnum, isUnion)
 	traits := scalar.traits
 	if !isScalar {
 		traits = codegen.GuessScalarTraits(irType)
@@ -1243,15 +1529,6 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 		(!traits.IsIntegerLike || fieldDef.DistinctNull || codegen.GoOptionalIntegerScalarIsPointer(isRequired, isArray, isMap, fieldDef.Default))
 	isNullableBool := codegen.GoOptionalBoolIsPointer(irType, isRequired, isArray, isMap, fieldDef.Default)
 	preservesExplicitJSONNull := isScalar && irType == "Generic.JSON" && !isArray && !isMap
-	// sqlgen stores a scalar mapped to POINT as POINT, and a list of it as
-	// POINT[]; a list of lists, a map and @jsonField are JSONB.
-	storedAsPoint := isScalar && !isMap && !fieldDef.JsonField && !fieldDef.TypeRef.IsArrayOfArrays && strings.EqualFold(scalar.sqlType, "POINT")
-	// Likewise a scalar mapped to INTERVAL (Temporal.Duration), whose Go
-	// type is a time.Duration. Its Valuer and Scanner write and read Go's
-	// duration text, which Postgres reads wrongly or refuses and does not
-	// write, so its values cross as time.Duration, which pgx writes as an
-	// interval of microseconds (D53, amended).
-	storedAsInterval := isScalar && !isMap && !fieldDef.JsonField && !fieldDef.TypeRef.IsArrayOfArrays && strings.EqualFold(scalar.sqlType, "INTERVAL")
 
 	field := Field{
 		Name:                      fieldDef.Name,
@@ -1271,30 +1548,40 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 		IsInternalMetadata:        fieldDef.InternalMetadata,
 		IsAutoGenerated:           fieldDef.AutoGenerated,
 		HasDefault:                fieldDef.Default != nil,
-		IsJSONField:               fieldDef.JsonField || fieldDef.TypeRef.IsMap || fieldDef.TypeRef.IsArrayOfArrays || isJSONPayloadType || preservesExplicitJSONNull,
+		IsJSONField:               class.JSON,
 		IsScalarType:              isScalar || isEnum,
 		IsNullableEnum:            isNullableEnum,
 		IsNullableScalar:          isNullableScalar,
 		IsNullableBool:            isNullableBool,
-		IsUUIDScalar:              isScalar && !isArray && traits.IsUUIDLike,
-		IsDateTimeScalar:          isScalar && !isArray && traits.IsDateTimeLike,
-		IsGeoPoint:                storedAsPoint && !isArray,
-		IsGeoPointList:            storedAsPoint && isArray,
-		IsInterval:                storedAsInterval && !isArray,
-		IsIntervalList:            storedAsInterval && isArray,
-		IsUUIDLike:                traits.IsUUIDLike,
-		IsStringLike:              traits.IsStringLike || irType == codegen.PrimitiveString,
-		IsIntLike:                 traits.IsIntegerLike,
-		IsFloatLike:               traits.IsFloatLike || irType == codegen.PrimitiveNumber,
-		IsBoolLike:                traits.IsBooleanLike || irType == codegen.PrimitiveBoolean,
-		IsDateTimeLike:            traits.IsDateTimeLike,
-		IsDateLike:                traits.IsDateLike,
-		IsJSONLike:                traits.IsJSONLike || traits.IsObjectLike || fieldDef.TypeRef.IsMap,
+		IsUUIDScalar:              isScalar && !isArray && class.UUIDLike,
+		IsDateTimeScalar:          isScalar && !isArray && class.DateTimeLike,
+		IsGeoPoint:                class.Point && !isArray,
+		IsGeoPointList:            class.Point && isArray,
+		IsInterval:                class.Interval && !isArray,
+		IsIntervalList:            class.Interval && isArray,
+		IsVector:                  class.Vector,
+		IsDecimal:                 class.Decimal,
+		Dimensions:                sqlutil.VectorDimensions(sqlutil.ColumnType(schema, fieldDef, sqlutil.ScalarSQLTypes(schema))),
+		IsUUIDLike:                class.UUIDLike,
+		IsStringLike:              class.StringLike,
+		IsIntLike:                 class.IntLike,
+		IsFloatLike:               class.FloatLike,
+		IsBoolLike:                class.BoolLike,
+		IsDateTimeLike:            class.DateTimeLike,
+		IsDateLike:                class.DateLike,
+		IsJSONLike:                class.JSONLike,
 		IsEnum:                    isEnum,
-		IsSecret:                  fieldDef.Secret,
+		IsSecret:                  fieldDef.Secret || fieldDef.EncryptedAtRest,
+		IsEncrypted:               fieldDef.EncryptedAtRest,
 		PreservesExplicitJSONNull: preservesExplicitJSONNull,
-		IsGenericJSONList:         isScalar && traits.IsAnyJSON && isArray && !isMap,
+		IsGenericJSONList:         class.AnyJSON && isArray && !isMap,
 	}
+	if (!field.IsAuditField || field.IsAuditTimestamp) && !field.IsEncrypted {
+		field.FilterKind = goFilterKind(class.FilterKind(isArray))
+	}
+	// Default<T, "now"> (D88): the database fills the column in when a
+	// create leaves it unset, its zero value.
+	field.DefaultsToNow = isRequired && !isArray && !isMap && codegen.IsDefaultNow(irType, fieldDef.Default)
 
 	nilCheckedJSONScalar := field.IsScalarType && field.IsJSONLike && !field.IsArray
 	nullableComplex := !field.IsRequired && !field.IsArray && !field.IsMap && !field.IsUnion &&
@@ -1302,7 +1589,6 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 	field.OptionalNilCheck = nilCheckedJSONScalar || nullableComplex || field.IsUnion || field.IsMap ||
 		field.IsNullableEnum || field.IsNullableScalar || field.IsNullableBool
 	field.DerefValue = nullableComplex || field.IsNullableEnum || field.IsNullableScalar || field.IsNullableBool
-	field.Sortable = sortable(field, ir.SortValue(schema, fieldDef.TypeRef))
 
 	return field
 }
@@ -1310,8 +1596,8 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 // extractRelationship extracts relationship information from an IR FieldDef.
 func extractRelationship(fieldDef *ir.FieldDef, parentTypeName string, schema *ir.Schema, scalars map[string]scalarLookup, unionNames map[string]bool) Relationship {
 	targetType := fieldDef.TypeRef.Name
-	dbColumnName := codegen.ToSnakeCase(fieldDef.Name) + "_id"
-	targetTableName := codegen.ToSnakeCase(targetType)
+	dbColumnName := sqlutil.ForeignKeyColumn(fieldDef)
+	targetTableName := sqlutil.TableNameOf(schema, targetType)
 	hasManyParentRelationField := ""
 	hasManyParentFilterField := ""
 	if fieldDef.TypeRef.IsArray {
@@ -1380,6 +1666,113 @@ func inferHasManyParentMapping(childTypeName string, parentTypeName string, sche
 	return "", ""
 }
 
+// attachTable gives repo the table sqlutil models for it (D79): its
+// statements, each column's parts of them, its filter kinds, its sort
+// fields and its unique keys, which the TypeScript repositories take from
+// the same model. The repository and the model must list the same columns in
+// the same order, which every statement selects them in; a difference is a
+// generator's bug, and fails the build rather than writing SQL the other
+// language would not run.
+func attachTable(repo *Repository, table *sqlutil.TableModel) error {
+	if table.Type != repo.TypeName {
+		return fmt.Errorf("ormgen: the repository of %s was given the table of %s", repo.TypeName, table.Type)
+	}
+	members := make([]string, 0, len(repo.OrderedMembers))
+	for _, m := range repo.OrderedMembers {
+		if m.IsRelationship {
+			members = append(members, m.Relationship.DBColumnName)
+		} else {
+			members = append(members, m.Field.DBName)
+		}
+	}
+	columns := make([]string, 0, len(table.Columns))
+	for _, c := range table.Columns {
+		columns = append(columns, c.Name)
+	}
+	if !slices.Equal(members, columns) {
+		return fmt.Errorf("ormgen: the repository of %s lists the columns %v, and sqlutil's table %v", repo.TypeName, members, columns)
+	}
+	repo.Table = table
+	repo.SQL = sqlutil.TableStatementsOf(table)
+	if err := repo.SQL.CheckFormats(); err != nil {
+		return err
+	}
+	for i := range repo.Fields {
+		field := &repo.Fields[i]
+		column := table.Column(field.DBName)
+		if field.FilterKind != goFilterKind(column.Filter) {
+			return fmt.Errorf("ormgen: %s.%s filters as %q, and sqlutil's column as %q", repo.TypeName, field.Name, field.FilterKind, column.Filter)
+		}
+		field.SQL = sqlutil.ColumnStatementsOf(column)
+		field.Sortable = column.Sortable
+	}
+	for i := range repo.Relationships {
+		if rel := &repo.Relationships[i]; !rel.IsArray {
+			rel.SQL = sqlutil.ColumnStatementsOf(table.Column(rel.DBColumnName))
+		}
+	}
+	repo.SortFields = sortFields(repo.Fields)
+	repo.SearchCondition = sqlutil.SearchConditionOf(table)
+	for _, rel := range table.ToOne {
+		repo.PathRelations = append(repo.PathRelations, PathRelation{ToOne: rel, GoField: codegen.ToPascalCase(rel.Field)})
+	}
+	for _, field := range repo.Fields {
+		if field.IsEncrypted {
+			repo.EncryptedFields = append(repo.EncryptedFields, field)
+		}
+		if field.IsVector {
+			repo.VectorFields = append(repo.VectorFields, field)
+		}
+	}
+	repo.GeneratesKey = table.GeneratesKey()
+	repo.Clauses = sqlutil.PostgresClauses()
+	repo.BatchRows = table.BatchRows()
+	repo.QualifiedKey = table.KeyColumn().Qualified
+	for _, key := range table.UniqueKeys {
+		name := repo.TypeName + "UniqueBy"
+		for _, field := range key.Fields {
+			name += codegen.ToPascalCase(field)
+		}
+		unique := UniqueKey{UniqueKey: key, Const: name}
+		for i, field := range key.Fields {
+			part, err := keyPart(repo, field)
+			if err != nil {
+				return err
+			}
+			unique.KeyParts = append(unique.KeyParts, part)
+			unique.QuotedColumns = append(unique.QuotedColumns, sqlutil.QuoteIdentifier(key.Columns[i]))
+		}
+		repo.UniqueKeys = append(repo.UniqueKeys, unique)
+	}
+	return nil
+}
+
+// keyPart is the Go expression of a row's value of field, a field of a
+// unique key of repo, as UpsertMany matches rows to inputs by it (D89):
+// upsertKeyValue of the field, or of a to-one relation's key, which leaves
+// a value the insert leaves to the database unset, as an optional field's
+// zero value, which the insert does not write, and a Default<T, "now">
+// field's (D88).
+func keyPart(repo *Repository, field string) (string, error) {
+	for _, f := range repo.Fields {
+		if f.Name == field {
+			optional := (!f.IsRequired && !f.IsPrimaryKey) || f.DefaultsToNow
+			return fmt.Sprintf("upsertKeyValue(row.%s, %t)", codegen.ToPascalCase(f.Name), optional), nil
+		}
+	}
+	for _, rel := range repo.Relationships {
+		if rel.FieldName != field || rel.IsArray {
+			continue
+		}
+		member := codegen.ToPascalCase(rel.FieldName)
+		if rel.IsRequired {
+			return fmt.Sprintf("upsertKeyValue(row.%s.Id, false)", member), nil
+		}
+		return fmt.Sprintf("upsertKeyValue(func() any { if row.%[1]s == nil { return nil }; return row.%[1]s.Id }(), false)", member), nil
+	}
+	return "", fmt.Errorf("ormgen: the unique key of %s names %s, which is no field of it", repo.TypeName, field)
+}
+
 // attachInboundReferences indexes every to-one foreign key by the table it
 // points at, so each repository knows who references it. The edges already
 // exist in the schema; this only makes them visible from the other side.
@@ -1406,6 +1799,12 @@ func attachInboundReferences(repositories []Repository) {
 				QuotedSourceTable:   source.QuotedTableName,
 				QuotedSourceColumn:  rel.QuotedDBColumn,
 				SourceHasSoftDelete: source.HasSoftDelete,
+				Probe: sqlutil.ReferenceProbeOf(repositories[target].Table, sqlutil.Reference{
+					SourceTable:      source.QuotedTableName,
+					SourceColumn:     rel.QuotedDBColumn,
+					SourceSoftDelete: source.HasSoftDelete,
+					SourceDeletedAt:  source.Table.AuditQuoted(sqlutil.AuditDeletedAt),
+				}),
 			})
 		}
 	}
@@ -1485,11 +1884,11 @@ func mapIRToGoType(irType string, scalars map[string]scalarLookup) string {
 
 // historyActorColumn returns the column a versioned table's delete
 // tombstone records its actor in, as sqlgen's history trigger picks it
-// (sqlutil.VersionedHistory): deleted_by when the table has one, else
-// updated_by, else "". An actor column @versioned({ exclude }) leaves out
-// of history records none.
-func historyActorColumn(fields []Field, cfg *ir.VersionedConfig) string {
-	return sqlutil.VersionedHistory(cfg, func(column string) bool {
+// (sqlutil.VersionedHistory): deletedBy's column when the table has one,
+// else updatedBy's, else "". An actor column @versioned({ exclude }) leaves
+// out of history records none.
+func historyActorColumn(fields []Field, td *ir.TypeDef) string {
+	return sqlutil.VersionedHistory(td, func(column string) bool {
 		return slices.ContainsFunc(fields, func(field Field) bool { return field.DBName == column })
 	}).Actor
 }
@@ -1547,7 +1946,7 @@ func computeImportNeeds(repo *Repository) {
 		// (was papered over by a `var _ = reflect.ValueOf` band-aid).
 		optionalInsert := !field.IsPrimaryKey && !field.IsInternalMetadata &&
 			field.Name != "createdAt" && field.Name != "updatedAt" &&
-			(!field.IsRequired || field.IsAutoGenerated)
+			(!field.IsRequired || field.IsAutoGenerated || field.DefaultsToNow)
 		if optionalInsert && !field.OptionalNilCheck {
 			repo.NeedsReflect = true
 		}

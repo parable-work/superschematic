@@ -56,7 +56,15 @@ Generated TypeScript API server for the `{{ .SchemaName }}` schema. Built on
   `@envVars` settings and the fields a stack derives for its edges from the
   environment.
 {{- end }}
-- `openapi.json`: the OpenAPI document shared with the Go and Rust generators.
+- `openapi.json`: the OpenAPI document shared with the Go and Rust generators,
+  and `openapi.ts`, the same document as a module: `buildRouter` serves it at
+  `GET /api/openapi.json`, with a RapiDoc page at `GET /api/docs`, unless
+  `serveOpenAPI` is false.
+{{- if .MCP }}
+- `mcp.ts`: the MCP tools (`outputs.api.mcp`): `buildRouter` serves the
+  visible `@mcp` operations at `POST /api/mcp`, and runs each call through
+  its operation's route.
+{{- end }}
 - `values-schema.json`: the env-var contract, when the schema declares an
   `@envVars` class or its edges derive config fields.
 

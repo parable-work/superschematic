@@ -16,6 +16,10 @@
       "name": "@superschematic/db",
       "version": "0.0.0",
     },
+    "memory-store": {
+      "name": "@superschematic/memory-store",
+      "version": "0.0.0",
+    },
     "schema": {
       "name": "@superschematic/schema",
       "version": "0.0.0",
@@ -41,6 +45,8 @@
     "@superschematic/api": ["@superschematic/api@workspace:api"],
 
     "@superschematic/db": ["@superschematic/db@workspace:db"],
+
+    "@superschematic/memory-store": ["@superschematic/memory-store@workspace:memory-store"],
 
     "@superschematic/schema": ["@superschematic/schema@workspace:schema"],
 

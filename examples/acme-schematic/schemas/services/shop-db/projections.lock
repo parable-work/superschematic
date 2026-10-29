@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "migrations": [
+    {
+      "migration": "20260923120000",
+      "projection": "ShopStock",
+      "hash": "sha256:256cb7b6189153c430b50d69e91656bfbe200b5c0a5c69719bc84520395aa841"
+    }
+  ]
+}

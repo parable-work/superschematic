@@ -232,6 +232,13 @@ fn resolve(options: Option<&RunnerOptions>) -> Result<Settings> {
                 "runner.principal is the principal reactions and schedules act as: { subject, permissions }",
             ));
         }
+        // The runner's work writes as the runner, for no one (D77): its
+        // events carry no `for`.
+        if options.principal.acting_for.is_some() {
+            return Err(Error::usage(
+                "runner.principal acts for no one: reactions and schedules write as the runner",
+            ));
+        }
     }
     let pick = |key: &str, value: Option<i64>, fallback: i64| -> Result<i64> {
         let Some(value) = value else {

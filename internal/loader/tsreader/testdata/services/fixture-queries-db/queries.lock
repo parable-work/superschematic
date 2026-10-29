@@ -1,0 +1,330 @@
+{
+  "version": 1,
+  "queries": [
+    {
+      "name": "accountLines",
+      "hash": "sha256:07dd0b43d7d21e5122bbfab4bc00077e4481a56a45dce375d45cc59544ff0e65",
+      "params": [
+        "uuid",
+        "bigint"
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "notNull": true
+        },
+        {
+          "name": "date",
+          "type": "timestamp with time zone",
+          "notNull": true
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "notNull": true
+        },
+        {
+          "name": "amount",
+          "type": "bigint",
+          "notNull": true
+        }
+      ]
+    },
+    {
+      "name": "accountNamed",
+      "hash": "sha256:5640069edee2c6dfb48ff36f8817556e3d573dec51e686a5b5cf7a8536e48083",
+      "params": [
+        "text"
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "notNull": true
+        },
+        {
+          "name": "name",
+          "type": "character varying(80)",
+          "notNull": true
+        }
+      ]
+    },
+    {
+      "name": "budgets",
+      "hash": "sha256:444c6d3024ff32e364cf01079d3b63d08a14253c8c94a477a84646c43a98018a",
+      "params": [
+        "uuid"
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "notNull": true
+        },
+        {
+          "name": "name",
+          "type": "character varying(80)",
+          "notNull": true
+        },
+        {
+          "name": "budget",
+          "type": "numeric(12,2)"
+        },
+        {
+          "name": "budget_since",
+          "type": "date"
+        },
+        {
+          "name": "parent_id",
+          "type": "uuid"
+        }
+      ]
+    },
+    {
+      "name": "categoryTotals",
+      "hash": "sha256:d1271686b4bee9c6f924bc7e511be28efe8602c8c3fac16f7af8d3a77922f844",
+      "params": [
+        "timestamp with time zone",
+        "timestamp with time zone",
+        "uuid[]"
+      ],
+      "columns": [
+        {
+          "name": "category_id",
+          "type": "uuid"
+        },
+        {
+          "name": "spent",
+          "type": "bigint"
+        },
+        {
+          "name": "earned",
+          "type": "bigint"
+        }
+      ]
+    },
+    {
+      "name": "dashboardCategories",
+      "hash": "sha256:b6c368d319820e85eea8379308b34fe195b86e473204773ea918697f2b18d89c",
+      "params": [
+        "timestamp with time zone",
+        "timestamp with time zone",
+        "uuid[]",
+        "uuid[]",
+        "text"
+      ],
+      "columns": [
+        {
+          "name": "category_id",
+          "type": "uuid"
+        },
+        {
+          "name": "total",
+          "type": "bigint"
+        },
+        {
+          "name": "lines",
+          "type": "bigint"
+        }
+      ]
+    },
+    {
+      "name": "dashboardLines",
+      "hash": "sha256:eb9e0480c0eb633c421fd54b9bb6cbd18b701fea4d18c05a032f5d1cd11c819c",
+      "params": [
+        "timestamp with time zone",
+        "timestamp with time zone",
+        "uuid[]",
+        "uuid[]",
+        "text"
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "notNull": true
+        },
+        {
+          "name": "date",
+          "type": "timestamp with time zone",
+          "notNull": true
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "notNull": true
+        },
+        {
+          "name": "account_name",
+          "type": "character varying(80)",
+          "notNull": true
+        },
+        {
+          "name": "category_name",
+          "type": "character varying(80)"
+        }
+      ]
+    },
+    {
+      "name": "dashboardTotals",
+      "hash": "sha256:80ff57d16745a585fdbf83446ae349618280397e262f1a10db5a06450556306a",
+      "params": [
+        "timestamp with time zone",
+        "timestamp with time zone",
+        "uuid[]",
+        "uuid[]",
+        "text"
+      ],
+      "columns": [
+        {
+          "name": "spent",
+          "type": "bigint"
+        },
+        {
+          "name": "earned",
+          "type": "bigint"
+        },
+        {
+          "name": "lines",
+          "type": "bigint"
+        }
+      ]
+    },
+    {
+      "name": "matchingLine",
+      "hash": "sha256:338b79118343c2e0ba3bc79cfdd76ccbd69464558e92a45ed2b14ca860d23e14",
+      "params": [
+        "timestamp with time zone",
+        "timestamp with time zone",
+        "uuid[]",
+        "uuid[]",
+        "text",
+        "text"
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "notNull": true
+        },
+        {
+          "name": "date",
+          "type": "timestamp with time zone",
+          "notNull": true
+        },
+        {
+          "name": "amount",
+          "type": "bigint",
+          "notNull": true
+        }
+      ]
+    },
+    {
+      "name": "timeBuckets",
+      "hash": "sha256:27cac9ada8df9bed95af7d15c398f1e85a21f5da6b6fec90a7923d595be5e341",
+      "params": [
+        "text",
+        "timestamp with time zone",
+        "timestamp with time zone"
+      ],
+      "columns": [
+        {
+          "name": "bucket",
+          "type": "timestamp with time zone"
+        },
+        {
+          "name": "spent",
+          "type": "bigint"
+        },
+        {
+          "name": "earned",
+          "type": "bigint"
+        },
+        {
+          "name": "lines",
+          "type": "bigint"
+        }
+      ]
+    },
+    {
+      "name": "transactionList",
+      "hash": "sha256:57da4510322ef0d0c43107535681f039567864fb090f97467b09d996d3a5ae0a",
+      "params": [
+        "timestamp with time zone",
+        "timestamp with time zone",
+        "text",
+        "bigint"
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "notNull": true
+        },
+        {
+          "name": "date",
+          "type": "timestamp with time zone",
+          "notNull": true
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "notNull": true
+        },
+        {
+          "name": "amount",
+          "type": "bigint",
+          "notNull": true
+        },
+        {
+          "name": "account_name",
+          "type": "character varying(80)",
+          "notNull": true
+        },
+        {
+          "name": "category_id",
+          "type": "uuid"
+        },
+        {
+          "name": "category_name",
+          "type": "character varying(80)"
+        }
+      ]
+    },
+    {
+      "name": "transferCandidates",
+      "hash": "sha256:e003f96fc8f506aabd7c3dfd98be6ba6dda9b3a470caf2753e71fa6b2b848318",
+      "params": [
+        "uuid",
+        "integer"
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "notNull": true
+        },
+        {
+          "name": "account_id",
+          "type": "uuid",
+          "notNull": true
+        },
+        {
+          "name": "amount",
+          "type": "bigint",
+          "notNull": true
+        },
+        {
+          "name": "date",
+          "type": "timestamp with time zone",
+          "notNull": true
+        },
+        {
+          "name": "days_apart",
+          "type": "double precision"
+        }
+      ]
+    }
+  ]
+}

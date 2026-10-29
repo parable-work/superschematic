@@ -13,6 +13,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/parable-work/superschematic/internal/generator"
+	"github.com/parable-work/superschematic/internal/queryverify"
 	"github.com/parable-work/superschematic/internal/sentinel"
 )
 
@@ -95,8 +97,9 @@ type fileStamp struct {
 
 // snapshot stamps every file a check reads that an edit can change: the
 // schemas root's naming file and base tsconfig, the naming file --naming
-// names, and the TypeScript, JSON, YAML and TOML files of each service,
-// outside node_modules, dist, target and hidden directories. A service's
+// names, and the TypeScript, JSON, YAML and TOML files of each service and
+// its queries.lock (D86), outside node_modules, dist, target and hidden
+// directories. A service's
 // sentinel is left out, since every check may write it.
 func (c *checker) snapshot() map[string]fileStamp {
 	files := map[string]fileStamp{}
@@ -133,6 +136,12 @@ func (c *checker) snapshot() map[string]fileStamp {
 		}
 		switch filepath.Ext(name) {
 		case ".ts", ".json", ".yaml", ".yml", ".toml":
+			stamp(path)
+		}
+		// A DB service's queries are held to its lock (D86), which
+		// queries verify rewrites, and its projections' built migrations
+		// to projections.lock (D102), which build writes.
+		if name == queryverify.LockFile || name == generator.ProjectionsLockFile {
 			stamp(path)
 		}
 		return nil

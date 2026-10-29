@@ -31,8 +31,9 @@ type field struct {
 // DerivedField returns the name of the config field an edge of kind to
 // service fills under the core's rule: the service's name in upper snake
 // case, suffixed `_DATABASE` for a sql edge, `_SERVICE` for an http edge
-// and `_BUCKET` for a bucket edge (`SHOP_DB_DATABASE`, `SHOP_API_SERVICE`,
-// `SHOP_MEDIA_BUCKET`). Input.FieldNames replaces the rule with the naming
+// `_BUCKET` for a bucket edge and `_MEMORY_STORE` for a memoryStore edge
+// (`SHOP_DB_DATABASE`, `SHOP_API_SERVICE`, `SHOP_MEDIA_BUCKET`,
+// `SHOP_CACHE_MEMORY_STORE`). Input.FieldNames replaces the rule with the naming
 // file's (section 3.4).
 func DerivedField(kind ir.EdgeKind, service string) string {
 	return ir.DerivedFieldNames{}.Field(kind, service)
@@ -64,8 +65,9 @@ func (r *resolver) databaseOf(svc *Service) (string, bool) {
 
 // deriveEdges finds every edge: a sql edge from each server to the
 // database of each API it serves, an http edge from each server to the
-// server of each API it calls, and a bucket edge from each server to each
-// bucket an API it serves lists (D54). A job takes its API's edges, from
+// server of each API it calls, a bucket edge from each server to each
+// bucket an API it serves lists (D54), and a memoryStore edge from each to
+// each memory store an API it serves uses (D75). A job takes its API's edges, from
 // itself (D52). An engine's runner has one, a sql edge to its engine
 // database (D58). Each finds the connector between the two platforms.
 func (r *resolver) deriveEdges() {
@@ -95,17 +97,33 @@ func (r *resolver) deriveEdges() {
 		for _, bucket := range d.res.Buckets {
 			r.addEdge(ir.EdgeBucket, d, bucket.Name)
 		}
+		for _, store := range d.res.MemoryStores {
+			r.addEdge(ir.EdgeMemoryStore, d, store.Name)
+		}
 	}
 }
 
 // deriveSiteEdges gives a site a site edge to the server of each API it
 // calls, which must be exposed: the browser reaches the API at its public
-// address (D55).
+// address (D55). An API the site serves on its own origin (D91) needs no
+// exposure when its server is on the site's provider, whose site platform
+// reaches it; on another provider the site's origin forwards to its public
+// address, so it must be exposed.
 func (r *resolver) deriveSiteEdges(d *deployable) {
 	for _, callee := range d.res.Calls {
 		server, ok := r.deployables[r.byService[callee.Name]]
 		if !ok {
 			continue // collectMembers reported it
+		}
+		origin := d.res.Site.OriginAPI(callee.Name) != nil
+		if origin && server.platform.Provider == d.platform.Provider {
+			r.addEdge(ir.EdgeSite, d, callee.Name)
+			continue
+		}
+		if origin && !server.res.Exposed {
+			r.fail(CodeCrossProviderUnexposed, "site %s on %s (%s) serves %s on its origin, whose server %s on %s (%s) the stack does not expose; the origin forwards to a server of another provider only at its public address, so add %s to @stack's expose",
+				d.res.Name, d.platform.Name, d.platform.Provider, callee.Name, server.res.Name, server.platform.Name, server.platform.Provider, callee.Name)
+			continue
 		}
 		if !server.res.Exposed {
 			r.fail(CodeSiteCallsUnexposed, "site %s calls %s, whose server %s the stack does not expose; a browser reaches only an exposed API, so add %s to @stack's expose", d.res.Name, callee.Name, server.res.Name, callee.Name)
@@ -379,6 +397,9 @@ func contractOf(kind ir.EdgeKind) string {
 	}
 	if kind == ir.EdgeBucket {
 		return "bucket connection (ir.BucketConnection)"
+	}
+	if kind == ir.EdgeMemoryStore {
+		return "memory store connection (ir.MemoryStoreConnection)"
 	}
 	return "service endpoint (ir.ServiceEndpoint)"
 }

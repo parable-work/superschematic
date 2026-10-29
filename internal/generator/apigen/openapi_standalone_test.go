@@ -223,4 +223,26 @@ func TestTypeOpenAPISchemaTypesArrayScalars(t *testing.T) {
 	if points["type"] != "array" || !reflect.DeepEqual(points["items"], map[string]interface{}{}) {
 		t.Fatalf("an array scalar without an element type = %#v, want items {}", points)
 	}
+
+	// A vector's dimensions are its array's length, alone and in a list (D84).
+	dimensions := 3
+	for _, f := range schema.Types["Embedded"].Fields {
+		if f.Name != "points" {
+			f.ValidateDimensions = &dimensions
+		}
+	}
+	standalone, err = TypeOpenAPISchema("Embedded", schema, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	properties = standalone["properties"].(map[string]interface{})
+	vec = properties["vec"].(map[string]interface{})
+	if vec["minItems"] != 3 || vec["maxItems"] != 3 {
+		t.Fatalf("Validate<Embedding.Vector, { dimensions: 3 }> = %#v, want 3 items", vec)
+	}
+	vecs = properties["vecs"].(map[string]interface{})
+	inner = vecs["items"].(map[string]interface{})
+	if inner["minItems"] != 3 || inner["maxItems"] != 3 || vecs["minItems"] != nil {
+		t.Fatalf("a list of Validate<Embedding.Vector, { dimensions: 3 }> = %#v, want 3 items each", vecs)
+	}
 }

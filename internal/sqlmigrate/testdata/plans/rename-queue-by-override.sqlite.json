@@ -1,0 +1,165 @@
+{
+  "dialect": "sqlite",
+  "from": "3cb22c127616ba19f079543c4b35c3a0f9af474762de67b81f1b9f5e3d3c2ec2",
+  "hash": "0881562ed5e8184926f2ce1f33ca5f74449667aa79b26e1e91f6c8707cb6f779",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/orderShipments",
+          "reason": "Table order_shipped_queue is renamed to orderShipments, following OrderShipped's @table: servers built from the previous version still use the old name.",
+          "subject": "table/orderShipments"
+        }
+      ],
+      "index": 1,
+      "op": "renameTable",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order_shipped_queue\" RENAME TO \"orderShipments\""
+      ],
+      "subject": "table/orderShipments",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/orderShipments/column/orderId",
+          "reason": "order_shipped_queue.order_id is renamed to orderShipments.orderId, following OrderShipped.orderId's @column: servers built from the previous version still use the old name.",
+          "subject": "table/orderShipments/column/orderId"
+        }
+      ],
+      "index": 2,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"orderShipments\" RENAME COLUMN \"order_id\" TO \"orderId\""
+      ],
+      "subject": "table/orderShipments/column/orderId",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/orderShipments/index/idx_orderShipments_claim_expires_at",
+          "reason": "SQLite cannot rename an index, so the step drops it and builds it again under its new name holds the database's write lock for time that grows with orderShipments.",
+          "subject": "table/orderShipments/index/idx_orderShipments_claim_expires_at"
+        }
+      ],
+      "index": 3,
+      "op": "renameIndex",
+      "phase": "expand",
+      "statements": [
+        "DROP INDEX \"idx_order_shipped_queue_claim_expires_at\"",
+        "CREATE INDEX \"idx_orderShipments_claim_expires_at\" ON \"orderShipments\" (\"claim_expires_at\") WHERE state = 'claimed'"
+      ],
+      "subject": "table/orderShipments/index/idx_orderShipments_claim_expires_at",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/orderShipments/index/idx_orderShipments_due_at",
+          "reason": "SQLite cannot rename an index, so the step drops it and builds it again under its new name holds the database's write lock for time that grows with orderShipments.",
+          "subject": "table/orderShipments/index/idx_orderShipments_due_at"
+        }
+      ],
+      "index": 4,
+      "op": "renameIndex",
+      "phase": "expand",
+      "statements": [
+        "DROP INDEX \"idx_order_shipped_queue_due_at\"",
+        "CREATE INDEX \"idx_orderShipments_due_at\" ON \"orderShipments\" (\"due_at\") WHERE state = 'ready'"
+      ],
+      "subject": "table/orderShipments/index/idx_orderShipments_due_at",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/orderShipments/index/idx_orderShipments_updated_at",
+          "reason": "SQLite cannot rename an index, so the step drops it and builds it again under its new name holds the database's write lock for time that grows with orderShipments.",
+          "subject": "table/orderShipments/index/idx_orderShipments_updated_at"
+        }
+      ],
+      "index": 5,
+      "op": "renameIndex",
+      "phase": "expand",
+      "statements": [
+        "DROP INDEX \"idx_order_shipped_queue_updated_at\"",
+        "CREATE INDEX \"idx_orderShipments_updated_at\" ON \"orderShipments\" (\"updated_at\") WHERE state = 'done'"
+      ],
+      "subject": "table/orderShipments/index/idx_orderShipments_updated_at",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/orderShipments/index/uq_orderShipments_ready_key",
+          "reason": "SQLite cannot rename an index, so the step drops it and builds it again under its new name holds the database's write lock for time that grows with orderShipments.",
+          "subject": "table/orderShipments/index/uq_orderShipments_ready_key"
+        }
+      ],
+      "index": 6,
+      "op": "renameIndex",
+      "phase": "expand",
+      "statements": [
+        "DROP INDEX \"uq_order_shipped_queue_ready_key\"",
+        "CREATE UNIQUE INDEX \"uq_orderShipments_ready_key\" ON \"orderShipments\" (\"orderId\") WHERE state = 'ready'"
+      ],
+      "subject": "table/orderShipments/index/uq_orderShipments_ready_key",
+      "transactional": true
+    },
+    {
+      "index": 7,
+      "op": "renameTrigger",
+      "phase": "expand",
+      "statements": [
+        "DROP TRIGGER IF EXISTS \"trg_order_enqueue_order_shipped_insert\""
+      ],
+      "subject": "trigger/order/trg_order_enqueue_orderShipments_insert",
+      "transactional": true
+    },
+    {
+      "index": 8,
+      "op": "renameTrigger",
+      "phase": "expand",
+      "statements": [
+        "DROP TRIGGER IF EXISTS \"trg_order_enqueue_order_shipped_update\""
+      ],
+      "subject": "trigger/order/trg_order_enqueue_orderShipments_update",
+      "transactional": true
+    },
+    {
+      "index": 9,
+      "op": "replaceTrigger",
+      "phase": "expand",
+      "statements": [
+        "DROP TRIGGER IF EXISTS \"trg_order_enqueue_orderShipments_insert\"",
+        "CREATE TRIGGER \"trg_order_enqueue_orderShipments_insert\" AFTER INSERT ON \"order\" FOR EACH ROW\nBEGIN\n  INSERT INTO \"orderShipments\" (\"orderId\", \"note\") VALUES (NEW.\"id\", NEW.\"note\")\n    ON CONFLICT (\"orderId\") WHERE state = 'ready' DO UPDATE SET note = excluded.note, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now');\nEND"
+      ],
+      "subject": "trigger/order/trg_order_enqueue_orderShipments_insert",
+      "transactional": true
+    },
+    {
+      "index": 10,
+      "op": "replaceTrigger",
+      "phase": "expand",
+      "statements": [
+        "DROP TRIGGER IF EXISTS \"trg_order_enqueue_orderShipments_update\"",
+        "CREATE TRIGGER \"trg_order_enqueue_orderShipments_update\" AFTER UPDATE ON \"order\" FOR EACH ROW\nWHEN (OLD.\"note\" IS NOT NEW.\"note\")\nBEGIN\n  INSERT INTO \"orderShipments\" (\"orderId\", \"note\") VALUES (NEW.\"id\", NEW.\"note\")\n    ON CONFLICT (\"orderId\") WHERE state = 'ready' DO UPDATE SET note = excluded.note, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now');\nEND"
+      ],
+      "subject": "trigger/order/trg_order_enqueue_orderShipments_update",
+      "transactional": true
+    }
+  ],
+  "to": "fe1d51a6d3e41141e337d8e59455fb5a609b3c9dd5b58bb064ce026c10c45bbd",
+  "toModel": null,
+  "version": 1
+}

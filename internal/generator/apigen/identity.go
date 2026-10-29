@@ -64,6 +64,21 @@ func ImplementedOutput(output *APIOutput) (*APIOutput, error) {
 	return &view, nil
 }
 
+// IdentityRegistration returns schema's @userSessions config when its
+// register admits users otherwise than open registration with no roles
+// does (D81): under approval, with default roles or with a first
+// administrator. Every server's identity wiring hands it to its runtime;
+// for any other API it is nil and the wiring is unchanged.
+func IdentityRegistration(schema *ir.Schema) *ir.UserSessionsConfig {
+	for _, set := range schema.OperationSets {
+		cfg := set.UserSessions
+		if cfg != nil && cfg.Register && !cfg.NoLogin && (cfg.Approval() || len(cfg.DefaultRoles) > 0 || cfg.FirstUser != nil) {
+			return cfg
+		}
+	}
+	return nil
+}
+
 // addIdentityErrorResponses adds to an operation's OpenAPI responses the
 // errors the identity runtime answers the user model's operation op with
 // (ir.IdentityOperationErrors): one response per status, whose description

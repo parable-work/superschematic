@@ -203,6 +203,11 @@ type DecoratorSpec struct {
 	// a type argument in an extension slot.
 	typeArgs int
 
+	// typeArgAliases lets a type argument name an object type alias as
+	// well as a class: @query's params and row types, which a DB schema
+	// may write either way (D86).
+	typeArgAliases bool
+
 	// optionalArg lets the decorator be written without its argument when
 	// it has Args: @paginated() as well as @paginated({ maxLimit: 50 }).
 	// Apply then receives no argument. Only core decorators set it: the
@@ -224,6 +229,12 @@ func (s DecoratorSpec) RecordsErrors() bool {
 // decorator but the core ones that name a table (@projection, @join).
 func (s DecoratorSpec) TypeArgs() int {
 	return s.typeArgs
+}
+
+// TypeArgAliases reports whether a type argument may name an object type
+// alias of the schema as well as a class.
+func (s DecoratorSpec) TypeArgAliases() bool {
+	return s.typeArgAliases
 }
 
 // DeclaredIn reports whether pkg is one of the spec's authoring packages.
@@ -484,6 +495,21 @@ func (ctx GenerateContext) Logf(format string, args ...any) {
 	if ctx.Options.Log != nil {
 		_, _ = fmt.Fprintf(ctx.Options.Log, format, args...)
 	}
+}
+
+// Warnf records a warning on the run's Result and writes it to the run's
+// log, "warning: " first, as the load writes the verification pass's
+// warnings (D100): what the run found that fails nothing now, such as a
+// package the build scaffolded once lacking a dependency its generated
+// neighbours need. A warning the run met before, as the server, the job
+// and the worker of one API meet it, is not recorded again.
+func (ctx GenerateContext) Warnf(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	if slices.Contains(ctx.Result.Warnings, msg) {
+		return
+	}
+	ctx.Result.Warnings = append(ctx.Result.Warnings, msg)
+	ctx.Logf("warning: %s\n", msg)
 }
 
 // Done records an output key written to dir.

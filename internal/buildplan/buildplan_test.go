@@ -590,3 +590,36 @@ func TestDiscoverReadsTheConfigPackageByIdentity(t *testing.T) {
 	require.Len(t, services, 1)
 	assert.Equal(t, "aliased", services[0].Name)
 }
+
+// TestMemoryStoresOrderTheBuild: a MemoryStore service an API lists in its
+// memoryStores, or names its rateLimitStore, builds before the API, whose
+// implementation imports its definitions; it joins the closure, a handle of
+// the wrong kind is refused, and an edit to the store reaches the API
+// (D75).
+func TestMemoryStoresOrderTheBuild(t *testing.T) {
+	store := func(name string) Service {
+		return Service{Name: name, Dir: "/services/" + name, Config: &schemaconfig.SchemaConfig{Name: name, Kind: ir.SchemaKindMemoryStore}}
+	}
+	api := apiCalling("a-api")
+	api.Config.MemoryStores = []schemaconfig.ServiceDependency{{Name: "shop-cache", Kind: ir.SchemaKindMemoryStore}}
+	limited := apiCalling("b-api")
+	limited.Config.RateLimitStore = &schemaconfig.ServiceDependency{Name: "z-limits", Kind: ir.SchemaKindMemoryStore}
+	services := []Service{api, limited, store("shop-cache"), store("z-limits")}
+
+	sorted, err := TopologicalSort(services)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"shop-cache", "a-api", "z-limits", "b-api"}, serviceNames(sorted))
+
+	closure, err := Closure(sorted, "b-api")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"z-limits", "b-api"}, serviceNames(closure))
+
+	assert.Equal(t, []string{"shop-cache", "a-api"}, serviceNames(Dependents(sorted, []string{"shop-cache"}, nil)))
+	assert.Equal(t, []string{"z-limits", "b-api"}, serviceNames(Dependents(sorted, []string{"z-limits"}, nil)))
+
+	wrong := apiCalling("a-api")
+	wrong.Config.MemoryStores = []schemaconfig.ServiceDependency{{Name: "shop-cache", Kind: ir.SchemaKindBucket}}
+	err = validateHandleKinds([]Service{wrong, store("shop-cache")})
+	require.Error(t, err)
+	assert.Equal(t, "a-api: memoryStores names shop-cache with kind Bucket, but shop-cache is kind MemoryStore", err.Error())
+}

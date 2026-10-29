@@ -44,6 +44,10 @@ const (
 	// IdentityRoleIDArgument is the {roleId} of a grant's route,
 	// users/{id}/roles/{roleId}.
 	IdentityRoleIDArgument = "roleId"
+	// IdentityPendingArgument is listUsers' optional boolean query
+	// parameter (D81): true lists the users waiting for approval alone,
+	// false the others.
+	IdentityPendingArgument = "pending"
 )
 
 // The requests per minute the rate-limited operations allow, per client.
@@ -72,6 +76,48 @@ type UserSessionsConfig struct {
 	// Register is @userSessions({ register: true }): the set also has
 	// register, which anyone may call. A set with NoLogin takes no Register.
 	Register bool `json:"register,omitempty" yaml:"register,omitempty"`
+
+	// Registration is how register admits a user (D81):
+	// IdentityRegistrationOpen, the default when empty, signs them in;
+	// IdentityRegistrationApproval creates them pending and starts no
+	// session until an administrator approves them (approveUser). It
+	// needs Register.
+	Registration string `json:"registration,omitempty" yaml:"registration,omitempty"`
+
+	// DefaultRoles names the roles register grants each new user (D81),
+	// each created with no permissions when no role has the name. Under
+	// approval they are granted with the pending user, who can neither sign
+	// in nor hold a session, so they take effect at approval. It needs
+	// Register and a UserRole table in the authDb.
+	DefaultRoles []string `json:"defaultRoles,omitempty" yaml:"defaultRoles,omitempty"`
+
+	// FirstUser makes the registration that finds no role grant, the one
+	// identity bootstrap would still run for, the database's first
+	// administrator (D81): the user is active even under approval, and holds
+	// the role, created with its permissions when no role has the name,
+	// beside DefaultRoles. Two such registrations at once make one
+	// administrator. It needs Register and a UserRole table in the authDb.
+	FirstUser *IdentityFirstUser `json:"firstUser,omitempty" yaml:"firstUser,omitempty"`
+}
+
+// IdentityFirstUser is @userSessions' firstUser: the role the first
+// registered user holds, and the permissions it carries when register
+// creates it (D81).
+type IdentityFirstUser struct {
+	Role        string   `json:"role" yaml:"role"`
+	Permissions []string `json:"permissions" yaml:"permissions"`
+}
+
+// The values of UserSessionsConfig.Registration.
+const (
+	IdentityRegistrationOpen     = "open"
+	IdentityRegistrationApproval = "approval"
+)
+
+// Approval reports whether register creates users pending an
+// administrator's approval (D81).
+func (c *UserSessionsConfig) Approval() bool {
+	return c != nil && c.Registration == IdentityRegistrationApproval
 }
 
 // UserAdministrationConfig is @userAdministration on an operation set: the
@@ -128,7 +174,10 @@ const (
 	// user's other sessions.
 	IdentityOpChangePassword = "changePassword"
 	// IdentityOpRegister is POST <path>/register, RegisterInput to
-	// LoginResult: @publicRoute and rate-limited, only with Register.
+	// LoginResult: @publicRoute and rate-limited, only with Register. Under
+	// registration "approval" it answers RegisterResult (D81): 200 with a
+	// session for an active user (the first administrator), 202 with none
+	// for a user who waits for approval.
 	IdentityOpRegister = "register"
 )
 
@@ -145,7 +194,8 @@ const (
 	// IdentityUser (users.write).
 	IdentityOpCreateUser = "createUser"
 	// IdentityOpListUsers is GET <path>/users, to IdentityUser[]
-	// (users.read).
+	// (users.read); ?pending=true lists the users waiting for approval
+	// alone, ?pending=false the others (D81).
 	IdentityOpListUsers = "listUsers"
 	// IdentityOpGetUser is GET <path>/users/{id}, to IdentityUser
 	// (users.read).
@@ -158,6 +208,12 @@ const (
 	// IdentityUser (users.write, and the caller's permissions cover every
 	// one the user holds: D50, amended).
 	IdentityOpEnableUser = "enableUser"
+	// IdentityOpApproveUser is POST <path>/users/{id}/approve, to
+	// IdentityUser (users.write, and the caller's permissions cover every
+	// one the user holds, the roles register granted them included): the
+	// user, who registered under registration "approval", can sign in
+	// (D81).
+	IdentityOpApproveUser = "approveUser"
 	// IdentityOpSetUserPassword is PUT <path>/users/{id}/password,
 	// SetPasswordInput to true (users.write, and the caller's permissions
 	// cover every one the user holds: D50, amended); revokes the user's
@@ -225,6 +281,10 @@ const (
 	// (Temporal.DateTime), token (a Secret string; absent for a cookie
 	// session).
 	IdentityLoginResultType = "LoginResult"
+	// IdentityRegisterResultType is register's result under registration
+	// "approval" (D81): pending (bool), user (SessionUser), and expiresAt
+	// and token as LoginResult has them, both absent while pending.
+	IdentityRegisterResultType = "RegisterResult"
 	// IdentitySessionUserType: id, login, name.
 	IdentitySessionUserType = "SessionUser"
 	// IdentityRoleRefType: id, name.
@@ -243,7 +303,8 @@ const (
 	IdentityCreateUserInputType = "CreateUserInput"
 	// IdentitySetPasswordInputType: password.
 	IdentitySetPasswordInputType = "SetPasswordInput"
-	// IdentityUserType: id, login, name, disabled (bool), roles (RoleRef[]).
+	// IdentityUserType: id, login, name, disabled (bool), pending (bool,
+	// D81), roles (RoleRef[]).
 	IdentityUserType = "IdentityUser"
 	// IdentityRoleInputType: name, permissions (string[]).
 	IdentityRoleInputType = "RoleInput"
@@ -281,6 +342,13 @@ const (
 	// dotted segments of letters, digits, _ and -; details.permissions
 	// lists them.
 	IdentityCodeInvalidPermission = "invalid_permission"
+	// IdentityCodePendingApproval (403): a login whose password verifies
+	// for a user who waits for an administrator's approval (D81). Every
+	// other failed login stays invalid_credentials.
+	IdentityCodePendingApproval = "pending_approval"
+	// IdentityCodeNotPending (409): approveUser for a user who is not
+	// waiting for approval (D81).
+	IdentityCodeNotPending = "not_pending"
 )
 
 // IdentityRouteError is an error response a route of the user model
@@ -311,10 +379,12 @@ var identityOperationErrors = func() map[string][]IdentityRouteError {
 	noRole := IdentityRouteError{404, IdentityCodeNotFound, "No role has the id."}
 	noUserOrRole := IdentityRouteError{404, IdentityCodeNotFound, "No user has the id, or no role the roleId."}
 	invalidPermission := IdentityRouteError{422, IdentityCodeInvalidPermission, "A permission is not dotted segments of letters, digits, _ and -; details.permissions lists them."}
+	notPending := IdentityRouteError{409, IdentityCodeNotPending, "The user is not waiting for approval."}
 	return map[string][]IdentityRouteError{
 		IdentityOpLogin: {
 			{401, IdentityCodeInvalidCredentials, "The login or the password does not verify, or the user is disabled."},
 			cookieLogin,
+			{403, IdentityCodePendingApproval, "The password verifies, and the user waits for an administrator's approval."},
 		},
 		IdentityOpRegister:     {cookieLogin, loginTaken},
 		IdentityOpLogout:       {unauthorized, crossOrigin},
@@ -330,6 +400,7 @@ var identityOperationErrors = func() map[string][]IdentityRouteError {
 		IdentityOpGetUser:         {unauthorized, permission, noUser},
 		IdentityOpDisableUser:     {unauthorized, permission, crossOrigin, noUser},
 		IdentityOpEnableUser:      {unauthorized, permission, crossOrigin, noUser},
+		IdentityOpApproveUser:     {unauthorized, permission, crossOrigin, noUser, notPending},
 		IdentityOpSetUserPassword: {unauthorized, permission, crossOrigin, noUser},
 		IdentityOpListRoles:       {unauthorized, permission},
 		IdentityOpCreateRole:      {unauthorized, granting, crossOrigin, nameTaken, invalidPermission},

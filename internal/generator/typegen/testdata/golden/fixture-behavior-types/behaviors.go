@@ -233,7 +233,7 @@ type RequestDerivedFieldsSummaryOverridden struct {
 
 // RequestProvenance holds the fields a Request's Provenance adds, as a read returns them: a field with no value is absent.
 type RequestProvenance struct {
-	// By recorded field written since Provenance was added: { source, by, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; review is { state, by?, at? }, state proposed, accepted, rejected or edited.
+	// By recorded field written since Provenance was added: { source, by, for?, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; for is the subject it acted for, when it acted for one (D77); review is { state, by?, at? }, state proposed, accepted, rejected or edited.
 	Fields RequestProvenanceFields `json:"fields"`
 	// Whether any recorded field is proposed. A list filters on it.
 	InReview bool `json:"inReview"`
@@ -252,6 +252,7 @@ type RequestProvenanceFieldsBody struct {
 	At         int64                              `json:"at"`
 	By         string                             `json:"by"`
 	Confidence *float64                           `json:"confidence,omitempty"`
+	For        *string                            `json:"for,omitempty"`
 	Review     *RequestProvenanceFieldsBodyReview `json:"review,omitempty"`
 	Source     string                             `json:"source"`
 }
@@ -269,6 +270,7 @@ type RequestProvenanceFieldsCategory struct {
 	At         int64                                  `json:"at"`
 	By         string                                 `json:"by"`
 	Confidence *float64                               `json:"confidence,omitempty"`
+	For        *string                                `json:"for,omitempty"`
 	Review     *RequestProvenanceFieldsCategoryReview `json:"review,omitempty"`
 	Source     string                                 `json:"source"`
 }
@@ -286,6 +288,7 @@ type RequestProvenanceFieldsSubject struct {
 	At         int64                                 `json:"at"`
 	By         string                                `json:"by"`
 	Confidence *float64                              `json:"confidence,omitempty"`
+	For        *string                               `json:"for,omitempty"`
 	Review     *RequestProvenanceFieldsSubjectReview `json:"review,omitempty"`
 	Source     string                                `json:"source"`
 }
@@ -303,6 +306,7 @@ type RequestProvenanceFieldsSummary struct {
 	At         int64                                 `json:"at"`
 	By         string                                `json:"by"`
 	Confidence *float64                              `json:"confidence,omitempty"`
+	For        *string                               `json:"for,omitempty"`
 	Review     *RequestProvenanceFieldsSummaryReview `json:"review,omitempty"`
 	Source     string                                `json:"source"`
 }
@@ -358,12 +362,16 @@ type TicketWorkflow struct {
 
 // TicketComments holds the fields a Ticket's Comments adds, as a read returns them: a field with no value is absent.
 type TicketComments struct {
-	// How many posted messages the conversation has, top-level and replies; deleted and purged ones are not counted.
+	// How many posted and interrupted messages the conversation has, top-level and replies; composing, deleted and purged ones are not counted.
 	Messages int64 `json:"messages"`
-	// When the latest posted message was posted, in epoch milliseconds; absent while there is none.
+	// The greatest postedAt of a posted or interrupted message, in epoch milliseconds; absent while there is none.
 	LastMessageAt *int64 `json:"lastMessageAt,omitempty"`
-	// The posted top-level messages, each a thread, whether resolved or not: { open, resolved }.
+	// The posted and interrupted top-level messages, each a thread, whether resolved or not: { open, resolved }.
 	Threads TicketCommentsThreads `json:"threads"`
+	// The subjects writing a message now: each subject with a composing message on the instance, once, in the order of its earliest composing message's id; empty while nobody is.
+	Composing []string `json:"composing"`
+	// The caller's: how many posted and interrupted top-level messages of others came to stand after the caller's read marker on the conversation. 0 until the caller first reads the conversation with markRead or posts in it top-level, so a conversation nobody opened is unread for nobody. Replies are read thread by thread, in the inbox, and not counted here.
+	Unread int64 `json:"unread"`
 }
 
 // TicketCommentsThreads types TicketComments.threads.

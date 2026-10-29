@@ -121,13 +121,20 @@ export interface ProjectionCollapse {
 }
 
 export interface ProjectionOptions {
-  /** The Postgres schema the view is created in; readers address it as `pool.name`. */
-  readonly pool: string;
-  /** The view's name inside the pool. */
+  /**
+   * The Postgres schema the view is created in; readers address it as
+   * `pool.name`. Unset creates the view beside the service's tables, as a
+   * plain view the ORMs read (D90).
+   */
+  readonly pool?: string;
+  /** The view's name inside the pool, or beside the tables. */
   readonly name: string;
   /**
-   * The 14-digit version stamp of the generated migration. An applied
-   * migration is never rewritten: a changed declaration takes a new stamp.
+   * The 14-digit version stamp of the generated migration pair, for a
+   * migration runner of your own (a stack builds the view from its plan).
+   * The first build that writes the pair records it in `projections.lock`;
+   * a changed declaration then takes a new stamp, which check and build
+   * name, since an applied migration is never rewritten (D102).
    */
   readonly migration: string;
   /** The row rules, all ANDed, in order. */
@@ -145,7 +152,8 @@ export interface ProjectionOptions {
  * are the view's columns; each reads `base.<field>` unless `@column` says
  * otherwise. superschematic generates the Postgres view, its migration and
  * its Arrow schema from this one declaration. Only DB schemas declare
- * projections, and a projection is never a table or a language type.
+ * projections. A projection is never a table: the ORMs read it as a row
+ * type of its own, through a read-only repository (D90).
  */
 export function projection<TSource>(_options: ProjectionOptions): ClassDecorator {
   return noopClassDecorator;
@@ -166,24 +174,123 @@ export function join<TTable>(
 }
 
 /**
- * Names the `alias.field` a projection column reads, or computes it with a
- * SQL function the migrations own. A function column has the field's
- * declared type and nullability; the function must honor them.
+ * On a table's field, names the column it is stored in, which a to-one
+ * relation's foreign key is itself (`@column("categoryId")`), in place of
+ * the field's name in snake case (D85): a SQL identifier, quoted wherever
+ * it must be. On a projection column, names the `alias.field` it reads
+ * instead, or computes it with a SQL function the migrations own; a
+ * function column has the field's declared type and nullability, which the
+ * function must honor.
  */
-export function column(_source: string | ProjectionFunctionCall): PropertyDecorator {
+export function column(_nameOrSource: string | ProjectionFunctionCall): PropertyDecorator {
   return noopPropertyDecorator;
 }
 
-export interface IndexOptions {
-  readonly unique?: boolean;
-  readonly name?: string;
+/**
+ * Names the table a DB type is stored in, in place of its name in snake
+ * case (D85), as when the schema adopts a database that names its tables
+ * otherwise: `@table("lineItem")`. A SQL identifier, quoted wherever it
+ * must be.
+ */
+export function table(_name: string): ClassDecorator {
+  return noopClassDecorator;
 }
 
-/** An index over the listed fields, unique when asked; the engine keeps it too. */
+/**
+ * An index's access method. `hnsw` and `ivfflat` index an `Embedding.Vector`
+ * column with `dimensions`, and name the metric its nearest-neighbour
+ * queries order by in `ops`: `vector_cosine_ops`, `vector_l2_ops` or
+ * `vector_ip_ops`.
+ */
+export type IndexMethod = "btree" | "gin" | "gist" | "brin" | "hnsw" | "ivfflat";
+
+export interface IndexOptions {
+  readonly unique?: boolean;
+  /** A purpose name: the index is `idx_<table>_<name>`, or `uq_` when unique. */
+  readonly name?: string;
+  /**
+   * The access method. Unset picks one from the columns' types: GIST for
+   * ltree and geometric types, GIN for JSONB, arrays and tsvector, else
+   * BTREE.
+   */
+  readonly method?: IndexMethod;
+  /**
+   * The operator class every key is indexed with, such as `gin_trgm_ops`; on
+   * a vector index, the metric's: `vector_cosine_ops`, `vector_l2_ops` or
+   * `vector_ip_ops`.
+   */
+  readonly ops?: string;
+  /** Makes the index partial: a raw SQL predicate over the table's columns, without WHERE. */
+  readonly where?: string;
+  /**
+   * Indexes a raw SQL expression over the table's columns, such as
+   * `lower(email)`, instead of the keys' columns. The keys name the fields it
+   * reads, and the index's default name.
+   */
+  readonly expression?: string;
+  /**
+   * How a migration plan builds the index on a table that holds data: true,
+   * the default, builds it concurrently, outside a transaction; false builds
+   * it inside the step's transaction, which blocks writes while it builds.
+   */
+  readonly concurrently?: boolean;
+  /**
+   * An `hnsw` index's links per vector, pgvector's `m`: more find closer
+   * neighbours and cost memory and build time. From 2 to 100; 16 unless set.
+   */
+  readonly m?: number;
+  /**
+   * An `hnsw` index's candidates per vector while it builds, pgvector's
+   * `ef_construction`: at least twice `m`, up to 1000; 64 unless set.
+   */
+  readonly efConstruction?: number;
+  /** An `ivfflat` index's lists, pgvector's `lists`: from 1 to 32768; 100 unless set. */
+  readonly lists?: number;
+}
+
+/**
+ * An index over the listed fields, unique when asked. The engine keeps an
+ * engine type's index too, over its fields alone: method, ops, where,
+ * expression and concurrently are for tables.
+ */
 export function index<T>(
   _keys: readonly (keyof T)[],
   _uniqueOrOptions?: boolean | IndexOptions,
 ): ClassDecorator {
+  return noopClassDecorator;
+}
+
+/** The options of a piece of raw SQL a DB service runs (@rawSql). */
+export interface RawSqlOptions {
+  /** Names the piece in the migration model: a lowercase identifier, unique in the service. */
+  readonly id: string;
+  /**
+   * The SQL: one or more statements separated by semicolons. A plan runs the
+   * piece again when it changes, so each statement must be able to run again
+   * over what it made: CREATE OR REPLACE, CREATE ... IF NOT EXISTS,
+   * DROP ... IF EXISTS, REFRESH, COMMENT ON, GRANT, REVOKE,
+   * INSERT ... ON CONFLICT, or a DO block.
+   */
+  readonly up: string;
+  /** The SQL a plan runs when the piece is no longer declared, under the same rules. */
+  readonly down?: string;
+  /**
+   * Where the piece runs: `"tables"`, after the tables and before the
+   * indexes; `"indexes"`, the default, after every object the schema
+   * declares; or another piece's id, right after that piece.
+   */
+  readonly after?: "tables" | "indexes" | (string & {});
+  /** The dialects it runs on; unset is every dialect the service is built for. */
+  readonly dialects?: readonly ("postgres" | "sqlite")[];
+}
+
+/**
+ * Raw SQL the DB service runs after the objects its schema declares: a
+ * function, a materialized view, an extension. create.sql includes it, and a
+ * migration plan runs it when it is new or changes, and its down when it is
+ * gone. The class it is written on is only where it lives.
+ */
+export function rawSql(_options: RawSqlOptions): ClassDecorator {
   return noopClassDecorator;
 }
 
@@ -222,7 +329,23 @@ export type QueueOptions = {
   readonly lease?: string;
   /** How long a done message stays before a worker removes it, a duration of whole seconds (`"168h"`); `"0s"` removes it when it is done; a week unless set. Dead messages stay. */
   readonly retain?: string;
+  /**
+   * The message's field that keys it, a required scalar or enum field. It takes effect with `onDuplicate`
+   * `"replace"` or `"skip"`, and with `serialize`.
+   */
+  readonly key?: string;
+  /**
+   * What an enqueue does when a ready message holds its key: `"append"` adds another, as a queue without a key
+   * does; `"replace"` overwrites the ready one with the new message, due at once with no attempts; `"skip"`
+   * keeps the ready one and adds none. `"append"` unless set.
+   */
+  readonly onDuplicate?: QueueOnDuplicate;
+  /** Hold the queue to one claim per key at a time: no worker claims a message whose key another claim holds. */
+  readonly serialize?: boolean;
 };
+
+/** What an enqueue does when a ready message holds its key. */
+export type QueueOnDuplicate = "append" | "replace" | "skip";
 
 /**
  * Declares a queue of the DB service whose class is its message
@@ -238,6 +361,141 @@ export type QueueOptions = {
  * ```
  */
 export function queue(_options?: QueueOptions): ClassDecorator {
+  return noopClassDecorator;
+}
+
+/** A write to a table's rows that an `@enqueueOnChange` trigger enqueues on. */
+export type EnqueueWrite = "insert" | "update" | "delete";
+
+/**
+ * A condition the row must meet for the trigger to enqueue: a field that is null, one that is not, or one that
+ * equals a literal (an enum's member, a text, a number or a boolean). The row is the one written, or for a
+ * delete the one deleted.
+ */
+export type EnqueueCondition<TTable = any> =
+  | { readonly field: TableField<TTable>; readonly isNull: true }
+  | { readonly field: TableField<TTable>; readonly notNull: true }
+  | { readonly field: TableField<TTable>; readonly equals: string | number | boolean };
+
+/** A field of the table, by its name: any name unless the table's class is given as a type argument. */
+export type TableField<TTable> = keyof NoInfer<TTable> & string;
+
+/** The options of `@enqueueOnChange`. */
+export interface EnqueueOnChangeOptions<TMessage, TTable = any> {
+  /** The writes that enqueue. */
+  readonly on: readonly EnqueueWrite[];
+  /** The table's fields whose change makes an update enqueue; every update enqueues unless set. */
+  readonly fields?: readonly TableField<TTable>[];
+  /** The conditions the row must meet, all of them. */
+  readonly when?: readonly EnqueueCondition<TTable>[];
+  /** Each field of the message the trigger sets, and the table's field whose value it takes. */
+  readonly message: { readonly [K in keyof TMessage]?: TableField<TTable> };
+  /**
+   * The migration step that creates the trigger on a table that has rows also enqueues one message for each row
+   * that meets `when`, as an insert of it would, under the queue's `onDuplicate`. Without it only writes after the
+   * trigger exists enqueue; `superschematic stack queue backfill` enqueues for the rows already there. Needs an
+   * insert or an update among `on`.
+   */
+  readonly backfill?: boolean;
+}
+
+/**
+ * Enqueues a message of a queue of the DB service after a write to the table's rows, whatever wrote it: a
+ * trigger of the database runs in the writer's transaction, so the message commits with the write. Under the
+ * queue's `onDuplicate`, repeated writes keep one ready message per key:
+ *
+ * ```ts
+ * @enqueueOnChange(EmbedLineItem, {
+ *   on: ["insert", "update"],
+ *   fields: ["category"],
+ *   when: [{ field: "category", notNull: true }],
+ *   message: { lineItemId: "id" },
+ * })
+ * export abstract class LineItem { ... }
+ * ```
+ */
+export function enqueueOnChange<TMessage, TTable = any>(
+  _queue: abstract new (...args: never[]) => TMessage,
+  _options: EnqueueOnChangeOptions<TMessage, TTable>,
+): ClassDecorator {
+  return noopClassDecorator;
+}
+
+/** The fields of a type, as a query's options name its params' and row's fields. */
+export type QueryField<T> = Extract<keyof T, string>;
+
+/** A query's safe dynamic sort (@query's orderBy). */
+export interface QueryOrderBy<TParams> {
+  /** The parameter that picks the order: an enum field of the params, written in the SQL as :param where ORDER BY's terms go. */
+  readonly param: QueryField<TParams>;
+  /** Each value of the enum and its fixed ORDER BY fragment, such as `li."date" DESC, li.id DESC`. No caller text reaches the SQL. */
+  readonly options: Readonly<Record<string, string>>;
+  /** The option a null param picks; required when the param may be null. */
+  readonly default?: string;
+}
+
+/** A query's keyset paging (@query's page), as findPage pages a table (D60). */
+export interface QueryPage<TRow> {
+  /** The row fields the rows are ordered and paged by, which together tell every row apart: ["date", "id"]. */
+  readonly key: readonly QueryField<TRow>[];
+  /** Orders by the key descending. */
+  readonly desc?: boolean;
+}
+
+/** The options of a declared query (@query). */
+export interface QueryOptions<TParams, TRow> {
+  /** The query's function in the ORMs, orm.queries.<name>: a lower camel case identifier; the class's name, lower camel case, unless set. */
+  readonly name?: string;
+  /**
+   * One SQL statement, each parameter a params field written :field. Every
+   * field of the params is used and every :name is a field; a :: cast and a
+   * string literal are not parameters. Each result column is a row field,
+   * by the field's column name (snake case unless @column names it). A
+   * template literal may interpolate string constants, a const declared
+   * with a string or with such a template, in this file or one it imports,
+   * so queries share a filter: `${DASHBOARD_FILTER} GROUP BY 1`.
+   */
+  readonly sql: string;
+  /** Row fields the query vouches are never null, which Postgres cannot tell (an aggregate, a computed column); a `-- @notNull field` comment says the same. */
+  readonly notNull?: readonly QueryField<TRow>[];
+  /** An enum parameter that picks one of fixed ORDER BY fragments. */
+  readonly orderBy?: QueryOrderBy<TParams>;
+  /** Reads the rows a page at a time by a keyset of row fields. */
+  readonly page?: QueryPage<TRow>;
+  /**
+   * What a call answers: "many", the rows, unless set; "one", the one row,
+   * which fails when the statement reads none (NotFoundError, ErrNotFound)
+   * or more than one (TooManyRowsError, ErrTooManyRows); "optional", the
+   * row or null, which fails when it reads more than one. A statement whose
+   * top level groups, is a UNION, or reads a set-returning function may
+   * return more than one row, so neither takes it unless it ends LIMIT 1.
+   */
+  readonly returns?: "many" | "one" | "optional";
+  /** The dialects it runs on; unset is every dialect the service is built for. */
+  readonly dialects?: readonly ("postgres" | "sqlite")[];
+}
+
+/**
+ * A named SQL statement of the DB service, checked against the database
+ * model and generated as a typed function of both ORMs (D86):
+ * `orm.queries.<name>(params)` in TypeScript, `Queries.<Name>(ctx, params)`
+ * in Go. TParams and TRow are types of the schema, a class or an object
+ * type alias each, which are no tables. `superschematic queries verify`
+ * prepares the statement on Postgres and records what it described in the
+ * service's queries.lock.
+ *
+ * ```ts
+ * @query<CategoryTotalsParams, CategoryTotalsRow>({
+ *   name: "categoryTotals",
+ *   sql: `SELECT c.id AS category_id, SUM(li.amount)::bigint AS spent
+ *         FROM line_item li JOIN category c ON c.id = li.category_id
+ *         WHERE li."date" BETWEEN :start AND :end GROUP BY 1`,
+ *   notNull: ["spent"],
+ * })
+ * export abstract class CategoryTotals {}
+ * ```
+ */
+export function query<TParams, TRow>(_options: QueryOptions<TParams, TRow>): ClassDecorator {
   return noopClassDecorator;
 }
 

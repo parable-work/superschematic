@@ -9,6 +9,9 @@ holds and the SDKs' retry rule (D15, amended; D37):
   refreshes.
 - The calling service's token goes in Service-Authorization (or the
   headers its config names) on every request.
+- The subject the caller acts for (D77) goes in Acting-For: the call's
+  `actingFor`, else the client's; a call's null sends none. The engine's
+  mount honors it only when the host opts in, and ignores it otherwise.
 - A 401 whose problem code is `service_unauthorized` asks the service
   source for a fresh token once and retries; the end-user refresh cannot
   help, so it does not run. Any other 401 runs the end-user refresh once,
@@ -58,6 +61,12 @@ export interface CallOptions {
   readonly signal?: AbortSignal;
   /** Forward this end user instead of the client's own credentials (D37). */
   readonly forward?: ForwardedUser;
+  /**
+   * The subject the caller acts for (D77), sent as the Acting-For header in
+   * place of the client's; null sends none. A mount that does not honor
+   * the header answers as if it were not there.
+   */
+  readonly actingFor?: string | null;
 }
 
 export interface TransportOptions {
@@ -67,6 +76,8 @@ export interface TransportOptions {
   readonly fetch?: FetchLike;
   readonly timeoutMs?: number;
   readonly headers?: Readonly<Record<string, string>>;
+  /** The subject every call acts for (D77) unless it names another, sent as Acting-For. */
+  readonly actingFor?: string;
 }
 
 /** One request: the path below the base URL, already encoded. */
@@ -90,6 +101,9 @@ export const DEFAULT_TIMEOUT_MS = 30_000;
 /** The header a service credential travels in by default (D37). */
 export const SERVICE_AUTHORIZATION_HEADER = 'Service-Authorization';
 
+/** The header that names the subject a caller acts for (D77). */
+export const ACTING_FOR_HEADER = 'Acting-For';
+
 interface Attempt {
   readonly userRefreshed: boolean;
   readonly serviceRetried: boolean;
@@ -105,6 +119,7 @@ export class Transport {
   private readonly fetchImpl: FetchLike;
   private readonly timeoutMs: number;
   private readonly headers: Readonly<Record<string, string>>;
+  private readonly actingFor: string | undefined;
   private token: string | undefined;
   private refreshing: Promise<string> | undefined;
 
@@ -126,6 +141,10 @@ export class Transport {
     this.fetchImpl = fetchImpl;
     this.timeoutMs = timeoutMs;
     this.headers = options.headers ?? {};
+    if (options.actingFor !== undefined && (typeof options.actingFor !== 'string' || options.actingFor.trim() === '')) {
+      throw new TypeError(`EngineClient: actingFor is the subject the caller acts for, got ${String(options.actingFor)}`);
+    }
+    this.actingFor = options.actingFor;
     this.token = options.auth?.token;
   }
 
@@ -144,6 +163,11 @@ export class Transport {
    */
   async stream(spec: RequestSpec): Promise<Response> {
     return (await this.attempt({ ...spec, stream: true }, FIRST_ATTEMPT)).response;
+  }
+
+  /** empty sends a request whose success has no body (204), and answers its response. */
+  async empty(spec: RequestSpec): Promise<Response> {
+    return (await this.attempt({ ...spec, stream: false }, FIRST_ATTEMPT)).response;
   }
 
   /** json sends a request and unwraps the success envelope's `data`. */
@@ -166,6 +190,10 @@ export class Transport {
     headers.set('accept', spec.accept ?? 'application/json');
     for (const [name, value] of Object.entries(spec.headers ?? {})) {
       headers.set(name, value);
+    }
+    const actingFor = spec.options?.actingFor === undefined ? this.actingFor : spec.options.actingFor;
+    if (actingFor !== undefined && actingFor !== null) {
+      headers.set(ACTING_FOR_HEADER, actingFor);
     }
     let body: string | undefined;
     if (spec.body !== undefined) {

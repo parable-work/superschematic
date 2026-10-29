@@ -1,6 +1,6 @@
 ---
 title: MCP tools
-description: The @mcp and @icon decorators on operations, a tool's invocation policy, the tool documents the SDK generators write from them, and how an extension adds its rules, vendor keys and policy.
+description: The @mcp and @icon decorators on operations, a tool's invocation policy, the tool documents the SDK generators write from them, the MCP endpoint a TypeScript API serves them at, and how an extension adds its rules, vendor keys and policy.
 sidebar:
   order: 4
 ---
@@ -87,10 +87,13 @@ them. `mcp` on a data field is an error. The record's `name`,
 
 A visible tool's invocation policy says whether an MCP client should run
 the tool as soon as a model calls it (`"auto"`) or ask the person first
-(`"ask"`). It is a default for the client: a client or its user may
-override it. The core's key is `invocationPolicy`; a visible tool that
-omits it gets `"auto"` when it loads, from any authoring form, so the IR
-always carries it. A hidden operation has none.
+(`"ask"`). In the tool documents it is a default for the client: a client
+or its user may override it. An API's own MCP endpoint enforces `"ask"`:
+it runs such a tool only once the person confirms the call
+([Confirming a tool that asks](#confirming-a-tool-that-asks)). The core's
+key is `invocationPolicy`; a visible tool that omits it gets `"auto"` when
+it loads, from any authoring form, so the IR always carries it. A hidden
+operation has none.
 
 | Where | Position | Hidden or unclassified operation |
 | --- | --- | --- |
@@ -135,8 +138,12 @@ When the `api` generator builds an API it resolves each operation's record:
 a visible tool gets `name` from the `@docs` title, `description` from the
 `@docs` description and `icon: { name }` from `@icon`, and keeps its
 invocation policy, or gets the policy's default when IR that did not come
-through the loader has none; a hidden record keeps its reason. The schema's
-own record is not changed. A policy under another key, or with a value the
+through the loader has none; a hidden record keeps its reason. An
+operation whose result is a `FileDownload`
+([Downloads](/superschematic/guides/api-routes/#downloads)) and that
+declares no `@mcp` gets a hidden record, `It answers a file, which is no
+tool result.`, as the user model's password operations get one; the loader
+refuses a visible `@mcp` on it. The schema's own record is not changed. A policy under another key, or with a value the
 policy does not allow, fails the build, also when a tool hook left it. It
 then fails the build when two visible tools of the API:
 
@@ -207,7 +214,7 @@ reference's `options` names its tool so), `operationId`, `title`, `mcp`
   operation's comment, with ` (Requires authentication)` appended when the
   route requires it.
 - `bindingStatus` is `ready`, or `unsupported_multipart` for an operation
-  with a file upload.
+  with a file upload, a `FileUpload` field or a field of an upload scalar.
 - `parameters` is one closed JSON Schema object (`additionalProperties:
   false`) over the path parameters, the query parameters, the input type's
   fields or the scalar arguments, and `publicEncryptionKey` for an
@@ -368,6 +375,226 @@ expected revision a number. Otherwise the build fails:
 operation OrderOpenReturnHandler replay contract: idempotency pointer "/pickup/postalCode": segment "postalCode" is optional
 ```
 
+## An API's MCP endpoint
+
+A TypeScript API serves its visible tools over MCP when its config turns
+on `outputs.api.mcp` (D81):
+
+```ts
+outputs: {
+  types: { [TargetLanguage.TypeScript]: { enabled: true } },
+  api: { enabled: true, language: "TYPESCRIPT", mcp: true }
+}
+```
+
+The API package then has `mcp.ts`, the tool table, and `buildRouter`
+serves it at `POST /api/mcp`. The table is built from the tool documents
+above, whether or not the config enables an SDK: one tool per operation
+whose `@mcp` is visible, as the engine lists its tools.
+
+| `tools/list` member | From |
+| --- | --- |
+| `name` | the `@mcp` handle |
+| `title`, `description` | the `@docs` title and description |
+| `inputSchema` | the tool's `parameters` in `tools/schema.json` |
+| `annotations.readOnlyHint` | `true` when the `@docs` replay mode is `read_only` |
+| `_meta` | the declared `_meta`, the guidance under `superschematic/operation-guidance`, and the invocation policy under its key |
+
+A hidden or unclassified operation is no tool: it is not listed, and a
+call of it is the invalid-params error of a tool the API does not have.
+Nor is a `@requireService` operation, as in the documents. A tool whose
+operation uploads a file (`unsupported_multipart`), or whose payload is
+encrypted, is left out too, since a call's arguments cannot carry a file
+and only the SDK seals a payload; `mcp.ts` names each one it leaves out,
+and the load warns of each, whether or not `mcp` is on, so `check` and
+`build` say so:
+
+```
+warning: LineItems.importStatement: the visible @mcp tool import_statement uploads a file (ImportStatementInput.statement), which tool arguments cannot carry, so an API's MCP endpoint leaves it out of tools/list and invokeTool refuses it; declare @mcp({ hidden: true, reason }) to leave it out on purpose
+```
+
+A build that routes an operation at `/api/mcp` with `mcp` on is refused,
+naming the operation.
+
+The endpoint speaks the engine's transport, MCP's streamable HTTP,
+statelessly (`runtime/http/typescript/src/mcp.ts`, a copy of the engine's
+`api/mcp.rs`): on the 2025 revisions `initialize`, `ping`, `tools/list` and
+`tools/call`, alone or in a batch, each request answered as one `message`
+event of a `text/event-stream` body and a notification with 202; on
+2026-07-28, `server/discover`, `ping`, `tools/list` and `tools/call`, each
+answered as one JSON body; `GET` and `DELETE` answer 405. The runtime's
+tests replay the engine's MCP corpus (`runtime/engine/testdata/http/mcp.json`)
+through it.
+
+The endpoint authenticates as the API's other routes do: the identity
+service of the user model, or the router's `authenticate`, from a
+`Bearer` session or a cookie. It needs a caller when a route of the API
+does, so without a session it answers 401 with the problem document; an
+API whose routes are all public serves it to anyone. Each caller's list
+holds the tools whose routes it may call: a tool whose operation needs a
+permission the caller lacks is not listed, and a call of it is the
+invalid-params error.
+
+`tools/call` runs in process through the router, as a request to the
+route of the tool's operation that carries the endpoint request's
+headers (its `Authorization`, cookie, `Service-Authorization` and
+forwarded addresses) and its request id. Each argument goes where the
+route reads it: a path argument into the path, a query argument into the
+query string (a list as repeated keys), and an input type's fields or the
+body arguments into the JSON body, as `tools/mcp-binding.json` binds them.
+So the route's rate limit, body limit, permission check, validation and
+timeout apply to the call as to a request:
+
+- a result is the envelope's `data`, as text and, for an object, as
+  `structuredContent`; a body that is not JSON, which a
+  `@manualRouteRegistration` handler may answer, is its text, or an
+  embedded resource for one that is not text;
+- a refusal is a tool error (`isError`) whose `structuredContent` is the
+  problem document the route answered, its `requestId` the endpoint
+  request's;
+- an argument the tool does not take is a tool error with a 400 problem,
+  `get_order takes id, not "extra"`, and a tool the API does not offer
+  the caller is the JSON-RPC error `-32602`,
+  `fixture-mcp has no tool "delete_order"`.
+
+A tool whose `@mcp` says `invocationPolicy: "ask"` reads
+`"invocationPolicy": "ask"` in its `_meta`, as on the engine's endpoint,
+and the endpoint runs it only once the person confirms the call (below).
+
+`initialize` names the server after the API, at the version its OpenAPI
+document states (`openAPIVersion`, `1.0.0` unless set). The router's
+`mcp` option sets the rest:
+
+| `RouterOptions.mcp` | What it sets |
+| --- | --- |
+| `serverInfo` | the `{ name, version }` `initialize` reports |
+| `instructions` | the instructions `initialize` gives the client |
+| `rateLimitPerMinute`, `timeoutSeconds` | the endpoint's own rate limit and timeout; each call keeps its route's |
+| `confirmationKey` | the key the endpoint signs its confirmations with: required when a tool asks, at least 32 bytes, the same on every replica; the generated entrypoint passes the secret `outputs.api.mcpConfirmationKey` names |
+| `confirmationTtlSeconds` | how long a confirmation is good for, 600 unless set |
+| `confirmationStore` | where a confirmation is claimed so it redeems once: an `McpConfirmationStore`, in process memory unless given |
+
+### Confirming a tool that asks
+
+A tool whose policy is `"ask"` runs only once the person confirms the
+call; until then a call runs nothing. Which path a client gets depends on
+the revision it speaks and what it says it can do:
+
+| Client | What the first call answers | What runs the call |
+| --- | --- | --- |
+| 2026-07-28, its envelope's `clientCapabilities` elicit forms (`elicitation: {}` or `elicitation: { form: {} }`) | `resultType: "input_required"`, with one input request, `confirm`, an `elicitation/create` whose `message` is the call's summary and whose `requestedSchema` asks for nothing, and a `requestState` | the client's retry of the call with `inputResponses.confirm` `{ action: "accept" }` and the `requestState` echoed |
+| any other: a 2025 revision, or 2026-07-28 without form elicitation | a tool error, `428 confirmation_required`, whose `details` hold `summary`, `confirmationToken` and `expiresAt` | the same call with `confirmationToken` added to its arguments |
+
+Only a call that would run is confirmed. Before the endpoint answers
+either, and before it redeems a token or a `requestState`, it checks the
+call through the route of the tool's operation, as far as the
+implementation: the arguments, decoded and validated as the route decodes
+them, and the route's body limit, service clause, authentication and
+permission check. A call they refuse answers the route's problem at once,
+as a tool error, and no one is asked: an argument the tool does not take
+is `400 bad_request`, `update_order takes id, revision, note, not "input"`,
+a value the route refuses is its 400, a body over the route's limit its
+413, and a caller the route refuses its 401 or 403. A confirmation sent
+with such a call, as a token or as a `requestState` with any answer, is
+not used up, so it still runs the call it was given for.
+
+What the check cannot see runs once the call is confirmed, and a refusal
+there uses the confirmation up: the route's rate limit, which counts the
+calls that run, so a call asked about, confirmed and run takes one token;
+the implementation's own checks, such as whether the caller owns the row
+(`@requireOwnership` only needs a caller), whether it exists, or whether
+its revision still matches; a `@manualRouteRegistration` handler's reading
+of the request; and anything that changes in between, such as a session
+signed out. A tool the caller's permissions do not cover is not in its
+list, and a call of it is the invalid-params error before anything else,
+as above.
+
+The official SDK's client answers an `input_required` result itself: it
+asks the person through its elicitation handler and retries. A client
+that declined (`decline`) or dismissed (`cancel`) the request gets a tool
+error, `403 confirmation_declined`, and nothing runs. The two-step token is
+for a client that cannot ask the person: its model reads the summary,
+shows the person the call, and calls again with the token once they
+confirm, and a client that applies the `ask` in `_meta` asks the person
+before that second call too.
+
+A 2025 client gets the token even when it declared elicitation at
+`initialize`. A 2025 server asks a client mid-call by sending it a
+request on the call's event stream, and the client posts its answer as a
+new request. The endpoint is stateless, as the engine's is: it keeps no
+session, so it neither remembers the capabilities `initialize` declared
+nor finds the call that waits for an answer, which may be on another
+replica or Worker isolate. 2026-07-28 carries the request and the answer
+in the call itself, so the endpoint asks there.
+
+`tools/list` lists the `confirmationToken` argument in the input schema of
+each tool that asks, optional, so a client that checks arguments sends it.
+A tool that asks may not take an argument of that name; the build refuses
+one.
+
+The summary is the tool's title and handle and its arguments as JSON with
+sorted keys: `Update an order (update_order) with {"id":"…","note":null,"revision":2}`.
+Arguments past 2,000 characters are counted, not shown. A
+confirmation, the `requestState` and the token alike, is
+`v1.<mode>.<expires>.<nonce>.<binding>.<mac>`:
+
+- it binds the API, the tool, the caller (the principal's subject and the
+  calling service the auth gate established) and the exact arguments, as
+  canonical JSON, so it confirms no other call;
+- it expires, ten minutes after it was minted unless
+  `confirmationTtlSeconds` says;
+- it is claimed once, by its nonce, in the `confirmationStore`;
+- it is an HMAC-SHA-256 under the confirmation key, so no one without the
+  key makes one or changes one;
+- one path's confirmation does not redeem on the other, so a
+  `requestState` sent as a token runs nothing the person was not asked
+  about.
+
+A confirmation that does not redeem asks again, saying why: `invalid`,
+`expired`, `mismatch` (another call, caller or path) or `used`, in the
+token's `details.refused` and at the start of its `detail`, or at the
+start of the next elicitation's message.
+
+The key is an `@envVars` `Secret<string>` the API's config names, by the
+type that declares the field and the field's name, as a stack names the
+secret and `outputs.sql.encryption.key` names a database's:
+
+```ts
+// schema.config.ts of finances-api
+api: { enabled: true, language: "TYPESCRIPT", mcp: true, mcpConfirmationKey: "McpKeys.MCP_CONFIRMATION_KEY" }
+
+// finances-api.schema.ts, or a General service whose class the API's extends
+@envVars
+export abstract class McpKeys {
+  MCP_CONFIRMATION_KEY: Secret<string>;
+}
+```
+
+The API's `@envVars` class holds the field, its own or one it extends, so
+the stack binds the one secret to every deployable of the API and each
+server's generated entrypoint builds the router with it:
+`buildRouter(implementations, { mcp: { confirmationKey: config.MCP_CONFIRMATION_KEY } })`.
+Set it per environment to a random value of at least 32 bytes, with
+`stack secrets set`; every replica reads the same value, so a token one
+replica minted redeems on another. The build refuses an API whose
+endpoint serves a tool that asks and whose config names no key, or whose
+`@envVars` lacks the field, saying where the class goes; `mcpConfirmationKey`
+without `mcp` fails the config.
+
+The claim that makes a confirmation single-use is kept in process by
+default, so with several replicas a token redeems once on each until it
+expires. A deployment that needs it once across them passes a
+`confirmationStore` its replicas share, whose `claim(id, ttlMs, now)` sets
+the id unless it is set (Redis's `SET NX PX`, say).
+
+The APIs of one server share its paths, so a server serves one API with
+`mcp` on, and the stack's build refuses a second:
+`stack shop-stack: server Web serves shop-api and shop-admin, which both turn on outputs.api.mcp, and one server answers POST /api/mcp for one API; serve them from two servers, or turn mcp off in one (D81)`.
+
+The Go and Rust servers serve no MCP endpoint yet. Their config fails to
+load with `mcp` on:
+`outputs.api.mcp is on and the API's language is GO: a TypeScript API serves the MCP endpoint; Go and Rust follow; set outputs.api.language to TYPESCRIPT, or remove mcp (D81)`.
+
 ## The engine
 
 `@superschematic/engine` runs schemas with no generated code (D16) and
@@ -386,6 +613,23 @@ and instance operation tools also take `preconditions`, by behavior
 name, and where one takes create parameters, as `Links` and
 `Dependencies` do, the create tool takes `behaviors`
 ([Engine behaviors](/superschematic/guides/engine-behaviors/#create-parameters)).
+A behavior's namespace operation (`scope: "namespace"`), which runs
+across every schema of the namespace that composes the behavior, has one
+tool, named after the behavior (`comments.inbox`, handle
+`comments_inbox`; `comments.searchMessages`, handle
+`comments_search_messages`), that takes `params` alone; the access policy's
+question for it, which names the behavior and no schema, with
+`listing: true`, hides it from a caller it refuses
+([Engine behaviors](/superschematic/guides/engine-behaviors/#namespace-operations)).
+The endpoint honors the `Acting-For` header, the subject an agent calls
+for, only when the host mounts it with `actingFor` as it does the HTTP
+API; then every call of the request acts for that subject, and the
+events it writes record it as `for`
+([The engine](/superschematic/guides/engine/#callers-and-the-access-policy)).
+Its `hiddenBy` names the same causes as a schema's tool (below):
+`deployment` when `tools.hidden` names it, `archived` for one that writes
+in an archived namespace, `policy` when that question refuses the caller,
+`handle` when its handle collides or is refused, and `filter`.
 Three more list, describe and define
 schemas, and none publishes; two list the behaviors the engine runs and
 describe one by name (`list_behaviors`, `describe_behavior`), which every
@@ -475,6 +719,32 @@ same tools with the same policies over one commerce database
 (`TestCommerceServersAnswerOneScriptAlike`), and
 [selling and booking](/superschematic/guides/commerce/#mcp-tools-and-agents)
 says why each of these operations asks.
+
+The engine's hidden record adds `hiddenBy` after `hiddenReason`, which
+the generators' `tools/schema.json` does not write: each cause the
+engine found, in this order, and `hiddenReason` is the first one's.
+
+| `hiddenBy` | The engine hides the tool because |
+| --- | --- |
+| `deployment` | `tools.hidden` names its operation; the policy is not asked |
+| `archived` | it writes in an archived namespace; an operation that asks read (`markRead`, `follow`) writes only the caller's own state and is not hidden |
+| `policy` | the access policy refuses the caller what its call asks |
+| `handle` | `@mcp` would refuse its handle: not snake case, longer than 48 characters, an engine tool's, or another tool's too; the policy is asked all the same, since the API still offers the operation |
+| `filter` | the mount's `tools` filter leaves it out; asked only of a tool nothing else hides |
+
+```json
+"mcp": {
+  "hidden": true,
+  "hiddenReason": "the access policy refuses reader write on SupplierContractAmendmentRequest (withdrawSignOff)",
+  "hiddenBy": ["policy", "handle"]
+}
+```
+
+A tool hidden by `deployment` and `handle` keeps the deployment's reason.
+A client that shows the engine's operations outside MCP, as the Topcoat
+console does, offers one hidden by `handle` (or `filter`) alone, drops
+one hidden by `deployment`, and refuses any other.
+
 Its argument schemas are the generators':
 `runtime/engine/testdata/tool_parameters_parity.json` holds them to
 `toolsutil`. A create's `data` and an update's `patch` also carry, under
@@ -532,18 +802,23 @@ A distribution's own invocation policy is
 | Field | Core default | Rule |
 | --- | --- | --- |
 | `Extension` | | the registering extension; required |
-| `Key` | `invocationPolicy` | a letter, then letters, digits or underscores; not a key `@mcp` already uses (`handle`, `hidden`, `hiddenReason`, `reason`, `_meta`, `name`, `description`, `icon`) |
+| `Key` | `invocationPolicy` | a letter, then letters, digits or underscores; not a key `@mcp` already uses (`handle`, `hidden`, `hiddenReason`, `reason`, `_meta`, `name`, `description`, `icon`), nor `hiddenBy`, which the engine's hidden record uses |
 | `Values` | `auto`, `ask` | at least one; lowercase letters, digits, `_` and `-`, starting with a letter; each once; in the order `tools/index.ts` lists them |
 | `Default` | `auto` | one of `Values` |
+| `Confirm` | `ask` | the values whose tools an API's MCP endpoint runs only once the person confirms the call, each one of `Values`, once; empty confirms every value but `Default` |
 
 A registry holds one policy: a second registration fails assembly and
 names both extensions. With it registered, `@mcp` and the data forms take
 its key and not the core's, a visible tool without the key gets its
-default, and the IR and every tool document write its key where the core
-writes `invocationPolicy`. The position of every line is the same, so a
-distribution that already writes a policy under its own key keeps its
-bytes. A tool hook may change a tool's value to another value of the
-policy.
+default, the IR and every tool document write its key where the core
+writes `invocationPolicy`, and an API's MCP endpoint confirms the tools
+whose value `Confirm` lists. A policy that lists none confirms every value
+but its default, the exception an author opts into, so a distribution
+whose policy predates `Confirm` asks before more calls rather than fewer;
+one whose values mean otherwise lists them. The position of every line is
+the same, so a distribution that already writes a policy under its own
+key keeps its bytes. A tool hook may change a tool's value to another
+value of the policy.
 
 The TypeScript loader type-checks schema files, so the key must
 type-check too. `@superschematic/api` exports `MCPToolOptions`, the
@@ -569,5 +844,5 @@ as an unknown key.
 every operation of acme's shop API; its hook writes `x-acme-scalar`,
 `acme/operation-guidance` and `x-acme-arguments: 1` and gives every tool
 icon acme's family and style; and it registers `confirm`, `"never"` or
-`"always"`, `"never"` by default, with the augmentation in
-`packages/schema/src/mcp.ts`.
+`"always"`, `"never"` by default, `"always"` confirmed, with the
+augmentation in `packages/schema/src/mcp.ts`.

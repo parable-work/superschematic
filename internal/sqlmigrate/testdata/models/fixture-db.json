@@ -20,6 +20,16 @@
   "service": "fixture-db",
   "tables": [
     {
+      "checks": [
+        {
+          "column": "status",
+          "in": [
+            "active",
+            "suspended"
+          ],
+          "name": "ck_tenant_status"
+        }
+      ],
       "columns": [
         {
           "default": "CURRENT_TIMESTAMP",
@@ -55,16 +65,19 @@
           "type": "TEXT"
         },
         {
+          "default": "'active'",
           "name": "status",
           "origin": "Tenant.status",
           "type": "TEXT"
         },
         {
+          "default": "true",
           "name": "is_active",
           "origin": "Tenant.isActive",
           "type": "BOOLEAN"
         },
         {
+          "default": "5",
           "name": "seat_count",
           "origin": "Tenant.seatCount",
           "type": "DOUBLE PRECISION"

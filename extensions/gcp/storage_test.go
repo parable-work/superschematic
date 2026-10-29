@@ -84,7 +84,15 @@ func TestBucketRefusals(t *testing.T) {
 	t.Run("a long name", func(t *testing.T) {
 		s := shop()
 		s.Name = "TheShopStackOfTheAcmeCompanyStorefront"
-		refused(t, s, stack.CodeLowering, "the bucket name of shop-media")
+		env, err := stack.Resolve(reg, stack.Input{Stack: s, Services: stacktest.AcmeShop(), Environment: "Staging"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		bucket := node(t, env, "shop-media.bucket").Properties
+		if name, _ := bucket["name"].(string); len(name) > 63 || !strings.HasPrefix(name, "acme-staging-the-shop-stack-") {
+			t.Errorf("the bucket is named %v, want a prefix and a hash in 63 characters (D97)", bucket["name"])
+		}
+		wantJSON(t, "the bucket's labels", bucket["labels"], `{"superschematic-deployable":"shop-media"}`)
 	})
 	t.Run("google", func(t *testing.T) {
 		s := shop()

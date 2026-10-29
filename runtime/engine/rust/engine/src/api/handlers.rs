@@ -19,6 +19,7 @@ use crate::events::{EventsAfter, ReadEvents};
 use crate::instances::{CreateOptions, GetOptions, ListOptions, WriteOptions};
 use crate::principal::Principal;
 use crate::registry::{DefineOptions, SchemaTarget};
+use crate::signals::SendSignal;
 use crate::tools::{encode_component, schema_view, ToolTarget};
 use crate::Engine;
 
@@ -126,7 +127,7 @@ fn flag_param(param: Option<Param>) -> bool {
     matches!(param, Some(Param::Flag(true)))
 }
 
-/// Serves one of the 26 routes.
+/// Serves one of the 27 routes.
 pub(crate) fn serve(
     engine: &Engine,
     options: &ApiOptions,
@@ -525,6 +526,57 @@ pub(crate) fn serve(
                     .map_err(failed)?,
             ))
         }
+        "invokeNamespaceOperation" => {
+            let input = json_body(request)?;
+            if input.is_some() {
+                media_type(request, matched, JSON_MEDIA_TYPE)?;
+            }
+            let params = input.unwrap_or_else(|| Value::Object(Map::new()));
+            Ok(ok(
+                request,
+                engine
+                    .behaviors()
+                    .invoke(
+                        principal,
+                        &crate::behaviors::NamespaceCall {
+                            namespace: ns,
+                            behavior: matched.param("behavior"),
+                            operation: matched.param("operation"),
+                            params: Some(&params),
+                        },
+                    )
+                    .map_err(failed)?,
+            ))
+        }
+        "sendSignal" => {
+            let input = json_body(request)?;
+            if input.is_some() {
+                media_type(request, matched, JSON_MEDIA_TYPE)?;
+            }
+            let data = input.unwrap_or_else(|| Value::Object(Map::new()));
+            engine
+                .signals()
+                .send(
+                    principal,
+                    &SendSignal {
+                        namespace: ns,
+                        schema: name,
+                        instance_id: matched.param("id"),
+                        behavior: matched.param("behavior"),
+                        name: matched.param("signal"),
+                        data: &data,
+                    },
+                )
+                .map_err(failed)?;
+            Ok(Response {
+                status: 204,
+                headers: vec![
+                    ("cache-control".to_owned(), "no-store".to_owned()),
+                    ("x-request-id".to_owned(), request.request_id.clone()),
+                ],
+                body: super::Body::Empty,
+            })
+        }
         "listTools" => Ok(ok(
             request,
             engine
@@ -608,6 +660,7 @@ fn read_events(
         Some(Param::Flag(beside)) => Some(beside),
         _ => None,
     };
+    let signals = flag_param(query_param(query, "signals", Kind::Boolean, false)?);
     let resume = last_event_id_of(request)?;
     let after = match resume {
         Some(cursor) => Some(EventsAfter::Cursor(cursor)),
@@ -631,7 +684,7 @@ fn read_events(
             .map_err(failed)?;
         return Ok(ok(request, to_json(&page)?));
     }
-    super::stream::open(engine, options, request, principal, &read)
+    super::stream::open(engine, options, request, principal, &read, signals)
 }
 
 /// The cursor a reconnecting EventSource sends; it wins over `after`.

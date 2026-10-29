@@ -12,7 +12,7 @@
 
 module example.com/schemas/server/users-stack/Accounts
 
-go 1.26.4
+go 1.27.3
 
 require (
 	example.com/schemas/api/users-admin v0.0.0-00010101000000-000000000000

@@ -55,7 +55,7 @@ export type DocsConfig = {
   readonly title: string;
   /** The OpenAPI description; it replaces the operation's comment there. */
   readonly description: string;
-  /** Stable dotted identifier, at least two lowercase segments: "orders.returns.create". */
+  /** Stable dotted identifier, at least two segments of lowercase letters, digits and hyphens (never underscores): "orders.returns.create", "finances.line-items.list". */
   readonly capability: string;
   /** deprecated and retired mark the OpenAPI operation deprecated. */
   readonly lifecycle: DocsLifecycle;
@@ -255,19 +255,48 @@ export function source(_target: unknown): ClassDecorator {
  * `login`, true by default, adds login, logout and changePassword; false
  * leaves me and capabilities, for an API whose users sign in through
  * another API of the same authDb. `register`, false by default, adds
- * register, which anyone may call, and needs the login.
+ * register, which anyone may call, and needs the login; the
+ * RegistrationConfig members shape it.
  */
 export type UserSessionsConfig =
   | {
       readonly path?: string;
       readonly login?: true;
-      readonly register?: boolean;
+      readonly register?: false;
     }
+  | ({
+      readonly path?: string;
+      readonly login?: true;
+      readonly register: true;
+    } & RegistrationConfig)
   | {
       readonly path?: string;
       readonly login: false;
       readonly register?: false;
     };
+
+/**
+ * How register admits a user (D81).
+ *
+ * - `registration`: "open", the default, signs the user in. "approval"
+ *   creates them pending: register answers 202 with no session, and login
+ *   refuses them with 403 pending_approval until an administrator calls
+ *   approveUser.
+ * - `defaultRoles`: the roles each new user holds, by name, each created
+ *   with no permissions when no role has the name. Under approval they
+ *   take effect at approval.
+ * - `firstUser`: the registration that finds no role grant, as `identity
+ *   bootstrap` would, makes the database's first administrator, active
+ *   even under approval, holding `role`, created with `permissions` when
+ *   no role has the name, beside the default roles. Two at once make one.
+ *
+ * defaultRoles and firstUser need a UserRole table in the authDb.
+ */
+export type RegistrationConfig = {
+  readonly registration?: 'open' | 'approval';
+  readonly defaultRoles?: readonly string[];
+  readonly firstUser?: { readonly role: string; readonly permissions: readonly string[] };
+};
 
 /** The routes @userAdministration adds. `path` prefixes them, "auth/admin" by default. */
 export type UserAdministrationConfig = {
@@ -409,6 +438,12 @@ export function app(_options?: AppOptions): ClassDecorator {
 
 /** A field of a `@source` view with no column behind it, which the implementation fills in. */
 export const virtual: PropertyDecorator = noopPropertyDecorator;
+/**
+ * A field of a `@source` view that carries the plaintext of its table's
+ * `Encrypted<T>` field (D85). A view leaves such a field out unless it says
+ * so: whatever the view holds, a response sends.
+ */
+export const decrypted: PropertyDecorator = noopPropertyDecorator;
 /** A UI schema renderer hides the field. */
 export const uiHidden: PropertyDecorator = noopPropertyDecorator;
 /**

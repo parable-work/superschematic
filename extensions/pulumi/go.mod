@@ -1,6 +1,6 @@
 module github.com/parable-work/superschematic/extensions/pulumi
 
-go 1.26.4
+go 1.27.3
 
 // The extension builds against the checkout it lives in, as the other
 // modules do (D1). A release requires the core at a tag and drops these.
@@ -18,7 +18,9 @@ replace github.com/parable-work/superschematic/extensions/cloudflare => ../cloud
 
 // replace directives do not propagate across modules, so the core's pins
 // are repeated here. Keep them equal to the root go.mod.
-replace github.com/microsoft/typescript-go => github.com/parable-work/typescript-go v0.0.0-20260701192534-c5de5679073f
+replace github.com/microsoft/typescript-go => github.com/microsoft/TypeScript/tsc v0.0.0-20260708042240-1e4744d68260
+
+replace github.com/microsoft/typescript-go/shim => github.com/parable-work/typescript-shim v0.0.0-20261028220021-9c62d2c703d9
 
 require (
 	github.com/blang/semver v3.5.1+incompatible
@@ -116,6 +118,7 @@ require (
 	github.com/mattn/go-localereader v0.0.1 // indirect
 	github.com/mattn/go-runewidth v0.0.20 // indirect
 	github.com/microsoft/typescript-go v0.0.0 // indirect
+	github.com/microsoft/typescript-go/shim v0.0.0 // indirect
 	github.com/mitchellh/go-ps v1.0.0 // indirect
 	github.com/mitchellh/go-wordwrap v1.0.1 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
@@ -126,7 +129,7 @@ require (
 	github.com/nxadm/tail v1.4.11 // indirect
 	github.com/opentracing/basictracer-go v1.1.0 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
-	github.com/parable-work/superscalar/go v0.0.0-20261021190928-62b300e78ba9 // indirect
+	github.com/parable-work/superscalar/go v0.0.0-20261025233249-5cc6787bc45f // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/pgavlin/fx v0.1.6 // indirect
 	github.com/pgavlin/fx/v2 v2.0.12 // indirect

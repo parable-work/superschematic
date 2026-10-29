@@ -156,7 +156,7 @@ version graph's Go binding links its own. `go/README.md` is its guide.
   `deploy`, `health` and `abi`; `eng_http` serves one request through the
   transport-neutral routes, an event stream a handle that
   `eng_stream_poll` pulls without waiting; `eng_wait` blocks one thread
-  until a commit, for every stream of the engine; `eng_runner` starts,
+  until a commit or a signal (D77), for every stream of the engine; `eng_runner` starts,
   stops and runs the runner. Each returns `ENG_OK`, `ENG_ERROR` with an
   error document (this package's class, code, message and details),
   `ENG_BAD_ARGUMENTS` or `ENG_CLOSED`.
@@ -344,6 +344,9 @@ CREATE TABLE engine_events (
   -- The JSON pointers of the members of change that hold a ref to the
   -- value store (migration 9); null for none.
   value_refs     TEXT,
+  -- The subject the writing principal acted for (D77, migration 14), the
+  -- event's `for`; null when it acted for no one.
+  for_subject    TEXT,
   CHECK ((kind IN ('publish', 'define')) = (instance_id IS NULL)),
   CHECK (instance_id IS NOT NULL OR seq IS NULL),
   CHECK (seq IS NOT NULL OR instance_id IS NULL OR kind = 'operation'),
@@ -529,6 +532,12 @@ long (it needs `SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL`).
   ends reconnects at once (while it cannot, it tries again after 50 ms,
   backing off to 5 s) and wakes them, so they read what they missed. An instance opened with `listen: false` has
   its streams read at each heartbeat instead, and `watch` at its timeout.
+- **Signals.** A signal travels on a `pg_notify` channel of the engine
+  schema's own, apart from the commits' (D77, "Signals"), which the same
+  listener hears and hands to its process's streams, so a signal one
+  instance sends reaches a stream another serves, at most once: one sent
+  while a listener reconnects is lost to it. It wakes a stream without a
+  read of the log. `replicas_signals.rs` holds it.
 - **The runner.** One instance's runner runs at a time: the one whose
   process holds the runner's lease, a session advisory lock on a
   connection of its own. Another takes the lease, within its
@@ -992,6 +1001,15 @@ carries `service`, the calling deployable, beside `actor`: the end user
 the service acted for, or the service's own subject when it stood in for
 one. An event no service's call wrote has no `service`.
 
+An event a principal acting for a subject wrote (D77, "Acting for a
+subject" under "Access") carries `for`, the subject, beside `actor`: an
+instance's create, update, delete and operation, a beside operation's
+included, and a define or publish. The log keeps it in its own column
+(`for_subject`, engine migration 14), so retention, replay, the value
+store's refs and the stream carry it as they carry `actor`; an event
+written before the migration, and every event the runner's work writes,
+has none. `events.read` has no filter on it.
+
 A namespace that looks names up in a shared namespace also reads the
 shared namespace's publish events, which change the schemas it reaches;
 they keep the shared namespace as their `namespace`. Its own instance
@@ -1033,6 +1051,82 @@ cursor; the notice tells it only that the log grew.
 Without `retention` the log grows for good, and so does what its events
 hold in the value store; with it, the runner prunes the oldest events
 ("Retention").
+
+## Signals
+
+A signal is a message about one instance that the engine delivers to the
+event streams open on it and keeps nowhere (D77): who is typing, who is
+looking, the next chunk of a reply being written. It appends no event,
+writes no row and moves nothing a read returns; a reader that misses one
+has missed it. A behavior declares its signals ("Behaviors"), each with
+the JSON Schema of its data and who may send it, its `access`: `read`, a
+caller the policy lets read the schema; `write`, one it lets write it; or
+`operation`, the behavior's own operations alone.
+
+```ts
+engine.signals.send(bob, { schema: 'Ticket', instanceId: 't1', behavior: 'Comments', name: 'typing', data: { thread: 4 } });
+// on a stream opened with signals=1:
+// event: signal
+// data: {"namespace":"default","schema":"Ticket","instanceId":"t1","behavior":"Comments","name":"typing","data":{"thread":4},"from":"bob","at":1790000000000}
+```
+
+- **A caller's.** `engine.signals.send(principal, { namespace?, schema,
+  instanceId, behavior, name, data? })` (the call `signals.send`, also
+  named `sendSignal`; `POST .../instances/{id}/signals/{behavior}/{name}`,
+  204) checks, in order: that the schema's live version composes the
+  behavior and the behavior declares the signal (`not_found`, to a
+  principal that may read the schema; `forbidden` otherwise); that its
+  access is `read` or `write` (`operation` is `forbidden` to a caller);
+  the policy, asked that access with the operation `signal:<name>`
+  ("Access"); the data, `{}` when absent, at most 4096 bytes of JSON its
+  `paramsSchema` accepts (`invalid_argument`); that the instance exists
+  (`not_found`); and the rate. It is sent once the read that checked it
+  commits. An archived namespace takes signals: they write nothing.
+- **The rate.** Each principal's subject may send on each instance
+  `signals.perSecond` signals a second, its burst the same, a token
+  bucket on the engine's clock; past it the send is `rate_limited`, a 429
+  with `Retry-After: 1` over HTTP. The buckets are each process's own, so
+  a server of three instances lets a caller through three times as fast.
+- **An operation's.** A behavior's operation sends any signal its
+  behavior declares, of any access, with its context's `signal(name,
+  data)` ("Contexts"), beside the instance or not, writing or read-only,
+  a reaction's or a schedule's invoke of it included, as the call's
+  principal. Its data is checked as a caller's, a refusal a
+  `BehaviorError` that rolls the call back. It is delivered once the
+  call commits, in the order sent, and dropped when the call rolls back,
+  or with the savepoint of a `call()` that rolls back. It is not limited,
+  so a streamed reply's chunks go as fast as they are written.
+- **What a signal is.** `{ namespace, schema, instanceId, behavior, name,
+  data, from, at }`: `from` the sender's subject, `at` the engine's
+  clock when it was sent. The whole, as JSON, is at most 7900 bytes, so a
+  long subject or instance id with 4096 bytes of data is
+  `invalid_argument` ("more than a signal carries"), the 8000 bytes of a
+  Postgres notification being the bound.
+- **Delivery.** A stream opened with signals ("The event stream" under
+  "HTTP") receives each signal of its namespace that its `schema`,
+  `instanceId` and `behavior` filters keep, on a schema its principal may
+  read: it asks the policy `read` once per schema it meets between two
+  reads of the log, so a policy that stops letting it read a schema
+  stops its signals by the next read (at most a heartbeat on), and skips
+  a schema it may not read. `kind`, `exclude` and `beside` do not apply to
+  signals. Delivery is at most once and in no order with the events. A
+  stream holds up to 256 for a slow client, the oldest dropped first,
+  and sends what it holds once replay has caught up.
+- **The carrier.** On SQLite the commit hands each signal to the
+  process's streams. On Postgres the transaction sends it with
+  `pg_notify` on a channel of its own beside the commit notifier's,
+  `superschematic_engine_signals.<schema>` (shortened as a long name is),
+  so each engine schema of a database has its own, and every process's
+  listener hands it to that process's streams, the sender's included
+  ("Several instances on one Postgres database"). An instance opened with
+  `listen: false` delivers only its own signals, at the commit.
+- **No MCP tool.** The MCP endpoint has no tool that sends a signal: a
+  typing indicator is a client's, and an agent that writes a reply streams
+  it through its behavior's operations.
+
+| Option | Default | What it is |
+| --- | --- | --- |
+| `signals.perSecond` | 20 | the signals a principal may send on one instance each second, and its burst; a positive integer |
 
 ## The value store
 
@@ -1429,6 +1523,11 @@ where the action is `read` (a schema, its instances or its events),
 `write` (create, update, delete), `define` or `publish`; a behavior
 operation asks `write` when its declaration says it writes and `read`
 otherwise, and names itself in `operation`, absent for every other call.
+A caller's signal (D77, "Signals") asks its declared access, `read` or
+`write`, with the operation `signal:<name>`, so a policy that lets
+readers talk lets `signal:typing` through for a caller who may read; a
+stream with signals asks `read` of each schema it delivers one of, with
+no operation.
 A question about a namespace itself names no schema:
 `{ principal, action: 'manage', namespace, operation }`, the operation
 `create`, `archive`, `unarchive` or `list` ("Namespaces"). The type is a
@@ -1446,7 +1545,19 @@ operation, listing: true }` for the namespace tools, the operation
 `list`, `create`, `archive` or `unarchive`, and it names no schema. A
 refusal hides the tool from the caller; a call of it asks the question
 its call asks, with the name it gives. A policy that cannot answer
-without a name answers false. Only `true` allows, and anything else is
+without a name answers false.
+
+A behavior's namespace operation (D77, "Namespace operations" under
+"Behaviors") asks a fourth kind, which names the behavior and no schema
+(`BehaviorAccessRequest`): `{ principal, action, namespace, behavior,
+operation }`, `action` `read` or `write` as its declaration says. The
+tools document asks it with `listing: true` while it lists the
+operation's tool. `behavior` tells it from a schema's question of the
+same action, so a policy that reads `schema` checks `behavior` first. Its
+rows are those of the schemas the principal may read, which the engine
+asks `read` of itself, so a policy can let every read one through.
+
+Only `true` allows, and anything else is
 `forbidden`. It runs synchronously. There is no default
 policy: `allowAll` is explicit, for tests and local use. The engine has
 no roles of its own; a policy can hold the principal's `permissions` to
@@ -1455,11 +1566,30 @@ whatever rule the deployment has, through the HTTP runtime's
 opt-in: it allows an action to a caller holding `<schema>.<action>`
 (`Task.read`, `Task.write`, `Task.define`, `Task.publish`), by the
 engine's `permissionMatcher`, so a caller holding `Task` may do all four.
-It refuses a question that names no schema: `manage`, which a
+It allows a namespace operation that reads to anyone, and one that writes
+to a caller holding `<behavior>.<operation>` (`Comments.claimDeliveries`),
+its listing question the same. It refuses the other questions that name
+no schema: `manage`, which a
 deployment's policy answers before it asks `permissionPolicy` the rest,
 and a listing question, so the tools document hides `define_schema` and
 the namespace tools from the caller, though a define, which names its
-schema, asks `<schema>.define`.
+schema, asks `<schema>.define`. The Rust engine reads it as the policy
+`"permission"`; a policy of rules (`{ "rules": [...] }`, the Rust
+engine's `PolicyConfig`) matches a namespace operation's question with a
+rule's `behavior`, `true` for any, `false` for none, or names, and fills
+`{behavior}` in a permission it requires, as it fills `{schema}`, which
+renders nothing in such a question. Only a rule that names `behavior`
+matches such a question: a rule that leaves `behavior` out, as every
+rule written before D77 does, matches schema, namespace and listing
+questions alone. So a subject- or service-wide allow, `{ "service":
+["shop-orders"], "action": ["read", "write"], "allow": true }`, lets its
+principal read and write schemas and call no behavior's namespace
+operation; with no rule naming `behavior`, the question falls past the
+last rule and is refused. A deployment that wants one allowed says so:
+`{ "behavior": ["Comments"], "action": "read", "allow": true }`, or
+`{ "behavior": true, "action": "write", "require":
+"{behavior}.{operation}" }` as `"permission"` does. `"allowAll"` still
+allows them.
 With the core user model ("Users" under "HTTP"), a user's permissions are
 those of their roles. `permissionPolicy({ permissionMatcher })` matches
 with the matcher it is given instead; called from a policy of the
@@ -1473,6 +1603,49 @@ runtime, so one rule answers both.
 `permissions`, `claims`), so a principal its `Authenticator` returns can
 be passed on as it is. The main entry point does not import the HTTP
 runtime, which brings Hono; the `./http` entry point does.
+
+### Acting for a subject
+
+An agent or a service that works for a person carries the person in its
+principal (D77): `actingFor: { subject }`. The principal stays its own,
+so an event names the agent as `actor` and the person as `for` ("The
+event log"), Provenance records both (`by` and `for`), and a lease the
+agent holds is the agent's whoever it works for. It adds no permissions:
+`can()` answers for the principal's own, and the engine has no grant of
+its own for acting for anyone. Over HTTP and MCP the host's mount sets it
+from the `Acting-For` header when it opts in ("Authentication and
+access" under "HTTP"); a caller of the engine's API sets it on the
+principal it passes.
+
+The engine checks it with the rest of the principal (`checkPrincipal`):
+`invalid_argument` for an `actingFor` that is not `{ subject }`, a
+subject that is empty, or the principal's own. The runner's principal
+acts for no one: an engine whose `runner.principal` carries `actingFor`
+does not open, so an event the runner's work writes for a reaction or a
+schedule never carries `for`.
+
+The policy sees it on every question's principal, and may refuse it.
+`permissionPolicy()` refuses every question whose principal acts for
+someone unless the principal holds `actFor`, matched by its matcher
+(`ACT_FOR_PERMISSION`), and then answers as for the principal's own
+permissions: an agent holding `Task.write` and `actFor` may write tasks
+for anyone, and nothing else. In a `{ rules }` policy a rule matches on
+`actingFor`: `true` for a principal acting for any subject, `false` for
+one acting for none, or a subject or a list of them. As with `behavior`,
+an allow or a require that leaves it out matches only a principal acting
+for no one, so every rule written before it, a subject- or service-wide
+allow among them, lets no principal act for anyone, and a question no
+rule matches is refused. A deny (`allow: false`) that leaves it out
+matches a principal acting for a subject too, as it matches one acting
+for none: `[{ "service": "crawler", "standsIn": true, "allow": false },
+{ "actingFor": true, "allow": true }]` refuses the crawler whether or not
+it acts for someone, and only `"actingFor": false` keeps a deny to the
+principal acting for no one. `{ "actingFor": true, "require": "{schema}.{action}" }` lets a
+principal act for anyone within its own permissions; `"allowAll"` allows
+it, and `"permission"` answers as `permissionPolicy()` does. A policy of
+the deployment's own reads `principal.actingFor`, and one written before
+it, which does not, answers as if the principal acted for no one: check
+`actingFor` first, as the examples' `auth.ts` do.
 
 ### Service callers
 
@@ -1502,6 +1675,13 @@ their context's `principal`.
   matches end users' permissions.
 - `standsIn(principal)` says which case a principal is. The runner keeps
   its own principal, which the deployment names.
+- A service standing in may act for a subject (D77, "Acting for a
+  subject"): `service:<deployable>` is the actor, the deployable the
+  `service`, and the subject the `for` of what it writes. A service that
+  brings an end user already acts for that user, who is the actor: a call
+  that also acts for a third subject is `invalid_argument`, since an
+  event has one `actor`, one `service` and one `for`, and would lose
+  which of the two people the call was for.
 
 ## Errors
 
@@ -1520,9 +1700,10 @@ pruned past, with its `floor` and the `head`), `value_too_large`
 `CreateParamsError` for a create's and `PreconditionsError` for a call's
 preconditions, with their issues), `seq_mismatch`, `vetoed`
 (`BehaviorVetoError`: a behavior refused the change, with the veto's
-`vetoCode` and `vetoDetails` when it gives them) and `unavailable` (the
+`vetoCode` and `vetoDetails` when it gives them), `unavailable` (the
 live version composes a behavior this engine has no implementation for,
-or whose implementation refuses its config). A message names only what
+or whose implementation refuses its config) and `rate_limited` (a
+caller's signals past `signals.perSecond` on one instance, "Signals"). A message names only what
 the call named: `name_taken` in the shared namespace does not say which
 namespace holds the name. "Statuses" under "HTTP" gives each code's
 status.
@@ -1635,6 +1816,7 @@ function is synchronous (D16): one that returns a promise is a
 | `guard(view, request)` | may veto a `create`, an `update`, a `delete` or an `operation` of any behavior on the type: a returned reason, or `{ reason, code?, details? }`, vetoes ("Vetoes and preconditions"). It is asked once every `validate` has accepted the fields. A create's request carries the new instance's `data` and the create's parameters by behavior (`behaviors`), and no precondition. An operation's request carries `writes`, as its declaration says, so a guard that holds back changes can let a read-only operation through. An update a behavior's operation applies names that behavior as `caller`, as a `call()` does. `precondition` is the behavior's own entry of the caller's preconditions |
 | `operations` | a handler per declared instance operation: `(context, params) => result`, with an `OperationContext`; it refuses with a `BehaviorVetoError`, whose code its declaration lists |
 | `schemaOperations` | a handler per declared schema-level operation (`scope: "schema"`): `(context, params) => result`, with a `SchemaContext`, whose `sql` writes the behavior's own tables in a writing one ("Schema-level operations") |
+| `namespaceOperations` | a handler per declared namespace operation (`scope: "namespace"`, D77): `(context, params) => result`, with a `NamespaceContext` ("Namespace operations") |
 | `fields` | a reader per declared field: `(view) => value`. A read returns them under the behavior's name, apart from the own fields ("Instances and events") |
 | `filters` | what a list filters on, `{ <name>: { column, type, description? } }`: a declared field, or `<field>.<member>`, a camelCase member of a declared field whose value is an object, whose value is one of its columns, by its own name; a list's `where` names it by its qualified name, the behavior's name and a dot before it (`Lease.holder`); `type` is its JSON type, `string`, `number`, `integer` or `boolean`, and `description` what the list tool's `where` says of it, the declared field's when absent. A list's `where` compares the column in SQL, a null column holding no value, so the field's reader must return what the column holds, and nothing (absent or null) for null; a migration's index on that column alone serves the filter ("Filters" under "Instances") |
 | `afterChange(context, change)` | runs after a create, an update, a delete or a caller's writing operation, in the same transaction. An operation's change carries `before`, the instance's own fields before it, when its `update()` changed them, and `attribution` when its `update()`s attributed the fields they changed ("Contexts") |
@@ -1655,9 +1837,26 @@ over a column no migration up to its own adds included; a filter on a
 field it does not declare, or a member of one whose name is not `<field>.<member>` with a camelCase member, or a column its migrations do not add; a veto code that is
 not lowercase snake case of at most 64 characters, or is listed twice;
 an operation beside the instance that does not write or has `scope:
-"schema"`, `"log": false` on an operation that is not beside, and a
-behavior with a beside operation and a field that is not volatile
-("Instances and events").
+"schema"`, `"log": false` on an operation that is not beside, `"asks"`
+other than `"read"` or on an operation that is not beside with `"log":
+false`, and a behavior with a beside operation and a field that is not
+volatile ("Instances and events"); a namespace operation that sets
+`beside` or `log`, and `namespaceOperations` that are not exactly the
+namespace operations its declaration names ("Namespace operations"); and
+a signal whose name is not camelCase or is
+declared twice, whose `paramsSchema` is absent or does not compile, or
+whose `access` is not `read`, `write` or `operation`.
+
+A declaration's `signals` (D77) are the messages about an instance the
+engine delivers to the event streams open on it and keeps nowhere
+("Signals"); `GET /behaviors/{name}` lists them, when it declares any:
+
+```json
+"signals": [
+  { "name": "typing", "description": "Who is typing.", "access": "read", "paramsSchema": { "type": "object", "properties": { "thread": { "type": "integer" } } } },
+  { "name": "draft", "access": "operation", "paramsSchema": { "type": "object", "required": ["message", "offset", "text"] } }
+]
+```
 An operation's `paramsSchema` sets
 `additionalProperties: false`, so the handler and every guard read the
 same declared parameters and no alias reaches one and not the other; a
@@ -1944,6 +2143,8 @@ a field reader's) has:
 
 - `behavior`, `config`, `namespace`, `schema`, `version`, `id`;
 - `principal`, and `now`, the clock's time, read once for the whole call;
+  `principal.actingFor` is the subject the caller acts for, when it acts
+  for one ("Acting for a subject" under "Access");
 - `can(permission)`: whether the principal holds a permission, as the
   engine's `permissionMatcher` answers for its permissions. The default is
   the HTTP runtime's `hasAnyPermission`: dotted paths, a granted
@@ -1983,10 +2184,10 @@ read-only relation, the event log, another behavior's storage or the
 connection: a status one behavior owns changes at another's request only
 through its operations, whose guards run, on this instance or another.
 
-An operation's context (`OperationContext`) adds three more: two so a
+An operation's context (`OperationContext`) adds four more: two so a
 behavior that changes the instance on a caller's behalf, approving a
-proposed change say, runs the checks an update runs, and one that says
-the call changed nothing:
+proposed change say, runs the checks an update runs, one that says the
+call changed nothing, and one that sends a signal:
 
 - `update(patch)` applies a JSON merge patch to the instance's own fields
   and returns them after it. A result the live version refuses is
@@ -2024,6 +2225,13 @@ the call changed nothing:
 - `unchanged()` says the call changed nothing, so the engine appends no
   event for it ("Instances and events"). It does nothing in a read-only
   operation.
+- `signal(name, data)` sends one of its behavior's signals on the
+  instance, of any access its declaration gives it (D77, "Signals"):
+  delivered once the call commits, in the order sent, dropped when the
+  call or its savepoint rolls back, and not limited. Data its
+  `paramsSchema` refuses, more than 4096 bytes of it, and a name the
+  declaration does not declare are a `BehaviorError`. It writes nothing,
+  so it keeps a beside, read-only or `unchanged()` call what it was.
 
 `validate` gets a narrower context of its own ("Validating fields"):
 `behavior`, `config`, `namespace`, `schema`, `version`, `id`,
@@ -2281,6 +2489,95 @@ instances"). An instance operation is `not_found` there and to
 `instances.invokeSchema`, and a schema-level one is `not_found` to
 `invoke`, `call()` and `instances.invoke`, each naming the other scope.
 
+### Namespace operations
+
+An operation declared with `scope: "namespace"` (D77) runs on the
+behavior's own tables across every schema of a namespace that composes
+it, with no instance and no schema: "my mentions" and "what is unread"
+over every conversation, which one statement reads, since the tables
+already hold every schema's rows by their namespace and schema columns
+and each behavior has one key per engine ("Storage"). It is called by the
+behavior's name:
+
+```ts
+engine.behaviors.invoke(me, { namespace: 'default', behavior: 'Comments', operation: 'inbox', params: { limit: 20 } });
+// POST /namespaces/default/behaviors/Comments/operations/inbox, the MCP tool comments_inbox,
+// client.behaviors.invoke('Comments', 'inbox', { limit: 20 })
+```
+
+- **The call.** A behavior the engine does not run is `not_found`, and so
+  is an operation it does not declare with namespace scope, naming the
+  scope it has; one of namespace scope is `not_found` to `invoke`,
+  `invokeSchema`, `call()` and `instances.invoke`, and is no operation of
+  a type: the describe document names it under its behavior
+  (`namespaceOperations`), and the tools document holds its tool. The
+  policy is asked `{ principal, action, namespace, behavior, operation }`
+  ("Access"), then the parameters are held to its `paramsSchema`
+  (`invalid_argument`). A writing one runs in a write that holds its
+  namespace's writer, as an instance's write does, and an archived
+  namespace refuses it; a read-only one takes no writer. It is never
+  beside an instance and appends no event, so it declares neither
+  `beside` nor `log`.
+- **Its context** (`NamespaceContext`) has `behavior`, `namespace`,
+  `principal`, `now`, `can()`, `instances` (reads, and invokes of
+  read-only operations), `values` (`load`), `configs()` and `sql`. It has
+  no config, schema, instance, `update()`, `signal()` or `call()`: a
+  writing `instances.invoke` or `invokeSchema` and `instances.create`
+  are a `BehaviorError`, which rolls the call back.
+- **`sql.readable()`** names a read-only relation over the schemas of the
+  call's namespace whose live version composes the behavior and that the
+  principal may read, one row each, its column `schema`; a statement
+  joins it, and a row of a schema the principal may not read never
+  leaves the statement. The policy is asked `read` once per such schema
+  per call, the first time a statement names it, and a schema it refuses
+  is left out, never refused, as the search across schemas skips one.
+  It is defined like `sql.instances()`, a common table expression ahead
+  of the statement with the names inlined, as `bhv_<key>___readable`.
+  There is no `sql.instances()`: the operation has no schema.
+- **Its writes.** `sql.run` writes the behavior's own tables, in the
+  call's transaction, in a writing one; a read-only one's `run` is a
+  `BehaviorError`. The SQL checks every behavior's statement passes keep
+  `engine_*` out of it ("Storage"), so neither kind appends an event or
+  touches `engine_instances`.
+- **`configs()`** gives each composing schema with the config it gives
+  the behavior, as `parseConfig` returned it for its instance
+  operations, asking nothing (`config(schema)` one of them): a handler
+  that keeps a schema's rows only when its config names a permission the
+  caller holds (`can()`) reads the config of each schema it keeps.
+- **A full-text match across the readable schemas** (Rust). A behavior's
+  full-text index ("Search on Postgres") is one per engine, its keys
+  table holding every namespace's and schema's rows, and
+  `sql.fulltext(&FullTextQuery { .. })` filters the keys by equality
+  alone. `FullTextQuery::readable`, `Some("<column>")`, names the column
+  of the keys that holds a schema's name, and both databases' statements
+  join `sql.readable()` on it (SQLite after FTS5's `CROSS JOIN`, Postgres
+  in the subquery that ranks), so one match ranks the hits of every
+  schema the caller may read together, pages them by `limit` and
+  `offset`, and lets no row of another schema leave the statement.
+  Outside a namespace operation `readable()` refuses, so such a match is
+  a `BehaviorError`; `None`, what Search passes, filters nothing more.
+  Comments' `searchMessages` is its caller.
+- A behavior no published schema composes has no storage yet; its first
+  namespace call creates it, as a publish would, and runs with empty
+  tables and an empty `readable()`.
+
+```ts
+namespaceOperations: {
+  inbox(context, params) {
+    const notes = context.sql.table('note');
+    return context.sql.all(
+      `SELECT n.schema, n.instance, n.body FROM ${notes} AS n JOIN ${context.sql.readable()} AS r ON r.schema = n.schema
+       WHERE n.namespace = ? AND n.subject = ? ORDER BY n.at DESC LIMIT ?`,
+      [context.namespace, context.principal.subject, (params as { limit: number }).limit],
+    );
+  },
+},
+```
+
+In Rust a namespace operation's handler is `fn(&B, &NamespaceCx<'_,
+B::Config>, &Value) -> Result<Value>` in `Hooks::namespace_operations`,
+and `cx.configs()` returns `(schema, &Config)` pairs.
+
 ### Reactions and schedules
 
 A behavior's `reactions` and `schedules` run after the commit, on the
@@ -2531,12 +2828,22 @@ A field its declaration marks `"volatile": true` can move without an
 event of its own instance: the engine computes it at the read, from
 other instances, the clock or the config. The core's are
 `Dependencies.blocked`, `Links.targets` (whose `latest` and `stale` read
-the target), `Rollups.values`, Comments' three (which its operations
+the target), `Rollups.values`, Comments' four (which its operations
 beside the instance move), and the work queue's `Lease.active` and
 `Budget.meters` (a daily meter starts again at a read). The log holds
 such a field as the instance's last event found it, the describe
 document marks it, and `Reactions`' `changes`, which hears a field
 through its instance's events, refuses it (D56).
+
+A volatile field may also say `"perReader": true` when its value is the
+caller's rather than the instance's, as Comments' `unread` is (D77). A
+read computes it for whoever reads. No event records it: an operation's
+or an update's `patch` leaves it out, as does a create event's
+`behaviors`, and so do the moves a referring behavior's hook hears, so
+a caller's own count never lands in the log as the instance's. A
+declaration that gives `perReader` without `"volatile": true` is
+refused, by registration and by the compiler's registry. The describe
+document marks it `perReader: true` beside `volatile: true`.
 
 A writing operation appends an `operation` event, `{ behavior,
 operation, params, patch, attribution? }`, its `patch` a merge patch of `{ data,
@@ -2596,6 +2903,12 @@ behavior that declares one and a field that is not volatile.
   event at all, for a write only its writer reads back. `unchanged()`
   keeps its meaning: a beside call that says it changed nothing appends
   no event either.
+- `"asks": "read"`, which only a beside operation with `"log": false`
+  may declare, says it writes only its caller's own state, a read marker
+  or a follow, so the policy is asked `read` with its name instead of
+  `write`, a caller who may only read the instance may call it, and an
+  archived namespace lets it run. Its tool hides from no reader either.
+  The behavior's document carries `"asks": "read"` after `log`.
 - Its handler that reaches past its behavior's own storage, with
   `update()`, a `call()` or `instances.invoke` of a writing operation
   that is not beside, an `instances.invokeSchema` of a writing one,
@@ -2853,31 +3166,60 @@ back.
 A conversation on the instance (D77): messages, each top-level or a reply
 in the thread of a top-level one, one level deep, which their authors
 edit and delete, others react to and pin, and whose threads are resolved
-and reopened. `rust/behaviors/src/comments-contract.md` is the contract
-the behavior, the generators and the corpora implement: every record,
-parameter, check and refusal in its order.
+and reopened. A message may be streamed as it is written: `begin` holds
+its place, `appendDraft` adds to its draft and sends the `draft` signal,
+and `finish` posts it. Each caller has its own read markers and follows,
+each message that comes to stand records a delivery for each subject that
+should hear of it, and three namespace operations read and work them
+across a namespace: the caller's `inbox`, and `claimDeliveries` and
+`settleDeliveries` for a notifier or an agent dispatcher. A fourth,
+`searchMessages`, finds messages by the words of their bodies. An agent
+acting for a person (`actingFor`, "Acting for a subject") writes as
+itself, and the message records whom it was for. A message may carry a
+place in code, which `moveAnchor` follows to a newer revision, and the
+description of a file the deployment stored. A delivery is
+recorded for each subject a message mentions, and each follower, whether
+or not that subject may read the schema, and a claim returns up to 4000
+code points of the message's body. So a notifier must check that the
+recipient may read the instance before it sends the body: read the
+instance as the recipient (`instances.get` with a principal of the
+recipient's subject and permissions, from the deployment's identity
+store), or ask the deployment's policy with the recipient's permissions,
+and for a `role:<name>` subject each member it sends to. One who may not
+read it gets no body: settle the delivery `dropped`, or send a notice
+with a link and no text.
+`rust/behaviors/src/comments-contract.md` is the contract the behavior,
+the generators and the corpora implement: every record, parameter, check
+and refusal in its order.
 
 | | |
 | --- | --- |
-| Config | all optional: `maxBodyLength` (1..40000 code points, 40000 when absent), `editWindowMs` (at least 1000; an author's edit after it is refused), `blocks` (the kinds a post or an edit may give, `ref` and `action`; every kind when absent, none when empty), `moderatePermission` (edit and delete another's message, edit past the window, purge), `pinPermission` (pin and unpin; anyone the policy lets write when absent), `resolvePermission` (resolve and reopen another's thread; only its author when absent) |
-| Fields | all volatile: `messages`, the posted messages, top-level and replies; `lastMessageAt`, when the latest posted one was posted, absent while there is none; `threads`, `{ open, resolved }`, the posted top-level messages |
-| Operations | beside the instance and writing: `post({ body, blocks?, mentions?, thread?, quotes?, clientId? })`, `edit({ message, body?, blocks?, mentions? })`, `deleteMessage({ message })`, `purge({ message })` -> `{ message, purged }`, `react` and `unreact({ message, emoji })`, `pin` and `unpin({ message })`, `resolve` and `reopen({ thread })`, each -> the message's record but `purge`; read-only: `listMessages({ thread?, around?, before?, after?, limit? })` -> `{ items, before, after, root? }`, `getMessage({ message })`, `listEdits({ message, limit?, cursor? })` and `listReactions({ message, emoji, limit?, cursor? })` -> a page |
-| Guards | none of another behavior: every write is beside the instance, so an active `Lease` lets any principal post. Its own refusals are vetoes with codes and details (`no_message`, `not_a_thread`, `not_in_thread`, `deleted`, `not_author`, `edit_window_passed`, `too_many_edits`, `already_reacted`, `not_reacted`, `too_many_reactions`, `already_pinned`, `not_pinned`, `already_resolved`, `not_resolved`, `block_not_allowed`, `ref_not_found`, `not_configured`), `invalid_argument` for what the `paramsSchema` cannot say, and `forbidden` for a permission the config names and the caller lacks |
-| Events | each write's operation event beside the instance, `seq: null`, `beside: true`, `change: { behavior, operation, params, result }`, its `result` the record the caller got; a retry of a post appends none, and the reads none |
+| Config | all optional: `maxBodyLength` (1..40000 code points, 40000 when absent; a draft too), `editWindowMs` (at least 1000; an author's edit later than that after the message's `postedAt` is refused), `blocks` (the kinds a post, an edit or a finish may give, `ref`, `action`, `code` and `attachment`; every kind when absent, none when empty), `moderatePermission` (edit, delete and interrupt another's message, edit past the window, move another's anchor, purge), `anchorPermission` (move the anchor of a code block on another's message; only its author and a moderator when absent), `attachments` (`{ schemes?, mediaTypes?, maxBytes? }`: the URI schemes an attachment's `uri` may use, the whole list, `["https"]` when absent, and never `javascript`, `vbscript`, `data`, `file`, `blob` or `about`; the media types it may have, `type/subtype` or `type/*`, any when absent; its largest `bytes`, no limit when absent), `pinPermission` (pin and unpin; anyone the policy lets write when absent), `resolvePermission` (resolve and reopen another's thread; only its author when absent), `composeTimeoutMs` (5000..3600000, 60000 when absent: how long a composing message's author may append nothing before the runner interrupts it), `maxDrafts` (1..50, 5 when absent: the composing messages one subject may have on an instance at once), `deliverPermission` (what `claimDeliveries` and `settleDeliveries` need for this type's deliveries; nobody claims them when absent), `maxAttempts` (1..20, 5 when absent: the claims a delivery gets), `retryBackoffMs` (1000..3600000, 30000 when absent: a failed delivery is due again after it, doubled after each later failure, at most an hour), `deliveryRetentionMs` (one day to a year, 30 days when absent: how long a delivery is kept, and how far back the inbox's mentions reach) |
+| Fields | all volatile: `messages`, the standing (posted and interrupted) messages, top-level and replies; `lastMessageAt`, the greatest `postedAt` of a standing one, absent while there is none; `threads`, `{ open, resolved }`, the standing top-level messages; `composing`, the subjects with a composing message, each once, by the id of their earliest; `unread`, the reader's own (`perReader`, so no event records it): how many standing top-level messages of others stand above its conversation marker, 0 while it has none |
+| Operations | beside the instance and writing: `post({ body, blocks?, mentions?, thread?, quotes?, clientId? })`, `begin({ thread?, quotes?, clientId? })`, `appendDraft({ message, text })` -> `{ message, offset, length }`, `finish({ message, body?, blocks?, mentions? })`, `interrupt({ message })`, `edit({ message, body?, blocks?, mentions? })`, `deleteMessage({ message })`, `purge({ message })` -> `{ message, purged }`, `react` and `unreact({ message, emoji })`, `pin` and `unpin({ message })`, `resolve` and `reopen({ thread })`, `moveAnchor({ message, block, revision, lines })`, each -> the message's record but `appendDraft` and `purge`; read-only: `listMessages({ thread?, around?, before?, after?, limit? })` -> `{ items, before, after, root? }`, `getMessage({ message })`, `listEdits({ message, limit?, cursor? })`, `listReactions({ message, emoji, limit?, cursor? })` and `listPinned({ limit?, cursor? })` -> a page; beside the instance, `"log": false` and `"asks": "read"`, writing only the caller's own state: `markRead({ upTo, thread? })` -> `{ readUpTo, unread }` and `follow({ thread, on })` -> `{ thread, following }`; namespace operations (`"scope": "namespace"`): `inbox({ kinds?, unread?, limit?, cursor? })` -> `{ items, next }` and `searchMessages({ query, schema?, instanceId?, thread?, limit?, cursor? })` -> `{ items, next }`, which read, and `claimDeliveries({ subjects?, prefix?, limit?, ttlMs? })` -> `{ token, expiresAt, items }` and `settleDeliveries({ token, ids, outcome, error? })` -> `{ items }`, which write |
+| Signals | `typing({ thread? })` and `viewing({})`, `read` access, which a client sends and the engine delivers; `draft({ message, offset, text })`, `operation` access, which only `appendDraft` sends, after its commit |
+| Schedules | `interrupt`, every quarter of `composeTimeoutMs`, at most 15 seconds: interrupts, as the runner, each message whose author has appended nothing for `composeTimeoutMs`, oldest first, at most 1000 a run; `prune`, hourly: removes the schema's deliveries made more than `deliveryRetentionMs` ago that no live claim holds, oldest first, in batches of 1000, going on while a batch comes back full, at most 20 batches a run |
+| Guards | none of another behavior: every write is beside the instance, so an active `Lease` lets any principal post. Its own refusals are vetoes with codes and details (`no_message`, `not_a_thread`, `not_in_thread`, `deleted`, `composing`, `not_composing`, `not_author`, `not_idle`, `edit_window_passed`, `too_many_edits`, `too_many_drafts`, `draft_too_long`, `already_reacted`, `not_reacted`, `too_many_reactions`, `already_pinned`, `not_pinned`, `already_resolved`, `not_resolved`, `block_not_allowed`, `attachment_not_allowed`, `ref_not_found`, `no_block`, `not_code`, `anchor_unchanged`, `not_configured`, `unknown_delivery`, `token_stale`, `not_claimed`), `invalid_argument` for what the `paramsSchema` cannot say, and `forbidden` for a permission the config names and the caller lacks |
+| Events | each write's operation event beside the instance, `seq: null`, `beside: true`, `change: { behavior, operation, params, result }`, its `result` the record the caller got; a retry of a post or a begin appends none, `appendDraft`, `markRead` and `follow` none, the namespace operations none, and the reads none |
 | `configChange` | added to a schema with instances, which start with an empty conversation; not removed from one, since their messages would stay behind. A config change applies to the next call |
 
-A message's record is `{ id, thread?, quotes?, author, via?, state, body,
-blocks, mentions, reactions, createdAt, editedAt?, edits, pinned }`, and
-a top-level message's adds `replies`, `lastReplyAt?`, `participants` (the
-latest ten authors of its thread's posted messages) and `resolved?: { by,
-at }`. Ids are per instance, 1, 2, 3, ..., never reused. `author` is the
+A message's record is `{ id, thread?, quotes?, author, for?, via?, state,
+body, blocks, mentions, reactions, createdAt, postedAt?, stand?,
+editedAt?, edits, pinned }`, and a top-level message's adds `replies`,
+`lastReplyAt?`, `participants` (the latest ten authors of its thread's
+standing messages) and `resolved?: { by, for?, at }`. `state` is `composing`, `posted`,
+`interrupted` or `deleted`; a message *stands* while it is posted or
+interrupted, and `postedAt` is when it came to stand: a post's time, or
+its finish's or interrupt's. Ids are per instance, 1, 2, 3, ..., never reused. `author` is the
 caller's subject and `via` the calling service's deployable (D37); the
 times are the engine clock's. `reactions` holds each emoji's `count` and
 whether the caller is one of them (`mine`); in an event it is the
 actor's. A block is a reference to an instance the caller may read
-(`{ kind: "ref", schema, id }`) or an action's progress (`{ kind:
-"action", title, status, data? }`); `mentions` are subjects, recorded and
-nothing more in batch 1.
+(`{ kind: "ref", schema, id }`), an action's progress (`{ kind:
+"action", title, status, data? }`), a place in code (`{ kind: "code",
+repo, path, revision, lines, snippet }`) or a file the deployment stored
+(`{ kind: "attachment", uri, name, mediaType, bytes, sha256 }`);
+`mentions` are subjects.
 
 `clientId` makes a post safe to retry: a post with one the caller has
 used returns that message as it is now and writes nothing. `edit` keeps
@@ -2887,12 +3229,124 @@ author, its thread and its replies stay. `purge`, which needs
 `moderatePermission`, removes a message for good, a top-level one with
 its whole thread. A post into a resolved thread leaves it resolved.
 
+A streamed message is the way an agent's reply shows as it is written.
+`begin` takes the message's id and its place, `composing`, with an empty
+body and nothing counted; each `appendDraft` adds a chunk to its draft and
+returns the draft's length before and after it, in code points (a
+JavaScript client counts them with `Array.from(text).length`), at most
+4000 bytes of JSON string a chunk. Once its call commits it sends the
+`draft` signal, `{ message, offset, text }`, to the event streams opened
+with signals on the instance; a read of a composing message holds its
+draft so far as its body. A reader opens the stream before it reads,
+appends a `draft` whose `offset` is the length it holds, ignores one
+below it, and reads the message again past it, since a signal is
+delivered at most once. `finish` posts the draft, or a `body` in its
+place, and counts it as a post. An empty append changes nothing but keeps
+the message from going idle, for an author at work with nothing to show;
+one idle for `composeTimeoutMs` is interrupted by the schedule, as the
+runner, or by anyone the policy lets write: it keeps its draft as its
+body, `interrupted`, or is deleted when the draft has no text. Its author
+may interrupt it, or drop it with `deleteMessage`, at any time. A
+composing message takes no edit, reaction, pin, resolve, reply or quote
+(`composing`); an author's edit of an interrupted message posts it.
+
 `listMessages` pages the top-level messages, or with `thread` that
 thread's replies and its top-level message as `root`, always in
 ascending id order: with no anchor the latest page, `before` an older
 one, `after` a newer one, and `around` a page about one message. `before`
 and `after` in the result are the anchors of the pages either side, null
-at an end.
+at an end, and `readUpTo` is the caller's marker on the listing, absent
+while it has none.
+
+A message's `stand` is its place in the order the conversation's messages
+came to stand, given at its post, finish or interrupt and never changed;
+read markers count in stands, not ids, so a streamed reply that began
+before a message a reader read and finished after it is unread. `markRead`
+moves the caller's marker on the top-level messages, or with `thread` on a
+thread's replies, up to the greatest stand among the listing's messages
+with an id up to `upTo`, never back. A subject follows each thread it posts
+in and each it is mentioned in (a `role:` group never), and `follow` turns
+that on or off. When a message comes to stand it records one delivery per
+subject it mentions or that follows its thread, never its author, with its
+reasons (`mention`, `reply`); an edit that adds a mention adds one, and
+`deleteMessage`, `purge` and the instance's delete remove them but those a
+claim holds, which the instance's delete removes too. The engine sends
+nothing: `claimDeliveries` claims the due ones of the schemas whose
+`deliverPermission` the caller holds, under one token that lapses after
+`ttlMs`, dropping those whose message no longer stands or whose subject
+has read it, and `settleDeliveries` marks them `sent`, `failed` (due again
+after the backoff, dropped at `maxAttempts`) or `dropped`. The `inbox`
+lists the caller's mentions, the threads it follows and the conversations
+it has read, across the schemas of the namespace it may read, newest
+first, each with how many of its messages the caller has not read; an item
+with none is done, and stays.
+
+A principal acting for a subject (D77 primitive 4) writes as itself:
+Comments asks nothing of the `for`, which the policy has seen
+(`permissionPolicy` refuses it without `actFor`). The message's `for` is
+its post's or begin's, and a finish, an edit, `moveAnchor` and the
+schedule's interrupt keep it; each edit (`listEdits`' `for`), reaction
+(`listReactions`' `for`) and resolve (`resolved.for`) records its own
+caller's, and the inbox's and a claim's items carry the message's. The
+agent is the author, so an agent acting for Alice may not edit, delete,
+finish or resolve what Alice wrote, nor interrupt her draft before it is
+idle, and Alice may not edit what the agent wrote for her; its
+reaction, read marker, follows and drafts are the agent's own. The
+subject a message was written for follows its thread as a mentioned one
+does, gets no delivery of it (nor of an edit that adds its mention), and
+finds it unread in its inbox and its `unread`, since it did not write
+it; replies to it reach the subject through the follow.
+
+A code block is a place in a repository at a revision with the text the
+poster captured (`snippet`, at most 8000 code points), its `lines` the
+first and last, the first at most the last, and its `path` relative (no
+leading or trailing `/`, no `\`, no empty, `.` or `..` part), each
+refused at the block's pointer. `moveAnchor` moves it to the same code at
+another revision once a caller that knows the repository has found it (a
+git extension after a push): its author, a holder of `anchorPermission`
+or a moderator may, past `editWindowMs` too. It is not an edit: it
+writes the block alone, which takes the new `revision` and `lines` and
+adds `original` (the anchor it was first given), `moves`, `movedAt`,
+`movedBy` and `movedFor?`, and leaves the body, `editedAt`, `edits`,
+`listEdits`, the search index and the deliveries as they were. Each move
+is an event with the record after. An edit that gives a code block back
+as it was read (the move members left out) keeps its moves; one that
+changes it starts a new block. An attachment block describes a file the
+deployment's upload route stored: the engine checks its `uri`'s scheme,
+its `mediaType` and its `bytes` against `attachments`
+(`attachment_not_allowed`, `{ block, member, value, allowed }`), and an
+https `uri` for a host, and never fetches it; an edit does not hold an
+attachment it keeps to a config narrowed since. `listPinned` pages the
+pinned messages, top-level and replies, by id.
+
+`searchMessages` searches the bodies of the standing messages of every
+schema of the namespace that composes Comments and that the caller may
+read, as one full-text match kept to `sql.readable()` ("Namespace
+operations"): the first eight words of `query`, each quoted, all
+required, so quotes, `AND`, `NOT`, `NEAR` and `*` are words; `schema`,
+`instanceId` and `thread` (the top-level message and its replies)
+narrow it, and a schema the caller may not read finds nothing, never a
+refusal. Each item is `{ schema, instanceId, message, thread?, author,
+for?, via?, state, postedAt, editedAt?, rank, snippet }`, `snippet` a few
+words around the matches in parts `{ text, match }`; `rank` counts
+across pages, and a search reaches its first 1000 hits. A draft, a
+deleted or purged message and the text before an edit are never found:
+each write that makes a message stand indexes its body, an edit replaces
+it, and a delete, a purge and the instance's delete remove it, in the
+call's transaction. The order is each database's own ranking, as
+Search's is (bm25 on SQLite, `ts_rank_cd` on Postgres).
+
+`searchMessages` and `inbox` keep to the schemas the caller may read by
+the policy's schema-wide question alone (`read` on the schema, no
+operation): `sql.readable()` asks nothing about Comments' instance
+operations. A policy that refuses `listMessages` or `getMessage` on a
+schema by a rule that names the operation still lets `searchMessages`
+return that schema's messages, snippets and all, and `inbox` list them.
+To hide a schema's messages from both, refuse `read` on the schema (a
+rule that names the schema and `read` and no operation), or refuse the
+namespace operations themselves through the behavior question (`{
+"behavior": "Comments", "operation": ["searchMessages", "inbox"],
+"allow": false }`).
 
 Its storage is migration 2 (`conversation`): `comment_messages`,
 `comment_edits`, `comment_reactions` and `comment_conversations`, the
@@ -2900,7 +3354,24 @@ last holding each instance's counters and the counts the fields read
 beside the instance column `count`. The migration moves version 1's
 comments, a chain of replies, into threads one level deep: a comment's
 thread is the root of its chain, and it quotes the comment it replied to
-when that was a reply.
+when that was a reply. Migration 3 (`drafts`) adds `comment_drafts`, one
+row per non-empty append, and a composing message's columns,
+`draft_length` and `last_append_at`, with `posted_at`, which it sets to
+each existing message's `created_at`. Migration 4 (`inbox`) adds a
+message's `stand` and the conversation's `last_stand`, numbering each
+message that stood by its id, and the tables `comment_reads`,
+`comment_follows` and `comment_deliveries`. Migration 5 (`acting_for`)
+adds `for_subject` to `comment_messages`, `comment_edits` and
+`comment_reactions`, and `resolved_for` to `comment_messages`, NULL on
+every row before it. Migration 6 (`search`) adds `comment_search`, one
+row per standing message keying its body in the full-text index
+`comment_search_text`, fills both from the messages that stand, and
+indexes the pinned messages (`comment_messages_pinned`). On Postgres the
+index folds diacritics through `unaccent` where the database has it or
+the engine may create it, and folds case alone where not
+(`Unaccent::IfAvailable`, "Search on Postgres"): an engine that
+composes Comments never fails to migrate for the extension, and on such
+a database `cafe` does not find `café`.
 
 #### Revisions
 
@@ -3468,7 +3939,16 @@ Rust over the stored bytes, the same on both.
   so a role with `CREATE` on the database may; where the role may not, a
   publish that adds Search fails and says so, and an administrator runs
   `CREATE EXTENSION unaccent` once. The official image and Cloud SQL ship
-  it.
+  it. That is `create_fulltext`'s rule, `Unaccent::Required`. A behavior
+  every engine migrates, whose search is a convenience beside its data,
+  creates its index with `create_fulltext_with(name, columns,
+  Unaccent::IfAvailable)`: where `unaccent` cannot be had (the database
+  lacks it and the engine may not create it, or the role may not use it)
+  the index's configuration maps the words to `simple` alone, which folds
+  case and keeps diacritics (`cafe` does not find `café`), and the
+  migration goes on rather than fail. The configuration is made once, at
+  the index's migration: an `unaccent` created later leaves an index made
+  without it as it is. Comments' search index is one (its migration 6).
 - **The query** is an FTS5 expression on both, plain words quoted as
   above. Postgres takes FTS5's common forms, translated to a `tsquery`
   before the statement runs, since an error inside it would end the
@@ -4208,7 +4688,9 @@ Who set each own field last and through what (D73). afterChange compares
 a change's own fields before and after it and records each recorded
 field that moved: `caller` for a caller's create or update, else the
 attribution entry's behavior or the operation's own (D16, amended), the
-principal's subject, the time and the attributed confidence. With
+principal's subject (`by`), the subject it acted for (`for`, D77, absent
+when it acted for no one; its migration 2 adds the column), the time and
+the attributed confidence. With
 `review`, a write from one of its `sources` is `proposed`, or `accepted`
 when its confidence reaches `below`; `accept` and `reject` need the
 review's permission, and `reject` writes the field through its own
@@ -4345,10 +4827,12 @@ the engine does not raise.
 | DELETE | `/namespaces/{namespace}/schemas/{name}/instances/{id}` | `instances.delete`; `If-Match`, `Preconditions` | 200, `null` |
 | POST | `/namespaces/{namespace}/schemas/{name}/instances/{id}/operations/{operation}` | `instances.operate`, body: the parameters; `If-Match`, `Preconditions` | 200, the result, `ETag` |
 | POST | `/namespaces/{namespace}/schemas/{name}/operations/{operation}` | `instances.invokeSchema`, body: the parameters of a schema-level operation | 200, the result |
+| POST | `/namespaces/{namespace}/schemas/{name}/instances/{id}/signals/{behavior}/{signal}` | `signals.send`, body: the signal's data, `{}` when absent ("Signals") | 204, no body |
+| POST | `/namespaces/{namespace}/behaviors/{behavior}/operations/{operation}` | `behaviors.invoke`, body: the parameters of a namespace operation ("Namespace operations") | 200, the result |
 | GET | `/namespaces/{namespace}/schemas/{name}/describe` | `tools.describe` | 200, the describe document ("Tools") |
 | GET | `/namespaces/{namespace}/tools` | `tools.manifest` | 200, the tools document ("Tools") |
 | POST | `/namespaces/{namespace}/search` | `engine.search`, body: its parameters | 200, `{items, next}`, the hits of every schema that composes Search ("Search", "Across schemas") |
-| GET | `/namespaces/{namespace}/events?after=&limit=&schema=&instanceId=&kind=&behavior=&exclude=&beside=` | `events.read` | 200, `{events, next, more}`; with `Accept: text/event-stream`, the stream |
+| GET | `/namespaces/{namespace}/events?after=&limit=&schema=&instanceId=&kind=&behavior=&exclude=&beside=&signals=` | `events.read` | 200, `{events, next, more}`; with `Accept: text/event-stream`, the stream, and with `signals=1` its signals |
 | GET | `/namespaces/{namespace}/values/{hash}` | `values.get` | 200, `{hash, bytes, value}`, a value of the value store a schema the caller may read references ("The value store") |
 | GET | `/behaviors` | `tools.listBehaviors` | 200, a summary of each behavior the engine runs ("The behavior catalog") |
 | GET | `/behaviors/{name}` | `tools.describeBehavior` | 200, the behavior's document |
@@ -4377,7 +4861,9 @@ read-only operation, and a call that changed nothing, leave where it
 was. A schema-level operation's route
 takes its parameters the same way and answers its result with no `ETag`,
 since it names no instance; each operation route answers 404 for an
-operation of the other scope.
+operation of the other scope. A namespace operation's route takes its
+parameters and answers its result the same way, and 404 for an operation
+of another scope or a behavior the engine does not run.
 
 The event route's `after` is a cursor or `head`; `kind`, `behavior` and
 `exclude` are lists, as repeated parameters or comma-separated
@@ -4422,6 +4908,7 @@ the same in every namespace.
 | 415 | `unsupported_media_type` | the body is not of the route's media type |
 | 422 | `invalid_schema` | the document is refused; `details.issues` |
 | 422 | `invalid_instance` | the instance, or an update's result, is refused by the live version or a behavior's `validate`; `details.issues` |
+| 429 | `rate_limited` | a caller's signals past `signals.perSecond` on one instance ("Signals"); `Retry-After: 1` |
 | 429 | `too_many_requests` | the rate limit; `Retry-After` |
 | 500 | `internal_error` | anything else the deployment's `onError` does not map, a `BehaviorError` included; the failure stays off the wire |
 | 503 | `unavailable` | the schema's live version composes a behavior this engine has no implementation for, or whose implementation refuses its config |
@@ -4465,6 +4952,44 @@ policy's to say. The engine wraps the deployment's `Authenticator`:
 A deployment whose callers are all services passes `authenticateService`
 and no `authenticate`. Without `authenticateService` the runtime ignores
 the header, as before.
+
+`actingFor` lets a caller act for a subject (D77, "Acting for a subject"
+under "Access") with the `Acting-For` request header (`ACTING_FOR_HEADER`),
+whose value is the subject. `engineApp` and `engineMcp` take it:
+
+- `false`, the default, ignores the header: a request that carries it is
+  answered as if it did not, so a deployment that never opted in is not
+  changed by a client that sends it;
+- `true` honors it on every route for any caller the runtime
+  authenticated, an end user or a service standing in, and the access
+  policy decides what the principal may do for the subject;
+- a function, `(principal, subject, request) => boolean`, decides per
+  request, given the engine's principal for the caller (the service
+  beside it included), the subject and the request: a host that trusts
+  only its agents' tokens to act for anyone says so here.
+
+Every host reads a header it honors by one rule (the Rust engine's
+`acting_for_header_subject`, the Go binding's
+`enginehttp.ActingForSubject` and the TypeScript mount's): ASCII
+whitespace around the value (space, tab, LF, FF, CR) is trimmed, and
+nothing else. A request with more than one `Acting-For` header is 400
+`invalid_argument`, and so is a value holding a comma, which is how two
+read once a host or a proxy folds them into one, or a control character
+or any other whitespace, Unicode's included (U+0085, U+00A0, U+2028):
+such a value is refused, never trimmed into a subject the function did
+not see. An empty header acts for no one. A subject that is the caller's
+own, or one beside the end user a service brings, is the engine's 400
+`invalid_argument`. The Go binding's `enginehttp.Options.ActingFor` is
+the function (`enginehttp.HonorActingFor` for `true`, nil for `false`),
+and the Rust engine's `ApiOptions.acting_for` an `ActingForHeader`
+(`Ignore`, `Honor`, `ActingForHeader::decide(...)`, or `Decided` with
+the subject a host decided), which the axum router's
+`Options::acting_for` sets. A host whose mount honors the header for
+every caller passes the engine's routes `actingFor: true`, and the
+engine reads the header; a host whose function decides passes the
+subject it approved, `actingFor: "<subject>"`, and the engine acts for
+exactly that subject without reading the header again, so the subject a
+function approves is the one every event records.
 
 ### Users
 
@@ -4637,6 +5162,26 @@ data: {"cursor":41}
   the response, so a refusal is a problem document. A later refusal, a
   policy change say, ends the stream; the client reconnects and gets the
   problem.
+- With `signals=1` (or `true`) it also sends the signals ("Signals") of
+  its namespace that its `schema`, `instanceId` and `behavior` filters
+  keep, on schemas its principal may read, each one message `event:
+  signal` whose `data:` is the signal and which has no `id:` line, so
+  `Last-Event-ID` and a reconnect's replay never see one and
+  `EventSource.onmessage` does not receive it
+  (`addEventListener('signal', ...)`). It sends them once replay has
+  caught up, after `ready`, at most once and in no order with the events;
+  `kind`, `exclude` and `beside` do not apply to them. A signal wakes the
+  stream as a commit does, and the stream reads the log again only when a
+  commit came since its last read, or a heartbeat went by since its last
+  read, so signals sent more often than a heartbeat, which put its
+  keepalive comment off, never put off its reads. Without
+  `signals=1` a stream is as it was.
+
+  ```
+  event: signal
+  data: {"namespace":"default","schema":"Ticket","instanceId":"t1","behavior":"Comments","name":"typing","data":{},"from":"bob","at":1790000000000}
+  ```
+
 - It ends when the client disconnects, which removes its watcher, and
   when the engine closes. `timeoutSeconds` covers the first page, not the
   stream.
@@ -4691,7 +5236,7 @@ let app = Router::new().merge(routes).fallback_service(api_router);
 - **What the router answers itself.** A method no route on the path
   takes is the engine's 404, before the caller is asked, as the other
   runtimes answer it, not axum's 405 with `Allow`. A route that takes a
-  body (`Route::takes_body`: the seven whose spec declares one) reads at
+  body (`Route::takes_body`: the nine whose spec declares one) reads at
   most `Options::body_limit` bytes (1 MiB, `api::DEFAULT_BODY_LIMIT_BYTES`)
   and is 413 `payload_too_large` past it, as the HTTP runtimes' body limit
   answers. MCP reads up to its own 4 MiB and refuses past it as JSON-RPC.
@@ -4789,7 +5334,7 @@ a schema's live version:
   "namespace": "default", "name": "Item", "schemaNamespace": "default",
   "version": 1, "hash": "9f2c...", "instanceType": "Item",
   "display": {"noun": "Item", "plural": "Items", "titleField": "title", "summaryFields": ["test.Counter.count"]},
-  "fields": [{"name": "title", "title": "Title", "icon": "text"}],
+  "fields": [{"name": "title", "title": "Title", "icon": "text", "display": {"multiline": false}}],
   "instance": {
     "type": "object", "additionalProperties": false,
     "properties": {
@@ -4831,8 +5376,14 @@ a schema's live version:
   declares none.
 - `fields` lists the instance type's own fields in declaration order, each
   by its key in an instance's `data`, with its `title` (`@docs({ title
-  })`) and its `icon` (`@icon`) where it declares them. A behavior's
-  fields are under `behaviors`.
+  })`), its `icon` (`@icon`) and its `display` (`@display`) where it
+  declares them. `display` is the field's as the schema holds it:
+  `multiline`, and `currency`, an ISO 4217 code or `{ field }` naming the
+  own field that holds one, by its key in `data` (D48, amended). The
+  engine applies no rule of its own: a reader that takes a
+  `Finance.Money` field without a currency in the type's one
+  `Finance.Currency` field reads each field's scalar from `instance`. A
+  behavior's fields are under `behaviors`.
 - `instance` is the JSON Schema of an instance's `data`: closed, its own
   fields. Under `allOf` it carries what its behaviors' `validate` holds
   the own fields to, as their `instanceSchema` writes it: `Variants`'
@@ -4842,13 +5393,17 @@ a schema's live version:
   by behavior name, each behavior on the type that declares a field,
   with its fields `readOnly` and without a type, since a declaration
   gives a field a name, a description and whether it is volatile, and no
-  type. A volatile field says `"volatile": true` there, an annotation as
-  `readOnly` is ("Instances and events"). Each result that returns an
+  type. A volatile field says `"volatile": true` there, and a per-reader
+  one `"perReader": true` besides, annotations as `readOnly` is
+  ("Instances and events"). Each result that returns an
   instance carries it beside `data`.
 - `behaviors` lists each behavior's config, its `summary`, what its
   guidance says it does under the config ("Guidance", below; absent for
   a behavior that gives none), its fields, each with `volatile: true`
-  when it is, operations and the codes its vetoes carry (`vetoes`).
+  and `perReader: true` when it is, operations and the codes its vetoes carry (`vetoes`). A
+  behavior with namespace operations (D77) names them in
+  `namespaceOperations`, apart from the type's `operations`, which they
+  are not among.
 - `operations` lists `create`, `get`, `list`, `update`, `delete`, `lookup`
   where the instance type has a unique field, then each behavior's
   operations in the type's list order. `list`'s `params` has `where`,
@@ -4898,8 +5453,9 @@ included; `typeArguments(document, type, keys)` returns it for any type.
 reference): a tool per operation of every live schema the namespace
 reaches that the principal may read, by name, after the engine's tools:
 three schema tools, two behavior tools, the read of a value by its hash,
-four namespace tools, and the search across schemas where one of those
-schemas composes Search.
+four namespace tools, the search across schemas where one of those
+schemas composes Search, and a tool per namespace operation (D77) of each
+behavior one of those schemas composes.
 
 | Tool | Name | MCP handle | Arguments |
 | --- | --- | --- | --- |
@@ -4922,21 +5478,47 @@ schemas composes Search.
 | archive a namespace | `engine.archiveNamespace` | `archive_namespace` | `name` |
 | unarchive a namespace | `engine.unarchiveNamespace` | `unarchive_namespace` | `name` |
 | search every schema | `engine.search` | `search` | `query`, `syntax`, `vector`, `model`, `limit`, `cursor` (`engine.search`'s); listed where a schema the principal may read composes Search |
+| a namespace operation | `<behavior>.<operation>` | `<behavior>_<operation>` | `params` (its `paramsSchema`); listed where a schema the principal may read composes the behavior |
 
 A name follows the SDK generators, `<namespace>.<method>`, with the schema
-name in kebab case as the namespace (`LineItem` is `line-item`). An SDK
+name in kebab case as the namespace (`LineItem` is `line-item`), or for a
+namespace operation the behavior's, its dot a hyphen (`Comments.inbox` is
+`comments.inbox`, `acme.Rating`'s `topRated` `acme-rating.topRated`,
+handle `acme_rating_top_rated`). An SDK
 tool's handle is authored with `@mcp`; the engine derives one from the
 same parts in snake case (`line_item_add_note`). A handle `@mcp` would
 refuse (not lowercase snake case, longer than 48 characters), one two
-tools derive, or an engine tool's hides the tool with its reason in
-`hiddenReason`; the engine's tools keep theirs. A tool the access policy
+tools derive, or an engine tool's hides the tool (`hiddenBy` `handle`,
+below); the engine's tools keep theirs. A tool the access policy
 refuses the principal is hidden too, with that reason: a schema's tool
 asks what its call asks, and `define_schema` and the namespace tools,
 which name their schema or namespace only when called, ask a listing
-question ("Access"). So is, in an archived namespace, every tool that
-writes there, the namespace tools aside: the namespace refuses the
-write; and every tool a mount's `tools` filter leaves out of the
-caller's set ("MCP"). `requiresAuth` is
+question ("Access"), and so does a namespace operation's tool, with its
+behavior and operation. So is, in an archived namespace, every tool that
+writes there, the namespace tools and an operation that asks read
+(`markRead`, `follow`) aside: the namespace refuses the write; a
+namespace operation's tool that writes, `comments.claimDeliveries` say,
+is hidden there as `archived`; and every tool a mount's `tools` filter
+leaves out of the caller's set ("MCP").
+
+A hidden tool's `mcp` is `{ hidden: true, hiddenReason, hiddenBy }`.
+`hiddenBy` lists each cause, in this order: `deployment` (the tool
+options' `hidden`), `archived`, `policy`, `handle` and `filter`; and
+`hiddenReason` is the first one's, so a tool the deployment hides keeps
+the deployment's reason when its handle is refused too, and one the
+policy refuses gives the policy's. The policy is asked of every tool the
+deployment does not hide, one hidden for its handle included, since the
+operation is still offered through `instances` and the HTTP routes: a
+reader of the document learns whether the principal may run it. A tool
+the deployment hides is offered to no one, and the filter is asked only
+of a tool nothing else hides.
+
+```json
+{"hidden": true, "hiddenReason": "the access policy refuses reader write on SupplierContractAmendmentRequest (withdrawSignOff)", "hiddenBy": ["policy", "handle"]}
+```
+
+Here the handle, `supplier_contract_amendment_request_withdraw_sign_off`,
+has 53 characters. A tool's `requiresAuth` is
 true, `httpMethod` and `httpPath` name the HTTP route, a read-only tool's
 `replay` is `read_only`, `inputSchemaDigest` hashes the arguments as
 the Go encoder writes them, and `guidance` is the tool's guidance
@@ -5021,7 +5603,7 @@ module of its own (in `rust/behaviors` and
 | Behavior | What it says |
 | --- | --- |
 | `Workflow` | the states, the initial one, the moves from each state and the permission a move needs, the terminal states with their outcomes; that `transition` sets `enteredAt`, create's initial status, that update does not move it, and list's `where` on `Workflow.status` |
-| `Comments` | the conversation, the longest body, the block kinds, the edit window and who moderates, pins and resolves; that every write is beside the instance; each operation's refusals, and `purge` refused without `moderatePermission` (`not_configured`) |
+| `Comments` | the conversation, the longest body, the block kinds, the edit window and who moderates, pins and resolves; streaming a message with begin, appendDraft and finish, how long its author may pause (`composeTimeoutMs`) and how many drafts a caller holds (`maxDrafts`); that every write is beside the instance; each operation's refusals, and `purge` refused without `moderatePermission` (`not_configured`) |
 | `Revisions` | that every change records a revision, which `getRevision` reads by number, the review permission, `evidence` and `pendingProposals`; without review, that the review operations are refused (`no_review`) |
 | `Dependencies` | the blocker schemas, the gated states, the outcomes that finish a blocker; `blocked` on `transition`, the edge refusals on `addBlocker` and `create` |
 | `Links` | each link with its schema, required and what it pins, a revision or a release; what `create`, `link` and `unlink` take and refuse |
@@ -5062,8 +5644,9 @@ process. The catalog serves them:
   operation's `scope`, `writes` and invocation policy, the declaration's
   or the default, under the policy's key after `writes`, as the describe
   document writes it (D11); an operation beside the instance has
-  `"beside": true` after `writes`, and `"log": false` when it appends no
-  event (D77). `configSchema`, `createParamsSchema` and
+  `"beside": true` after `writes`, `"log": false` when it appends no
+  event, and `"asks": "read"` when it asks read (D77); a namespace
+  operation's `scope` is `namespace`. `configSchema`, `createParamsSchema` and
   `preconditionSchema` are as declared, and absent when the behavior
   takes none. A name the engine does not run is `not_found`; one that is
   not a behavior name, `invalid_argument`.
@@ -5174,6 +5757,10 @@ app.route('/api', engineMcp(engine, options));   // POST /api/namespaces/default
   ("Authentication and access" under "HTTP"), is the principal of every
   call, so the access policy answers each. An unknown namespace is the HTTP API's 404 problem; a request
   without a caller is 401.
+- `actingFor` honors the `Acting-For` header as `engineApp`'s does (D77,
+  "Authentication and access" under "HTTP"): ignored unless the mount
+  opts in, and then the principal of the request's every call acts for
+  the subject it names, which each event it writes records as `for`.
 - The engine speaks the protocol itself (D58, `rust/engine/src/api`):
   MCP's stateless streamable transport, each request answered on its own,
   on the 2025 revisions (`initialize`, `tools/list`, `tools/call`; GET and
@@ -5193,7 +5780,10 @@ app.route('/api', engineMcp(engine, options));   // POST /api/namespaces/default
   called, so the list asks the policy a listing question for each
   (`define`, or `manage` with what the tool does; "Access"): a caller the
   policy would refuse does not see them, and a call of one still asks
-  the question its call asks. The tools that only read, `list_schemas`,
+  the question its call asks. A namespace operation's tool (D77) is
+  listed where a schema the caller may read composes its behavior, and
+  asks the listing question `{ principal, action, namespace, behavior,
+  operation, listing: true }`. The tools that only read, `list_schemas`,
   `describe_schema`, the behavior tools (`list_behaviors`,
   `describe_behavior`) and `get_value`, are in every caller's list: each
   answers with what the policy lets the caller read, and the behavior
@@ -5266,9 +5856,11 @@ await client.instances.invoke('jobs', job.id, 'heartbeat', {}, { preconditions: 
 | `instances.create` (`{ id?, behaviors? }`), `get`, `list` (`{ limit?, cursor?, where? }`), `lookup(schema, key)`, `update`, `delete`, `invoke`, `operate`, `invokeSchema` | the instance, lookup and operation routes |
 | `events.read` (`{ after?, limit?, schema?, instanceId?, kinds?, behaviors?, exclude? }`), `events.head`, `events.subscribe` | the event route, as a page or the stream |
 | `behaviors.list`, `behaviors.describe`, `tools()`, `search(params)` | the behavior catalog, the tools document, the search across schemas |
+| `behaviors.invoke(behavior, operation, params?)` | a namespace operation's route (D77): its result |
+| `signals.send({ schema, instanceId, behavior, name, data? })` | the signal route ("Signals"): 204, nothing; a 429 `rate_limited` is not retried |
 
 - **Options.** Every call takes `namespace` (the client's `namespace`,
-  `default`, otherwise), `signal` and `forward`. A write (`update`,
+  `default`, otherwise), `signal`, `forward` and `actingFor`. A write (`update`,
   `delete`, `invoke`, `operate`) also takes `expectedSeq`, sent as
   `If-Match`, and `preconditions`, sent as the `Preconditions` header.
   `operate` returns `{ result, seq }`, the sequence from the `ETag`.
@@ -5299,6 +5891,12 @@ await client.instances.invoke('jobs', job.id, 'heartbeat', {}, { preconditions: 
   `signedTokenSource` fill it. A call's `forward` sends that end user's
   token instead of the client's, or no `Authorization` when it has none,
   so a service stands in for one.
+- **Acting for a subject** (D77). The client's `actingFor`, or a call's,
+  is sent as the `Acting-For` header (`ACTING_FOR_HEADER`), a call's
+  `null` sending none: the subject an agent or a service works for. A
+  mount honors it only when its host opts in ("Authentication and
+  access" under "HTTP"), and answers as if it were not there otherwise;
+  an event a call acting for someone wrote carries `for`.
 - **The retry rule.** A 401 `service_unauthorized` asks the service source
   for a fresh token (`token(true)`) once and retries; the end-user refresh
   does not run. Any other 401 runs `auth.refreshToken` once, shared by the
@@ -5334,6 +5932,16 @@ for await (const message of subscription) {
   iteration with its problem, a policy that now refuses the caller say,
   or the 410 `cursor_expired` of a cursor retention has pruned past,
   whose `floor` and `head` say where a new subscription may start.
+- With `signals: true` it opens the stream with `signals=1` and also
+  hands out each signal as `{ type: 'signal', signal }`, an `EngineSignal`
+  (`SignalMessage`; the subscription's type says so). A signal moves no
+  `cursor`, and a reconnect never replays one.
+
+  ```ts
+  for await (const message of client.events.subscribe({ after: 'head', schema: 'tickets', instanceId: 't1', signals: true })) {
+    if (message.type === 'signal') showTyping(message.signal.from, message.signal.data);
+  }
+  ```
 - Breaking out of the loop, `close()` or the options' `signal` ends it
   and cancels the connection.
 

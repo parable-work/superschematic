@@ -17,6 +17,14 @@ export const denyUnknownFields: ClassDecorator = () => {};
 // or null. Applies to this object only: a nested object type opts in on its
 // own.
 export const strictJSON: ClassDecorator = () => {};
+// Make every generated decoder of the type (Go, TypeScript, Python, Rust),
+// and a server's decoding of it as an operation's input, accept a key the
+// type does not declare and drop it, so the implementation sees only the
+// declared fields, which are checked as before. For a payload a producer
+// newer than its consumer sends, such as a provider's webhook; an @webhook
+// operation's input decodes this way unless its type is @strictJSON (D87).
+// A type is never both this and @strictJSON or @denyUnknownFields.
+export const allowUnknownFields: ClassDecorator = () => {};
 /** A UI schema renderer hides the field. */
 export const uiHidden: PropertyDecorator = noopPropertyDecorator;
 
@@ -76,6 +84,12 @@ export function source(_target: unknown): ClassDecorator {
 }
 /** A field of a `@source` view with no column behind it, which the implementation fills in. */
 export const virtual: PropertyDecorator = noopPropertyDecorator;
+/**
+ * A field of a `@source` view that carries the plaintext of its table's
+ * `Encrypted<T>` field (D85). A view leaves such a field out unless it says
+ * so: whatever the view holds, a response sends.
+ */
+export const decrypted: PropertyDecorator = noopPropertyDecorator;
 
 // Wire encodings for @temporalFormat: the epoch units. ISO text is the
 // default and is never declared.

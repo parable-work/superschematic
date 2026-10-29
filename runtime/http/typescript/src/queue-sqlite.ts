@@ -2,9 +2,11 @@ import type { SqlDatabase, SqlPreparedStatement, SqlValue } from './d1.js';
 import {
   canonicalUUID,
   ClaimLostError,
+  conflictOf,
   errorMessage,
   UNREADABLE,
   formatDuration,
+  jsonMemberValue,
   parseDuration,
   unset,
   type Queue,
@@ -89,7 +91,7 @@ export function enqueueStatement<M>(db: SqlDatabase, queue: QueueDefinition<M>, 
   const text =
     columns.length === 0
       ? `${statements.insert} DEFAULT VALUES`
-      : `${statements.insert} (${columns.join(', ')}) VALUES (${columns.map((_, i) => `?${i + 1}`).join(', ')})`;
+      : `${statements.insert} (${columns.join(', ')}) VALUES (${columns.map((_, i) => `?${i + 1}`).join(', ')})${conflictOf(statements)}`;
   return db.prepare(text).bind(...values);
 }
 
@@ -251,10 +253,12 @@ function sqliteClaimOf<M>(queue: QueueDefinition<M>, row: readonly unknown[]): Q
 
 /** A column's value as the message's member: the JSON a JSON column or a list holds, a boolean, a timestamp's Date, a duration's canonical text, or the value. */
 export function sqliteMemberValue(column: unknown, field: QueueField): unknown {
-  if (field.json || field.list) {
+  // A JSON column is TEXT on SQLite: its text is decoded once, by the field, a JSON string among it.
+  if (field.json) return jsonMemberValue(column, field);
+  if (field.list) {
     if (typeof column !== 'string') throw new Error(`the column holds ${JSON.stringify(column)}, no JSON text`);
     const value: unknown = JSON.parse(column);
-    if (field.list && field.timestamp && Array.isArray(value)) {
+    if (field.timestamp && Array.isArray(value)) {
       return value.map(element => (typeof element === 'string' ? new Date(element) : element));
     }
     return value;

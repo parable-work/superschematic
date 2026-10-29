@@ -48,6 +48,10 @@ const (
 	// deployable's class, or an app beside its API's handle,
 	// `{of: <API handle>, app: "<app class>"}` (D78).
 	stackExposeSchema = `{"oneOf":[` + stackHandleSchema + `,{"type":"object","required":["class"],"additionalProperties":false,"properties":{"class":{"type":"string","minLength":1}}},{"type":"object","required":["of","app"],"additionalProperties":false,"properties":{"of":` + stackHandleSchema + `,"app":{"type":"string","minLength":1}}}]}`
+	// stackOriginSchema is what `origins` lists (D91): a site's handle and
+	// the handles of the APIs its origin serves, every API it calls when
+	// apis is left out.
+	stackOriginSchema = `{"type":"object","required":["site"],"additionalProperties":false,"properties":{"site":` + stackHandleSchema + `,"apis":{"type":"array","minItems":1,"items":` + stackHandleSchema + `}}}`
 )
 
 var (
@@ -56,7 +60,8 @@ var (
 		"additionalProperties": false,
 		"properties": {
 			"deploy": {"type": "array", "items": ` + stackHandleSchema + `},
-			"expose": {"type": "array", "items": ` + stackExposeSchema + `}
+			"expose": {"type": "array", "items": ` + stackExposeSchema + `},
+			"origins": {"type": "array", "items": ` + stackOriginSchema + `}
 		}
 	}`)
 	serverArgs = json.RawMessage(`{
@@ -83,7 +88,8 @@ var (
 	// true, names the engine's runner of the DB of; enabled turns it on or
 	// off (D58). deriver names a deriver of the API of; enabled, instances
 	// and concurrency change how it runs (D74). app names an app of the API
-	// of; enabled turns it on or off (D78).
+	// of; enabled turns it on or off (D78). enabled beside a MemoryStore
+	// handle turns the store off, which no platform then places (D75).
 	environmentArgs = json.RawMessage(`{
 		"type": "object",
 		"additionalProperties": {"type": "object"},
@@ -179,16 +185,17 @@ func stackDeclaration(td *ir.TypeDef) string {
 	return ""
 }
 
-// applyStack reads @stack({ deploy, expose }).
+// applyStack reads @stack({ deploy, expose, origins }).
 func applyStack(td *ir.TypeDef, arg any) error {
 	var args struct {
-		Deploy []ir.ServiceRef `json:"deploy"`
-		Expose []any           `json:"expose"`
+		Deploy  []ir.ServiceRef `json:"deploy"`
+		Expose  []any           `json:"expose"`
+		Origins []*ir.Origin    `json:"origins"`
 	}
 	if err := DecodeArgs([]any{arg}, &args); err != nil {
 		return err
 	}
-	decl := &ir.StackDecl{Deploy: args.Deploy}
+	decl := &ir.StackDecl{Deploy: args.Deploy, Origins: args.Origins}
 	for i, v := range args.Expose {
 		ref, err := exposedRef(v)
 		if err != nil {
@@ -545,7 +552,10 @@ func checkJobSettings(where, owner string, settings *ir.DeployableSettings, r Ve
 		if settings.TimeZone != "" {
 			keys = append(keys, "timeZone")
 		}
-		if settings.Enabled != nil && settings.Of.Worker == "" && settings.Of.Deriver == "" && settings.Of.App == "" && !settings.Of.Runner {
+		// A worker, a runner, a deriver, an app and a memory store take
+		// enabled too (D53, D58, D74, D78, D75).
+		memoryStore := settings.Of.Service != nil && settings.Of.Service.Kind == ir.SchemaKindMemoryStore
+		if settings.Enabled != nil && settings.Of.Worker == "" && settings.Of.Deriver == "" && settings.Of.App == "" && !settings.Of.Runner && !memoryStore {
 			keys = append(keys, "enabled")
 		}
 		if settings.OnDeploy != nil {

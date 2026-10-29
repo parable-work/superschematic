@@ -20,7 +20,8 @@ use super::config::{Config, ConfigError};
 use super::cross_origin::{check_cross_origin, request_host};
 use super::errors::{
     cross_origin, field_refusal, forbidden, internal, invalid_credentials, invalid_permissions,
-    not_covered, not_held, store_error, unauthenticated, FieldErrors, CODE_UNAUTHORIZED,
+    not_covered, not_held, pending_approval, store_error, unauthenticated, FieldErrors,
+    CODE_UNAUTHORIZED,
 };
 use super::json;
 use super::password::{
@@ -29,7 +30,7 @@ use super::password::{
 use super::permissions::{
     capabilities_of, effective_permissions, uncovered, uncovered_user, valid_permission, Route,
 };
-use super::store::{NewSession, NewUser, Role, Store, StoreError, User};
+use super::store::{FirstUser, NewSession, NewUser, NewUserGrants, Role, Store, StoreError, User};
 use super::time::format_rfc3339;
 use super::token::{extract_credential, hash_token, new_token, CredentialOutcome, Transport};
 
@@ -68,6 +69,52 @@ pub struct Service {
     routes: Vec<Route>,
     params: Argon2Params,
     dummy: String,
+    registration: Registration,
+}
+
+/// How `register` admits a user (D81), as the API's `@userSessions({
+/// registration, defaultRoles, firstUser })` declares it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Registration {
+    /// Creates the user pending: `register` starts no session, and `login`
+    /// refuses them with 403 `pending_approval` until `approve_user`.
+    pub approval: bool,
+    /// The roles each new user is granted, by name, each created with no
+    /// permissions when no role has the name. A pending user holds them
+    /// from registration, and they take effect at approval.
+    pub default_roles: Vec<String>,
+    /// Makes the registration that finds no role grant the first
+    /// administrator: active even under `approval`, and holding the role
+    /// beside `default_roles`.
+    pub first_user: Option<FirstUser>,
+}
+
+/// What `register` did: started a session, or, for a user who waits for
+/// approval, none (D81).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Registered {
+    Signed(IssuedSession),
+    Pending(SessionUser),
+}
+
+impl Registered {
+    /// The answer of `register` under approval.
+    pub fn register_result(&self) -> RegisterResult {
+        match self {
+            Registered::Signed(issued) => RegisterResult {
+                pending: false,
+                user: issued.result.user.clone(),
+                expires_at: Some(issued.result.expires_at.clone()),
+                token: issued.result.token.clone(),
+            },
+            Registered::Pending(user) => RegisterResult {
+                pending: true,
+                user: user.clone(),
+                expires_at: None,
+                token: None,
+            },
+        }
+    }
 }
 
 impl fmt::Debug for Service {
@@ -292,6 +339,19 @@ impl Input for RoleInput {
     }
 }
 
+/// `register`'s result under approval (D81): pending and no session, or a
+/// session as [`LoginResult`] has one.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterResult {
+    pub pending: bool,
+    pub user: SessionUser,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
+}
+
 /// `login`'s and `register`'s result: the user, when the session ends, and
 /// the token, which a cookie session does not answer.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -339,6 +399,7 @@ pub struct IdentityUser {
     pub login: String,
     pub name: String,
     pub disabled: bool,
+    pub pending: bool,
     pub roles: Vec<RoleRef>,
 }
 
@@ -378,6 +439,7 @@ fn identity_user(user: User) -> IdentityUser {
         login: user.login,
         name: user.name,
         disabled: user.disabled,
+        pending: user.pending,
     }
 }
 
@@ -451,7 +513,37 @@ impl Service {
             routes: Vec::new(),
             params,
             dummy,
+            registration: Registration::default(),
         })
+    }
+
+    /// The service with how `register` admits users (D81). It refuses a
+    /// registration a store could not write: an empty role name, or a first
+    /// administrator without a role or with no permission or one of the
+    /// wrong form.
+    pub fn with_registration(mut self, registration: Registration) -> Result<Service, ConfigError> {
+        if registration.default_roles.iter().any(String::is_empty) {
+            return Err(ConfigError("a default role has no name".to_owned()));
+        }
+        if let Some(first) = &registration.first_user {
+            if first.role.is_empty() || first.permissions.is_empty() {
+                return Err(ConfigError(
+                    "the first administrator needs a role and at least one permission".to_owned(),
+                ));
+            }
+            if let Some(bad) = first.permissions.iter().find(|p| !valid_permission(p)) {
+                return Err(ConfigError(format!(
+                    "the first administrator's permission {bad:?} is not dotted segments of letters, digits, '_' and '-'"
+                )));
+            }
+        }
+        self.registration = registration;
+        Ok(self)
+    }
+
+    /// How `register` admits users.
+    pub fn registration(&self) -> &Registration {
+        &self.registration
     }
 
     /// The service with the clock sessions are created, expired and touched
@@ -535,8 +627,9 @@ impl Service {
     /// failure (an unknown login, a login the scalar refuses, a user with
     /// no password, a wrong one, a disabled user) is 401
     /// `invalid_credentials` after a verify of the same cost, so neither
-    /// the answer nor its timing tells which. A hash at another cost is
-    /// written again at the config's.
+    /// the answer nor its timing tells which. A user whose password
+    /// verifies and who waits for approval is 403 `pending_approval`
+    /// (D81). A hash at another cost is written again at the config's.
     pub async fn login(&self, input: &LoginInput) -> Result<IssuedSession, ApiError> {
         let mut errors = FieldErrors::default();
         let transport = transport_of(&input.session, &mut errors);
@@ -565,6 +658,9 @@ impl Service {
         if record.user.disabled {
             return Err(invalid_credentials());
         }
+        if record.user.pending {
+            return Err(pending_approval());
+        }
         if rehash {
             let hash = self.hash(&input.password).await?;
             self.store
@@ -575,30 +671,53 @@ impl Service {
         self.issue(&record.user, transport).await
     }
 
-    /// Creates a user with a password and signs them in, as `login` does. A
-    /// taken login is 409 `conflict`.
-    pub async fn register(&self, input: &RegisterInput) -> Result<IssuedSession, ApiError> {
+    /// Creates a user with a password, with the registration's default
+    /// roles, and signs them in, as `login` does. Under approval the user
+    /// waits for an administrator and no session starts, unless they are
+    /// the first administrator (D81). A taken login is 409 `conflict`.
+    pub async fn register(&self, input: &RegisterInput) -> Result<Registered, ApiError> {
         let mut errors = FieldErrors::default();
         let transport = transport_of(&input.session, &mut errors);
         check_login_field(&mut errors, &input.login);
         check_password_field(&mut errors, "password", &input.password);
         errors.check()?;
+        let grants = NewUserGrants {
+            pending: self.registration.approval,
+            roles: self.registration.default_roles.clone(),
+            first: self.registration.first_user.clone(),
+        };
         let user = self
-            .create(&input.login, &input.name, &input.password)
+            .create(&input.login, &input.name, &input.password, grants)
             .await?;
-        self.issue(&user, transport).await
+        if user.pending {
+            return Ok(Registered::Pending(SessionUser {
+                id: user.id,
+                login: user.login,
+                name: user.name,
+            }));
+        }
+        self.issue(&user, transport).await.map(Registered::Signed)
     }
 
-    async fn create(&self, login: &str, name: &str, password: &str) -> Result<User, ApiError> {
+    async fn create(
+        &self,
+        login: &str,
+        name: &str,
+        password: &str,
+        grants: NewUserGrants,
+    ) -> Result<User, ApiError> {
         let hash = self.hash(password).await?;
         let created = self
             .store
-            .create_user(NewUser {
-                login: login.to_owned(),
-                name: name.to_owned(),
-                password_hash: hash,
-                at: self.now(),
-            })
+            .create_user_with(
+                NewUser {
+                    login: login.to_owned(),
+                    name: name.to_owned(),
+                    password_hash: hash,
+                    at: self.now(),
+                },
+                grants,
+            )
             .await;
         match created {
             Ok(user) => Ok(user),
@@ -733,7 +852,11 @@ impl Service {
         };
         let now = self.now();
         let session = &record.session;
-        if session.revoked_at.is_some() || now >= session.expires_at || record.user.disabled {
+        if session.revoked_at.is_some()
+            || now >= session.expires_at
+            || record.user.disabled
+            || record.user.pending
+        {
             return Err(unauthenticated());
         }
         let last_seen = session.last_seen_at.unwrap_or(session.created_at);
@@ -859,15 +982,23 @@ impl Service {
         check_login_field(&mut errors, &input.login);
         check_password_field(&mut errors, "password", &input.password);
         errors.check()?;
-        self.create(&input.login, &input.name, &input.password)
-            .await
-            .map(identity_user)
+        self.create(
+            &input.login,
+            &input.name,
+            &input.password,
+            NewUserGrants::default(),
+        )
+        .await
+        .map(identity_user)
     }
 
-    /// Every user, by login (`users.read`).
+    /// The users, by login (`users.read`): every one when `pending` is
+    /// `None`, else those who wait for approval when it is `true` and the
+    /// others when it is `false` (D81).
     pub async fn list_users(
         &self,
         caller: &IdentityPrincipal,
+        pending: Option<bool>,
     ) -> Result<Vec<IdentityUser>, ApiError> {
         self.require(caller, PERMISSION_USERS_READ)?;
         let users = self
@@ -875,7 +1006,29 @@ impl Service {
             .list_users()
             .await
             .map_err(|err| internal(&err))?;
-        Ok(users.into_iter().map(identity_user).collect())
+        Ok(users
+            .into_iter()
+            .filter(|user| pending.is_none_or(|p| user.pending == p))
+            .map(identity_user)
+            .collect())
+    }
+
+    /// Approves a user who waits for approval, who can then sign in
+    /// (`users.write`, D81). The caller's permissions must cover each of
+    /// the user's, the roles `register` granted them included; a user who
+    /// is not pending is 409 `not_pending`.
+    pub async fn approve_user(
+        &self,
+        caller: &IdentityPrincipal,
+        id: &str,
+    ) -> Result<IdentityUser, ApiError> {
+        self.require(caller, PERMISSION_USERS_WRITE)?;
+        self.covers(caller, id).await?;
+        self.store
+            .approve_user(id)
+            .await
+            .map_err(|err| store_error(err, "User"))?;
+        self.user(id).await
     }
 
     /// One user (`users.read`).

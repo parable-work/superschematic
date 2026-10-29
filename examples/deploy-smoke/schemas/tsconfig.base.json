@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022"],
+    "strict": true,
+    "strictPropertyInitialization": false,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": false,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@superschematic/*": ["../../../packages/*/src/index.ts"],
+      "superscalar": ["../../../third_party/superscalar/bindings/typescript/src/index.ts"],
+      "@smoke/*": ["./services/*/src/index.ts"]
+    }
+  }
+}

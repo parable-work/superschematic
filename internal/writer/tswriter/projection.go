@@ -19,8 +19,8 @@ func (e *emitter) emitProjection(def *ir.TypeDef) {
 		return
 	}
 	if def.Extends != "" || len(def.Implements) > 0 || def.RawHeritage != nil || def.User != nil || def.UserRole != nil || def.IsTrait ||
-		def.TraitConfig != nil || def.Source != nil || len(def.Indexes) > 0 || def.JsonField ||
-		def.Versioned || def.Optimistic || def.EnvVars || def.DenyUnknownFields || def.StrictJSON || len(def.Behaviors) > 0 {
+		def.TraitConfig != nil || def.Source != nil || len(def.Indexes) > 0 || len(def.RawSQL) > 0 || def.JsonField ||
+		def.Versioned || def.Optimistic || def.EnvVars || def.DenyUnknownFields || def.StrictJSON || def.AllowUnknownFields || len(def.Behaviors) > 0 {
 		e.failf("type %s: a projection class carries only @projection and @join", def.Name)
 		return
 	}
@@ -28,7 +28,11 @@ func (e *emitter) emitProjection(def *ir.TypeDef) {
 	e.comment("", def.Comment)
 
 	fmt.Fprintf(&e.body, "@%s<%s>({\n", e.use("projection"), e.renderTypeName(p.Source, def.Name))
-	fmt.Fprintf(&e.body, "  pool: %s,\n  name: %s,\n  migration: %s,\n", quote(p.Pool), quote(p.Name), quote(p.Migration))
+	// A view without a pool is created beside the tables (D90).
+	if p.Pool != "" {
+		fmt.Fprintf(&e.body, "  pool: %s,\n", quote(p.Pool))
+	}
+	fmt.Fprintf(&e.body, "  name: %s,\n  migration: %s,\n", quote(p.Name), quote(p.Migration))
 	if len(p.Predicates) > 0 {
 		e.body.WriteString("  where: [\n")
 		for _, pred := range p.Predicates {

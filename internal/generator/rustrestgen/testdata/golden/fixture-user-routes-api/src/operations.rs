@@ -204,6 +204,21 @@ pub const ACCOUNT_ADMIN_GET_USER: OperationInfo = OperationInfo {
     service: None,
 };
 
+/// account-admin.approveUser (`POST /api/auth/admin/users/{id}/approve`), which the identity
+/// runtime serves (D50).
+pub const ACCOUNT_ADMIN_APPROVE_USER: OperationInfo = OperationInfo {
+    namespace: "account-admin",
+    name: "approveUser",
+    method: "POST",
+    path: "/api/auth/admin/users/{id}/approve",
+    requires_auth: true,
+    permissions: &["identity.users.write"],
+    require_ownership: false,
+    manual: false,
+    rate_limit: None,
+    service: None,
+};
+
 /// account-admin.disableUser (`POST /api/auth/admin/users/{id}/disable`), which the identity
 /// runtime serves (D50).
 pub const ACCOUNT_ADMIN_DISABLE_USER: OperationInfo = OperationInfo {
@@ -308,6 +323,7 @@ pub const ALL: &[OperationInfo] = &[
     ACCOUNT_ADMIN_LIST_USERS,
     ACCOUNT_ADMIN_CREATE_USER,
     ACCOUNT_ADMIN_GET_USER,
+    ACCOUNT_ADMIN_APPROVE_USER,
     ACCOUNT_ADMIN_DISABLE_USER,
     ACCOUNT_ADMIN_ENABLE_USER,
     ACCOUNT_ADMIN_SET_USER_PASSWORD,

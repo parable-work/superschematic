@@ -1,0 +1,17 @@
+# caller-ts-api on its default TypeScript server, and its worker, over
+# caller-db, on the local target.
+kind: Stack
+types:
+  Notes:
+    name: Notes
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: caller-ts-api, kind: API }
+      expose:
+        - service: { name: caller-ts-api, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

@@ -35,6 +35,12 @@ const (
 	// CodeInvalidPermission: a role's permission is not dotted segments of
 	// letters, digits, '_' and '-'. 422, with the permissions in details.
 	CodeInvalidPermission = "invalid_permission"
+	// CodePendingApproval: a login whose password verifies for a user who
+	// waits for an administrator's approval (D81). 403.
+	CodePendingApproval = "pending_approval"
+	// CodeNotPending: approveUser for a user who is not waiting for
+	// approval (D81). 409.
+	CodeNotPending = "not_pending"
 )
 
 func problem(category, code, message string, cause error) *apperror.AppError {
@@ -43,6 +49,14 @@ func problem(category, code, message string, cause error) *apperror.AppError {
 
 func invalidCredentials(cause error) *apperror.AppError {
 	return problem(apperror.ErrCodeUnauthorized, CodeInvalidCredentials, "Invalid login or password", cause)
+}
+
+func pendingApproval() *apperror.AppError {
+	return problem(apperror.ErrCodeForbidden, CodePendingApproval, "The user waits for an administrator's approval", nil)
+}
+
+func notPending() *apperror.AppError {
+	return problem(apperror.ErrCodeConflict, CodeNotPending, "The user is not waiting for approval", nil)
 }
 
 func unauthenticated(cause error) *apperror.AppError {

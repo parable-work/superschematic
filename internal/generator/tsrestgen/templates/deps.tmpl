@@ -29,7 +29,7 @@
 {{ if .DepsPool }}
 import type { Pool } from 'pg';
 {{- end }}
-import type { {{ if .ChecksEndUsers }}Authenticator, {{ end }}{{ if .Deps.Buckets }}Bucket, {{ end }}Logger } from '{{ .RuntimePackage }}';
+import type { {{ if .ChecksEndUsers }}Authenticator, {{ end }}{{ if .Deps.Buckets }}Bucket, {{ end }}Logger{{ if .Deps.MemoryStores }}, MemoryStore{{ end }} } from '{{ .RuntimePackage }}';
 {{- if .DepsSQLite }}
 import type { SqlDatabase } from '{{ .RuntimePackage }}/d1';
 {{- end }}
@@ -41,6 +41,9 @@ import type { {{ .Client }} } from '{{ .Package }}';
 {{- end }}
 {{- if or .HasWorkers .HasDerivers }}
 import type { {{ join .DatabaseTypeImports ", " }} } from '{{ .Deps.DatabaseTypesPackage }}';
+{{- end }}
+{{- if .DepsORM }}
+import type { {{ .Deps.ORM }} } from '{{ .Deps.DatabaseTypesPackage }}/orm';
 {{- end }}
 {{- if .Deps.Engine }}
 import type { EngineBackground } from '{{ .Deps.Engine.Package }}/server';
@@ -57,8 +60,23 @@ export interface Deps {
   readonly config: EnvConfig;
 {{- end }}
 {{- if .DepsPool }}
+{{- if .DepsORM }}
+  /** A pool of {{ .Deps.Database }}, the API's database, for the SQL the repositories do not express. */
+  readonly db: Pool;
+  /**
+   * The repositories of {{ .Deps.Database }}'s tables over db (D79), a table's rows
+   * read and written as its types' ./orm entry declares them, with no SQL of
+   * the implementation's. In an operation it acts as the caller, whom
+   * createdBy, updatedBy and deletedBy record, and in a job or a worker as
+   * no one: orm.asSystem() acts as the database's system actor, and
+   * orm.withUser(id) as another user (D87). orm.transaction(fn) writes in
+   * one transaction, which enqueue takes.
+   */
+  readonly orm: {{ .Deps.ORM }};
+{{- else }}
   /** A pool of {{ .Deps.Database }}, the API's database. */
   readonly db: Pool;
+{{- end }}
 {{- else if .DepsSQLite }}
   /**
    * {{ .Deps.Database }}, the API's database, whose DB service lists sqlite first: D1's
@@ -74,6 +92,15 @@ export interface Deps {
 {{- range .Deps.Buckets }}
   /** {{ .Service }}, a bucket the API lists: private object storage it puts, gets, deletes and lists objects in, and signs URLs for (D54). */
   readonly {{ .Field }}: Bucket;
+{{- end }}
+{{- range .Deps.MemoryStores }}
+  /**
+   * {{ .Service }}, a memory store the API lists (D75): use it through the store's
+   * generated definitions. It refuses every call at once while it is
+   * disabled or unreachable, and the caller takes its fallback path; a
+   * subscribe while it is unreachable is held until it reconnects.
+   */
+  readonly {{ .Field }}: MemoryStore;
 {{- end }}
 {{- with .Deps.Engine }}
   /**

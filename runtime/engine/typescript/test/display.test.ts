@@ -1,5 +1,5 @@
 // A type's display (D48): the describe document carries it, the instance
-// type's fields with their titles and icons and each operation's title;
+// type's fields with their titles, icons and displays, and each operation's title;
 // define and publish hold it to the type, its behaviors and its Workflow,
 // with the compiler's wording, and the meta-schema holds its shape.
 import assert from 'node:assert/strict';
@@ -30,7 +30,7 @@ function refusals(document: Record<string, unknown>): Array<{ path: string; mess
 }
 
 describe('the describe document', () => {
-  test("carries the instance type's display, its fields with their titles and icons, and each operation's title", () => {
+  test("carries the instance type's display, its fields with their titles, icons and displays, and each operation's title", () => {
     const engine = openTestEngine();
     publish(engine, ticketsDocument());
     const described = engine.tools.describe(alice, 'tickets');
@@ -57,7 +57,7 @@ describe('the describe document', () => {
     assert.deepEqual(described.fields, [
       { name: 'title', title: 'Title', icon: 'text' },
       { name: 'assignee', title: 'Assignee', icon: 'person' },
-      { name: 'body' },
+      { name: 'body', display: { multiline: true } },
     ]);
     assert.deepEqual(
       described.operations.map((operation) => [operation.name, operation.title]),
@@ -69,6 +69,10 @@ describe('the describe document', () => {
         ['delete', 'Delete tickets'],
         ['transition', 'tickets: transition'],
         ['post', 'tickets: post'],
+        ['begin', 'tickets: begin'],
+        ['appendDraft', 'tickets: appendDraft'],
+        ['finish', 'tickets: finish'],
+        ['interrupt', 'tickets: interrupt'],
         ['edit', 'tickets: edit'],
         ['deleteMessage', 'tickets: deleteMessage'],
         ['purge', 'tickets: purge'],
@@ -78,10 +82,14 @@ describe('the describe document', () => {
         ['unpin', 'tickets: unpin'],
         ['resolve', 'tickets: resolve'],
         ['reopen', 'tickets: reopen'],
+        ['moveAnchor', 'tickets: moveAnchor'],
+        ['markRead', 'tickets: markRead'],
+        ['follow', 'tickets: follow'],
         ['listMessages', 'tickets: listMessages'],
         ['getMessage', 'tickets: getMessage'],
         ['listEdits', 'tickets: listEdits'],
         ['listReactions', 'tickets: listReactions'],
+        ['listPinned', 'tickets: listPinned'],
       ]
     );
     // Each title is its tool's.
@@ -109,6 +117,25 @@ describe('the describe document', () => {
     const plain = engine.tools.describe(alice, 'Plain');
     assert.equal('display' in plain, false);
     assert.deepEqual(plain.fields, [{ name: 'title' }]);
+  });
+
+  test("gives each own field's display as the schema holds it, a currency's field by its key in an instance", () => {
+    const engine = openTestEngine();
+    publish(
+      engine,
+      schemaDocument('Invoice', [
+        { name: 'note', typeRef: { name: 'string' }, display: { multiline: true } },
+        { name: 'total', typeRef: { name: 'Generic.Int64' }, display: { currency: 'GBP' } },
+        { name: 'code', jsonTag: 'currencyCode', typeRef: { name: 'string' } },
+        { name: 'due', typeRef: { name: 'Generic.Int64' }, display: { currency: { field: 'code' } } },
+      ])
+    );
+    assert.deepEqual(engine.tools.describe(alice, 'Invoice').fields, [
+      { name: 'note', display: { multiline: true } },
+      { name: 'total', display: { currency: 'GBP' } },
+      { name: 'currencyCode' },
+      { name: 'due', display: { currency: { field: 'currencyCode' } } },
+    ]);
   });
 
   test('a new version may change the display of a schema with instances', () => {

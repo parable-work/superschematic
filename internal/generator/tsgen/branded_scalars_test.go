@@ -12,7 +12,9 @@ import (
 // plain string does not assign to a branded field and a value superscalar
 // parsed does; a scalar @default is cast to its symbol, an empty list
 // default is not; a mask writes a required secret's zero value cast to its
-// symbol; the validators still take unvalidated input.
+// symbol; the validators still take unvalidated input; and the package's
+// root hands out superscalar's constructors of each scalar's brand, which
+// throw on a value the scalar refuses (D100).
 func TestScalarFieldsAreBranded(t *testing.T) {
 	scalars := []string{"Contact.Email", "Identity.UUID", "Temporal.TimeZone", "Generic.Int64", "Identity.Slug", "Auth.Password", "Temporal.DateTime", "Generic.JSON"}
 	schema := loadScalarService(t, "branded-fixture", scalars, "BrandedFixture", []map[string]any{
@@ -55,6 +57,7 @@ import { maskSecretsBrandedFixture } from './mask/types/brandedfixture';
 import { parseBrandedFixtureJson, validateBrandedFixture } from './validators/types/brandedfixture';
 import { validateContactEmailRequired } from './validators/scalars/contact_email';
 import { parseAuthPasswordStrict, parseContactEmailStrict, parseIdentityUUID } from 'superscalar/scalars';
+import { normalizeIdentitySlugStrict, parseIdentityUUIDStrict, validateIdentitySlugRequired } from './index';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -82,6 +85,23 @@ assert(!validateContactEmailRequired('not an email')[0], 'the scalar validator a
 assert(BrandedFixtureDefaults.zone === 'UTC' && BrandedFixtureDefaults.seats === 5, 'the defaults hold the literals');
 const parsed = parseBrandedFixtureJson(JSON.stringify({ email: 'ops@example.com', password: 'hunter22', rotatedAt: '2026-01-02T00:00:00Z' }));
 assert(parsed.zone === 'UTC' && parsed.seats === 5 && Array.isArray(parsed.tags), 'parsing applies the defaults');
+
+// An implementation that depends on the types package alone makes the
+// brands from it.
+const constructed: BrandedFixture = {
+  ...fixture,
+  owner: parseIdentityUUIDStrict('0b1e8c64-5c39-4b2c-9a8c-3f1d2e4a5b6c'),
+  tags: [normalizeIdentitySlugStrict('spring-sale')],
+};
+assert(validateBrandedFixture(constructed) === true, 'a value the package constructed does not validate');
+assert(validateIdentitySlugRequired(constructed.tags[0])[0], 'a constructed slug does not validate');
+let refused = false;
+try {
+  parseIdentityUUIDStrict('not a uuid');
+} catch {
+  refused = true;
+}
+assert(refused, 'a strict constructor accepted a value its scalar refuses');
 
 const masked = maskSecretsBrandedFixture(fixture);
 assert(masked.password === '', 'a masked password is the empty string');

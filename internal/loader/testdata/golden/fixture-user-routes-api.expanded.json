@@ -300,6 +300,15 @@
           "origin": "identity"
         },
         {
+          "name": "pending",
+          "comment": "Whether the user waits for an administrator's approval, and so cannot sign in.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
           "name": "roles",
           "comment": "The roles the user holds.",
           "typeRef": {
@@ -423,6 +432,50 @@
           "typeRef": {
             "name": "SessionTransport"
           },
+          "origin": "identity"
+        }
+      ],
+      "origin": "identity"
+    },
+    "RegisterResult": {
+      "name": "RegisterResult",
+      "owner": "fixture-user-routes-api",
+      "comment": "What register answers under registration approval: whether the user waits for an administrator's approval, and the session of one who does not.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "pending",
+          "comment": "Whether the user waits for an administrator's approval, with no session.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "user",
+          "comment": "The registered user.",
+          "typeRef": {
+            "name": "SessionUser"
+          },
+          "required": true,
+          "origin": "identity"
+        },
+        {
+          "name": "expiresAt",
+          "comment": "When the session ends; absent while the user waits for approval.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "origin": "identity"
+        },
+        {
+          "name": "token",
+          "comment": "The session's bearer token; absent for a cookie session and while the user waits for approval.",
+          "typeRef": {
+            "name": "string"
+          },
+          "secret": true,
           "origin": "identity"
         }
       ],
@@ -556,7 +609,7 @@
   "operationSets": [
     {
       "name": "Account",
-      "comment": "Signs users in and out, and lets anyone register.",
+      "comment": "Signs users in and out, and lets anyone register: a new user waits for\nan administrator's approval as a member, and the first is the\nadministrator (D81).",
       "operations": [
         {
           "name": "login",
@@ -657,13 +710,13 @@
         },
         {
           "name": "register",
-          "comment": "Creates a user with the login, name and password given and signs them in, as login does.",
+          "comment": "Creates a user with the login, name and password given, who waits for an administrator's approval: it answers 202 with pending true and starts no session. The first administrator, when the set names one, is signed in as login does.",
           "mcp": {
             "hidden": true,
             "hiddenReason": "It carries a password, which an agent does not hold."
           },
           "typeRef": {
-            "name": "LoginResult"
+            "name": "RegisterResult"
           },
           "required": true,
           "arguments": [
@@ -686,7 +739,17 @@
         }
       ],
       "userSessions": {
-        "register": true
+        "register": true,
+        "registration": "approval",
+        "defaultRoles": [
+          "member"
+        ],
+        "firstUser": {
+          "role": "admin",
+          "permissions": [
+            "identity"
+          ]
+        }
       }
     },
     {
@@ -729,6 +792,15 @@
             "isArray": true
           },
           "required": true,
+          "arguments": [
+            {
+              "name": "pending",
+              "comment": "true lists the users waiting for approval alone, false the others; every user when absent.",
+              "typeRef": {
+                "name": "boolean"
+              }
+            }
+          ],
           "permissions": [
             "identity.users.read"
           ],
@@ -807,6 +879,30 @@
           "identityOperation": "enableUser",
           "httpMethod": "POST",
           "restPath": "auth/admin/users/{id}/enable",
+          "origin": "identity"
+        },
+        {
+          "name": "approveUser",
+          "comment": "Approves a user who registered to wait for approval, who can then sign in with the roles register granted them. The caller's own permissions must cover those roles'.",
+          "typeRef": {
+            "name": "IdentityUser"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "identity.users.write"
+          ],
+          "identityOperation": "approveUser",
+          "httpMethod": "POST",
+          "restPath": "auth/admin/users/{id}/approve",
           "origin": "identity"
         },
         {

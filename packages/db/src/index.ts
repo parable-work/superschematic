@@ -1,6 +1,7 @@
 export {
   column,
   conflictUnit,
+  enqueueOnChange,
   graphMember,
   index,
   join,
@@ -8,17 +9,24 @@ export {
   key,
   optimistic,
   projection,
+  query,
   queue,
+  rawSql,
   searchField,
   sourceMustProject,
+  table,
   unique,
   versioned,
   versionGraph,
 } from "./decorators";
 export type {
   ConflictUnitStrategy,
+  EnqueueCondition,
+  EnqueueOnChangeOptions,
+  EnqueueWrite,
   GraphMemberOptions,
   GraphParent,
+  IndexMethod,
   IndexOptions,
   ProjectionCollapse,
   ProjectionFunctionCall,
@@ -27,10 +35,18 @@ export type {
   ProjectionOrder,
   ProjectionPredicate,
   ProjectionSettingBinding,
+  QueryField,
+  QueryOptions,
+  QueryOrderBy,
+  QueryPage,
+  QueueOnDuplicate,
   QueueOptions,
+  RawSqlOptions,
   SchemaClass,
+  TableField,
   VersionedOptions,
   VersionGraphOptions,
 } from "./decorators";
-export type { AutoGenerate, HasMany, JsonField, ManyToMany, OnDeleteAction, Relation, RelationOptions } from "./wrappers";
-export type { User, UserConfig, UserRole } from "./user";
+export type { AutoGenerate, Encrypted, HasMany, JsonField, ManyToMany, OnDeleteAction, Relation, RelationOptions } from "./wrappers";
+export type { RoleSeed, User, UserConfig, UserRole } from "./user";
+export { seedRoles } from "./user";

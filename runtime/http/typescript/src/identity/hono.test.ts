@@ -388,7 +388,7 @@ for (const kind of databaseKinds) {
       const created = await h.do('POST', '/auth/admin/users', { login: 'clerk@example.com', name: 'Clerk', password: USER_PASSWORD }, ...admin);
       expectReply(created, 200);
       const clerkId = created.body.data.id as string;
-      expect(created.body.data).toEqual({ id: clerkId, login: 'clerk@example.com', name: 'Clerk', disabled: false, roles: [] });
+      expect(created.body.data).toEqual({ id: clerkId, login: 'clerk@example.com', name: 'Clerk', disabled: false, pending: false, roles: [] });
       expectReply(await h.do('POST', '/auth/admin/users', { login: 'CLERK@example.com', password: USER_PASSWORD }, ...admin), 409, 'conflict');
       expectReply(await h.do('POST', '/auth/admin/users', { login: 'x@example.com', password: USER_PASSWORD }, ...member), 403, 'forbidden');
 
@@ -596,6 +596,7 @@ describe('identity routes', () => {
       'GET /api/auth/admin/users/{id} identity.users.read 600',
       'POST /api/auth/admin/users/{id}/disable identity.users.write 600',
       'POST /api/auth/admin/users/{id}/enable identity.users.write 600',
+      'POST /api/auth/admin/users/{id}/approve identity.users.write 600',
       'PUT /api/auth/admin/users/{id}/password identity.users.write 600',
       'GET /api/auth/admin/roles identity.roles.read 600',
       'POST /api/auth/admin/roles identity.roles.write 600',

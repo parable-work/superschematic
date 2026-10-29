@@ -94,7 +94,7 @@ operationSets:
         typeRef: { name: OrderView }
         required: true
         httpMethod: GET
-        restPath: orders/:id
+        restPath: "orders/{id}"
         arguments:
           - name: id
             typeRef: { name: string }

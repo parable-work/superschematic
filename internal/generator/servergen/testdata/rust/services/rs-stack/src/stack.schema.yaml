@@ -1,8 +1,9 @@
 # Three servers, each the default one of its API: rs-stock, a Rust server
-# on rs-db with the bucket rs-media, calls rs-pricing, another Rust server,
-# and rs-orders, a Go server, calls rs-stock; the site rs-web calls
-# rs-stock, which answers CORS for it. Its one environment, Local, runs on
-# the local target.
+# on rs-db with the bucket rs-media and the memory store rs-cache, calls
+# rs-pricing, another Rust server, and rs-orders, a Go server, calls
+# rs-stock; the site rs-web calls rs-stock, which answers CORS for it. Local
+# runs on the local target, with rs-cache on its Valkey; Offline runs there
+# with rs-cache turned off, so rs-stock's workloads open it disabled (D75).
 kind: Stack
 types:
   Stock:
@@ -22,3 +23,11 @@ types:
     role: EmbeddedStruct
     environment:
       target: local
+  Offline:
+    name: Offline
+    role: EmbeddedStruct
+    environment:
+      target: local
+      settings:
+        - of: { service: { name: rs-cache, kind: MemoryStore } }
+          enabled: false

@@ -48,6 +48,11 @@ export interface EngineEvent {
   actor: string;
   /** The deployable of the service whose call made the change (D37); absent for a call no service made. */
   service?: string;
+  /**
+   * The subject the principal that made the change acted for (D77), beside
+   * actor; absent when it acted for no one, as the runner's work never does.
+   */
+  for?: string;
   /** When, in epoch milliseconds. */
   at: number;
   /**

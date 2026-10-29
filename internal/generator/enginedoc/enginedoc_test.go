@@ -323,6 +323,8 @@ func TestBuildCarriesTheDeploymentsInvocationPolicies(t *testing.T) {
 		"publish":              "ask",
 		"acme.Rating.rate":     "ask",
 		"Comments.post":        "ask",
+		// A namespace operation's tool takes a policy by the same name (D77).
+		"Comments.claimDeliveries": "ask",
 	}})
 	for _, want := range []string{
 		"outputs.engine.tools.invocation: ",
@@ -336,8 +338,12 @@ func TestBuildCarriesTheDeploymentsInvocationPolicies(t *testing.T) {
 			t.Errorf("Build = %v, want it refused saying %q", err, want)
 		}
 	}
-	if err != nil && strings.Contains(err.Error(), "Comments.post") {
-		t.Errorf("Build refused Comments.post, an operation of a composed behavior: %v", err)
+	if err != nil && strings.Contains(err.Error(), "Comments.") {
+		t.Errorf("Build refused Comments.post or Comments.claimDeliveries, operations of a composed behavior: %v", err)
+	}
+	// A namespace operation's tool can be hidden by the same name.
+	if doc := build(t, s, enginedoc.Options{Invocation: invocation, Hidden: []string{"Comments.claimDeliveries"}}); !slices.Contains(doc.Tools.Hidden, "Comments.claimDeliveries") {
+		t.Errorf("Tools.Hidden = %v, want Comments.claimDeliveries", doc.Tools.Hidden)
 	}
 
 	// A schema that composes Payments or Stock names a policy for each of

@@ -1,0 +1,10 @@
+# The prebuilt dependencies scripts/prebuilt_deps.py fetch stages in a
+# checkout without Rust (D82): for each family, the key of the inputs its
+# artifacts were built from and the SHA-256 of the manifest.json of the
+# prerelease prebuilt-<family>-<key>, which lists each tarball's digest.
+# The prebuilt-deps workflow publishes the prerelease;
+# `scripts/prebuilt_deps.py pin superscalar versiongraph` writes this file.
+superscalar_key=
+superscalar_manifest_sha256=
+versiongraph_key=
+versiongraph_manifest_sha256=

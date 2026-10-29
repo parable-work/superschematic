@@ -4,6 +4,18 @@
     "citext",
     "pgcrypto"
   ],
+  "roles": [
+    {
+      "insert": "INSERT INTO role (\"name\", permissions) VALUES ('member', ARRAY['identity.roles.read']::TEXT[])\nON CONFLICT (\"name\") DO UPDATE SET permissions = EXCLUDED.permissions WHERE cardinality(role.permissions) = 0",
+      "name": "member",
+      "origin": "Role",
+      "permissions": [
+        "identity.roles.read"
+      ],
+      "table": "role",
+      "update": "UPDATE role SET permissions = ARRAY['identity.roles.read']::TEXT[] WHERE \"name\" = 'member'"
+    }
+  ],
   "service": "fixture-user-model-db",
   "tables": [
     {
@@ -201,6 +213,12 @@
           "name": "disabled_at",
           "nullable": true,
           "origin": "UserCredential.disabledAt",
+          "type": "TIMESTAMPTZ"
+        },
+        {
+          "name": "pending_at",
+          "nullable": true,
+          "origin": "UserCredential.pendingAt",
           "type": "TIMESTAMPTZ"
         }
       ],

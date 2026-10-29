@@ -235,6 +235,132 @@ pub fn parse_order(value: Value, unknown_fields: rt::UnknownFields) -> Result<cr
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
 
+/// The fields `OrderChanged` declares, by their wire names.
+pub const ORDER_CHANGED_FIELDS: &[&str] = &["orderId", "lineId", "priority"];
+
+/// Validates a JSON value as `OrderChanged`. A null value passes; the errors
+/// are empty when the value is valid.
+pub fn validate_order_changed(value: &Value) -> ValidationErrors {
+    let mut errors = ValidationErrors::new();
+    if value.is_null() {
+        return errors;
+    }
+    {
+        let field = value.get("orderId");
+        errors.set_result("orderId", scalars::validate_identity_uuid_required(field));
+    }
+    {
+        let field = value.get("lineId");
+        if !rt::is_absent(field) {
+            errors.set_result("lineId", scalars::validate_identity_uuid(field));
+        }
+    }
+    {
+        let field = value.get("priority");
+        errors.set_result("priority", validate_priority_required(field));
+    }
+    errors
+}
+
+/// Validates a `OrderChanged` object that must be present: its errors are one
+/// `object` error.
+pub fn validate_order_changed_required(value: Option<&Value>) -> rt::ScalarResult {
+    rt::require_object(value, validate_order_changed)
+}
+
+/// Prepares a JSON value as `OrderChanged`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_order_changed` decodes.
+pub fn prepare_order_changed(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
+    let Value::Object(mut object) = value else {
+        return Err(rt::ParseError::NotAnObject);
+    };
+    rt::fill_default(&mut object, "priority", "\"low\"", true);
+    rt::check_unknown_fields(&object, ORDER_CHANGED_FIELDS, unknown_fields)?;
+    let value = Value::Object(object);
+    let errors = validate_order_changed(&value);
+    if !errors.is_empty() {
+        return Err(rt::ParseError::Invalid(errors));
+    }
+    Ok(value)
+}
+
+/// Parses a JSON value as `OrderChanged`: `prepare_order_changed`, then decodes it.
+pub fn parse_order_changed(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::OrderChanged, rt::ParseError> {
+    let value = prepare_order_changed(value, unknown_fields)?;
+    serde_json::from_value(value).map_err(rt::ParseError::Decode)
+}
+
+/// The fields `OrderLine` declares, by their wire names.
+pub const ORDER_LINE_FIELDS: &[&str] = &["id", "order", "product", "quantity", "note"];
+
+/// Validates a JSON value as `OrderLine`. A null value passes; the errors
+/// are empty when the value is valid.
+pub fn validate_order_line(value: &Value) -> ValidationErrors {
+    let mut errors = ValidationErrors::new();
+    if value.is_null() {
+        return errors;
+    }
+    {
+        let field = value.get("id");
+        if !rt::is_absent(field) {
+            errors.set_result("id", scalars::validate_identity_uuid(field));
+        }
+    }
+    {
+        let field = value.get("order");
+        if let Some(nested) = field {
+            rt::check_nested(&mut errors, "order".to_owned(), nested, validate_order);
+        }
+        if rt::is_absent(field) {
+            errors.push("order", ValidationError::required());
+        }
+    }
+    {
+        let field = value.get("product");
+        if let Some(nested) = field {
+            rt::check_nested(&mut errors, "product".to_owned(), nested, validate_product);
+        }
+    }
+    {
+        let field = value.get("quantity");
+        errors.set_result("quantity", scalars::validate_generic_int64_required(field));
+    }
+    {
+        let field = value.get("note");
+        rt::expect_string(&mut errors, "note", field);
+    }
+    errors
+}
+
+/// Validates a `OrderLine` object that must be present: its errors are one
+/// `object` error.
+pub fn validate_order_line_required(value: Option<&Value>) -> rt::ScalarResult {
+    rt::require_object(value, validate_order_line)
+}
+
+/// Prepares a JSON value as `OrderLine`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_order_line` decodes.
+pub fn prepare_order_line(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
+    let Value::Object(object) = value else {
+        return Err(rt::ParseError::NotAnObject);
+    };
+    rt::check_unknown_fields(&object, ORDER_LINE_FIELDS, unknown_fields)?;
+    let value = Value::Object(object);
+    let errors = validate_order_line(&value);
+    if !errors.is_empty() {
+        return Err(rt::ParseError::Invalid(errors));
+    }
+    Ok(value)
+}
+
+/// Parses a JSON value as `OrderLine`: `prepare_order_line`, then decodes it.
+pub fn parse_order_line(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::OrderLine, rt::ParseError> {
+    let value = prepare_order_line(value, unknown_fields)?;
+    serde_json::from_value(value).map_err(rt::ParseError::Decode)
+}
+
 /// The fields `OrderPlaced` declares, by their wire names.
 pub const ORDER_PLACED_FIELDS: &[&str] = &["orderId", "placedAt", "priority", "quantity", "note", "shipTo", "tags"];
 
@@ -370,5 +496,160 @@ pub fn prepare_ping(value: Value, unknown_fields: rt::UnknownFields) -> Result<V
 /// Parses a JSON value as `Ping`: `prepare_ping`, then decodes it.
 pub fn parse_ping(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Ping, rt::ParseError> {
     let value = prepare_ping(value, unknown_fields)?;
+    serde_json::from_value(value).map_err(rt::ParseError::Decode)
+}
+
+/// The fields `Product` declares, by their wire names.
+pub const PRODUCT_FIELDS: &[&str] = &["id", "name"];
+
+/// Validates a JSON value as `Product`. A null value passes; the errors
+/// are empty when the value is valid.
+pub fn validate_product(value: &Value) -> ValidationErrors {
+    let mut errors = ValidationErrors::new();
+    if value.is_null() {
+        return errors;
+    }
+    {
+        let field = value.get("id");
+        if !rt::is_absent(field) {
+            errors.set_result("id", scalars::validate_identity_uuid(field));
+        }
+    }
+    {
+        let field = value.get("name");
+        if rt::is_absent(field) {
+            errors.push("name", ValidationError::required());
+        }
+        rt::expect_string(&mut errors, "name", field);
+    }
+    errors
+}
+
+/// Validates a `Product` object that must be present: its errors are one
+/// `object` error.
+pub fn validate_product_required(value: Option<&Value>) -> rt::ScalarResult {
+    rt::require_object(value, validate_product)
+}
+
+/// Prepares a JSON value as `Product`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_product` decodes.
+pub fn prepare_product(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
+    let Value::Object(object) = value else {
+        return Err(rt::ParseError::NotAnObject);
+    };
+    rt::check_unknown_fields(&object, PRODUCT_FIELDS, unknown_fields)?;
+    let value = Value::Object(object);
+    let errors = validate_product(&value);
+    if !errors.is_empty() {
+        return Err(rt::ParseError::Invalid(errors));
+    }
+    Ok(value)
+}
+
+/// Parses a JSON value as `Product`: `prepare_product`, then decodes it.
+pub fn parse_product(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Product, rt::ParseError> {
+    let value = prepare_product(value, unknown_fields)?;
+    serde_json::from_value(value).map_err(rt::ParseError::Decode)
+}
+
+/// The fields `StockChecked` declares, by their wire names.
+pub const STOCK_CHECKED_FIELDS: &[&str] = &["sku", "quantity"];
+
+/// Validates a JSON value as `StockChecked`. A null value passes; the errors
+/// are empty when the value is valid.
+pub fn validate_stock_checked(value: &Value) -> ValidationErrors {
+    let mut errors = ValidationErrors::new();
+    if value.is_null() {
+        return errors;
+    }
+    {
+        let field = value.get("sku");
+        if rt::is_absent(field) {
+            errors.push("sku", ValidationError::required());
+        }
+        rt::expect_string(&mut errors, "sku", field);
+    }
+    {
+        let field = value.get("quantity");
+        errors.set_result("quantity", scalars::validate_generic_int64_required(field));
+    }
+    errors
+}
+
+/// Validates a `StockChecked` object that must be present: its errors are one
+/// `object` error.
+pub fn validate_stock_checked_required(value: Option<&Value>) -> rt::ScalarResult {
+    rt::require_object(value, validate_stock_checked)
+}
+
+/// Prepares a JSON value as `StockChecked`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_stock_checked` decodes.
+pub fn prepare_stock_checked(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
+    let Value::Object(object) = value else {
+        return Err(rt::ParseError::NotAnObject);
+    };
+    rt::check_unknown_fields(&object, STOCK_CHECKED_FIELDS, unknown_fields)?;
+    let value = Value::Object(object);
+    let errors = validate_stock_checked(&value);
+    if !errors.is_empty() {
+        return Err(rt::ParseError::Invalid(errors));
+    }
+    Ok(value)
+}
+
+/// Parses a JSON value as `StockChecked`: `prepare_stock_checked`, then decodes it.
+pub fn parse_stock_checked(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::StockChecked, rt::ParseError> {
+    let value = prepare_stock_checked(value, unknown_fields)?;
+    serde_json::from_value(value).map_err(rt::ParseError::Decode)
+}
+
+/// The fields `SyncRequested` declares, by their wire names.
+pub const SYNC_REQUESTED_FIELDS: &[&str] = &["accountId", "reason"];
+
+/// Validates a JSON value as `SyncRequested`. A null value passes; the errors
+/// are empty when the value is valid.
+pub fn validate_sync_requested(value: &Value) -> ValidationErrors {
+    let mut errors = ValidationErrors::new();
+    if value.is_null() {
+        return errors;
+    }
+    {
+        let field = value.get("accountId");
+        errors.set_result("accountId", scalars::validate_identity_uuid_required(field));
+    }
+    {
+        let field = value.get("reason");
+        rt::expect_string(&mut errors, "reason", field);
+    }
+    errors
+}
+
+/// Validates a `SyncRequested` object that must be present: its errors are one
+/// `object` error.
+pub fn validate_sync_requested_required(value: Option<&Value>) -> rt::ScalarResult {
+    rt::require_object(value, validate_sync_requested)
+}
+
+/// Prepares a JSON value as `SyncRequested`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_sync_requested` decodes.
+pub fn prepare_sync_requested(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
+    let Value::Object(object) = value else {
+        return Err(rt::ParseError::NotAnObject);
+    };
+    rt::check_unknown_fields(&object, SYNC_REQUESTED_FIELDS, unknown_fields)?;
+    let value = Value::Object(object);
+    let errors = validate_sync_requested(&value);
+    if !errors.is_empty() {
+        return Err(rt::ParseError::Invalid(errors));
+    }
+    Ok(value)
+}
+
+/// Parses a JSON value as `SyncRequested`: `prepare_sync_requested`, then decodes it.
+pub fn parse_sync_requested(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::SyncRequested, rt::ParseError> {
+    let value = prepare_sync_requested(value, unknown_fields)?;
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }

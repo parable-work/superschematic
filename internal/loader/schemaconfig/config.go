@@ -89,6 +89,17 @@ type SchemaConfig struct {
 	// only, and each entry names a Bucket service.
 	Buckets []ServiceDependency `json:"buckets,omitempty" yaml:"buckets,omitempty"`
 
+	// MemoryStores lists the MemoryStore services an API's implementation
+	// uses (D75). It is valid on an API config only, and each entry names a
+	// MemoryStore service.
+	MemoryStores []ServiceDependency `json:"memoryStores,omitempty" yaml:"memoryStores,omitempty"`
+
+	// RateLimitStore names the MemoryStore service an API's @rateLimit
+	// routes count in, which its replicas share (D75). It is valid on an
+	// API config only, and the API uses the store whether or not
+	// MemoryStores lists it.
+	RateLimitStore *ServiceDependency `json:"rateLimitStore,omitempty" yaml:"rateLimitStore,omitempty"`
+
 	// Outputs is the raw outputs configuration. The v2 generators
 	// own its typed interpretation.
 	Outputs map[string]any `json:"outputs,omitempty" yaml:"outputs,omitempty"`
@@ -223,6 +234,9 @@ func ValidateShapeWith(cfg *SchemaConfig, known KindSet) (*SchemaConfig, error) 
 	if err := validateBuckets(cfg); err != nil {
 		return nil, err
 	}
+	if err := validateMemoryStores(cfg); err != nil {
+		return nil, err
+	}
 	if _, ok := cfg.Outputs["ci"]; ok && cfg.Kind != ir.SchemaKindStack {
 		return nil, fmt.Errorf("schema config for %s sets outputs.ci, which only a %s service may set: the generated CI deploys a stack's environments (this service is kind %s)", cfg.Name, ir.SchemaKindStack, cfg.Kind)
 	}
@@ -285,9 +299,78 @@ func validateBuckets(cfg *SchemaConfig) error {
 	return nil
 }
 
+// validateMemoryStores checks memoryStores and rateLimitStore, an API
+// config's MemoryStore services, each named once (D75), and a MemoryStore
+// service's own config: it names no authDb and is not public, and its
+// outputs are types alone, in Go, TypeScript or Rust. Its dependencies are
+// the services whose object types its channels carry.
+func validateMemoryStores(cfg *SchemaConfig) error {
+	if cfg.Kind == ir.SchemaKindMemoryStore {
+		switch {
+		case cfg.AuthDB != "":
+			return fmt.Errorf("schema config for %s sets authDb; a %s service authenticates no one, and the APIs that use it list it in their memoryStores", cfg.Name, ir.SchemaKindMemoryStore)
+		case cfg.Public:
+			return fmt.Errorf("schema config for %s sets public; a %s service is reached only by the workloads of the APIs that list it", cfg.Name, ir.SchemaKindMemoryStore)
+		}
+		for key, value := range cfg.Outputs {
+			if key != "types" {
+				return fmt.Errorf("schema config for %s sets outputs.%s; a %s service's outputs are its definitions, outputs.types, in go, typescript or rust", cfg.Name, key, ir.SchemaKindMemoryStore)
+			}
+			langs, _ := value.(map[string]any)
+			for lang := range langs {
+				switch lang {
+				case "go", "typescript", "rust":
+				default:
+					return fmt.Errorf("schema config for %s sets outputs.types.%s; a %s service's definitions are written in go, typescript or rust", cfg.Name, lang, ir.SchemaKindMemoryStore)
+				}
+			}
+		}
+	}
+	if (len(cfg.MemoryStores) > 0 || cfg.RateLimitStore != nil) && cfg.Kind != ir.SchemaKindAPI {
+		return fmt.Errorf("schema config for %s sets memoryStores or rateLimitStore, which only an API service may set (this service is kind %s)", cfg.Name, cfg.Kind)
+	}
+	seen := make(map[string]bool, len(cfg.MemoryStores))
+	for _, store := range cfg.MemoryStores {
+		switch {
+		case store.Name == "":
+			return fmt.Errorf("schema config for %s has a memoryStores entry with no name", cfg.Name)
+		case store.Kind != ir.SchemaKindMemoryStore:
+			return fmt.Errorf("schema config for %s lists %s in memoryStores, a handle of kind %q; memoryStores names %s services only", cfg.Name, store.Name, store.Kind, ir.SchemaKindMemoryStore)
+		case seen[store.Name]:
+			return fmt.Errorf("schema config for %s lists memory store %s more than once", cfg.Name, store.Name)
+		}
+		seen[store.Name] = true
+	}
+	if store := cfg.RateLimitStore; store != nil {
+		switch {
+		case store.Name == "":
+			return fmt.Errorf("schema config for %s has a rateLimitStore with no name", cfg.Name)
+		case store.Kind != ir.SchemaKindMemoryStore:
+			return fmt.Errorf("schema config for %s names %s its rateLimitStore, a handle of kind %q; rateLimitStore names a %s service", cfg.Name, store.Name, store.Kind, ir.SchemaKindMemoryStore)
+		}
+	}
+	return nil
+}
+
+// UsedMemoryStores are the MemoryStore services the config's API uses:
+// its memoryStores in order, then its rateLimitStore when the list leaves
+// it out (D75).
+func (c *SchemaConfig) UsedMemoryStores() []ServiceDependency {
+	stores := append([]ServiceDependency(nil), c.MemoryStores...)
+	if c.RateLimitStore == nil {
+		return stores
+	}
+	for _, store := range stores {
+		if store.Name == c.RateLimitStore.Name {
+			return stores
+		}
+	}
+	return append(stores, *c.RateLimitStore)
+}
+
 // NewSchema returns an empty schema for the configured service, holding the
-// references the config makes: its authDb, dependencies, calls and
-// buckets. Every frontend starts its schema here, so the IR records them
+// references the config makes: its authDb, dependencies, calls, buckets,
+// memory stores and rate limit store. Every frontend starts its schema here, so the IR records them
 // whatever form the config takes.
 func (c *SchemaConfig) NewSchema() *ir.Schema {
 	schema := ir.NewSchema(c.Name, c.Kind)
@@ -299,6 +382,10 @@ func (c *SchemaConfig) NewSchema() *ir.Schema {
 		schema.Site = &site
 	}
 	schema.Buckets = serviceRefs(c.Buckets)
+	schema.MemoryStores = serviceRefs(c.UsedMemoryStores())
+	if c.RateLimitStore != nil {
+		schema.RateLimitStore = &ir.ServiceRef{Name: c.RateLimitStore.Name, Kind: c.RateLimitStore.Kind}
+	}
 	return schema
 }
 

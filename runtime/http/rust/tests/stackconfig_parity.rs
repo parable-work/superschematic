@@ -15,14 +15,21 @@ use serde_json::{json, Map, Value};
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use superschematic_http_runtime::stackconfig::{
-    load_bucket_from, load_callers_from, load_cors_from, load_database_from, load_service_from,
-    Database, StackConfigError,
+    load_bucket_from, load_callers_from, load_cors_from, load_database_from,
+    load_memory_store_from, load_service_from, Database, StackConfigError,
 };
 
 const VECTORS: &str = "../testdata/stackconfig_parity.json";
 
 /// The readers a vector names, all of which the corpus must hold.
-const READERS: [&str; 5] = ["database", "service", "bucket", "callers", "cors"];
+const READERS: [&str; 6] = [
+    "database",
+    "service",
+    "bucket",
+    "memoryStore",
+    "callers",
+    "cors",
+];
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -109,6 +116,18 @@ fn read(vector: &Vector, env: &HashMap<String, String>) -> Result<Value, Option<
             put(&mut out, "endpoint", bucket.endpoint.as_ref());
             Value::Object(out)
         }
+        "memoryStore" => match load_memory_store_from(field, env)? {
+            None => Value::Null,
+            Some(store) => {
+                let mut out = Map::new();
+                out.insert("store".to_string(), json!(store.store));
+                out.insert("url".to_string(), json!(store.url));
+                out.insert("auth".to_string(), json!(store.auth.as_str()));
+                put(&mut out, "ca", store.ca.as_ref());
+                put(&mut out, "member", store.member.as_ref());
+                Value::Object(out)
+            }
+        },
         "callers" => {
             // The config as the shared JSON writes it, without the leeway,
             // which the field does not set and the Rust config writes.

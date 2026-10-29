@@ -1274,7 +1274,9 @@ impl Native {
 
     /// Calls `callback(epoch)` on the JavaScript thread each time a commit
     /// moves the engine's notifier: one the runner's thread, an
-    /// asynchronous call or, on Postgres, another process made. A thread of
+    /// asynchronous call or, on Postgres, another process made; and each
+    /// time a signal one of its event streams keeps wakes it (D77), with
+    /// the epoch where it was. A thread of
     /// its own waits on the notifier and calls through a weak threadsafe
     /// function, so a watch never holds the process open. It ends when the
     /// engine shuts down (a last call) or at `unwatch`; a second watch
@@ -1300,14 +1302,17 @@ impl Native {
         std::thread::Builder::new()
             .name("engine-watch".to_owned())
             .spawn(move || {
-                let mut seen = notifier.epoch();
+                let mut seen = notifier.wakes();
                 while !stop.load(Ordering::SeqCst) {
-                    let epoch = notifier.wait(seen, std::time::Duration::from_millis(250));
+                    let wakes = notifier.wait_wakes(seen, std::time::Duration::from_millis(250));
                     let closed = weak.upgrade().is_none_or(|engine| engine.is_closed());
-                    if epoch > seen || closed {
-                        seen = epoch;
+                    if wakes > seen || closed {
+                        seen = wakes;
                         #[allow(clippy::cast_precision_loss)]
-                        tsfn.call(epoch as f64, ThreadsafeFunctionCallMode::NonBlocking);
+                        tsfn.call(
+                            notifier.epoch() as f64,
+                            ThreadsafeFunctionCallMode::NonBlocking,
+                        );
                     }
                     if closed {
                         break;

@@ -67,6 +67,13 @@ const (
 	// queue.
 	DeployableDeriver DeployableKind = "deriver"
 
+	// DeployableMemoryStore is one MemoryStore service: a Redis or Valkey
+	// server, which needs nothing. The server, jobs and workers of each API
+	// that lists it reach it over a memoryStore edge (D75). An environment
+	// whose settings turn it off (`enabled: false`) places no deployable
+	// for it, and lists it in ResolvedEnvironment.Disabled.
+	DeployableMemoryStore DeployableKind = "memoryStore"
+
 	// DeployableApp runs one `@app` of an API schema: the project's own
 	// HTTP program over the API's Deps, implementations, identity and
 	// engine, which serves requests as a server does (D78). Its needs are
@@ -76,7 +83,7 @@ const (
 
 // Valid reports whether k is a deployable kind v1 knows.
 func (k DeployableKind) Valid() bool {
-	return k == DeployableDatabase || k == DeployableServer || k == DeployableJob || k == DeployableSite || k == DeployableBucket || k == DeployableWorker || k == DeployableRunner || k == DeployableDeriver || k == DeployableApp
+	return k == DeployableDatabase || k == DeployableServer || k == DeployableJob || k == DeployableSite || k == DeployableBucket || k == DeployableWorker || k == DeployableRunner || k == DeployableDeriver || k == DeployableMemoryStore || k == DeployableApp
 }
 
 // RunsCode reports whether a deployable of kind k runs code the stack's
@@ -98,7 +105,7 @@ func (k DeployableKind) RollsOut() bool {
 
 // DeployableKinds returns the deployable kinds, in a fixed order.
 func DeployableKinds() []DeployableKind {
-	return []DeployableKind{DeployableDatabase, DeployableServer, DeployableJob, DeployableSite, DeployableBucket, DeployableWorker, DeployableRunner, DeployableDeriver, DeployableApp}
+	return []DeployableKind{DeployableDatabase, DeployableServer, DeployableJob, DeployableSite, DeployableBucket, DeployableWorker, DeployableRunner, DeployableDeriver, DeployableMemoryStore, DeployableApp}
 }
 
 // EdgeKind is the kind of an edge: a need met by something that provides
@@ -123,11 +130,16 @@ const (
 	// EdgeBucket runs from a server, and from a job, to each bucket an API
 	// it serves lists in its config's buckets (D54).
 	EdgeBucket EdgeKind = "bucket"
+
+	// EdgeMemoryStore runs from a server, a job and a worker to each
+	// memory store an API it serves lists in its config's memoryStores, or
+	// names its rateLimitStore (D75).
+	EdgeMemoryStore EdgeKind = "memoryStore"
 )
 
 // Valid reports whether k is an edge kind v1 knows.
 func (k EdgeKind) Valid() bool {
-	return k == EdgeSQL || k == EdgeHTTP || k == EdgeSite || k == EdgeBucket
+	return k == EdgeSQL || k == EdgeHTTP || k == EdgeSite || k == EdgeBucket || k == EdgeMemoryStore
 }
 
 // A service handle is a ServiceRef (ir/schema.go), written `{name, kind}`
@@ -208,6 +220,11 @@ type Stack struct {
 	// is named here or not (D55).
 	Expose []DeployableRef `json:"expose,omitempty" yaml:"expose,omitempty"`
 
+	// Origins put a site and APIs it calls on one origin in every
+	// environment (D91): each API under SiteDevAPIPath(service) on the
+	// site's own origin, as `stack dev`'s proxy serves it (D82).
+	Origins []*Origin `json:"origins,omitempty" yaml:"origins,omitempty"`
+
 	// Deployables are the declared deployables: those that differ from the
 	// defaults of section 3.2. StackOf gives them in name order.
 	Deployables []*DeployableDecl `json:"deployables,omitempty" yaml:"deployables,omitempty"`
@@ -226,6 +243,19 @@ func (s *Stack) Environment(name string) *Environment {
 		}
 	}
 	return nil
+}
+
+// Origin is one element of `@stack`'s origins (D91): a site that serves
+// APIs it calls on its own origin, each under SiteDevAPIPath(service), so
+// the page calls them with no CORS, and a cookie session needs no trusted
+// origin and no shared domain.
+type Origin struct {
+	// Site is the Site service whose origin it is.
+	Site ServiceRef `json:"site" yaml:"site"`
+
+	// APIs are the API services the origin serves, each one the site
+	// calls. Empty is every API the site calls.
+	APIs []ServiceRef `json:"apis,omitempty" yaml:"apis,omitempty"`
 }
 
 // DeployableDecl is a declared deployable, such as an `@server` class. It
@@ -368,14 +398,17 @@ type EnvValue struct {
 	Parameter string `json:"parameter,omitempty" yaml:"parameter,omitempty"`
 }
 
-// StackDecl is the declaration of a stack's `@stack` class: Stack's Deploy
-// and Expose.
+// StackDecl is the declaration of a stack's `@stack` class: Stack's
+// Deploy, Expose and Origins.
 type StackDecl struct {
 	// Deploy names the entry points.
 	Deploy []ServiceRef `json:"deploy,omitempty" yaml:"deploy,omitempty"`
 
 	// Expose names what is reachable from outside the environment.
 	Expose []DeployableRef `json:"expose,omitempty" yaml:"expose,omitempty"`
+
+	// Origins put a site and APIs it calls on one origin (D91).
+	Origins []*Origin `json:"origins,omitempty" yaml:"origins,omitempty"`
 }
 
 // ServerDecl is the declaration of an `@server` class: a declared server
@@ -438,9 +471,10 @@ func StackOf(schema *Schema) *Stack {
 		}
 		if td.Stack != nil && stack == nil {
 			stack = &Stack{
-				Name:   schema.Name,
-				Deploy: td.Stack.Deploy,
-				Expose: td.Stack.Expose,
+				Name:    schema.Name,
+				Deploy:  td.Stack.Deploy,
+				Expose:  td.Stack.Expose,
+				Origins: td.Stack.Origins,
 			}
 		}
 		if td.Server != nil {
@@ -496,8 +530,9 @@ func EnvironmentNames(types map[string]*TypeDef) []string {
 }
 
 // StackReferences returns every service handle the declarations of a Stack
-// schema's classes hold: `@stack`'s deploy and its exposed handles,
-// `@server`'s serves, `@database`'s hosts and each settings element's `of`,
+// schema's classes hold: `@stack`'s deploy, its exposed handles and its
+// origins' sites and APIs (D91), `@server`'s serves, `@database`'s hosts
+// and each settings element's `of`,
 // in declaration order and with repeats. They are the schema's references
 // (Schema.References, D41). The TypeScript form records them from the
 // decorators' arguments; the data forms write the declarations as these
@@ -526,6 +561,12 @@ func StackReferences(schema *Schema) []ServiceRef {
 			refs = append(refs, td.Stack.Deploy...)
 			for _, exposed := range td.Stack.Expose {
 				deployable(exposed)
+			}
+			for _, origin := range td.Stack.Origins {
+				if origin != nil {
+					refs = append(refs, origin.Site)
+					refs = append(refs, origin.APIs...)
+				}
 			}
 		}
 		if td.Server != nil {

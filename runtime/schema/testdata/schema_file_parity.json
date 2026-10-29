@@ -437,21 +437,21 @@
       "registry": "core",
       "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"fields\": [{\"name\": \"a\", \"typeRef\": {\"name\": \"String\"}, \"validateMinLength\": 1.0}]}",
       "accept": false,
-      "error": "an integer field refuses a fraction: json: cannot unmarshal number 1.0 into Go struct field FieldDef.fields.validateMinLength of type int"
+      "error": "an integer field refuses a fraction: json: cannot unmarshal number 1.0 into Go struct field TypeDef.fields.0.validateMinLength of type int"
     },
     {
       "name": "an integer field refuses an exponent",
       "registry": "core",
       "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"fields\": [{\"name\": \"a\", \"typeRef\": {\"name\": \"String\"}, \"validateMinLength\": 1e2}]}",
       "accept": false,
-      "error": "an integer field refuses an exponent: json: cannot unmarshal number 1e2 into Go struct field FieldDef.fields.validateMinLength of type int"
+      "error": "an integer field refuses an exponent: json: cannot unmarshal number 1e2 into Go struct field TypeDef.fields.0.validateMinLength of type int"
     },
     {
       "name": "an integer field refuses a value past int64",
       "registry": "core",
       "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"fields\": [{\"name\": \"a\", \"typeRef\": {\"name\": \"File\"}, \"validateUploadMaxBytes\": 9223372036854775808}]}",
       "accept": false,
-      "error": "an integer field refuses a value past int64: json: cannot unmarshal number 9223372036854775808 into Go struct field FieldDef.fields.validateUploadMaxBytes of type int64"
+      "error": "an integer field refuses a value past int64: json: cannot unmarshal number 9223372036854775808 into Go struct field TypeDef.fields.0.validateUploadMaxBytes of type int64"
     },
     {
       "name": "an integer field refuses a value below int64",
@@ -472,14 +472,14 @@
       "registry": "core",
       "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"implements\": [{\"name\": \"Named\", \"configArgs\": {\"a\": 1e400}}]}",
       "accept": false,
-      "error": "a float past float64 fails anywhere: json: cannot unmarshal number 1e400 into Go value of type float64"
+      "error": "a float past float64 fails anywhere: json: cannot unmarshal number 1e400 into Go struct field .implements.0.configArgs.a of type float64"
     },
     {
       "name": "a negative float past float64 fails",
       "registry": "core",
       "input": "{\"name\": \"Item\", \"role\": \"EmbeddedStruct\", \"fields\": [{\"name\": \"a\", \"typeRef\": {\"name\": \"Float\"}, \"validateMin\": -1e309}]}",
       "accept": false,
-      "error": "a negative float past float64 fails: json: cannot unmarshal number -1e309 into Go value of type float64"
+      "error": "a negative float past float64 fails: json: cannot unmarshal number -1e309 into Go struct field .fields.0.validateMin of type float64"
     },
     {
       "name": "strings",
@@ -591,7 +591,7 @@
       "registry": "core",
       "input": "{\"name\": \"Item\", \"role\": \"Table\"}",
       "accept": false,
-      "error": "unknown role: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/role': value must be one of 'DBTable', 'APIView', 'APIInput', 'EmbeddedStruct', 'APIOperationSet', 'Trait', 'Projection'"
+      "error": "unknown role: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/role': value must be one of 'DBTable', 'APIView', 'APIInput', 'EmbeddedStruct', 'APIOperationSet', 'Trait', 'Projection', 'Query'"
     },
     {
       "name": "unknown schema kind",
@@ -864,7 +864,7 @@
       "registry": "extended",
       "input": "{\"extensions\": {\"acme\": {\"n\": 1e400}}}",
       "accept": false,
-      "error": "a float past float64 in extension data: json: cannot unmarshal number 1e400 into Go value of type float64"
+      "error": "a float past float64 in extension data: json: cannot unmarshal number 1e400 into Go struct field .extensions.acme.n of type float64"
     },
     {
       "name": "the registry's policy default",

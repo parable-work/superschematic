@@ -43,7 +43,9 @@ export function walkTypeDef(
     known.add(key);
     walkField(ctx, field, key, raw, result, errors);
   }
-  if (ctx.strict) {
+  // A type that is @allowUnknownFields accepts the keys it does not declare,
+  // in strict mode too, and the result holds only its own (D87).
+  if (ctx.strict && !td.allowUnknownFields) {
     for (const k of Object.keys(raw)) {
       if (known.has(k)) continue;
       addFieldError(errors, k, 'unknown_field', 'unknown field');

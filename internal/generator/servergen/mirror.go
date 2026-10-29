@@ -334,10 +334,13 @@ func (m *RustMirror) header() string {
 
 // namedOutputRoot is the output root the crate's manifest names its API
 // crate under, `<root>/api/<service>`, or "" when its path to the API
-// crate has another shape or it names none.
+// crate has another shape or it names none. Each table's entries are read
+// by name, so the first that names the API crate is the same on every
+// build (D94).
 func (m *RustMirror) namedOutputRoot(doc map[string]any) string {
 	for _, deps := range dependencyTables(doc) {
-		for name, spec := range deps {
+		for _, name := range slices.Sorted(maps.Keys(deps)) {
+			spec := deps[name]
 			s, ok := spec.(map[string]any)
 			if !ok {
 				continue

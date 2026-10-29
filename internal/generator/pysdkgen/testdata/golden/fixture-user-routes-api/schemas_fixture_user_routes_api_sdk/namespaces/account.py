@@ -6,7 +6,7 @@ import importlib
 import re
 from typing import TYPE_CHECKING, Any, Mapping, TypedDict
 
-from ..client import EncryptedRequestOptions, FilePart, SyncHTTPClient
+from ..client import DownloadedFile, EncryptedRequestOptions, FilePart, SyncHTTPClient
 from ..errors import SDKError, ValidationError
 
 _BUILTIN_VALIDATION_TYPES: dict[str, Any] = {
@@ -39,6 +39,7 @@ if TYPE_CHECKING:
         LoginInput,
         LoginResult,
         RegisterInput,
+        RegisterResult,
     )
 class AccountNamespace:
     def __init__(
@@ -458,7 +459,7 @@ class AccountNamespace:
             extra_headers=extra_headers,
         )
         return self._coerce_response(response, "CurrentUser", False)
-    def register(self, input_data: RegisterInput, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> LoginResult:
+    def register(self, input_data: RegisterInput, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> RegisterResult:
         path = "/api/auth/register"
         if input_data is None:
             raise ValidationError(
@@ -476,4 +477,4 @@ class AccountNamespace:
             timeout_seconds=timeout_seconds,
             extra_headers=extra_headers,
         )
-        return self._coerce_response(response, "LoginResult", False)
+        return self._coerce_response(response, "RegisterResult", False)

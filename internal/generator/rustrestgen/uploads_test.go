@@ -67,3 +67,47 @@ func TestGenerateRefusesFileUploadWithoutManualRegistration(t *testing.T) {
 		}
 	}
 }
+
+// TestGenerateRefusesFileDownloadWithoutManualRegistration: the Rust
+// router answers JSON, so it refuses a FileDownload result (D81) unless the
+// service mounts the route and answers the file; the refusal names the fix
+// and says support follows.
+func TestGenerateRefusesFileDownloadWithoutManualRegistration(t *testing.T) {
+	for _, manual := range []bool{false, true} {
+		schema, err := loader.LoadService(filepath.Join(fixturesDir, nestedArraysService))
+		if err != nil {
+			t.Fatalf("load %s: %v", nestedArraysService, err)
+		}
+		for _, set := range schema.OperationSets {
+			if set.Name != "GridMutations" {
+				continue
+			}
+			set.Operations = append(set.Operations, &ir.FieldDef{
+				Name:                    "exportGrid",
+				Required:                true,
+				FileDownload:            &ir.FileDownloadDef{ContentType: "text/csv", Filename: "grid.csv"},
+				HTTPMethod:              "GET",
+				RestPath:                "grid-exports",
+				ManualRouteRegistration: manual,
+			})
+		}
+		output, err := generateFrom(schema, apiSource{}, Options{
+			SchemaName: nestedArraysService,
+			TypesCrate: "schemas-" + nestedArraysService + "-types",
+			Clock:      codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
+		})
+		if !manual {
+			if err == nil || !strings.Contains(err.Error(), "operation grid.exportGrid answers a FileDownload") ||
+				!strings.Contains(err.Error(), "@manualRouteRegistration") || !strings.Contains(err.Error(), "support follows") {
+				t.Fatalf("Generate = %v, want the refusal of grid.exportGrid", err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("Generate with a manual download: %v", err)
+		}
+		if len(output.ManualEndpoints) != 1 || output.ManualEndpoints[0].Name != "exportGrid" {
+			t.Fatalf("ManualEndpoints = %+v, want grid.exportGrid", output.ManualEndpoints)
+		}
+	}
+}

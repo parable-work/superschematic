@@ -244,6 +244,10 @@ type RustServer struct {
 	// them (D54).
 	Buckets []*RustBucket
 
+	// MemoryStores are the memory stores main.rs opens once, for every API
+	// that lists them, and closes when it stops (D75).
+	MemoryStores []*RustMemoryStore
+
 	// Dependencies are Cargo.toml's, the registry crates first, then the
 	// HTTP runtime and the crates of the workspace, each in name order.
 	Dependencies []CargoDependency
@@ -387,6 +391,13 @@ type RustAPI struct {
 
 	// Buckets are Deps' buckets (D54).
 	Buckets []RustBucketUse
+
+	// MemoryStores are Deps' memory stores (D75), and RateLimitStore the
+	// one its @rateLimit routes count in, nil without one, whose router
+	// options RouterOptions is the variable of.
+	MemoryStores   []RustMemoryStoreUse
+	RateLimitStore *RustMemoryStore
+	RouterOptions  string
 }
 
 // MountsEngine reports whether the API's server mounts the routes of its
@@ -419,6 +430,66 @@ type RustBucket struct {
 	// From the expression that reads it from the first API's config.
 	Field string
 	From  string
+}
+
+// RustMemoryStoreUse is a memory store in an API's Deps.
+type RustMemoryStoreUse struct {
+	Field string
+	Store *RustMemoryStore
+}
+
+// RustMemoryStore is a memory store main.rs opens once, for every API that
+// lists it, on Redis through the HTTP runtime's memorystore-redis feature,
+// or disabled when its field is unset or its connection refused (D75).
+type RustMemoryStore struct {
+	Service string
+	Var     string
+
+	// Field is the derived config field the connection is read from, and
+	// From the expression of its value in the first API's config, an
+	// Option<MemoryStore>.
+	Field string
+	From  string
+}
+
+// OpenLet is main.rs's statement that opens the store, as rustfmt lays
+// it out.
+func (m *RustMemoryStore) OpenLet() string {
+	const indent = "    "
+	fn := "memorystore::redis::open_or_disabled"
+	args := []string{rustString(m.Service), rustString(m.Field), m.From + ".as_ref()"}
+	list := strings.Join(args, ", ")
+	if len(list) <= rustCallWidth {
+		if line := indent + "let " + m.Var + " = " + fn + "(" + list + ").await;"; len(line) <= rustWidth {
+			return line
+		}
+		if line := indent + indent + fn + "(" + list + ").await;"; len(line) <= rustWidth {
+			return indent + "let " + m.Var + " =\n" + line
+		}
+	}
+	return indent + "let " + m.Var + " = " + fn + "(\n" + indent + indent + strings.Join(args, ",\n"+indent+indent) + ",\n" + indent + ")\n" + indent + ".await;"
+}
+
+// RouterOptionsLet is main.rs's statement that builds the router options
+// of an API with a rateLimitStore: a registry whose limiters count in the
+// store (D75).
+func (a *RustAPI) RouterOptionsLet() string {
+	const indent = "    "
+	limits := "RateLimits::with_store(" + rustString(a.Service) + ", Arc::clone(&" + a.RateLimitStore.Var + "))"
+	field := indent + indent + "rate_limits: " + limits + ","
+	if len(field) > rustWidth {
+		field = indent + indent + "rate_limits: RateLimits::with_store(\n" + indent + indent + indent + rustString(a.Service) + ",\n" + indent + indent + indent + "Arc::clone(&" + a.RateLimitStore.Var + "),\n" + indent + indent + "),"
+	}
+	return indent + "let " + a.RouterOptions + " = " + a.Alias + "::RouterOptions {\n" + field + "\n" + indent + indent + ".." + a.Alias + "::RouterOptions::default()\n" + indent + "};"
+}
+
+// RouterOptionsExpr is the router options main.rs builds the API's router
+// with: its own, or the defaults.
+func (a *RustAPI) RouterOptionsExpr() string {
+	if a.RouterOptions != "" {
+		return a.RouterOptions
+	}
+	return a.Alias + "::RouterOptions::default()"
 }
 
 // RustDatabase is a database the server opens one pool to, for every API
@@ -496,6 +567,7 @@ var rustReserved = []string{
 	"api", "apis", "request", "router", "endpoint", "credential", "service_credential", "err",
 	"jobs", "workers", "worker", "queue", "shutdown", "started", "definition", "concurrency", "options",
 	"handle", "message", "bucket", "gcs", "open_bucket", "field", "service", "connection",
+	"memorystore", "open_or_disabled",
 	"token", "headers",
 	// A deriver's (D74).
 	"derive", "derivers", "deriver", "answer", "derived", "item", "schema", "schemas", "principal", "engine",
@@ -648,6 +720,7 @@ func PlanRust(in RustInput) (*RustServer, error) {
 		// The app's program, as main.rs names it.
 		s.App.Alias = taken.take(rustStem(in.Server) + "_app")
 	}
+	stores := map[string]*RustMemoryStore{}
 	for _, a := range in.APIs {
 		o := a.Output
 		stem := rustStem(o.SchemaName)
@@ -776,6 +849,30 @@ func PlanRust(in RustInput) (*RustServer, error) {
 				s.Buckets = append(s.Buckets, h)
 			}
 			api.Buckets = append(api.Buckets, RustBucketUse{Field: b.Field, Bucket: h})
+		}
+		for _, m := range o.Deps.MemoryStores {
+			h := stores[m.Service]
+			if h == nil {
+				key, ok := derived[string(ir.EdgeMemoryStore)+" "+m.Service]
+				if !ok || api.Config == "" {
+					return nil, fmt.Errorf("stack %s: %s %s serves %s, whose config has no field for memory store %s, which it lists", in.Stack, s.Kind, in.Server, o.SchemaName, m.Service)
+				}
+				h = &RustMemoryStore{
+					Service: m.Service,
+					Var:     taken.take(rustStem(m.Service) + "_store"),
+					Field:   key,
+					From:    api.Config + "." + envgen.RustFieldName(key),
+				}
+				stores[m.Service] = h
+				s.MemoryStores = append(s.MemoryStores, h)
+			}
+			api.MemoryStores = append(api.MemoryStores, RustMemoryStoreUse{Field: m.Field, Store: h})
+			// A job or a worker serves no route, whose rate limit it would
+			// count.
+			if o.Deps.RateLimitStore == m.Service && !background {
+				api.RateLimitStore = h
+				api.RouterOptions = taken.take(stem + "_router_options")
+			}
 		}
 		if s.Worker != nil {
 			if api.Database == nil {
@@ -953,6 +1050,11 @@ func (s *RustServer) planManifest(in RustInput, dir string) error {
 		// too, so the build decides by the bucket, as Go's and
 		// TypeScript's do (D54).
 		features["gcs"] = true
+	}
+	if len(s.MemoryStores) > 0 {
+		// Only an entrypoint whose APIs list a store links the Redis
+		// client (D75).
+		features["memorystore-redis"] = true
 	}
 	for _, a := range in.APIs {
 		for _, f := range a.Output.RuntimeFeatures() {
@@ -1322,6 +1424,12 @@ func (s *RustServer) AnyCORS() bool {
 	return slices.ContainsFunc(s.APIs, func(a *RustAPI) bool { return a.CORS != "" })
 }
 
+// Closes reports whether main.rs closes anything once it stops serving or
+// running: an engine, or a memory store (D75).
+func (s *RustServer) Closes() bool {
+	return len(s.Engines) > 0 || len(s.MemoryStores) > 0
+}
+
 // Dispatches reports whether the server serves more than one API, whose
 // routers it dispatches between.
 func (s *RustServer) Dispatches() bool {
@@ -1342,6 +1450,7 @@ func (s *RustServer) RuntimeUses() []string {
 		uses = append(uses, rustutil.UseLine(runtime+"::identity", []string{"PostgresPool", "Store"}))
 	}
 	uses = append(uses, rustutil.UseLine(runtime+"::logging", []string{"self", "tracing"}))
+	uses = append(uses, s.memoryStoreUses(runtime)...)
 	if len(s.Databases) > 0 {
 		uses = append(uses, rustutil.UseLine(runtime+"::postgres", []string{"self", "Pool"}))
 	}
@@ -1365,6 +1474,9 @@ func (s *RustServer) RuntimeUses() []string {
 	if s.Dispatches() {
 		root = append(root, "OperationInfo")
 	}
+	if slices.ContainsFunc(s.APIs, func(a *RustAPI) bool { return a.RateLimitStore != nil }) {
+		root = append(root, "RateLimits")
+	}
 	if len(root) > 0 {
 		uses = append(uses, rustutil.UseLine(runtime, root))
 	}
@@ -1378,6 +1490,7 @@ func (s *RustServer) RuntimeUses() []string {
 // stops on.
 func (s *RustServer) backgroundUses(runtime string) []string {
 	uses := append(s.bucketUses(runtime), rustutil.UseLine(runtime+"::logging", []string{"self", "tracing"}))
+	uses = append(uses, s.memoryStoreUses(runtime)...)
 	if len(s.Databases) > 0 {
 		uses = append(uses, rustutil.UseLine(runtime+"::postgres", []string{"self", "Pool"}))
 	}
@@ -1435,6 +1548,16 @@ func (s *RustServer) bucketUses(runtime string) []string {
 		return nil
 	}
 	return []string{"use " + runtime + "::bucket::Bucket;", "use " + runtime + "::gcs;"}
+}
+
+// memoryStoreUses are the use declarations of main.rs from the HTTP
+// runtime for its memory stores (D75): the memorystore module, whose redis
+// opens each, none without a store.
+func (s *RustServer) memoryStoreUses(runtime string) []string {
+	if len(s.MemoryStores) == 0 {
+		return nil
+	}
+	return []string{"use " + runtime + "::memorystore;"}
 }
 
 // stackconfigUses are what main.rs names from the HTTP runtime's
@@ -1677,7 +1800,7 @@ func (s *RustServer) ServerSpans() string {
 func (s *RustServer) JobRun() string {
 	const indent = "    "
 	lead, end := "", ""
-	if len(s.Engines) > 0 {
+	if s.Closes() {
 		lead, end = "let ran = ", ";"
 	}
 	args := []string{rustString(s.Job.Name), "jobs." + s.Job.Method + "(shutdown)"}

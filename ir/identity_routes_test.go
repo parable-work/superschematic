@@ -11,7 +11,8 @@ import (
 func TestIdentityOperationErrors(t *testing.T) {
 	ops := []string{
 		IdentityOpLogin, IdentityOpLogout, IdentityOpMe, IdentityOpCapabilities, IdentityOpChangePassword, IdentityOpRegister,
-		IdentityOpCreateUser, IdentityOpListUsers, IdentityOpGetUser, IdentityOpDisableUser, IdentityOpEnableUser, IdentityOpSetUserPassword,
+		IdentityOpCreateUser, IdentityOpListUsers, IdentityOpGetUser, IdentityOpDisableUser, IdentityOpEnableUser, IdentityOpApproveUser,
+		IdentityOpSetUserPassword,
 		IdentityOpListRoles, IdentityOpCreateRole, IdentityOpUpdateRole, IdentityOpDeleteRole, IdentityOpGrantRole, IdentityOpRevokeRole,
 	}
 	if len(identityOperationErrors) != len(ops) {
@@ -35,6 +36,10 @@ func TestIdentityOperationErrors(t *testing.T) {
 	errs[0].Code = "changed"
 	if IdentityOperationErrors(IdentityOpLogin)[0].Code != IdentityCodeInvalidCredentials {
 		t.Error("a caller's copy changed the table")
+	}
+	// A pending user's login has a code of its own (D81).
+	if login := IdentityOperationErrors(IdentityOpLogin); login[len(login)-1].Code != IdentityCodePendingApproval {
+		t.Errorf("login's last error = %+v, want pending_approval", login[len(login)-1])
 	}
 	if IdentityOperationErrors("greet") != nil {
 		t.Error("an operation of the project has the user model's errors")

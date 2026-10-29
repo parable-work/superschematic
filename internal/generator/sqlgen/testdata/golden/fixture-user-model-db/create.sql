@@ -48,6 +48,7 @@ CREATE TABLE user_credential (
   password_hash TEXT NOT NULL,
   password_changed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
   disabled_at TIMESTAMPTZ,
+  pending_at TIMESTAMPTZ,
   UNIQUE (user_id)
 );
 
@@ -93,3 +94,9 @@ ALTER TABLE user_role_grant
 CREATE INDEX idx_session_user ON "session" USING BTREE (user_id);
 
 CREATE UNIQUE INDEX uq_user_role_grant_user_role ON user_role_grant USING BTREE (user_id, role_id);
+
+-- Seed the roles a UserRole table's @seedRoles declares: a role of the
+-- name that exists keeps its permissions unless it has none
+
+INSERT INTO role ("name", permissions) VALUES ('member', ARRAY['identity.roles.read']::TEXT[])
+ON CONFLICT ("name") DO UPDATE SET permissions = EXCLUDED.permissions WHERE cardinality(role.permissions) = 0;

@@ -114,7 +114,7 @@ func TestTypeScriptJobAndWorkerRunOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := loadTypeScriptFixture(t)
-	f.build(t, repoRoot, paths, append([]string{"ts-db"}, append(slices.Clone(tsAPIs), "ts-stack")...)...)
+	f.build(t, repoRoot, paths, append([]string{"ts-db", "ts-cache"}, append(slices.Clone(tsAPIs), "ts-stack")...)...)
 	names := naming.Default()
 	for service, code := range map[string]string{"ts-pricing": tsPricingImplementation, "ts-shop": tsShopImplementation} {
 		if err := os.WriteFile(filepath.Join(names.TypeScriptImplementationDir(repoRoot, service), "index.ts"), []byte(code), 0o644); err != nil {

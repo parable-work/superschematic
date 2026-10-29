@@ -3,6 +3,7 @@ package registry
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -139,6 +140,48 @@ func TestRegisterBehaviorBesideOperations(t *testing.T) {
 	}
 }
 
+// A declaration may give signals (D77), each a camelCase name declared
+// once, a paramsSchema that compiles and an access of read, write or
+// operation.
+func TestRegisterBehaviorSignals(t *testing.T) {
+	typing := map[string]any{"name": "typing", "description": "Who is typing.", "access": "read", "paramsSchema": map[string]any{"type": "object"}}
+	reg := New(naming.Default())
+	if err := reg.RegisterBehavior(BehaviorSpec{Extension: "acme", Declaration: declaration("acme.Chat", map[string]any{
+		"signals": []any{
+			typing,
+			map[string]any{"name": "nudge", "access": "write", "paramsSchema": true},
+			map[string]any{"name": "draft", "access": "operation", "paramsSchema": map[string]any{"type": "object", "required": []any{"text"}}},
+		},
+	})}); err != nil {
+		t.Fatal(err)
+	}
+	chat, _ := reg.Behavior("acme.Chat")
+	var got []string
+	for _, signal := range chat.Signals {
+		got = append(got, signal.Name+" "+signal.Access)
+	}
+	if want := []string{"typing read", "nudge write", "draft operation"}; !slices.Equal(got, want) {
+		t.Fatalf("acme.Chat signals = %v, want %v", got, want)
+	}
+	for _, tc := range []struct {
+		signals []any
+		want    string
+	}{
+		{[]any{map[string]any{"name": "Typing", "access": "read", "paramsSchema": true}}, `signal name "Typing" is not camelCase`},
+		{[]any{typing, typing}, `declares signal "typing" twice`},
+		{[]any{map[string]any{"name": "typing", "access": "read"}}, "signal typing has no paramsSchema"},
+		{[]any{map[string]any{"name": "typing", "access": "read", "paramsSchema": map[string]any{"type": 3}}}, "signal typing paramsSchema"},
+		{[]any{map[string]any{"name": "typing", "access": "everyone", "paramsSchema": true}}, `signal typing access "everyone" is not "read", "write" or "operation"`},
+		{[]any{map[string]any{"name": "typing", "access": "read", "paramsSchema": true, "colour": 1}}, `unknown field "colour"`},
+	} {
+		reg := New(naming.Default())
+		err := reg.RegisterBehavior(BehaviorSpec{Extension: "acme", Declaration: declaration("acme.Chat", map[string]any{"signals": tc.signals})})
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("signals %v: got %v, want an error containing %q", tc.signals, err, tc.want)
+		}
+	}
+}
+
 // A declaration may give the schema of the precondition a caller sends
 // for the behavior, held to a paramsSchema's rule, and the codes its
 // vetoes carry, each lowercase snake case and listed once, beside the
@@ -253,14 +296,21 @@ func TestRegisterBehaviorRejects(t *testing.T) {
 		{"params not an object", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("rate", map[string]any{"paramsSchema": map[string]any{"type": "integer"}})}}), `behavior acme.Rating operation rate paramsSchema must be an object schema`},
 		{"params a boolean schema", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("rate", map[string]any{"paramsSchema": false})}}), `behavior acme.Rating operation rate paramsSchema must be an object schema`},
 		{"result schema", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("rate", map[string]any{"resultSchema": map[string]any{"required": "stars"}})}}), "behavior acme.Rating operation rate resultSchema: "},
-		{"scope", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("rate", map[string]any{"scope": "type"})}}), `behavior acme.Rating operation rate scope "type" is not "instance" or "schema"`},
-		{"scope case", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("rate", map[string]any{"scope": "Schema"})}}), `behavior acme.Rating operation rate scope "Schema" is not "instance" or "schema"`},
+		{"scope", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("rate", map[string]any{"scope": "type"})}}), `behavior acme.Rating operation rate scope "type" is not "instance", "schema" or "namespace"`},
+		{"scope case", "acme", declaration("acme.Rating", map[string]any{"operations": []any{operation("rate", map[string]any{"scope": "Schema"})}}), `behavior acme.Rating operation rate scope "Schema" is not "instance", "schema" or "namespace"`},
 		{"beside reads", "acme", declaration("acme.Chat", map[string]any{"operations": []any{operation("post", map[string]any{"beside": true})}}), `behavior acme.Chat operation post is beside the instance and does not write: a beside operation declares "writes": true`},
 		{"beside on the schema", "acme", declaration("acme.Chat", map[string]any{"operations": []any{operation("post", map[string]any{"beside": true, "writes": true, "scope": "schema"})}}), `behavior acme.Chat operation post is beside the instance and has scope "schema": a beside operation runs on an instance`},
 		{"beside field not volatile", "acme", declaration("acme.Chat", map[string]any{"fields": []any{map[string]any{"name": "count", "volatile": true}, map[string]any{"name": "last"}}, "operations": []any{operation("post", map[string]any{"beside": true, "writes": true})}}), `behavior acme.Chat field last is not volatile, and operation post is beside the instance: a behavior with a beside operation declares every field volatile, since no event records its moves`},
+		{"per reader not volatile", "acme", declaration("acme.Chat", map[string]any{"fields": []any{map[string]any{"name": "unseen", "perReader": true}}}), `behavior acme.Chat field unseen is perReader but not volatile: a value each reader reads its own of is computed at a read`},
+		{"per reader not a boolean", "acme", declaration("acme.Chat", map[string]any{"fields": []any{map[string]any{"name": "unseen", "volatile": true, "perReader": "yes"}}}), "behavior declaration of extension acme: "},
 		{"unlogged not beside", "acme", declaration("acme.Chat", map[string]any{"operations": []any{operation("mark", map[string]any{"writes": true, "log": false})}}), `behavior acme.Chat operation mark sets "log": false and is not beside the instance: only a beside operation appends no event`},
 		{"beside not a boolean", "acme", declaration("acme.Chat", map[string]any{"operations": []any{operation("post", map[string]any{"beside": "yes"})}}), "behavior declaration of extension acme: "},
 		{"log not a boolean", "acme", declaration("acme.Chat", map[string]any{"operations": []any{operation("post", map[string]any{"beside": true, "writes": true, "log": "no"})}}), "behavior declaration of extension acme: "},
+		{"namespace beside", "acme", declaration("acme.Chat", map[string]any{"operations": []any{operation("inbox", map[string]any{"scope": "namespace", "beside": true, "writes": true})}}), `behavior acme.Chat operation inbox has scope "namespace" and is beside the instance: a namespace operation runs on no instance`},
+		{"namespace log", "acme", declaration("acme.Chat", map[string]any{"operations": []any{operation("inbox", map[string]any{"scope": "namespace", "log": true})}}), `behavior acme.Chat operation inbox has scope "namespace" and sets "log": a namespace operation appends no event`},
+		{"asks not read", "acme", declaration("acme.Chat", map[string]any{"operations": []any{operation("mark", map[string]any{"beside": true, "writes": true, "log": false, "asks": "write"})}}), `behavior acme.Chat operation mark asks "write": the only value is "read"`},
+		{"asks logged", "acme", declaration("acme.Chat", map[string]any{"operations": []any{operation("mark", map[string]any{"beside": true, "writes": true, "asks": "read"})}}), `behavior acme.Chat operation mark asks "read" and is not beside the instance with "log": false: only an operation that writes its caller's own state, and appends no event, asks read`},
+		{"asks not beside", "acme", declaration("acme.Chat", map[string]any{"operations": []any{operation("mark", map[string]any{"writes": true, "asks": "read"})}}), `behavior acme.Chat operation mark asks "read" and is not beside the instance`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			reg := New(naming.Default())
@@ -407,7 +457,7 @@ func TestFinalizeHoldsARustCrateToOnePath(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "enginedoc", "stack", "site"} {
+			for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "enginedoc", "stack", "site", "memorystore"} {
 				if err := reg.RegisterGenerator(GeneratorSpec{Name: name, Generate: noopGenerate}); err != nil {
 					t.Fatal(err)
 				}
@@ -538,7 +588,7 @@ func TestFinalizeChecksBehaviorReferences(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "enginedoc", "stack", "site"} {
+			for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "enginedoc", "stack", "site", "memorystore"} {
 				if err := reg.RegisterGenerator(GeneratorSpec{Name: name, Generate: noopGenerate}); err != nil {
 					t.Fatal(err)
 				}
@@ -575,5 +625,35 @@ func TestBehaviorNamesFollowOneRule(t *testing.T) {
 		if err := reg.RegisterBehavior(BehaviorSpec{Extension: fmt.Sprintf("ext%d", i), Declaration: declaration(qualified, nil)}); err != nil {
 			t.Errorf("extension %s: %v", qualified, err)
 		}
+	}
+}
+
+// A namespace operation (D77) registers, read-only or writing, and so does
+// a beside operation with "log": false that asks read.
+func TestRegisterBehaviorNamespaceOperationsAndAsksRead(t *testing.T) {
+	reg := New(naming.Default())
+	decl := declaration("acme.Chat", map[string]any{"operations": []any{
+		operation("inbox", map[string]any{"scope": "namespace"}),
+		operation("claim", map[string]any{"scope": "namespace", "writes": true}),
+		operation("markRead", map[string]any{"beside": true, "writes": true, "log": false, "asks": "read"}),
+	}})
+	if err := reg.RegisterBehavior(BehaviorSpec{Extension: "acme", Declaration: decl}); err != nil {
+		t.Fatal(err)
+	}
+	beh, ok := reg.Behavior("acme.Chat")
+	if !ok {
+		t.Fatal("acme.Chat is not registered")
+	}
+	got := map[string][2]any{}
+	for _, op := range beh.Operations {
+		got[op.Name] = [2]any{op.Scope, op.AsksRead()}
+	}
+	want := map[string][2]any{
+		"inbox":    {OperationScopeNamespace, false},
+		"claim":    {OperationScopeNamespace, false},
+		"markRead": {"", true},
+	}
+	if !maps.Equal(got, want) {
+		t.Fatalf("operations = %v, want %v", got, want)
 	}
 }

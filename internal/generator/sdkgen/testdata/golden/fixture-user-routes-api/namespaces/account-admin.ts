@@ -11,8 +11,10 @@ import type {
   ValidationResult,
 } from '@schemas/fixture-user-routes-api-types';
 import {
+  newValidationErrors,
   parseIdentityRoleFromJSON,
   parseIdentityUserFromJSON,
+  setFieldErrors,
   validateCreateUserInput,
   validateRoleInput,
   validateSetPasswordInput,
@@ -138,19 +140,35 @@ export class AccountAdminNamespace {
   /**
    * Lists the users and the roles each holds.
    * @requires Authentication
+   * @param pending - pending argument
    * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
    * @returns Array of IdentityUser
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
    */
   public async listUsers(
+    pending?: any,
     signal?: any,
     ...extraArgs: any[]
   ): Promise<IdentityUser[]> {
+    let requestSignal = signal;
+    let scalarInput = {
+      pending,
+    };
+    if (typeof pending === 'object' && pending !== null && !Array.isArray(pending)) {
+      scalarInput = pending;
+    }
+    // Validate scalar arguments before sending request
+    const errors = newValidationErrors();
+    if (Object.keys(errors).length > 0) {
+      throw new ValidationError(errors);
+    }
     // Make GET request
+    // Scalar args take precedence over @query params; spread order is intentional.
+    const scalarParams = { ...scalarInput };
     const result = await this.client.get<IdentityUser[]>(
       `/api/auth/admin/users`,
-      { ...toRequestOptions(signal) }
+      { ...toRequestOptions(requestSignal), params: scalarParams }
     );
     return Array.isArray(result) ? result.map(parseIdentityUserFromJSON) : result;
   }
@@ -203,6 +221,29 @@ export class AccountAdminNamespace {
     // Make GET request
     const result = await this.client.get<IdentityUser>(
       `/api/auth/admin/users/${encodeURIComponent(id)}`,
+      { ...toRequestOptions(signal) }
+    );
+    return parseIdentityUserFromJSON(result);
+  }
+
+  /**
+   * Approves a user who registered to wait for approval, who can then sign in with the roles register granted them. The caller's own permissions must cover those roles'.
+   * @requires Authentication
+   * @param id - id parameter
+   * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
+   * @returns IdentityUser
+   * @throws {ValidationError} if input validation fails
+   * @throws {ApiError} if the API request fails
+   */
+  public async approveUser(
+    id: string,
+    signal?: any,
+    ...extraArgs: any[]
+  ): Promise<IdentityUser> {
+    // Make POST request
+    const result = await this.client.post<IdentityUser>(
+      `/api/auth/admin/users/${encodeURIComponent(id)}/approve`,
+      undefined,
       { ...toRequestOptions(signal) }
     );
     return parseIdentityUserFromJSON(result);

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
@@ -24,6 +26,7 @@ var deployableKinds = []ir.DeployableKind{
 	ir.DeployableWorker,
 	ir.DeployableRunner,
 	ir.DeployableDeriver,
+	ir.DeployableMemoryStore,
 	ir.DeployableApp,
 }
 
@@ -53,19 +56,40 @@ declare module %s {
 	}
 	fmt.Fprintf(&b, "      values: %s;\n", values)
 	for _, kind := range deployableKinds {
-		platform, ok := target.Platforms[kind]
-		if !ok {
+		var platforms []string
+		if platform, ok := target.Platforms[kind]; ok {
+			platforms = append(platforms, platform)
+		}
+		if kind == ir.DeployableDatabase {
+			// A database goes on the platform of its DB services' first
+			// dialect when the target names one, so its settings are any of
+			// those platforms' (D92).
+			for _, dialect := range slices.Sorted(maps.Keys(target.DatabasePlatforms)) {
+				platforms = append(platforms, target.DatabasePlatforms[dialect])
+			}
+		}
+		if len(platforms) == 0 {
 			continue
 		}
-		spec, ok := reg.Platform(platform)
-		if !ok {
-			return nil, fmt.Errorf("target %s places %s deployables on platform %s, which is not registered", target.Name, kind, platform)
+		var types []string
+		for _, platform := range platforms {
+			spec, ok := reg.Platform(platform)
+			if !ok {
+				return nil, fmt.Errorf("target %s places %s deployables on platform %s, which is not registered", target.Name, kind, platform)
+			}
+			settings, err := schemaType(spec.Settings)
+			if err != nil {
+				return nil, fmt.Errorf("platform %s: settings: %w", platform, err)
+			}
+			// A platform that takes no settings adds none to another's.
+			if !slices.Contains(types, settings) && (settings != "{}" || len(types) == 0) {
+				types = append(types, settings)
+			}
 		}
-		settings, err := schemaType(spec.Settings)
-		if err != nil {
-			return nil, fmt.Errorf("platform %s: settings: %w", platform, err)
+		if len(types) > 1 {
+			types = slices.DeleteFunc(types, func(t string) bool { return t == "{}" })
 		}
-		fmt.Fprintf(&b, "      %s: %s;\n", kind, settings)
+		fmt.Fprintf(&b, "      %s: %s;\n", kind, strings.Join(types, " | "))
 	}
 	b.WriteString("    };\n  }\n}\n")
 	return b.Bytes(), nil

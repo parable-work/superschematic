@@ -1,6 +1,6 @@
 ---
 title: Database tables
-description: Keys, columns, relations, one-to-many, indexes, text search, JSON columns and soft delete in a DB schema, what the SQL and the Go ORM make of them, and how a database that holds data changes.
+description: Keys, columns, table and column names, relations, one-to-many, indexes, text search, JSON columns, encrypted fields, upserts and soft delete in a DB schema, what the SQL, the Go ORM and the TypeScript repositories make of them, and how a database that holds data changes.
 sidebar:
   order: 2
 ---
@@ -8,8 +8,11 @@ sidebar:
 import Snippet from '../../../components/Snippet.astro';
 
 A DB schema declares tables. Its build writes Postgres DDL
-(`sql/<service>/create.sql` and `drop.sql`), a Go ORM over pgx, and the row
-types in the languages `outputs.types` lists. A service whose
+(`sql/<service>/create.sql` and `drop.sql`), a Go ORM over pgx, the row
+types in the languages `outputs.types` lists, and, in its TypeScript
+types, repositories over `pg` ([TypeScript](#typescript)). The Go ORM and
+the TypeScript repositories run the same statements, which the compiler
+writes once. A service whose
 `outputs.sql.dialects` lists `sqlite` also gets SQLite DDL
 (`sql/<service>/sqlite/create.sql`; see [SQLite](/superschematic/reference/migrations/#sqlite)). This guide walks the acme
 shop's order and review tables in `shop-db`. [Your first project](/superschematic/first-project/database/)
@@ -18,8 +21,9 @@ covers the basics of the users and products tables.
 ## Tables and keys
 
 Every class in a DB schema is a table, named after the class in snake case
-(`OrderLine` is `order_line`). Postgres keywords are quoted: the `Order`
-class is the `"order"` table.
+(`OrderLine` is `order_line`), unless `@table` names it
+([Table and column names](#table-and-column-names)). Postgres keywords are
+quoted: the `Order` class is the `"order"` table.
 
 <Snippet file="schemas/services/shop-db/src/orders.schema.ts" symbol="Order" />
 
@@ -27,9 +31,9 @@ class is the `"order"` table.
   `UUID DEFAULT gen_random_uuid()`, so the ORM leaves a zero id out of an
   insert and the row type holds the id as a pointer until then.
 - A class that other tables extend, like `Auditable`, is not a table: its
-  fields become columns of each table that extends it. A required
-  `Temporal.DateTime` column defaults to `CURRENT_TIMESTAMP`, and the ORM's
-  `UpdateOne` sets `updatedAt`.
+  fields become columns of each table that extends it. `createdAt` and
+  `updatedAt` are audit timestamps: a required one defaults to
+  `CURRENT_TIMESTAMP`, and the ORM's `UpdateOne` sets `updatedAt`.
 - `@unique` on a field adds a unique constraint on its column.
 - The class comment becomes `COMMENT ON TABLE`.
 
@@ -44,7 +48,9 @@ The field's type decides its column:
 | `Identity.UUID` | `UUID` |
 | `Identity.Slug`, `Contact.Email` | `CITEXT` (compares case-insensitively) |
 | `Identity.Name` | `VARCHAR(80)` |
-| `Generic.Int64` | `BIGINT` |
+| `Generic.Int64`, `Finance.Money`, `Finance.SignedMoney` | `BIGINT` |
+| `Generic.Decimal` | `NUMERIC`, or `NUMERIC(p,s)` with `Validate`'s `precision` and `scale` |
+| `Embedding.Vector` with `Validate`'s `dimensions` | pgvector's `vector(n)`, and the DDL enables the `vector` extension |
 | `Temporal.DateTime` | `TIMESTAMPTZ` |
 | `Temporal.Duration` | `INTERVAL` |
 | `Geo.Location` | `POINT`, x the longitude and y the latitude |
@@ -56,11 +62,64 @@ The field's type decides its column:
 
 A field is `NOT NULL` unless it is `Nullable<T>`. A required array column
 defaults to the empty array `'{}'`, whatever its element type, and a
-required `JSONB` column has no default. `Validate` constraints
-and enum membership are checked by the generated code, not by the
-database, and `Default<T, V>` fills in decoded payloads, not columns.
+required `JSONB` column has no default.
+
+The DDL says what the schema says about a column's values too, so a row
+written outside the generated code, by a script, a trigger or by hand, is
+held to them:
+
+- A required field's `Default<T, V>` is the column's `DEFAULT` when `V` is
+  text, a number, a boolean or an enum member: `status TEXT DEFAULT
+  'placed' NOT NULL`. An optional field's column defaults to `NULL`, which
+  the ORMs write for an unset value; a UUID, a time or a JSON value keeps
+  its default in the decoders alone, since `V` is written in the wire
+  form.
+- A required date, time or timestamp has no default, so an import or a
+  script that leaves out a posting date fails `NOT NULL` rather than
+  record today. Its column takes the time of the insert only when it is an
+  audit timestamp (`createdAt`, `updatedAt`), a timestamp of the tables
+  the user model adds, or the field declares it with `Default<T, "now">`:
+  `Default<Temporal.DateTime, "now">` is `DEFAULT CURRENT_TIMESTAMP`,
+  `Default<Temporal.Date, "now">` `CURRENT_DATE` and
+  `Default<Temporal.Time, "now">` `CURRENT_TIME`, on Postgres and SQLite.
+  A create through either ORM may leave such a field unset (Go: its zero
+  value), and the database fills it in; no decoder does.
+- An enum column has a `CHECK` that its members' values hold it to:
+  `CONSTRAINT ck_order_status CHECK (status IN ('placed', 'fulfilled',
+  'shipped', 'cancelled'))`.
+- `Validate`'s `min` and `max` on a number column, and `minLength` and
+  `maxLength` on a text column, are the column's `CHECK`:
+  `CHECK (length(cancel_reason) <= 500)`. `length` counts characters, as
+  every validator does. A pattern and the list rules stay the generated
+  code's.
+
+A check is named `ck_<table>_<column>`, and `NULL` passes it. A list, a
+map and a JSON value get neither a default nor a check. A decimal's
+`precision` and `scale` are its column's type, `NUMERIC(p,s)`, which
+refuses a value with too many digits before the point and rounds one with
+too many after it, which the validators refuse first.
+
+A decimal crosses as its canonical text in every language: Postgres writes
+a `NUMERIC(10,4)`'s `1.5` as `1.5000`, and both ORMs read it back as
+`1.5`, the wire form. The Go ORM holds superscalar's `GenericDecimal`,
+whose `Scan` and `Value` canonicalize it; TypeScript holds the text
+(`decodeRow`, and the pool's parser for a raw query, canonicalize it
+through superscalar); Python `decimal.Decimal`; Rust `superscalar::Decimal`.
+A decimal's filter, `DecimalFilter` in Go and `NumberFilter` in TypeScript,
+compares numbers: `Eq`, `Gt`, `Gte`, `Lt`, `Lte`, `Between`, `In` and
+`IsNull`, each value a decimal's text. A `Finance.SignedMoney` is a
+`BIGINT` from -(2^53 - 1) to 2^53 - 1, a debit negative, which
+`@display({ currency })` shows in its currency as it does a
+`Finance.Money`.
+
+An `Embedding.Vector` on a table needs `dimensions`, and a list of them is
+no column: either fails the load, naming the fix, and JSON
+(`JsonField<T>`) holds one without them. [Vectors](#vectors) has the
+indexes and the nearest-neighbour reads.
+
 The SQLite DDL stores each column as the type its values need, such as a
-list as JSON text; [SQLite](/superschematic/reference/migrations/#types-and-defaults)
+list as JSON text, with the same defaults and checks;
+[SQLite](/superschematic/reference/migrations/#types-and-defaults)
 has the table.
 
 The Go ORM writes a `Temporal.Duration` as its whole microseconds, the
@@ -72,20 +131,115 @@ values: `Eq`, `Gt`, `Gte`, `Lt`, `Lte`, `Between` and `IsNull`. A
 `Geo.Location`'s filter, `GeoPointFilter`, has `IsNull` only; [JSON-valued
 scalars](/superschematic/reference/json-scalars/) says why.
 
+## Table and column names
+
+A database the schema did not create, or one whose names follow another
+convention, keeps its names: `@table("lineItem")` on a class names its
+table, and `@column("createdAt")` on a field names its column, a to-one
+relation's foreign key among them (`@column("categoryId")` in place of
+`category_id`). Both come from `@superschematic/db` and take a SQL
+identifier: letters, digits and underscores, not starting with a digit.
+
+```ts
+@table("lineItem")
+export abstract class LineItem {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  @column("amountCents")
+  amountCents: Generic.Int64;
+
+  @column("categoryId")
+  category: Nullable<Relation<Category, { onDelete: "SET NULL" }>>;
+}
+```
+
+Every name derived from a table's or a column's follows it, quoted where
+Postgres would fold its case: the DDL's columns, foreign keys
+(`fk_lineItem_categoryId`), indexes (`idx_lineItem_postedOn`), checks
+(`ck_lineItem_amountCents`) and defaults, the audit columns the ORMs set,
+a `@versioned` table's history table, functions and triggers
+(`ledgerNote_history`, `trg_ledgerNote_capture_history_write`), a `@source`
+view's columns and a projection's joins, the user model's tables, and
+both ORMs' statements. On a `@queue` class, `@table` names the queue's
+table whole, with no `_queue`, and `@column` its message's columns; an
+`@enqueueOnChange` trigger is named after both tables
+(`trg_lineItem_enqueue_linePosted`). The fields keep their names in the
+row types, the filters and the API.
+
+Two tables, or two columns of a table, a column the generator adds among
+them, may not take one name, and the load says which. A table the engine,
+a version graph or a projection view names itself takes no override, nor
+do the tables the user model adds (`Session`, `UserCredential`,
+`UserRoleGrant`), though the `User` and `UserRole` tables do, and neither
+does a list relation, whose foreign key is a column of the other table. Adding, changing or removing an override of a
+table that holds rows is a rename to the migration planner
+([Renames](/superschematic/reference/migrations/#renames)).
+
 ## Relations
 
 `Relation<T>` stores a foreign key to another table of the same schema, in
 a column named after the field with `_id`. `onDelete` says what deleting
 the referenced row does: `CASCADE`, the default, deletes this row too;
-`RESTRICT` and `NO ACTION` refuse the delete. A relation is never null, so
-`SET NULL` is not offered. The DDL adds the foreign keys once every table
-exists:
+`RESTRICT` and `NO ACTION` refuse the delete; `SET NULL` keeps the row and
+clears its reference. `SET NULL` needs a column that can hold null, so it
+goes on a nullable relation only, `Nullable<Relation<Category, { onDelete:
+"SET NULL" }>>`, and a required one fails the load with that fix. The DDL
+adds the foreign keys once every table exists:
 
 <Snippet file="testdata/generated/sql/shop-db/create.sql" from={'ALTER TABLE "order"'} to="ON DELETE RESTRICT;" />
 
 In the row types a relation holds the related row (`Order.Customer` is a
 `User` in Go). To write one, give it the related row's id:
-`Customer: db.User{Id: &customer}`. The filter for it is `CustomerID`.
+`Customer: db.User{Id: &customer}`. The filter for it is `CustomerID`. A
+TypeScript repository's row holds the related row's key instead,
+`customerId`, which its create, update and filter take too; a read
+includes the related row under the relation's field
+([Relations in a read](#relations-in-a-read)).
+
+A filter reaches through a to-one relation: its member named for the
+relation, `Customer` in Go and `customer` in TypeScript, is the target's
+filter, and keeps the rows whose relation points at a live row that filter
+finds. It is one condition, the foreign key in the keys of the target's
+rows, so a row whose relation is null is not kept, and neither is one
+whose target is soft-deleted. A path goes as deep as the relations do:
+`{ category: { parent: { name: { eq: 'Food' } } } }`. `AnyOf` (`anyOf`)
+keeps the rows any of its filters finds, beside the filter's other
+members, so "the category is X or its parent is X" is one filter:
+
+```ts
+const filter = {
+  anyOf: [{ categoryId: { in: ids } }, { category: { parentId: { in: ids } } }],
+  date: { gte: start, lt: end },
+};
+```
+
+A filter of `anyOf` with no member keeps every row, and so does an empty
+`anyOf`, as `in` with no values adds no condition.
+
+A filter holds one `anyOf`, so two OR groups that must both hold go in
+`AllOf` (`allOf`), which keeps the rows every one of its filters finds,
+beside the filter's other members. "The category is X or its parent is X,
+and the name or the description holds a word" is one filter, not four
+branches multiplied out:
+
+```ts
+const filter = {
+  allOf: [
+    { anyOf: [{ categoryId: { in: ids } }, { category: { parentId: { in: ids } } }] },
+    { anyOf: [{ name: { ilike: word } }, { description: { ilike: word } }] },
+  ],
+  date: { gte: start, lt: end },
+};
+```
+
+Each filter of an `allOf` adds its conditions to the filter's own, ANDed. A
+filter of no member adds none, and so does an empty `allOf`. The two nest
+either way: a branch of `anyOf` may hold an `allOf`, and a filter of
+`allOf` an `anyOf` or an `allOf` of its own. Every read and write that
+takes a filter takes both, in Go (`AllOf []LineItemFilter`) and in
+TypeScript: a find, a page, `updateMany`, `deleteMany` and `nearest`'s
+filter, and a projection's reads ([Read a projection](/superschematic/reference/projections/#read-a-projection)).
 
 ## One-to-many
 
@@ -100,12 +254,37 @@ field selection of the order's options:
 
 <Snippet file="go/shop-orders/orders.go" symbol="withLines" />
 
+A TypeScript read loads them with `include: { lines: true }`. It also
+loads the rows of any other table's relation that points at a row, with no
+`HasMany` field: a table's include names each such relation for its
+table in the plural, `reviews` for `Review.product`, or with `By` and the
+field when that table points at the row through more than one, as a line
+item's category and sub-category point at a category,
+`lineItemsByCategory` and `lineItemsBySubCategory`
+([Relations in a read](#relations-in-a-read)).
+
 ## Indexes
 
 `@index<T>(keys, options?)` on the class adds an index over the listed
 fields, in order. A relation field indexes its foreign key column.
 `{ unique: true }` makes it unique, and `name` names it. A key that names
-no field fails the build.
+no field fails the build. The other options shape the index:
+
+| Option | What it does |
+| --- | --- |
+| `method` | the access method: `btree`, `gin`, `gist`, `brin`, `hnsw` or `ivfflat`. Unset picks one from the columns' types: GIST for `ltree` and geometric types, GIN for `JSONB`, arrays and `tsvector`, else BTREE. `hnsw` and `ivfflat` index one vector column ([Vectors](#vectors)) |
+| `ops` | the operator class each key is indexed with, such as `gin_trgm_ops`, whose extension the DDL enables; a vector index's names its metric |
+| `m`, `efConstruction` | an `hnsw` index's links per vector (2 to 100, 16 unless set) and candidates per vector while it builds (4 to 1000, at least twice `m`, 64 unless set) |
+| `lists` | an `ivfflat` index's lists (1 to 32768, 100 unless set) |
+| `where` | makes the index partial: a SQL predicate over the table's columns, without `WHERE`. On a unique index of a soft-deletable table it is ANDed with `deleted_at IS NULL` |
+| `expression` | indexes a SQL expression over the table's columns, such as `lower(email)`, in place of the keys' columns; the keys name the fields it reads and give the index its default name |
+| `concurrently` | how a migration plan builds the index on a table that holds rows: `true`, the default, builds it concurrently, outside a transaction; `false` builds it inside the step's transaction, which blocks writes while it builds |
+
+`where` and `expression` are SQL, written once for every dialect the
+service lists, and hold one expression each. SQLite takes an expression
+and a predicate, and refuses a method other than BTREE and an operator
+class. An engine type's index is the engine's, over its fields alone, so
+it takes none of these options.
 
 <Snippet file="schemas/services/shop-db/src/orders.schema.ts" symbol="Review" />
 
@@ -119,6 +298,114 @@ compares for equality, then its sort's column, then the key: the index
 holds the page's rows in its order, from the cursor's on.
 `idx_order_customer_placed_at` serves a shopper's orders by `placedAt`.
 
+## Vectors
+
+An `Embedding.Vector` with `dimensions` is a pgvector `vector(n)` column,
+and an `hnsw` or `ivfflat` index over it serves the nearest-neighbour
+reads by one metric, which its `ops` names:
+
+```ts
+@index<TextEmbedding>(["embedding"], { method: "hnsw", ops: "vector_cosine_ops", m: 16, efConstruction: 64 })
+export abstract class TextEmbedding {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  text: string;
+  embedding: Validate<Embedding.Vector, { dimensions: 1024 }>;
+}
+```
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE TABLE text_embedding (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  text TEXT NOT NULL,
+  embedding vector(1024) NOT NULL
+);
+CREATE INDEX idx_text_embedding_embedding ON text_embedding USING HNSW (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+```
+
+| Metric | Distance | Operator class |
+| --- | --- | --- |
+| `cosine`, the default | 1 less the cosine similarity, from 0 to 2 (`<=>`) | `vector_cosine_ops` |
+| `l2` | Euclidean distance (`<->`) | `vector_l2_ops` |
+| `ip` | the negative inner product, so the largest product is nearest (`<#>`) | `vector_ip_ops` |
+
+A vector index covers one key, a vector column of at most 2000 dimensions,
+with no expression, and is never unique; it names its metric's operator
+class. A table's repository finds the rows nearest a vector, nearest first,
+each with its distance, through the same statement in both ORMs:
+
+```go
+neighbours, err := db.TextEmbedding.Nearest(ctx, orm.TextEmbeddingVectorEmbedding, query,
+	&orm.TextEmbeddingNearestOptions{K: 5, Metric: orm.VectorCosine, Filter: &orm.TextEmbeddingFilter{...}})
+// neighbours[0].Row, neighbours[0].Distance
+```
+
+```ts
+const neighbours = await deps.orm.textEmbedding.nearest('embedding', query, { k: 5, metric: 'cosine', filter: { ... } });
+// neighbours[0].row, neighbours[0].distance
+```
+
+`k` is 10 unless set. The filter is the table's own, and a soft-deleted
+row is left out unless `includeDeleted` is set, as for a find; a row whose
+vector is null has no distance and is left out too. `excludeIds`
+(`ExcludeIDs`) leaves out the rows of some keys, the row whose vector is
+asked for, say. The vector must have the field's dimensions.
+
+An index finds approximate neighbours: an hnsw scan reads `ef_search`
+candidates (40) and an ivfflat scan `probes` lists (1), and keeps those
+the filter keeps, so a filter that keeps few rows may leave fewer than
+`k`. `nearest`'s options set pgvector's settings for the read:
+
+| Option | Setting | |
+| --- | --- | --- |
+| `efSearch` (`EfSearch`) | `hnsw.ef_search` | the candidates an hnsw scan reads, 1 to 1000 |
+| `iterativeScan` (`IterativeScan`) | `hnsw.iterative_scan`, and `ivfflat.iterative_scan` but for `strict_order` | `relaxed_order` scans on until it has `k` rows, in an order a little out of the distance's; `strict_order`, hnsw's alone, in the distance's order; `off`, the default, does not |
+| `maxScanTuples` (`MaxScanTuples`) | `hnsw.max_scan_tuples` | the tuples an iterative scan reads at most (20000) |
+| `probes` (`Probes`) | `ivfflat.probes` | the lists an ivfflat scan reads, 1 to 32768 |
+| `maxProbes` (`MaxProbes`) | `ivfflat.max_probes` | the lists an iterative ivfflat scan reads at most |
+
+```ts
+// A filter that keeps few rows still finds k of them.
+await deps.orm.lineItemEmbedding.nearest('embedding', query, { k: 10, filter: { categoryId: { eq: id } }, iterativeScan: 'relaxed_order' });
+```
+
+The iterative scan is pgvector 0.8's, which `stack dev`'s image runs.
+`nearest` sets each option with `set_config(..., true)`, which holds for a
+transaction, so outside one it opens a transaction of its own for the
+read; inside one the settings hold until the transaction ends, as
+`SET LOCAL`'s do (D89).
+
+A vector crosses as pgvector's text form, `[0.5,-1,2]`: the Go ORM binds
+and scans it as text, a `[]float32`, and TypeScript's codec reads and
+writes a `number[]` (`vectorText`), so neither needs a pgvector client
+library. A migration plan creates the extension in its first step, builds
+a vector index concurrently unless `concurrently: false` says otherwise,
+and names changing a vector's dimensions as `destructive` and
+`data-dependent`: a stored vector of another length fails the cast, so the
+column is cleared or embedded again first. SQLite has no vector type, and
+a SQLite build of a service with one fails, naming the fix:
+`outputs.sql.dialects: ["postgres"]`.
+
+`@table` and `@column` name a table with a vector and the vector's column
+as they name any other, and the index and `nearest` follow them; changing
+either plans a rename that keeps every vector. `Encrypted<T>` takes text
+alone, so a vector or a decimal cannot be encrypted, but a table may hold
+an encrypted field beside its vector, and `nearest` opens it on each row
+it reads.
+
+`stack dev` runs Postgres on `pgvector/pgvector:0.8.7-pg16` when a DB
+service of the stack has a vector column and the environment names no
+`postgresImage`. On Cloud SQL for PostgreSQL, which ships pgvector, the
+migration job creates the extension: its user holds `cloudsqlsuperuser`,
+which may run `CREATE EXTENSION vector`. On the cloudflare target a
+Postgres database is outside Cloudflare, on Neon, Supabase, Cloud SQL or
+your own, which Workers reach through Hyperdrive
+([Databases on Hyperdrive](/superschematic/guides/stacks/#databases-on-hyperdrive)):
+the deploy's migration creates the extension there too, as the user the
+origin's connection string names, which those providers let create it,
+and `nearest` runs through Hyperdrive unchanged.
+
 ## Text search
 
 `@searchField` on one or more fields adds a generated `search_text` column
@@ -129,6 +416,11 @@ extension.
 
 The SQLite DDL has the same column, `VIRTUAL`, and no index over it:
 SQLite has no trigram index ([SQLite](/superschematic/reference/migrations/#types-and-defaults)).
+
+The TypeScript repositories' filter has `searchText`, which keeps the
+same rows with the same conditions. So does the filter of a projection
+keyed by the table's key, over the table's search fields
+([Read a projection](/superschematic/reference/projections/#read-a-projection)).
 
 An API's search argument, a `SearchQuery`, is what reads it
 ([References and search](/superschematic/reference/references-and-search/)):
@@ -210,13 +502,141 @@ the filter compares for equality, then the sort's column, then the key
 ([Indexes](#indexes)): without one, each page sorts every row the filter
 finds.
 
+A TypeScript repository's `findPage` runs the same query, its options a
+`sort`, `{ field: 'placedAt', desc: true }`, `after`, the key of the page
+before, `limit` and `includeDeleted`, and answers `{ rows, next }`, `next`
+a key such as `{ id }`, which the HTTP runtime's `encodeCursor` and
+`decodeCursor` turn into a cursor and back. A key that names no row is
+`PageKeyError`.
+
 ## JSON columns
 
 A class marked `@jsonField` (from `@superschematic/schema`) is not a table.
-A field of its type is a `JSONB` column, read and written with its row, and
-the ORM marshals it for you. `shop-db`'s `ShippingAddress` is one; see
+A field of its type, or of a list of it, is a `JSONB` column, read and
+written with its row, and the ORM marshals it for you. `shop-db`'s
+`ShippingAddress` is one; see
 [Modeling types](/superschematic/guides/modeling-types/#constraints). Maps
-and lists of lists are `JSONB` too.
+and lists of lists are `JSONB` too. A compiler before D83 made such a
+field `TEXT`; a migration plan from a database it built casts the column
+with `USING shipping_address::JSONB`, which fails on text that is not JSON
+(`data-dependent`).
+
+## Encrypted fields
+
+`Secret<T>` keeps a value out of logs; its column still holds the value.
+A field whose value must not be readable in the database, a backup or a
+replica, such as a bank's access token, is `Encrypted<string>`, from
+`@superschematic/db`:
+
+```ts
+import { AutoGenerate, Encrypted, key } from "@superschematic/db";
+
+export abstract class PlaidItem {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  itemId: string;
+
+  accessToken: Encrypted<string>;
+
+  webhookSecret: Nullable<Encrypted<string>>;
+}
+```
+
+Its column is `TEXT` and holds an envelope, `v1:<key id>:<nonce>:<ciphertext>`:
+the value sealed with AES-256-GCM under a random nonce, bound to the
+table, the field and the row's key, so an envelope copied to another row
+or column does not open. The Go ORM and the TypeScript repositories seal
+it on every write and open it on every read, byte for byte alike; `psql`
+sees only the envelope. An `Encrypted<T>` field is a `Secret<T>` too: the
+mask helpers clear it, and a TypeScript row holds it as a `SecretValue`.
+
+The keys come from an `@envVars` `Secret<string>` the DB service's config
+names, by the type that declares the field and the field's name, as a
+stack names the secret:
+
+```ts
+// schema.config.ts of finances-db
+outputs: { sql: { encryption: { key: "FieldKeys.FINANCES_DB_FIELD_KEYS" } } }
+```
+
+Its value is one or more 32-byte keys in base64, separated by commas. Each
+API on the database holds that field in its `@envVars` class, usually by
+extending the class that declares it. The declaring class lives where
+each API can extend it: in the API's own schema, or, for several APIs on
+the database, in a General service they depend on:
+
+```ts
+// finances-api/src/finances-api.schema.ts, or a General service's schema
+@envVars
+export abstract class FieldKeys {
+  FINANCES_DB_FIELD_KEYS: Secret<string>;
+}
+
+@envVars
+export abstract class FinancesConfig extends FieldKeys {
+  PLAID_CLIENT_ID: Secret<string>;
+}
+```
+
+An API's config is the `@envVars` class no other `@envVars` class extends:
+here `FinancesConfig`, which holds `FieldKeys`' field and its own. The
+loaders, the stack and the API's handle all read it, so an environment
+sets `PLAID_CLIENT_ID` and binds the secret `FieldKeys.FINANCES_DB_FIELD_KEYS`
+on the same servers. Two `@envVars` classes neither of which extends the
+other fail the load, naming both
+([Environment variables](/superschematic/guides/modeling-types/#environment-variables)).
+
+So each API's servers, jobs and workers read the one secret each
+environment sets, and the generated entrypoints open the ORM with it:
+`ConnectWithPool(pool, WithFieldKeys(config.FinancesDbFieldKeys))` in Go,
+`createOrm(pool, { fieldKeys: config.FINANCES_DB_FIELD_KEYS })` in
+TypeScript. The build refuses a database whose config names no key and an
+API on the database whose `@envVars` lacks it, each saying where the class
+goes, and a stack refuses a deployable that reads no binding of it.
+Without the keys, a read or a write of the field fails with a typed error (`fieldcrypt.ErrNoKeys` in Go,
+`FieldEncryptionError` with reason `no-keys` in TypeScript); an envelope
+under a key the keyring does not hold fails with `ErrUnknownKey`
+(`unknown-key`), one that does not open with `ErrDecrypt` (`decrypt`).
+None of them carries the value or a key.
+
+A ciphertext compares with nothing, so the field:
+
+- takes no `@key`, `@unique`, `@searchField`, `@index` or
+  `Default<T, V>`, and is no relation; its column has no `CHECK` and no
+  `DEFAULT`, and `Validate` holds the value in the decoders alone;
+- has no filter and no sort;
+- is left out of a `@versioned` table's history:
+  `@versioned({ exclude: ["accessToken"] })`;
+- is not set by `updateMany`, which does not know each row's key;
+  `updateOne` sets it, and so does an upsert on any unique key: the
+  insert seals it under the key the ORM generates for the row, and an
+  update of the row that holds the key sets it by a second statement,
+  under that row's key, in the upsert's transaction, when it differs
+  from what the row holds ([Upserts](#upserts)).
+
+The envelope is bound to the row's key, which the ORMs must know before
+the insert: a table with an `Encrypted<T>` field has a UUID key the ORMs
+generate when a create leaves it unset, or a key each create sets. A
+table the engine, a version graph or the user model keeps cannot have one.
+A queue's message carries none, and an `@enqueueOnChange` neither copies
+one into a message, nor compares one in `fields`, nor tests what one
+equals; whether it is null it may test. Carry the row's key in the
+message, and read the field through the repository. A `@source` view's
+field that reads one carries the plaintext to every response the view is
+in, so it says so with `@decrypted`, or the load fails.
+
+`@rawSql`, a trigger, a projection view and a hand-written query see only
+the envelope.
+
+To rotate the key, put a new key first in the secret's value and keep the
+old ones after it: the first seals, and each opens what it sealed. Then
+reseal the rows: `Reencrypt(ctx, batch)` on each Go repository, or
+`reencrypt({ batch })` on each TypeScript one, reseals every envelope an
+older key sealed under the current one, `batch` rows at a time (100),
+deleted rows among them, and returns how many rows it resealed. A row a
+write changes meanwhile keeps the write's envelope. Once every table's
+`Reencrypt` has run, drop the old keys from the secret.
 
 ## Inserts
 
@@ -225,7 +645,69 @@ optional column takes its database default. `CreateMany` writes the batch
 as one multi-row `INSERT` by the same rule: its rows may set different
 optional fields, and some may supply an id while others take the generated
 one. A row that leaves unset a column another row sets writes `DEFAULT`
-for it, not `NULL`.
+for it, not `NULL`. The TypeScript `createOne` and `createMany` do the
+same, and write a field's schema default, `Default<T, V>`, when the input
+leaves the field unset.
+
+## Upserts
+
+`UpsertOne(ctx, input, on, update)` inserts `input`, or, when a row
+already holds its value of the unique key `on`, applies `update` to that
+row instead, and returns the row: an import that inserts or updates by a
+natural key in one statement, `INSERT ... ON CONFLICT ... DO UPDATE`. A
+key is the primary key, a `@unique` field or a unique `@index`, named by
+its fields: `orm.ReviewUniqueByProductAuthor` in Go, and
+`['product', 'author']` in TypeScript (`upsertOne(input, on, update)`).
+The update writes what `UpdateOne` writes, `updatedAt` among it, but an
+update that sets no field leaves the row as it is and returns it. An
+upsert by a unique `@index` names the index's own target: its
+`expression`, `ON CONFLICT ((lower(label)))`, and its `where`, so Postgres
+infers a partial index. On a soft-deletable table a unique `@index` covers
+the live rows alone, so a deleted row never conflicts; a conflict with a
+deleted row on a full key, such as the primary key, is not updated, and
+the upsert fails with `ErrNotFound` (`NotFoundError`).
+
+`UpsertOneResult` (`upsertOneResult`) is `UpsertOne` with what it did:
+`{ row, status }`, the status `inserted`, `updated`, or `unchanged`, the
+row that held the key left as it was. The statement returns
+`(xmax = 0) AS _inserted` beside the row, true for a row it inserted.
+
+`UpsertMany(ctx, inputs, on, fields, opts)` and `upsertMany(inputs, on,
+fields, options)` upsert a batch in one multi-row statement: each input
+is inserted, or the row that holds its key takes the input's value of
+each field `fields` names, `SET name = EXCLUDED.name`, and each input's
+row and status come back in the inputs' order (D89). A bank sync upserts a
+page of transactions by the bank's id for each:
+
+```ts
+const results = await deps.orm.lineItem.upsertMany(page, ['plaidTransactionId'], ['name', 'amount', 'postedAt', 'pending'], { onlyIfChanged: true });
+const added = results.filter(r => r.status === 'inserted').length;
+```
+
+```go
+results, err := db.LineItem.UpsertMany(ctx, page, orm.LineItemUniqueByPlaidTransactionId,
+	orm.LineItemFields{Name: true, Amount: true, PostedAt: true, Pending: true}, &orm.UpsertOptions{OnlyIfChanged: true})
+```
+
+One statement writes as many rows as Postgres binds the parameters of
+(65535 over the table's columns); more take a statement per batch, or per
+`batch` (`Batch`) rows, in one transaction, which an upsert opens itself
+when none is open, so a failed batch writes nothing. The rows the
+statement returns are matched to the inputs by the key's values, and an
+input that sets none of them, whose key the database generates, takes the
+next row in order. Two inputs of one statement that hold one key fail it,
+as Postgres refuses to update a row twice, and a key over an `expression`
+cannot be matched and is refused; `upsertOne` takes it.
+
+With `onlyIfChanged` (`OnlyIfChanged`) the update runs only where a field
+it sets differs from what the row holds, `WHERE (line_item.name, ...) IS
+DISTINCT FROM (EXCLUDED.name, ...)`, a location compared as its text, as
+Postgres has no equality for a point. A row it leaves as it was is not
+rewritten: its `updatedAt` and `updatedBy` stay, and no trigger fires, an
+`@enqueueOnChange` among them, so a sync that sends the same page again
+enqueues nothing. Postgres returns no such row, so the repository reads it
+back by its key in the same transaction and reports it `unchanged`. An
+`Encrypted<T>` field compares its plaintext, after the statement.
 
 ## Soft delete
 
@@ -240,13 +722,52 @@ soft-deletable:
 
 <Snippet file="testdata/generated/orm/shop-db/interfaces.go" symbol="ReviewRepositoryInterface" />
 
-`DeleteOne` records who deleted the row, so it needs the acting user on the
-context, set with `orm.WithUserID`; without one it returns
-`ErrNoUserInContext`. The generated API server authenticates callers but
-does not tell the ORM who they are, so each method of the orders service
-that writes rows hands the caller over:
+`DeleteOne` records who deleted the row, so it needs an acting user
+([Who wrote a row](#who-wrote-a-row)): in an operation its caller, and in
+a job or a worker the user it names.
 
-<Snippet file="go/shop-orders/orders.go" symbol="actingUser" />
+## Who wrote a row
+
+A table's `createdBy`, `updatedBy` and `deletedBy` fields record the
+acting user: a create stamps `createdBy`, and `updatedBy` with it, an
+update `updatedBy`, and a soft delete `deletedBy`. Each holds a user's id,
+a scalar such as `Identity.UUID`, with no foreign key, so no user row need
+stand behind it. A create of a table with `createdBy`, a write of one with
+a required `updatedBy` and any soft delete need an acting user, and fail
+without one: `ErrNoUserInContext` in Go, `NoUserError` in TypeScript. An
+update with none leaves a nullable `updatedBy` as it was.
+
+In an operation, the acting user is its caller, the principal its route
+authenticated (D87), with nothing in the implementation:
+
+- Go: each route runs its operation with a context that acts as the caller
+  (`orm.WithCaller`), so the repositories of `Deps.DB` stamp the caller
+  wherever the implementation passes that context on.
+- TypeScript: the router runs each operation within its caller, and
+  `deps.orm`, which the entrypoint opens with no user of its own, acts as
+  it, in a transaction too.
+
+A job, a worker and a manual route's handler serve no caller, so their
+writes act as no one until they name a user. For a write no person makes,
+`orm.AsSystem(ctx)` in Go and `deps.orm.asSystem()` in TypeScript act as
+the database's system actor, a fixed id its DB service may name:
+
+```ts
+outputs: {
+  sql: { systemActor: { id: "3f2c1a9e-7b4d-4e8a-9c61-0d5e2f7a8b10", name: "sync" } },
+}
+```
+
+Unset, it is `00000000-0000-4000-8000-000000000000`, named `system`, the
+id a Go API exports as `SystemUserID`. `orm.WithUserID(ctx, id)` in Go,
+and `deps.orm.withUser(id)` or `deps.orm.as(principal)` in TypeScript,
+act as another user wherever they run, in an operation too;
+`deps.orm.withUser(null)` acts as no one. A caller whose subject is no
+UUID, as a custom authenticator may give, is no acting user.
+
+`requireUpdatedBy: true` in the DB service's `outputs.sql` makes an update
+of a table with `updatedBy` need an acting user too, so a nullable
+`updatedBy` is never left as it was by a write that forgot to name one.
 
 ## Transactions
 
@@ -261,9 +782,218 @@ express: `Exec` for a write, and `Query` for a read such as a keyset-paged
 join across tables. `Query` returns pgx rows, which the caller closes; the
 no-op transaction returns none.
 
+`TransactionWith(ctx, orm.TxOptions{Isolation: orm.Serializable, ReadOnly:
+true}, fn)` begins at an isolation level, `ReadCommitted`, the default,
+`RepeatableRead` or `Serializable`, read only or not:
+`BEGIN ISOLATION LEVEL SERIALIZABLE READ ONLY`. `tx.Transaction(ctx, fn)`
+nests a transaction in one, a savepoint named for its depth: when `fn`
+returns an error the savepoint is rolled back to and released, and the
+transaction around it goes on, as it may after a statement that failed
+in `fn` (D89).
+
 `ErrNotFound` from a lookup, and the unique index's `23505` error from
 Postgres, are the errors an implementation usually turns into a 404 or a
 409; [API routes](/superschematic/guides/api-routes/) shows how.
+
+In TypeScript, `deps.orm.transaction(async tx => ...)` runs a function
+with repositories bound to one transaction, `tx.query(sql, values)` and
+`tx.exec(sql, values)` for raw SQL on it, and rolls it back when the
+function throws. The queue client's `enqueue` takes the transaction, so a
+message commits with the rows ([Queues and workers](/superschematic/guides/queues/#from-typescript)).
+`transaction(fn, { isolation: 'serializable', readOnly: true })` takes the
+same options as `TransactionWith`, and `tx.transaction(fn)` nests a
+savepoint, which a throw rolls back to.
+
+## TypeScript
+
+A DB service whose `outputs.types` lists TypeScript, and whose
+`outputs.sql.dialects` lists postgres, gets its tables' repositories in
+its types package's `./orm` entry (`@acme/shop-db-types/orm`), with the
+statements the Go ORM runs (D79). For each table it declares the row
+(`ReviewRow`), what a create and an update set (`ReviewCreate`,
+`ReviewUpdate`), the filter (`ReviewFilter`), the members a read orders by
+and a page sorts by, the unique keys, and the repository
+(`ReviewRepository`): `getOne`, `getManyByIds`, `findOne`, `findMany`,
+`findPage`, `createOne`, `createMany`, `updateOne`, `updateMany`,
+`upsertOne`, `upsertOneResult`, `upsertMany`, `deleteOne`, `deleteMany`,
+and `hardDeleteOne` on a soft-deletable table. `findMany` counts the rows
+its filter finds before it reads a page of them, `total`; `{ count: false
+}` reads the page alone, and `total` is undefined (`SkipCount` in Go,
+whose total is then -1).
+
+<Snippet file="testdata/generated/types/typescript/shop-db/orm.ts" symbol="ReviewFilter" />
+
+An API whose database lists postgres first and has a table gets the
+repositories in its `Deps` as `orm`, beside the pool, `db`, which stays for
+the SQL they do not express and no [declared query](#declared-queries)
+holds. `shop-cart`, on
+Bun, keeps a shopper's reviews and reorders through them, with no SQL of
+its own:
+
+<Snippet file="typescript/shop-cart/index.ts" symbol={['myReviews', 'reorders']} />
+
+A row holds each column by its member, in the form the TypeScript types
+hold it: a UUID in base62, the wire form, a `Generic.Int64` a number, a
+`Temporal.DateTime` a `Date`, a `Temporal.Date` its `YYYY-MM-DD` text, a
+JSON column the JSON value it holds, a JSON string staying a string and
+`null` the JSON null in a column that may not be null. The HTTP runtime's
+value codec converts each, by the column's type and never by the value's,
+and a
+raw query's rows go through it too: `decodeRow(row, reviewTable.columns)`
+reads a row of the review table's columns, and `uuidToDb(id)` turns a
+base62 id, `ctx.principal.subject` among them, into the hyphenated text a
+`UUID` column compares. `connectPostgres`, which opens `Deps.db`, reads a
+BIGINT as a number, refusing one past 2^53 - 1, a NUMERIC as its exact
+text in a decimal's canonical form (`1.50` as `1.5`; `NaN` as Postgres
+writes it) and a DATE as its text, through parsers of the pool's own;
+`typeParsers: false` keeps pg's. A vector column's value is a `number[]`,
+which crosses as pgvector's text form (`vectorText`).
+
+`query(sql, values, { decode: lineItemTable })`, on the ORM and on a
+transaction, reads a raw query's rows as the table's repository does:
+each column the row holds decoded, by its name, and an `Encrypted<T>`
+column opened. `decode` takes a list of fields too, as `decodeRow` does.
+
+A filter member per column holds its conditions, by the column's kind, as
+the Go ORM's filters do: `eq` and `in` (`in` with no values adds no
+condition), `gt`, `gte`, `lt`, `lte` and `between` on a number, a date or
+a time, `ilike` on text, `eq` and `in` on a `Generic.JSON` column, which
+compare JSON values as JSONB does, an object whatever the order of its
+keys and the string `"1"` apart from the number 1, `isNull` on a column
+that may be null, and a relation's key by `<field>Id`; `in` takes a time
+and a boolean too. The Go filters take the same: `Int64Filter`,
+`FloatFilter`, `DateFilter`, `DateTimeFilter` and `BoolFilter` have `In`,
+and the filter of each kind of column has `IsNull`. A `Generic.JSON` column's Go
+filter is a `StringFilter`, whose `Eq` and `In` take JSON text and compare
+alike, and whose `ILike` Postgres refuses on JSONB.
+
+The repositories do not read a `@versioned` table's history yet; the Go
+ORM does. SQLite repositories are not built.
+
+### Relations in a read
+
+A read's options select members and include relations (D90), in
+`getOne`, `findOne`, `findMany` and `findPage` alike, and the rows it
+resolves to are typed by them:
+
+```ts
+const page = await deps.orm.lineItem.findPage(filter, {
+  include: {
+    account: { include: { provider: true } },
+    category: { select: ['id', 'name'], include: { parent: true } },
+    notes: true,
+  },
+  sort: { field: 'date', desc: true },
+  limit: 50,
+});
+page.rows[0].category?.parent?.name; // string | undefined
+```
+
+- `select` lists the members each row holds; unset, a row holds every
+  column. A relation the read includes reads its foreign key too, which a
+  row that did not select it leaves out.
+- `include` names each relation by its field, or a one-to-many relation
+  by its name, `true` for its rows' columns or `{ select, include }` for
+  what to read of them, at any depth. A to-one relation's row is the
+  member, typed one row, or `| null` for a relation that may be null or a
+  soft-deletable target, whose deleted rows a read leaves out. A
+  one-to-many relation's rows are a list, empty when none.
+- Each relation loads in one statement for all of the read's rows, the
+  target's find with no count, as the Go ORM's hydration reads it: a page
+  of 50 rows with five relations is six statements.
+
+An option, a member or a relation the table does not have fails to type
+check, and throws at run time.
+
+The Go ORM selects and loads relations through `Fields`, as above: a
+field's flag selects its column, and a relation's `<Field>Nested` selection
+loads the related row. Its default nested selection of a relation is every
+column and every relation in turn, where TypeScript's `true` is the
+target's columns alone. The two send the same statements for the same
+selection.
+
+### Reading a projection
+
+A [projection](/superschematic/reference/projections/) whose columns
+include its source's key, or the one column it collapses by, is read
+through a repository of its own: its row is the projection's name, its
+members the projection's fields, and it has the reads of a table,
+`getOne`, `getManyByIds`, `findOne`, `findMany` and `findPage`, its filter
+and sorts over the view's columns:
+
+```ts
+const list = await deps.orm.transactionListRow.findPage(
+  { parentCategoryId: { in: ids }, accountName: { ilike: 'card' } },
+  { sort: { field: 'date', desc: true }, limit: 50 }
+);
+```
+
+In Go the projection's row is a struct of the ORM's package, and
+`db.TransactionListRow()` reads it over the pool, and
+`orm.TransactionListRowIn(tx)` in a transaction.
+
+## Raw SQL
+
+What the schema cannot say, such as a function, an extension or a
+materialized view for a dashboard, is raw SQL the DB service declares with
+`@rawSql` on any of its tables. The class is only where it is written: the
+piece belongs to the service. `examples/migrations`' `tasks-db` keeps a
+materialized view of each project's open tasks for a dashboard:
+
+<Snippet example="migrations" file="v2/schemas/services/tasks-db/src/tasks.schema.ts" symbol="Project" />
+
+- `id` names the piece: a lowercase identifier, unique in the service.
+- `up` is one or more statements, separated by semicolons. A migration
+  plan runs the piece again when it changes, so each statement must run
+  again over what it made: `CREATE OR REPLACE`, `CREATE ... IF NOT
+  EXISTS`, `DROP ... IF EXISTS`, `REFRESH`, `COMMENT ON`, `GRANT`,
+  `REVOKE`, `INSERT ... ON CONFLICT` (or SQLite's `INSERT OR IGNORE`), or a
+  `DO` block, which you vouch for. Any other statement fails the load and
+  names the fix. So does `CONCURRENTLY`, which a plan's transaction
+  refuses; an `@index` is built concurrently.
+- `down`, under the same rules, is what a plan runs when the piece is no
+  longer declared.
+- `after` places it: `"tables"` runs it after the tables, before the
+  indexes; `"indexes"`, the default, after every object the schema
+  declares; another piece's id, right after that piece. Pieces in one
+  place run in the order of their ids. An `after` that names no piece, and
+  pieces that run after each other, fail the load.
+- `dialects` lists the dialects it runs on, `postgres` and `sqlite`; unset
+  is every dialect the service lists.
+
+Raw SQL sees an `Encrypted<T>` field's envelope, never its value
+([Encrypted fields](#encrypted-fields)).
+
+A template literal with no `${}` is a string, so the SQL can span lines.
+`create.sql` runs every piece, in order, at its place, and `drop.sql` runs
+each `down` first. A migration plan records each piece by id and the
+checksum of its statements, runs a new or changed one in `expand` and a
+removed one's `down` in `contract`, and marks each such step `raw-sql`,
+since it cannot judge what the SQL does
+([Raw SQL](/superschematic/reference/migrations/#raw-sql)).
+
+## Declared queries
+
+A report's SQL, its aggregates, a `generate_series` of time buckets, a
+paged list over joined tables, is a query the DB schema declares with
+`@query<Params, Row>({ name, sql })` on a class of its own (D86). Its
+`:name` parameters are fields of `Params`, its result columns fields of
+`Row`, and both ORMs run it as a typed function:
+`deps.orm.queries.categoryTotals(params)` and `tx.queries.categoryTotals(params)`
+in TypeScript, `db.Queries.CategoryTotals(ctx, params)` in Go. An enum
+parameter may pick one of fixed `ORDER BY` fragments, a query may read
+its rows a page at a time by a keyset of its row's fields, and one of one
+row returns it (`returns: "one"`, or `"optional"` for one or none). Reports
+share a filter by interpolating a string constant into their SQL.
+
+`superschematic queries verify <db-service-dir>` prepares each query on
+Postgres, checks the types Postgres describes against `Params` and `Row`,
+and that a field that is not `Nullable<T>` reads a column that is never
+null, and writes `queries.lock`, which `check` and `build` hold the
+queries to with no database. A `migrate plan` prepares them on the new
+version's DDL too, so a renamed column a query reads fails the plan,
+naming the query. [Declared queries](/superschematic/reference/declared-queries/)
+covers the options, the codec, nullability and the lock.
 
 ## Change tables that hold data
 
@@ -300,6 +1030,9 @@ Three reference pages cover what a DB schema can add on top of this guide:
   whole, with engines in Go, TypeScript, Rust and Python.
 - [Projection views](/superschematic/reference/projections/): read-only SQL
   views over joined tables, with `@projection`, `@join` and `@column`.
+- [Declared queries](/superschematic/reference/declared-queries/): named,
+  type-checked SQL with `@query`, verified on Postgres into a lock and run
+  by both ORMs as typed functions.
 
 A type of a DB schema that composes a behavior, `@behavior("Workflow",
 ...)` say, is no table: it is an engine type, whose instances the engine

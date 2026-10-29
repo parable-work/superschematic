@@ -1,6 +1,7 @@
 package agentcatalog
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -80,6 +81,72 @@ func TestEveryBehaviorIsListed(t *testing.T) {
 	}
 	if !strings.Contains(catalog, "\n```ts\ninterface WorkflowConfig {") {
 		t.Error("the config types do not include WorkflowConfig")
+	}
+}
+
+// A behavior's signals (D77) are listed with who may send each.
+func TestSignalsAreListed(t *testing.T) {
+	reg := registry.New(naming.Naming{})
+	if err := generator.RegisterCore(reg); err != nil {
+		t.Fatal(err)
+	}
+	signals := json.RawMessage(`{"name": "Chatter", "signals": [
+		{"name": "typing", "description": "Who is typing.", "access": "read", "paramsSchema": {"type": "object"}},
+		{"name": "draft", "access": "operation", "paramsSchema": true}
+	]}`)
+	if err := reg.RegisterBehavior(registry.BehaviorSpec{Declaration: signals}); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+	catalog := render(t, Behaviors, reg)
+	want := "\nSignals (delivered to event streams opened with `signals=1`, never stored):\n\n" +
+		"- `typing` (sent by callers who may read): Who is typing.\n" +
+		"- `draft` (sent by its operations alone)\n"
+	if !strings.Contains(catalog, want) {
+		t.Errorf("Chatter's entry lacks its signals:\n%s", catalog[strings.Index(catalog, "## `Chatter`"):])
+	}
+}
+
+// A behavior's namespace operations (D77) say where they run, and an
+// operation that asks read says so.
+func TestNamespaceOperationsAndAsksReadAreListed(t *testing.T) {
+	reg := registry.New(naming.Naming{})
+	if err := generator.RegisterCore(reg); err != nil {
+		t.Fatal(err)
+	}
+	closed := `"paramsSchema": {"type": "object", "additionalProperties": false}, "resultSchema": true`
+	chat := json.RawMessage(`{"name": "Chatter", "operations": [
+		{"name": "inbox", "description": "The caller's mentions.", "scope": "namespace", ` + closed + `},
+		{"name": "markRead", "writes": true, "beside": true, "log": false, "asks": "read", ` + closed + `}
+	]}`)
+	if err := reg.RegisterBehavior(registry.BehaviorSpec{Declaration: chat}); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+	catalog := render(t, Behaviors, reg)
+	want := "\nOperations:\n\n" +
+		"- `inbox` (reads, across the namespace's schemas, called by the behavior's name): The caller's mentions.\n" +
+		"- `markRead` (writes, on an instance, beside the instance, no event, asks read)\n"
+	if !strings.Contains(catalog, want) {
+		t.Errorf("Chatter's entry lacks its operations:\n%s", catalog[strings.Index(catalog, "## `Chatter`"):])
+	}
+}
+
+// A per-reader field (D77) says that each caller reads its own and no
+// event records it.
+func TestPerReaderFieldsAreListed(t *testing.T) {
+	reg := generator.CoreRegistry(naming.Naming{})
+	catalog := render(t, Behaviors, reg)
+	want := "- `Comments.unread` (volatile, per reader: computed for each caller when read, and no event records it): "
+	if !strings.Contains(catalog, want) {
+		t.Errorf("Comments' entry lacks its per-reader unread:\n%s", catalog[strings.Index(catalog, "## `Comments`"):])
+	}
+	if !strings.Contains(catalog, "- `Comments.messages` (volatile: computed when read)") {
+		t.Errorf("Comments' messages is not listed as volatile alone")
 	}
 }
 

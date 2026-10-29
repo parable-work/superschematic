@@ -28,8 +28,8 @@ use serde_json::{Map, Value};
 
 use super::config::ConfigTarget;
 use super::context::{
-    InstanceCx, InstanceView, OperationCx, PublishCx, ReactionCx, ReferenceCx, ScheduleCx,
-    SchemaCx, ValidationCx,
+    InstanceCx, InstanceView, NamespaceCx, OperationCx, PublishCx, ReactionCx, ReferenceCx,
+    ScheduleCx, SchemaCx, ValidationCx,
 };
 use crate::errors::{Error, Result, ValidationIssue, Veto};
 use crate::events::EngineEvent;
@@ -437,6 +437,11 @@ pub type OperationFn<B> =
 /// A schema-level operation's handler.
 pub type SchemaOperationFn<B> =
     fn(&B, &SchemaCx<'_, <B as Behavior>::Config>, &Value) -> Result<Value>;
+/// A namespace operation's handler (D77): it has no one config, since it
+/// runs across every schema that composes the behavior, each with its own
+/// ([`NamespaceCx::configs`]).
+pub type NamespaceOperationFn<B> =
+    fn(&B, &NamespaceCx<'_, <B as Behavior>::Config>, &Value) -> Result<Value>;
 /// Reads one declared field: a JSON value, or `None` (or null) for none.
 pub type FieldFn<B> = fn(&B, &InstanceView<'_, <B as Behavior>::Config>) -> Result<Option<Value>>;
 /// May veto a change: a [`Veto`] to refuse, `None` to allow.
@@ -575,6 +580,8 @@ pub struct Hooks<B: Behavior> {
     pub operations: Vec<(&'static str, OperationFn<B>)>,
     /// A handler per declared schema-level operation, by name.
     pub schema_operations: Vec<(&'static str, SchemaOperationFn<B>)>,
+    /// A handler per declared namespace operation (D77), by name.
+    pub namespace_operations: Vec<(&'static str, NamespaceOperationFn<B>)>,
     /// A reader per declared field, by name.
     pub fields: Vec<(&'static str, FieldFn<B>)>,
     /// What a list may filter on, by a declared field's name or
@@ -611,6 +618,7 @@ impl<B: Behavior> Default for Hooks<B> {
             create_params_schema: None,
             operations: Vec::new(),
             schema_operations: Vec::new(),
+            namespace_operations: Vec::new(),
             fields: Vec::new(),
             filters: Vec::new(),
             after_change: None,

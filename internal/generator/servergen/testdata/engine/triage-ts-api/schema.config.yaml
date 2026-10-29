@@ -1,11 +1,14 @@
 # A TypeScript API over triage-db that declares two derivers (D74): TriageTickets,
 # which fills Ticket's derived fields eight at a time, and FillAll, which
 # names no schema and so fills every type of triage-db that composes
-# Derived.
+# Derived. It lists the memory store triage-cache, which its server and
+# each deriver open (D75).
 name: triage-ts-api
 kind: API
 dependencies:
   - { name: triage-db, kind: DB }
+memoryStores:
+  - { name: triage-cache, kind: MemoryStore }
 outputs:
   types:
     typescript: { enabled: true }

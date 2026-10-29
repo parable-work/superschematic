@@ -180,10 +180,42 @@ func decode{{ .TypeName }}HistoryData(raw []byte) (*types.{{ .TypeName }}, error
 		{{- else }}
 		result.{{ toGoName .Name }} = {{ .GoType }}(duration)
 		{{- end }}
+		{{- else if and .IsDecimal .NativeList }}
+		if err := unmarshalHistoryDecimals(rawValue, &result.{{ toGoName .Name }}, {{ printf "%q" .Name }}); err != nil {
+			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
+		}
 		{{- else if .NativeList }}
 		if err := unmarshalJSONListFieldValue(rawValue, &result.{{ toGoName .Name }}, {{ printf "%q" .Name }}, 1); err != nil {
 			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
 		}
+		{{- else if .IsVector }}
+		// to_jsonb writes a vector as its text, "[0.5,-1]" (D84).
+		var text string
+		if err := json.Unmarshal(rawValue, &text); err != nil {
+			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
+		}
+		vector, err := parseVectorText(text)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
+		}
+		{{- if .IsNullableScalar }}
+		result.{{ toGoName .Name }} = &vector
+		{{- else }}
+		result.{{ toGoName .Name }} = vector
+		{{- end }}
+		{{- else if and .IsDecimal (not .IsArray) }}
+		// to_jsonb writes a NUMERIC as a JSON number, in the column's scale
+		// (D84); the decimal is its canonical text.
+		decimal, err := historyDecimal(rawValue)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode history field {{ .DBName }}: %w", err)
+		}
+		{{- if .IsNullableScalar }}
+		value := {{ .GoType }}(decimal)
+		result.{{ toGoName .Name }} = &value
+		{{- else }}
+		result.{{ toGoName .Name }} = {{ .GoType }}(decimal)
+		{{- end }}
 		{{- else if .IsGeoPoint }}
 		// to_jsonb writes a POINT as its text, "(x,y)": x is the longitude and
 		// y the latitude.
@@ -241,6 +273,7 @@ var temp{{ toGoName $member.Field.Name }} []byte
 var temp{{ toGoName $member.Field.Name }} []*{{ $member.Field.ListElementScanType }}
 {{- else if $member.Field.IsGeoPointList }}
 var temp{{ toGoName $member.Field.Name }} []pgtype.Point
+{{- else if $member.Field.IsVector }}
 {{- else if $member.Field.IsGeoPoint }}
 var temp{{ toGoName $member.Field.Name }} pgtype.Point
 {{- else if and $member.Field.IsInterval $member.Field.IsNullableScalar }}
@@ -284,6 +317,7 @@ if err := {{ $member.Field.ListCopyCall (printf "temp%s" (toGoName $member.Field
 if err := {{ $member.Field.GeoPointListCopy (printf "temp%s" (toGoName $member.Field.Name)) (printf "&result.%s" (toGoName $member.Field.Name)) }}; err != nil {
 	return nil, fmt.Errorf("failed to decode field {{ $member.Field.Name }}: %w", err)
 }
+{{- else if $member.Field.IsVector }}
 {{- else if $member.Field.IsGeoPoint }}
 if temp{{ toGoName $member.Field.Name }}.Valid {
 	// A POINT is (x, y): x is the longitude and y the latitude.
@@ -358,6 +392,7 @@ if err := {{ $member.Field.ListCopyCall (printf "temp%s" (toGoName $member.Field
 if err := {{ $member.Field.GeoPointListCopy (printf "temp%s" (toGoName $member.Field.Name)) (printf "&entity.%s" (toGoName $member.Field.Name)) }}; err != nil {
 	return nil, fmt.Errorf("failed to decode field {{ $member.Field.Name }}: %w", err)
 }
+{{- else if $member.Field.IsVector }}
 {{- else if $member.Field.IsGeoPoint }}
 if temp{{ toGoName $member.Field.Name }}.Valid {
 	// A POINT is (x, y): x is the longitude and y the latitude.
@@ -410,6 +445,8 @@ if temp{{ toGoName $member.Field.Name }} != nil {
 &temp{{ toGoName $member.Field.Name }},
 {{- else if $member.Field.IsGeoPointList }}
 &temp{{ toGoName $member.Field.Name }},
+{{- else if $member.Field.IsVector }}
+{{ if $member.Field.IsNullableScalar }}vectorPtrScanner{{ else }}vectorScanner{{ end }}{&result.{{ toGoName $member.Field.Name }}},
 {{- else if $member.Field.IsGeoPoint }}
 &temp{{ toGoName $member.Field.Name }},
 {{- else if and $member.Field.IsInterval (not $member.Field.IsNullableScalar) }}
@@ -433,6 +470,8 @@ if temp{{ toGoName $member.Field.Name }} != nil {
 &temp{{ toGoName $member.Field.Name }},
 {{- else if $member.Field.IsGeoPointList }}
 &temp{{ toGoName $member.Field.Name }},
+{{- else if $member.Field.IsVector }}
+{{ if $member.Field.IsNullableScalar }}vectorPtrScanner{{ else }}vectorScanner{{ end }}{&entity.{{ toGoName $member.Field.Name }}},
 {{- else if $member.Field.IsGeoPoint }}
 &temp{{ toGoName $member.Field.Name }},
 {{- else if and $member.Field.IsInterval (not $member.Field.IsNullableScalar) }}
@@ -454,6 +493,7 @@ var temp{{ toGoName $field.Name }} []byte
 var temp{{ toGoName $field.Name }} []*{{ $field.ListElementScanType }}
 {{- else if $field.IsGeoPointList }}
 var temp{{ toGoName $field.Name }} []pgtype.Point
+{{- else if $field.IsVector }}
 {{- else if $field.IsGeoPoint }}
 var temp{{ toGoName $field.Name }} pgtype.Point
 {{- else if and $field.IsInterval $field.IsNullableScalar }}
@@ -470,7 +510,7 @@ var temp{{ toGoName $field.Name }} *{{ $field.GoType }}
 
 {{- define "nullableSelectedFlagsFields" -}}
 {{- range $field := . }}
-{{- if and (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) (not $field.IsJSONField) }}
+{{- if and (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) (not $field.IsJSONField) (not $field.IsVector) }}
 {{- if or (not $field.IsRequired) (and $field.IsRequired (or $field.IsDateLike $field.IsGeoPoint)) }}
 var selected{{ toGoName $field.Name }} bool
 {{- end }}
@@ -487,6 +527,9 @@ case "{{ $field.DBName }}":
 	scanDest[i] = &temp{{ toGoName $field.Name }}
 	{{- else if $field.IsGeoPointList }}
 	scanDest[i] = &temp{{ toGoName $field.Name }}
+	{{- else if $field.IsVector }}
+	// A vector reads as pgvector's text, [0.5,-1] (D84).
+	scanDest[i] = {{ if $field.IsNullableScalar }}vectorPtrScanner{{ else }}vectorScanner{{ end }}{&result.{{ toGoName $field.Name }}}
 	{{- else if $field.IsGeoPoint }}
 	scanDest[i] = &temp{{ toGoName $field.Name }}
 	selected{{ toGoName $field.Name }} = true
@@ -534,6 +577,7 @@ if err := {{ $field.ListCopyCall (printf "temp%s" (toGoName $field.Name)) (print
 if err := {{ $field.GeoPointListCopy (printf "temp%s" (toGoName $field.Name)) (printf "&result.%s" (toGoName $field.Name)) }}; err != nil {
 	jsonFieldDecodeErr = fmt.Errorf("failed to decode field {{ $field.Name }}: %w", err)
 }
+{{- else if $field.IsVector }}
 {{- else if $field.IsGeoPoint }}
 if selected{{ toGoName $field.Name }} && temp{{ toGoName $field.Name }}.Valid {
 	// A POINT is (x, y): x is the longitude and y the latitude.
@@ -618,7 +662,7 @@ var {{ .TypeName }}QuotedFields = map[string]string{
 // are the only text of a sort that reaches its SQL (D60, amended).
 var {{ lowerFirst .TypeName }}SortColumns = map[{{ .TypeName }}SortField]struct{ sql, key string }{
 	{{- range .SortFields }}
-	{{ $.TypeName }}SortBy{{ toGoName .Name }}: {`{{ $.QuotedTableName }}.{{ .QuotedDBName }}`, `page_key.{{ .QuotedDBName }}`},
+	{{ $.TypeName }}SortBy{{ toGoName .Name }}: { {{- goRawString .SQL.Qualified }}, {{ goRawString .SQL.PageKey -}} },
 	{{- end }}
 }
 
@@ -754,7 +798,7 @@ FROM (
   ORDER BY {{ .HistoryRecordedAtCol }} DESC, _version DESC
   LIMIT 1
 ) latest
-WHERE {{ .HistoryOperationCol }} <> 'DELETE'{{ if .HasSoftDelete }} AND ({{ .HistoryDataCol }}->>'deleted_at') IS NULL{{ end }}`
+WHERE {{ .HistoryOperationCol }} <> 'DELETE'{{ if .HasSoftDelete }} AND ({{ .HistoryDataCol }}->>'{{ $.DeletedAtCol }}') IS NULL{{ end }}`
 
 	var data []byte
 	var row pgx.Row
@@ -849,7 +893,7 @@ func (r *{{ $.Name }}) ListAsOfBy{{ toGoName .FieldName }}ID(ctx context.Context
 )
 SELECT _version, {{ $.HistoryOperationCol }}, {{ $.HistoryRecordedAtCol }}, {{ $.HistoryDataCol }}
 FROM latest
-WHERE {{ $.HistoryOperationCol }} <> 'DELETE'{{ if $.HasSoftDelete }} AND ({{ $.HistoryDataCol }}->>'deleted_at') IS NULL{{ end }} AND {{ $.HistoryDataCol }}->>'{{ .DBColumnName }}' = $2
+WHERE {{ $.HistoryOperationCol }} <> 'DELETE'{{ if $.HasSoftDelete }} AND ({{ $.HistoryDataCol }}->>'{{ $.DeletedAtCol }}') IS NULL{{ end }} AND {{ $.HistoryDataCol }}->>'{{ .DBColumnName }}' = $2
 ORDER BY {{ $.HistoryRecordedAtCol }} ASC, _version ASC`
 	query += buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
 
@@ -942,7 +986,7 @@ func (r *{{ $.Name }}) batch{{ toGoName $rel.FieldName }}ByIDs(ctx context.Conte
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&{{ $rel.TargetType }}Filter{
 			Id: &UUIDFilter{
@@ -1007,19 +1051,26 @@ func (r *{{ .Name }}) GetOne(ctx context.Context, id {{ .PrimaryKeyType }}, opts
 			fieldStrings = append(fieldStrings, "{{ .PrimaryKeyCol }}")
 		}
 		{{- end }}
+		{{- if .EncryptedFields }}
+		// An encrypted field's envelope is bound to the row's key, which
+		// opening it reads (D85).
+		if ({{ range $i, $f := .EncryptedFields }}{{ if $i }} || {{ end }}opts.Fields.{{ toGoName $f.Name }}{{ end }}) && !containsString(fieldStrings, "{{ .PrimaryKeyCol }}") {
+			fieldStrings = append(fieldStrings, "{{ .PrimaryKeyCol }}")
+		}
+		{{- end }}
 		// Validate fields
 		if err := validateFields(fieldStrings, {{ .TypeName }}AllowedFields); err != nil {
 			return nil, err
 		}
 		selectFields := buildSelectFieldsTyped(fieldStrings, "{{ .TableName }}")
-		query = fmt.Sprintf(`SELECT %s FROM {{ .QuotedTableName }} WHERE {{ .QuotedPrimaryKey }} = $1`, selectFields)
+		query = fmt.Sprintf({{ goRawString .SQL.GetOneFields }}, selectFields)
 	} else {
 		// Select all fields in explicit order matching scan order (using OrderedMembers for schema order)
-		query = `SELECT {{ range $i, $member := .OrderedMembers }}{{ if $i }}, {{ end }}{{ if $member.IsRelationship }}"{{ $member.Relationship.DBColumnName }}"{{ else }}"{{ $member.Field.DBName }}"{{ end }}{{ end }} FROM {{ .QuotedTableName }} WHERE {{ .QuotedPrimaryKey }} = $1`
+		query = {{ goRawString .SQL.GetOne }}
 	}
 
 	{{- if .HasSoftDelete }}
-	query += " AND deleted_at IS NULL"
+	query += {{ printf "%q" .SQL.Live }}
 	{{- end }}
 
 	// Execute query
@@ -1242,7 +1293,7 @@ func (r *{{ .Name }}) GetOne(ctx context.Context, id {{ .PrimaryKeyType }}, opts
 		// of the guard does not apply and only the depth cap can refuse it.
 		children := []*types.{{ $rel.TargetType }}{}
 		if hydrationCtx, allowed := enterRelationHydration(ctx, "{{ $.TypeName }}", "{{ $rel.FieldName }}", "{{ $rel.TargetType }}", false); allowed {
-			fetched, _, findErr := repo.FindMany(hydrationCtx, childFilter, &{{ $rel.TargetType }}FindOptions{
+			fetched, findErr := repo.findRelated(hydrationCtx, childFilter, &{{ $rel.TargetType }}FindOptions{
 				Fields: childFields,
 				Limit:  1000000,
 			})
@@ -1312,6 +1363,13 @@ func (r *{{ .Name }}) GetOne(ctx context.Context, id {{ .PrimaryKeyType }}, opts
 	}
 	{{- end }}
 	{{- end }}
+	{{- if .EncryptedFields }}
+
+	// Open each encrypted field under the row's key (D85).
+	if err := r.open(result); err != nil {
+		return nil, err
+	}
+	{{- end }}
 
 	return result, nil
 	{{- end }}
@@ -1342,10 +1400,10 @@ func (r *{{ .Name }}) GetManyByIDs(ctx context.Context, ids []{{ .LookupKeyType 
 	}
 
 	// Build query with explicit column order
-	query := fmt.Sprintf(`SELECT {{ range $i, $member := .OrderedMembers }}{{ if $i }}, {{ end }}{{ if $member.IsRelationship }}"{{ $member.Relationship.DBColumnName }}"{{ else }}"{{ $member.Field.DBName }}"{{ end }}{{ end }} FROM {{ .QuotedTableName }} WHERE {{ .QuotedPrimaryKey }} IN (%s)`, strings.Join(placeholders, ", "))
+	query := fmt.Sprintf({{ goRawString .SQL.GetMany }}, strings.Join(placeholders, ", "))
 
 	{{- if .HasSoftDelete }}
-	query += " AND deleted_at IS NULL"
+	query += {{ printf "%q" .SQL.Live }}
 	{{- end }}
 
 	// Execute query
@@ -1407,6 +1465,11 @@ func (r *{{ .Name }}) GetManyByIDs(ctx context.Context, ids []{{ .LookupKeyType 
 		}
 		{{- end }}
 		{{- end }}
+		{{- if .EncryptedFields }}
+		if err := r.open(entity); err != nil {
+			return nil, err
+		}
+		{{- end }}
 		{{- if .PrimaryKeyIsUUID }}
 
 		entityID, ok := {{ lowerFirst .TypeName }}UUIDValue(entity.{{ toGoName .PrimaryKeyField }})
@@ -1462,6 +1525,13 @@ func (r *{{ .Name }}) FindOne(ctx context.Context, filter *{{ .TypeName }}Filter
 			fieldStrings = append(fieldStrings, "{{ .PrimaryKeyCol }}")
 		}
 		{{- end }}
+		{{- if .EncryptedFields }}
+		// An encrypted field's envelope is bound to the row's key, which
+		// opening it reads (D85).
+		if ({{ range $i, $f := .EncryptedFields }}{{ if $i }} || {{ end }}opts.Fields.{{ toGoName $f.Name }}{{ end }}) && !containsString(fieldStrings, "{{ .PrimaryKeyCol }}") {
+			fieldStrings = append(fieldStrings, "{{ .PrimaryKeyCol }}")
+		}
+		{{- end }}
 		// Validate fields
 		if err := validateFields(fieldStrings, {{ .TypeName }}AllowedFields); err != nil {
 			return nil, err
@@ -1469,7 +1539,7 @@ func (r *{{ .Name }}) FindOne(ctx context.Context, filter *{{ .TypeName }}Filter
 		selectFields = buildSelectFieldsTyped(fieldStrings, "{{ .TableName }}")
 	} else {
 		// Select all fields in explicit order matching scan order (using OrderedMembers for schema order)
-		selectFields = `{{ range $i, $member := .OrderedMembers }}{{ if $i }}, {{ end }}{{ if $member.IsRelationship }}"{{ $member.Relationship.DBColumnName }}"{{ else }}"{{ $member.Field.DBName }}"{{ end }}{{ end }}`
+		selectFields = {{ goRawString .SQL.Columns }}
 		if opts == nil {
 			opts = &{{ .TypeName }}FindOptions{}
 		}
@@ -1483,9 +1553,9 @@ func (r *{{ .Name }}) FindOne(ctx context.Context, filter *{{ .TypeName }}Filter
 	// Apply soft-delete filter unless IncludeDeleted is set
 	if !opts.IncludeDeleted {
 		if whereClause == "" {
-			whereClause = " WHERE deleted_at IS NULL"
+			whereClause = {{ printf "%q" .SQL.LiveWhere }}
 		} else {
-			whereClause += " AND deleted_at IS NULL"
+			whereClause += {{ printf "%q" .SQL.Live }}
 		}
 	}
 	{{- end }}
@@ -1494,7 +1564,7 @@ func (r *{{ .Name }}) FindOne(ctx context.Context, filter *{{ .TypeName }}Filter
 	orderByClause := build{{ .TypeName }}OrderByClause(opts.OrderBy, `{{ .QuotedTableName }}`)
 
 	// Build query
-	query := fmt.Sprintf(`SELECT %s FROM {{ .QuotedTableName }}%s%s LIMIT 1`, selectFields, whereClause, orderByClause)
+	query := fmt.Sprintf({{ goRawString .SQL.FindOne }}, selectFields, whereClause, orderByClause)
 
 	// Execute query
 	var row pgx.Row
@@ -1650,12 +1720,20 @@ func (r *{{ .Name }}) FindOne(ctx context.Context, filter *{{ .TypeName }}Filter
 	}
 	{{- end }}
 	{{- end }}
+	{{- if .EncryptedFields }}
+
+	// Open each encrypted field under the row's key (D85).
+	if err := r.open(result); err != nil {
+		return nil, err
+	}
+	{{- end }}
 
 	return result, nil
 	{{- end }}
 }
 
-// FindMany retrieves multiple {{ .TypeName }} records matching the filter
+// FindMany retrieves multiple {{ .TypeName }} records matching the filter, and how
+// many it matches in all, -1 when the options skip the count
 func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filter, opts *{{ .TypeName }}FindOptions) ([]*types.{{ .TypeName }}, int, error) {
 	if opts == nil || opts.Fields.IsZero() {
 		return nil, 0, fmt.Errorf("fields must be specified in FindOptions for performance")
@@ -1683,9 +1761,9 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 	// Apply soft-delete filter unless IncludeDeleted is set
 	if !opts.IncludeDeleted {
 		if whereClause == "" {
-			whereClause = " WHERE deleted_at IS NULL"
+			whereClause = {{ printf "%q" .SQL.LiveWhere }}
 		} else {
-			whereClause += " AND deleted_at IS NULL"
+			whereClause += {{ printf "%q" .SQL.Live }}
 		}
 	}
 	{{- end }}
@@ -1697,27 +1775,62 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
 
 	// Build query
-	query := fmt.Sprintf(`SELECT %s FROM {{ .QuotedTableName }}%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
+	query := fmt.Sprintf({{ goRawString .SQL.FindMany }}, selectFields, whereClause, orderByClause, limitOffsetClause)
 
-	// Get total count
-	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM {{ .QuotedTableName }}%s`, whereClause)
+	// Get total count, unless the options skip it (D89)
+	totalCount := -1
+	if !opts.SkipCount {
+		countQuery := fmt.Sprintf({{ goRawString .SQL.Count }}, whereClause)
 
-	var totalCount int
-	var countRow pgx.Row
-	if r.tx != nil {
-		countRow = r.tx.QueryRow(ctx, countQuery, args...)
-	} else {
-		countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
+		var countRow pgx.Row
+		if r.tx != nil {
+			countRow = r.tx.QueryRow(ctx, countQuery, args...)
+		} else {
+			countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
+		}
+		if err := countRow.Scan(&totalCount); err != nil {
+			return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		}
 	}
-	if err := countRow.Scan(&totalCount); err != nil {
-		return nil, 0, fmt.Errorf("failed to get count: %w", err)
-	}
 
-	results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
+	results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields{{ if .VectorFields }}, nil{{ end }})
 	if err != nil {
 		return nil, 0, err
 	}
 	return results, totalCount, nil
+}
+
+// findRelated reads the rows filter finds as FindMany reads them, with no
+// count: the read that loads a relation's rows for the rows of another
+// table's read (D90), which counts nothing, as the TypeScript
+// repositories' include does.
+func (r *{{ .Name }}) findRelated(ctx context.Context, filter *{{ .TypeName }}Filter, opts *{{ .TypeName }}FindOptions) ([]*types.{{ .TypeName }}, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in FindOptions for performance")
+	}
+	fieldStrings := {{ lowerFirst .TypeName }}FieldStrings(opts.Fields)
+	if err := validateFields(fieldStrings, {{ .TypeName }}AllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "{{ .TableName }}")
+	if selectFields == "" {
+		return nil, fmt.Errorf("no valid fields specified")
+	}
+	var args []interface{}
+	whereClause := filter.buildWhereClause(&args, 0)
+	{{- if .HasSoftDelete }}
+	if !opts.IncludeDeleted {
+		if whereClause == "" {
+			whereClause = {{ printf "%q" .SQL.LiveWhere }}
+		} else {
+			whereClause += {{ printf "%q" .SQL.Live }}
+		}
+	}
+	{{- end }}
+	orderByClause := build{{ .TypeName }}OrderByClause(opts.OrderBy, `{{ .QuotedTableName }}`)
+	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
+	query := fmt.Sprintf({{ goRawString .SQL.FindMany }}, selectFields, whereClause, orderByClause, limitOffsetClause)
+	return r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields{{ if .VectorFields }}, nil{{ end }})
 }
 
 // {{ lowerFirst .TypeName }}FieldStrings are the columns fields selects, in OrderedMembers
@@ -1750,13 +1863,24 @@ func {{ lowerFirst .TypeName }}FieldStrings(fields {{ .TypeName }}Fields) []stri
 		fieldStrings = append(fieldStrings, "{{ .PrimaryKeyCol }}")
 	}
 	{{- end }}
+	{{- if .EncryptedFields }}
+	// An encrypted field's envelope is bound to the row's key, which opening
+	// it reads (D85).
+	if ({{ range $i, $f := .EncryptedFields }}{{ if $i }} || {{ end }}fields.{{ toGoName $f.Name }}{{ end }}) && !containsString(fieldStrings, "{{ .PrimaryKeyCol }}") {
+		fieldStrings = append(fieldStrings, "{{ .PrimaryKeyCol }}")
+	}
+	{{- end }}
 	return fieldStrings
 }
 
 // findRows runs query, a select of the columns fieldStrings names, in turn,
 // with args, scans its rows, and hydrates the relations fields selects, as
 // FindMany and FindPage read them. method names the caller in an error.
-func (r *{{ .Name }}) findRows(ctx context.Context, method, query string, args []interface{}, fieldStrings []string, fields {{ .TypeName }}Fields) ([]*types.{{ .TypeName }}, error) {
+{{- if .VectorFields }}
+// With distances, the select ends with the distance Nearest orders by,
+// which it appends, row by row (D84).
+{{- end }}
+func (r *{{ .Name }}) findRows(ctx context.Context, method, query string, args []interface{}, fieldStrings []string, fields {{ .TypeName }}Fields{{ if .VectorFields }}, distances *[]float64{{ end }}) ([]*types.{{ .TypeName }}, error) {
 	// Execute query
 	var rows pgx.Rows
 	var err error
@@ -1811,9 +1935,21 @@ func (r *{{ .Name }}) findRows(ctx context.Context, method, query string, args [
 			}
 		}
 
+		{{- if .VectorFields }}
+		var distance float64
+		if distances != nil {
+			scanDest = append(scanDest, &distance)
+		}
+		{{- end }}
+
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
+		{{- if .VectorFields }}
+		if distances != nil {
+			*distances = append(*distances, distance)
+		}
+		{{- end }}
 
 		// Copy nullable fields when present
 		var jsonFieldDecodeErr error
@@ -1821,6 +1957,11 @@ func (r *{{ .Name }}) findRows(ctx context.Context, method, query string, args [
 		if jsonFieldDecodeErr != nil {
 			return nil, jsonFieldDecodeErr
 		}
+		{{- if .EncryptedFields }}
+		if err := r.open(result); err != nil {
+			return nil, err
+		}
+		{{- end }}
 
 		// Set relationship IDs from scanned FK values (hydration happens after loop)
 		{{- range $i, $rel := .Relationships }}
@@ -2005,7 +2146,7 @@ func (r *{{ .Name }}) findRows(ctx context.Context, method, query string, args [
 			// of the guard does not apply and only the depth cap can refuse it.
 			children := []*types.{{ $rel.TargetType }}{}
 			if hydrationCtx, allowed := enterRelationHydration(ctx, "{{ $.TypeName }}", "{{ $rel.FieldName }}", "{{ $rel.TargetType }}", false); allowed {
-				fetched, _, findErr := repo.FindMany(hydrationCtx, childFilter, &{{ $rel.TargetType }}FindOptions{
+				fetched, findErr := repo.findRelated(hydrationCtx, childFilter, &{{ $rel.TargetType }}FindOptions{
 					Fields: childFields,
 					Limit:  1000000,
 				})
@@ -2145,7 +2286,7 @@ func (r *{{ .Name }}) FindPage(ctx context.Context, filter *{{ .TypeName }}Filte
 	conditions := filter.conditions(&args, 0)
 	{{- if .HasSoftDelete }}
 	if !opts.IncludeDeleted {
-		conditions = append(conditions, `{{ .QuotedTableName }}.deleted_at IS NULL`)
+		conditions = append(conditions, {{ goRawString .SQL.LiveCondition }})
 	}
 	{{- end }}
 	comparison, direction := ">", "ASC"
@@ -2161,12 +2302,12 @@ func (r *{{ .Name }}) FindPage(ctx context.Context, filter *{{ .TypeName }}Filte
 		args = append(args, key)
 		placeholder := fmt.Sprintf("$%d", len(args))
 		if byKey {
-			conditions = append(conditions, fmt.Sprintf(`{{ .QuotedTableName }}.{{ .QuotedPrimaryKey }} %s %s`, comparison, placeholder))
+			conditions = append(conditions, fmt.Sprintf({{ goRawString .SQL.PageAfterKey }}, comparison, placeholder))
 		} else {
 			// The key's row gives the sort field's value: no deleted_at
 			// condition and no filter, so a row soft-deleted or changed
 			// since the page before still places this one.
-			conditions = append(conditions, fmt.Sprintf(`(%s, {{ .QuotedTableName }}.{{ .QuotedPrimaryKey }}) %s ((SELECT %s FROM {{ .QuotedTableName }} AS page_key WHERE page_key.{{ .QuotedPrimaryKey }} = %s), %s)`,
+			conditions = append(conditions, fmt.Sprintf({{ goRawString .SQL.PageAfter }},
 				column.sql, comparison, column.key, placeholder, placeholder))
 		}
 	}
@@ -2174,13 +2315,13 @@ func (r *{{ .Name }}) FindPage(ctx context.Context, filter *{{ .TypeName }}Filte
 	if len(conditions) > 0 {
 		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
-	orderByClause := fmt.Sprintf(" ORDER BY %s %s", column.sql, direction)
+	orderByClause := fmt.Sprintf({{ printf "%q" .SQL.PageOrder }}, column.sql, direction)
 	if !byKey {
-		orderByClause += fmt.Sprintf(`, {{ .QuotedTableName }}.{{ .QuotedPrimaryKey }} %s`, direction)
+		orderByClause += fmt.Sprintf({{ goRawString .SQL.PageTiebreak }}, direction)
 	}
-	query := fmt.Sprintf(`SELECT %s FROM {{ .QuotedTableName }}%s%s LIMIT %d`, selectFields, whereClause, orderByClause, limit+1)
+	query := fmt.Sprintf({{ goRawString .SQL.Page }}, selectFields, whereClause, orderByClause, limit+1)
 
-	rows, err := r.findRows(ctx, "FindPage", query, args, fieldStrings, opts.Fields)
+	rows, err := r.findRows(ctx, "FindPage", query, args, fieldStrings, opts.Fields{{ if .VectorFields }}, nil{{ end }})
 	if err != nil {
 		return nil, err
 	}
@@ -2203,7 +2344,7 @@ func (r *{{ .Name }}) FindPage(ctx context.Context, filter *{{ .TypeName }}Filte
 // pageKeyExists is nil when the table holds a row whose primary key is key,
 // soft-deleted or not, and ErrPageKey when it holds none.
 func (r *{{ .Name }}) pageKeyExists(ctx context.Context, key any) error {
-	query := `SELECT EXISTS (SELECT 1 FROM {{ .QuotedTableName }} WHERE {{ .QuotedTableName }}.{{ .QuotedPrimaryKey }} = $1)`
+	query := {{ goRawString .SQL.PageKeyExists }}
 	var row pgx.Row
 	if r.tx != nil {
 		row = r.tx.QueryRow(ctx, query, key)
@@ -2236,8 +2377,30 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 	input.CreatedBy = GetUserID(ctx)
 	{{- end }}
 	{{- if eq .Name "updatedBy" }}
+	{{- if .IsRequired }}
 	input.UpdatedBy = GetUserID(ctx)
+	{{- else }}
+	{{- if $.RequireUpdatedBy }}
+	if !HasUserID(ctx) {
+		return nil, ErrNoUserInContext
+	}
 	{{- end }}
+	if HasUserID(ctx) {
+		userID := GetUserID(ctx)
+		input.UpdatedBy = &userID
+	}
+	{{- end }}
+	{{- end }}
+	{{- end }}
+	{{- if .EncryptedFields }}
+
+	// The key, generated when unset, and each encrypted field sealed under
+	// it (D85).
+	sealedInput, sealErr := r.seal(input)
+	if sealErr != nil {
+		return nil, fmt.Errorf("create {{ .TypeName }}: %w", sealErr)
+	}
+	input = sealedInput
 	{{- end }}
 
 	// Build INSERT query
@@ -2264,7 +2427,7 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 
 	{{- range .Fields }}
 	{{- if and (not .IsPrimaryKey) (not .IsInternalMetadata) (ne .Name "createdAt") (ne .Name "updatedAt") }}
-	{{- if and .IsRequired (not .IsAutoGenerated) }}
+	{{- if and .IsRequired (not .IsAutoGenerated) (not .DefaultsToNow) }}
 	// Required field: {{ .Name }}
 	fields = append(fields, `{{ .QuotedDBName }}`)
 	paramNum++
@@ -2279,6 +2442,8 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 	values = append(values, input.{{ toGoName .Name }}.ToUUID())
 	{{- else if .IsDateTimeScalar }}
 	values = append(values, time.Time(input.{{ toGoName .Name }}))
+	{{- else if .IsVector }}
+	values = append(values, vectorValue({{ if .DerefValue }}*{{ end }}input.{{ toGoName .Name }}))
 	{{- else if .IsGeoPoint }}
 	values = append(values, {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }})
 	{{- else if .IsGeoPointList }}
@@ -2324,6 +2489,8 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 			{{- else }}
 			values = append(values, time.Time(input.{{ toGoName .Name }}))
 			{{- end }}
+			{{- else if .IsVector }}
+			values = append(values, vectorValue({{ if .DerefValue }}*{{ end }}input.{{ toGoName .Name }}))
 			{{- else if .IsGeoPoint }}
 			values = append(values, {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }})
 			{{- else if .IsGeoPointList }}
@@ -2354,7 +2521,7 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 		var zeroId {{ $.UUIDGoType }}
 		{{- if $rel.IsRequired }}
 		if relID, ok := {{ lowerFirst $.TypeName }}UUIDValue(input.{{ toGoName $rel.FieldName }}.Id); ok && relID != zeroId {
-			fields = append(fields, "{{ $rel.DBColumnName }}")
+			fields = append(fields, `{{ $rel.QuotedDBColumn }}`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -2362,7 +2529,7 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 		{{- else }}
 		if input.{{ toGoName $rel.FieldName }} != nil {
 			if relID, ok := {{ lowerFirst $.TypeName }}UUIDValue(input.{{ toGoName $rel.FieldName }}.Id); ok && relID != zeroId {
-			fields = append(fields, "{{ $rel.DBColumnName }}")
+			fields = append(fields, `{{ $rel.QuotedDBColumn }}`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -2374,9 +2541,9 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 	{{- end }}
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClause := `{{ range $i, $member := .OrderedMembers }}{{ if $i }}, {{ end }}{{ if $member.IsRelationship }}"{{ $member.Relationship.DBColumnName }}"{{ else }}"{{ $member.Field.DBName }}"{{ end }}{{ end }}`
+	returningClause := {{ goRawString .SQL.Columns }}
 	query := fmt.Sprintf(
-		`INSERT INTO {{ .QuotedTableName }} (%s) VALUES (%s) RETURNING %s`,
+		{{ goRawString .SQL.Insert }},
 		strings.Join(fields, ", "),
 		strings.Join(placeholders, ", "),
 		returningClause,
@@ -2430,10 +2597,899 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 	}
 	{{- end }}
 	{{- end }}
+	{{- if .EncryptedFields }}
+
+	// Open each encrypted field under the row's key (D85).
+	if err := r.open(result); err != nil {
+		return nil, err
+	}
+	{{- end }}
 
 	return result, nil
 	{{- end }}
 }
+
+
+// {{ lowerFirst .TypeName }}UniqueKeys are the conflict targets of {{ .TypeName }}'s unique keys, and
+// the assignment an upsert that sets nothing writes, so the row it
+// conflicts with is returned (sqlutil.UniqueKey, D79); the read of the rows
+// that hold keys, which an upsert only if changed reads back, empty for a
+// key over an expression, and the key's columns as a batch insert's cells
+// name them (D89).
+var {{ lowerFirst .TypeName }}UniqueKeys = map[{{ .TypeName }}UniqueKey]struct {
+	conflict, keep, rows string
+	columns              []string
+}{
+	{{- range .UniqueKeys }}
+	{{ .Const }}: { {{- goRawString .Conflict }}, {{ goRawString .Keep }}, {{ goRawString .Rows }}, []string{ {{- range $i, $c := .QuotedColumns }}{{ if $i }}, {{ end }}{{ goRawString $c }}{{ end -}} } },
+	{{- end }}
+}
+
+// {{ lowerFirst .TypeName }}KeyOf is the text of row's values of the unique key on, as
+// UpsertMany matches the rows a statement returns to its inputs, or false
+// when the insert leaves one of them to the database (D89).
+func {{ lowerFirst .TypeName }}KeyOf(on {{ .TypeName }}UniqueKey, row *types.{{ .TypeName }}) (string, bool) {
+	switch on {
+	{{- range .UniqueKeys }}
+	case {{ .Const }}:
+		return upsertKeyText({{ range $i, $p := .KeyParts }}{{ if $i }}, {{ end }}{{ $p }}{{ end }})
+	{{- end }}
+	}
+	return "", false
+}
+
+// database is the Database the repository runs on.
+func (r *{{ .Name }}) database() *Database {
+	if r.txDB != nil {
+		return r.txDB
+	}
+	return r.db
+}
+
+// scanReturned scans a row of every column of {{ .TypeName }}, as a write returns
+// it, and, with inserted, the flag an upsert returns after them (D89).
+func (r *{{ .Name }}) scanReturned(row pgx.Row, inserted *bool) (*types.{{ .TypeName }}, error) {
+	result := &types.{{ .TypeName }}{}
+	{{- if eq (len .OrderedMembers) 0 }}
+	if inserted != nil {
+		if err := row.Scan(inserted); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+	{{- else }}
+	// Create temporary variables for nullable fields that need pointer scanning
+	{{ template "nullableTempVarsMembers" .OrderedMembers }}
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+	{{- range $i, $member := .OrderedMembers }}
+	{{- if $member.IsRelationship }}
+	var tempRel{{ toGoName $member.Relationship.FieldName }} *{{ $.UUIDGoType }}
+	{{- end }}
+	{{- end }}
+
+	// Scan all fields in schema order (matches DDL column order)
+	dest := []any{
+		{{- range $i, $member := .OrderedMembers }}
+		{{ template "scanArgForMember" $member }}
+		{{- end }}
+	}
+	if inserted != nil {
+		dest = append(dest, inserted)
+	}
+	if err := row.Scan(dest...); err != nil {
+		return nil, err
+	}
+
+	// Copy nullable fields when present
+	{{ template "nullablePostCopyMembers" .OrderedMembers }}
+
+	// Set relationship IDs from scanned FK values
+	{{- range $i, $rel := .Relationships }}
+	{{- if not $rel.IsArray }}
+	if tempRel{{ toGoName $rel.FieldName }} != nil {
+		{{- if $rel.IsRequired }}
+		result.{{ toGoName $rel.FieldName }}.Id = {{ if $rel.TargetPrimaryKeyIsPointer }}{{ lowerFirst $.TypeName }}UUIDPtr(*tempRel{{ toGoName $rel.FieldName }}){{ else }}*tempRel{{ toGoName $rel.FieldName }}{{ end }}
+		{{- else }}
+		// Initialize pointer for optional relationship before setting ID
+		result.{{ toGoName $rel.FieldName }} = &types.{{ $rel.TargetType }}{Id: {{ if $rel.TargetPrimaryKeyIsPointer }}{{ lowerFirst $.TypeName }}UUIDPtr(*tempRel{{ toGoName $rel.FieldName }}){{ else }}*tempRel{{ toGoName $rel.FieldName }}{{ end }}}
+		{{- end }}
+	}
+	{{- end }}
+	{{- end }}
+	{{- if .EncryptedFields }}
+
+	// Open each encrypted field under the row's key (D85).
+	if err := r.open(result); err != nil {
+		return nil, err
+	}
+	{{- end }}
+
+	return result, nil
+	{{- end }}
+}
+
+// UpsertOne inserts input, or, when a row already holds its value of the
+// unique key on, applies update to that row instead, and returns the row
+// (D79). The insert writes what CreateOne writes and the update what
+// UpdateOne writes, updated_at and updated_by among it, but an update that
+// sets no field leaves the row as it is.{{ if .HasSoftDelete }} A soft-deleted row that holds the key is
+// left as it is, and UpsertOne returns ErrNotFound.{{ end }}
+func (r *{{ .Name }}) UpsertOne(ctx context.Context, input *types.{{ .TypeName }}, on {{ .TypeName }}UniqueKey, update *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error) {
+	result, err := r.UpsertOneResult(ctx, input, on, update, nil)
+	if err != nil {
+		return nil, err
+	}
+	return result.Row, nil
+}
+
+// UpsertOneResult is UpsertOne, and what it did with the row: inserted it,
+// updated the row that held the key, or left that row as it was (D89).
+// With opts.OnlyIfChanged it updates the row only when a field the update
+// sets differs from what the row holds, which it reads back otherwise.{{ if .EncryptedFields }} An
+// encrypted field the update sets is sealed under the key of the row it
+// updates, which only the statement names, so a second statement, an
+// UpdateOne, sets it when it differs from what the row holds.{{ end }} A write that
+// may take more than one statement runs in a transaction of its own when
+// none is open.
+func (r *{{ .Name }}) UpsertOneResult(ctx context.Context, input *types.{{ .TypeName }}, on {{ .TypeName }}UniqueKey, update *{{ .TypeName }}Update, opts *UpsertOptions) (UpsertResult[*types.{{ .TypeName }}], error) {
+	var none UpsertResult[*types.{{ .TypeName }}]
+	key, ok := {{ lowerFirst .TypeName }}UniqueKeys[on]
+	if !ok {
+		return none, fmt.Errorf("orm: {{ .TypeName }} has no unique key %q", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if opts.OnlyIfChanged && key.rows == "" {
+		return none, upsertExpressionKey("UpsertOneResult", "{{ .TypeName }}", string(on))
+	}
+	if update == nil {
+		update = &{{ .TypeName }}Update{}
+	}
+	write := func(repo *{{ .Name }}) (UpsertResult[*types.{{ .TypeName }}], error) {
+		result, err := repo.upsertRow(ctx, input, on, update, opts.OnlyIfChanged)
+		if err != nil {
+			return none, err
+		}
+		return *result, nil
+	}
+	if {{ if .EncryptedFields }}{{ lowerFirst .TypeName }}SetsEncrypted(update) == "" && {{ end }}!opts.OnlyIfChanged {
+		return write(r)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (UpsertResult[*types.{{ .TypeName }}], error) {
+		return write(&{{ .Name }}{tx: tx, txDB: r.database()})
+	})
+}
+
+// upsertRow is UpsertOneResult on the repository's connection: the upsert,
+// a read of the row it left as it was, only if changed, and the second
+// statement of an encrypted field.
+func (r *{{ .Name }}) upsertRow(ctx context.Context, input *types.{{ .TypeName }}, on {{ .TypeName }}UniqueKey, update *{{ .TypeName }}Update, onlyIfChanged bool) (*UpsertResult[*types.{{ .TypeName }}], error) {
+	key := {{ lowerFirst .TypeName }}UniqueKeys[on]
+	{{- if .GenericJSONListFields }}
+	if err := refuseNull{{ .TypeName }}UpdateGenericJSONElements(update); err != nil {
+		return nil, fmt.Errorf("upsert {{ .TypeName }}: %w", err)
+	}
+	{{- end }}
+	{{- if .GenericJSONListFields }}
+	if err := refuseNull{{ .TypeName }}GenericJSONElements(input); err != nil {
+		return nil, fmt.Errorf("upsert {{ .TypeName }}: %w", err)
+	}
+	{{- end }}
+	// Set audit fields
+	{{- range .Fields }}
+	{{- if eq .Name "createdBy" }}
+	if !HasUserID(ctx) {
+		return nil, ErrNoUserInContext
+	}
+	input.CreatedBy = GetUserID(ctx)
+	{{- end }}
+	{{- if eq .Name "updatedBy" }}
+	{{- if .IsRequired }}
+	input.UpdatedBy = GetUserID(ctx)
+	{{- else }}
+	{{- if $.RequireUpdatedBy }}
+	if !HasUserID(ctx) {
+		return nil, ErrNoUserInContext
+	}
+	{{- end }}
+	if HasUserID(ctx) {
+		userID := GetUserID(ctx)
+		input.UpdatedBy = &userID
+	}
+	{{- end }}
+	{{- end }}
+	{{- end }}
+	{{- if .EncryptedFields }}
+
+	// The key, generated when unset, and each encrypted field sealed under
+	// it (D85). An encrypted field the update sets is sealed under the key
+	// of the row it updates, which only the statement names, so resealed
+	// sets it after it (D89); one it sets to null goes in the statement.
+	sealedInput, sealErr := r.seal(input)
+	if sealErr != nil {
+		return nil, fmt.Errorf("upsert {{ .TypeName }}: %w", sealErr)
+	}
+	input = sealedInput
+	sealing := update
+	{
+		plain := *update
+		{{- range .EncryptedFields }}
+		plain.{{ toGoName .Name }} = nil
+		{{- end }}
+		update = &plain
+	}
+	{{- end }}
+
+	// Build INSERT query
+	var fields []string
+	var placeholders []string
+	var values []interface{}
+	paramNum := 0
+
+	{{- range .Fields }}
+	{{- if and .IsPrimaryKey $.PrimaryKeyIsUUID }}
+	// Schema-owned identities may supply a stable UUID. A zero value keeps the
+	// database-generated default used by ordinary creates.
+	{
+		var zeroPrimaryKey {{ $.UUIDGoType }}
+		if primaryKey, ok := {{ lowerFirst $.TypeName }}UUIDValue(input.{{ toGoName .Name }}); ok && primaryKey != zeroPrimaryKey {
+			fields = append(fields, `{{ .QuotedDBName }}`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, primaryKey.ToUUID())
+		}
+	}
+	{{- end }}
+	{{- end }}
+
+	{{- range .Fields }}
+	{{- if and (not .IsPrimaryKey) (not .IsInternalMetadata) (ne .Name "createdAt") (ne .Name "updatedAt") }}
+	{{- if and .IsRequired (not .IsAutoGenerated) (not .DefaultsToNow) }}
+	// Required field: {{ .Name }}
+	fields = append(fields, `{{ .QuotedDBName }}`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	{{- if .IsJSONField }}
+	jsonValue{{ toGoName .Name }}, err := {{ if .IsArrayOfArrays }}marshalArrayOfArraysFieldValue{{ else }}marshalJSONFieldValue{{ end }}(input.{{ toGoName .Name }})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal JSON field {{ .Name }}: %w", err)
+	}
+	values = append(values, jsonValue{{ toGoName .Name }})
+	{{- else if .IsUUIDScalar }}
+	values = append(values, input.{{ toGoName .Name }}.ToUUID())
+	{{- else if .IsDateTimeScalar }}
+	values = append(values, time.Time(input.{{ toGoName .Name }}))
+	{{- else if .IsVector }}
+	values = append(values, vectorValue({{ if .DerefValue }}*{{ end }}input.{{ toGoName .Name }}))
+	{{- else if .IsGeoPoint }}
+	values = append(values, {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }})
+	{{- else if .IsGeoPointList }}
+	values = append(values, {{ .GeoPointListValue (printf "input.%s" (toGoName .Name)) }})
+	{{- else if .IsInterval }}
+	// An INTERVAL goes as its microseconds, which pgx encodes from a
+	// time.Duration, sign and all.
+	values = append(values, time.Duration(input.{{ toGoName .Name }}))
+	{{- else if .IsIntervalList }}
+	values = append(values, intervalList(input.{{ toGoName .Name }}))
+	{{- else if .EnumDefault }}
+	// An unset enum takes its schema default; "" is never a member.
+	if input.{{ toGoName .Name }} == "" {
+		values = append(values, {{ .GoType }}({{ printf "%q" .EnumDefault }}))
+	} else {
+		values = append(values, input.{{ toGoName .Name }})
+	}
+	{{- else }}
+	values = append(values, input.{{ toGoName .Name }})
+	{{- end }}
+	{{- else }}
+	// {{ if .IsAutoGenerated }}Auto-generated{{ else }}Optional{{ end }} field: {{ .Name }} - only add if set
+	{
+		{{- if .OptionalNilCheck }}
+		if input.{{ toGoName .Name }} != nil {
+		{{- else }}
+		if !reflect.ValueOf(input.{{ toGoName .Name }}).IsZero() {
+		{{- end }}
+			fields = append(fields, `{{ .QuotedDBName }}`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			{{- if .IsJSONField }}
+			jsonValue{{ toGoName .Name }}, err := {{ if .IsArrayOfArrays }}marshalArrayOfArraysFieldValue{{ else }}marshalJSONFieldValue{{ end }}(input.{{ toGoName .Name }})
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal JSON field {{ .Name }}: %w", err)
+			}
+			values = append(values, jsonValue{{ toGoName .Name }})
+			{{- else if .IsUUIDScalar }}
+			values = append(values, input.{{ toGoName .Name }}.ToUUID())
+			{{- else if .IsDateTimeScalar }}
+			{{- if .DerefValue }}
+			values = append(values, time.Time(*input.{{ toGoName .Name }}))
+			{{- else }}
+			values = append(values, time.Time(input.{{ toGoName .Name }}))
+			{{- end }}
+			{{- else if .IsVector }}
+			values = append(values, vectorValue({{ if .DerefValue }}*{{ end }}input.{{ toGoName .Name }}))
+			{{- else if .IsGeoPoint }}
+			values = append(values, {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }})
+			{{- else if .IsGeoPointList }}
+			values = append(values, {{ .GeoPointListValue (printf "input.%s" (toGoName .Name)) }})
+			{{- else if and .IsInterval .DerefValue }}
+			values = append(values, time.Duration(*input.{{ toGoName .Name }}))
+			{{- else if .IsInterval }}
+			values = append(values, time.Duration(input.{{ toGoName .Name }}))
+			{{- else if .IsIntervalList }}
+			values = append(values, intervalList(input.{{ toGoName .Name }}))
+			{{- else if .DerefValue }}
+			// Dereference pointer for database value (nullable complex types, enums, and scalars are pointers)
+			values = append(values, *input.{{ toGoName .Name }})
+			{{- else }}
+			values = append(values, input.{{ toGoName .Name }})
+			{{- end }}
+		}
+	}
+	{{- end }}
+	{{- end }}
+	{{- end }}
+
+	// Handle relationship foreign key columns
+	{{- range $i, $rel := .Relationships }}
+	{{- if not $rel.IsArray }}
+	// Relationship: {{ $rel.FieldName }} (FK: {{ $rel.DBColumnName }})
+	{
+		var zeroId {{ $.UUIDGoType }}
+		{{- if $rel.IsRequired }}
+		if relID, ok := {{ lowerFirst $.TypeName }}UUIDValue(input.{{ toGoName $rel.FieldName }}.Id); ok && relID != zeroId {
+			fields = append(fields, `{{ $rel.QuotedDBColumn }}`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, relID.ToUUID())
+		}
+		{{- else }}
+		if input.{{ toGoName $rel.FieldName }} != nil {
+			if relID, ok := {{ lowerFirst $.TypeName }}UUIDValue(input.{{ toGoName $rel.FieldName }}.Id); ok && relID != zeroId {
+			fields = append(fields, `{{ $rel.QuotedDBColumn }}`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, relID.ToUUID())
+			}
+		}
+		{{- end }}
+	}
+	{{- end }}
+	{{- end }}
+
+	// Build the update of the row the key conflicts with, its placeholders
+	// numbered after the insert's
+	var setClauses, compareCurrent, compareNext []string
+
+	{{- range .Fields }}
+	{{- if and (not .IsPrimaryKey) (not .IsAuditField) (not .IsInternalMetadata) }}
+	{{- if not .IsRequired }}
+	if update.{{ toGoName .Name }} != nil && update.{{ toGoName .Name }}SetNull {
+		return nil, fmt.Errorf("{{ .DBName }} cannot be updated with both value and null assignment")
+	}
+	if update.{{ toGoName .Name }}SetNull {
+		setClauses = append(setClauses, {{ goRawString .SQL.SetNull }})
+		compareCurrent = append(compareCurrent, {{ goRawString .SQL.Compared }})
+		compareNext = append(compareNext, {{ goRawString $.Clauses.Null }})
+	} else if update.{{ toGoName .Name }} != nil {
+	{{- else }}
+	if update.{{ toGoName .Name }} != nil {
+	{{- end }}
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf({{ goRawString .SQL.Set }}, paramNum))
+		compareCurrent = append(compareCurrent, {{ goRawString .SQL.Compared }})
+		compareNext = append(compareNext, fmt.Sprintf({{ goRawString .SQL.CompareParam }}, paramNum))
+		{{- if .IsJSONField }}
+		jsonValue{{ toGoName .Name }}, err := {{ if .IsArrayOfArrays }}marshalArrayOfArraysFieldValue{{ else }}marshalJSONFieldValue{{ end }}(*update.{{ toGoName .Name }})
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal JSON field {{ .Name }}: %w", err)
+		}
+		values = append(values, jsonValue{{ toGoName .Name }})
+		{{- else if .IsUUIDScalar }}
+		values = append(values, (*update.{{ toGoName .Name }}).ToUUID())
+		{{- else if .IsDateTimeScalar }}
+		values = append(values, time.Time(*update.{{ toGoName .Name }}))
+		{{- else if .IsVector }}
+		values = append(values, vectorValue(*update.{{ toGoName .Name }}))
+		{{- else if .IsGeoPoint }}
+		values = append(values, {{ template "geoPoint" (printf "update.%s" (toGoName .Name)) }})
+		{{- else if .IsGeoPointList }}
+		values = append(values, {{ .GeoPointListValue (printf "*update.%s" (toGoName .Name)) }})
+		{{- else if .IsInterval }}
+		// An INTERVAL goes as its microseconds, which pgx encodes from a
+		// time.Duration, sign and all.
+		values = append(values, time.Duration(*update.{{ toGoName .Name }}))
+		{{- else if .IsIntervalList }}
+		values = append(values, intervalList(*update.{{ toGoName .Name }}))
+		{{- else }}
+		values = append(values, *update.{{ toGoName .Name }})
+		{{- end }}
+	}
+	{{- end }}
+	{{- end }}
+
+	{{- range .Relationships }}
+	{{- if not .IsArray }}
+	// Handle relationship foreign key: {{ .FieldName }}
+	{{- if not .IsRequired }}
+	if update.{{ toGoName .FieldName }}ID != nil && update.{{ toGoName .FieldName }}IDSetNull {
+		return nil, fmt.Errorf("{{ .DBColumnName }} cannot be updated with both value and null assignment")
+	}
+	if update.{{ toGoName .FieldName }}IDSetNull {
+		setClauses = append(setClauses, {{ printf "%q" .SQL.SetNull }})
+		compareCurrent = append(compareCurrent, {{ goRawString .SQL.Compared }})
+		compareNext = append(compareNext, {{ goRawString $.Clauses.Null }})
+	} else if update.{{ toGoName .FieldName }}ID != nil {
+	{{- else }}
+	if update.{{ toGoName .FieldName }}ID != nil {
+	{{- end }}
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" .SQL.Set }}, paramNum))
+		compareCurrent = append(compareCurrent, {{ goRawString .SQL.Compared }})
+		compareNext = append(compareNext, fmt.Sprintf({{ goRawString .SQL.CompareParam }}, paramNum))
+		values = append(values, update.{{ toGoName .FieldName }}ID.ToUUID())
+	}
+	{{- end }}
+	{{- end }}
+
+	assigned := len(setClauses)
+	if assigned == 0 {
+		// An update that sets no field leaves the row as it is, stamps and
+		// all, and returns it.
+		setClauses = append(setClauses, key.keep)
+	} else {
+		// Set updated_at
+		{{- range .Fields }}
+		{{- if eq .Name "updatedAt" }}
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedAt }}, paramNum))
+		values = append(values, time.Now())
+		{{- end }}
+		{{- end }}
+
+		// Set updated_by
+		{{- range .Fields }}
+		{{- if eq .Name "updatedBy" }}
+		if update.UpdatedBy != nil {
+			paramNum++
+			setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedBy }}, paramNum))
+			values = append(values, *update.UpdatedBy)
+		} else if HasUserID(ctx) {
+			paramNum++
+			setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedBy }}, paramNum))
+			values = append(values, GetUserID(ctx))
+		}{{ if $.RequireUpdatedBy }} else {
+			return nil, ErrNoUserInContext
+		}{{ end }}
+		{{- end }}
+		{{- end }}
+
+
+	}
+
+	query := fmt.Sprintf(
+		{{ goRawString .SQL.Upsert }},
+		strings.Join(fields, ", "),
+		"("+strings.Join(placeholders, ", ")+")",
+		key.conflict,
+		strings.Join(setClauses, ", "),
+		upsertWhere({{ goRawString .SQL.LiveCondition }}, compareCurrent, compareNext, onlyIfChanged),
+	)
+
+	// Execute query
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, values...)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, values...)
+	}
+	var inserted bool
+	scanned, err := r.scanReturned(row, &inserted)
+	var upserted *UpsertResult[*types.{{ .TypeName }}]
+	switch {
+	case err == nil:
+		status := UpsertUnchanged
+		if inserted {
+			status = UpsertInserted
+		} else if assigned > 0 {
+			status = UpsertUpdated
+		}
+		upserted = &UpsertResult[*types.{{ .TypeName }}]{Row: scanned, Status: status}
+	case err != pgx.ErrNoRows:
+		return nil, fmt.Errorf("failed to scan result: %w", err)
+	case !onlyIfChanged:
+		// The row the key conflicts with is soft-deleted.
+		return nil, ErrNotFound
+	default:
+		// The row the key conflicts with already held the update's values.
+		keyValues, ok := upsertCellValues(upsertCells(fields, values), key.columns)
+		if !ok {
+			return nil, fmt.Errorf("no {{ .TypeName }} row holds an unset %s: %w", string(on), ErrNotFound)
+		}
+		found, err := r.rowsOfKeys(ctx, on, [][]any{keyValues}, []*types.{{ .TypeName }}{input})
+		if err != nil {
+			return nil, err
+		}
+		upserted = &UpsertResult[*types.{{ .TypeName }}]{Row: found[0], Status: UpsertUnchanged}
+	}
+	{{- if .EncryptedFields }}
+	return r.resealed(ctx, upserted, sealing)
+	{{- else }}
+	return upserted, nil
+	{{- end }}
+}
+
+// UpsertMany inserts each input, or, when a row already holds its value of
+// the unique key on, sets each field update names of that row to the value
+// the input would have inserted, and returns each input's row and what it
+// did with it, in the inputs' order (D89). One statement writes a batch of
+// rows, opts.Batch or as many as Postgres binds the parameters of, and more
+// rows take a statement per batch, in one transaction; a write that may
+// take more than one statement runs in a transaction of its own when none
+// is open. An update that names no field leaves each row that holds a key
+// as it is.{{ if .HasSoftDelete }} A soft-deleted row that holds a key is left as it is, and
+// UpsertMany returns ErrNotFound.{{ end }} Two inputs of one batch that hold one key fail
+// the statement, and a key over an expression, whose rows the statement's
+// cannot be matched to the inputs by, is refused.
+func (r *{{ .Name }}) UpsertMany(ctx context.Context, inputs []*types.{{ .TypeName }}, on {{ .TypeName }}UniqueKey, update {{ .TypeName }}Fields, opts *UpsertOptions) ([]UpsertResult[*types.{{ .TypeName }}], error) {
+	key, ok := {{ lowerFirst .TypeName }}UniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: {{ .TypeName }} has no unique key %q", string(on))
+	}
+	if key.rows == "" {
+		return nil, upsertExpressionKey("UpsertMany", "{{ .TypeName }}", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	{{- range .Fields }}
+	{{- if or .IsPrimaryKey .IsAuditField .IsInternalMetadata }}
+	if update.{{ toGoName .Name }} {
+		return nil, fmt.Errorf("orm: UpsertMany of {{ $.TypeName }} sets the fields an update sets, not {{ .Name }}")
+	}
+	{{- end }}
+	{{- end }}
+	batch, err := upsertBatch("{{ .TypeName }}", opts.Batch, {{ .BatchRows }})
+	if err != nil {
+		return nil, err
+	}
+	if len(inputs) == 0 {
+		return []UpsertResult[*types.{{ .TypeName }}]{}, nil
+	}
+	if len(inputs) <= batch && !opts.OnlyIfChanged{{ range .EncryptedFields }} && !update.{{ toGoName .Name }}{{ end }} {
+		return r.upsertBatches(ctx, inputs, on, update, batch, false)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]UpsertResult[*types.{{ .TypeName }}], error) {
+		return (&{{ .Name }}{tx: tx, txDB: r.database()}).upsertBatches(ctx, inputs, on, update, batch, opts.OnlyIfChanged)
+	})
+}
+
+// upsertBatches is UpsertMany on the repository's connection, a batch at a
+// time: each batch's statement, a read of the rows it left as they were,
+// only if changed, and the second statement of each encrypted field.
+func (r *{{ .Name }}) upsertBatches(ctx context.Context, inputs []*types.{{ .TypeName }}, on {{ .TypeName }}UniqueKey, update {{ .TypeName }}Fields, batch int, onlyIfChanged bool) ([]UpsertResult[*types.{{ .TypeName }}], error) {
+	key := {{ lowerFirst .TypeName }}UniqueKeys[on]
+	{{- if .GenericJSONListFields }}
+	for i, input := range inputs {
+		if err := refuseNull{{ .TypeName }}GenericJSONElements(input); err != nil {
+			return nil, fmt.Errorf("upsert {{ .TypeName }} %d: %w", i, err)
+		}
+	}
+	{{- end }}
+
+	// Set audit fields
+	{{- range .Fields }}
+	{{- if eq .Name "createdBy" }}
+	if !HasUserID(ctx) {
+		return nil, ErrNoUserInContext
+	}
+	for _, input := range inputs {
+		input.CreatedBy = GetUserID(ctx)
+	}
+	{{- end }}
+	{{- if eq .Name "updatedBy" }}
+	{{- if .IsRequired }}
+	for _, input := range inputs {
+		input.UpdatedBy = GetUserID(ctx)
+	}
+	{{- else }}
+	{{- if $.RequireUpdatedBy }}
+	if !HasUserID(ctx) {
+		return nil, ErrNoUserInContext
+	}
+	{{- end }}
+	if HasUserID(ctx) {
+		for _, input := range inputs {
+			userID := GetUserID(ctx)
+			input.UpdatedBy = &userID
+		}
+	}
+	{{- end }}
+	{{- end }}
+	{{- end }}
+
+	// Each field update names takes the value the input would have
+	// inserted, which an upsert only if changed compares with the row's.
+	var setClauses, compareCurrent, compareNext []string
+	{{- range .Fields }}
+	{{- if and (not .IsPrimaryKey) (not .IsAuditField) (not .IsInternalMetadata) (not .IsEncrypted) }}
+	if update.{{ toGoName .Name }} {
+		setClauses = append(setClauses, {{ goRawString .SQL.SetExcluded }})
+		compareCurrent = append(compareCurrent, {{ goRawString .SQL.Compared }})
+		compareNext = append(compareNext, {{ goRawString .SQL.CompareExcluded }})
+	}
+	{{- end }}
+	{{- end }}
+	{{- range .Relationships }}
+	{{- if not .IsArray }}
+	if update.{{ toGoName .FieldName }} {
+		setClauses = append(setClauses, {{ goRawString .SQL.SetExcluded }})
+		compareCurrent = append(compareCurrent, {{ goRawString .SQL.Compared }})
+		compareNext = append(compareNext, {{ goRawString .SQL.CompareExcluded }})
+	}
+	{{- end }}
+	{{- end }}
+
+	results := make([]UpsertResult[*types.{{ .TypeName }}], 0, len(inputs))
+	for start := 0; start < len(inputs); start += batch {
+		chunk := inputs[start:min(start+batch, len(inputs))]
+		{{- if .EncryptedFields }}
+		// Each row's key, generated when unset, and its encrypted fields
+		// sealed under it (D85).
+		prepared := make([]*types.{{ .TypeName }}, len(chunk))
+		for i, input := range chunk {
+			sealed, err := r.seal(input)
+			if err != nil {
+				return nil, fmt.Errorf("upsert {{ .TypeName }} %d: %w", start+i, err)
+			}
+			prepared[i] = sealed
+		}
+		{{- else }}
+		prepared := chunk
+		{{- end }}
+
+		// The batch's rows, as CreateMany writes them.
+		rows := make([][]batchInsertCell, 0, len(prepared))
+		for _, input := range prepared {
+			var row []batchInsertCell
+			{{- template "batchInsertRow" . }}
+			rows = append(rows, row)
+		}
+		fieldNames, valuePlaceholders, values := buildBatchInsert(rows)
+		assignments := append([]string(nil), setClauses...)
+		if len(setClauses) == 0 {
+			// An update that names no field leaves each row as it is.
+			assignments = append(assignments, key.keep)
+		} else {
+			{{- range .Fields }}
+			{{- if eq .Name "updatedAt" }}
+			values = append(values, time.Now())
+			assignments = append(assignments, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedAt }}, len(values)))
+			{{- end }}
+			{{- end }}
+			{{- range .Fields }}
+			{{- if eq .Name "updatedBy" }}
+			if HasUserID(ctx) {
+				values = append(values, GetUserID(ctx))
+				assignments = append(assignments, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedBy }}, len(values)))
+			}
+			{{- end }}
+			{{- end }}
+		}
+		query := fmt.Sprintf(
+			{{ goRawString .SQL.Upsert }},
+			strings.Join(fieldNames, ", "),
+			strings.Join(valuePlaceholders, ", "),
+			key.conflict,
+			strings.Join(assignments, ", "),
+			upsertWhere({{ goRawString .SQL.LiveCondition }}, compareCurrent, compareNext, onlyIfChanged),
+		)
+		returned, inserted, err := r.upsertReturned(ctx, query, values)
+		if err != nil {
+			return nil, err
+		}
+
+		// A row is its input's by the key's values; an input that sets none
+		// of them, whose key the database generates, takes the next row whose
+		// key no input holds, as the rows come back in the inputs' order.
+		keys := make([]string, len(prepared))
+		set := make([]bool, len(prepared))
+		for i, input := range prepared {
+			keys[i], set[i] = {{ lowerFirst .TypeName }}KeyOf(on, input)
+		}
+		matcher := newUpsertMatcher(keys, set)
+		matched := make([]*UpsertResult[*types.{{ .TypeName }}], len(prepared))
+		for n, row := range returned {
+			text, ok := {{ lowerFirst .TypeName }}KeyOf(on, row)
+			i := matcher.take(text, ok)
+			if i < 0 {
+				return nil, fmt.Errorf("orm: UpsertMany of {{ .TypeName }} wrote a row whose %s no input holds", string(on))
+			}
+			status := UpsertUnchanged
+			if inserted[n] {
+				status = UpsertInserted
+			} else if len(setClauses) > 0 {
+				status = UpsertUpdated
+			}
+			matched[i] = &UpsertResult[*types.{{ .TypeName }}]{Row: row, Status: status}
+		}
+
+		// A row it did not return is one it left as it was, only if changed,
+		// which it reads back by its key, or a deleted one.
+		var left []int
+		for i := range matched {
+			if matched[i] == nil {
+				left = append(left, i)
+			}
+		}
+		if len(left) > 0 {
+			if !onlyIfChanged {
+				return nil, fmt.Errorf("the {{ .TypeName }} row that holds the %s of input %d is deleted: %w", string(on), start+left[0], ErrNotFound)
+			}
+			keyValues := make([][]any, len(left))
+			wanted := make([]*types.{{ .TypeName }}, len(left))
+			for n, i := range left {
+				cells, ok := upsertCellValues(rows[i], key.columns)
+				if !ok {
+					return nil, fmt.Errorf("no {{ .TypeName }} row holds an unset %s: %w", string(on), ErrNotFound)
+				}
+				keyValues[n], wanted[n] = cells, prepared[i]
+			}
+			found, err := r.rowsOfKeys(ctx, on, keyValues, wanted)
+			if err != nil {
+				return nil, err
+			}
+			for n, i := range left {
+				matched[i] = &UpsertResult[*types.{{ .TypeName }}]{Row: found[n], Status: UpsertUnchanged}
+			}
+		}
+		for {{ if .EncryptedFields }}i{{ else }}_{{ end }}, result := range matched {
+			{{- if .EncryptedFields }}
+			// Each encrypted field update names, which the statement left
+			// as it was, set to the input's when it differs.
+			want := &{{ .TypeName }}Update{}
+			{{- range .EncryptedFields }}
+			if update.{{ toGoName .Name }} {
+				{{- if .DerefValue }}
+				if chunk[i].{{ toGoName .Name }} != nil {
+					want.{{ toGoName .Name }} = chunk[i].{{ toGoName .Name }}
+				} else {
+					want.{{ toGoName .Name }}SetNull = true
+				}
+				{{- else }}
+				value := chunk[i].{{ toGoName .Name }}
+				want.{{ toGoName .Name }} = &value
+				{{- end }}
+			}
+			{{- end }}
+			resealed, err := r.resealed(ctx, result, want)
+			if err != nil {
+				return nil, err
+			}
+			result = resealed
+			{{- end }}
+			results = append(results, *result)
+		}
+	}
+	return results, nil
+}
+
+// upsertReturned runs an upsert's statement, query with values, and scans
+// each row it returns and whether it inserted it.
+func (r *{{ .Name }}) upsertReturned(ctx context.Context, query string, values []any) ([]*types.{{ .TypeName }}, []bool, error) {
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to execute upsert: %w", err)
+	}
+	defer rows.Close()
+	var returned []*types.{{ .TypeName }}
+	var inserted []bool
+	for rows.Next() {
+		var flag bool
+		row, err := r.scanReturned(rows, &flag)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		returned = append(returned, row)
+		inserted = append(inserted, flag)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	return returned, inserted, nil
+}
+
+// rowsOfKeys reads the rows that hold keys, each the values of the unique
+// key on an input's insert binds, among the rows the key's index holds, in
+// the inputs' order: the rows an upsert only if changed left as they were
+// (D89). A key no live row holds is ErrNotFound.
+func (r *{{ .Name }}) rowsOfKeys(ctx context.Context, on {{ .TypeName }}UniqueKey, keys [][]any, inputs []*types.{{ .TypeName }}) ([]*types.{{ .TypeName }}, error) {
+	tuples, values := upsertKeyTuples(keys)
+	query := fmt.Sprintf({{ lowerFirst .TypeName }}UniqueKeys[on].rows, strings.Join(tuples, ", "))
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the rows the upsert left: %w", err)
+	}
+	defer rows.Close()
+	found := map[string]*types.{{ .TypeName }}{}
+	for rows.Next() {
+		row, err := r.scanReturned(rows, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		if text, ok := {{ lowerFirst .TypeName }}KeyOf(on, row); ok {
+			found[text] = row
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	out := make([]*types.{{ .TypeName }}, len(inputs))
+	for i, input := range inputs {
+		text, _ := {{ lowerFirst .TypeName }}KeyOf(on, input)
+		row := found[text]
+		if row == nil{{ if .HasSoftDelete }} || upsertHolds(row.DeletedAt){{ end }} {
+			return nil, fmt.Errorf("the {{ .TypeName }} row that holds the key %s is deleted: %w", string(on), ErrNotFound)
+		}
+		out[i] = row
+	}
+	return out, nil
+}
+{{- if .EncryptedFields }}
+
+// resealed is result, with each encrypted field want sets that the row it
+// updated holds another value of set by UpdateOne, sealed under the row's
+// key, and UpsertUpdated (D89). A row the upsert inserted holds the
+// input's already.
+func (r *{{ .Name }}) resealed(ctx context.Context, result *UpsertResult[*types.{{ .TypeName }}], want *{{ .TypeName }}Update) (*UpsertResult[*types.{{ .TypeName }}], error) {
+	if result.Status == UpsertInserted || want == nil {
+		return result, nil
+	}
+	change := &{{ .TypeName }}Update{}
+	changed := false
+	{{- range .EncryptedFields }}
+	{{- if .DerefValue }}
+	if want.{{ toGoName .Name }} != nil && (result.Row.{{ toGoName .Name }} == nil || *result.Row.{{ toGoName .Name }} != *want.{{ toGoName .Name }}) {
+		change.{{ toGoName .Name }}, changed = want.{{ toGoName .Name }}, true
+	}
+	if want.{{ toGoName .Name }}SetNull && result.Row.{{ toGoName .Name }} != nil {
+		change.{{ toGoName .Name }}SetNull, changed = true, true
+	}
+	{{- else }}
+	if want.{{ toGoName .Name }} != nil && result.Row.{{ toGoName .Name }} != *want.{{ toGoName .Name }} {
+		change.{{ toGoName .Name }}, changed = want.{{ toGoName .Name }}, true
+	}
+	{{- end }}
+	{{- end }}
+	if !changed {
+		return result, nil
+	}
+	{{- range .Fields }}
+	{{- if eq .Name "updatedBy" }}
+	change.UpdatedBy = want.UpdatedBy
+	{{- end }}
+	{{- end }}
+	row, err := r.UpdateOne(ctx, {{ if .PrimaryKeyIsPointer }}*{{ end }}result.Row.{{ toGoName .PrimaryKeyField }}, change)
+	if err != nil {
+		return nil, err
+	}
+	return &UpsertResult[*types.{{ .TypeName }}]{Row: row, Status: UpsertUpdated}, nil
+}
+{{- end }}
 
 // CreateMany inserts multiple {{ .TypeName }} records in a single statement
 func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeName }}) ([]*types.{{ .TypeName }}, error) {
@@ -2459,10 +3515,39 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 	}
 	{{- end }}
 	{{- if eq .Name "updatedBy" }}
+	{{- if .IsRequired }}
 	for _, input := range inputs {
 		input.UpdatedBy = GetUserID(ctx)
 	}
+	{{- else }}
+	{{- if $.RequireUpdatedBy }}
+	if !HasUserID(ctx) {
+		return nil, ErrNoUserInContext
+	}
 	{{- end }}
+	if HasUserID(ctx) {
+		for _, input := range inputs {
+			userID := GetUserID(ctx)
+			input.UpdatedBy = &userID
+		}
+	}
+	{{- end }}
+	{{- end }}
+	{{- end }}
+
+	{{- if .EncryptedFields }}
+
+	// Each row's key, generated when unset, and its encrypted fields sealed
+	// under it (D85).
+	sealedInputs := make([]*types.{{ .TypeName }}, len(inputs))
+	for i, input := range inputs {
+		sealed, err := r.seal(input)
+		if err != nil {
+			return nil, fmt.Errorf("create {{ .TypeName }} %d: %w", i, err)
+		}
+		sealedInputs[i] = sealed
+	}
+	inputs = sealedInputs
 	{{- end }}
 
 	// Build the batch INSERT in one pass over the fields. Each row records every
@@ -2472,131 +3557,15 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 	batch := make([][]batchInsertCell, 0, len(inputs))
 	for _, input := range inputs {
 		var row []batchInsertCell
-		{{- range .Fields }}
-		{{- if and .IsPrimaryKey $.PrimaryKeyIsUUID }}
-		// Primary key: {{ .Name }}. Schema-owned identities may supply a stable
-		// UUID, matching CreateOne; a row without one takes the generated default.
-		{
-			cell := batchInsertCell{column: `{{ .QuotedDBName }}`}
-			var zeroPrimaryKey {{ $.UUIDGoType }}
-			if primaryKey, ok := {{ lowerFirst $.TypeName }}UUIDValue(input.{{ toGoName .Name }}); ok && primaryKey != zeroPrimaryKey {
-				cell.value, cell.set = primaryKey.ToUUID(), true
-			}
-			row = append(row, cell)
-		}
-		{{- else if and (not .IsPrimaryKey) (not .IsInternalMetadata) (ne .Name "createdAt") (ne .Name "updatedAt") }}
-		{{- if and .IsRequired (not .IsAutoGenerated) }}
-		// Required field: {{ .Name }}
-		{
-			cell := batchInsertCell{column: `{{ .QuotedDBName }}`, set: true}
-			{{- if .IsJSONField }}
-			jsonValue, err := {{ if .IsArrayOfArrays }}marshalArrayOfArraysFieldValue{{ else }}marshalJSONFieldValue{{ end }}(input.{{ toGoName .Name }})
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal JSON field {{ .Name }}: %w", err)
-			}
-			cell.value = jsonValue
-			{{- else if .IsUUIDScalar }}
-			cell.value = input.{{ toGoName .Name }}.ToUUID()
-			{{- else if .IsDateTimeScalar }}
-			cell.value = time.Time(input.{{ toGoName .Name }})
-			{{- else if .IsGeoPoint }}
-			cell.value = {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }}
-			{{- else if .IsGeoPointList }}
-			cell.value = {{ .GeoPointListValue (printf "input.%s" (toGoName .Name)) }}
-			{{- else if .IsInterval }}
-			// An INTERVAL goes as its microseconds, which pgx encodes from a
-			// time.Duration, sign and all.
-			cell.value = time.Duration(input.{{ toGoName .Name }})
-			{{- else if .IsIntervalList }}
-			cell.value = intervalList(input.{{ toGoName .Name }})
-			{{- else if .EnumDefault }}
-			// An unset enum takes its schema default; "" is never a member.
-			cell.value = input.{{ toGoName .Name }}
-			if input.{{ toGoName .Name }} == "" {
-				cell.value = {{ .GoType }}({{ printf "%q" .EnumDefault }})
-			}
-			{{- else }}
-			cell.value = input.{{ toGoName .Name }}
-			{{- end }}
-			row = append(row, cell)
-		}
-		{{- else }}
-		// {{ if .IsAutoGenerated }}Auto-generated{{ else }}Optional{{ end }} field: {{ .Name }}
-		{
-			cell := batchInsertCell{column: `{{ .QuotedDBName }}`}
-			{{- if .OptionalNilCheck }}
-			if input.{{ toGoName .Name }} != nil {
-			{{- else }}
-			if !reflect.ValueOf(input.{{ toGoName .Name }}).IsZero() {
-			{{- end }}
-				{{- if .IsJSONField }}
-				jsonValue, err := {{ if .IsArrayOfArrays }}marshalArrayOfArraysFieldValue{{ else }}marshalJSONFieldValue{{ end }}(input.{{ toGoName .Name }})
-				if err != nil {
-					return nil, fmt.Errorf("failed to marshal JSON field {{ .Name }}: %w", err)
-				}
-				cell.value = jsonValue
-				{{- else if .IsUUIDScalar }}
-				cell.value = input.{{ toGoName .Name }}.ToUUID()
-				{{- else if .IsDateTimeScalar }}
-				{{- if .DerefValue }}
-				cell.value = time.Time(*input.{{ toGoName .Name }})
-				{{- else }}
-				cell.value = time.Time(input.{{ toGoName .Name }})
-				{{- end }}
-				{{- else if .IsGeoPoint }}
-				cell.value = {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }}
-				{{- else if .IsGeoPointList }}
-				cell.value = {{ .GeoPointListValue (printf "input.%s" (toGoName .Name)) }}
-				{{- else if and .IsInterval .DerefValue }}
-				cell.value = time.Duration(*input.{{ toGoName .Name }})
-				{{- else if .IsInterval }}
-				cell.value = time.Duration(input.{{ toGoName .Name }})
-				{{- else if .IsIntervalList }}
-				cell.value = intervalList(input.{{ toGoName .Name }})
-				{{- else if .DerefValue }}
-				// Dereference pointer for database value (nullable complex types, enums, and scalars are pointers)
-				cell.value = *input.{{ toGoName .Name }}
-				{{- else }}
-				cell.value = input.{{ toGoName .Name }}
-				{{- end }}
-				cell.set = true
-			}
-			row = append(row, cell)
-		}
-		{{- end }}
-		{{- end }}
-		{{- end }}
-
-		// Relationship foreign key columns, matching CreateOne
-		{{- range $i, $rel := .Relationships }}
-		{{- if not $rel.IsArray }}
-		// Relationship: {{ $rel.FieldName }} (FK: {{ $rel.DBColumnName }})
-		{
-			cell := batchInsertCell{column: "{{ $rel.DBColumnName }}"}
-			var zeroId {{ $.UUIDGoType }}
-			{{- if $rel.IsRequired }}
-			if relID, ok := {{ lowerFirst $.TypeName }}UUIDValue(input.{{ toGoName $rel.FieldName }}.Id); ok && relID != zeroId {
-				cell.value, cell.set = relID.ToUUID(), true
-			}
-			{{- else }}
-			if input.{{ toGoName $rel.FieldName }} != nil {
-				if relID, ok := {{ lowerFirst $.TypeName }}UUIDValue(input.{{ toGoName $rel.FieldName }}.Id); ok && relID != zeroId {
-					cell.value, cell.set = relID.ToUUID(), true
-				}
-			}
-			{{- end }}
-			row = append(row, cell)
-		}
-		{{- end }}
-		{{- end }}
+		{{- template "batchInsertRow" . }}
 		batch = append(batch, row)
 	}
 	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClauseMany := `{{ range $i, $member := .OrderedMembers }}{{ if $i }}, {{ end }}{{ if $member.IsRelationship }}"{{ $member.Relationship.DBColumnName }}"{{ else }}"{{ $member.Field.DBName }}"{{ end }}{{ end }}`
+	returningClauseMany := {{ goRawString .SQL.Columns }}
 	query := fmt.Sprintf(
-		`INSERT INTO {{ .QuotedTableName }} (%s) VALUES %s RETURNING %s`,
+		{{ goRawString .SQL.InsertMany }},
 		strings.Join(fieldNames, ", "),
 		strings.Join(valuePlaceholders, ", "),
 		returningClauseMany,
@@ -2660,6 +3629,11 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 		{{- end }}
 
 		{{- end }}
+		{{- if .EncryptedFields }}
+		if err := r.open(result); err != nil {
+			return nil, err
+		}
+		{{- end }}
 		results = append(results, result)
 	}
 
@@ -2687,7 +3661,7 @@ func (r *{{ .Name }}) UpdateOneIfVersion(ctx context.Context, id {{ .PrimaryKeyT
 // ErrVersionConflict when the row exists at another version, ErrNotFound when
 // it does not exist{{ if .HasSoftDelete }} or is soft-deleted{{ end }}.
 func (r *{{ .Name }}) versionMiss(ctx context.Context, id {{ .PrimaryKeyType }}) error {
-	query := `SELECT _version FROM {{ .QuotedTableName }} WHERE {{ .QuotedPrimaryKey }} = $1{{ if .HasSoftDelete }} AND deleted_at IS NULL{{ end }}`
+	query := {{ goRawString .SQL.Version }}
 
 	var version int64
 	var row pgx.Row
@@ -2712,6 +3686,14 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 		return nil, fmt.Errorf("update {{ .TypeName }}: %w", err)
 	}
 	{{- end }}
+	{{- if .EncryptedFields }}
+	// Each encrypted field the update sets, sealed for the row (D85).
+	sealedUpdate, sealErr := r.sealUpdate(id, update)
+	if sealErr != nil {
+		return nil, fmt.Errorf("update {{ .TypeName }}: %w", sealErr)
+	}
+	update = sealedUpdate
+	{{- end }}
 	// Build UPDATE query
 	var setClauses []string
 	var values []interface{}
@@ -2724,13 +3706,13 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 		return nil, fmt.Errorf("{{ .DBName }} cannot be updated with both value and null assignment")
 	}
 	if update.{{ toGoName .Name }}SetNull {
-		setClauses = append(setClauses, `{{ .QuotedDBName }} = NULL`)
+		setClauses = append(setClauses, {{ goRawString .SQL.SetNull }})
 	} else if update.{{ toGoName .Name }} != nil {
 	{{- else }}
 	if update.{{ toGoName .Name }} != nil {
 	{{- end }}
 		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf(`{{ .QuotedDBName }} = $%d`, paramNum))
+		setClauses = append(setClauses, fmt.Sprintf({{ goRawString .SQL.Set }}, paramNum))
 		{{- if .IsJSONField }}
 		jsonValue{{ toGoName .Name }}, err := {{ if .IsArrayOfArrays }}marshalArrayOfArraysFieldValue{{ else }}marshalJSONFieldValue{{ end }}(*update.{{ toGoName .Name }})
 		if err != nil {
@@ -2741,6 +3723,8 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 		values = append(values, (*update.{{ toGoName .Name }}).ToUUID())
 		{{- else if .IsDateTimeScalar }}
 		values = append(values, time.Time(*update.{{ toGoName .Name }}))
+		{{- else if .IsVector }}
+		values = append(values, vectorValue(*update.{{ toGoName .Name }}))
 		{{- else if .IsGeoPoint }}
 		values = append(values, {{ template "geoPoint" (printf "update.%s" (toGoName .Name)) }})
 		{{- else if .IsGeoPointList }}
@@ -2766,13 +3750,13 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 		return nil, fmt.Errorf("{{ .DBColumnName }} cannot be updated with both value and null assignment")
 	}
 	if update.{{ toGoName .FieldName }}IDSetNull {
-		setClauses = append(setClauses, "{{ .DBColumnName }} = NULL")
+		setClauses = append(setClauses, {{ printf "%q" .SQL.SetNull }})
 	} else if update.{{ toGoName .FieldName }}ID != nil {
 	{{- else }}
 	if update.{{ toGoName .FieldName }}ID != nil {
 	{{- end }}
 		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf("{{ .DBColumnName }} = $%d", paramNum))
+		setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" .SQL.Set }}, paramNum))
 		values = append(values, update.{{ toGoName .FieldName }}ID.ToUUID())
 	}
 	{{- end }}
@@ -2782,7 +3766,7 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 	{{- range .Fields }}
 	{{- if eq .Name "updatedAt" }}
 	paramNum++
-	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
+	setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedAt }}, paramNum))
 	values = append(values, time.Now())
 	{{- end }}
 	{{- end }}
@@ -2792,13 +3776,15 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 	{{- if eq .Name "updatedBy" }}
 	if update.UpdatedBy != nil {
 		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf("updated_by = $%d", paramNum))
+		setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedBy }}, paramNum))
 		values = append(values, *update.UpdatedBy)
 	} else if HasUserID(ctx) {
 		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf("updated_by = $%d", paramNum))
+		setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedBy }}, paramNum))
 		values = append(values, GetUserID(ctx))
-	}
+	}{{ if $.RequireUpdatedBy }} else {
+		return nil, ErrNoUserInContext
+	}{{ end }}
 	{{- end }}
 	{{- end }}
 
@@ -2810,7 +3796,7 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 	values = append(values, id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }})
 
 	query := fmt.Sprintf(
-		`UPDATE {{ .QuotedTableName }} SET %s WHERE {{ .QuotedPrimaryKey }} = $%d`,
+		{{ goRawString .SQL.Update }},
 		strings.Join(setClauses, ", "),
 		paramNum,
 	)
@@ -2819,16 +3805,16 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 	if expectedVersion != nil {
 		paramNum++
 		values = append(values, *expectedVersion)
-		query += fmt.Sprintf(" AND _version = $%d", paramNum)
+		query += fmt.Sprintf({{ printf "%q" .SQL.VersionFence }}, paramNum)
 	}
 
 	{{- end }}
 	{{- if .HasSoftDelete }}
-	query += " AND deleted_at IS NULL"
+	query += {{ printf "%q" .SQL.Live }}
 	{{- end }}
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	query += ` RETURNING {{ range $i, $member := .OrderedMembers }}{{ if $i }}, {{ end }}{{ if $member.IsRelationship }}"{{ $member.Relationship.DBColumnName }}"{{ else }}"{{ $member.Field.DBName }}"{{ end }}{{ end }}`
+	query += {{ goRawString .SQL.Returning }}
 
 	// Execute query
 	var row pgx.Row
@@ -2886,6 +3872,13 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 	}
 	{{- end }}
 	{{- end }}
+	{{- if .EncryptedFields }}
+
+	// Open each encrypted field under the row's key (D85).
+	if err := r.open(result); err != nil {
+		return nil, err
+	}
+	{{- end }}
 
 	return result, nil
 	{{- end }}
@@ -2896,6 +3889,13 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	{{- if .GenericJSONListFields }}
 	if err := refuseNull{{ .TypeName }}UpdateGenericJSONElements(update); err != nil {
 		return 0, fmt.Errorf("update {{ .TypeName }}: %w", err)
+	}
+	{{- end }}
+	{{- if .EncryptedFields }}
+	// Each row's envelope is bound to its own key, so one statement cannot
+	// set an encrypted field of many rows (D85).
+	if field := {{ lowerFirst .TypeName }}SetsEncrypted(update); field != "" {
+		return 0, fmt.Errorf("update {{ .TypeName }}: %w", &EncryptedWriteError{Table: "{{ .TypeName }}", Field: field, Write: "UpdateMany"})
 	}
 	{{- end }}
 	// Build UPDATE query
@@ -2910,13 +3910,13 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 		return 0, fmt.Errorf("{{ .DBName }} cannot be updated with both value and null assignment")
 	}
 	if update.{{ toGoName .Name }}SetNull {
-		setClauses = append(setClauses, `{{ .QuotedDBName }} = NULL`)
+		setClauses = append(setClauses, {{ goRawString .SQL.SetNull }})
 	} else if update.{{ toGoName .Name }} != nil {
 	{{- else }}
 	if update.{{ toGoName .Name }} != nil {
 	{{- end }}
 		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf(`{{ .QuotedDBName }} = $%d`, paramNum))
+		setClauses = append(setClauses, fmt.Sprintf({{ goRawString .SQL.Set }}, paramNum))
 		{{- if .IsJSONField }}
 		jsonValue{{ toGoName .Name }}, err := {{ if .IsArrayOfArrays }}marshalArrayOfArraysFieldValue{{ else }}marshalJSONFieldValue{{ end }}(*update.{{ toGoName .Name }})
 		if err != nil {
@@ -2927,6 +3927,8 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 		values = append(values, (*update.{{ toGoName .Name }}).ToUUID())
 		{{- else if .IsDateTimeScalar }}
 		values = append(values, time.Time(*update.{{ toGoName .Name }}))
+		{{- else if .IsVector }}
+		values = append(values, vectorValue(*update.{{ toGoName .Name }}))
 		{{- else if .IsGeoPoint }}
 		values = append(values, {{ template "geoPoint" (printf "update.%s" (toGoName .Name)) }})
 		{{- else if .IsGeoPointList }}
@@ -2952,13 +3954,13 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 		return 0, fmt.Errorf("{{ .DBColumnName }} cannot be updated with both value and null assignment")
 	}
 	if update.{{ toGoName .FieldName }}IDSetNull {
-		setClauses = append(setClauses, "{{ .DBColumnName }} = NULL")
+		setClauses = append(setClauses, {{ printf "%q" .SQL.SetNull }})
 	} else if update.{{ toGoName .FieldName }}ID != nil {
 	{{- else }}
 	if update.{{ toGoName .FieldName }}ID != nil {
 	{{- end }}
 		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf("{{ .DBColumnName }} = $%d", paramNum))
+		setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" .SQL.Set }}, paramNum))
 		values = append(values, update.{{ toGoName .FieldName }}ID.ToUUID())
 	}
 	{{- end }}
@@ -2968,7 +3970,7 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	{{- range .Fields }}
 	{{- if eq .Name "updatedAt" }}
 	paramNum++
-	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
+	setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedAt }}, paramNum))
 	values = append(values, time.Now())
 	{{- end }}
 	{{- end }}
@@ -2978,13 +3980,15 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	{{- if eq .Name "updatedBy" }}
 	if update.UpdatedBy != nil {
 		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf("updated_by = $%d", paramNum))
+		setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedBy }}, paramNum))
 		values = append(values, *update.UpdatedBy)
 	} else if HasUserID(ctx) {
 		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf("updated_by = $%d", paramNum))
+		setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedBy }}, paramNum))
 		values = append(values, GetUserID(ctx))
-	}
+	}{{ if $.RequireUpdatedBy }} else {
+		return 0, ErrNoUserInContext
+	}{{ end }}
 	{{- end }}
 	{{- end }}
 
@@ -2997,14 +4001,14 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 
 	{{- if .HasSoftDelete }}
 	if whereClause == "" {
-		whereClause = " WHERE deleted_at IS NULL"
+		whereClause = {{ printf "%q" .SQL.LiveWhere }}
 	} else {
-		whereClause += " AND deleted_at IS NULL"
+		whereClause += {{ printf "%q" .SQL.Live }}
 	}
 	{{- end }}
 
 	query := fmt.Sprintf(
-		`UPDATE {{ .QuotedTableName }} SET %s%s`,
+		{{ goRawString .SQL.UpdateMany }},
 		strings.Join(setClauses, ", "),
 		whereClause,
 	)
@@ -3032,11 +4036,11 @@ func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) e
 		return ErrNoUserInContext
 	}
 
+	{{- /* sqlutil's statement (D79) */}}
+	query := {{ goRawString .SQL.SoftDelete }}
 	{{- if .HasDeletedBy }}
-	query := `UPDATE {{ .QuotedTableName }} SET deleted_at = $1, deleted_by = $2 WHERE {{ .QuotedPrimaryKey }} = $3 AND deleted_at IS NULL`
 	queryArgs := []interface{}{time.Now(), GetUserID(ctx), id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}}
 	{{- else }}
-	query := `UPDATE {{ .QuotedTableName }} SET deleted_at = $1 WHERE {{ .QuotedPrimaryKey }} = $2 AND deleted_at IS NULL`
 	queryArgs := []interface{}{time.Now(), id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}}
 	{{- end }}
 
@@ -3068,11 +4072,11 @@ func (r *{{ .Name }}) DeleteOneIfVersion(ctx context.Context, id {{ .PrimaryKeyT
 		return ErrNoUserInContext
 	}
 
+	{{- /* sqlutil's statement (D79) */}}
+	query := {{ goRawString .SQL.SoftDeleteIfVersion }}
 	{{- if .HasDeletedBy }}
-	query := `UPDATE {{ .QuotedTableName }} SET deleted_at = $1, deleted_by = $2 WHERE {{ .QuotedPrimaryKey }} = $3 AND _version = $4 AND deleted_at IS NULL`
 	queryArgs := []interface{}{time.Now(), GetUserID(ctx), id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, expectedVersion}
 	{{- else }}
-	query := `UPDATE {{ .QuotedTableName }} SET deleted_at = $1 WHERE {{ .QuotedPrimaryKey }} = $2 AND _version = $3 AND deleted_at IS NULL`
 	queryArgs := []interface{}{time.Now(), id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, expectedVersion}
 	{{- end }}
 
@@ -3111,16 +4115,13 @@ func (r *{{ .Name }}) DeleteMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	{{- end }}
 
 	if whereClause == "" {
-		whereClause = " WHERE deleted_at IS NULL"
+		whereClause = {{ printf "%q" .SQL.LiveWhere }}
 	} else {
-		whereClause += " AND deleted_at IS NULL"
+		whereClause += {{ printf "%q" .SQL.Live }}
 	}
 
-	{{- if .HasDeletedBy }}
-	query := fmt.Sprintf(`UPDATE {{ .QuotedTableName }} SET deleted_at = $1, deleted_by = $2%s`, whereClause)
-	{{- else }}
-	query := fmt.Sprintf(`UPDATE {{ .QuotedTableName }} SET deleted_at = $1%s`, whereClause)
-	{{- end }}
+	{{- /* sqlutil's statement (D79) */}}
+	query := fmt.Sprintf({{ goRawString .SQL.SoftDeleteMany }}, whereClause)
 
 	var result pgconn.CommandTag
 	var err error
@@ -3140,10 +4141,10 @@ func (r *{{ .Name }}) DeleteMany(ctx context.Context, filter *{{ .TypeName }}Fil
 // The history tombstone records the context user as its {{ .HistoryActorCol }}.{{ end }}
 func (r *{{ .Name }}) HardDeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) error {
 	{{- if .HistoryActorCol }}
-	query := historyActorCTE + `DELETE FROM {{ .QuotedTableName }} USING history_actor WHERE {{ .QuotedPrimaryKey }} = $2`
+	query := historyActorCTE + {{ goRawString .SQL.Delete }}
 	queryArgs := []interface{}{historyActor(ctx), id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}}
 	{{- else }}
-	query := `DELETE FROM {{ .QuotedTableName }} WHERE {{ .QuotedPrimaryKey }} = $1`
+	query := {{ goRawString .SQL.Delete }}
 	queryArgs := []interface{}{id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}}
 	{{- end }}
 
@@ -3176,7 +4177,7 @@ func (r *{{ .Name }}) HardDeleteOne(ctx context.Context, id {{ .PrimaryKeyType }
 // The history tombstone records the context user as its {{ .HistoryActorCol }}.{{ end }}
 func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) error {
 	{{- if .HistoryActorCol }}
-	query := historyActorCTE + `DELETE FROM {{ .QuotedTableName }} USING history_actor WHERE {{ .QuotedPrimaryKey }} = $2`
+	query := historyActorCTE + {{ goRawString .SQL.Delete }}
 	queryArgs := []interface{}{historyActor(ctx), id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}}
 
 	var result pgconn.CommandTag
@@ -3190,7 +4191,7 @@ func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) e
 		result, err = r.db.pool.Exec(ctx, query, queryArgs...)
 	}
 	{{- else }}
-	query := `DELETE FROM {{ .QuotedTableName }} WHERE {{ .QuotedPrimaryKey }} = $1`
+	query := {{ goRawString .SQL.Delete }}
 
 	var result pgconn.CommandTag
 	var err error
@@ -3218,10 +4219,10 @@ func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) e
 // The history tombstone records the context user as its {{ .HistoryActorCol }}.{{ end }}
 func (r *{{ .Name }}) DeleteOneIfVersion(ctx context.Context, id {{ .PrimaryKeyType }}, expectedVersion int64) error {
 	{{- if .HistoryActorCol }}
-	query := historyActorCTE + `DELETE FROM {{ .QuotedTableName }} USING history_actor WHERE {{ .QuotedPrimaryKey }} = $2 AND _version = $3`
+	query := historyActorCTE + {{ goRawString .SQL.DeleteIfVersion }}
 	queryArgs := []interface{}{historyActor(ctx), id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, expectedVersion}
 	{{- else }}
-	query := `DELETE FROM {{ .QuotedTableName }} WHERE {{ .QuotedPrimaryKey }} = $1 AND _version = $2`
+	query := {{ goRawString .SQL.DeleteIfVersion }}
 	queryArgs := []interface{}{id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, expectedVersion}
 	{{- end }}
 
@@ -3257,7 +4258,7 @@ func (r *{{ .Name }}) DeleteMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	values := []interface{}{historyActor(ctx)}
 	whereClause := filter.buildWhereClause(&values, 1)
 
-	query := historyActorCTE + fmt.Sprintf(`DELETE FROM {{ .QuotedTableName }} USING history_actor%s`, whereClause)
+	query := historyActorCTE + fmt.Sprintf({{ goRawString .SQL.DeleteMany }}, whereClause)
 
 	var result pgconn.CommandTag
 	var err error
@@ -3272,7 +4273,7 @@ func (r *{{ .Name }}) DeleteMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	var values []interface{}
 	whereClause := filter.buildWhereClause(&values, 0)
 
-	query := fmt.Sprintf(`DELETE FROM {{ .QuotedTableName }}%s`, whereClause)
+	query := fmt.Sprintf({{ goRawString .SQL.DeleteMany }}, whereClause)
 
 	var result pgconn.CommandTag
 	var err error
@@ -3289,4 +4290,133 @@ func (r *{{ .Name }}) DeleteMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	return int(result.RowsAffected()), nil
 }
 
+{{- end }}
+
+{{- /*
+batchInsertRow appends to row, in CreateMany's order, a cell per column a
+batch insert of input may write (D79), the value it binds or none when it
+leaves an optional column unset: CreateMany's and UpsertMany's rows (D89).
+*/}}
+{{- define "batchInsertRow" }}
+		{{- range .Fields }}
+		{{- if and .IsPrimaryKey $.PrimaryKeyIsUUID }}
+		// Primary key: {{ .Name }}. Schema-owned identities may supply a stable
+		// UUID, matching CreateOne; a row without one takes the generated default.
+		{
+			cell := batchInsertCell{column: `{{ .QuotedDBName }}`}
+			var zeroPrimaryKey {{ $.UUIDGoType }}
+			if primaryKey, ok := {{ lowerFirst $.TypeName }}UUIDValue(input.{{ toGoName .Name }}); ok && primaryKey != zeroPrimaryKey {
+				cell.value, cell.set = primaryKey.ToUUID(), true
+			}
+			row = append(row, cell)
+		}
+		{{- else if and (not .IsPrimaryKey) (not .IsInternalMetadata) (ne .Name "createdAt") (ne .Name "updatedAt") }}
+		{{- if and .IsRequired (not .IsAutoGenerated) (not .DefaultsToNow) }}
+		// Required field: {{ .Name }}
+		{
+			cell := batchInsertCell{column: `{{ .QuotedDBName }}`, set: true}
+			{{- if .IsJSONField }}
+			jsonValue, err := {{ if .IsArrayOfArrays }}marshalArrayOfArraysFieldValue{{ else }}marshalJSONFieldValue{{ end }}(input.{{ toGoName .Name }})
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal JSON field {{ .Name }}: %w", err)
+			}
+			cell.value = jsonValue
+			{{- else if .IsUUIDScalar }}
+			cell.value = input.{{ toGoName .Name }}.ToUUID()
+			{{- else if .IsDateTimeScalar }}
+			cell.value = time.Time(input.{{ toGoName .Name }})
+			{{- else if .IsVector }}
+			cell.value = vectorValue({{ if .DerefValue }}*{{ end }}input.{{ toGoName .Name }})
+			{{- else if .IsGeoPoint }}
+			cell.value = {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }}
+			{{- else if .IsGeoPointList }}
+			cell.value = {{ .GeoPointListValue (printf "input.%s" (toGoName .Name)) }}
+			{{- else if .IsInterval }}
+			// An INTERVAL goes as its microseconds, which pgx encodes from a
+			// time.Duration, sign and all.
+			cell.value = time.Duration(input.{{ toGoName .Name }})
+			{{- else if .IsIntervalList }}
+			cell.value = intervalList(input.{{ toGoName .Name }})
+			{{- else if .EnumDefault }}
+			// An unset enum takes its schema default; "" is never a member.
+			cell.value = input.{{ toGoName .Name }}
+			if input.{{ toGoName .Name }} == "" {
+				cell.value = {{ .GoType }}({{ printf "%q" .EnumDefault }})
+			}
+			{{- else }}
+			cell.value = input.{{ toGoName .Name }}
+			{{- end }}
+			row = append(row, cell)
+		}
+		{{- else }}
+		// {{ if .IsAutoGenerated }}Auto-generated{{ else }}Optional{{ end }} field: {{ .Name }}
+		{
+			cell := batchInsertCell{column: `{{ .QuotedDBName }}`}
+			{{- if .OptionalNilCheck }}
+			if input.{{ toGoName .Name }} != nil {
+			{{- else }}
+			if !reflect.ValueOf(input.{{ toGoName .Name }}).IsZero() {
+			{{- end }}
+				{{- if .IsJSONField }}
+				jsonValue, err := {{ if .IsArrayOfArrays }}marshalArrayOfArraysFieldValue{{ else }}marshalJSONFieldValue{{ end }}(input.{{ toGoName .Name }})
+				if err != nil {
+					return nil, fmt.Errorf("failed to marshal JSON field {{ .Name }}: %w", err)
+				}
+				cell.value = jsonValue
+				{{- else if .IsUUIDScalar }}
+				cell.value = input.{{ toGoName .Name }}.ToUUID()
+				{{- else if .IsDateTimeScalar }}
+				{{- if .DerefValue }}
+				cell.value = time.Time(*input.{{ toGoName .Name }})
+				{{- else }}
+				cell.value = time.Time(input.{{ toGoName .Name }})
+				{{- end }}
+				{{- else if .IsVector }}
+				cell.value = vectorValue({{ if .DerefValue }}*{{ end }}input.{{ toGoName .Name }})
+				{{- else if .IsGeoPoint }}
+				cell.value = {{ template "geoPoint" (printf "input.%s" (toGoName .Name)) }}
+				{{- else if .IsGeoPointList }}
+				cell.value = {{ .GeoPointListValue (printf "input.%s" (toGoName .Name)) }}
+				{{- else if and .IsInterval .DerefValue }}
+				cell.value = time.Duration(*input.{{ toGoName .Name }})
+				{{- else if .IsInterval }}
+				cell.value = time.Duration(input.{{ toGoName .Name }})
+				{{- else if .IsIntervalList }}
+				cell.value = intervalList(input.{{ toGoName .Name }})
+				{{- else if .DerefValue }}
+				// Dereference pointer for database value (nullable complex types, enums, and scalars are pointers)
+				cell.value = *input.{{ toGoName .Name }}
+				{{- else }}
+				cell.value = input.{{ toGoName .Name }}
+				{{- end }}
+				cell.set = true
+			}
+			row = append(row, cell)
+		}
+		{{- end }}
+		{{- end }}
+		{{- end }}
+
+		// Relationship foreign key columns, matching CreateOne
+		{{- range $i, $rel := .Relationships }}
+		{{- if not $rel.IsArray }}
+		// Relationship: {{ $rel.FieldName }} (FK: {{ $rel.DBColumnName }})
+		{
+			cell := batchInsertCell{column: `{{ $rel.QuotedDBColumn }}`}
+			var zeroId {{ $.UUIDGoType }}
+			{{- if $rel.IsRequired }}
+			if relID, ok := {{ lowerFirst $.TypeName }}UUIDValue(input.{{ toGoName $rel.FieldName }}.Id); ok && relID != zeroId {
+				cell.value, cell.set = relID.ToUUID(), true
+			}
+			{{- else }}
+			if input.{{ toGoName $rel.FieldName }} != nil {
+				if relID, ok := {{ lowerFirst $.TypeName }}UUIDValue(input.{{ toGoName $rel.FieldName }}.Id); ok && relID != zeroId {
+					cell.value, cell.set = relID.ToUUID(), true
+				}
+			}
+			{{- end }}
+			row = append(row, cell)
+		}
+		{{- end }}
+		{{- end }}
 {{- end }}
