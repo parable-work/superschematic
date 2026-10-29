@@ -143,3 +143,61 @@ func TestARustScaffoldWarnsOfADependencyItsCrateLacks(t *testing.T) {
 		t.Errorf("a build wrote %s: %v\n%s", path, err, data)
 	}
 }
+
+// TestASiteScaffoldTypeChecksBeforeItBundles (D101): the scaffold's build
+// script runs its typecheck script before `bun build`, which checks no
+// type. A site whose package.json still holds the build script its
+// scaffold wrote before D101, word for word, draws a warning on each build
+// naming the script to write, and the build writes nothing into it; a
+// build script of the author's own draws none.
+func TestASiteScaffoldTypeChecksBeforeItBundles(t *testing.T) {
+	repoRoot := t.TempDir()
+	f := loadTypeScriptFixture(t)
+	paths := tsFakePaths(repoRoot)
+	f.build(t, repoRoot, paths, append(slices.Clone(tsOrder[:len(tsOrder)-1]), tsSite)...)
+	build := func() []string {
+		t.Helper()
+		result, err := generator.Run(f.schemas[tsSite], f.configs[tsSite], f.options(repoRoot, paths))
+		if err != nil {
+			t.Fatalf("build %s: %v", tsSite, err)
+		}
+		return result.Warnings
+	}
+	path := filepath.Join(naming.Default().SiteImplementationDir(repoRoot, tsSite), "package.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const checked = `"build": "bun run typecheck && rm -rf dist && bun build ./index.html --outdir=dist --public-path=/ --minify",`
+	if !strings.Contains(string(data), checked) || !strings.Contains(string(data), `"typecheck": "tsc --noEmit -p tsconfig.json"`) {
+		t.Fatalf("the scaffold's build does not run its typecheck first:\n%s", data)
+	}
+	if warnings := build(); len(warnings) != 0 {
+		t.Errorf("the scaffolded site warns: %q", warnings)
+	}
+
+	write := func(manifest string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(manifest), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := strings.Replace(string(data), "bun run typecheck && ", "", 1)
+	write(before)
+	want := []string{`site ts-web: its package, at web/ts-web, builds without a type-check, with the build script its scaffold wrote before D101; the build wrote the package's package.json once and does not write it again, so change the script to
+
+    "build": "bun run typecheck && rm -rf dist && bun build ./index.html --outdir=dist --public-path=/ --minify"
+
+which type-checks the site, and the SDKs it calls, before it bundles them (D101)`}
+	if warnings := build(); !reflect.DeepEqual(warnings, want) {
+		t.Errorf("the site's warnings =\n%q\nwant\n%q", warnings, want)
+	}
+	if again, err := os.ReadFile(path); err != nil || string(again) != before {
+		t.Errorf("a build wrote %s: %v\n%s", path, err, again)
+	}
+
+	write(strings.Replace(before, "--minify", "--minify --sourcemap=linked", 1))
+	if warnings := build(); len(warnings) != 0 {
+		t.Errorf("a build script of the author's own draws warnings: %q", warnings)
+	}
+}

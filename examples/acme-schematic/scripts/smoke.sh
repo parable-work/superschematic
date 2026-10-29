@@ -167,13 +167,13 @@ go build -o "$OUT/acme-schematic" ./cmd/acme-schematic
 
 echo "==> describe: the registry the acme binary assembles"
 "$OUT/acme-schematic" describe "$SCHEMAS" | tee "$OUT/describe.txt"
-grep -q '^kinds: API, Bucket, Catalog, DB, General, Site, Stack$' "$OUT/describe.txt"
+grep -q '^kinds: API, Bucket, Catalog, DB, General, MemoryStore, Site, Stack$' "$OUT/describe.txt"
 grep -q '^  Catalog: types -> catalog -> acmeManifest$' "$OUT/describe.txt"
 grep -q '^documents: catalog.config (catalog.config.yaml)$' "$OUT/describe.txt"
 grep -q '^auth providers: apikey, session (selected: apikey)$' "$OUT/describe.txt"
 grep -q '^checks: acmeIcons (every kind), acmeDocsAudience (every kind), acmeToolsClassified (API), acmeProjectionScope (DB)$' "$OUT/describe.txt"
 grep -q '^tool invocation policy: confirm (never, always; default never)$' "$OUT/describe.txt"
-grep -q '^behaviors: Approvals, Assignment, Blueprint, Branches, Budget, Calendar, Comments, Constants, Dependencies, Holds, Lease, Links, Numbering, Payments, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, StateRules, Stock, Timers, Variants, Workflow, acme.Rating$' "$OUT/describe.txt"
+grep -q '^behaviors: Approvals, Assignment, Blueprint, Branches, Budget, Calendar, Comments, Constants, Dependencies, Derived, Holds, Lease, Links, Numbering, Payments, Presence, Provenance, Queue, Reactions, Retries, Revisions, Rollups, Search, StateRules, Stock, Timers, Variants, Workflow, acme.Rating$' "$OUT/describe.txt"
 
 echo "==> build-all over the schemas root, every config importing the aliased config package"
 rm -rf "$DIST"
@@ -291,7 +291,7 @@ if "$OUT/superschematic" build "$SCHEMAS/services/shop-catalog" --naming "$OUT/s
   echo "ERROR: the core-only binary built a Catalog service" >&2
   exit 1
 fi
-grep -q 'unknown kind "Catalog" (registered kinds: API, Bucket, DB, General, Site, Stack)' "$OUT/core-kind.log"
+grep -q 'unknown kind "Catalog" (registered kinds: API, Bucket, DB, General, MemoryStore, Site, Stack)' "$OUT/core-kind.log"
 if "$OUT/superschematic" build "$SCHEMAS/services/shop-db" --out "$OUT/core-dist" >"$OUT/core-auth.log" 2>&1; then
   echo "ERROR: the core-only binary accepted auth_provider = \"apikey\"" >&2
   exit 1
@@ -479,7 +479,7 @@ jq -e '.types.Product.behaviors == [{"name": "acme.Rating", "config": {"maxStars
 "$OUT/acme-schematic" build "$RATINGS-ts" --emit-ir --out "$OUT/ratings-dist" >"$OUT/ratings-ts-ir.json"
 jq -e '.types.Product.behaviors == [{"name": "acme.Rating", "config": {"maxStars": 5}}]' "$OUT/ratings-ts-ir.json" >/dev/null
 "$OUT/acme-schematic" json-schema >"$OUT/acme-schema-file.json"
-jq -e '."$defs".BehaviorRef.properties.name.enum == ["Approvals", "Assignment", "Blueprint", "Branches", "Budget", "Calendar", "Comments", "Constants", "Dependencies", "Holds", "Lease", "Links", "Numbering", "Payments", "Presence", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "StateRules", "Stock", "Timers", "Variants", "Workflow", "acme.Rating"]' "$OUT/acme-schema-file.json" >/dev/null
+jq -e '."$defs".BehaviorRef.properties.name.enum == ["Approvals", "Assignment", "Blueprint", "Branches", "Budget", "Calendar", "Comments", "Constants", "Dependencies", "Derived", "Holds", "Lease", "Links", "Numbering", "Payments", "Presence", "Provenance", "Queue", "Reactions", "Retries", "Revisions", "Rollups", "Search", "StateRules", "Stock", "Timers", "Variants", "Workflow", "acme.Rating"]' "$OUT/acme-schema-file.json" >/dev/null
 "$OUT/acme-schematic" format --to=yaml --stdout "$RATINGS/src/product.schema.json" >"$OUT/ratings.schema.yaml"
 grep -qx '          maxStars: 5' "$OUT/ratings.schema.yaml"
 "$OUT/acme-schematic" format --to=ts --stdout "$RATINGS/src/product.schema.json" >"$OUT/ratings.schema.ts"
@@ -491,7 +491,7 @@ if "$OUT/superschematic" build "$RATINGS" --emit-ir --naming "$OUT/session.toml"
   echo "ERROR: the core-only binary accepted acme.Rating" >&2
   exit 1
 fi
-grep -q 'behavior "acme.Rating" on type "Product" is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Calendar, Comments, Constants, Dependencies, Holds, Lease, Links, Numbering, Payments, Presence, Queue, Reactions, Retries, Revisions, Rollups, Search, StateRules, Stock, Timers, Variants, Workflow)' "$OUT/core-ratings.log"
+grep -q 'behavior "acme.Rating" on type "Product" is not a registered behavior (registered: Approvals, Assignment, Blueprint, Branches, Budget, Calendar, Comments, Constants, Dependencies, Derived, Holds, Lease, Links, Numbering, Payments, Presence, Provenance, Queue, Reactions, Retries, Revisions, Rollups, Search, StateRules, Stock, Timers, Variants, Workflow)' "$OUT/core-ratings.log"
 
 echo "==> version graph: shop-db's Planogram, declared with no core edit"
 # The loader expands the declarations into ordinary types, marked with their
