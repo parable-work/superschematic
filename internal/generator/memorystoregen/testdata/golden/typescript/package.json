@@ -1,0 +1,23 @@
+{
+  "name": "@schemas/shop-cache-types",
+  "version": "1.0.0",
+  "description": "TypeScript definitions of the channels and keys of the memory store shop-cache (D75)",
+  "type": "module",
+  "main": "index.ts",
+  "types": "index.ts",
+  "exports": {
+    ".": {
+      "types": "./index.ts",
+      "import": "./index.ts"
+    }
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "@schemas/shop-cache-common-types": "workspace:*",
+    "@superschematic/http-runtime": "*"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

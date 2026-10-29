@@ -133,6 +133,7 @@ var Operations = []Operation{
 	{Name: ir.IdentityOpGetUser, Administration: true, Method: http.MethodGet, Path: "users/{id}"},
 	{Name: ir.IdentityOpDisableUser, Administration: true, Method: http.MethodPost, Path: "users/{id}/disable"},
 	{Name: ir.IdentityOpEnableUser, Administration: true, Method: http.MethodPost, Path: "users/{id}/enable"},
+	{Name: ir.IdentityOpApproveUser, Administration: true, Method: http.MethodPost, Path: "users/{id}/approve"},
 	{Name: ir.IdentityOpSetUserPassword, Administration: true, Method: http.MethodPut, Path: "users/{id}/password"},
 	{Name: ir.IdentityOpListRoles, Administration: true, Method: http.MethodGet, Path: "roles"},
 	{Name: ir.IdentityOpCreateRole, Administration: true, Method: http.MethodPost, Path: "roles"},
@@ -189,7 +190,11 @@ func (s *Service) Handler(op string) (http.Handler, bool) {
 		})
 	case ir.IdentityOpListUsers:
 		h = s.authed(func(w http.ResponseWriter, r *http.Request, p Principal) {
-			out, err := s.ListUsers(r.Context(), p)
+			pending, ok := pendingParam(w, r)
+			if !ok {
+				return
+			}
+			out, err := s.ListUsers(r.Context(), p, pending)
 			respondList(w, r, out, err)
 		})
 	case ir.IdentityOpGetUser:
@@ -205,6 +210,11 @@ func (s *Service) Handler(op string) (http.Handler, bool) {
 	case ir.IdentityOpEnableUser:
 		h = s.withID(func(w http.ResponseWriter, r *http.Request, p Principal, id string) {
 			out, err := s.EnableUser(r.Context(), p, id)
+			respond(w, r, out, err)
+		})
+	case ir.IdentityOpApproveUser:
+		h = s.withID(func(w http.ResponseWriter, r *http.Request, p Principal, id string) {
+			out, err := s.ApproveUser(r.Context(), p, id)
 			respond(w, r, out, err)
 		})
 	case ir.IdentityOpSetUserPassword:
@@ -302,8 +312,23 @@ func (s *Service) serveRegister(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) || !s.checkCookieLogin(w, r, in.Session) {
 		return
 	}
-	issued, err := s.Register(r.Context(), in)
-	s.respondIssued(w, r, issued, err)
+	registered, err := s.Register(r.Context(), in)
+	switch {
+	case err != nil:
+		WriteError(w, r, err)
+	case !s.registration.Approval:
+		s.respondIssued(w, r, *registered.Issued, nil)
+	default:
+		// Under approval register answers RegisterResult (D81): 202 with
+		// no session for a pending user, 200 with one otherwise.
+		status := http.StatusOK
+		if registered.Pending {
+			status = http.StatusAccepted
+		} else if registered.Issued.Transport == TransportCookie {
+			http.SetCookie(w, s.cfg.SessionCookie(registered.Issued.Token, s.cfg.SessionTTL()))
+		}
+		response.JSONEnvelope(w, status, registered.RegisterResult(), meta(r))
+	}
 }
 
 // checkCookieLogin runs the cross-origin check on a login that asks for a
@@ -367,6 +392,25 @@ func pathParam(w http.ResponseWriter, r *http.Request, name string) (string, boo
 		return "", false
 	}
 	return value, true
+}
+
+// pendingParam reads listUsers' ?pending: nil when absent, else true or
+// false, and 400 bad_request for any other value (D81).
+func pendingParam(w http.ResponseWriter, r *http.Request) (*bool, bool) {
+	values, ok := r.URL.Query()[ir.IdentityPendingArgument]
+	if !ok {
+		return nil, true
+	}
+	var pending bool
+	switch {
+	case len(values) == 1 && values[0] == "true":
+		pending = true
+	case len(values) == 1 && values[0] == "false":
+	default:
+		WriteError(w, r, apperror.BadRequestError("pending must be true or false", nil).WithCode(response.ValidationCode))
+		return nil, false
+	}
+	return &pending, true
 }
 
 // decode reads a JSON body into v, refusing unknown members (a member

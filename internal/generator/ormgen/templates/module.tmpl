@@ -1,6 +1,6 @@
 module {{ .ModulePath }}
 
-go 1.26.4
+go 1.27.3
 
 require (
 	{{ .TypesModule }} v0.0.0-00010101000000-000000000000
@@ -9,6 +9,9 @@ require (
 	{{ .Naming.SchemaIRGoModule }} {{ .Pins.Version .Naming.SchemaIRGoModule "v0.0.0-00010101000000-000000000000" }}
 {{- if .VersionGraphs }}
 	{{ .Naming.VersionGraphGoModule }} {{ .Pins.Version .Naming.VersionGraphGoModule "v0.0.0-00010101000000-000000000000" }}
+{{- end }}
+{{- if .HasEncryptedFields }}
+	{{ .Naming.SchemaRuntimeGoModule }} {{ .Pins.Version .Naming.SchemaRuntimeGoModule "v0.0.0-00010101000000-000000000000" }}
 {{- end }}
 {{- range .IndirectModules }}
 	{{ . }} v0.0.0-00010101000000-000000000000 // indirect
@@ -39,6 +42,10 @@ replace {{ .Naming.SchemaIRGoModule }} => {{ .SchemaIRReplacePath }}
 {{- if .VersionGraphReplacePath }}
 
 replace {{ .Naming.VersionGraphGoModule }} => {{ .VersionGraphReplacePath }}
+{{- end }}
+{{- if .SchemaRuntimeReplacePath }}
+
+replace {{ .Naming.SchemaRuntimeGoModule }} => {{ .SchemaRuntimeReplacePath }}
 {{- end }}
 {{- if .Pins }}
 

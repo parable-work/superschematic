@@ -59,6 +59,12 @@ type walker struct {
 	// belong in Imports.
 	suppressRecording bool
 
+	// foreignClass is set while resolving the fields of a class another
+	// service declares (a cross-service @source target): its decorators
+	// answer to that service's kind, which that service's own load checks,
+	// so a DB table's or a projection's @column passes here (D90).
+	foreignClass bool
+
 	// identityTables records the class node of each type that takes a user
 	// model trait and stands where one may, for the base-class check once
 	// every file is walked (finishIdentityTraits).
@@ -173,7 +179,7 @@ func (w *walker) applyDecorator(d decoratorRef, target registry.DecoratorTarget,
 		return errorAtNode(d.node, "decorator @%s is not valid on %s", d.id.name, target)
 	}
 	kind := string(w.cfg.Kind)
-	if !spec.AllowsKind(kind) {
+	if !spec.AllowsKind(kind) && !w.foreignClass {
 		return errorAtNode(d.node, "%s", spec.KindError(kind))
 	}
 	if spec.Apply == nil {
@@ -186,7 +192,7 @@ func (w *walker) applyDecorator(d decoratorRef, target registry.DecoratorTarget,
 			return errorAtNode(d.node, "@%s takes exactly %d type argument(s) naming a schema class", d.id.name, n)
 		}
 		for _, typeArg := range typeArgNodes {
-			name, serr := w.classTypeArg(d, typeArg)
+			name, serr := w.classTypeArg(d, typeArg, spec.TypeArgAliases())
 			if serr != nil {
 				return serr
 			}
@@ -290,12 +296,16 @@ func decoratorTypeArgs(d decoratorRef) []*astNode {
 }
 
 // classTypeArg resolves one decorator type argument to the name of the
-// schema class it references.
-func (w *walker) classTypeArg(d decoratorRef, typeArg *astNode) (string, *SchemaError) {
+// schema class it references, or of an object type alias when aliases
+// says the decorator takes one (@query's params and row, D86).
+func (w *walker) classTypeArg(d decoratorRef, typeArg *astNode, aliases bool) (string, *SchemaError) {
 	if typeArg.Kind != kindTypeReference {
 		return "", errorAtNode(typeArg, "the @%s type argument must name a schema class", d.id.name)
 	}
 	id, ok := w.identityOf(typeArg.AsTypeReferenceNode().TypeName)
+	if ok && id.decl != nil && aliases && id.decl.Kind == kindTypeAliasDeclaration {
+		return id.name, nil
+	}
 	if !ok || id.decl == nil || id.decl.Kind != kindClassDeclaration {
 		return "", errorAtNode(typeArg, "cannot resolve the @%s type argument %q to a schema class", d.id.name, w.nodeText(typeArg))
 	}
@@ -620,6 +630,17 @@ func findDecorators(decorators []decoratorRef, name string) []decoratorRef {
 	return out
 }
 
+// hasMemoryStoreDecorator reports whether a class carries @channel or
+// @key from the memory store's authoring package (D75).
+func hasMemoryStoreDecorator(decorators []decoratorRef) bool {
+	for _, d := range decorators {
+		if registry.IsMemoryStoreDecorator(d.id.pkg, d.id.name) {
+			return true
+		}
+	}
+	return false
+}
+
 func findDecorator(decorators []decoratorRef, name string) *decoratorRef {
 	for i := range decorators {
 		if decorators[i].id.name == name {
@@ -773,8 +794,9 @@ func (w *walker) walkStructClass(node *astNode, name string, decorators []decora
 	// either: @worker's Apply recorded it in Schema.Workers (D53), nor is
 	// a @deriver class: @deriver's Apply recorded it in Schema.Derivers
 	// (D74), nor an @app class: @app's Apply recorded it in Schema.Apps
-	// (D78).
-	if findDecorator(decorators, "job") != nil || findDecorator(decorators, "worker") != nil || findDecorator(decorators, "deriver") != nil || findDecorator(decorators, "app") != nil {
+	// (D78). Nor is an @channel or @key class of a MemoryStore schema,
+	// which their Apply recorded in Schema.MemoryStoreDeclarations (D75).
+	if findDecorator(decorators, "job") != nil || findDecorator(decorators, "worker") != nil || findDecorator(decorators, "deriver") != nil || findDecorator(decorators, "app") != nil || hasMemoryStoreDecorator(decorators) {
 		return
 	}
 
@@ -1124,8 +1146,9 @@ func (w *walker) fieldFromProperty(member *astNode) (*ir.FieldDef, *SchemaError)
 		JsonField:       info.jsonField,
 		HasMany:         info.hasMany,
 		ManyToMany:      info.manyToMany,
-		Secret:          info.secret,
+		Secret:          info.secret || info.encryptedAtRest,
 		Encrypted:       info.encrypted,
+		EncryptedAtRest: info.encryptedAtRest,
 	}
 	if info.relation {
 		fd.Relation = &ir.RelationDef{Type: info.ref.Name, OnDelete: info.relationOnDelete}
@@ -1139,6 +1162,10 @@ func (w *walker) fieldFromProperty(member *astNode) (*ir.FieldDef, *SchemaError)
 	if info.sortBy != nil {
 		return nil, errorAtNode(prop.Type, "SortBy marks an operation's argument; a field is no sort")
 	}
+	if info.fileDownload != nil {
+		return nil, errorAtNode(prop.Type, "FileDownload marks an operation's result; a field that is a file is FileUpload")
+	}
+	fd.FileUpload = info.fileUpload
 	fd.References = info.references
 	applyValidateConfig(info.validate, fd)
 
@@ -1180,6 +1207,15 @@ func applyValidateConfig(cfg map[string]any, fd *ir.FieldDef) {
 	if v, ok := cfg["pattern"].(string); ok {
 		fd.ValidatePattern = v
 	}
+	if v, ok := cfg["precision"].(int); ok {
+		fd.ValidatePrecision = &v
+	}
+	if v, ok := cfg["scale"].(int); ok {
+		fd.ValidateScale = &v
+	}
+	if v, ok := cfg["dimensions"].(int); ok {
+		fd.ValidateDimensions = &v
+	}
 }
 
 // applySource resolves @source(Target): the cross-layer projection linkage.
@@ -1215,10 +1251,10 @@ func (w *walker) applySource(td *ir.TypeDef, src *decoratorRef) {
 		// verification data.
 	}
 
-	prevSuppress := w.suppressRecording
-	w.suppressRecording = true
+	prevSuppress, prevForeign := w.suppressRecording, w.foreignClass
+	w.suppressRecording, w.foreignClass = true, external
 	sourceFields, _ := w.resolveClassFieldDefs(id.decl)
-	w.suppressRecording = prevSuppress
+	w.suppressRecording, w.foreignClass = prevSuppress, prevForeign
 
 	target := targetService + "." + id.name
 	if external {
@@ -1509,8 +1545,14 @@ func (w *walker) operationFromMethod(setName string, m *astNode) (*ir.FieldDef, 
 	if info.search {
 		return nil, nil, errorAtNode(method.Type, "SearchQuery marks an operation's argument, not its result")
 	}
+	if info.encryptedAtRest {
+		return nil, nil, errorAtNode(method.Type, "Encrypted<T> marks a stored field of a DB table; a request or a response carries the value itself, and EncryptedField<T> encrypts a request body")
+	}
 	if info.sortBy != nil {
 		return nil, nil, errorAtNode(method.Type, "SortBy marks an operation's argument, not its result")
+	}
+	if info.fileUpload != nil {
+		return nil, nil, errorAtNode(method.Type, "FileUpload marks a field of an input type; a result that is a file is FileDownload")
 	}
 	// A reference on the result is the loader's refusal, in every form.
 	op := &ir.FieldDef{
@@ -1520,6 +1562,8 @@ func (w *walker) operationFromMethod(setName string, m *astNode) (*ir.FieldDef, 
 		Required:   !info.nullable,
 		Encrypted:  info.encrypted,
 		References: info.references,
+		// A FileDownload result (D81) names no JSON type.
+		FileDownload: info.fileDownload,
 	}
 
 	decorators := w.decoratorsOf(m)
@@ -1575,6 +1619,15 @@ func (w *walker) argumentFromParameter(p *astNode) (*ir.ArgumentDef, string, *Sc
 	if info.platformDefault {
 		return nil, "", errorAtNode(p, "PlatformDefault<T> is only valid on object fields")
 	}
+	if info.encryptedAtRest {
+		return nil, "", errorAtNode(p, "Encrypted<T> marks a stored field of a DB table; an argument carries the value itself, and EncryptedField<T> encrypts a request body")
+	}
+	if info.fileUpload != nil {
+		return nil, "", errorAtNode(p, "FileUpload is a field of the operation's input type, which travels as multipart/form-data; an argument is no file")
+	}
+	if info.fileDownload != nil {
+		return nil, "", errorAtNode(p, "FileDownload marks an operation's result, not an argument")
+	}
 	w.recordReference(info)
 
 	arg := &ir.ArgumentDef{
@@ -1593,6 +1646,9 @@ func (w *walker) argumentFromParameter(p *astNode) (*ir.ArgumentDef, string, *Sc
 		applyValidateConfig(info.validate, fd)
 		if fd.ValidateUploadMaxBytes != nil {
 			return nil, "", errorAtNode(p, "Validate uploadMaxBytes is only valid on object fields")
+		}
+		if fd.ValidatePrecision != nil || fd.ValidateScale != nil || fd.ValidateDimensions != nil {
+			return nil, "", errorAtNode(p, "Validate precision, scale and dimensions bound a field of a type, not an operation's argument; take the value in a type's field (support for arguments follows)")
 		}
 		arg.ValidateMin = fd.ValidateMin
 		arg.ValidateMax = fd.ValidateMax

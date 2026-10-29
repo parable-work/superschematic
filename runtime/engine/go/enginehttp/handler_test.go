@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -69,7 +70,7 @@ func send(t *testing.T, method, url, body string, headers ...string) (*http.Resp
 		t.Fatal(err)
 	}
 	for i := 0; i+1 < len(headers); i += 2 {
-		req.Header.Set(headers[i], headers[i+1])
+		req.Header.Add(headers[i], headers[i+1])
 	}
 	response, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -348,5 +349,250 @@ func TestABackgroundEnginesRoutes(t *testing.T) {
 	case <-ended:
 	case <-time.After(10 * time.Second):
 		t.Fatal("the stream did not end once Done closed")
+	}
+}
+
+// The signal route and a stream with signals (D77), over the core's
+// archive, whose behaviors declare no signal: the route answers the
+// engine's refusal, the call by name too, and a stream with signals=1
+// replays and goes on as one without. The HTTP corpus's signal cases
+// deliver signals through the test kit's archive (make engine-go).
+func TestTheSignalRouteAndAStreamWithSignals(t *testing.T) {
+	e := openNotes(t)
+	server := httptest.NewServer(enginehttp.Handler(e, enginehttp.Options{
+		Caller: bearer,
+		Stream: engine.StreamOptions{HeartbeatMs: 60000},
+	}))
+	defer server.Close()
+	if _, err := e.Call(context.Background(), "instances.create", &engine.Principal{Subject: "alice"},
+		"Note", map[string]any{"body": "hello"}, map[string]any{"id": "n1"}); err != nil {
+		t.Fatal(err)
+	}
+	route := server.URL + "/namespaces/default/schemas/Note/instances/n1/signals/Comments/typing"
+	response, body := send(t, "POST", route, `{}`, "Authorization", "Bearer bob", "Content-Type", "application/json")
+	if response.StatusCode != 404 || !strings.Contains(body, `"code":"not_found"`) || !strings.Contains(body, "does not compose behavior Comments") {
+		t.Fatalf("a signal of a behavior the schema does not compose: %d %s", response.StatusCode, body)
+	}
+	_, err := e.Call(context.Background(), "sendSignal", &engine.Principal{Subject: "bob"},
+		map[string]any{"schema": "Note", "instanceId": "n1", "behavior": "Comments", "name": "typing"})
+	var refused *engine.Error
+	if !errors.As(err, &refused) || refused.Code != engine.CodeNotFound {
+		t.Fatalf("sendSignal: %v", err)
+	}
+	if engine.CodeRateLimited.Status() != http.StatusTooManyRequests {
+		t.Fatalf("rate_limited answers %d", engine.CodeRateLimited.Status())
+	}
+
+	req, _ := http.NewRequest("GET", server.URL+"/namespaces/default/events?signals=1", nil)
+	req.Header.Set("Authorization", "Bearer alice")
+	req.Header.Set("Accept", "text/event-stream")
+	stream, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Body.Close()
+	if stream.StatusCode != 200 {
+		t.Fatalf("a stream with signals: %d", stream.StatusCode)
+	}
+	lines := make(chan string, 100)
+	go func() {
+		defer close(lines)
+		scanner := bufio.NewScanner(stream.Body)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+	}()
+	until := func(want string) {
+		t.Helper()
+		deadline := time.After(10 * time.Second)
+		for {
+			select {
+			case line, ok := <-lines:
+				if !ok {
+					t.Fatalf("the stream ended before %q", want)
+				}
+				if strings.Contains(line, want) {
+					return
+				}
+			case <-deadline:
+				t.Fatalf("no %q within 10s", want)
+			}
+		}
+	}
+	until(`"instanceId":"n1"`)
+	until("event: ready")
+	if _, err := e.Call(context.Background(), "instances.create", &engine.Principal{Subject: "alice"},
+		"Note", map[string]any{"body": "live"}, map[string]any{"id": "n2"}); err != nil {
+		t.Fatal(err)
+	}
+	until(`"instanceId":"n2"`)
+}
+
+// The namespace operation route (D77), over the core's archive, whose
+// behaviors declare no namespace operation: the route answers the engine's
+// refusal of an operation of another scope and of a behavior it does not
+// run, and behaviors.invoke by name too. The test kit's Rust suites run one
+// that does (behavior_namespace.rs).
+func TestTheNamespaceOperationRoute(t *testing.T) {
+	e := openNotes(t)
+	server := httptest.NewServer(enginehttp.Handler(e, enginehttp.Options{Caller: bearer}))
+	defer server.Close()
+	route := server.URL + "/namespaces/default/behaviors/Comments/operations/post"
+	response, body := send(t, "POST", route, `{}`, "Authorization", "Bearer bob", "Content-Type", "application/json")
+	if response.StatusCode != 404 || !strings.Contains(body, `"code":"not_found"`) || !strings.Contains(body, "Comments's post is an instance operation") {
+		t.Fatalf("an instance operation called on the namespace: %d %s", response.StatusCode, body)
+	}
+	response, body = send(t, "POST", server.URL+"/namespaces/default/behaviors/acme.Nothing/operations/inbox", "", "Authorization", "Bearer bob")
+	if response.StatusCode != 404 || !strings.Contains(body, "this engine runs no behavior acme.Nothing") {
+		t.Fatalf("a behavior the engine does not run: %d %s", response.StatusCode, body)
+	}
+	_, err := e.Call(context.Background(), "behaviors.invoke", &engine.Principal{Subject: "bob"},
+		map[string]any{"behavior": "Comments", "operation": "post", "params": map[string]any{}})
+	var refused *engine.Error
+	if !errors.As(err, &refused) || refused.Code != engine.CodeNotFound {
+		t.Fatalf("behaviors.invoke: %v", err)
+	}
+}
+
+// The Acting-For header (D77) is ignored unless Options.ActingFor honors it;
+// a function decides per request, given the engine's principal.
+func TestTheActingForHeaderIsHonoredOnlyWhenTheOptionSaysSo(t *testing.T) {
+	e := openNotes(t)
+	var seen []string
+	mounts := map[string]func(engine.Principal, string, *http.Request) bool{
+		"/ignore": nil,
+		"/honor":  enginehttp.HonorActingFor,
+		"/decide": func(principal engine.Principal, subject string, _ *http.Request) bool {
+			seen = append(seen, principal.Subject+" for "+subject)
+			return subject != "carol"
+		},
+	}
+	router := chi.NewRouter()
+	for prefix, actingFor := range mounts {
+		router.Mount(prefix, enginehttp.Handler(e, enginehttp.Options{Prefix: prefix, Caller: bearer, ActingFor: actingFor}))
+	}
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	forOf := func(prefix, id, subject string) string {
+		t.Helper()
+		response, body := send(t, "POST", server.URL+prefix+"/namespaces/default/schemas/Note/instances",
+			`{"id": "`+id+`", "data": {"body": "hello"}}`,
+			"Authorization", "Bearer agent", "Content-Type", "application/json", "Acting-For", subject)
+		if response.StatusCode != 201 {
+			t.Fatalf("%s create %s: %d %s", prefix, id, response.StatusCode, body)
+		}
+		response, body = send(t, "GET", server.URL+prefix+"/namespaces/default/events?schema=Note&limit=500", "", "Authorization", "Bearer agent")
+		if response.StatusCode != 200 {
+			t.Fatalf("events: %d %s", response.StatusCode, body)
+		}
+		var page struct {
+			Data struct {
+				Events []struct {
+					InstanceID string `json:"instanceId"`
+					Actor      string `json:"actor"`
+					For        string `json:"for"`
+				} `json:"events"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(body), &page); err != nil {
+			t.Fatal(err)
+		}
+		for _, event := range page.Data.Events {
+			if event.InstanceID == id {
+				if event.Actor != "agent" {
+					t.Fatalf("actor = %q", event.Actor)
+				}
+				return event.For
+			}
+		}
+		t.Fatalf("no event of %s: %s", id, body)
+		return ""
+	}
+	if got := forOf("/ignore", "n1", "alice"); got != "" {
+		t.Fatalf("ignored by default: for = %q", got)
+	}
+	if got := forOf("/honor", "n2", "alice"); got != "alice" {
+		t.Fatalf("honored: for = %q", got)
+	}
+	if got := forOf("/decide", "n3", "alice"); got != "alice" {
+		t.Fatalf("decided yes: for = %q", got)
+	}
+	if got := forOf("/decide", "n4", "carol"); got != "" {
+		t.Fatalf("decided no: for = %q", got)
+	}
+	if strings.Join(seen, ", ") != "agent for alice, agent for carol" {
+		t.Fatalf("the function saw %v", seen)
+	}
+	// A subject that is the caller's own is the engine's invalid_argument.
+	response, body := send(t, "POST", server.URL+"/honor/namespaces/default/schemas/Note/instances",
+		`{"id": "n5", "data": {"body": "hello"}}`,
+		"Authorization", "Bearer agent", "Content-Type", "application/json", "Acting-For", "agent")
+	if response.StatusCode != 400 || !strings.Contains(body, `"code":"invalid_argument"`) {
+		t.Fatalf("acting for itself: %d %s", response.StatusCode, body)
+	}
+}
+
+// One rule reads the Acting-For header: ASCII whitespace is trimmed, and a
+// second header, a comma, a control or other whitespace is refused, so a
+// function that refuses role: subjects sees the subject the engine
+// records, and no spelling of one gets past it.
+func TestTheActingForHeaderIsReadByOneRule(t *testing.T) {
+	e := openNotes(t)
+	var seen []string
+	decide := func(_ engine.Principal, subject string, _ *http.Request) bool {
+		seen = append(seen, subject)
+		return !strings.HasPrefix(subject, "role:")
+	}
+	server := httptest.NewServer(enginehttp.Handler(e, enginehttp.Options{Caller: bearer, ActingFor: decide}))
+	defer server.Close()
+	create := func(id string, actingFor ...string) (int, string) {
+		t.Helper()
+		headers := []string{"Authorization", "Bearer agent", "Content-Type", "application/json"}
+		for _, value := range actingFor {
+			headers = append(headers, "Acting-For", value)
+		}
+		response, body := send(t, "POST", server.URL+"/namespaces/default/schemas/Note/instances",
+			`{"id": "`+id+`", "data": {"body": "hello"}}`, headers...)
+		return response.StatusCode, body
+	}
+	if status, body := create("n1", " \tbob\t "); status != 201 || !strings.Contains(body, `"createdBy":"agent"`) {
+		t.Fatalf("a trimmed subject: %d %s", status, body)
+	}
+	for id, values := range map[string][]string{
+		"n2": {"bob", "role:admins"},
+		"n3": {"bob, role:admins"},
+		"n4": {"\u0085role:admins"},
+		"n5": {"role:admins\u00a0"},
+		"n6": {"b ob"},
+		"n7": {"bob\u2028"},
+	} {
+		if status, body := create(id, values...); status != 400 || !strings.Contains(body, `"code":"invalid_argument"`) {
+			t.Fatalf("%s %q: %d %s", id, values, status, body)
+		}
+	}
+	if status, body := create("n8", "role:admins"); status != 201 {
+		t.Fatalf("refused by the function: %d %s", status, body)
+	}
+	if strings.Join(seen, ", ") != "bob, role:admins" {
+		t.Fatalf("the function saw %q", seen)
+	}
+	for _, check := range []struct {
+		values  []string
+		subject string
+		refused bool
+	}{
+		{nil, "", false},
+		{[]string{" \r\n"}, "", false},
+		{[]string{"\talice "}, "alice", false},
+		{[]string{"alice", "bob"}, "", true},
+		{[]string{"\u000balice"}, "", true},
+		{[]string{"\u3000alice"}, "", true},
+		{[]string{"alice\u0000"}, "", true},
+	} {
+		subject, err := enginehttp.ActingForSubject(check.values)
+		if subject != check.subject || (err != nil) != check.refused {
+			t.Fatalf("ActingForSubject(%q) = %q, %v", check.values, subject, err)
+		}
 	}
 }

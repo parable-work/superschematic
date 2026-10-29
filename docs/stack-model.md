@@ -74,8 +74,10 @@ environments   a target (gcp, local, ...) and the values only a person can decid
 | job | one `@job` of an API schema | a run to completion, on a schedule or on demand | its API's needs: the same connection and addresses (D52) |
 | worker | one `@worker` of an API schema | a loop that handles a queue's messages until stopped | its API's needs; its queue lives in one of the API's databases (D53) |
 | bucket | one Bucket schema | object storage, private, with signed URLs | nothing (D54) |
+| memoryStore | one MemoryStore schema | channels, counters and claims that every replica shares and can lose | nothing (D75, section 8.12) |
 | site | one Site schema | static files over HTTPS, with a config per environment | the public address of each API it calls (D55) |
 | runner | one engine database: a DB schema whose types compose behaviors | the engine's runner, which runs reactions, schedules, Timers' deadlines and retention, one process at a time under the runner's lock | a connection to its database (D58) |
+| deriver | one `@deriver` of a TypeScript or Rust API schema | a loop that fills the Derived fields of its API's engine types, waking on the engine's commits, until stopped | its API's needs; its API's engine database (D74, section 8.8) |
 | app | one `@app` of a Rust API schema | the project's own HTTP program over its API's `Deps`, implementations, identity and engine, at an address a server's platform gives it | its API's needs (D78, section 8.6) |
 
 A queue is not a deployable: it lives in the database of the DB schema
@@ -99,9 +101,10 @@ deployable is declared only to change that:
 A declared deployable only groups. It declares no needs: a server's edges
 are the union of its APIs' edges, so grouping APIs never restates one.
 
-Each `@app` of an API service is one app too, named `<api>-<app>` as a
-job is (D78). An app is never declared in the stack: the API declares it,
-and the stack exposes it or turns it off.
+Each `@deriver` of an API service is one deriver, named `<api>-<deriver>`
+as a worker is (D74). Each `@app` of an API service is one app too, named
+`<api>-<app>` as a job is (D78). An app is never declared in the stack:
+the API declares it, and the stack exposes it or turns it off.
 
 ### 3.3 Edges
 
@@ -114,6 +117,7 @@ kinds:
 | http | server, job or worker | server | `calls` in the config of each API the calling server serves |
 | site | site | server | `calls` in the Site service's config; the server must be exposed (D55, section 8.10) |
 | bucket | server or job | bucket | `buckets` in the config of each API the server serves (D54, section 8.9) |
+| memoryStore | server, job, worker or deriver | memoryStore | `memoryStores` and `rateLimitStore` in the config of each API the server serves (D75, section 8.12) |
 
 A site edge derives the API's public address and nothing else, since the
 browser carries its end user's token. Resolution refuses a site that
@@ -143,7 +147,9 @@ schema says that one API's implementation calls another API. It sits in
 the API service's config next to `authDb`, because both describe what the
 implementation needs, and the implementation belongs to the API (section
 8.5). `buckets` sits beside it, for the same reason: the Bucket services
-the implementation keeps objects in (section 8.9):
+the implementation keeps objects in (section 8.9). So do `memoryStores`
+and `rateLimitStore`, the MemoryStore services it shares wake-ups, counts
+and claims in (section 8.12):
 
 ```ts
 // schemas/services/shop-orders/schema.config.ts
@@ -191,6 +197,11 @@ bucket with its API, but no step waits for it. A server that serves two
 APIs listing one bucket has one bucket edge to it, as it has one http edge
 to an API both call.
 
+`memoryStores` is a build-order edge, unlike `buckets`: a MemoryStore
+service builds its definitions, which the API's server imports, so the
+store builds before each API that lists it. A server's memory stores are
+the union of its APIs', one edge each.
+
 Building is not deploying: two servers that call each other still have no
 callee-first rollout (section 5.3), and resolution refuses them
 (`call-cycle`, section 6.10) unless one server serves both APIs.
@@ -216,6 +227,10 @@ loaders `envgen` writes for Go, Rust and TypeScript, and the
 - a bucket field per bucket edge. It holds the bucket's name and, for a
   bucket an emulator serves, the emulator's endpoint, with no credential
   (D54, section 8.9);
+- a memory store field per memoryStore edge. It holds the store's name,
+  its URL, the server's CA when it has one, the authentication and, in a
+  member of a parameterized environment, the member's name, with no
+  credential (D75, section 8.12);
 - a callers field per served API with a service clause, `<API>_CALLERS`
   (`SHOP_API_CALLERS`), named by the core's rule alone over the API's own
   name. It holds what the server's `ServiceAuthenticator` checks: the
@@ -250,7 +265,8 @@ dependency, as its sql edge does (section 3.3).
 
 The Go loader has the first three. The API package's `EnvConfig` embeds
 the `@envVars` type and adds a field per edge, a `stackconfig.Database`, a
-`stackconfig.Service` or a `stackconfig.Bucket` from the Go HTTP runtime,
+`stackconfig.Service`, a `stackconfig.Bucket` or a `stackconfig.MemoryStore`
+from the Go HTTP runtime,
 which `LoadEnvConfig` reads. `values-schema.json` lists each derived field in
 `x-superschematic.envVars` with `derived` (the edge kind), `service` and
 `variables`, and each of its variables as an optional string property
@@ -276,6 +292,7 @@ connector's value against it and refuses one that breaks it with a
 | bucket | `ir.BucketConnection` | `name`, the bucket's name with its provider; an optional `endpoint`, the base URL of an emulator that serves the provider's API in its place; and, on Workers, `binding`, the name of the Worker's `r2_bucket` binding, with `r2`, the credential that signs URLs for the bucket's objects (D64): `account`, `accessKeyId` and `token`, a secret member (below). `r2` needs `binding`, and `binding` excludes `endpoint`. On gcp it holds no credential: the workload's own account reaches the bucket (D54) |
 | http, for the callee's `<API>_CALLERS` | `ir.ServiceAuth` | `issuers`, each an `ir.ServiceAuthIssuer`: `issuer` and `issuerAliases`, `audience`, `algorithms`, `jwksUrl` or `keys` (each a `jwk`, a public JWK's JSON, or a `pem`, an Ed25519 public key's SubjectPublicKeyInfo PEM, D63), `subjectClaim`, `maxLifetimeSeconds`, and `callers`, each a `subject`, the `deployable` it is and the APIs it `serves`. A connector gives one issuer per edge, listing the edge's caller (`Connected.Callee`), and resolution merges the edges to the API by issuer (section 9.2) |
 | site | `ir.SiteEndpoint` | `url`, the API's public base URL, its server's `PublicAddressOf` (section 6.1) |
+| memoryStore | `ir.MemoryStoreConnection` | `store`, the MemoryStore service's name; `url`, `redis://` or `rediss://`; `ca`, the PEM of the server's CA, with `rediss://` only; `auth`, `iam`, which needs `rediss://`, or `none`; and `member`, the member's name in a member of a parameterized environment (D75) |
 | site, for the callee's `<API>_CORS` | `ir.CORSPolicy` | `origins`, the public origin of each site whose site edge reaches the API, in the order of the edges, each once: `<scheme>://<host>[:<port>]` or a reference. Resolution writes it from the sites' public addresses (D55) |
 
 A member holds a string or a reference to an output or a parameter. A
@@ -330,9 +347,10 @@ member of it could come from a secret store.
 Field and variable names follow a naming-file rule over the callee's
 service name, with the core's rule as the default (D7, D8). The
 `[derived_fields]` table holds a template per edge kind, `database`,
-`service` and `bucket`, in which `{SERVICE}` is the DB, called API or
-Bucket service's name in upper snake case. They default to
-`{SERVICE}_DATABASE`, `{SERVICE}_SERVICE` and `{SERVICE}_BUCKET`. envgen
+`service`, `bucket` and `memory_store`, in which `{SERVICE}` is the DB,
+called API, Bucket or MemoryStore service's name in upper snake case.
+They default to `{SERVICE}_DATABASE`, `{SERVICE}_SERVICE`,
+`{SERVICE}_BUCKET` and `{SERVICE}_MEMORY_STORE`. envgen
 and the resolver (`stack.Input.FieldNames`) name the fields by the same
 templates.
 
@@ -417,7 +435,13 @@ export abstract class Preview extends Staging {}
 - **`expose`** names what is reachable from outside the environment, an
   API's handle or an `@server` class. Everything else is internal, and
   reachable only along its edges. A site is always exposed, named here or
-  not, and every API a site calls must be (D55, section 8.10).
+  not, and every API a site calls must be (D55, section 8.10), unless the
+  site serves it on its own origin.
+- **`origins`** put a site and APIs it calls on one origin in every
+  environment (D91, section 8.10): `{ site: ShopWeb, apis: [ShopApi] }`
+  serves shop-api under `/api/shop-api` on shop-web's address, as `stack
+  dev`'s proxy serves it, and `apis` left out serves every API the site
+  calls.
 - **`@server`** declares a deployable only to change a default. Here it
   runs both APIs in one process in place of their two default servers. Its
   edges are its APIs' edges: shop-db through `authDb`, and shop-api
@@ -548,6 +572,9 @@ export abstract class PaymentsSecrets {
   here, the servers of shop-api and shop-orders.
 - Two servers whose config is the same type share all its secrets with no
   further declaration.
+- The base may carry `@envVars` too. A service's config is the `@envVars`
+  class no other `@envVars` class extends, which holds every field it
+  inherits; two that do not extend one another fail the load (D94).
 - The platform stores the secret (Secret Manager on GCP, a gitignored file
   locally) under a name derived from the declaring type and the field.
 
@@ -601,15 +628,17 @@ line that holds it.
   `ServiceHandle` is any handle. An API's generated `service.generated.ts`
   writes both: `service<"API", ShopApiConfig>({ name: "shop-api", kind:
   SchemaKind.API })`, with `ShopApiConfig` imported as a type. The second
-  names the API's `@envVars` class, so the sentinel is written after the
-  service loads; the sentinel sweep, which reads only configs, keeps the
-  type a build wrote. A DB or General handle has no config type, nor has
-  an API without a TypeScript `@envVars` class, and `service()` infers the
+  names the API's config, the `@envVars` class no other extends (D94),
+  so the sentinel is written after the service loads; the sentinel
+  sweep, which reads only configs, keeps the type a build wrote. A DB or
+  General handle has no config type, nor has an API without a TypeScript
+  `@envVars` class, and `service()` infers the
   kind from its argument (`kind: SchemaKind.DB` gives `ServiceHandle<"DB">`).
   No person writes either parameter. `calls` takes `ServiceHandle<"API">`,
   so tsc refuses a DB handle there, and `buckets` takes
   `ServiceHandle<"Bucket">`, which a Bucket service's sentinel gives
-  (D54). A third parameter, `J`, names an API's
+  (D54), and `memoryStores` and `rateLimitStore` take
+  `ServiceHandle<"MemoryStore">` (D75). A third parameter, `J`, names an API's
   jobs, its `@job` classes (D52): `service<"API", OrdersConfig,
   "ShipOrders">`, with `unknown` for the config type of an API without
   one. It defaults to `string`, any job, and the sweep keeps it as it
@@ -655,6 +684,8 @@ line that holds it.
     runs once and every overdue deadline fires;
   - a Bucket handle takes the target's `bucket` settings and no `env`
     (D54);
+  - a MemoryStore handle takes the target's `memoryStore` settings,
+    `enabled` and no `env` (D75);
   - an `@server` or `@database` class takes either kind's settings and an
     `env` of any field, since tsc cannot see what a declared deployable
     serves;
@@ -796,8 +827,10 @@ registers a `PlatformSpec`:
   `local` platform's turns the session cookie's `Secure` off;
 - `NoIdentity`, for a server platform that runs no identity runtime, why
   not: resolution refuses a server of an API over the user model on it as
-  unrealizable, giving the reason. `cloudflare.workers` sets it (section
-  18.15, D64);
+  unrealizable, giving the reason. With `IdentityDatabases` beside it, the
+  database platforms it does run one over, it refuses only a server whose
+  API's `authDb` the environment places elsewhere. `cloudflare.workers`
+  sets both, naming `cloudflare.hyperdrive` (section 18.6, D64, D92);
 - `NameOf` and `AddressOf`, how it names and addresses a deployable in an
   environment. Under a parameter the name references the parameter
   (`{"$concat": ["shop-api-", {"$parameter": "pr"}]}`), and an address
@@ -1469,11 +1502,13 @@ Bootstrap reads the GitHub repository from the git remote.
 | job | a Cloud Run job (`gcp.cloudrunjob`) named after the deployable, for a job in Go, TypeScript or Rust (D65), with its own service account, which holds the Cloud Trace agent role when the job exports its traces to Cloud Trace, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; one task, which runs the image to its end, with the job's timeout for each try and the job's retries, at most the 10 Cloud Run allows (D52) |
 | schedule | for a job whose environment runs a schedule, a Cloud Scheduler job named as the job is, in the environment's region, on the job's cron in its time zone, which POSTs to the Cloud Run Admin API's `jobs/<job>:run` with an OAuth token for the job's own account; that account holds `roles/run.invoker` on that job alone, which grants it `run.jobs.run`. A job whose schedule is off has neither, and runs only on demand |
 | bucket | a Cloud Storage bucket (`gcp.storage`, D54) named `<project>-<stack>-<bucket>`, since a bucket's name is global, in the environment's region, with uniform bucket-level access, so IAM alone admits a reader, and public access prevention enforced; versioned when the settings say so (section 7.5). Only a member of a parameterized environment sets `forceDestroy`: its bucket is its own, which its destroy empties, where any other bucket keeps its objects and a destroy fails on it |
+| memoryStore | a Memorystore for Valkey instance (`gcp.memorystore`, D75, section 8.12) named `<project>-<stack>-<store>`, in the environment's region: `VALKEY_8_0`, cluster mode disabled, one shard, transit encryption `SERVER_AUTHENTICATION`, authorization `IAM_AUTH`, persistence and deletion protection off; its node type and replica count from the settings (section 7.5). It creates its own Private Service Connect endpoint on the environment's network, under a service connection policy for Memorystore (`network.memorystore`, service class `gcp-memorystore`) whose endpoints take addresses from a subnet of their own (`network.memorystore-subnet`, `<stack>-memorystore`, `10.8.16.0/24`); every store of the environment shares both |
 | worker | a Cloud Run worker pool (`gcp.cloudrunworker`) named after the deployable, for a worker in Go, TypeScript or Rust (D65), with its own service account, which holds the Cloud Trace agent role when the worker exports its traces to Cloud Trace, and the config, secrets, Cloud SQL volume and VPC egress a server of its API takes; no port, no URL and no IAM of its own, since nothing calls it; manual scaling to the worker's instances, zero when the environment turns it off, so the pool and its pinned image stay; `WORKER_CONCURRENCY` set to its concurrency; `cpu`, one or more, and `memory` (D53). A worker whose grace is ten seconds or more is refused, since Cloud Run kills an instance ten seconds after SIGTERM |
 | runner | a Cloud Run worker pool (`gcp.cloudrunrunner`) named after the deployable, an engine database's runner (D58), in its API's language, with its own service account, which holds the Cloud Trace agent role when the runner exports its traces to Cloud Trace, and its database's Cloud SQL connection as its one config; one instance under manual scaling, which runs the engine's runner while it holds the runner's lock, since a Cloud Run service's instance has CPU only while it serves. Its database user is its own, a member of the role that owns the engine's schema, as each server's, job's and worker's on the database is (section 8.4, D58). A settings element that turns it off (`{ of: ShopDb, runner: true, enabled: false }`) leaves the pool no instance |
 | sql edge | `roles/cloudsql.client` and `roles/cloudsql.instanceUser` for the server's, the job's or the worker's account, held to the edge's instance by an IAM condition; an IAM database user, which the migration job gives read and write privileges; the Cloud SQL connection, which the connector derives (instance connection name, database, IAM user) and the service, the job or the worker pool mounts at `/cloudsql`. The same for a Rust server, job or worker, which dials the mount's socket as the IAM user (section 7.4, D57, D65) |
 | http edge | `roles/run.invoker` on the callee for the caller's account; the callee's `run.app` URL in the caller's config, with a Google ID token for the callee's custom audience, its full resource name `//run.googleapis.com/projects/<project>/locations/<region>/services/<service>`, as the service credential, since the service's own callers field cannot reference its URL; every service lists its resource name in `customAudiences`. The callee's callers field gets Google's issuer and keys, and the caller's service account by its email (section 9.2): a job's, as a caller that serves its API |
 | bucket edge | `roles/storage.objectUser` on the bucket alone for the server's, the job's or the worker's account, which reads, writes, lists and deletes its objects and changes nothing of the bucket, and `roles/iam.serviceAccountTokenCreator` for that account on itself, which IAM's `signBlob` asks of an account that signs a URL as itself; the bucket's name, which the connector derives, with no credential, since the client takes the workload's own from the metadata server. A Rust server's, job's or worker's edge lowers as a Go one's: its runtime's `gcs` asks the metadata server for the token and signs through `signBlob` (D54) |
+| memoryStore edge | `roles/memorystore.dbConnectionUser` for the server's, the job's, the worker's or the deriver's account, granted on the project and held to the edge's instance by an IAM condition on its resource name, since Memorystore has no IAM policy per instance; Direct VPC egress for the workload, as a calling server has; the store's `rediss://` URL at its endpoint's address and port, the first certificate of the instance's managed server CA chain as `ca`, and `auth: iam`, which the connector derives with no credential: each new connection sends an access token for the workload's account from the metadata server. The same for Go, TypeScript and Rust (D75) |
 | internal server | internal-only ingress, with Cloud Run's invoker check on; callers also send the token in `X-Serverless-Authorization`, which the check reads |
 | calling server, job or worker | Direct VPC egress for all its traffic through the environment's network: a VPC, a subnet with Private Google Access, and Cloud NAT so the internet stays reachable. A job or a worker runs apart from every server, so it reaches each API its API calls this way, one its API's server serves too |
 | exposure | a global external Application Load Balancer per exposed server, with a Google-managed certificate from Certificate Manager on a host under the domain, authorized by a DNS record, and the records written by the environment's DNS platform (section 6.9); the service takes traffic from the load balancer only, with the invoker check off. Without a domain, the `run.app` URL, open to all traffic. The server's public address is `https://<server>.<domain>`, or without a domain its `run.app` URL |
@@ -1481,7 +1516,7 @@ Bootstrap reads the GitHub repository from the git remote.
 | site edge | the server's public address in the site's config, and the site's origin in the server's CORS field (section 3.4). No grant: the server is exposed, with its invoker check off |
 | secret | a Secret Manager secret named `<Stack>-<Type>-<FIELD>`, an accessor grant to each reading server's, job's or worker's account, and an environment variable that references its latest version |
 | image | a server's, a job's or a worker's, built by Cloud Build, pushed to the Artifact Registry repository named after the stack and deployed by digest; the graph holds the image's repository path, and the deploy pins the digest it built |
-| parameter | names suffixed with the parameter and its value (`shop-api-pr123`); a database per value (`shop_db_pr123`) on the parent's instance, whose secrets and network the member also inherits; a bucket per value, which the member's destroy empties |
+| parameter | names suffixed with the parameter and its value (`shop-api-pr123`); a database per value (`shop_db_pr123`) on the parent's instance, whose secrets and network the member also inherits; a bucket per value, which the member's destroy empties; a memory store shared with the parent, whose names the member's own name (`pr123`) prefixes and whose destroy deletes nothing |
 
 A caller reaches every callee at its `run.app` URL, exposed or not, from
 inside the VPC. Cloud Run counts a request from a VPC as internal, which
@@ -1529,7 +1564,9 @@ again: each step creates what is missing and leaves the rest.
    Federation, Secret Manager, and Cloud Run, Cloud SQL, Compute Engine,
    Certificate Manager, Cloud DNS and Cloud Scheduler as the graph's
    resource types need them, Cloud Run with any database for its migration
-   job, Cloud Scheduler for a job's schedule (D52), and, with Cloud Run,
+   job, Cloud Scheduler for a job's schedule (D52), Memorystore and
+   Network Connectivity for a memory store's instance and its service
+   connection policy (D75), and, with Cloud Run,
    the Telemetry and Cloud Trace APIs, which a deployable that exports to
    Cloud Trace uses (section 8.11), whether or not this environment
    exports, since another in the same project may. An API
@@ -1578,7 +1615,15 @@ again: each step creates what is missing and leaves the rest.
      `allUsers` and publish the site's files (D55): no narrower predefined
      role creates a bucket and sets its policy, and IAM checks a bucket's
      create on the project, where a condition on the bucket's name cannot
-     narrow it;
+     narrow it. It holds Memorystore's admin role, which creates, updates
+     and deletes a memory store's instance, and Network Connectivity's
+     consumer network admin role, which creates the service connection
+     policy on the environment's network (D75): Memorystore's editor role
+     neither creates nor deletes an instance, and an instance has no IAM
+     policy of its own to narrow a grant to. A memoryStore edge's
+     conditional project grant is one `resourcemanager.projectIamAdmin`
+     already sets, and `compute.networkAdmin` already makes the
+     endpoints' subnet;
    - a `builder` account, `<stack>-builder`, that image builds run as
      (section 11.2): it pushes to the stack's repository, writes its
      logs, and reads the build contexts in the state bucket, under
@@ -1691,6 +1736,8 @@ The target sets defaults that `settings` can override:
 - a bucket with object versioning off (`versioning`) and no lifecycle
   rule, unless `deleteAfterDays` deletes each object that many days after
   it was written (D54);
+- a memory store on one `SHARED_CORE_NANO` node (`nodeType`) with one
+  replica (`replicas`, 0 to 5) (D75);
 - logs to Cloud Logging, and no trace export unless the environment's
   `telemetry` or the deployable's turns it on (section 8.11, D67,
   amended).
@@ -1727,6 +1774,11 @@ messages, so a worker's `cpu` is one or more (D53).
   reaches a bucket's objects through signed URLs. A site's own
   bucket is no Bucket service's, so this rule leaves it to
   `nothing-public-unless-exposed`.
+- `memory-stores-tls-and-iam`: a Memorystore instance has transit
+  encryption `SERVER_AUTHENTICATION` and authorization `IAM_AUTH` (D75),
+  so each client verifies it over TLS and authenticates as its own
+  account. A rate limit's key names a client, so no store goes without
+  either, whatever deployable owns it.
 
 ## 8. Generated build and runtime
 
@@ -2016,27 +2068,30 @@ runs an environment on the `local` target (`internal/stack/local`):
    job runs, and the queue each worker handles (section 8.8).
 4. It stops the sites, the servers and the workers, callers first, then
    the containers, which keep their data for the next run: the databases,
-   and the buckets' objects. `--remove-data` removes the checkout's
+   and the buckets' objects. The memory store's container keeps nothing,
+   since its Valkey runs with no persistence (D75). `--remove-data` removes the checkout's
    containers and their data instead, and no other checkout's;
    `--remove-database`, its name before the storage emulator joined
    Postgres, does the same.
 
 | Stack concept | local |
 | --- | --- |
-| database | one Postgres container per environment and checkout, `superschematic-<stack>-<environment>-<checkout>-postgres`, from `postgres:16-alpine` unless the `postgresImage` value names another; it publishes its port on 127.0.0.1 only and trusts every connection. A database per hosted DB schema, named after it in snake case (`shop_db`). A database whose DB services list sqlite first is instead a SQLite file per hosted DB schema, `databases/<database>.sqlite` under the environment's state directory, on `local.sqlite`, with no container (section 18.13, D64) |
+| database | one Postgres container per environment and checkout, `superschematic-<stack>-<environment>-<checkout>-postgres`, from `postgres:16-alpine` unless the `postgresImage` value names another, or from `pgvector/pgvector:0.8.7-pg16` when a DB service of the stack has a vector column (D84); it publishes its port on 127.0.0.1 only and trusts every connection. A database per hosted DB schema, named after it in snake case (`shop_db`). A database whose DB services list sqlite first is instead a SQLite file per hosted DB schema, `databases/<database>.sqlite` under the environment's state directory, on `local.sqlite`, with no container (section 18.13, D64) |
 | bucket | one fake-gcs-server container per environment and checkout beside Postgres's, `superschematic-<stack>-<environment>-<checkout>-storage`, from `fsouza/fake-gcs-server:1.56.1` unless the `storageImage` value names another, on plain HTTP and publishing its port on 127.0.0.1 only. It keeps its objects in the container's filesystem. A bucket per Bucket service, named after it (`shop-media`), which the provisioner creates through the emulator's JSON API (D54) |
+| memoryStore | one Valkey container per environment and checkout, `superschematic-<stack>-<environment>-<checkout>-memorystore`, on `local.valkey`, from `valkey/valkey:8.0.2-alpine`, the engine version `gcp.memorystore` pins, unless the `memoryStoreImage` value names another. It runs `valkey-server --save "" --appendonly no`, so it keeps nothing, with no TLS and no password, publishes its port on 127.0.0.1 only, and is ready once `valkey-cli ping` answers inside it. Every memoryStore deployable of the environment lowers to the same node, since each store's names start with its own name (D75) |
 | migration | each run plans with `sqlmigrate` from the model the database recorded (`superschematic-migrate status --model`) to the schema's model, and applies the plan with `superschematic-migrate`, expand and contract back to back, since no server of the previous version runs. The runner is on `PATH`, or where `SUPERSCHEMATIC_MIGRATE` says |
 | server | a Go process built with `go build` (with `-mod=mod`) from its entrypoint module at `<output-root>/server/<stack>/<server>` (section 8.1); a TypeScript one, `bun main.ts` in its entrypoint package at the same place, after one `bun install` at the output root, the root of the Bun workspace (section 8.6); or a Rust one, built with `cargo build --release --locked` in its crate at the same place and run from `target/release/<binary>`, the binary its `Cargo.toml` names (D57). Its environment is its bindings, a derived field as one variable per member (section 3.4), and `PORT`, with nothing of the shell's but `PATH`, `HOME` and a few like them, and its OpenTelemetry variables but `OTEL_SERVICE_NAME`, so trace export is off unless the shell names a collector (section 8.11). It is ready once it answers `/readyz`, and each of its lines is printed with its name in front |
 | job | a process built and run as a server in its language is, from its entrypoint at `<output-root>/server/<stack>/<job>`: a Go binary, `bun main.ts` for TypeScript, or for Rust the binary its crate's `Cargo.toml` names, built with `cargo build --release --locked` into the target directory the environment's Rust servers share (D65). It has a server's environment and no `PORT`. It runs on its schedule, in its time zone, while `stack dev` waits, once after the rollout when its settings say `onDeploy`, and once with `superschematic stack run <environment> <job>`, each line of a run's output with its name in front. `jobs/<job>.lock` in the environment's state directory keeps a schedule's runs and `stack run`'s apart (section 8.7) |
 | worker | a process built and run as a server in its language is, Go, TypeScript or Rust (D65), from its entrypoint at `<output-root>/server/<stack>/<worker>`, started in its rollout wave with the servers: the same `local:process/process:Process` node with no port, `kind: worker` and a readiness of `started`, so it is ready once it runs. Its environment is a server's with no `PORT` and with `WORKER_CONCURRENCY`, the concurrency the environment gives it. One process runs whatever its `instances`, none when the environment turns it off; each line is printed with its name in front, and its exit stops the environment, as a server's does (section 8.8) |
 | runner | an engine database's runner (D58), a process built and run as a worker is, from its entrypoint at `<output-root>/server/<stack>/<db>-engine-runner`: the same node with no port, `kind: runner` and a readiness of `started`, its environment its database's connection string alone. It takes the runner's lock on the environment's Postgres as it does on Cloud SQL, so the servers run no runner of their own here either |
-| site | built once, `bun run <build>` in its package at the naming file's `[implementation_paths] site` template after the workspace's install, then served from a file server of the provisioner's own on `http://127.0.0.1:<port>`: each file of its output, its config at `/__superschematic/config.json` with each API it calls at its loopback URL, and its fallback for a path that names no file. HTML files and the config are served `no-cache` and `no-store`, so a reload sees a rebuilt site (D55) |
+| site | built once, `bun run <build>` in its package at the naming file's `[implementation_paths] site` template after the workspace's install, then served from a file server of the provisioner's own on `http://127.0.0.1:<port>`: each file of its output, its config at `/__superschematic/config.json` with each API it calls at its loopback URL, and its fallback for a path that names no file. HTML files and the config are served `no-cache` and `no-store`, so a reload sees a rebuilt site (D55). A site whose config names a dev server (`site.dev`) is not built unless `stack dev --build-sites`: `bun run <command>` runs in its package with `PORT` its dev port (`site.dev.port`, or one derived as a server's), `SUPERSCHEMATIC_SITE_URL` its origin and `<API>_URL` each API's loopback URL, and once it answers on `localhost:<dev port>` a proxy of the provisioner's serves the site's port: the dev server, WebSocket upgrades among its requests, each API under `/api/<service>` with the prefix taken off, and the config with each API at that path on the page's origin. Its exit stops the environment, as a server's does (D82) |
 | sql edge | `postgres://postgres@127.0.0.1:<port>/<database>?sslmode=disable`, or for a SQLite file `sqlite:<absolute path>`, a reference to the file's node's `url` output, which the provisioner resolves from the state directory |
 | bucket edge | the bucket's name and the emulator's `http://127.0.0.1:<port>` as its endpoint, with no credential, which the Go, TypeScript and Rust runtimes' GCS implementations reach alike |
+| memoryStore edge | the store's name, `redis://127.0.0.1:<port>/0` and `auth: none`, from a server, a job, a worker or a deriver in any language. The local target refuses a parameterized environment, so it names no member |
 | http edge | the callee's `http://127.0.0.1:<port>`, with a `signed-token` credential (D37): `iss` and `sub` the caller's deployable, `aud` the callee's, signed with an Ed25519 key pair per calling and called server. A call between two APIs one server serves stays on loopback with no credential |
 | site edge | the server's public address, its loopback URL, which is also its address. The server's CORS field lists the site's origin, `http://127.0.0.1:<port>` (D55) |
 | secret | a line `<Type>.<FIELD>=<value>` in `<schemas-root>/.superschematic/local/<stack>/<environment>/secrets.env` |
-| port | a server's or a site's `port` setting and the `postgresPort` and `storagePort` values, the same in every checkout, else a hash of the stack, the environment and the deployable, shifted within its range by the checkout's offset: 20000 to 22767 for a server or a site, 23000 to 25767 for the storage emulator and 30000 to 32767 for Postgres, the same from run to run |
+| port | a server's or a site's `port` setting and the `postgresPort`, `storagePort` and `memoryStorePort` values, the same in every checkout, else a hash of the stack, the environment and the deployable, shifted within its range by the checkout's offset: 20000 to 22767 for a server or a site, 23000 to 25767 for the storage emulator, 26000 to 28767 for the memory store and 30000 to 32767 for Postgres, the same from run to run |
 | checkout | `<checkout>` is six hexadecimal digits of a SHA-256 of the absolute path of the environment's state directory, `<schemas-root>/.superschematic/local/<stack>/<environment>`, its links resolved. Each container carries it as the label `superschematic.checkout`, beside `superschematic.stack` and `superschematic.environment`, and read as a number modulo 2768 it is the offset that shifts every default port of the environment. So two checkouts of a repository run one environment side by side, one checkout keeps its containers from run to run, and a checkout that moves starts new ones |
 
 Every build of the CLI resolves a local environment in the checkout it
@@ -2450,7 +2505,15 @@ as they are, with no build step (D51). The pieces mirror Go's:
   verifier per `@hmacVerified` provider that refuses every request. An
   implementation that exists and exports no `createManualRoutes` while its
   API declares a manual route fails a stack's build, which says what to
-  add, as one without its `createJobs` does (section 8.7). `deps.db` is a
+  add, as one without its `createJobs` does (section 8.7). An
+  implementation whose `package.json` lacks a package its scaffold would
+  depend on now, such as the database's types after the API gains a
+  worker, draws a warning from the stack's build that names the line to
+  add; the build does not edit the file (D100). The types package
+  re-exports superscalar's `parse<Scalar>Strict` and
+  `normalize<Scalar>Strict` for each of its scalars, so the
+  implementation makes a branded value without depending on superscalar
+  (D25, amended). `deps.db` is a
   `pg` Pool that the runtime's `connectPostgres`
   (`@superschematic/http-runtime/postgres`) opens from the derived
   connection; a TypeScript ORM, when one exists, adds a typed client on
@@ -3516,7 +3579,10 @@ export abstract class FulfilOrders {}
   named, or every dead message with `--all`, ready, due now, with no
   attempts and no claim, its last error kept; and `drop` deletes them,
   `--all` taking `--yes`. A retry or a drop that names a message that is
-  not dead changes none and says what each such ID is. The statements are
+  not dead changes none and says what each such ID is. `stack queue
+  backfill` (D88) enqueues a message for each row each `@enqueueOnChange`
+  of the queue would enqueue one for, with the trigger's insert as a
+  statement per table, and prints how many. The statements are
   `sqlutil.PostgresQueueOperatorStatements`, beside the claims', each
   taking IDs as one text-array parameter. The compiler holds no driver
   (D27), so the command writes them into a queue document
@@ -3546,13 +3612,15 @@ export abstract class FulfilOrders {}
   `superschematic/queue/` a day after it was written; the command sets
   that rule too before it runs. A failed execution reports the runner's
   error from Cloud Logging, as a failed migration does (D68, amended).
+  On cloudflare the runner runs on the deploying machine against the
+  origin of a database on Hyperdrive, as its migrations do (section 18.6,
+  D96).
 
 Not built:
 
 - A list of locations or durations, a `POINT[]` or `INTERVAL[]` column,
   in a queue's message.
 - Claims on SQLite and D1, whose write transaction would claim.
-- `stack queue` on a cloud target other than gcp.
 
 The engine's work-queue behaviors (D16) stay the engine's. A stack does
 not deploy the engine, whose single SQLite writer Cloud Run cannot keep.
@@ -3759,8 +3827,13 @@ config may leave `outputs` out.
   generates no TypeScript SDK has its `baseUrl` alone. When the package
   is missing, the build scaffolds a minimal site there once: an
   `index.html`, a script that loads the config, and a `package.json`
-  that depends on each SDK and whose `build` script bundles them with
-  `bun build`.
+  that depends on each SDK and whose `build` script runs its `typecheck`
+  script, `tsc --noEmit` over the site and the SDKs it imports, before it
+  bundles them with `bun build`, which checks no type (D101). A site
+  whose `package.json` lacks an SDK the config imports, as one scaffolded
+  before its config named the API, draws a warning from each build that
+  names the line to add (D100); one whose build script is still the
+  scaffold's from before D101 draws a warning naming the script to write.
 - **Build.** The deploy runs the site's `build` script after a frozen
   install of the workspace. It digests the output as it digests a server's
   build context (D46): every file in path order, at the epoch, owned by
@@ -3816,7 +3889,36 @@ config may leave `outputs` out.
 - **Local.** `stack dev` builds each site once and serves the built
   directory and its config from a small file server, with the single-page
   fallback and the Cache-Control the gcp target gives each file (below),
-  and prints its URL in the summary (section 8.3).
+  and prints its URL in the summary (section 8.3). A site whose config
+  names a dev server (`site.dev`, D82) runs it instead, behind a proxy on
+  the site's port that serves the dev server and each API the site calls
+  under `/api/<service>`, so the page, its hot reload and its APIs share
+  one origin and a cookie session needs no CORS; the deploy still builds
+  the site.
+- **One origin** (D91). A stack's `origins` (section 4.1) put a site and
+  APIs it calls on one origin in every environment, not under `stack dev`
+  alone. The site's platform, which must serve origins
+  (`PlatformSpec.ServesOrigin`), serves each such API under
+  `/api/<service>` on the site's public address, forwarded to its server
+  with that prefix taken off, the query kept, the browser's `Host` passed
+  on and `X-Forwarded-Prefix` set, as `stack dev`'s proxy forwards it
+  (D82); every other path is the site's. The site edge derives the API's
+  URL there, `ir.SiteOriginURL`, the site's public address and the path,
+  which resolution checks and the site's config hands the page, so the
+  SDK's code is the same in development and on a deploy. The resolved
+  site lists the APIs of its origin (`ResolvedSite.Origin`), and each
+  server of one names the site (`ResolvedDeployable.Origins`). An API of
+  an origin needs no `expose` when its server runs on the site's
+  provider, whose site platform reaches it; on another provider the
+  generic connector derives its public address as the upstream the site
+  forwards to (`SiteEndpoint.Upstream`), so it must be exposed. The API's
+  CORS field leaves the site out. A cookie session then needs no CORS, no
+  trusted origin and no `cookie.domain`: the identity runtime's
+  cross-origin check sees `Sec-Fetch-Site: same-origin`, or an `Origin`
+  whose host is the request's `Host`, and its default `__Host-` cookie is
+  the site's host's alone. `stack dev` serves such a site from its proxy
+  whether it runs a dev server or its build, with the origin's APIs under
+  their paths and every other API the site calls at its own address.
 - **gcp.** The site platform, `gcp.site`, gives each site a bucket of its
   own, `<project>-<site>`, and the publisher puts each build's files in it
   under the hex of their digest, `<hex>/index.html`, with a marker object
@@ -3847,7 +3949,21 @@ config may leave `outputs` out.
   readable by `allUsers`: a backend bucket reads only public objects for a
   browser's unsigned requests, so a project whose organization policy
   forbids public buckets cannot serve a site. With no domain, the site is
-  served over HTTP at its load balancer's address (D55, amended).
+  served over HTTP at its load balancer's address (D55, amended). A site
+  with an origin (D91) routes each API of it on the same load balancer: a
+  serverless network endpoint group of the API's Cloud Run service and a
+  backend service over it without Cloud CDN, so no answer of an API is
+  cached, both in the site's rollout step, and two URL map rules ahead of
+  the files' rule, `fullPathMatch: /api/<service>` and `prefixMatch:
+  /api/<service>/`, with `pathPrefixRewrite: /` and `X-Forwarded-Prefix`
+  added; the fallback then sits on the files' two rules, since the path
+  matcher's would answer an API's 404 with the site's page. The page and
+  its APIs share one host and one certificate. A server that only an
+  origin serves takes load balancers' traffic, with its invoker check
+  off, and has no load balancer of its own; an API of another provider is
+  refused, since a serverless network endpoint group reaches Cloud Run
+  alone. Without a domain the origin is HTTP, where a browser keeps no
+  `Secure` cookie, so a cookie session there needs a domain.
 
 ### 8.11 Trace export
 
@@ -3948,6 +4064,149 @@ or on; the target sets the same variables as `plain_text` bindings, with
 `cloud.provider=cloudflare`, `cloud.platform=cloudflare_workers`,
 `cloud.account.id` and the bundle's digest as `service.version`, and the
 runtime's `./workers-telemetry` reads them (section 18.5, D64, amended).
+
+### 8.12 Memory stores
+
+A memory store is a Redis or Valkey server that the replicas of a stack's
+servers, jobs, workers and derivers share, for data whose loss costs a
+sample, never a record: a wake-up, a counter, a claim (D75). It is a
+service of the core kind `MemoryStore`. An API lists the stores it uses
+in its config, by handle, and may name one of them its `rateLimitStore`:
+
+```ts
+// schemas/services/shop-cache/schema.config.ts
+export default defineConfig({ name: "shop-cache", kind: SchemaKind.MemoryStore, outputs: { types: { [TargetLanguage.Go]: { enabled: true } } } });
+
+// schemas/services/shop-api/schema.config.ts
+export default defineConfig({ name: "shop-api", kind: SchemaKind.API, memoryStores: [ShopCache], rateLimitStore: ShopCache, ... });
+```
+
+The store never holds a fact, the code works without it, and it is no job
+queue. A disabled or unreachable store refuses every call at once, the
+caller takes the path it had before the store existed, and readiness
+never waits for it.
+
+- **Kind.** A MemoryStore schema declares only channels and keys:
+  `@channel` or `@key` from `@superschematic/memory-store` on an abstract
+  class, which no type library emits. The class's fields, in order, are
+  the declaration's parts, each a required scalar whose wire form is a
+  string, an integer, a boolean or an enum value
+  (`ir.MemoryStorePart.Format`). A channel's `payload` is an object type
+  of a dependency of the store's schema, never `@strictJSON`; one without
+  is a signal. A key is a `counter` or a `claim` and sets exactly one of
+  `ttlSeconds` and `maxTtlSeconds`, 1 to 604800. The IR records them as
+  `Schema.MemoryStoreDeclarations`, sorted by name, and the core adds the
+  reserved `rate-limit` counter to every store: parts `service`,
+  `operation`, `window` and `client`, `maxTtlSeconds` 86405. On an API,
+  `memoryStores` is `Schema.MemoryStores`, the `rateLimitStore` among
+  them, and `rateLimitStore` is `Schema.RateLimitStore`. The outputs are
+  `types` per language (`go`, `typescript`, `rust`); any other output key
+  is refused.
+- **Names.** A declaration's name is its class's in kebab case, or the
+  decorator's `name`. A name and each part's value at run time is one
+  segment: 1 to 128 bytes, without `:`, `*`, `?`, `[`, `]`, `@`, `\` or a
+  control character, refused and never escaped. A full name is
+  `<store>:<declaration>:<part>...`, and `<store>@<member>:...` in a
+  member of a parameterized environment. A part's wire string is the
+  value's string in the API's JSON: a UUID's compact base62 form, an
+  integer in base 10, `true` or `false`, an enum's wire value.
+  `runtime/http/testdata/memorystore_parity.json` holds the rule's
+  vectors.
+- **Build.** A MemoryStore builds before each API that lists it, since the
+  API's server imports its definitions. Its build writes, per language its
+  outputs name, a package of definitions under `types/<language>/<store>`:
+  Go's module is the service's types module, package `shopcache`, Go
+  `shopcache.ProductChanged.For(id)`; TypeScript's is the service's types
+  package, `productChanged.for(id)`; Rust's the service's types crate,
+  `PRODUCT_CHANGED.for_(&id)`. A key with `maxTtlSeconds` has `ForTTL`,
+  `forTTL` or `for_ttl`, which refuses a TTL above the maximum. A
+  channel's decoder keeps only the members its payload declares, at every
+  depth. Beside them, `memorystore/<store>/inventory.json` lists each
+  declaration's symbol, kind, name pattern, parts, payload or signal, TTL
+  and owning file. An API's implementation depends on the definitions of
+  each store it lists: Go's server module requires them, and the scaffold
+  of a TypeScript implementation's `package.json` and of a Rust one's
+  `Cargo.toml` names them, so `import { productChanged } from
+  '@schemas/shop-cache-types'` and `use schemas_shop_cache_types::PRODUCT_CHANGED`
+  need no edit to a manifest.
+- **Deployable.** Each MemoryStore service an API of the stack lists is a
+  deployable of kind `memoryStore`, named after its service, which a
+  settings element names by its handle: `{ of: ShopCache, enabled?,
+  platform? }` and the target's `memoryStore` settings. It takes no `env`
+  and is never exposed, and its resources land in the infrastructure
+  step. Each server, job, worker and deriver of an API that lists it gets
+  a `memoryStore` edge to it; a server's stores are the union of its
+  APIs' (`ResolvedDeployable.MemoryStores`).
+- **Turned off.** `settings: [{ of: ShopCache, enabled: false }]` takes
+  the store out of the environment's deployables before any is placed:
+  no platform, no resource, no edge and no field, so each workload opens
+  it disabled. `environment.json` lists it under `disabled`, with its
+  name, kind, services and the environment that turned it off. A store
+  that is off and names a platform or settings is refused. A target with
+  no memoryStore platform refuses a store that is on, and its refusal
+  names `enabled: false`.
+- **Derived value.** A memoryStore edge derives an
+  `ir.MemoryStoreConnection`: `store`, `url` (`redis://` or `rediss://`),
+  `ca` with `rediss://` only, `auth` (`iam`, which needs `rediss://`, or
+  `none`) and `member`. It holds no credential. The field is
+  `{SERVICE}_MEMORY_STORE` (`[derived_fields] memory_store`), one variable
+  per member, `SHOP_CACHE_MEMORY_STORE_STORE`, `_URL`, `_CA`, `_AUTH` and
+  `_MEMBER`, as every derived field's (section 3.4). None set is a
+  disabled store. Go's `stackconfig.LoadMemoryStore`, TypeScript's
+  `loadMemoryStore` and Rust's `stackconfig::load_memory_store` read it,
+  held to one encoding by `stackconfig_parity.json`; each refuses a URL
+  that holds a user or a password, and a field that is set and malformed
+  fails the config's load.
+- **Code.** `Deps` gains a field per listed store: Go's
+  `memorystore.Store` (`runtime/http/go/memorystore`), TypeScript's
+  `MemoryStore`, Rust's `Arc<dyn MemoryStore>`. The store has `Name`,
+  `Available`, `Publish`, `Subscribe`, `Increment`, `Count`, `Claim`,
+  `Delete` and `Close`, each by a `Ref` the definitions build. While it is
+  unavailable each call returns `ErrUnavailable`
+  (`MemoryStoreUnavailableError`, `MemoryStoreError::Unavailable`) at
+  once, except a subscribe, which is held until the store reconnects;
+  only a disabled or closed store refuses it. Each runtime has `Disabled` and an in-process store for tests.
+- **Redis.** Each generated entrypoint opens each store once, hands it to
+  every API that lists it, and closes it on shutdown; a field that is
+  unset, or that the client cannot use, opens a disabled store after one
+  log line. Only a workload whose APIs list a store links a client:
+  go-redis in the `memorystores.go` the build writes beside `main.go`,
+  `@redis/client` from the TypeScript runtime's `./redis` entry, and the
+  Rust runtime's `memorystore-redis` feature over the `redis` crate. Open
+  never fails for a server that is down: it pings once within a second,
+  then pings every 2 seconds while up and backs off from 100 ms to 5
+  seconds, jittered, while down. A call has 500 ms and one retry. The
+  client sends no `CLIENT` command and asks for no maintenance
+  notifications. `rediss://` is TLS 1.2 or later against the field's CA;
+  `auth: iam` sends an access token for the workload's account from the
+  metadata server as the password of user `default` on each new
+  connection. A process holds one subscriber connection per store, whose
+  one subscription per channel wakes every local handler. A message over
+  64 KiB is refused before it is sent, and no log line holds a URL, a
+  token or a part. `Increment` is `INCR` and `PEXPIRE <ttl> NX` in one
+  transaction, `Count` a `GET`, `Claim` `SET <name> <token> PX <ttl> NX
+  GET`, true when nothing was there or the token read back is the call's
+  own, and `Delete` a `DEL`.
+- **Rate limit.** An API whose config names a `rateLimitStore` counts
+  each `@rateLimit` route there, by httprate's sliding window in every
+  language: allowed when `round(estimate) + 1 <= limit`, then an
+  increment of the current window's counter with a TTL of two windows and
+  five seconds; refused with `Retry-After` the window's length. The client
+  part is the hex SHA-256 of the limiter's client key. While the store is
+  unavailable, or a call fails, the route counts in process. Go runs the
+  runtime's own limiter, which holds no lock across its calls to the
+  store, and httprate's in-process limiter when it falls back.
+- **Local.** `stack dev` runs one Valkey container per environment and
+  checkout, with no persistence and no TLS (section 8.3).
+- **gcp.** A store is a Memorystore for Valkey instance on
+  `gcp.memorystore`, reached over Private Service Connect as the
+  workload's own account (section 7.2). A member of a parameterized
+  environment shares its parent's instance; its names carry its own name,
+  and its destroy deletes nothing.
+- **cloudflare.** The target has no memoryStore platform, so it refuses a
+  store that is on (section 18.15).
+- **Engine.** The engine does not use the store: its runner and sweepers
+  keep the database's polls and locks.
 
 
 ## 9. End-user auth and service auth
@@ -4612,8 +4871,8 @@ The core adds a `stack` command group: `init`, `bootstrap`, `secrets set`,
 `queue` and `unlock`. Targets and provisioners plug into it; they add no commands of
 their own. `stack dev` runs a local environment (section 8.3), `stack run`
 runs a job once on demand, locally or in the cloud (section 8.7), and
-`stack queue` lists, retries and drops a queue's dead messages, locally or
-on gcp (section 8.8), in `cli/stack_queue.go`.
+`stack queue` lists, retries and drops a queue's dead messages, locally,
+on gcp or on cloudflare (section 8.8), in `cli/stack_queue.go`.
 
 `stack init [<services-root>]` starts a stack in a tree that already has
 API services (D59), in `cli/stack_init.go` over `internal/stackinit`. It
@@ -4722,7 +4981,9 @@ eight seams on its `TargetSpec` (D45, D46, D47, D52, D68):
   document where `superschematic-migrate` reaches the database and returns
   its result, which it keeps out of every log (section 8.8). Without it,
   `stack queue` refuses the target's environments. On gcp, an execution
-  of the migration job whose result comes back through the state bucket.
+  of the migration job whose result comes back through the state bucket;
+  on cloudflare, the runner on the deploying machine against a Hyperdrive
+  database's origin, whose result comes back on its stdout (D96).
 
 A target with none of them resolves and does not deploy. Platform
 credentials, such as a DNS platform's API token, come from one function,
@@ -5562,6 +5823,8 @@ Not kept:
 platform (section 6.9) (D64):
 - the target;
 - its Workers, Cron, D1, R2 and site platforms and their connectors;
+- its Hyperdrive platform, for a Postgres outside Cloudflare, and its
+  drainer platform, for queue workers, and their connectors (D92);
 - the policy rules;
 - the pinned schemas at pulumi-cloudflare 6.22.0;
 - bootstrap, with the R2 state bucket, the Secrets Store and the CI
@@ -5620,8 +5883,9 @@ declare module "@superschematic/stack" {
     cloudflare: {
       values: { accountId: string; workersSubdomain?: string; secretsStoreId?: string; telemetry?: { endpoint: string; sampleRatio?: number } };
       server: { logs?: boolean; compatibilityDate?: string; cpuMs?: number; placement?: "smart"; telemetry?: boolean };
-      database: { locationHint?: "wnam" | "enam" | "weur" | "eeur" | "apac" | "oc"; jurisdiction?: "eu" | "fedramp" | "us" };
+      database: { locationHint?: "wnam" | "enam" | "weur" | "eeur" | "apac" | "oc"; jurisdiction?: "eu" | "fedramp" | "us" } | { hyperdrive?: string; caching?: boolean };
       job: { cpuMs?: number; logs?: boolean; telemetry?: boolean };
+      worker: { logs?: boolean; cpuMs?: number; telemetry?: boolean; drainSeconds?: number };
       site: {};
       bucket: { locationHint?: "wnam" | "enam" | "weur" | "eeur" | "apac" | "oc"; storageClass?: "Standard" | "InfrequentAccess"; deleteAfterDays?: number; jurisdiction?: "eu" | "fedramp" };
     };
@@ -5629,19 +5893,22 @@ declare module "@superschematic/stack" {
 }
 ```
 
-There is no `worker` key: resolution refuses the kind on this target,
-saying why and where a worker runs (`TargetSpec.Unplaced`, section 18.15).
-Nor is there an `app` key, for the same reason (D78).
+A database's settings are D1's or Hyperdrive's, whichever platform its
+first dialect places it on (`TargetSpec.DatabasePlatforms`, section 18.6),
+and a worker's are the drainer's (section 18.9) (D92). There is no `app`
+key: resolution refuses the kind on this target, saying why and where an
+app runs (`TargetSpec.Unplaced`, section 18.15, D78).
 
 ### 18.2 Realization
 
 | Stack concept | cloudflare |
 | --- | --- |
-| server | A `cloudflare:index/worker:Worker` (`<deployable>.worker`) named `<stack>-<env>-<deployable>`, as every name in the account is (below), in infrastructure, with Workers Logs on unless `logs: false` (`observability.enabled` and `observability.logs`), workers.dev on only for an exposed server without a domain, and previews off (`subdomain.enabled`, `subdomain.previewsEnabled`). Each rollout makes a `workerVersion` (`<deployable>.version`, on the worker's `id`) and a `workersDeployment` (`<deployable>.deployment`) sending 100% of traffic to it. The version holds the server's bundle (`main.js`, `application/javascript+module`; `main.js.map`, `application/source-map`; and `superscalar_wasm_bg.wasm`, `application/wasm`, the name superscalar's `workerd` build imports it by; each a `contentFile` under `artifacts/<server>/{bundle-digest}/` with its pinned `contentSha256`), `mainModule: main.js`, the compatibility date the extension pins (`cloudflare.CompatibilityDate`, 2026-09-15) unless set, `compatibilityFlags: ["nodejs_als"]` (section 18.5), `limits.cpuMs` and `placement.mode` from the settings, and the server's config as bindings. Its address is `https://<name>`, the host a service binding's requests carry. TypeScript only, and no API over the user model; a name over 63 characters, or under a parameter 63 before the parameter's value, is refused as unrealizable, the refusal listing each part of the name with its length and naming the longest to shorten. |
-| config | Each literal, parameter and derived variable is a `plain_text` binding named as the variable. A derived member flagged secret is a `secret_text` binding referencing the output that holds it. A `Secret<T>` field is a `secrets_store_secret` binding named after the field, with the environment's `secretsStoreId` and its secret's `SecretName`; without a `secretsStoreId` the server is refused, saying to run bootstrap. A D1 database, an R2 bucket or a callee Worker is a binding named after the derived field, which the value names: `d1: {binding, database}` a `d1` binding of the database's id, `binding: {name, worker}` a `service` binding to the Worker, and a bucket's `binding`, a name, an `r2_bucket` binding of the bucket its `name` names. Bindings are sorted by name, and two of one name are refused. |
-| database | A `d1Database` per hosted DB schema, `<stack>-<env>-<db>`, with a suffix under a parameter, and `sqlite` dialect: the node `<database>.d1.<db>`, in infrastructure. `locationHint` and `jurisdiction` become `primaryLocationHint` and `jurisdiction`; D1 ignores the hint under a jurisdiction, so both together are refused. |
-| sql edge | `cloudflare.workers-d1` derives `d1: { binding: "<FIELD>", database: <uuid output> }`, the uuid an output of the database's node. The platform writes `{type: "d1", name: <binding>, id: <database>}` beside the field's two `plain_text` variables, and the binding is the grant: D1 has no roles, so a Worker bound to a database reads and writes all of it, and the edge has no node. |
-| migration | The runner on the deploying machine, against `d1://<accountId>/<uuid>`, each uuid read from the applied graph's outputs, with the run's token and no privileges (section 18.6). |
+| server | A `cloudflare:index/worker:Worker` (`<deployable>.worker`) named `<stack>-<env>-<deployable>`, as every name in the account is (below), in infrastructure, with Workers Logs on unless `logs: false` (`observability.enabled` and `observability.logs`), workers.dev on only for an exposed server without a domain, and previews off (`subdomain.enabled`, `subdomain.previewsEnabled`). Each rollout makes a `workerVersion` (`<deployable>.version`, on the worker's `id`) and a `workersDeployment` (`<deployable>.deployment`) sending 100% of traffic to it. The version holds the server's bundle (`main.js`, `application/javascript+module`; `main.js.map`, `application/source-map`; and `superscalar_wasm_bg.wasm`, `application/wasm`, the name superscalar's `workerd` build imports it by; each a `contentFile` under `artifacts/<server>/{bundle-digest}/` with its pinned `contentSha256`), `mainModule: main.js`, the compatibility date the extension pins (`cloudflare.CompatibilityDate`, 2026-09-15) unless set, `compatibilityFlags: ["nodejs_als"]` (section 18.5), `limits.cpuMs` and `placement.mode` from the settings, and the server's config as bindings. Its address is `https://<name>`, the host a service binding's requests carry. TypeScript only, and an API over the user model only when its authDb is on Hyperdrive, where its identity store runs (D92); a name over 63 characters, or under a parameter 63 before the parameter's value, is refused as unrealizable, the refusal listing each part of the name with its length and naming the longest to shorten. |
+| config | Each literal, parameter and derived variable is a `plain_text` binding named as the variable. A derived member flagged secret is a `secret_text` binding referencing the output that holds it. A `Secret<T>` field is a `secrets_store_secret` binding named after the field, with the environment's `secretsStoreId` and its secret's `SecretName`; without a `secretsStoreId` the server is refused, saying to run bootstrap. A D1 database, a Hyperdrive config, an R2 bucket or a callee Worker is a binding named after the derived field, which the value names: `d1: {binding, database}` a `d1` binding of the database's id, `hyperdrive: {binding, config}` a `hyperdrive` binding of the config's id (D92), `binding: {name, worker}` a `service` binding to the Worker, and a bucket's `binding`, a name, an `r2_bucket` binding of the bucket its `name` names. Bindings are sorted by name, and two of one name are refused. |
+| database | A `d1Database` per hosted DB schema, `<stack>-<env>-<db>`, with a suffix under a parameter, and `sqlite` dialect: the node `<database>.d1.<db>`, in infrastructure. `locationHint` and `jurisdiction` become `primaryLocationHint` and `jurisdiction`; D1 ignores the hint under a jurisdiction, so both together are refused. A database whose DB services list postgres first is on `cloudflare.hyperdrive` instead: a database of a Postgres outside Cloudflare, no node, reached through the Hyperdrive config whose id its settings name (section 18.6, D92). |
+| sql edge | `cloudflare.workers-d1` derives `d1: { binding: "<FIELD>", database: <uuid output> }`, the uuid an output of the database's node. The platform writes `{type: "d1", name: <binding>, id: <database>}` beside the field's two `plain_text` variables, and the binding is the grant: D1 has no roles, so a Worker bound to a database reads and writes all of it, and the edge has no node. To a database on Hyperdrive, `cloudflare.workers-hyperdrive`, `cloudflare.cron-hyperdrive` and `cloudflare.drainer-hyperdrive` derive `hyperdrive: { binding: "<FIELD>", config: <the settings' id> }`, and the Worker connects as the config's user. |
+| migration | The runner on the deploying machine, against `d1://<accountId>/<uuid>`, each uuid read from the applied graph's outputs, with the run's token and no privileges (section 18.6). A database on Hyperdrive is migrated on its origin, the connection string in the shell's `HYPERDRIVE_ORIGIN_<DB>`, once the runner has read the config and found it names that database (D92). |
+| queue operation | `stack queue` on a database on Hyperdrive: the runner on the deploying machine, `superschematic-migrate queue`, on its origin, with the connection string and the check a migration has (section 18.6, D96). |
 | http edge | A service binding `{type: "service", name: <binding>, service: <callee's Worker>}`, and D37's signed token with the edge's key, the generic connector's `tls:index/privateKey:PrivateKey` node `<caller>.calls.<callee>.key` (D63), in infrastructure. The value is `{url: "https://<callee's Worker>", binding: {name, worker}, credential: {source: signed-token, issuer, audience, key}}`: the binding's name is the derived field's, its worker the output `name` of the callee's `worker` node, the issuer the caller's deployable, the audience the callee's, and the key the node's `privateKeyPemPkcs8`, a secret member. The callee's callers field gets the edge's issuer: the caller, the node's `publicKeyPem`, EdDSA, at most 300 seconds. A call between two APIs one server serves derives the server's own address alone (section 18.10). |
 | internal server | No workers.dev, no custom domain and no route: only a service binding reaches it. |
 | bucket | An `r2Bucket` (`<bucket>.bucket`, in infrastructure), `<stack>-<env>-<bucket>`, with a suffix under a parameter, its `location` the settings' `locationHint`, its `storageClass` theirs, and its `jurisdiction`, `eu` or `fedramp`, theirs, which a location hint beside it is refused with. `deleteAfterDays` becomes an `r2BucketLifecycle` (`<bucket>.lifecycle`) whose one rule deletes each object that many days after it was written. Its address is the node's output `name`. A name R2 refuses, outside 3 to 63 lowercase letters, digits and hyphens, and the name of either bucket bootstrap makes, are refused as unrealizable. |
@@ -5649,6 +5916,7 @@ Nor is there an `app` key, for the same reason (D78).
 | site | A Worker of `cloudflare.sites` per site, named as a server's is, workers.dev on without a domain, whose version holds the site's files as `assets.directory` `artifacts/<site>/{site-digest}` with `htmlHandling` and `notFoundHandling` `none` and `runWorkerFirst: ["/__superschematic/*"]`; the script the extension embeds, `site.js`, as its one module, inline (`contentBase64`); an `assets` binding, `ASSETS`; `SITE_CONFIG`, a `plain_text` binding composed from the site's bindings; and `SITE_FALLBACK` when it has one (section 18.8). Its address and public address are both `https://<label>.<domain>`, the label the site's name, or `https://<name>.<workersSubdomain>.workers.dev`, the name its Worker's. |
 | site edge | `cloudflare.site-workers` derives the server's public address, which goes in the site's config, and the core puts the site's origin in the server's CORS field (section 8.10). |
 | job | A Worker of `cloudflare.cron` per job, named as a server's is, workers.dev off, whose version runs the job's bundle, built from `scheduled.ts`, with `limits.cpuMs` from `cpuMs`, under a `workersCronTrigger` (`<job>.schedule`) on the job's schedule in UTC once the deployment is there, and a `workflow` (`<job>.workflow`) named as the Worker, of the class `JobRun` its bundle exports, through which the job runner runs it once; the version binds `SUPERSCHEMATIC_BUNDLE` to its bundle's digest. A job with no schedule has a Worker, its Workflow and no trigger. Its edges are its API's, through `cloudflare.cron-workers`, `cloudflare.cron-r2` and `cloudflare.cron-d1`, whose values are the server's connectors': a job calls even an API it serves through a service binding, and its Worker depends on each Worker it binds. TypeScript only; a schedule in another time zone, and a timeout times tries over 15 minutes, are refused as unrealizable (section 18.9). |
+| worker | A Worker of `cloudflare.drainer` per worker, named as a server's is, workers.dev off, whose version runs the worker's bundle, built from `drain.ts`, with `WORKER_CONCURRENCY` and `WORKER_DRAIN_SECONDS` as `plain_text` bindings, under a `workersCronTrigger` (`<worker>.schedule`) firing every minute; each firing claims the worker's queue on Postgres through Hyperdrive for the window. Its edges are its API's, through `cloudflare.drainer-workers`, `cloudflare.drainer-r2` and `cloudflare.drainer-hyperdrive`. TypeScript only; more than one instance, `maxInstances`, and a window and grace over 15 minutes are refused as unrealizable (section 18.9, D92). |
 | secret | A Secrets Store secret `<Stack>-<Environment>-<Type>-<FIELD>`, written by `stack secrets set`. A member of a parameterized environment reads its environment's. |
 | exposure | A `workersCustomDomain` (`<deployable>.domain`) for `<label>.<domain>`, the label the deployable's name with a suffix under a parameter, in the exposure step; Cloudflare writes its DNS record and certificate. Without a domain, the public address is `https://<name>.<workersSubdomain>.workers.dev`, the Worker's name, and an environment that exposes a server without a domain and records no `workersSubdomain` is refused, saying to run bootstrap. |
 | parameter | Names are suffixed with the parameter's value. Each member gets its own D1 database and R2 bucket, and the target's `DestroyPreparer` (`TargetSpec.PreDestroy`) empties the bucket before the member's destroy. Secrets are the environment's. |
@@ -6112,9 +6380,9 @@ A D1 binding provides `SqlDatabase` on Workers, and `openSqlite(path)` over
 each sqlite-first database with `d1Database`: the d1 binding its field's
 `d1.binding` names, through `binding(env, name, 'd1')`, refusing a
 connection string or a Cloud SQL configuration, which a Worker cannot
-reach; `/readyz` pings each with `./d1`'s `ping`. The generator refuses a
-Workers server whose API's database lists postgres first, which no D1
-binding reaches. The generated `main.ts`, and a
+reach; `/readyz` pings each with `./d1`'s `ping`. A Workers server whose
+API's database lists postgres first opens it through a Hyperdrive binding
+(below, D92). The generated `main.ts`, and a
 job's, open a sqlite-first database with `openDatabase`: it reads the
 field's `url`, a `sqlite:` URL, takes the file's path from it with
 `sqliteFile` (`./sqlite`), and opens it at once. It refuses a D1 binding,
@@ -6153,8 +6421,9 @@ A target may name a database platform per dialect,
 places, and whose DB services all list one dialect first, goes on that
 dialect's platform; any other goes on the target's database platform.
 `local` names `local.sqlite` for `sqlite` (section 18.13). `cloudflare`
-places every database on `cloudflare.d1`, whose one dialect is `sqlite`,
-so a database whose DB service lists no sqlite is refused there.
+names `cloudflare.hyperdrive` for `postgres` (below, D92) and places every
+other database on `cloudflare.d1`, whose one dialect is `sqlite`, so a
+database there whose DB service lists no sqlite is refused.
 `Finalize` checks that each platform named for a dialect runs it.
 
 On D1 each hosted DB schema is a `d1Database` node, `<database>.d1.<db>`,
@@ -6206,6 +6475,73 @@ id in the environment's values, the token and passphrase of section 18.3
 Write`, `D1 Write`, `Workers R2 Storage Write`, `Secrets Store Write` and
 `Account API Tokens Write`), `superschematic-migrate` on `PATH` or at
 `SUPERSCHEMATIC_MIGRATE`, the Pulumi CLI the provisioner pins, and Bun.
+
+**Databases on Hyperdrive (D92).** A database whose DB services list
+postgres first is on `cloudflare.hyperdrive`: a database of a Postgres
+outside Cloudflare, Neon, Supabase, Cloud SQL or the person's own, which
+Workers reach through a Hyperdrive config, a pool Cloudflare keeps near
+the database. The config holds the origin's password, which Cloudflare
+never returns, so it lives outside the graph as a secret's value does: the
+person makes it once per environment, caching off, and names its id in the
+database's settings, `hyperdrive`; `caching: true` allows a config that
+caches reads. The platform lowers to no node, refuses a missing id with
+the `wrangler hyperdrive create` that makes one, a parameterized
+environment, whose members would share the origin, and a database that
+hosts two DB services, which one config cannot reach.
+
+A sql edge from a server, a job or a worker derives
+`hyperdrive: {binding, config}` (`ir.HyperdriveConnection`), the variables
+`<FIELD>_HYPERDRIVE_BINDING` and `<FIELD>_HYPERDRIVE_CONFIG`, which only a
+Worker reads (Go and Rust refuse them), and the version's `hyperdrive`
+binding of the config's id. The API's `Deps.db` is a `pg` Pool and its
+`Deps.orm` the generated repositories, unchanged: the runtime's
+`./hyperdrive` entry gives a `HyperdrivePool`, whose queries run on a pool
+of the current scope, which `withHyperdrive` opens per request and per
+firing over the binding's `connectionString` and ends after it, since a
+Worker may not use one request's socket in another. The bundle keeps
+node-postgres's Node modules as `node:` imports, which workerd gives with
+no flag from 2026-08-04; a version under an earlier compatibility date
+names `nodejs_compat`.
+
+The migration runner migrates the origin from the deploying machine. It
+reads the connection string from the shell's `HYPERDRIVE_ORIGIN_<DB>`,
+which `PrepareMigrations` refuses a run without, reads the config
+(`GET /accounts/<id>/hyperdrive/configs/<id>`, `Hyperdrive Read`), and
+refuses an origin whose host, port, database or user is not the config's,
+and a config that caches without `caching: true`. It writes each plan to a
+file readable by its owner alone and runs `superschematic-migrate apply
+--plan <file> --phase <phase>`, the connection string in `DATABASE_URL`
+alone, so no file and no argument holds the password. The plan creates
+pgvector's extension for a vector column (D84), as the origin's user,
+which Neon, Supabase and Cloud SQL let a database's owner do. The CI
+identity names `env.HYPERDRIVE_ORIGIN_<DB>`, which the deploy job reads
+from the secret `HYPERDRIVE_ORIGIN_<DB>_<STACK>_<ENV>`, and `stack
+bootstrap --github` sets that secret from the shell. The deployer's token
+holds `Hyperdrive Read`. `stack destroy` leaves the config and the origin.
+
+The target's queue runner (`TargetSpec.Queues`, section 8.8, D96) reaches
+the origin the same way, through the same code (`reachOrigin`): it reads
+the connection string from `HYPERDRIVE_ORIGIN_<DB>`, refusing a shell
+without it with the variable's name and the config whose host, port,
+database and user it must match, reads the config with the shell's token
+and refuses an origin that is not the config's, writes the queue document
+to a file readable by its owner alone and runs `superschematic-migrate
+queue --queue <file>`, the connection string in `DATABASE_URL` alone. The
+runner prints the result, which the command reads and no log holds; the
+log names the database, host, port and user. It does not refuse a config
+that caches reads, which the operation does not read through. A queue on
+D1 is refused: no worker claims there, and the core refuses a queue on
+SQLite before it reaches the runner.
+
+An API over the user model whose authDb is on Hyperdrive is served on
+Workers (`PlatformSpec.IdentityDatabases`, beside `NoIdentity`, which
+still refuses one whose authDb is elsewhere): `fetch.ts` builds its
+identity store over the database's pool, so it runs per request as the
+ORM does, and reads its identity config from the string bindings. A
+Worker's `node:crypto` has no argon2, so the runtime's `password.ts`
+takes its own argon2id (`identity/argon2.ts`), in TypeScript, which writes
+`node:crypto`'s keys for the same inputs; at the default cost it takes
+about 120 ms of CPU and 19 MiB, which it keeps for the next hash.
 
 ### 18.7 Buckets on R2
 
@@ -6284,8 +6620,36 @@ assets. Its version holds:
   every release, inline as the module's `contentBase64`: a few hundred
   bytes need no placement beside the program.
 
+A site with an origin (D91) also holds:
+- `SITE_ORIGIN`, a `plain_text` binding with a JSON list of the APIs of
+  its origin, each with its path and either `binding`, the name of a
+  service binding to the API's Worker, `SITE_API_<API>`, which the
+  version holds beside it and the site edge derives, or, for a server of
+  another provider, `url`, its public address;
+- each API's path, and every path under it, in `runWorkerFirst`;
+- a `worker` node that depends on each Worker it binds, so a destroy
+  removes the site first.
+
+For a request under an API's path, with any method, the script forwards
+it, the path with the prefix taken off and the query kept, through the
+binding on a URL with the browser's host, or to the public address, with
+`X-Forwarded-Host`, `-Proto`, `-Prefix` and `-For` set, and puts the
+prefix back on a redirect within the API's routes, as `stack dev`'s proxy
+does. The API's Worker needs no workers.dev or custom domain of its own:
+the binding admits the site's Worker, which carries the browser's request
+and no service credential. A Workers route on the zone was not taken: it
+needs a zone, so no workers.dev, and the API would see its prefix.
+
+An API over the user model whose authDb is on Hyperdrive (section 18.6,
+D92) signs the page in on the site's origin with the identity runtime's
+defaults: its Worker sees the site's host, so the cross-origin check
+passes a same-origin login, and the `__Host-session` cookie, with no
+`Domain`, is the site's host's alone; no CORS, trusted origin or cookie
+domain is set. `TestTypeScriptHyperdriveUnderWorkerd` runs the site's
+script in front of such an API under the pinned workerd.
+
 Cloudflare runs the script only when no file matches, and first under
-`/__superschematic/`. For a GET or a HEAD it answers
+`/__superschematic/` and each API's path. For a GET or a HEAD it answers
 `/__superschematic/config.json` with `SITE_CONFIG`, `application/json`
 and `no-store`; a directory with its `index.html`, which it asks `ASSETS`
 for, since `htmlHandling: "none"` serves `/` nothing; and any other path
@@ -6398,6 +6762,23 @@ A Workflow runs the Worker's current deployment, so a run takes the
 version the last rollout deployed; the bundle check makes a run that
 would take another one fail rather than run it.
 
+**Queue workers on Cron Triggers (D92).** A worker's claim loop runs as
+long as its process (D53), and a Worker runs per request or per firing, so
+`cloudflare.drainer` runs a TypeScript worker as a Worker that a Cron
+Trigger fires every minute. Its bundle is built from the generated
+`drain.ts`, whose `scheduled` handler builds the API's `Deps`, the
+database through Hyperdrive, and runs the runtime's `runWorker` over
+`postgresQueue` for a window, `WORKER_DRAIN_SECONDS`, 50 seconds unless
+the worker's `drainSeconds` says otherwise, then stops as a worker stops
+at SIGTERM: it claims no more, lets its running handlers finish within the
+`@worker`'s grace and gives back the rest. The queue is its Postgres table,
+so the outbox, keys, serialization, backoff, retention and dead messages
+are D53's, D68's and D80's. `WORKER_CONCURRENCY` is how many messages a
+firing handles at a time. The platform refuses more than one instance, an
+instance range, and a window and grace over 15 minutes; `instances: 0`
+leaves the Worker with no trigger. A worker whose queue is on D1 is
+refused (`NoQueueClaims`), and so is a Go or Rust worker.
+
 ### 18.10 Service auth on Workers
 
 Admission is the service binding: a Worker that is not exposed has no
@@ -6443,8 +6824,7 @@ records no `workersSubdomain` is refused until bootstrap records it.
 
 The pin grows by `worker`, `workerVersion`, `workersDeployment`,
 `workersCustomDomain`, `workersCronTrigger`, `d1Database`, `r2Bucket`,
-`r2BucketLifecycle` and `accountToken`, and later `hyperdriveConfig`,
-written by `go run ./internal/tools/providerschemas` in
+`r2BucketLifecycle` and `accountToken`, written by `go run ./internal/tools/providerschemas` in
 `extensions/cloudflare`. `accountToken` is pinned, for bootstrap's graph
 and the bucket edges' tokens; each platform pins its own types as it
 comes, and the R2 platform has pinned `r2Bucket` and `r2BucketLifecycle`.
@@ -6452,7 +6832,9 @@ pulumi-cloudflare's bridge
 metadata lists a single nested attribute's list fields with no element,
 which `pintool` reads, so the token's `condition.requestIp.ins` pins as
 Terraform's `in`. The `tls` provider's pin comes with the generic
-connector. No provider node exists: every node names `accountId`, and the
+connector. `hyperdriveConfig` is not pinned: a Hyperdrive config is the
+person's, outside the graph, and a version's `hyperdrive` binding is
+`workerVersion`'s (D92). No provider node exists: every node names `accountId`, and the
 provider reads the token from the run's environment.
 
 ### 18.13 Local development
@@ -6503,22 +6885,34 @@ runtime tests run fixture bundles under the `workerd` binary.
 
 ### 18.15 Not built
 
-- Queue workers. A worker's claim loop runs as long as its process, on
-  Postgres or a SQLite file (D53, amended), and a Worker runs per request
-  or per firing: resolution refuses a worker on this target saying so,
-  and that gcp's `gcp.cloudrunworker` or `stack dev` runs one
-  (`TargetSpec.Unplaced`, D64, amended). `cloudflare.d1` also refuses a
-  worker of a queue on it (`NoQueueClaims`, D53, amended). A Worker or a
-  Cron job enqueues on D1 with `enqueueStatement` in its batch.
+- Queue workers on D1. `cloudflare.d1` refuses a worker of a queue on it
+  (`NoQueueClaims`, D53, amended); a Worker or a Cron job enqueues on D1
+  with `enqueueStatement` in its batch. A worker of a Postgres queue runs
+  on `cloudflare.drainer` (section 18.9, D92), woken by its Cron Trigger
+  alone, at most once a minute.
 - Apps (D78). An app is the project's own Rust program, which serves
   until it is stopped: resolution refuses an app the environment runs,
   saying that gcp's `gcp.cloudrunapp` or `stack dev` runs one
   (`TargetSpec.Unplaced`), and leaves out an app the environment turns
   off.
 - A collector header from a secret for trace export, as on gcp.
-- Hyperdrive to Cloud SQL, and any mixing of targets in one environment.
-- An identity API on Workers, whose argon2 is `node:crypto`'s (D50), and
-  an identity store over SQLite for a TypeScript API.
+- Hyperdrive to a Cloud SQL database the gcp target places, and any
+  mixing of targets in one environment: a Postgres on Hyperdrive is the
+  person's own, and so is its Hyperdrive config (section 18.6, D92). A
+  site's Worker forwards an API of its origin on another provider to its
+  public address (D91), which resolves and renders, but no environment
+  gives two targets' values, and a mixed deploy is D63's to build.
+- A Hyperdrive deploy that has reached Cloudflare: the platform, the
+  drainer, the runner's origin check and the CI secret are proven against
+  the pins, a fake account and a stand-in `superschematic-migrate`, and
+  the bundles under workerd over a hyperdrive binding to a local
+  Postgres; `stack queue` runs the real runner on a local Postgres as the
+  origin, behind a fake account's config (D96).
+- An identity store over SQLite or D1 for a TypeScript API (D50). An
+  identity API on Workers is built over Hyperdrive (section 18.6, D92),
+  and its cookie session on a site's origin through the site's Worker
+  (section 18.8, D91) is proven under the pinned workerd, not yet on
+  Cloudflare.
 - A D1 deploy that has reached Cloudflare: the platform, the runner and
   the D1 driver are proven against the pins, a fake account and the fake
   D1, and `TestRealD1` has not run yet. acme-shop's `wishlist-stack` is
@@ -6533,6 +6927,14 @@ runtime tests run fixture bundles under the `workerd` binary.
   candidate store.
 - `immutable` caching for a site's hashed files.
 - A bucket's CORS (section 18.7).
+- Memory stores (D75). The target has no memoryStore platform, so
+  resolution refuses a stack that places a store on it with the store on,
+  as `unrealizable`, and the refusal names `settings: [{ of: ShopCache,
+  enabled: false }]`. With the store off, the environment deploys, and
+  each Worker's `fetch.ts` and `scheduled.ts` hold a disabled store and
+  import no Redis client. A KV namespace or a Durable Object is not the
+  store: KV has no atomic increment, and either is a platform of its own
+  to design.
 
 Built so far: the target's values, state with a deploy lock per run,
 secrets, bootstrap and CI identity, and the Workers platform for
@@ -6546,7 +6948,10 @@ from the deploying machine; the Cron platform for TypeScript jobs and
 `scheduled.ts`, with each job's Workflow and the job runner over it for
 `stack run` and a job on every deploy; trace export on Workers; buckets
 in a jurisdiction; and the site platform, its embedded script and its site
-store in R2; all proven offline (D64, amended). No Worker has deployed.
+store in R2; databases on a Postgres outside Cloudflare through
+Hyperdrive, their migrations on the origin, and queue workers under Cron
+Triggers (D92); `stack queue` on the origin (D96); all proven offline (D64,
+amended). No Worker has deployed.
 
 Milestone 7's second target is done when acme-shop's storefront has run
 live on Workers (workers.dev, then a domain, through the SDK, with a

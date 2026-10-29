@@ -194,6 +194,39 @@ func TestStackDecoratorsWriteTheirDeclarations(t *testing.T) {
 
 // TestStackDecoratorsRefuseWhatTheyCannotDeclare: each refusal names what
 // is wrong.
+// TestStackDecoratorReadsOrigins: @stack's origins name a site and the
+// APIs its origin serves, or none for every API it calls (D91); an origin
+// without a site, with an empty list of APIs or with a member it does not
+// have is refused.
+func TestStackDecoratorReadsOrigins(t *testing.T) {
+	shop := &ir.TypeDef{Name: "Shop"}
+	if err := applyStackDecorator(t, "stack", shop, map[string]any{
+		"deploy": []any{handle("shop-web", "Site")},
+		"origins": []any{
+			map[string]any{"site": handle("shop-web", "Site"), "apis": []any{handle("shop-api", "API")}},
+			map[string]any{"site": handle("shop-admin", "Site")},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	want := []*ir.Origin{
+		{Site: ir.ServiceRef{Name: "shop-web", Kind: ir.SchemaKindSite}, APIs: []ir.ServiceRef{{Name: "shop-api", Kind: ir.SchemaKindAPI}}},
+		{Site: ir.ServiceRef{Name: "shop-admin", Kind: ir.SchemaKindSite}},
+	}
+	if !reflect.DeepEqual(shop.Stack.Origins, want) {
+		t.Errorf("@stack wrote origins %+v, want %+v", shop.Stack.Origins, want)
+	}
+	for _, arg := range []map[string]any{
+		{"origins": []any{map[string]any{"apis": []any{handle("shop-api", "API")}}}},
+		{"origins": []any{map[string]any{"site": handle("shop-web", "Site"), "apis": []any{}}}},
+		{"origins": []any{map[string]any{"site": handle("shop-web", "Site"), "path": "/api"}}},
+	} {
+		if err := applyStackDecorator(t, "stack", &ir.TypeDef{Name: "C"}, arg); err == nil || !strings.Contains(err.Error(), "@stack argument") {
+			t.Errorf("@stack(%v) = %v, want a refusal of its argument", arg, err)
+		}
+	}
+}
+
 func TestStackDecoratorsRefuseWhatTheyCannotDeclare(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -257,11 +290,20 @@ func TestVerifyStack(t *testing.T) {
 	if len(f.errs) > 0 {
 		t.Fatalf("a valid stack: %v", f.errs)
 	}
+	// A memory store's element turns it off (D75).
+	off := false
+	withStoreOff := valid()
+	withStoreOff.Types["Staging"].Environment.Settings = append(withStoreOff.Types["Staging"].Environment.Settings,
+		&ir.DeployableSettings{Of: ir.DeployableRef{Service: &ir.ServiceRef{Name: "shop-cache", Kind: ir.SchemaKindMemoryStore}}, Enabled: &off})
+	spec.Verify(withStoreOff, &f)
+	if len(f.errs) > 0 {
+		t.Fatalf("a stack that turns a memory store off: %v", f.errs)
+	}
 
 	// An app is exposed, and turned off, beside its API's handle (D78).
 	withApp := valid()
 	backoffice := ir.DeployableRef{Service: &api, App: "Backoffice"}
-	off := false
+	off = false
 	withApp.Types["Shop"].Stack.Expose = append(withApp.Types["Shop"].Stack.Expose, backoffice)
 	withApp.Types["Staging"].Environment.Settings = append(withApp.Types["Staging"].Environment.Settings, &ir.DeployableSettings{Of: backoffice, Enabled: &off})
 	f = findings{}
@@ -352,6 +394,10 @@ func TestVerifyStack(t *testing.T) {
 		{"an exposed deriver", func(s *ir.Schema) {
 			s.Types["Shop"].Stack.Expose = []ir.DeployableRef{{Service: &api, Deriver: "TriageTickets"}}
 		}, "@stack class Shop expose[0] names deriver TriageTickets; only a server is exposed"},
+		{"enabled on a bucket", func(s *ir.Schema) {
+			off := false
+			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &ir.ServiceRef{Name: "shop-media", Kind: ir.SchemaKindBucket}}, Enabled: &off}
+		}, "sets enabled, which only a job takes"},
 		{"an app and a worker", func(s *ir.Schema) {
 			s.Types["Staging"].Environment.Settings[0] = &ir.DeployableSettings{Of: ir.DeployableRef{Service: &api, App: "Backoffice", Worker: "FulfilOrders"}}
 		}, "names app Backoffice and a job, a worker or a deriver; an element names one"},

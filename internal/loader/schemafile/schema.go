@@ -76,6 +76,13 @@ func generateDefinition(reg *registry.Registry) ([]byte, error) {
 			ir.ConflictUnitAtomic, ir.ConflictUnitKeyed, ir.ConflictUnitJSONSchema, ir.ConflictUnitExcluded,
 		}},
 		{"ServiceCallers", "mode", []string{string(ir.ServiceCallersRequire), string(ir.ServiceCallersAllow)}},
+		{"MemoryStoreDeclaration", "kind", []string{
+			string(ir.MemoryStoreChannel), string(ir.MemoryStoreCounter), string(ir.MemoryStoreClaim),
+		}},
+		{"MemoryStorePart", "format", []string{
+			string(ir.MemoryStorePartString), string(ir.MemoryStorePartInteger),
+			string(ir.MemoryStorePartBoolean), string(ir.MemoryStorePartEnum),
+		}},
 		{"OperationDocs", "lifecycle", []string{
 			string(ir.DocsLifecycleDraft), string(ir.DocsLifecycleExperimental),
 			string(ir.DocsLifecycleActive), string(ir.DocsLifecycleDeprecated),
@@ -346,7 +353,7 @@ func roleNames() []string {
 	return []string{
 		string(ir.RoleDBTable), string(ir.RoleAPIView), string(ir.RoleAPIInput),
 		string(ir.RoleEmbeddedStruct), string(ir.RoleAPIOperationSet),
-		string(ir.RoleTrait), string(ir.RoleProjection),
+		string(ir.RoleTrait), string(ir.RoleProjection), string(ir.RoleQuery),
 	}
 }
 

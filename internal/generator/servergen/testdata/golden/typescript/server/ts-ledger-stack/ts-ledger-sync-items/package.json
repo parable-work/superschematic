@@ -1,0 +1,32 @@
+{
+  "name": "@schemas/ts-ledger-stack-ts-ledger-sync-items-server",
+  "version": "0.0.0",
+  "description": "Worker ts-ledger-sync-items of stack ts-ledger-stack, which superschematic writes on every build of the stack. DO NOT EDIT.",
+  "private": true,
+  "type": "module",
+  "main": "main.ts",
+  "scripts": {
+    "start": "bun main.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/context-async-hooks": "2.12.0",
+    "@opentelemetry/core": "2.12.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "0.223.0",
+    "@opentelemetry/otlp-transformer": "0.223.0",
+    "@opentelemetry/resources": "2.12.0",
+    "@opentelemetry/sdk-trace": "2.12.0",
+    "@schemas/ts-ledger-api": "workspace:*",
+    "@schemas/ts-ledger-db-types": "workspace:*",
+    "@schemas/ts-ledger-implementation": "workspace:*",
+    "@superschematic/http-runtime": "*",
+    "hono": "4.13.8",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.9",
+    "@types/pg": "8.23.1",
+    "typescript": "5.9.3"
+  }
+}

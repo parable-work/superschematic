@@ -47,6 +47,15 @@ func TestWriteTypesGolden(t *testing.T) {
 		// A DB with queues (D53): queues.ts holds each as the HTTP runtime's
 		// queue client reads it.
 		{service: "fixture-queue-db", sqlite: true},
+		// The repositories (D79): orm.ts over a ledger's tables.
+		{service: "fixture-ledger-db"},
+		// Encrypted<T> fields (D85): rows hold them as SecretValues.
+		{service: "fixture-vault-db"},
+		// Tables and columns @table and @column name (D85).
+		{service: "fixture-naming-db"},
+		// Declared queries (D86): orm.ts's queries, and their params' and
+		// rows' types.
+		{service: "fixture-queries-db"},
 	}
 
 	for _, tc := range cases {

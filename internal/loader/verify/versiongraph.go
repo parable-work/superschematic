@@ -179,7 +179,7 @@ func authoredIndexNames(schema *ir.Schema) map[string]string {
 			if len(idx.Keys) == 0 {
 				continue
 			}
-			if id, err := sqlutil.IndexName(codegen.ToSnakeCase(td.Name), idx.Keys, idx.Name, idx.Unique); err == nil {
+			if id, err := sqlutil.IndexNameIn(td, idx.Keys, idx.Name, idx.Unique); err == nil {
 				names[id] = td.Name
 			}
 		}

@@ -16,6 +16,10 @@ func TestCatalogCommand(t *testing.T) {
 	out, err := runCommandWith(t, nil, "catalog", "scalars")
 	require.NoError(t, err)
 	assert.Contains(t, out, "| `Contact.Email` | An email address | `CITEXT` |")
+	// The scalars of D84: a signed amount and an exact decimal, each with
+	// its SQL type, its four languages' types and its checks.
+	assert.Contains(t, out, "| `Finance.SignedMoney` | Signed monetary amount in smallest currency unit (e.g., cents for USD) | `BIGINT` | int64 / number / int / i64 | -9007199254740991 to 9007199254740991 |")
+	assert.Contains(t, out, "| `Generic.Decimal` | Exact decimal number in plain notation, carried as a string | `NUMERIC` | string / string / decimal.Decimal / superscalar::Decimal | pattern")
 
 	out, err = runCommandWith(t, nil, "catalog", "decorators")
 	require.NoError(t, err)

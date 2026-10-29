@@ -20,6 +20,7 @@ import type {
   HttpRequestOptions,
   ForwardedUser,
   RequestOptions,
+  DownloadedFile,
 } from './types';
 
 export interface EncryptedPayloadEnvelope {
@@ -42,6 +43,30 @@ export function toRequestOptions(value: AbortSignal | RequestOptions | null | un
     return { signal: value };
   }
   return { signal: value.signal, forward: value.forward };
+}
+
+/**
+ * The filename a Content-Disposition offers (D81): filename*, the name in
+ * UTF-8 (RFC 8187), before filename, quoted or not; null for none.
+ */
+export function filenameOf(disposition: string | null | undefined): string | null {
+  if (!disposition) {
+    return null;
+  }
+  const extended = /(?:^|;)\s*filename\*\s*=\s*([^']*)'[^']*'([^;]*)/i.exec(disposition);
+  if (extended && extended[1].trim().toLowerCase() === 'utf-8') {
+    try {
+      return decodeURIComponent(extended[2].trim());
+    } catch {
+      // A malformed filename* falls back to filename.
+    }
+  }
+  const quoted = /(?:^|;)\s*filename\s*=\s*"((?:[^"\\]|\\.)*)"/i.exec(disposition);
+  if (quoted) {
+    return quoted[1].replace(/\\(.)/g, '$1');
+  }
+  const token = /(?:^|;)\s*filename\s*=\s*([^;\s]+)/i.exec(disposition);
+  return token ? token[1] : null;
 }
 
 function isAbortSignal(value: unknown): value is AbortSignal {
@@ -361,6 +386,15 @@ export class HttpClient {
       });
 
       const responseHeaders = this.headersToRecord(response.headers);
+      if (options.responseType === 'file' && response.ok) {
+        // A FileDownload result (D81): the body is the file, not the envelope.
+        const blob = await response.blob();
+        const contentType = response.headers.get('content-type') ?? '';
+        const file: DownloadedFile = { blob, filename: filenameOf(response.headers.get('content-disposition')), contentType };
+        this.logger.debug('Response:', response.status, requestConfig.url);
+        this.reportCompletion(requestConfig, startMs, response.status, false);
+        return file as T;
+      }
       const rawText = await response.text();
       let rawBody: any;
       if (rawText) {
@@ -391,6 +425,7 @@ export class HttpClient {
                 data: requestConfig.data,
                 signal: requestConfig.signal,
                 forward: options.forward,
+                responseType: options.responseType,
               },
               { ...attempt, serviceRetried: true, freshServiceToken: true },
               startMs

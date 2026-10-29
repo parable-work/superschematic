@@ -12,6 +12,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/pgtest"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -49,6 +50,9 @@ func TestConvergenceOnPostgres(t *testing.T) {
 		}
 	}
 	for _, dir := range modelFixtures {
+		if dir == vectorsFixture {
+			continue
+		}
 		schema, err := loader.LoadService(dir)
 		if err != nil {
 			t.Fatal(err)
@@ -68,6 +72,51 @@ func TestConvergenceOnPostgres(t *testing.T) {
 		writeFile(t, filepath.Join(dir, "to.sql"), []byte(createSQL(t, run.schema, sqlgen.Options{SchemaName: "ledger-db"})))
 	}
 
+	module := t.TempDir()
+	if err := os.CopyFS(module, os.DirFS(filepath.Join("testdata", "pgconverge"))); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("go", "test", "-count=1", "-v", "-run", "^TestConvergence$", "./...")
+	cmd.Dir = module
+	cmd.Env = append(os.Environ(), "GOFLAGS=-mod=readonly", "PGCONVERGE_DATABASE_URL="+dsn, "PGCONVERGE_CASES="+cases)
+	out, err := cmd.CombinedOutput()
+	t.Logf("pgconverge:\n%s", out)
+	if err != nil {
+		t.Fatalf("pgconverge failed: %v", err)
+	}
+	if !strings.Contains(string(out), "--- PASS: TestConvergence") {
+		t.Fatal("pgconverge did not run TestConvergence")
+	}
+}
+
+// TestVectorPlansOnPostgres applies the vector plan cases (D84), which the
+// convergence Postgres cannot (noPgvector), to the Postgres with pgvector
+// that pgtest.VectorDatabaseURL names, as TestConvergenceOnPostgres applies
+// the others: each from create.sql of the previous version, with its rows,
+// to create.sql of the new one; and fixture-vectors-db's plan from an empty
+// database.
+func TestVectorPlansOnPostgres(t *testing.T) {
+	dsn := pgtest.VectorDatabaseURL(t)
+	cases := t.TempDir()
+	applied := 0
+	for _, pc := range planCases {
+		if pc.noConverge != noPgvector {
+			continue
+		}
+		if plan := writePlanCase(t, filepath.Join(cases, pc.name), pc); plan.Expanded != "" {
+			fromSchema, _, fromOpts, _ := pc.versions(t)
+			writeExpandedCase(t, filepath.Join(cases, "expanded-"+pc.name), pc, plan, createSQL(t, fromSchema, fromOpts), postgresSeeds)
+		}
+		applied++
+	}
+	if applied == 0 {
+		t.Fatal("no plan case is a vector case")
+	}
+	schema, err := loader.LoadService(vectorsFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeEmptyCase(t, filepath.Join(cases, "empty-"+filepath.Base(vectorsFixture)), schema, sqlgen.Options{SchemaName: filepath.Base(vectorsFixture)})
 	module := t.TempDir()
 	if err := os.CopyFS(module, os.DirFS(filepath.Join("testdata", "pgconverge"))); err != nil {
 		t.Fatal(err)
@@ -150,6 +199,7 @@ func writePlanCase(t *testing.T, dir string, pc planCase) *Plan {
 	t.Logf("%s: %d rows seeded, %d checks", pc.name, strings.Count(seed, "INSERT"), len(checks))
 	writeFile(t, filepath.Join(dir, "seed.sql"), []byte(seed))
 	writeJSON(t, filepath.Join(dir, "checks.json"), checks)
+	writeExtraRows(t, dir, pc.rows)
 	return plan
 }
 
@@ -188,16 +238,40 @@ type seedCheck struct {
 }
 
 // seeds is how a dialect seeds rows: value is a literal for a column, or
-// false for a column whose type it has none for, and same compares a
-// column with a literal, true when both are null.
+// false for a column whose type it has none for, checked the literal of a
+// column for a value that passes the column's check (D83), and same
+// compares a column with a literal, true when both are null.
 type seeds struct {
-	value func(col *Column, n, i int) (string, bool)
-	same  string
+	value   func(col *Column, n, i int) (string, bool)
+	checked func(col *Column, raw string, number bool) string
+	same    string
 }
 
 var postgresSeeds = seeds{
-	value: func(col *Column, n, i int) (string, bool) { return seedValue(col.Type, n, i) },
-	same:  "IS NOT DISTINCT FROM",
+	value:   func(col *Column, n, i int) (string, bool) { return seedValue(col.Type, n, i) },
+	checked: func(col *Column, raw string, _ bool) string { return literal(raw) + "::" + col.Type },
+	same:    "IS NOT DISTINCT FROM",
+}
+
+// checkedSeed is the raw value of a column that passes c, whether it is a
+// number, and whether c has one to give: an enum's first value, a number
+// inside the bounds, or text as long as the bounds need.
+func checkedSeed(c *Check) (string, bool, bool) {
+	switch {
+	case c == nil:
+		return "", false, false
+	case len(c.In) > 0:
+		return c.In[0], false, true
+	case c.Min != nil:
+		return fmt.Sprint(*c.Min), true, true
+	case c.Max != nil:
+		return fmt.Sprint(*c.Max), true, true
+	case c.MinLength != nil:
+		return strings.Repeat("a", *c.MinLength), false, true
+	case c.MaxLength != nil:
+		return "", false, true
+	}
+	return "", false, false
 }
 
 // seedRows inserts one row into every entity and join table of from, with
@@ -226,7 +300,29 @@ func seedRows(t *testing.T, from, to *Model, r *renames, dialect seeds) (string,
 		sort.Strings(names)
 		for _, name := range names {
 			table := pending[name]
-			row, ok := seedRow(table, len(order)+1, keys, dialect.value)
+			checkOf := func(column string) *Check {
+				// The new model's check, which the plan holds the row to, else
+				// the previous model's.
+				if tt := tablesByName(to)[r.table(table.Name)]; tt != nil {
+					for _, c := range tt.Checks {
+						if c.Column == r.column(table.Name, column) {
+							return c
+						}
+					}
+				}
+				for _, c := range table.Checks {
+					if c.Column == column {
+						return c
+					}
+				}
+				return nil
+			}
+			row, ok := seedRow(table, len(order)+1, keys, func(col *Column, n, i int) (string, bool) {
+				if raw, number, ok := checkedSeed(checkOf(col.Name)); ok {
+					return dialect.checked(col, raw, number), true
+				}
+				return dialect.value(col, n, i)
+			})
 			if !ok {
 				continue
 			}

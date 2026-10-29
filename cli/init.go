@@ -157,7 +157,7 @@ func runInit(cmd *cobra.Command, flags *initFlags, schemasRoot string) error {
 		rootFlag = " --root " + displayPath(schemasRoot)
 	}
 	b.WriteString("\nNext, add a service:\n")
-	fmt.Fprintf(&b, "  superschematic new service <name> --kind DB|API|General|Bucket|Site%s\n", rootFlag)
+	fmt.Fprintf(&b, "  superschematic new service <name> --kind DB|API|General|Bucket|Site|MemoryStore%s\n", rootFlag)
 	_, _ = io.WriteString(out, b.String())
 	return nil
 }
@@ -224,7 +224,7 @@ func checkCheckout(dir string) error {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err != nil {
 			hint := ""
 			if rel == initSuperscalarTypeScript {
-				hint = "; run make setup in it, which checks superscalar out under third_party"
+				hint = "; run make setup in it, which checks superscalar out under third_party, or without Rust scripts/superscalar-dep.sh --prebuilt, which stages it prebuilt"
 			}
 			return fmt.Errorf("%s is no superschematic checkout ready to build against: it has no %s%s", displayPath(dir), rel, hint)
 		}

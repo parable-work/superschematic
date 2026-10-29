@@ -360,6 +360,8 @@ export const ShopOrders = service<"API", OrdersConfig, "ExpireCarts" | "ShipOrde
 	}
 }
 
+// TestConfigTypeOf: an API handle's config type is its config, the
+// @envVars class no other extends (D94), when a TypeScript file declares it.
 func TestConfigTypeOf(t *testing.T) {
 	schema := func(kind ir.SchemaKind, types ...*ir.TypeDef) *ir.Schema {
 		s := ir.NewSchema("svc", kind)
@@ -370,6 +372,10 @@ func TestConfigTypeOf(t *testing.T) {
 	}
 	envVars := func(name, owner string) *ir.TypeDef {
 		return &ir.TypeDef{Name: name, Owner: owner, EnvVars: true}
+	}
+	extending := func(def *ir.TypeDef, base string) *ir.TypeDef {
+		def.Extends = base
+		return def
 	}
 	plain := &ir.TypeDef{Name: "Order", Owner: "src/orders.schema.ts"}
 
@@ -384,6 +390,7 @@ func TestConfigTypeOf(t *testing.T) {
 		{"a General service's", schema(ir.SchemaKindGeneral, envVars("ShopConfig", "src/config.schema.ts")), nil},
 		{"from a data-form file", schema(ir.SchemaKindAPI, envVars("ShopApiConfig", "src/config.schema.yaml")), nil},
 		{"two of them", schema(ir.SchemaKindAPI, envVars("A", "src/a.schema.ts"), envVars("B", "src/b.schema.ts")), nil},
+		{"one and the one it extends", schema(ir.SchemaKindAPI, envVars("FieldKeys", "src/keys.schema.ts"), extending(envVars("FinancesConfig", "src/config.schema.ts"), "FieldKeys")), &ConfigType{Name: "FinancesConfig", Module: "./config.schema"}},
 		{"no schema", nil, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

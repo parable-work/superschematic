@@ -1,6 +1,6 @@
 module github.com/parable-work/superschematic/runtime/migrate/go
 
-go 1.26.4
+go 1.27.3
 
 require (
 	cloud.google.com/go/auth v0.24.0

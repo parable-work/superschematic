@@ -72,6 +72,7 @@ type names struct {
 	session, sessionID, sessionUser, tokenHash                            string
 	createdAt, expiresAt, lastSeenAt, revokedAt                           string
 	credential, credentialUser, passwordHash, passwordChangedAt, disabled string
+	pending                                                               string
 	role, roleKey, roleName, rolePermissions                              string
 	grant, grantUser, grantRole, grantedAt                                string
 }
@@ -113,7 +114,7 @@ func NewSQLStore(db *sql.DB, dialect Dialect, descriptor []byte, opts ...SQLStor
 		session: quote(se.Table), sessionID: quote(se.Columns.ID), sessionUser: quote(se.Columns.User), tokenHash: quote(se.Columns.TokenHash),
 		createdAt: quote(se.Columns.CreatedAt), expiresAt: quote(se.Columns.ExpiresAt), lastSeenAt: quote(se.Columns.LastSeenAt), revokedAt: quote(se.Columns.RevokedAt),
 		credential: quote(c.Table), credentialUser: quote(c.Columns.User), passwordHash: quote(c.Columns.PasswordHash),
-		passwordChangedAt: quote(c.Columns.PasswordChangedAt), disabled: quote(c.Columns.DisabledAt),
+		passwordChangedAt: quote(c.Columns.PasswordChangedAt), disabled: quote(c.Columns.DisabledAt), pending: quote(c.Columns.PendingAt),
 	}
 	if r, g := d.Role, d.RoleGrant; r != nil {
 		s.t.role, s.t.roleKey, s.t.roleName, s.t.rolePermissions = quote(r.Table), quote(r.Columns.Key), quote(r.Columns.Name), quote(r.Columns.Permissions)
@@ -323,11 +324,11 @@ func (s *SQLStore) exists(ctx context.Context, q querier, table, column, key str
 	return true, nil
 }
 
-// userSelect selects a user's key, login, name, disabledAt and password
-// hash, the credential joined when there is one.
+// userSelect selects a user's key, login, name, disabledAt, pendingAt and
+// password hash, the credential joined when there is one.
 func (s *SQLStore) userSelect() string {
 	t := s.t
-	return "SELECT u." + t.userKey + ", u." + t.userLogin + ", u." + t.userName + ", c." + t.disabled + ", c." + t.passwordHash +
+	return "SELECT u." + t.userKey + ", u." + t.userLogin + ", u." + t.userName + ", c." + t.disabled + ", c." + t.pending + ", c." + t.passwordHash +
 		" FROM " + t.user + " u LEFT JOIN " + t.credential + " c ON c." + t.credentialUser + " = u." + t.userKey
 }
 
@@ -335,13 +336,13 @@ type scanner interface{ Scan(dest ...any) error }
 
 func (s *SQLStore) scanUser(row scanner) (LoginRecord, error) {
 	var key, login, name string
-	var disabled timeScan
+	var disabled, pending timeScan
 	var hash sql.NullString
-	if err := row.Scan(&key, &login, &name, &disabled, &hash); err != nil {
+	if err := row.Scan(&key, &login, &name, &disabled, &pending, &hash); err != nil {
 		return LoginRecord{}, err
 	}
 	return LoginRecord{
-		User:         User{ID: s.userKey.toWire(key), Login: login, Name: name, Disabled: disabled.valid},
+		User:         User{ID: s.userKey.toWire(key), Login: login, Name: name, Disabled: disabled.valid, Pending: pending.valid},
 		PasswordHash: hash.String,
 	}, nil
 }
@@ -439,13 +440,132 @@ func (s *SQLStore) CreateUser(ctx context.Context, nu NewUser) (User, error) {
 	if err != nil {
 		return User{}, err
 	}
+	if (len(nu.Roles) > 0 || nu.First != nil) && !s.HasRoles() {
+		return User{}, ErrNoRoles
+	}
+	// A grant seen now rules out the first administrator without the lock
+	// below, so only the registrations of an empty database take it.
+	first := nu.First != nil
+	if first {
+		if first, err = s.noGrant(ctx, s.db); err != nil {
+			return User{}, err
+		}
+	}
 	var user User
 	err = s.inTx(ctx, func(tx *sql.Tx) error {
+		// Two first users at once make one administrator, as two
+		// bootstraps do (D81). On Postgres the lock conflicts with itself
+		// and with every write to the grants, so a second waits for the
+		// first to commit and then finds its grant. On SQLite the user's
+		// insert takes the database's one write lock before the grants are
+		// read, so the second reads after the first commits.
+		if first && s.dialect == Postgres {
+			if _, err := tx.ExecContext(ctx, "LOCK TABLE "+s.t.grant+" IN SHARE ROW EXCLUSIVE MODE"); err != nil {
+				return fmt.Errorf("identity: lock the role grants: %w", err)
+			}
+		}
+		var key string
 		var err error
-		user, _, err = s.insertUser(ctx, tx, login, name, nu)
+		if user, key, err = s.insertUser(ctx, tx, login, name, nu); err != nil {
+			return err
+		}
+		if first {
+			if first, err = s.noGrant(ctx, tx); err != nil {
+				return err
+			}
+		}
+		roles := []NewRole{}
+		for _, role := range nu.Roles {
+			roles = append(roles, NewRole{Name: role})
+		}
+		if first {
+			if user.Pending {
+				if _, err := tx.ExecContext(ctx, s.bind("UPDATE "+s.t.credential+" SET "+s.t.pending+" = NULL WHERE "+s.t.credentialUser+" = ?"), key); err != nil {
+					return fmt.Errorf("identity: approve the first administrator: %w", err)
+				}
+				user.Pending = false
+			}
+			roles = append(roles, NewRole{Name: nu.First.Role, Permissions: nu.First.Permissions})
+		}
+		user.Roles, err = s.grantNewRoles(ctx, tx, key, roles, nu.At)
 		return err
 	})
 	return user, err
+}
+
+// NewRole is a role CreateUser grants, created with Permissions when no
+// role has the name.
+type NewRole struct {
+	Name        string
+	Permissions []string
+}
+
+// noGrant reports whether no role grant exists.
+func (s *SQLStore) noGrant(ctx context.Context, q querier) (bool, error) {
+	var one int
+	switch err := q.QueryRowContext(ctx, "SELECT 1 FROM "+s.t.grant+" LIMIT 1").Scan(&one); {
+	case errors.Is(err, sql.ErrNoRows):
+		return true, nil
+	case err != nil:
+		return false, fmt.Errorf("identity: look up the role grants: %w", err)
+	}
+	return false, nil
+}
+
+// grantNewRoles grants the user with the database key user each role,
+// creating the ones no role has the name of, and returns the roles by
+// name.
+func (s *SQLStore) grantNewRoles(ctx context.Context, tx *sql.Tx, user string, roles []NewRole, at time.Time) ([]Role, error) {
+	t := s.t
+	granted := []Role{}
+	for _, nr := range roles {
+		if _, err := tx.ExecContext(ctx, s.bind("INSERT INTO "+t.role+" ("+t.roleName+", "+t.rolePermissions+") VALUES (?, "+s.permissionsWrite()+") ON CONFLICT ("+t.roleName+") DO NOTHING"),
+			nr.Name, permissionsJSON(nr.Permissions)); err != nil {
+			return nil, fmt.Errorf("identity: create role %s: %w", nr.Name, err)
+		}
+		found, err := s.queryRoles(ctx, tx, s.roleSelect()+" WHERE r."+t.roleName+" = ?", false, nr.Name)
+		if err != nil {
+			return nil, err
+		}
+		if len(found) == 0 {
+			return nil, fmt.Errorf("identity: role %s is missing once created", nr.Name)
+		}
+		role := found[0].role
+		key, _ := s.roleKey.toDB(role.ID)
+		if _, err := tx.ExecContext(ctx, s.bind("INSERT INTO "+t.grant+" ("+t.grantUser+", "+t.grantRole+", "+t.grantedAt+") VALUES (?, ?, ?) ON CONFLICT ("+t.grantUser+", "+t.grantRole+") DO NOTHING"),
+			user, key, s.timeArg(at)); err != nil {
+			return nil, fmt.Errorf("identity: grant role %s: %w", nr.Name, err)
+		}
+		if !slices.ContainsFunc(granted, func(r Role) bool { return r.Name == role.Name }) {
+			granted = append(granted, role)
+		}
+	}
+	sortRoles(granted)
+	return granted, nil
+}
+
+// ApproveUser implements Store.
+func (s *SQLStore) ApproveUser(ctx context.Context, userID string) error {
+	key, ok := s.userKey.toDB(userID)
+	if !ok {
+		return ErrNotFound
+	}
+	t := s.t
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		if found, err := s.exists(ctx, tx, t.user, t.userKey, key); err != nil || !found {
+			return orNotFound(err)
+		}
+		res, err := tx.ExecContext(ctx, s.bind("UPDATE "+t.credential+" SET "+t.pending+" = NULL WHERE "+t.credentialUser+" = ? AND "+t.pending+" IS NOT NULL"), key)
+		if err != nil {
+			return fmt.Errorf("identity: approve a user: %w", err)
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return fmt.Errorf("identity: approve a user: %w", err)
+		} else if n == 0 {
+			return ErrNotPending
+		}
+		return nil
+	})
 }
 
 // userValues are the login and the display name a new user is written
@@ -486,11 +606,15 @@ func (s *SQLStore) insertUser(ctx context.Context, tx *sql.Tx, login, name strin
 	if err != nil {
 		return User{}, "", fmt.Errorf("identity: create a user: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, s.bind("INSERT INTO "+t.credential+" ("+t.credentialUser+", "+t.passwordHash+", "+t.passwordChangedAt+") VALUES (?, ?, ?)"),
-		key, nu.PasswordHash, s.timeArg(nu.At)); err != nil {
+	var pending any
+	if nu.Pending {
+		pending = s.timeArg(nu.At)
+	}
+	if _, err := tx.ExecContext(ctx, s.bind("INSERT INTO "+t.credential+" ("+t.credentialUser+", "+t.passwordHash+", "+t.passwordChangedAt+", "+t.pending+") VALUES (?, ?, ?, ?)"),
+		key, nu.PasswordHash, s.timeArg(nu.At), pending); err != nil {
 		return User{}, "", fmt.Errorf("identity: create a credential: %w", err)
 	}
-	return User{ID: s.userKey.toWire(key), Login: login, Name: name, Roles: []Role{}}, key, nil
+	return User{ID: s.userKey.toWire(key), Login: login, Name: name, Pending: nu.Pending, Roles: []Role{}}, key, nil
 }
 
 // SetPassword implements Store.
@@ -580,13 +704,13 @@ func (s *SQLStore) CreateSession(ctx context.Context, ns NewSession) (Session, e
 func (s *SQLStore) FindSession(ctx context.Context, tokenHash string) (SessionRecord, error) {
 	t := s.t
 	query := "SELECT s." + t.sessionID + ", s." + t.sessionUser + ", s." + t.createdAt + ", s." + t.expiresAt + ", s." + t.lastSeenAt + ", s." + t.revokedAt +
-		", u." + t.userLogin + ", u." + t.userName + ", c." + t.disabled +
+		", u." + t.userLogin + ", u." + t.userName + ", c." + t.disabled + ", c." + t.pending +
 		" FROM " + t.session + " s JOIN " + t.user + " u ON u." + t.userKey + " = s." + t.sessionUser +
 		" LEFT JOIN " + t.credential + " c ON c." + t.credentialUser + " = s." + t.sessionUser +
 		" WHERE s." + t.tokenHash + " = ?"
 	var id, user, login, name string
-	var created, expires, lastSeen, revoked, disabled timeScan
-	err := s.db.QueryRowContext(ctx, s.bind(query), tokenHash).Scan(&id, &user, &created, &expires, &lastSeen, &revoked, &login, &name, &disabled)
+	var created, expires, lastSeen, revoked, disabled, pending timeScan
+	err := s.db.QueryRowContext(ctx, s.bind(query), tokenHash).Scan(&id, &user, &created, &expires, &lastSeen, &revoked, &login, &name, &disabled, &pending)
 	if errors.Is(err, sql.ErrNoRows) {
 		return SessionRecord{}, ErrNotFound
 	}
@@ -599,7 +723,7 @@ func (s *SQLStore) FindSession(ctx context.Context, tokenHash string) (SessionRe
 			ID: s.sessionKey.toWire(id), UserID: userID, CreatedAt: created.t, ExpiresAt: expires.t,
 			LastSeenAt: lastSeen.ptr(), RevokedAt: revoked.ptr(),
 		},
-		User: User{ID: userID, Login: login, Name: name, Disabled: disabled.valid},
+		User: User{ID: userID, Login: login, Name: name, Disabled: disabled.valid, Pending: pending.valid},
 	}, nil
 }
 

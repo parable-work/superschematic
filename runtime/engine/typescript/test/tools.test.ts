@@ -266,7 +266,7 @@ describe('the describe document', () => {
     assert.equal(tool(engine, 'item.hold').httpPath, '/namespaces/default/schemas/Item/instances/{id}/operations/hold');
     // The policy hides it from a caller it refuses, naming the operation.
     const hidden = tool(engine, 'item.releaseAll', reader).mcp;
-    assert.deepEqual(hidden, { hidden: true, hiddenReason: 'the access policy refuses reader write on Item (releaseAll)' });
+    assert.deepEqual(hidden, { hidden: true, hiddenReason: 'the access policy refuses reader write on Item (releaseAll)', hiddenBy: ['policy'] });
   });
 
   test('describes a schema the namespace reaches in the shared one, and refuses what it cannot describe', () => {
@@ -365,6 +365,7 @@ describe('the tools document', () => {
     const hidden = (name: string) => {
       const entry = tool(engine, name);
       assert.equal(entry.mcp.hidden, true, name);
+      assert.deepEqual((entry.mcp as { hiddenBy: string[] }).hiddenBy, ['handle'], name);
       return (entry.mcp as { hiddenReason: string }).hiddenReason;
     };
     assert.equal(hidden('line-item.create'), 'its MCP handle line_item_create is also the handle of line_item.create');
@@ -422,10 +423,11 @@ describe('the tools document', () => {
       .tools.filter((entry) => !entry.mcp.hidden)
       .map((entry) => entry.name);
     assert.deepEqual(visible, ['item.get', 'item.list', 'item.increment', 'item.history']);
-    assert.equal(
-      (engine.tools.manifest(agent, { filter }).tools.find((entry) => entry.name === 'other.get')?.mcp as { hiddenReason: string }).hiddenReason,
-      "this mount's tool filter leaves it out of agent's tools"
-    );
+    assert.deepEqual(engine.tools.manifest(agent, { filter }).tools.find((entry) => entry.name === 'other.get')?.mcp, {
+      hidden: true,
+      hiddenReason: "this mount's tool filter leaves it out of agent's tools",
+      hiddenBy: ['filter'],
+    });
     assert.deepEqual(
       seen.find((summary) => summary.name === 'item.increment'),
       { handle: 'item_increment', name: 'item.increment', schema: 'Item', operation: 'increment', behavior: 'test.Counter', writes: true }
@@ -506,12 +508,36 @@ describe('invocation policies', () => {
     assert.match(refused.message, /invocation names test\.Counter\.decrement, which is no operation of test\.Counter/);
   });
 
+  test('a hidden tool names each cause in hiddenBy, and hiddenReason is the first one\'s', () => {
+    const engine = openBehaviorEngine({ policy, tools: { hidden: ['test.Counter.increment'] } });
+    publishItem(engine, [{ name: 'test.Counter' }]);
+    const long = `A${'b'.repeat(42)}`;
+    const document = schemaDocument(long, [{ name: 'title', typeRef: { name: 'string' } }]) as { types: Record<string, Record<string, unknown>> };
+    document.types[long].behaviors = [{ name: 'test.Counter' }];
+    publish(engine, document);
+    const kebab = long.toLowerCase();
+    const mcp = (name: string, principal: Principal) => {
+      const record = tool(engine, name, principal).mcp;
+      assert.equal(record.hidden, true, name);
+      return record.hidden ? [record.hiddenBy, record.hiddenReason] : [];
+    };
+    const deployment = "the deployment's tool options hide test.Counter.increment (tools.hidden): a service calls it through the API, and no agent is offered it";
+    // The deployment's hide comes first, and no policy is asked of it.
+    assert.deepEqual(mcp('item.increment', reader), [['deployment'], deployment]);
+    assert.deepEqual(mcp(`${kebab}.increment`, alice), [['deployment', 'handle'], deployment]);
+    // A tool MCP refuses the handle of is asked of the policy all the same.
+    assert.deepEqual(mcp(`${kebab}.history`, reader), [['handle'], `its MCP handle ${kebab}_history is longer than 48 characters`]);
+    assert.deepEqual(mcp(`${kebab}.delete`, reader), [['policy', 'handle'], `the access policy refuses reader write on ${long}`]);
+    assert.equal(tool(engine, `${kebab}.get`, reader).mcp.hidden, false);
+  });
+
   test('a behavior operation the tool options hide is offered to no agent, and options it cannot hold are refused (D70)', () => {
     const engine = openBehaviorEngine({ tools: { hidden: ['test.Counter.increment'] } });
     publishItem(engine, [{ name: 'test.Counter' }]);
     const increment = engine.tools.manifest(alice).tools.find((each) => each.name === 'item.increment');
     assert.equal(increment?.mcp.hidden, true);
     assert.match(String(increment?.mcp.hiddenReason), /tools\.hidden/);
+    assert.deepEqual(increment?.mcp.hidden && increment.mcp.hiddenBy, ['deployment']);
     engine.instances.create(alice, 'Item', { title: 'Lamp' }, { id: 'i1' });
     assert.ok(thrown(() => engine.tools.call(alice, 'item_increment', { id: 'i1' }), UnknownToolError));
     engine.instances.invoke(alice, 'Item', 'i1', 'increment', {});
@@ -578,6 +604,7 @@ describe('invocation policies', () => {
   test("the tool options are checked as the compiler's registry checks them", () => {
     const refusal = (tools: TestEngineOptions['tools']) => thrown(() => openTestEngine({ tools }), TypeError).message;
     assert.match(refusal({ invocationPolicy: { key: 'handle', values: ['auto'], default: 'auto' } }), /key "handle" is a key @mcp already uses/);
+    assert.match(refusal({ invocationPolicy: { key: 'hiddenBy', values: ['auto'], default: 'auto' } }), /key "hiddenBy" is a key @mcp already uses/);
     assert.match(refusal({ invocationPolicy: { key: '9lives', values: ['auto'], default: 'auto' } }), /must be a letter followed by/);
     assert.match(refusal({ invocationPolicy: { key: 'confirm', values: [], default: 'auto' } }), /lists no values/);
     assert.match(refusal({ invocationPolicy: { key: 'confirm', values: ['Never', 'never', 'never'], default: 'always' } }), /"Never" must be lowercase.*never is listed twice.*default "always" is not one of/);
@@ -612,6 +639,10 @@ describe("the core's behaviors", () => {
         ['documents.delete', 'documents_delete', 'writes'],
         ['documents.transition', 'documents_transition', 'writes'],
         ['documents.post', 'documents_post', 'writes'],
+        ['documents.begin', 'documents_begin', 'writes'],
+        ['documents.appendDraft', 'documents_append_draft', 'writes'],
+        ['documents.finish', 'documents_finish', 'writes'],
+        ['documents.interrupt', 'documents_interrupt', 'writes'],
         ['documents.edit', 'documents_edit', 'writes'],
         ['documents.deleteMessage', 'documents_delete_message', 'writes'],
         ['documents.purge', 'documents_purge', 'writes'],
@@ -621,10 +652,14 @@ describe("the core's behaviors", () => {
         ['documents.unpin', 'documents_unpin', 'writes'],
         ['documents.resolve', 'documents_resolve', 'writes'],
         ['documents.reopen', 'documents_reopen', 'writes'],
+        ['documents.moveAnchor', 'documents_move_anchor', 'writes'],
+        ['documents.markRead', 'documents_mark_read', 'writes'],
+        ['documents.follow', 'documents_follow', 'writes'],
         ['documents.listMessages', 'documents_list_messages', 'read_only'],
         ['documents.getMessage', 'documents_get_message', 'read_only'],
         ['documents.listEdits', 'documents_list_edits', 'read_only'],
         ['documents.listReactions', 'documents_list_reactions', 'read_only'],
+        ['documents.listPinned', 'documents_list_pinned', 'read_only'],
         ['documents.listRevisions', 'documents_list_revisions', 'read_only'],
         ['documents.getRevision', 'documents_get_revision', 'read_only'],
         ['documents.propose', 'documents_propose', 'writes'],
@@ -653,6 +688,10 @@ describe("the core's behaviors", () => {
       [
         ['Workflow', 'transition', true, 'auto'],
         ['Comments', 'post', true, 'auto'],
+        ['Comments', 'begin', true, 'auto'],
+        ['Comments', 'appendDraft', true, 'auto'],
+        ['Comments', 'finish', true, 'auto'],
+        ['Comments', 'interrupt', true, 'auto'],
         ['Comments', 'edit', true, 'auto'],
         ['Comments', 'deleteMessage', true, 'auto'],
         ['Comments', 'purge', true, 'auto'],
@@ -662,10 +701,14 @@ describe("the core's behaviors", () => {
         ['Comments', 'unpin', true, 'auto'],
         ['Comments', 'resolve', true, 'auto'],
         ['Comments', 'reopen', true, 'auto'],
+        ['Comments', 'moveAnchor', true, 'auto'],
+        ['Comments', 'markRead', true, 'auto'],
+        ['Comments', 'follow', true, 'auto'],
         ['Comments', 'listMessages', false, 'auto'],
         ['Comments', 'getMessage', false, 'auto'],
         ['Comments', 'listEdits', false, 'auto'],
         ['Comments', 'listReactions', false, 'auto'],
+        ['Comments', 'listPinned', false, 'auto'],
         ['Revisions', 'listRevisions', false, 'auto'],
         ['Revisions', 'getRevision', false, 'auto'],
         ['Revisions', 'propose', true, 'auto'],
@@ -693,6 +736,8 @@ describe("the core's behaviors", () => {
             ['messages', true],
             ['lastMessageAt', true],
             ['threads', true],
+            ['composing', true],
+            ['unread', true],
           ],
         ],
         [
@@ -750,6 +795,10 @@ describe("the core's behaviors", () => {
         ['documents.delete', 'always'],
         ['documents.transition', 'always'],
         ['documents.post', 'always'],
+        ['documents.begin', 'always'],
+        ['documents.appendDraft', 'always'],
+        ['documents.finish', 'always'],
+        ['documents.interrupt', 'always'],
         ['documents.edit', 'always'],
         ['documents.deleteMessage', 'always'],
         ['documents.purge', 'always'],
@@ -759,10 +808,14 @@ describe("the core's behaviors", () => {
         ['documents.unpin', 'always'],
         ['documents.resolve', 'always'],
         ['documents.reopen', 'always'],
+        ['documents.moveAnchor', 'always'],
+        ['documents.markRead', 'always'],
+        ['documents.follow', 'always'],
         ['documents.listMessages', 'always'],
         ['documents.getMessage', 'always'],
         ['documents.listEdits', 'always'],
         ['documents.listReactions', 'always'],
+        ['documents.listPinned', 'always'],
         ['documents.listRevisions', 'always'],
         ['documents.getRevision', 'always'],
         ['documents.propose', 'always'],

@@ -1,0 +1,40 @@
+{
+  "dialect": "postgres",
+  "from": "94125afd02debf75a35bd4546a99c2789999ae0fb40a4234f48b5359a196303d",
+  "hash": "d43820a69eaf8263dd14782b801ac8de08ef2fe6c60ae5ad51da4d7513544547",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION order_enqueue_customer_ordered() RETURNS trigger AS $$\nBEGIN\n  -- Enqueues a message of CustomerOrdered after a write to order (D80).\n  INSERT INTO customer_ordered_queue (customer_id, note) VALUES (NEW.customer_id, NEW.note)\n    ON CONFLICT (customer_id) WHERE state = 'ready' DO UPDATE SET note = excluded.note, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = now();\n  RETURN NULL;\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/order_enqueue_customer_ordered",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:trigger/order/trg_order_enqueue_customer_ordered",
+          "reason": "Backfilling trg_order_enqueue_customer_ordered enqueues a message for every row of order that meets its conditions while the new trigger's lock blocks writes to order; for a large table, add the trigger without backfill and run stack queue backfill.",
+          "subject": "trigger/order/trg_order_enqueue_customer_ordered"
+        }
+      ],
+      "index": 2,
+      "op": "createTrigger",
+      "phase": "expand",
+      "statements": [
+        "CREATE TRIGGER trg_order_enqueue_customer_ordered\n  AFTER INSERT ON \"order\"\n  FOR EACH ROW EXECUTE FUNCTION order_enqueue_customer_ordered()",
+        "INSERT INTO customer_ordered_queue (customer_id, note)\nSELECT DISTINCT ON (src.customer_id) src.customer_id, src.note\nFROM \"order\" AS src\nWHERE TRUE\nORDER BY src.customer_id, src.id\nON CONFLICT (customer_id) WHERE state = 'ready' DO UPDATE SET note = excluded.note, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = now()"
+      ],
+      "subject": "trigger/order/trg_order_enqueue_customer_ordered",
+      "transactional": true
+    }
+  ],
+  "to": "dd9ccb22ca39ff7f1e9cb60f6d47cda629be1af843fab3dd2585a6e12870966c",
+  "toModel": null,
+  "version": 1
+}

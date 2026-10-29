@@ -58,6 +58,8 @@ export interface UserCredential {
   passwordChangedAt: TemporalDateTime;
   /** When the user was disabled; a disabled user cannot sign in. */
   disabledAt?: TemporalDateTime | null;
+  /** When the user registered to wait for an administrator's approval; a pending user cannot sign in (D81). */
+  pendingAt?: TemporalDateTime | null;
 }
 
 /**

@@ -1,0 +1,3 @@
+# The prebuilt dependencies scripts/prebuilt_deps.py stages in a checkout
+# without Rust (D82).
+/prebuilt/

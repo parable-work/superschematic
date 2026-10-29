@@ -27,6 +27,12 @@ const (
 	// tests against and the gcp target runs.
 	DefaultPostgresImage = "postgres:16-alpine"
 
+	// DefaultVectorPostgresImage is the image it runs instead when a DB
+	// service of the stack has a vector column (D84): Postgres 16 with
+	// pgvector at tools.env's PGVECTOR_VERSION, which CI's vector tests run
+	// on.
+	DefaultVectorPostgresImage = "pgvector/pgvector:0.8.7-pg16"
+
 	// PostgresUser is the role every connection uses. The container trusts
 	// every connection, and publishes its port on loopback only.
 	PostgresUser = "postgres"
@@ -98,6 +104,26 @@ const (
 	// StorageProject is the project the provisioner creates each bucket
 	// in on the emulator, which keeps one.
 	StorageProject = "local"
+
+	// DefaultMemoryStoreImage is the image the memory store's container
+	// runs when the environment's values name none: Valkey 8.0, the
+	// engine version the gcp platform pins (VALKEY_8_0), with no
+	// persistence and no TLS (D75).
+	DefaultMemoryStoreImage = "valkey/valkey:8.0.2-alpine"
+
+	// memoryStorePort is the port Valkey listens on inside its container.
+	memoryStorePort = 6379
+
+	// MemoryStoreContainer is the ID of the environment's memory store
+	// container node, which every memoryStore deployable's lowering
+	// returns, so every store of the environment shares one server: each
+	// store's names start with the store's own name (D75).
+	MemoryStoreContainer = "memorystore.container"
+
+	// MemoryStoreDatabase is the database every store's URL names. A test
+	// that needs a real server uses another, so it never touches the keys
+	// of a running stack dev (D75).
+	MemoryStoreDatabase = 0
 )
 
 // A port the environment does not set falls in a range by a hash of the
@@ -108,14 +134,15 @@ const (
 // environment side by side, while two of its ports meet in one checkout
 // only when they meet in every checkout, and `local-distinct-ports` says
 // the same of the environment wherever it resolves (D30, amended). The
-// servers' range, the Postgres container's and the storage emulator's do
-// not overlap, and all sit below the ephemeral ranges of Linux (32768 and
-// up) and macOS (49152 and up).
+// servers' range, the Postgres container's, the storage emulator's and
+// the memory store's do not overlap, and all sit below the ephemeral
+// ranges of Linux (32768 and up) and macOS (49152 and up).
 const (
-	serverPortBase   = 20000
-	storagePortBase  = 23000
-	postgresPortBase = 30000
-	portSpan         = 2768
+	serverPortBase      = 20000
+	storagePortBase     = 23000
+	memoryStorePortBase = 26000
+	postgresPortBase    = 30000
+	portSpan            = 2768
 )
 
 // hashPort returns base plus a hash of parts shifted by the checkout's
@@ -187,10 +214,14 @@ func PostgresPort(env registry.StackEnvironment) int {
 }
 
 // PostgresImage returns the image the environment's Postgres container
-// runs: the `postgresImage` value, or DefaultPostgresImage.
+// runs: the `postgresImage` value, or DefaultVectorPostgresImage for a
+// stack with a vector column, or DefaultPostgresImage.
 func PostgresImage(env registry.StackEnvironment) string {
 	if image, ok := env.Values["postgresImage"].(string); ok && image != "" {
 		return image
+	}
+	if env.Vectors {
+		return DefaultVectorPostgresImage
 	}
 	return DefaultPostgresImage
 }
@@ -277,6 +308,39 @@ func StorageContainerName(stack, environment, checkout string) string {
 // what a bucket edge derives as its endpoint.
 func StorageURL(port int) string {
 	return fmt.Sprintf("http://%s:%d", Loopback, port)
+}
+
+// MemoryStorePort returns the host port the environment's memory store
+// container publishes: the `memoryStorePort` value, or one derived from the
+// stack, the environment and the checkout (D75).
+func MemoryStorePort(env registry.StackEnvironment) int {
+	if port, ok := intValue(env.Values["memoryStorePort"]); ok {
+		return port
+	}
+	return hashPort(memoryStorePortBase, checkoutOf(env), env.Stack, env.Name)
+}
+
+// MemoryStoreImage returns the image the environment's memory store
+// container runs: the `memoryStoreImage` value, or DefaultMemoryStoreImage.
+func MemoryStoreImage(env registry.StackEnvironment) string {
+	if image, ok := env.Values["memoryStoreImage"].(string); ok && image != "" {
+		return image
+	}
+	return DefaultMemoryStoreImage
+}
+
+// MemoryStoreContainerName returns the name of the environment's memory
+// store container in a checkout (Checkout):
+// `superschematic-<stack>-<environment>-<checkout>-memorystore`, lower
+// case.
+func MemoryStoreContainerName(stack, environment, checkout string) string {
+	return containerName(stack, environment, checkout, "memorystore")
+}
+
+// MemoryStoreURL returns the URL of a memory store container published on
+// port: what a memoryStore edge derives, `redis://127.0.0.1:<port>/0`.
+func MemoryStoreURL(port int) string {
+	return fmt.Sprintf("redis://%s:%d/%d", Loopback, port, MemoryStoreDatabase)
 }
 
 // bucketNamePattern is the shape of a bucket's name on GCS and its
@@ -434,6 +498,68 @@ func storageContainer(env registry.StackEnvironment) *ir.Resource {
 		},
 		Phase: ir.PhaseInfrastructure,
 	}
+}
+
+// memoryStoreContainer is the environment's memory store container node
+// (D75), named for the checkout: Valkey with no persistence, so a stopped
+// container keeps nothing, and the store holds no fact to keep. Every
+// memoryStore deployable returns the same node, so they share it. It is
+// ready once valkey-cli's PING answers inside it.
+func memoryStoreContainer(env registry.StackEnvironment) *ir.Resource {
+	return &ir.Resource{
+		ID:   MemoryStoreContainer,
+		Type: TypeContainer,
+		Properties: map[string]any{
+			"name":  MemoryStoreContainerName(env.Stack, env.Name, checkoutOf(env)),
+			"image": MemoryStoreImage(env),
+			"ports": []any{map[string]any{
+				"host":          Loopback,
+				"hostPort":      MemoryStorePort(env),
+				"containerPort": memoryStorePort,
+			}},
+			"args":   []any{"valkey-server", "--save", "", "--appendonly", "no"},
+			"labels": containerLabels(env),
+			"readiness": map[string]any{"exec": []any{
+				"valkey-cli", "-p", strconv.Itoa(memoryStorePort), "ping",
+			}},
+		},
+		Phase: ir.PhaseInfrastructure,
+	}
+}
+
+// memoryStoreDeployableName names a memoryStore deployable after its
+// service, whose name starts every name it holds.
+func memoryStoreDeployableName(ctx registry.PlatformContext) any {
+	if len(ctx.Deployable.Services) == 1 {
+		return ctx.Deployable.Services[0].Name
+	}
+	return kebab(ctx.Deployable.Name)
+}
+
+// memoryStoreAddress is the memory store container's URL.
+func memoryStoreAddress(ctx registry.PlatformContext) any {
+	return MemoryStoreURL(MemoryStorePort(ctx.Environment))
+}
+
+// lowerMemoryStore lowers a memoryStore deployable to the environment's
+// memory store container. The store needs nothing of its own on it: a
+// store's names start with its own name, and every key expires.
+func lowerMemoryStore(ctx registry.PlatformContext) (registry.Lowered, error) {
+	return registry.Lowered{Resources: []*ir.Resource{memoryStoreContainer(ctx.Environment)}}, nil
+}
+
+// connectMemoryStore derives how a server, a job, a worker or a deriver
+// reaches the store: its service's name, the container's redis URL, and no
+// authentication, since the container checks none and publishes its port
+// on loopback only (D75). The local target refuses a parameterized
+// environment, so a connection names no member. The edge needs no
+// resource.
+func connectMemoryStore(ctx registry.ConnectorContext) (registry.Connected, error) {
+	return registry.Connected{Value: ir.MemoryStoreConnection{
+		Store: ctx.Edge.Service.Name,
+		URL:   ctx.To.Address,
+		Auth:  ir.MemoryStoreAuthNone,
+	}}, nil
 }
 
 // bucketDeployableName names a bucket deployable after its bucket on the
@@ -845,18 +971,35 @@ func siteAddress(ctx registry.PlatformContext) any {
 // siteID is the ID of a site's node.
 func siteID(deployable string) string { return deployable + ".site" }
 
+// SiteDevPort returns the port a site's dev server listens on (D82): its
+// config's port, or one derived as a server's is, from the stack, the
+// environment, the site's name and the checkout.
+func SiteDevPort(env registry.StackEnvironment, d ir.ResolvedDeployable) int {
+	if d.Site != nil && d.Site.Dev != nil && d.Site.Dev.Port != 0 {
+		return d.Site.Dev.Port
+	}
+	return hashPort(serverPortBase, checkoutOf(env), env.Stack, env.Name, d.Name, "dev")
+}
+
 // lowerSite lowers a site to its node (D55): its package, relative to the
 // output root, the script that builds it and the directory the build
 // writes, its single-page fallback, the port its file server listens on,
 // and its config, each API it calls with the loopback URL its site edge
 // derives. The provisioner builds it once and serves it until the
-// environment stops.
+// environment stops. A site with a dev server (D82) holds its command and
+// the port it listens on too: the provisioner runs it in place of the
+// build, and serves the site's port from a proxy in front of it. A site
+// with an origin (D91) holds the loopback URL of each API of it, the
+// upstream its site edge derives, which the provisioner's proxy serves
+// under the API's path, in front of the site's dev server or its build;
+// the config names the API on the site's own origin.
 func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 	d := ctx.Deployable
 	if d.Site == nil {
 		return registry.Lowered{}, fmt.Errorf("site %s says nothing of how it builds", d.Name)
 	}
 	apis := map[string]any{}
+	origin := map[string]any{}
 	for _, b := range d.Bindings {
 		value, _ := b.Value.(map[string]any)
 		url, ok := value["url"].(string)
@@ -864,6 +1007,14 @@ func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 			return registry.Lowered{}, fmt.Errorf("site %s: binding %s holds no URL of the local target's", d.Name, b.Field)
 		}
 		apis[b.Field] = map[string]any{"url": url}
+		if d.Site.OriginAPI(b.Field) == nil {
+			continue
+		}
+		upstream, ok := value["upstream"].(string)
+		if !ok {
+			return registry.Lowered{}, fmt.Errorf("site %s: binding %s holds no loopback URL of %s for the site's origin to forward to", d.Name, b.Field, b.Field)
+		}
+		origin[b.Field] = upstream
 	}
 	props := map[string]any{
 		"name":   d.ResourceName,
@@ -873,8 +1024,18 @@ func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 		"port":   ServerPort(ctx.Environment, d),
 		"config": map[string]any{"apis": apis},
 	}
+	if len(origin) > 0 {
+		props["origin"] = origin
+	}
 	if d.Site.Fallback != "" {
 		props["fallback"] = d.Site.Fallback
+	}
+	if dev := d.Site.Dev; dev != nil {
+		command := dev.Command
+		if command == "" {
+			command = ir.DefaultSiteDevCommand
+		}
+		props["dev"] = map[string]any{"command": command, "port": SiteDevPort(ctx.Environment, d)}
 	}
 	return registry.Lowered{Resources: []*ir.Resource{{
 		ID:         siteID(d.Name),
@@ -886,7 +1047,13 @@ func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 // connectSite derives the public address of the server whose API a site
 // calls: on this machine, its loopback URL (D55). The edge needs no
 // resource: the server answers the site's origin through its CORS field.
+// For an API of the site's origin (D91) the page's URL is on the site's own
+// origin (ir.SiteOriginURL), and the server's loopback URL, exposed or
+// not, is the upstream the site's proxy forwards to.
 func connectSite(ctx registry.ConnectorContext) (registry.Connected, error) {
+	if ctx.From.Site.OriginAPI(ctx.Edge.Service.Name) != nil {
+		return registry.Connected{Value: ir.SiteEndpoint{URL: ir.SiteOriginURL(ctx.From.PublicAddress, ctx.Edge.Service.Name), Upstream: ctx.To.Address}}, nil
+	}
 	return registry.Connected{Value: ir.SiteEndpoint{URL: ctx.To.PublicAddress}}, nil
 }
 
@@ -981,7 +1148,7 @@ func checkNoParameters(env *ir.ResolvedEnvironment) []string {
 
 // checkDistinctPorts refuses two listeners on one port: two processes, a
 // process and a container, or two containers, such as the Postgres
-// container and the storage emulator's (D54). Each container is named by
+// container, the storage emulator's (D54) and the memory store's (D75). Each container is named by
 // its name.
 func checkDistinctPorts(env *ir.ResolvedEnvironment) []string {
 	owners := map[int][]string{}
@@ -994,6 +1161,11 @@ func checkDistinctPorts(env *ir.ResolvedEnvironment) []string {
 		case TypeSite:
 			if port, ok := intValue(res.Properties["port"]); ok {
 				owners[port] = append(owners[port], "site "+strings.Join(res.Owners, ", "))
+			}
+			if dev, _ := res.Properties["dev"].(map[string]any); dev != nil {
+				if port, ok := intValue(dev["port"]); ok {
+					owners[port] = append(owners[port], "the dev server of site "+strings.Join(res.Owners, ", "))
+				}
 			}
 		case TypeContainer:
 			name, _ := res.Properties["name"].(string)
@@ -1017,7 +1189,7 @@ func checkDistinctPorts(env *ir.ResolvedEnvironment) []string {
 	var out []string
 	for _, port := range ports {
 		if names := slices.Compact(owners[port]); len(names) > 1 {
-			out = append(out, fmt.Sprintf("%s listen on one port, %d; give one another with a server's or a site's port setting or the environment's postgresPort or storagePort value", strings.Join(names, " and "), port))
+			out = append(out, fmt.Sprintf("%s listen on one port, %d; give one another with a server's or a site's port setting, a site's site.dev.port, or the environment's postgresPort, storagePort or memoryStorePort value", strings.Join(names, " and "), port))
 		}
 	}
 	return out

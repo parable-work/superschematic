@@ -3,6 +3,7 @@ package sqlmigrate
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // steps orders the changes, renders them through the dialect and numbers
@@ -15,8 +16,8 @@ func (d *differ) steps() ([]*Step, error) {
 		if a.phase != b.phase {
 			return phaseOrder[a.phase] < phaseOrder[b.phase]
 		}
-		if rank[a.op] != rank[b.op] {
-			return rank[a.op] < rank[b.op]
+		if rankOf(a) != rankOf(b) {
+			return rankOf(a) < rankOf(b)
 		}
 		if a.order != b.order {
 			return a.order < b.order
@@ -70,11 +71,41 @@ func (d *differ) steps() ([]*Step, error) {
 				steps = append(steps, step)
 			}
 		}
+		if step := d.rawSQLAfterRebuilds(phase, rebuilds); step != nil {
+			steps = append(steps, step)
+		}
 	}
 	for i, step := range steps {
 		step.Index = i + 1
 	}
 	return steps, nil
+}
+
+// rawSQLAfterRebuilds is the step that ends a phase that rebuilds tables
+// by copying them, when the new model has raw SQL: it runs every piece
+// again, in order, since dropping the old table dropped the indexes and
+// triggers raw SQL made on it, and each piece can run again over what it
+// made (D83). It is nil for a phase that rebuilds nothing.
+func (d *differ) rawSQLAfterRebuilds(phase Phase, rebuilds map[string]*tableRebuild) *Step {
+	if len(rebuilds) == 0 || len(d.to.RawSQL) == 0 {
+		return nil
+	}
+	var tables, ids, statements []string
+	for name := range rebuilds {
+		tables = append(tables, name)
+	}
+	sort.Strings(tables)
+	for _, p := range d.to.RawSQL {
+		ids = append(ids, p.ID)
+		statements = append(statements, p.Statements...)
+	}
+	step := &Step{Op: "rerunRawSQL", Phase: phase, Subject: "rawSql", Statements: statements, Transactional: true}
+	step.Hazards = []*Hazard{{
+		ID: HazardID(HazardRawSQL, step.Subject, ""), Class: HazardRawSQL, Subject: step.Subject,
+		Reason: fmt.Sprintf("The phase rebuilds %s, which drops what raw SQL made on them, so the step runs the raw SQL again: %s; the planner cannot judge what it does.",
+			joinAnd(tables), strings.Join(ids, ", ")),
+	}}
+	return step
 }
 
 // rebuilds groups the tables a phase rebuilds by copying them, by table
@@ -175,6 +206,35 @@ func (d *differ) rebuilds(phase Phase, changes []*change) map[string]*tableRebui
 		}
 		rb.changes = append(rb.changes, c)
 	}
+	for name, rb := range out {
+		if rb.triggers == nil {
+			rb.triggers = map[string][]*Trigger{}
+		}
+		rb.triggers[name] = d.phaseTriggers(phase, name)
+	}
+	return out
+}
+
+// phaseTriggers are the triggers a phase leaves on table: the new model's,
+// and in expand also the previous model's that contract drops, on a table
+// that keeps its name, since their definitions name it.
+func (d *differ) phaseTriggers(phase Phase, table string) []*Trigger {
+	var out []*Trigger
+	named := map[string]bool{}
+	for _, t := range d.to.Triggers {
+		if t.Table == table {
+			out = append(out, t)
+			named[t.Name] = true
+		}
+	}
+	if phase == Expand {
+		for _, t := range d.from.Triggers {
+			if t.Table == table && !named[t.Name] && d.renames.table(t.Table) == table {
+				out = append(out, t)
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 
@@ -275,6 +335,10 @@ func (d *differ) renamedTable(ft *Table) *Table {
 	for _, idx := range ft.Indexes {
 		t.Indexes = append(t.Indexes, d.renamedIndex(ft.Name, idx))
 	}
+	t.Checks = nil
+	for _, c := range ft.Checks {
+		t.Checks = append(t.Checks, d.renamedCheck(ft.Name, c, c.Name))
+	}
 	return &t
 }
 
@@ -311,8 +375,10 @@ func (d *differ) renamedFK(prevTable string, fk *ForeignKey) *ForeignKey {
 // betweenPhases is the table between expand and contract: the new table
 // with what contract still drops or tightens put back. A column contract
 // drops is nullable when expand drops its NOT NULL (dropColumn), and keeps
-// it when it has a default or is generated. A foreign key contract replaces
-// is the previous one under the name expand gave it.
+// it when it has a default or is generated, and its check. A foreign key
+// contract replaces is the previous one under the name expand gave it. A
+// check contract adds is not there yet, and one it narrows is the previous
+// one (D83).
 func (d *differ) betweenPhases(ft, tt *Table) *Table {
 	t := *tt
 	t.Columns = nil
@@ -335,6 +401,35 @@ func (d *differ) betweenPhases(ft, tt *Table) *Table {
 	}
 	t.Uniques = append([]*Constraint(nil), tt.Uniques...)
 	t.Indexes = append([]*Index(nil), tt.Indexes...)
+	t.Checks = nil
+	contractChecks := map[string]*Check{} // name -> the check between the phases, nil for none
+	for _, ch := range d.changes {
+		if ch.phase != Contract || ch.table != tt.Name {
+			continue
+		}
+		switch ch.op {
+		case opAddCheck:
+			contractChecks[ch.check.Name] = nil
+		case opReplaceCheck:
+			contractChecks[ch.check.Name] = d.renamedCheck(ft.Name, ch.oldCheck, ch.check.Name)
+		case opDropColumn:
+			for _, fc := range ft.Checks {
+				if d.renames.column(ft.Name, fc.Column) == ch.column.Name {
+					t.Checks = append(t.Checks, d.renamedCheck(ft.Name, fc, fc.Name))
+				}
+			}
+		}
+	}
+	for _, c := range tt.Checks {
+		if between, ok := contractChecks[c.Name]; ok {
+			if between != nil {
+				t.Checks = append(t.Checks, between)
+			}
+			continue
+		}
+		t.Checks = append(t.Checks, c)
+	}
+	sort.Slice(t.Checks, func(i, j int) bool { return t.Checks[i].Name < t.Checks[j].Name })
 	t.ForeignKeys = nil
 	contractFKs := map[string]*ForeignKey{}
 	for _, ch := range d.changes {

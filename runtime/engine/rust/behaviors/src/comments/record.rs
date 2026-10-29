@@ -1,7 +1,8 @@
 //! The message record every operation returns (`comments-contract.md`,
 //! "The message record"): a message's row with its reactions, and for a
 //! top-level message its thread's replies, latest reply and participants,
-//! read for a page of messages in three statements, however many it holds.
+//! and for a composing message its draft as its body, read for a page of
+//! messages in four statements, however many it holds.
 
 use std::collections::HashMap;
 
@@ -11,7 +12,7 @@ use superschematic_engine::behaviors::InstanceView;
 use superschematic_engine::storage::SqlValue;
 use superschematic_engine::Result;
 
-use super::storage::{keyed, placeholders, Message, MESSAGES, POSTED, REACTIONS};
+use super::storage::{drafts, keyed, placeholders, Message, MESSAGES, REACTIONS, STANDS};
 
 /// The most participants a top-level record names.
 const PARTICIPANTS: usize = 10;
@@ -28,7 +29,8 @@ struct Emoji {
 struct Thread {
     replies: i64,
     last_reply_at: Option<i64>,
-    // (author, the id of the author's latest posted message), latest first.
+    // (author, the id of the author's latest standing message), latest
+    // first.
     participants: Vec<(String, i64)>,
 }
 
@@ -40,11 +42,20 @@ pub(super) fn records<C>(view: &InstanceView<'_, C>, messages: &[Message]) -> Re
     }
     let reactions = reactions(view, messages)?;
     let mut threads = threads(view, messages)?;
+    let composing: Vec<i64> = messages
+        .iter()
+        .filter(|message| message.composing())
+        .map(|message| message.id)
+        .collect();
+    let mut drafts = drafts(view, &composing)?;
     Ok(messages
         .iter()
         .map(|message| {
             record(
                 message,
+                message
+                    .composing()
+                    .then(|| drafts.remove(&message.id).unwrap_or_default()),
                 reactions
                     .get(&message.id)
                     .map(Vec::as_slice)
@@ -96,8 +107,8 @@ fn reactions<C>(
     Ok(out)
 }
 
-// threads reads the top-level messages' threads: their posted replies,
-// the latest of them, and the authors of the thread's posted messages.
+// threads reads the top-level messages' threads: their standing replies,
+// the latest of them, and the authors of the thread's standing messages.
 fn threads<C>(view: &InstanceView<'_, C>, messages: &[Message]) -> Result<HashMap<i64, Thread>> {
     let tops: Vec<i64> = messages
         .iter()
@@ -113,11 +124,11 @@ fn threads<C>(view: &InstanceView<'_, C>, messages: &[Message]) -> Result<HashMa
     let list = placeholders(tops.len());
     let replies = view.sql().all(
         format!(
-            "SELECT thread, COUNT(*) AS replies, MAX(created_at) AS latest FROM {table}
-             WHERE namespace = ? AND schema = ? AND id = ? AND state = ? AND thread IN ({list})
+            "SELECT thread, COUNT(*) AS replies, MAX(posted_at) AS latest FROM {table}
+             WHERE namespace = ? AND schema = ? AND id = ? AND {STANDS} AND thread IN ({list})
              GROUP BY thread"
         ),
-        &keyed(view, std::iter::once(SqlValue::from(POSTED)).chain(ids())),
+        &keyed(view, ids()),
     )?;
     for row in &replies {
         let thread = out.entry(row.i64("thread")?).or_default();
@@ -127,16 +138,11 @@ fn threads<C>(view: &InstanceView<'_, C>, messages: &[Message]) -> Result<HashMa
     let authors = view.sql().all(
         format!(
             "SELECT COALESCE(thread, message) AS root, author, MAX(message) AS latest FROM {table}
-             WHERE namespace = ? AND schema = ? AND id = ? AND state = ?
+             WHERE namespace = ? AND schema = ? AND id = ? AND {STANDS}
                AND ((thread IS NULL AND message IN ({list})) OR thread IN ({list}))
              GROUP BY COALESCE(thread, message), author"
         ),
-        &keyed(
-            view,
-            std::iter::once(SqlValue::from(POSTED))
-                .chain(ids())
-                .chain(ids()),
-        ),
+        &keyed(view, ids().chain(ids())),
     )?;
     for row in &authors {
         out.entry(row.i64("root")?)
@@ -154,8 +160,13 @@ fn threads<C>(view: &InstanceView<'_, C>, messages: &[Message]) -> Result<HashMa
 }
 
 // record writes the record's members in the contract's order, leaving out
-// the absent ones.
-fn record(message: &Message, reactions: &[Emoji], thread: Option<Thread>) -> Value {
+// the absent ones; a composing message's body is its draft.
+fn record(
+    message: &Message,
+    draft: Option<String>,
+    reactions: &[Emoji],
+    thread: Option<Thread>,
+) -> Value {
     let mut out = Map::new();
     out.insert("id".into(), Value::from(message.id));
     if let Some(thread) = message.thread {
@@ -165,11 +176,17 @@ fn record(message: &Message, reactions: &[Emoji], thread: Option<Thread>) -> Val
         out.insert("quotes".into(), Value::from(quotes));
     }
     out.insert("author".into(), Value::from(message.author.as_str()));
+    if let Some(subject) = &message.for_subject {
+        out.insert("for".into(), Value::from(subject.as_str()));
+    }
     if let Some(via) = &message.via {
         out.insert("via".into(), Value::from(via.as_str()));
     }
     out.insert("state".into(), Value::from(message.state.as_str()));
-    out.insert("body".into(), Value::from(message.body.as_str()));
+    out.insert(
+        "body".into(),
+        Value::from(draft.unwrap_or_else(|| message.body.clone())),
+    );
     out.insert("blocks".into(), message.blocks.clone());
     out.insert("mentions".into(), message.mentions.clone());
     let mut held = Map::new();
@@ -181,6 +198,12 @@ fn record(message: &Message, reactions: &[Emoji], thread: Option<Thread>) -> Val
     }
     out.insert("reactions".into(), Value::Object(held));
     out.insert("createdAt".into(), Value::from(message.created_at));
+    if let Some(at) = message.posted_at {
+        out.insert("postedAt".into(), Value::from(at));
+    }
+    if let Some(stand) = message.stand {
+        out.insert("stand".into(), Value::from(stand));
+    }
     if let Some(at) = message.edited_at {
         out.insert("editedAt".into(), Value::from(at));
     }
@@ -204,6 +227,9 @@ fn record(message: &Message, reactions: &[Emoji], thread: Option<Thread>) -> Val
         if let (Some(by), Some(at)) = (&message.resolved_by, message.resolved_at) {
             let mut resolved = Map::new();
             resolved.insert("by".into(), Value::from(by.as_str()));
+            if let Some(subject) = &message.resolved_for {
+                resolved.insert("for".into(), Value::from(subject.as_str()));
+            }
             resolved.insert("at".into(), Value::from(at));
             out.insert("resolved".into(), Value::Object(resolved));
         }

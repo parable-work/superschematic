@@ -7,7 +7,7 @@ import re
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Mapping, TypedDict
 
-from ..client import EncryptedRequestOptions, FilePart, SyncHTTPClient
+from ..client import DownloadedFile, EncryptedRequestOptions, FilePart, SyncHTTPClient
 from ..errors import SDKError, ValidationError
 
 _BUILTIN_VALIDATION_TYPES: dict[str, Any] = {

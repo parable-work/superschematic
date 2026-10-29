@@ -446,6 +446,7 @@ class RequestProvenanceFieldsSummary(BaseModel):
     at: int = Field(..., alias="at", serialization_alias="at")
     by: str = Field(..., alias="by", serialization_alias="by")
     confidence: Optional[float] = Field(default=None, alias="confidence", serialization_alias="confidence")
+    for_: Optional[str] = Field(default=None, alias="for", serialization_alias="for")
     review: Optional[RequestProvenanceFieldsSummaryReview] = Field(default=None, alias="review", serialization_alias="review")
     source: str = Field(..., alias="source", serialization_alias="source")
 
@@ -481,6 +482,7 @@ class RequestProvenanceFieldsSubject(BaseModel):
     at: int = Field(..., alias="at", serialization_alias="at")
     by: str = Field(..., alias="by", serialization_alias="by")
     confidence: Optional[float] = Field(default=None, alias="confidence", serialization_alias="confidence")
+    for_: Optional[str] = Field(default=None, alias="for", serialization_alias="for")
     review: Optional[RequestProvenanceFieldsSubjectReview] = Field(default=None, alias="review", serialization_alias="review")
     source: str = Field(..., alias="source", serialization_alias="source")
 
@@ -516,6 +518,7 @@ class RequestProvenanceFieldsCategory(BaseModel):
     at: int = Field(..., alias="at", serialization_alias="at")
     by: str = Field(..., alias="by", serialization_alias="by")
     confidence: Optional[float] = Field(default=None, alias="confidence", serialization_alias="confidence")
+    for_: Optional[str] = Field(default=None, alias="for", serialization_alias="for")
     review: Optional[RequestProvenanceFieldsCategoryReview] = Field(default=None, alias="review", serialization_alias="review")
     source: str = Field(..., alias="source", serialization_alias="source")
 
@@ -551,6 +554,7 @@ class RequestProvenanceFieldsBody(BaseModel):
     at: int = Field(..., alias="at", serialization_alias="at")
     by: str = Field(..., alias="by", serialization_alias="by")
     confidence: Optional[float] = Field(default=None, alias="confidence", serialization_alias="confidence")
+    for_: Optional[str] = Field(default=None, alias="for", serialization_alias="for")
     review: Optional[RequestProvenanceFieldsBodyReview] = Field(default=None, alias="review", serialization_alias="review")
     source: str = Field(..., alias="source", serialization_alias="source")
 
@@ -583,7 +587,7 @@ class RequestProvenance(BaseModel):
         populate_by_name=True,
     )
 
-    # By recorded field written since Provenance was added: { source, by, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; review is { state, by?, at? }, state proposed, accepted, rejected or edited.
+    # By recorded field written since Provenance was added: { source, by, for?, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; for is the subject it acted for, when it acted for one (D77); review is { state, by?, at? }, state proposed, accepted, rejected or edited.
     fields_: RequestProvenanceFields = Field(..., alias="fields", serialization_alias="fields")
     # Whether any recorded field is proposed. A list filters on it.
     in_review: bool = Field(..., alias="inReview", serialization_alias="inReview")
@@ -1056,12 +1060,16 @@ class TicketComments(BaseModel):
         populate_by_name=True,
     )
 
-    # How many posted messages the conversation has, top-level and replies; deleted and purged ones are not counted.
+    # How many posted and interrupted messages the conversation has, top-level and replies; composing, deleted and purged ones are not counted.
     messages: int = Field(..., alias="messages", serialization_alias="messages")
-    # When the latest posted message was posted, in epoch milliseconds; absent while there is none.
+    # The greatest postedAt of a posted or interrupted message, in epoch milliseconds; absent while there is none.
     last_message_at: Optional[int] = Field(default=None, alias="lastMessageAt", serialization_alias="lastMessageAt")
-    # The posted top-level messages, each a thread, whether resolved or not: { open, resolved }.
+    # The posted and interrupted top-level messages, each a thread, whether resolved or not: { open, resolved }.
     threads: TicketCommentsThreads = Field(..., alias="threads", serialization_alias="threads")
+    # The subjects writing a message now: each subject with a composing message on the instance, once, in the order of its earliest composing message's id; empty while nobody is.
+    composing: List[str] = Field(..., alias="composing", serialization_alias="composing")
+    # The caller's: how many posted and interrupted top-level messages of others came to stand after the caller's read marker on the conversation. 0 until the caller first reads the conversation with markRead or posts in it top-level, so a conversation nobody opened is unread for nobody. Replies are read thread by thread, in the inbox, and not counted here.
+    unread: int = Field(..., alias="unread", serialization_alias="unread")
 
 class TicketWorkflow(BaseModel):
     """

@@ -55,6 +55,9 @@ func TestDerivedValuesMeetTheirContract(t *testing.T) {
 		{"a d1 binding", EdgeSQL, DatabaseConnection{D1: &D1Connection{
 			Binding: "SHOP_DB_DATABASE", Database: Output{Resource: "shop-db.database", Name: "uuid"},
 		}}},
+		{"a hyperdrive binding", EdgeSQL, DatabaseConnection{Hyperdrive: &HyperdriveConnection{
+			Binding: "SHOP_DB_DATABASE", Config: "a76a99bc342644deb02c38d66082262a",
+		}}},
 		{"a service binding", EdgeHTTP, ServiceEndpoint{
 			URL:     "https://shop-api",
 			Binding: &ServiceBinding{Name: "SHOP_API_SERVICE", Worker: "shop-api"},
@@ -92,11 +95,13 @@ func TestDerivedValuesThatBreakTheContract(t *testing.T) {
 		want  string
 	}{
 		{"free-form string", EdgeSQL, "postgres://localhost/shop", "a database connection must be an object"},
-		{"neither form", EdgeSQL, DatabaseConnection{}, "sets url, cloudSql or d1"},
+		{"neither form", EdgeSQL, DatabaseConnection{}, "sets url, cloudSql, d1 or hyperdrive"},
 		{"both forms", EdgeSQL, DatabaseConnection{URL: "postgres://x", CloudSQL: &CloudSQLConnection{Instance: "a", Database: "b", User: "c"}}, "not url and cloudSql"},
 		{"a url and a d1 binding", EdgeSQL, DatabaseConnection{URL: "postgres://x", D1: &D1Connection{Binding: "B", Database: "d"}}, "not url and d1"},
 		{"a d1 binding without its database", EdgeSQL, DatabaseConnection{D1: &D1Connection{Binding: "B"}}, "d1.database is null"},
 		{"a d1 binding's unknown member", EdgeSQL, map[string]any{"d1": map[string]any{"binding": "B", "database": "d", "account": "a"}}, "d1 has no member account"},
+		{"a d1 and a hyperdrive binding", EdgeSQL, DatabaseConnection{D1: &D1Connection{Binding: "B", Database: "d"}, Hyperdrive: &HyperdriveConnection{Binding: "B", Config: "c"}}, "not d1 and hyperdrive"},
+		{"a hyperdrive binding without its config", EdgeSQL, DatabaseConnection{Hyperdrive: &HyperdriveConnection{Binding: "B"}}, "hyperdrive.config is null"},
 		{"unknown member", EdgeSQL, map[string]any{"instance": "acme:us:shop", "database": "shop_db"}, "has no member database"},
 		{"missing cloud sql member", EdgeSQL, DatabaseConnection{CloudSQL: &CloudSQLConnection{Instance: "a", Database: "b"}}, "cloudSql.user is null"},
 		{"empty url", EdgeSQL, DatabaseConnection{URL: ""}, `url is ""`},
@@ -368,6 +373,7 @@ func TestDerivedMembersNameTheVariables(t *testing.T) {
 		EdgeSQL: {
 			DatabaseConnection{CloudSQL: &CloudSQLConnection{Instance: "i", Database: "d", User: "u"}},
 			DatabaseConnection{D1: &D1Connection{Binding: "b", Database: "d"}},
+			DatabaseConnection{Hyperdrive: &HyperdriveConnection{Binding: "b", Config: "c"}},
 		},
 		EdgeHTTP: {ServiceEndpoint{URL: "u", Binding: &ServiceBinding{Name: "n", Worker: "w"}, Credential: &ServiceCredential{
 			Source: CredentialSignedToken, Audience: "a", Issuer: "i", Key: "k", Headers: []string{ServiceAuthorizationHeader},

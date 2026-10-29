@@ -82,7 +82,24 @@ type APIOutputConfig struct {
 	// ScaffoldsOutputDir is where route-impl scaffolds are written, relative
 	// to the service directory. Empty disables scaffold generation.
 	ScaffoldsOutputDir string `json:"scaffoldsOutputDir,omitempty"`
+
+	// MCP serves the API's visible @mcp operations as MCP tools at POST
+	// /api/mcp (D81). A TypeScript API serves it; ParseOutputs refuses it
+	// on a Go or Rust API.
+	MCP bool `json:"mcp,omitempty"`
+
+	// MCPConfirmationKey is the @envVars Secret<string> the MCP endpoint
+	// signs its confirmations with (D93), by the type that declares the
+	// field and the field's name, as a stack names the secret and
+	// outputs.sql.encryption.key names its own: "McpKeys.MCP_CONFIRMATION_KEY".
+	// The API's @envVars class holds it. A build whose endpoint serves a
+	// tool that asks needs it; ParseOutputs refuses it without mcp.
+	MCPConfirmationKey string `json:"mcpConfirmationKey,omitempty"`
 }
+
+// APIMCPLanguages says which API servers serve outputs.api.mcp (D81), for
+// the refusal of the others.
+const APIMCPLanguages = "a TypeScript API serves the MCP endpoint; Go and Rust follow"
 
 // SQLOutputConfig configures the DB kind's sql output. The DDL and the ORM
 // are implied by the kind; this block places and owns the generated
@@ -107,6 +124,107 @@ type SQLOutputConfig struct {
 	// ["postgres"]. ParseOutputs refuses a list without postgres, since the
 	// DB kind always generates the Go ORM, which runs on Postgres.
 	Dialects []string `json:"dialects,omitempty"`
+
+	// Encryption names the key of the schema's Encrypted<T> fields (D85).
+	// Nil for a service without one; a schema with one needs it.
+	Encryption *SQLEncryptionConfig `json:"encryption,omitempty"`
+
+	// SystemActor is who the ORMs' asSystem (TypeScript) and AsSystem (Go)
+	// act as (D87). Nil acts as DefaultSystemActorID, named
+	// DefaultSystemActorName.
+	SystemActor *SQLSystemActorConfig `json:"systemActor,omitempty"`
+
+	// RequireUpdatedBy makes an update of a table with an updatedBy field
+	// need an acting user, as a create of a table with createdBy does
+	// (D87): the ORMs refuse one without a user where they would leave a
+	// nullable updatedBy as it was.
+	RequireUpdatedBy bool `json:"requireUpdatedBy,omitempty"`
+}
+
+// SQLSystemActorConfig is outputs.sql.systemActor (D87): the user ID the
+// ORMs stamp createdBy, updatedBy and deletedBy with for a write no
+// request's caller makes, a job's or a worker's, and the name an app shows
+// for it. The audit fields hold a user's ID with no foreign key, so the ID
+// needs no row of the user table.
+type SQLSystemActorConfig struct {
+	// ID is a UUID, hyphenated.
+	ID string `json:"id"`
+	// Name is DefaultSystemActorName when empty.
+	Name string `json:"name,omitempty"`
+}
+
+// The system actor the ORMs act as unless outputs.sql.systemActor names
+// another (D87): the fixed ID the generated Go APIs export as SystemUserID.
+const (
+	DefaultSystemActorID   = "00000000-0000-4000-8000-000000000000"
+	DefaultSystemActorName = "system"
+)
+
+// SystemActor is outputs.sql.systemActor with its unset members defaulted,
+// and whether the service sets it.
+func (o *Outputs) SystemActor() (actor SQLSystemActorConfig, set bool) {
+	actor = SQLSystemActorConfig{ID: DefaultSystemActorID, Name: DefaultSystemActorName}
+	if o == nil || o.SQL == nil || o.SQL.SystemActor == nil {
+		return actor, false
+	}
+	actor.ID = o.SQL.SystemActor.ID
+	if o.SQL.SystemActor.Name != "" {
+		actor.Name = o.SQL.SystemActor.Name
+	}
+	return actor, true
+}
+
+// RequireUpdatedBy is outputs.sql.requireUpdatedBy.
+func (o *Outputs) RequireUpdatedBy() bool {
+	return o != nil && o.SQL != nil && o.SQL.RequireUpdatedBy
+}
+
+// SQLEncryptionConfig is outputs.sql.encryption (D85): where the keys of a
+// DB service's Encrypted<T> fields come from.
+type SQLEncryptionConfig struct {
+	// Key is the @envVars Secret<string> that holds the keys, by the type
+	// that declares the field and the field's name, as a stack names the
+	// secret: "FieldKeys.FINANCES_DB_KEY". Every API whose servers, jobs
+	// and workers open the service's ORM must hold it in its @envVars, so
+	// each reads the one secret each environment sets.
+	Key string `json:"key"`
+}
+
+// SplitEncryptionKey is the declaring type and the field a key of the form
+// SQLEncryptionConfig.Key names, and whether it has that form: a type
+// name, a dot and a field name.
+func SplitEncryptionKey(key string) (typeName, field string, ok bool) {
+	typeName, field, ok = strings.Cut(key, ".")
+	return typeName, field, ok && identifier(typeName) && identifier(field)
+}
+
+func identifier(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		letter := r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+		if !letter && (i == 0 || r < '0' || r > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+// EncryptionKey is outputs.sql.encryption.key, or "".
+func (o *Outputs) EncryptionKey() string {
+	if o == nil || o.SQL == nil || o.SQL.Encryption == nil {
+		return ""
+	}
+	return o.SQL.Encryption.Key
+}
+
+// MCPConfirmationKey is outputs.api.mcpConfirmationKey, or "" (D93).
+func (o *Outputs) MCPConfirmationKey() string {
+	if o == nil || o.API == nil {
+		return ""
+	}
+	return o.API.MCPConfirmationKey
 }
 
 // EngineOutputConfig configures a DB service's engine document (D58): the
@@ -285,6 +403,16 @@ func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 		if !knownTargetLanguages[lang] {
 			return nil, fmt.Errorf("outputs.sdk has unknown target language %q", lang)
 		}
+		value := outputs.sdkMember(lang, sdkLazyValidationKey)
+		if value == nil {
+			continue
+		}
+		if lang != LangTypeScript {
+			return nil, fmt.Errorf("outputs.sdk.%s sets %s, which only the TypeScript SDK takes: it loads superscalar's WebAssembly core in a browser (D82)", lang, sdkLazyValidationKey)
+		}
+		if _, ok := value.(bool); !ok {
+			return nil, fmt.Errorf("outputs.sdk.typescript.%s must be true or false", sdkLazyValidationKey)
+		}
 	}
 	// The API server and each SDK import the types package of their
 	// language, which only outputs.types generates. The API language is
@@ -305,6 +433,20 @@ func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 	if err := errors.Join(missingTypes...); err != nil {
 		return nil, err
 	}
+	// Only the TypeScript router serves the MCP endpoint yet (D81).
+	if outputs.APIEnabled() && outputs.API.MCP && (outputs.API.Language == APILanguageGo || outputs.API.Language == APILanguageRust) {
+		return nil, fmt.Errorf("outputs.api.mcp is on and the API's language is %s: %s; set outputs.api.language to TYPESCRIPT, or remove mcp (D81)", outputs.API.Language, APIMCPLanguages)
+	}
+	// The MCP endpoint's confirmation key names a secret as the encryption
+	// key does (D93).
+	if key := outputs.MCPConfirmationKey(); key != "" {
+		if !outputs.API.MCP {
+			return nil, fmt.Errorf("outputs.api.mcpConfirmationKey is set and outputs.api.mcp is off: only the MCP endpoint signs confirmations; turn mcp on, or remove the key (D93)")
+		}
+		if _, _, ok := SplitEncryptionKey(key); !ok {
+			return nil, fmt.Errorf("outputs.api.mcpConfirmationKey %q must name an @envVars Secret<string> by its declaring type and field, such as \"McpKeys.MCP_CONFIRMATION_KEY\" (D93)", key)
+		}
+	}
 
 	// outputs.sql is read strictly: a misspelt key would otherwise leave
 	// the migrations in the output root or the views owned by the runner
@@ -321,6 +463,11 @@ func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 		if sql.Dialects != nil {
 			if err := checkSQLDialects(sql.Dialects); err != nil {
 				return nil, err
+			}
+		}
+		if e := sql.Encryption; e != nil {
+			if _, _, ok := SplitEncryptionKey(e.Key); !ok {
+				return nil, fmt.Errorf("outputs.sql.encryption.key %q must name an @envVars Secret<string> by its declaring type and field, such as \"FieldKeys.FINANCES_DB_KEY\"", e.Key)
 			}
 		}
 	}
@@ -385,6 +532,32 @@ func (o *Outputs) TypesEnabled(lang string) bool {
 // SDKEnabled reports whether the client SDK for lang is enabled.
 func (o *Outputs) SDKEnabled(lang string) bool {
 	return o != nil && o.SDK[lang].Enabled
+}
+
+// sdkLazyValidationKey is the member of outputs.sdk.typescript that loads
+// the SDK's validators lazily (D82).
+const sdkLazyValidationKey = "lazyValidation"
+
+// SDKLazyValidation reports whether outputs.sdk.typescript sets
+// lazyValidation: the TypeScript SDK loads its types package's validators
+// and parsers, and superscalar's WebAssembly core with them, on its first
+// call (D82).
+func (o *Outputs) SDKLazyValidation() bool {
+	lazy, _ := o.sdkMember(LangTypeScript, sdkLazyValidationKey).(bool)
+	return lazy
+}
+
+// sdkMember returns the member key of outputs.sdk.<lang> as written, or
+// nil.
+func (o *Outputs) sdkMember(lang, key string) any {
+	if o == nil || o.Raw["sdk"] == nil {
+		return nil
+	}
+	var sdk map[string]map[string]any
+	if err := json.Unmarshal(o.Raw["sdk"], &sdk); err != nil {
+		return nil
+	}
+	return sdk[lang][key]
 }
 
 // SQLMigrationsDir returns outputs.sql.migrationsDir, relative to the

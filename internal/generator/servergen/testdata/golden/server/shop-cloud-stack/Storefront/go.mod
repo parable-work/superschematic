@@ -12,7 +12,7 @@
 
 module example.com/schemas/server/shop-cloud-stack/Storefront
 
-go 1.26.4
+go 1.27.3
 
 require (
 	cloud.google.com/go/cloudsqlconn v1.25.3
@@ -26,12 +26,14 @@ require (
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/parable-work/superschematic/runtime/http/go v0.0.0-00010101000000-000000000000
+	github.com/redis/go-redis/v9 v9.23.0
 	go.uber.org/zap v1.28.0
 	google.golang.org/api v0.288.0
 )
 
 require (
 	example.com/schemas/types/go/shop-api v0.0.0-00010101000000-000000000000 // indirect
+	example.com/schemas/types/go/shop-cache v0.0.0-00010101000000-000000000000 // indirect
 	example.com/schemas/types/go/shop-db v0.0.0-00010101000000-000000000000 // indirect
 	example.com/schemas/types/go/shop-orders v0.0.0-00010101000000-000000000000 // indirect
 	example.com/schemas/types/go/shop-reviews v0.0.0-00010101000000-000000000000 // indirect
@@ -48,6 +50,7 @@ replace (
 	example.com/schemas/orm/shop-db => ../../../orm/shop-db
 	example.com/schemas/sdk/go/shop-api => ../../../sdk/go/shop-api
 	example.com/schemas/types/go/shop-api => ../../../types/go/shop-api
+	example.com/schemas/types/go/shop-cache => ../../../types/go/shop-cache
 	example.com/schemas/types/go/shop-db => ../../../types/go/shop-db
 	example.com/schemas/types/go/shop-orders => ../../../types/go/shop-orders
 	example.com/schemas/types/go/shop-reviews => ../../../types/go/shop-reviews

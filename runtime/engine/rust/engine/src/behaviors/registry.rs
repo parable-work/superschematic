@@ -26,7 +26,7 @@ use superschematic_engine_storage::behavior::{
 use superschematic_engine_storage::{migrate_in, Db, Dialect, Tx};
 use superschematic_schema_ir::ajv::{AjvError, AjvSchema};
 
-use super::declaration::{BehaviorDeclaration, OperationDeclaration, OperationScope};
+use super::declaration::{BehaviorDeclaration, OperationDeclaration, OperationScope, SignalAccess};
 use super::erased::{Erased, HookSet};
 use crate::errors::{Error, Result, SchemaIssue};
 use crate::json;
@@ -61,8 +61,36 @@ pub(crate) struct OperationSpec {
     /// Whether it appends an event: false only for a beside operation that
     /// declares `"log": false`.
     pub log: bool,
+    /// Whether the policy is asked `read` for it though it writes (D77,
+    /// `"asks": "read"`).
+    pub asks_read: bool,
     pub params: AjvSchema,
     pub result: AjvSchema,
+}
+
+impl OperationSpec {
+    /// What the policy is asked for a call of it: `write` for one that
+    /// writes, unless it asks `read` (D77), and `read` otherwise.
+    pub fn asks(&self) -> crate::access::SchemaAction {
+        if self.writes && !self.asks_read {
+            crate::access::SchemaAction::Write
+        } else {
+            crate::access::SchemaAction::Read
+        }
+    }
+
+    /// Whether an archived namespace refuses it: one that writes, unless it
+    /// asks `read`.
+    pub fn refused_when_archived(&self) -> bool {
+        self.writes && !self.asks_read
+    }
+}
+
+/// One declared signal with its compiled schema (D77).
+pub(crate) struct SignalSpec {
+    pub name: String,
+    pub access: SignalAccess,
+    pub params: AjvSchema,
 }
 
 /// A field a behavior lets a list filter on, checked.
@@ -90,6 +118,8 @@ pub(crate) struct RegisteredBehavior {
     /// The compiled preconditionSchema; `None` when it takes none.
     pub precondition: Option<AjvSchema>,
     pub operations: Vec<OperationSpec>,
+    /// Its declared signals (D77), in declaration order.
+    pub signals: Vec<SignalSpec>,
     /// Its declared fields, in declaration order.
     pub fields: Vec<String>,
     /// Every column its migrations add, by its own name.
@@ -101,11 +131,9 @@ pub(crate) struct RegisteredBehavior {
 }
 
 impl RegisteredBehavior {
-    /// The operation of a name.
-    pub fn operation(&self, name: &str) -> Option<&OperationSpec> {
-        self.operations
-            .iter()
-            .find(|operation| operation.name == name)
+    /// The signal of a name.
+    pub fn signal(&self, name: &str) -> Option<&SignalSpec> {
+        self.signals.iter().find(|signal| signal.name == name)
     }
 }
 
@@ -302,8 +330,23 @@ fn compile(
                 scope: operation.scope,
                 beside: operation.beside,
                 log: operation.log,
+                asks_read: operation.asks_read,
                 params,
                 result,
+            });
+        }
+    }
+    let mut signals = Vec::new();
+    for signal in &declaration.signals {
+        if let Some(params) = schema(
+            &signal.params_schema,
+            &format!("signal {} paramsSchema", signal.name),
+            &mut problems,
+        ) {
+            signals.push(SignalSpec {
+                name: signal.name.clone(),
+                access: signal.access,
+                params,
             });
         }
     }
@@ -325,6 +368,12 @@ fn compile(
         "schemaOperations",
         &hooks.schema_operations,
         &scoped(OperationScope::Schema),
+        &mut problems,
+    );
+    match_names(
+        "namespaceOperations",
+        &hooks.namespace_operations,
+        &scoped(OperationScope::Namespace),
         &mut problems,
     );
     let fields: Vec<String> = declaration
@@ -361,6 +410,7 @@ fn compile(
         create_params,
         precondition,
         operations,
+        signals,
         fields,
         columns,
         filters,

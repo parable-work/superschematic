@@ -60,6 +60,7 @@ pub fn engine_migrations(
             step(11, "namespaces a create makes", SQLITE_11, POSTGRES_11),
             step(12, "event log retention", SQLITE_12, POSTGRES_12),
             step(13, "beside events", SQLITE_13, POSTGRES_13),
+            step(14, "events acting for a subject", SQLITE_14, POSTGRES_14),
         ],
     )
 }
@@ -674,3 +675,13 @@ ALTER TABLE engine_events
   ADD CONSTRAINT engine_events_instance_seq CHECK (instance_id IS NOT NULL OR seq IS NULL) NOT VALID,
   ADD CONSTRAINT engine_events_beside_seq CHECK (seq IS NOT NULL OR instance_id IS NULL OR kind = 'operation') NOT VALID;
 ";
+
+// An event a principal acting for a subject wrote (D77) records the subject
+// as `for_subject` beside `actor`, `for` being reserved in both dialects.
+// A nullable column with no default is added in place on both, scanning no
+// row; every event written before it acted for no one.
+const SQLITE_14: &str = "
+ALTER TABLE engine_events ADD COLUMN for_subject TEXT;
+";
+
+const POSTGRES_14: &str = SQLITE_14;

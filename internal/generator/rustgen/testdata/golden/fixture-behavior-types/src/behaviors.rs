@@ -298,7 +298,7 @@ pub struct RequestDerivedFieldsSummaryOverridden {
 /// RequestProvenance holds the fields a Request's Provenance adds, as a read returns them: a field with no value is absent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RequestProvenance {
-    /// By recorded field written since Provenance was added: { source, by, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; review is { state, by?, at? }, state proposed, accepted, rejected or edited.
+    /// By recorded field written since Provenance was added: { source, by, for?, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; for is the subject it acted for, when it acted for one (D77); review is { state, by?, at? }, state proposed, accepted, rejected or edited.
     pub fields: RequestProvenanceFields,
     /// Whether any recorded field is proposed. A list filters on it.
     #[serde(rename = "inReview")]
@@ -326,6 +326,8 @@ pub struct RequestProvenanceFieldsBody {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confidence: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#for: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review: Option<RequestProvenanceFieldsBodyReview>,
     pub source: String,
 }
@@ -348,6 +350,8 @@ pub struct RequestProvenanceFieldsCategory {
     pub by: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confidence: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#for: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review: Option<RequestProvenanceFieldsCategoryReview>,
     pub source: String,
@@ -372,6 +376,8 @@ pub struct RequestProvenanceFieldsSubject {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confidence: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#for: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review: Option<RequestProvenanceFieldsSubjectReview>,
     pub source: String,
 }
@@ -394,6 +400,8 @@ pub struct RequestProvenanceFieldsSummary {
     pub by: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confidence: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#for: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review: Option<RequestProvenanceFieldsSummaryReview>,
     pub source: String,
@@ -468,13 +476,17 @@ pub struct TicketWorkflow {
 /// TicketComments holds the fields a Ticket's Comments adds, as a read returns them: a field with no value is absent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TicketComments {
-    /// How many posted messages the conversation has, top-level and replies; deleted and purged ones are not counted.
+    /// How many posted and interrupted messages the conversation has, top-level and replies; composing, deleted and purged ones are not counted.
     pub messages: i64,
-    /// When the latest posted message was posted, in epoch milliseconds; absent while there is none.
+    /// The greatest postedAt of a posted or interrupted message, in epoch milliseconds; absent while there is none.
     #[serde(default, rename = "lastMessageAt", skip_serializing_if = "Option::is_none")]
     pub last_message_at: Option<i64>,
-    /// The posted top-level messages, each a thread, whether resolved or not: { open, resolved }.
+    /// The posted and interrupted top-level messages, each a thread, whether resolved or not: { open, resolved }.
     pub threads: TicketCommentsThreads,
+    /// The subjects writing a message now: each subject with a composing message on the instance, once, in the order of its earliest composing message's id; empty while nobody is.
+    pub composing: Vec<String>,
+    /// The caller's: how many posted and interrupted top-level messages of others came to stand after the caller's read marker on the conversation. 0 until the caller first reads the conversation with markRead or posts in it top-level, so a conversation nobody opened is unread for nobody. Replies are read thread by thread, in the inbox, and not counted here.
+    pub unread: i64,
 }
 
 /// TicketCommentsThreads types TicketComments.threads.

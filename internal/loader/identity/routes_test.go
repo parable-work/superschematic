@@ -154,7 +154,39 @@ func TestExpandRoutesWithoutRegister(t *testing.T) {
 	}
 }
 
-// TestExpandRoutesAdministration: @userAdministration gets the twelve
+// TestExpandRoutesUnderApproval: under registration "approval" register
+// answers RegisterResult, whose expiry and token are optional, as no
+// session starts for a pending user (D81); defaultRoles and firstUser add
+// nothing to the routes.
+func TestExpandRoutesUnderApproval(t *testing.T) {
+	api := routesAPI(&ir.UserSessionsConfig{
+		Register: true, Registration: ir.IdentityRegistrationApproval, DefaultRoles: []string{"member"},
+		FirstUser: &ir.IdentityFirstUser{Role: "admin", Permissions: []string{"identity"}},
+	}, nil)
+	ExpandRoutes(api, routesDB(), ir.DefaultIdentityPermissionPrefix)
+	ops := api.OperationSets[0].Operations
+	register := ops[len(ops)-1]
+	if register.Name != ir.IdentityOpRegister || register.TypeRef.Name != ir.IdentityRegisterResultType {
+		t.Fatalf("last operation = %s answering %s, want register answering RegisterResult", register.Name, register.TypeRef.Name)
+	}
+	if got, want := fieldsOf(api.Types[ir.IdentityRegisterResultType]), "pending:boolean!,user:SessionUser!,expiresAt:Temporal.DateTime,token:string*"; got != want {
+		t.Errorf("RegisterResult = %s, want %s", got, want)
+	}
+	if len(ops) != 6 {
+		t.Errorf("operations = %d, want the six of @userSessions({ register: true })", len(ops))
+	}
+	// Open registration keeps LoginResult and adds no RegisterResult.
+	open := routesAPI(&ir.UserSessionsConfig{Register: true, Registration: ir.IdentityRegistrationOpen, DefaultRoles: []string{"member"}}, nil)
+	ExpandRoutes(open, routesDB(), ir.DefaultIdentityPermissionPrefix)
+	if got := open.OperationSets[0].Operations[5].TypeRef.Name; got != ir.IdentityLoginResultType {
+		t.Errorf("open register answers %s, want LoginResult", got)
+	}
+	if open.Types[ir.IdentityRegisterResultType] != nil {
+		t.Error("open registration added RegisterResult")
+	}
+}
+
+// TestExpandRoutesAdministration: @userAdministration gets the thirteen
 // routes, each needing its permission under the prefix, with the user's
 // and the role's keys as path arguments.
 func TestExpandRoutesAdministration(t *testing.T) {
@@ -175,10 +207,11 @@ func TestExpandRoutesAdministration(t *testing.T) {
 	)
 	want := []route{
 		{name: "createUser", method: "POST", path: "staff/admin/users", result: "IdentityUser", args: "input:CreateUserInput", rule: usersWrite, hidden: true},
-		{name: "listUsers", method: "GET", path: "staff/admin/users", result: "IdentityUser", array: true, rule: usersRead},
+		{name: "listUsers", method: "GET", path: "staff/admin/users", result: "IdentityUser", array: true, args: "pending?:boolean", rule: usersRead},
 		{name: "getUser", method: "GET", path: "staff/admin/users/{id}", result: "IdentityUser", args: "id:Identity.UUID", rule: usersRead},
 		{name: "disableUser", method: "POST", path: "staff/admin/users/{id}/disable", result: "IdentityUser", args: "id:Identity.UUID", rule: usersWrite},
 		{name: "enableUser", method: "POST", path: "staff/admin/users/{id}/enable", result: "IdentityUser", args: "id:Identity.UUID", rule: usersWrite},
+		{name: "approveUser", method: "POST", path: "staff/admin/users/{id}/approve", result: "IdentityUser", args: "id:Identity.UUID", rule: usersWrite},
 		{name: "setUserPassword", method: "PUT", path: "staff/admin/users/{id}/password", result: "boolean", args: "id:Identity.UUID,input:SetPasswordInput", rule: usersWrite, hidden: true},
 		{name: "listRoles", method: "GET", path: "staff/admin/roles", result: "IdentityRole", array: true, rule: rolesRead},
 		{name: "createRole", method: "POST", path: "staff/admin/roles", result: "IdentityRole", args: "input:RoleInput", rule: rolesWrite},
@@ -239,7 +272,7 @@ func TestExpandRoutesTypes(t *testing.T) {
 		"ChangePasswordInput": "current:Auth.Password!*,password:Auth.Password!*",
 		"CreateUserInput":     "login:Contact.Email!,name:Identity.Name,password:Auth.Password!*",
 		"SetPasswordInput":    "password:Auth.Password!*",
-		"IdentityUser":        "id:Identity.UUID!,login:Contact.Email!,name:Identity.Name!,disabled:boolean!,roles:RoleRef[]!",
+		"IdentityUser":        "id:Identity.UUID!,login:Contact.Email!,name:Identity.Name!,disabled:boolean!,pending:boolean!,roles:RoleRef[]!",
 		"RoleInput":           "name:string!,permissions:string[]!",
 		"IdentityRole":        "id:Identity.UUID!,name:string!,permissions:string[]!",
 	}

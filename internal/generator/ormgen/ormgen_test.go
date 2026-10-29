@@ -58,6 +58,8 @@ func TestWriteORMGolden(t *testing.T) {
 	common := []string{
 		"database.go", "interfaces.go", "query.go", "utils.go",
 		"go.mod", "README.md", "Makefile",
+		// An upsert's result and a transaction's options (D89).
+		"upsert.go", "transaction.go",
 	}
 	for _, tc := range []struct {
 		svc          string
@@ -76,7 +78,20 @@ func TestWriteORMGolden(t *testing.T) {
 			"repository_role.go", "repository_session.go", "repository_user.go",
 			"repository_user_credential.go", "repository_user_role_grant.go",
 		}},
-		{"fixture-queue-db", []string{"repository_order.go", "queues.go", "queues_sqlite.go"}},
+		{"fixture-queue-db", []string{"repository_order.go", "repository_order_line.go", "repository_product.go", "queues.go", "queues_sqlite.go"}},
+		// The tables both ORMs are held to (D79).
+		{"fixture-ledger-db", []string{"repository_account.go", "repository_entry.go", "queues.go", "search.go"}},
+		// Encrypted<T> fields (D85): encrypted.go seals and opens them.
+		{"fixture-vault-db", []string{"repository_api_credential.go", "repository_plaid_item.go", "encrypted.go", "search.go"}},
+		// Tables and columns @table and @column name (D85).
+		{"fixture-naming-db", []string{"queues.go", "repository_category.go", "repository_line_item.go", "repository_note.go", "search.go"}},
+		// Vectors and decimals, and Nearest (D84).
+		{"fixture-vectors-db", []string{"repository_chunk.go", "repository_ledger_line.go", "repository_passage.go", "repository_text_embedding.go", "nearest.go", "encrypted.go"}},
+		// A bank sync's upserts of many rows, only if changed (D89).
+		{"fixture-sync-db", []string{"repository_bank_account.go", "repository_line_item.go", "queues.go"}},
+		// Declared queries (D86): queries.go runs them, a query over the
+		// line_list projection's view among them (D95).
+		{"fixture-queries-db", []string{"repository_account.go", "repository_category.go", "repository_line_item.go", "repository_transfer_group.go", "projections.go", "queries.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)
@@ -428,7 +443,7 @@ func TestGenerateReferencedByAndAuditTimestampFilters(t *testing.T) {
 		"ReferencedByTenantUserTenant *ReferencedByFilter",
 		"probe := `SELECT 1 FROM tenant_user WHERE tenant_user.tenant_id = tenant.id`",
 		"probe += ` AND tenant_user.deleted_at IS NULL`",
-		"conditions = append(conditions, `NOT EXISTS (`+probe+`)`)",
+		"conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))",
 		// createdAt/updatedAt are filterable; the rest of the audit set is not.
 		"CreatedAt *DateTimeFilter",
 		"UpdatedAt *DateTimeFilter",
@@ -1599,16 +1614,18 @@ func TestRequiredEnumDefaultAppliesToLocalAndImportedEnums(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read repository: %v", err)
 	}
-	// CreateOne binds the default as a value and CreateMany as a row's cell.
-	// TestCreateBindsTheEnumDefaultWhenUnset in compile_test.go runs both.
-	for _, want := range []string{
-		`values = append(values, types.OrderStatus("pending"))`,
-		`values = append(values, types.OrderPriority("normal"))`,
-		`cell.value = types.OrderStatus("pending")`,
-		`cell.value = types.OrderPriority("normal")`,
+	// CreateOne and UpsertOne bind the default as a value, and CreateMany
+	// and UpsertMany (D89) as a row's cell.
+	// TestCreateBindsTheEnumDefaultWhenUnset in compile_test.go runs
+	// CreateOne and CreateMany.
+	for want, count := range map[string]int{
+		`values = append(values, types.OrderStatus("pending"))`:  2,
+		`values = append(values, types.OrderPriority("normal"))`: 2,
+		`cell.value = types.OrderStatus("pending")`:              2,
+		`cell.value = types.OrderPriority("normal")`:             2,
 	} {
-		if n := strings.Count(string(source), want); n != 1 {
-			t.Errorf("CreateOne and CreateMany must each insert the default; found %d of %q, want 1", n, want)
+		if n := strings.Count(string(source), want); n != count {
+			t.Errorf("CreateOne, UpsertOne and CreateMany must each insert the default; found %d of %q, want %d", n, want, count)
 		}
 	}
 }

@@ -34,6 +34,8 @@ type StringFilter struct {
 	// the empty slice and getting every row back.
 	In    []string
 	ILike *string // Case-insensitive LIKE
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // Int64Filter provides filtering operations for integer fields
@@ -44,6 +46,11 @@ type Int64Filter struct {
 	Lt      *int64
 	Lte     *int64
 	Between *Int64Range
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []int64
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // Int64Range represents a range for int64 values
@@ -60,6 +67,11 @@ type FloatFilter struct {
 	Lt      *float64
 	Lte     *float64
 	Between *FloatRange
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []float64
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // FloatRange represents a range for float values
@@ -71,6 +83,11 @@ type FloatRange struct {
 // BoolFilter provides filtering operations for boolean fields
 type BoolFilter struct {
 	Eq *bool
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In []bool
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // DateTimeFilter provides filtering operations for DateTime fields
@@ -81,7 +98,10 @@ type DateTimeFilter struct {
 	Lt      *time.Time
 	Lte     *time.Time
 	Between *DateTimeRange
-	IsNull  *bool // true for IS NULL, false for IS NOT NULL
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D89).
+	In     []time.Time
+	IsNull *bool // true for IS NULL, false for IS NOT NULL
 }
 
 // DateTimeRange represents a range for DateTime values
@@ -98,6 +118,11 @@ type DateFilter struct {
 	Lt      *string
 	Lte     *string
 	Between *DateRange
+	// In matches any value in the set; an empty or nil slice adds no
+	// condition (D79).
+	In []string
+	// IsNull is true for IS NULL, false for IS NOT NULL (D79).
+	IsNull *bool
 }
 
 // DateRange represents a range for Date values
@@ -271,6 +296,9 @@ type BoardFindOptions struct {
 	Offset int
 	// IncludeDeleted includes soft-deleted records in results (default false)
 	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
 }
 
 // BoardSortField is a field FindPage orders Board rows by, by its
@@ -300,6 +328,15 @@ func ParseBoardSort(text string) (BoardSort, error) {
 	}
 	return BoardSort{}, fmt.Errorf("orm: Board sorts by id, not %q", text)
 }
+
+// BoardUniqueKey names a unique key of Board that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
+type BoardUniqueKey string
+
+const (
+	BoardUniqueById BoardUniqueKey = "id"
+)
 
 // BoardPageKey is the position of a Board row in a FindPage order: the
 // row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
@@ -361,6 +398,17 @@ type BoardFilter struct {
 	States *ArrayStringFilter
 	Walls  *ArrayStringFilter
 	Scores *ArrayStringFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []BoardFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []BoardFilter
 }
 
 // BoardUpdate provides fields that can be updated
@@ -463,6 +511,38 @@ func (f *BoardFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			} else {
 				conditions = append(conditions, `board.id IS NOT NULL`)
 			}
+		}
+	}
+
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
 		}
 	}
 

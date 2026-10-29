@@ -90,7 +90,7 @@ func TestTheConsolePagesTheEngine(t *testing.T) {
 	t.Run("pages", func(t *testing.T) {
 		cargoTestCrateWith(t, engineService, enginePagesAppTest, crateOptions{
 			before:  map[string]map[string]any{engineDatabase: engineDatabaseHiding("Approvals.listSignOffs")},
-			appends: map[string]string{"src/engine_pages.rs": panelFormPage + panelShowsTest},
+			appends: map[string]string{"src/engine_pages.rs": panelFormPage + panelShowsTest + toolOfferTest},
 		})
 	})
 }
@@ -152,6 +152,34 @@ pub async fn panel_form_page(cx: &Cx) -> topcoat::Result<impl View> {
 }
 `
 
+// toolOfferTest, appended to engine_pages.rs, holds tool_offer to the
+// engine's hiddenBy: a tool hidden for MCP's limits alone is offered, the
+// deployment's is none, and every other cause, a missing list, an empty
+// one or a cause the pages do not know is refused, so the pages fail
+// closed.
+const toolOfferTest = `
+#[cfg(test)]
+mod tool_offer_tests {
+    use super::{Offer, tool_offer};
+    use serde_json::json;
+
+    #[test]
+    fn a_tool_is_offered_only_when_mcps_limits_alone_hide_it() {
+        let refused = |reason: &str| Some(Offer::Refused(reason.to_owned()));
+        assert_eq!(tool_offer(&json!({"hidden": false, "handle": "note_post"})), Some(Offer::Offered));
+        assert_eq!(tool_offer(&json!({"hidden": true, "hiddenReason": "its MCP handle", "hiddenBy": ["handle"]})), Some(Offer::Offered));
+        assert_eq!(tool_offer(&json!({"hidden": true, "hiddenReason": "a filter", "hiddenBy": ["filter"]})), Some(Offer::Offered));
+        assert_eq!(tool_offer(&json!({"hidden": true, "hiddenReason": "tools.hidden", "hiddenBy": ["deployment", "handle"]})), None);
+        assert_eq!(tool_offer(&json!({"hidden": true, "hiddenReason": "the policy", "hiddenBy": ["policy", "handle"]})), refused("the policy"));
+        assert_eq!(tool_offer(&json!({"hidden": true, "hiddenReason": "archived", "hiddenBy": ["archived"]})), refused("archived"));
+        assert_eq!(tool_offer(&json!({"hidden": true, "hiddenReason": "a quota", "hiddenBy": ["quota", "handle"]})), refused("a quota"));
+        assert_eq!(tool_offer(&json!({"hidden": true, "hiddenReason": "no list"})), refused("no list"));
+        assert_eq!(tool_offer(&json!({"hidden": true, "hiddenReason": "empty", "hiddenBy": []})), refused("empty"));
+        assert_eq!(tool_offer(&json!({"hidden": true, "hiddenBy": [7]})), refused("The engine does not offer this operation"));
+    }
+}
+`
+
 // panelShowsTest, appended to engine_pages.rs, holds panel_shows to the
 // panels: a core panel owns every operation of its behavior, a commerce
 // panel those commerce_shows names, and the instance page lists the rest.
@@ -194,15 +222,16 @@ mod panel_shows_tests {
 // with its pages on: the pages' caller is the API's, from the bearer token,
 // and ada holds Note, which the engine's permission policy asks of a
 // reader and a writer of notes, reader Note.read alone, clerk and boss
-// what a SupplierContractAmendmentRequest and a Request ask, and nobody
-// nothing.
+// what a SupplierContractAmendmentRequest and a Request ask, auditor
+// SupplierContractAmendmentRequest.read alone, and nobody nothing.
 // Each app's engine also holds SupplierContractAmendmentRequest, Request
 // under a name that makes the MCP handles of its Approvals tools too long,
 // and Invoice, whose amounts name their currencies (D48, amended); its
 // engine document hides Approvals.listSignOffs. A second test
 // checks that an operation the engine hides from MCP for its handle alone
 // is offered, one the deployment hides is not there (404), and one the
-// policy refuses is refused (403); a third, with the app's origin policy
+// policy refuses is refused (403), its handle too long or not, as the
+// tools document's hiddenBy says; a third, with the app's origin policy
 // off, that a write another site sent is refused (403); a fourth that an
 // instance's own amounts show as money in their currencies.
 const enginePagesAppTest = `use std::sync::Arc;
@@ -236,6 +265,7 @@ impl Authenticator for Bearer {
             let permissions: Vec<&str> = match subject {
                 "nobody" => vec![],
                 "reader" => vec!["Note.read"],
+                "auditor" => vec!["SupplierContractAmendmentRequest.read"],
                 "clerk" | "boss" => vec!["SupplierContractAmendmentRequest", "Request", "requests.approve", "Invoice"],
                 _ => vec!["Note"],
             };
@@ -529,6 +559,19 @@ async fn the_console_offers_what_the_deployment_and_the_policy_allow() {
         assert_eq!(answer.status, StatusCode::SEE_OTHER, "{operation}: {}", answer.body);
         assert_eq!(answer.location.as_deref(), Some(AMENDMENT));
     }
+
+    // The engine asks the policy of a tool it hides for its handle too, so
+    // a reader of amendments has no withdrawSignOff form, and is refused it
+    // with the policy's reason (403) before its method is looked at.
+    let audit = page(&router, AMENDMENT, Some("auditor"), StatusCode::OK).await;
+    assert!(!audit.contains("/operations/withdrawSignOff\""), "{audit}");
+    let answer = send(&router, "GET", &format!("{AMENDMENT}/operations/withdrawSignOff"), Some("auditor"), "").await;
+    assert_eq!(answer.status, StatusCode::FORBIDDEN, "{}", answer.body);
+    assert!(
+        answer.body.contains("the access policy refuses auditor write on SupplierContractAmendmentRequest (withdrawSignOff)"),
+        "{}",
+        answer.body
+    );
 
     // listSignOffs, which the deployment hides, is not there: on a type
     // whose handle is too long too, and on Request, whose is not.

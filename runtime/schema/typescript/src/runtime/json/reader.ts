@@ -339,6 +339,9 @@ function parseFieldDef(
     validateListMin: asIntOrNull(field["x-validateListMin"]),
     validateListMax: asIntOrNull(field["x-validateListMax"]),
     validatePattern: asString(field["x-validatePattern"]),
+    validatePrecision: asIntOrNull(field["x-validatePrecision"]),
+    validateScale: asIntOrNull(field["x-validateScale"]),
+    validateDimensions: asIntOrNull(field["x-validateDimensions"]),
     arguments: parseArguments(field, path),
     key: asBoolean(field["x-key"]),
     unique: asBoolean(field["x-unique"]),
@@ -414,6 +417,7 @@ function parseTypeDefinition(
     fields,
     indexes: parseIndexes(definition),
     envVars: asBoolean(definition["x-envVars"]),
+    ...(asBoolean(definition["x-allowUnknownFields"]) ? { allowUnknownFields: true } : {}),
   };
 }
 

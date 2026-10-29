@@ -81,24 +81,17 @@ type ConfigType struct {
 }
 
 // ConfigTypeOf returns the config type an API schema's sentinel names: its
-// one @envVars class, when a TypeScript schema file declares it. Only an
-// API handle has a config type. An @envVars class from a data-form schema
-// file has no TypeScript type to import, so its handle has none either.
+// config, the @envVars class no other extends (ir.Schema.EnvVarsType, D94),
+// when a TypeScript schema file declares it. Only an API handle has a
+// config type. An @envVars class from a data-form schema file has no
+// TypeScript type to import, so its handle has none either, nor has a
+// schema whose @envVars classes make no one config, which its load refuses.
 func ConfigTypeOf(schema *ir.Schema) *ConfigType {
 	if schema == nil || schema.Kind != ir.SchemaKindAPI {
 		return nil
 	}
-	var found *ir.TypeDef
-	for _, def := range schema.Types {
-		if !def.EnvVars {
-			continue
-		}
-		if found != nil {
-			return nil
-		}
-		found = def
-	}
-	if found == nil || !strings.HasPrefix(found.Owner, "src/") || !strings.HasSuffix(found.Owner, ".ts") {
+	found, err := schema.EnvVarsType()
+	if err != nil || found == nil || !strings.HasPrefix(found.Owner, "src/") || !strings.HasSuffix(found.Owner, ".ts") {
 		return nil
 	}
 	return &ConfigType{Name: found.Name, Module: "./" + strings.TrimSuffix(strings.TrimPrefix(found.Owner, "src/"), ".ts")}
@@ -198,7 +191,7 @@ var identifier = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$]*$`)
 
 // Content renders the sentinel file for a service. The SchemaKind enum in
 // the schema-config package is closed over the core kinds (DB, API,
-// General and Bucket, D54; the ir constants), so those render as the enum
+// General, Bucket, D54, and MemoryStore, D75; the ir constants), so those render as the enum
 // member, which keeps committed sentinels byte-stable. Any other kind is an
 // extension's
 // and has no member: it renders as a string literal, which the kind slot's
@@ -231,7 +224,7 @@ func HandleContent(name string, kind ir.SchemaKind, n naming.Naming, types Handl
 	imports := "service"
 	kindExpr := fmt.Sprintf("%q", string(kind))
 	switch kind {
-	case ir.SchemaKindDB, ir.SchemaKindAPI, ir.SchemaKindGeneral, ir.SchemaKindBucket:
+	case ir.SchemaKindDB, ir.SchemaKindAPI, ir.SchemaKindGeneral, ir.SchemaKindBucket, ir.SchemaKindMemoryStore:
 		imports = "service, SchemaKind"
 		kindExpr = "SchemaKind." + string(kind)
 	case ir.SchemaKindSite:

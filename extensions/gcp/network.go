@@ -54,3 +54,42 @@ func networkNodes(env registry.StackEnvironment, v values) []*ir.Resource {
 		}),
 	}
 }
+
+// The nodes a memory store adds to the network (D75): a subnet the
+// Private Service Connect endpoints of the environment's Memorystore
+// instances take their addresses from, and the service connection policy
+// that lets Memorystore create them on the network in the region. Every
+// store of the environment lowers the same nodes, which resolution shares,
+// and a member of a parameterized environment inherits its parent's.
+const (
+	memoryStoreSubnetID = "network.memorystore-subnet"
+	memoryStorePolicyID = "network.memorystore"
+)
+
+// memoryStoreNetworkNodes are the network's nodes, then the subnet and the
+// policy a memory store's endpoints need. The subnet is a /24 of its own
+// beside Direct VPC egress's, so neither takes the other's addresses.
+func memoryStoreNetworkNodes(env registry.StackEnvironment, v values) []*ir.Resource {
+	base := kebab(env.Stack)
+	inherited := len(env.Parameters) > 0
+	return append(networkNodes(env, v),
+		&ir.Resource{ID: memoryStoreSubnetID, Type: TypeSubnetwork, Phase: ir.PhaseInfrastructure, Inherited: inherited, Properties: map[string]any{
+			"project":     v.project,
+			"name":        base + "-memorystore",
+			"region":      v.region,
+			"network":     ir.Output{Resource: networkID, Name: "id"},
+			"ipCidrRange": memoryStoreRange,
+		}},
+		&ir.Resource{ID: memoryStorePolicyID, Type: TypeServiceConnectionPolicy, Phase: ir.PhaseInfrastructure, Inherited: inherited, Properties: map[string]any{
+			"project":      v.project,
+			"name":         base + "-memorystore",
+			"location":     v.region,
+			"serviceClass": memoryStoreServiceClass,
+			"network":      ir.Output{Resource: networkID, Name: "id"},
+			"description":  "Private Service Connect endpoints of the Memorystore instances of stack " + env.Stack,
+			"pscConfig": map[string]any{
+				"subnetworks": []any{ir.Output{Resource: memoryStoreSubnetID, Name: "id"}},
+			},
+		}},
+	)
+}

@@ -158,6 +158,9 @@ function parseIRField(raw: unknown, path: string): FieldDef {
     validateListMin: asNumberOrNull(field.validateListMin),
     validateListMax: asNumberOrNull(field.validateListMax),
     validatePattern: asString(field.validatePattern),
+    validatePrecision: asNumberOrNull(field.validatePrecision),
+    validateScale: asNumberOrNull(field.validateScale),
+    validateDimensions: asNumberOrNull(field.validateDimensions),
     arguments: argumentsRaw.map((argument, index) =>
       parseIRArgument(argument, `${path}.arguments[${index}]`)
     ),
@@ -229,6 +232,7 @@ function parseIRType(name: string, raw: unknown, path: string): TypeDef {
     fields: fieldsRaw.map((field, index) => parseIRField(field, `${path}.fields[${index}]`)),
     indexes: parseIRIndexes(definition.indexes),
     envVars: asBoolean(definition.envVars),
+    ...(asBoolean(definition.allowUnknownFields) ? { allowUnknownFields: true } : {}),
   };
 }
 

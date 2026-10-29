@@ -1562,7 +1562,8 @@ fn with_require_token_the_runners_sweep_still_expires_a_lapsed_lease() {
         )
         .unwrap();
         w.advance(60000);
-        assert_eq!(run_due(&w.engine).scheduled, 1);
+        // Lease's sweep, and Comments' interrupt, which the type composes too.
+        assert_eq!(run_due(&w.engine).scheduled, 2);
         let lease = w.lease_of("j1");
         assert_eq!(
             (
@@ -1928,7 +1929,8 @@ fn every_sweep_ms_the_runner_expires_the_leases_past_their_expiry_time_or_longes
         w.advance(30000);
         w.invoke(&worker(), "heartbeat", json!({}), "j2", Some(1))
             .unwrap();
-        assert_eq!(run_due(&w.engine).scheduled, 1);
+        // Lease's sweep, and Comments' interrupt, which the type composes too.
+        assert_eq!(run_due(&w.engine).scheduled, 2);
         let state = |w: &World, id: &str| {
             let lease = w.lease_of(id);
             (
@@ -1946,7 +1948,7 @@ fn every_sweep_ms_the_runner_expires_the_leases_past_their_expiry_time_or_longes
             ]
         );
         w.advance(30000);
-        assert_eq!(run_due(&w.engine).scheduled, 1);
+        assert_eq!(run_due(&w.engine).scheduled, 2);
         assert_eq!(
             ["j1", "j2", "j3"].map(|id| state(&w, id)),
             [

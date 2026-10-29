@@ -205,6 +205,42 @@ func (o *ModuleOutput) HasListFields() bool {
 	return false
 }
 
+// HasTypesAllowingUnknownFields reports whether any type in types.go is
+// @allowUnknownFields, whose UnmarshalJSON calls keepDeclaredKeys (D87).
+func (o *ModuleOutput) HasTypesAllowingUnknownFields() bool {
+	for _, typeInfo := range o.Types {
+		if typeInfo.AllowUnknownFields {
+			return true
+		}
+	}
+	return false
+}
+
+// NeedsDecimalDigits and NeedsVectorDimensions report whether types.go's
+// Validate checks a field's digit rules (D84), which call the
+// checkDecimalDigits and checkVectorDimensions helpers.
+func (o *ModuleOutput) NeedsDecimalDigits() bool {
+	for _, typeInfo := range o.Types {
+		for _, field := range typeInfo.Fields {
+			if field.Digits != nil && field.Digits.Decimal {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (o *ModuleOutput) NeedsVectorDimensions() bool {
+	for _, typeInfo := range o.Types {
+		for _, field := range typeInfo.Fields {
+			if field.Digits != nil && field.Digits.Dimensions > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // NeedsJSONValueMissing reports whether types.go's Validate checks a
 // required any-JSON field (requiredAnyJSONField) or JSON array field
 // (requiredStructuredJSONField), which call the jsonValueMissing helper.

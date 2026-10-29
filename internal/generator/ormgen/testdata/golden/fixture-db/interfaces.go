@@ -23,6 +23,9 @@ type TenantRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *TenantFilter, opts *TenantPageOptions) (*TenantPage, error)
 	CreateOne(ctx context.Context, input *types.Tenant) (*types.Tenant, error)
 	CreateMany(ctx context.Context, inputs []*types.Tenant) ([]*types.Tenant, error)
+	UpsertOne(ctx context.Context, input *types.Tenant, on TenantUniqueKey, update *TenantUpdate) (*types.Tenant, error)
+	UpsertOneResult(ctx context.Context, input *types.Tenant, on TenantUniqueKey, update *TenantUpdate, opts *UpsertOptions) (UpsertResult[*types.Tenant], error)
+	UpsertMany(ctx context.Context, inputs []*types.Tenant, on TenantUniqueKey, update TenantFields, opts *UpsertOptions) ([]UpsertResult[*types.Tenant], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *TenantUpdate) (*types.Tenant, error)
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *TenantUpdate) (*types.Tenant, error)
 	UpdateMany(ctx context.Context, filter *TenantFilter, update *TenantUpdate) (int, error)
@@ -44,6 +47,9 @@ type TenantUserRepositoryInterface interface {
 	FindPage(ctx context.Context, filter *TenantUserFilter, opts *TenantUserPageOptions) (*TenantUserPage, error)
 	CreateOne(ctx context.Context, input *types.TenantUser) (*types.TenantUser, error)
 	CreateMany(ctx context.Context, inputs []*types.TenantUser) ([]*types.TenantUser, error)
+	UpsertOne(ctx context.Context, input *types.TenantUser, on TenantUserUniqueKey, update *TenantUserUpdate) (*types.TenantUser, error)
+	UpsertOneResult(ctx context.Context, input *types.TenantUser, on TenantUserUniqueKey, update *TenantUserUpdate, opts *UpsertOptions) (UpsertResult[*types.TenantUser], error)
+	UpsertMany(ctx context.Context, inputs []*types.TenantUser, on TenantUserUniqueKey, update TenantUserFields, opts *UpsertOptions) ([]UpsertResult[*types.TenantUser], error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *TenantUserUpdate) (*types.TenantUser, error)
 	UpdateOneIfVersion(ctx context.Context, id types.IdentityUUID, expectedVersion int64, update *TenantUserUpdate) (*types.TenantUser, error)
 	UpdateMany(ctx context.Context, filter *TenantUserFilter, update *TenantUserUpdate) (int, error)
@@ -56,6 +62,7 @@ type TenantUserRepositoryInterface interface {
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
+	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
 	Ping(ctx context.Context) error
 	Close()
 	GetTenantRepository() TenantRepositoryInterface
@@ -66,6 +73,7 @@ type DatabaseInterface interface {
 type TxInterface interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	GetTenantRepository() TenantRepositoryInterface
 	GetTenantUserRepository() TenantUserRepositoryInterface
 }
@@ -97,6 +105,17 @@ func NewNoOpDatabase() *NoOpDatabase {
 // Transaction executes the callback with a deterministic no-op transaction.
 func (db *NoOpDatabase) Transaction(_ context.Context, fn func(TxInterface) error) error {
 	return fn(db.tx)
+}
+
+// TransactionWith executes the callback with a deterministic no-op
+// transaction, whatever its options.
+func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(TxInterface) error) error {
+	return fn(db.tx)
+}
+
+// Transaction executes the callback with the same no-op transaction.
+func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
+	return fn(tx)
 }
 
 // Ping always succeeds for no-op database.
@@ -181,6 +200,22 @@ func (r *NoOpTenantRepository) CreateMany(_ context.Context, inputs []*types.Ten
 	return inputs, nil
 }
 
+func (r *NoOpTenantRepository) UpsertOne(_ context.Context, input *types.Tenant, _ TenantUniqueKey, _ *TenantUpdate) (*types.Tenant, error) {
+	return input, nil
+}
+
+func (r *NoOpTenantRepository) UpsertOneResult(_ context.Context, input *types.Tenant, _ TenantUniqueKey, _ *TenantUpdate, _ *UpsertOptions) (UpsertResult[*types.Tenant], error) {
+	return UpsertResult[*types.Tenant]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpTenantRepository) UpsertMany(_ context.Context, inputs []*types.Tenant, _ TenantUniqueKey, _ TenantFields, _ *UpsertOptions) ([]UpsertResult[*types.Tenant], error) {
+	results := make([]UpsertResult[*types.Tenant], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.Tenant]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
 func (r *NoOpTenantRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *TenantUpdate) (*types.Tenant, error) {
 	return nil, ErrNotFound
 }
@@ -261,6 +296,22 @@ func (r *NoOpTenantUserRepository) CreateMany(_ context.Context, inputs []*types
 		return []*types.TenantUser{}, nil
 	}
 	return inputs, nil
+}
+
+func (r *NoOpTenantUserRepository) UpsertOne(_ context.Context, input *types.TenantUser, _ TenantUserUniqueKey, _ *TenantUserUpdate) (*types.TenantUser, error) {
+	return input, nil
+}
+
+func (r *NoOpTenantUserRepository) UpsertOneResult(_ context.Context, input *types.TenantUser, _ TenantUserUniqueKey, _ *TenantUserUpdate, _ *UpsertOptions) (UpsertResult[*types.TenantUser], error) {
+	return UpsertResult[*types.TenantUser]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpTenantUserRepository) UpsertMany(_ context.Context, inputs []*types.TenantUser, _ TenantUserUniqueKey, _ TenantUserFields, _ *UpsertOptions) ([]UpsertResult[*types.TenantUser], error) {
+	results := make([]UpsertResult[*types.TenantUser], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.TenantUser]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
 }
 
 func (r *NoOpTenantUserRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *TenantUserUpdate) (*types.TenantUser, error) {

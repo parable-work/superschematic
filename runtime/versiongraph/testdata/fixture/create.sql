@@ -15,7 +15,7 @@ CREATE TABLE cover (
   photo_url TEXT NOT NULL,
   entity_key UUID DEFAULT gen_random_uuid() NOT NULL,
   ref_id UUID NOT NULL,
-  deleted_on_ref BOOLEAN NOT NULL,
+  deleted_on_ref BOOLEAN DEFAULT false NOT NULL,
   _version BIGINT DEFAULT 1 NOT NULL
 );
 
@@ -29,7 +29,7 @@ CREATE TABLE ingredient (
   substitutes JSONB NOT NULL,
   entity_key UUID DEFAULT gen_random_uuid() NOT NULL,
   ref_id UUID NOT NULL,
-  deleted_on_ref BOOLEAN NOT NULL,
+  deleted_on_ref BOOLEAN DEFAULT false NOT NULL,
   _version BIGINT DEFAULT 1 NOT NULL
 );
 
@@ -42,7 +42,7 @@ CREATE TABLE note (
   body TEXT NOT NULL,
   entity_key UUID DEFAULT gen_random_uuid() NOT NULL,
   ref_id UUID NOT NULL,
-  deleted_on_ref BOOLEAN NOT NULL,
+  deleted_on_ref BOOLEAN DEFAULT false NOT NULL,
   _version BIGINT DEFAULT 1 NOT NULL
 );
 
@@ -79,7 +79,9 @@ CREATE TABLE recipe_patch (
   entity_key UUID NOT NULL,
   entity_id UUID NOT NULL,
   entity_version BIGINT NOT NULL,
-  operation TEXT NOT NULL
+  operation TEXT NOT NULL,
+  CONSTRAINT ck_recipe_patch_entity_kind CHECK (entity_kind IN ('cover', 'ingredient', 'note', 'step', 'tasting', 'utensil')),
+  CONSTRAINT ck_recipe_patch_operation CHECK (operation IN ('ADD', 'UPDATE', 'DELETE'))
 );
 
 COMMENT ON TABLE recipe_patch IS 'One entity a commit of the Recipe version graph changed, pinned to the row version it sealed.';
@@ -122,7 +124,8 @@ CREATE TABLE recipe_snapshot_entry (
   entity_kind TEXT NOT NULL,
   entity_key UUID NOT NULL,
   entity_id UUID NOT NULL,
-  entity_version BIGINT NOT NULL
+  entity_version BIGINT NOT NULL,
+  CONSTRAINT ck_recipe_snapshot_entry_entity_kind CHECK (entity_kind IN ('cover', 'ingredient', 'note', 'step', 'tasting', 'utensil'))
 );
 
 COMMENT ON TABLE recipe_snapshot_entry IS 'One entity of a snapshotted commit of the Recipe version graph, pinned to the row version its tree holds.';
@@ -140,7 +143,7 @@ CREATE TABLE step (
   updated_by UUID NOT NULL,
   entity_key UUID DEFAULT gen_random_uuid() NOT NULL,
   ref_id UUID NOT NULL,
-  deleted_on_ref BOOLEAN NOT NULL,
+  deleted_on_ref BOOLEAN DEFAULT false NOT NULL,
   _version BIGINT DEFAULT 1 NOT NULL
 );
 
@@ -153,9 +156,9 @@ CREATE TABLE tasting (
   salty BOOLEAN NOT NULL,
   score DOUBLE PRECISION NOT NULL,
   servings BIGINT NOT NULL,
-  tasted_on DATE DEFAULT CURRENT_DATE NOT NULL,
-  tasted_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
-  served_at TIME DEFAULT CURRENT_TIME NOT NULL,
+  tasted_on DATE NOT NULL,
+  tasted_at TIMESTAMPTZ NOT NULL,
+  served_at TIME NOT NULL,
   rested INTERVAL NOT NULL,
   verdict TEXT NOT NULL,
   remarks JSONB NOT NULL,
@@ -164,8 +167,9 @@ CREATE TABLE tasting (
   bites JSONB NOT NULL,
   entity_key UUID DEFAULT gen_random_uuid() NOT NULL,
   ref_id UUID NOT NULL,
-  deleted_on_ref BOOLEAN NOT NULL,
-  _version BIGINT DEFAULT 1 NOT NULL
+  deleted_on_ref BOOLEAN DEFAULT false NOT NULL,
+  _version BIGINT DEFAULT 1 NOT NULL,
+  CONSTRAINT ck_tasting_verdict CHECK (verdict IN ('again', 'tweak', 'never'))
 );
 
 COMMENT ON TABLE tasting IS 'A tasting of the recipe. Its columns hold a value of every class a
@@ -177,7 +181,7 @@ CREATE TABLE utensil (
   "name" TEXT NOT NULL,
   entity_key UUID DEFAULT gen_random_uuid() NOT NULL,
   ref_id UUID NOT NULL,
-  deleted_on_ref BOOLEAN NOT NULL,
+  deleted_on_ref BOOLEAN DEFAULT false NOT NULL,
   _version BIGINT DEFAULT 1 NOT NULL
 );
 

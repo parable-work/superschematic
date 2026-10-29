@@ -1,0 +1,14 @@
+{
+  "name": "fixture-actor-db",
+  "kind": "DB",
+  "outputs": {
+    "types": {
+      "typescript": { "enabled": true },
+      "go": { "enabled": true }
+    },
+    "sql": {
+      "systemActor": { "id": "3f2c1a9e-7b4d-4e8a-9c61-0d5e2f7a8b10", "name": "jobs" },
+      "requireUpdatedBy": false
+    }
+  }
+}

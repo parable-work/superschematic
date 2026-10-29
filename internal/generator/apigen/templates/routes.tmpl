@@ -31,7 +31,9 @@ import (
 {{- end }}
 	"strconv"
 {{- if .HasFileUpload }}
-	"strings"
+	"bytes"
+	"io"
+	"mime/multipart"
 {{- end }}
 {{- if .RoutesNeedTime }}
 	"time"
@@ -53,6 +55,9 @@ import (
 {{- end }}
 {{- if .RoutesNeedScalars }}
 	scalars "{{ $.Naming.ScalarGoModule }}"
+{{- end }}
+{{- if .Deps.RateLimitStore }}
+	"{{ $.Naming.HTTPRuntimeGoModule }}/memorystore"
 {{- end }}
 	runtimemiddleware "{{ $.Naming.HTTPRuntimeGoModule }}/middleware"
 	runtimerouting "{{ $.Naming.HTTPRuntimeGoModule }}/routing"
@@ -133,6 +138,15 @@ type Config struct {
 
 	// PayloadDecryptor decrypts encrypted endpoint request bodies.
 	PayloadDecryptor runtimemiddleware.PayloadDecryptor
+{{- end }}
+{{- if .Deps.RateLimitStore }}
+
+	// RateLimitStore is {{ .Deps.RateLimitStore }}, the memory store the API's config names
+	// its rateLimitStore (D75): each @rateLimit route counts in it, so every
+	// replica spends one budget. Optional: nil, or a disabled store, counts
+	// each replica's requests in its own process, and while the store is
+	// unavailable each replica counts in process.
+	RateLimitStore memorystore.Store
 {{- end }}
 {{- if .HasManualRoutes }}
 
@@ -336,7 +350,7 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 				webhookHMACVerifierMiddleware(cfg, {{ .WebhookHMACProviderTypesExpr }}),
 				{{- end }}
 				{{- if .RateLimit }}
-				runtimemiddleware.RateLimit({{ .RateLimit }}, time.Minute, LoggerFromContext),
+				runtimemiddleware.RateLimit({{ .RateLimit }}, time.Minute, LoggerFromContext{{ if .Output.Deps.RateLimitStore }}, runtimemiddleware.WithStore(cfg.RateLimitStore, {{ printf "%q" .Output.SchemaName }}, {{ printf "%q" .RateLimitOperation }}){{ end }}),
 				{{- end }}
 				{{- if .BodyLimit }}
 				runtimemiddleware.BodyLimit({{ .BodyLimit }}, RespondError),
@@ -883,51 +897,55 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		{{- end }}
 
 		{{- if .HasFileUpload }}
+		// A multipart input (D81), as every generated server reads one: the
+		// files first, each checked against its field, then the other fields,
+		// from the data part or a JSON body with no file, checked as a JSON
+		// input is, the file fields set aside.
 		var input types.{{ .InputType }}
-		var files map[string]*FileUploadData
-		contentType := r.Header.Get("Content-Type")
-		if strings.Contains(contentType, "application/json") {
-			rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
-			if refusal != nil {
-				RespondInputRefusal(w, r, refusal)
-				return
-			}
-			{{- range .RawBodyChecks }}
-			{{- range commentLines .Comment }}
-			{{ . }}
-			{{- end }}
-			if {{ .Var }} := {{ .PackageName }}.{{ .Func }}(rawInput{{ range .Fields }}, {{ printf "%q" . }}{{ end }}); {{ .Var }}.HasErrors() {
-				RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", {{ .Var }}))
-				return
-			}
-			{{- end }}
-			if err := json.Unmarshal(rawInput, &input); err != nil {
-				RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
-				return
-			}
-			files = nil
-		} else {
-			if err := r.ParseMultipartForm(defaultMaxMultipartMemory); err != nil {
-				RespondError(w, r, gohttp.StatusBadRequest, "Failed to parse multipart form: "+err.Error())
-				return
-			}
-			defer func() {
-				if r.MultipartForm != nil {
-					_ = r.MultipartForm.RemoveAll()
-				}
-			}()
-			var err error
-			files, err = ParseMultipleFileUploads(r, {{ .HandlerName }}FileUploadConfigs())
+		var rawInput json.RawMessage
+		var form *multipart.Form
+		switch RequestMediaType(r) {
+		case "application/json":
+			body, err := io.ReadAll(r.Body)
 			if err != nil {
-				RespondError(w, r, gohttp.StatusBadRequest, "File upload error: "+err.Error())
+				RespondInputRefusal(w, r, &bodyargs.InputRefusal{Detail: bodyargs.BodyNotJSON})
+				return
+			}
+			rawInput = body
+		case "multipart/form-data":
+			if err := r.ParseMultipartForm(defaultMaxMultipartMemory); err != nil {
+				RespondInputRefusal(w, r, &bodyargs.InputRefusal{Detail: BodyNotMultipart})
 				return
 			}
 			defer func() {
-				if closeErr := CloseFileUploads(files); closeErr != nil {
-					LoggerFromContext(r.Context()).Warn("failed to close uploaded file", zap.Error(closeErr))
-				}
+				_ = r.MultipartForm.RemoveAll()
 			}()
-
+			form = r.MultipartForm
+			if data := form.Value["data"]; len(data) > 0 {
+				rawInput = json.RawMessage(data[0])
+			}
+		default:
+			RespondInputRefusal(w, r, &bodyargs.InputRefusal{Detail: BodyNotMultipart})
+			return
+		}
+		files, fileRefusals, err := CheckFileUploads(form, {{ .HandlerName }}FileUploadConfigs())
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "File upload error: "+err.Error())
+			return
+		}
+		if len(fileRefusals) > 0 {
+			validationErrors := types.NewValidationErrors()
+			for _, refusal := range fileRefusals {
+				validationErrors.AddFieldError(refusal.Field, refusal.Validator, refusal.Message)
+			}
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+		defer func() {
+			if closeErr := CloseFileUploads(files); closeErr != nil {
+				LoggerFromContext(r.Context()).Warn("failed to close uploaded file", zap.Error(closeErr))
+			}
+		}()
 		{{- $hasImageUploads := false }}
 		{{- $hasTransparencyUploads := false }}
 		{{- range .FileUploadFields }}
@@ -938,79 +956,105 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		{{- end }}
 		{{- end }}
 		{{- if $hasImageUploads }}
-			// Extract and validate image metadata for plain image uploads (no transparency required)
-			imageMetadata := make(map[string]*ImageUploadMetadata)
-			{{- range .FileUploadFields }}
-			{{- if isPlainImage . }}
-			if {{ .GoName }}File, ok := files["{{ .Name }}"]; ok && {{ .GoName }}File != nil {
-				{{ .GoName }}Meta, err := ExtractImageUploadMetadata({{ .GoName }}File)
-				if err != nil {
-					RespondError(w, r, gohttp.StatusBadRequest, "Failed to process image '{{ .Name }}': "+err.Error())
-					return
-				}
-				if validationErrs := ValidateImageUploadMetadata({{ .GoName }}Meta); len(validationErrs) > 0 {
-					RespondError(w, r, gohttp.StatusBadRequest, "Image '{{ .Name }}' validation failed: "+validationErrs[0])
-					return
-				}
-				imageMetadata["{{ .Name }}"] = {{ .GoName }}Meta
+		// Extract and validate image metadata for plain image uploads (no transparency required)
+		imageMetadata := make(map[string]*ImageUploadMetadata)
+		{{- range .FileUploadFields }}
+		{{- if isPlainImage . }}
+		if {{ .GoName }}File, ok := files["{{ .Name }}"]; ok && {{ .GoName }}File != nil {
+			{{ .GoName }}Meta, err := ExtractImageUploadMetadata({{ .GoName }}File)
+			if err != nil {
+				RespondError(w, r, gohttp.StatusBadRequest, "Failed to process image '{{ .Name }}': "+err.Error())
+				return
 			}
-			{{- end }}
-			{{- end }}
-			_ = imageMetadata // Available for handler use
+			if validationErrs := ValidateImageUploadMetadata({{ .GoName }}Meta); len(validationErrs) > 0 {
+				RespondError(w, r, gohttp.StatusBadRequest, "Image '{{ .Name }}' validation failed: "+validationErrs[0])
+				return
+			}
+			imageMetadata["{{ .Name }}"] = {{ .GoName }}Meta
+		}
+		{{- end }}
+		{{- end }}
+		_ = imageMetadata // Available for handler use
 		{{- end }}
 		{{- if $hasTransparencyUploads }}
-			// Extract and validate image metadata for uploads requiring transparency (e.g., logos, icons)
-			// These images require PNG format with alpha channel
-			logoImageMetadata := make(map[string]*LogoImageUploadMetadata)
-			{{- range .FileUploadFields }}
-			{{- if isImageWithTransparency . }}
-			if {{ .GoName }}File, ok := files["{{ .Name }}"]; ok && {{ .GoName }}File != nil {
-				{{ .GoName }}Meta, err := ExtractLogoImageUploadMetadata({{ .GoName }}File)
-				if err != nil {
-					RespondError(w, r, gohttp.StatusBadRequest, "Failed to process logo image '{{ .Name }}': "+err.Error())
-					return
-				}
-				if validationErrs := ValidateLogoImageUploadMetadata({{ .GoName }}Meta); len(validationErrs) > 0 {
-					RespondError(w, r, gohttp.StatusBadRequest, "Logo image '{{ .Name }}' validation failed: "+validationErrs[0])
-					return
-				}
-				logoImageMetadata["{{ .Name }}"] = {{ .GoName }}Meta
+		// Extract and validate image metadata for uploads requiring transparency (e.g., logos, icons)
+		// These images require PNG format with alpha channel
+		logoImageMetadata := make(map[string]*LogoImageUploadMetadata)
+		{{- range .FileUploadFields }}
+		{{- if isImageWithTransparency . }}
+		if {{ .GoName }}File, ok := files["{{ .Name }}"]; ok && {{ .GoName }}File != nil {
+			{{ .GoName }}Meta, err := ExtractLogoImageUploadMetadata({{ .GoName }}File)
+			if err != nil {
+				RespondError(w, r, gohttp.StatusBadRequest, "Failed to process logo image '{{ .Name }}': "+err.Error())
+				return
 			}
-			{{- end }}
-			{{- end }}
-			_ = logoImageMetadata // Available for handler use
+			if validationErrs := ValidateLogoImageUploadMetadata({{ .GoName }}Meta); len(validationErrs) > 0 {
+				RespondError(w, r, gohttp.StatusBadRequest, "Logo image '{{ .Name }}' validation failed: "+validationErrs[0])
+				return
+			}
+			logoImageMetadata["{{ .Name }}"] = {{ .GoName }}Meta
+		}
+		{{- end }}
+		{{- end }}
+		_ = logoImageMetadata // Available for handler use
 		{{- end }}
 
-			{{- if .HasInput }}
-			dataField := r.FormValue("data")
-			if dataField != "" {
-				{{- range .RawBodyChecks }}
-				if {{ .Var }} := {{ .PackageName }}.{{ .Func }}([]byte(dataField){{ range .Fields }}, {{ printf "%q" . }}{{ end }}); {{ .Var }}.HasErrors() {
-					RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", {{ .Var }}))
-					return
-				}
-				{{- end }}
-				if err := json.Unmarshal([]byte(dataField), &input); err != nil {
-					RespondInputRefusal(w, r, bodyargs.DecodeRefusal(json.RawMessage(dataField), &input, err))
-					return
-				}
-			}
-			{{- end }}
-		}
-
-		{{- if .HasInput }}
-		// Validate input (excluding file upload fields which are handled separately)
-		if validationErrors := input.Validate(); validationErrors.HasErrors() {
-			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+		// An empty JSON body is no input; a multipart body without data holds
+		// none of the other fields.
+		hasFields := len(rawInput) > 0 || form != nil
+		{{- if .InputRequired }}
+		if !hasFields {
+			RespondInputRefusal(w, r, &bodyargs.InputRefusal{Detail: bodyargs.BodyRequired})
 			return
 		}
 		{{- end }}
+		if len(rawInput) > 0 {
+			checked, refusal := bodyargs.{{ if .InputAllowsUnknownFields }}ReadInputDroppingUnknown{{ else }}ReadInput{{ end }}(bytes.NewReader(rawInput), input.JSONFieldNames())
+			if refusal != nil {
+				RespondInputRefusal(w, r, refusal)
+				return
+			}
+			{{- range .RawBodyChecks }}
+			{{- range commentLines .Comment }}
+			{{ . }}
+			{{- end }}
+			if {{ .Var }} := {{ .PackageName }}.{{ .Func }}(checked{{ range .Fields }}, {{ printf "%q" . }}{{ end }}); {{ .Var }}.HasErrors() {
+				RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", {{ .Var }}))
+				return
+			}
+			{{- end }}
+			if err := json.Unmarshal(checked, &input); err != nil {
+				RespondInputRefusal(w, r, bodyargs.DecodeRefusal(checked, &input, err))
+				return
+			}
+		}
+		if hasFields {
+			// The JSON never holds the files, so their fields' errors are set
+			// aside.
+			validationErrors := input.Validate()
+			{{- range .FileUploadFields }}
+			delete(validationErrors, "{{ .Name }}")
+			{{- end }}
+			if validationErrors.HasErrors() {
+				RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+				return
+			}
+		}
 		{{- else if .HasInput }}
+		{{- if .InputAllowsUnknownFields }}
+		// Parse and validate input: a body, JSON and an object, whose keys
+		// the input type does not declare are dropped (D87), then the type's
+		// decoding and rules, each refused with the 400 every generated
+		// server sends.
+		var input types.{{ .InputType }}
+		rawInput, refusal := bodyargs.ReadInputDroppingUnknown(r.Body, input.JSONFieldNames())
+		{{- else }}
 		// Parse and validate input: a body, JSON, an object with only the
 		// keys the input type declares, then the type's decoding and rules,
 		// each refused with the 400 every generated server sends.
 		var input types.{{ .InputType }}
 		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		{{- end }}
 		if refusal != nil {
 			RespondInputRefusal(w, r, refusal)
 			return
@@ -1381,7 +1425,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		}
 
 		// Call implementation
-		result, err := impl.{{ .ShortImplName }}(r.Context(){{- range .PathParams }}, {{ .GoName }}{{- end }}{{- range .ArgQueryParams }}, {{ .GoName }}{{- end }}{{- if .Filterable }}, filters{{- end }}{{- if .HasInput }}, &input{{- else if .ScalarArgs }}{{- range .ScalarArgs }}{{- if eq $endpointMethod "GET" }}, {{ .GoName }}{{- else }}, requestBody.{{ .GoName }}{{- end }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files{{- end }}{{- if .Page }}, page{{- end }})
+		result, err := impl.{{ .ShortImplName }}({{ if $.Deps.Database }}callerContext(r.Context()){{ else }}r.Context(){{ end }}{{- range .PathParams }}, {{ .GoName }}{{- end }}{{- range .ArgQueryParams }}, {{ .GoName }}{{- end }}{{- if .Filterable }}, filters{{- end }}{{- if .HasInput }}, &input{{- else if .ScalarArgs }}{{- range .ScalarArgs }}{{- if eq $endpointMethod "GET" }}, {{ .GoName }}{{- else }}, requestBody.{{ .GoName }}{{- end }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files{{- end }}{{- if .Page }}, page{{- end }})
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -1408,7 +1452,10 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		{{- end }}
 
 		// Respond with result
-		{{- if .Page }}
+		{{- if .FileDownload }}
+		// A FileDownload result (D81): the file, not the envelope.
+		RespondFileDownload(w, r, {{ printf "%q" .FileDownload.ContentType }}, {{ printf "%q" .FileDownload.Filename }}, result)
+		{{- else if .Page }}
 		// The page is the envelope's data, {items, next}: nil items are [] and
 		// no next is null.
 		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)

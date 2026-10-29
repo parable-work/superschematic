@@ -75,20 +75,49 @@ Its entry points:
   streaming response, say). An `@hmacVerified` operation's spec names its
   `webhookProvider`, and both mount it only with a `webhookVerifier`, Hono
   middleware that runs before every other step. It may read the body to
-  check the signature; the route reads a copy taken before it ran. The runtime has no step that decrypts a request
+  check the signature; the route reads a copy taken before it ran.
+  `jwtBodyHashVerifier` is a built-in one (D81), for a provider that signs
+  each webhook with an ES256 JWT carrying the body's SHA-256, as Plaid
+  does: it looks keys up by `kid` or fetches a JWKS, holds them by `kid`,
+  and asks the provider at most once a minute. The runtime has no step that decrypts a request
   body or reads a multipart one, so the generator refuses an encrypted
   operation or a file upload that is not `@manualRouteRegistration`; the
   service's handler decrypts or reads the body itself. `notFoundHandler` and `errorHandler` cover the
   application root, and `disconnectSignal` aborts when the client leaves on
   `@hono/node-server`. `@timeout` answers 504, as the Go runtime does.
+- `@superschematic/http-runtime/openapi`, what a generated router mounts
+  beside its operations (D81): `mountOpenAPI` serves the document the
+  package embeds at `GET /api/openapi.json`, with the running version and
+  server URL (`openAPIVersion`, `openAPIBaseURL`, `1.0.0` and
+  `http://localhost:8080` unless set), and its RapiDoc page at
+  `GET /api/docs`, as the Go and Rust servers do, unless `serveOpenAPI` is
+  false.
+- `@superschematic/http-runtime/mcp`, the MCP endpoint of an API with
+  `outputs.api.mcp` on (D81): `serveMcp` is the engine's stateless
+  streamable HTTP transport over any tool set, and `mountMcp` mounts it at
+  `POST /api/mcp` behind the router's auth gate, listing the tools whose
+  routes the caller may call and running each `tools/call` in process
+  through its operation's route. A tool marked `confirm`, whose invocation
+  policy is ask, runs only once the person confirms the call (D93): a
+  2026-07-28 client that elicits forms is asked with `elicitation/create`
+  in an `input_required` result, any other gets a `confirmation_required`
+  tool error with a `confirmationToken` to call again with;
+  `McpConfirmations` (`src/mcpconfirm.ts`) signs and redeems both under
+  `confirmationKey`. `src/mcp-parity.test.ts` replays the engine's MCP
+  corpus through the transport, and `src/mcpconfirm.test.ts` holds the
+  confirmations.
 - `@superschematic/http-runtime/postgres`, a `pg` Pool over a derived
-  database connection, and a queue's enqueue and claims (below). It is
+  database connection, the Postgres value codec, the generated
+  repositories' runtime, and a queue's enqueue and claims (below). It is
   the only entry that imports `pg`.
 - `@superschematic/http-runtime/identity`, the core user model's runtime
   (D50, below). The main entry point does not load it.
 - `@superschematic/http-runtime/gcs`, a `Bucket` on GCS, or on an
   emulator that serves its API, over a derived bucket connection (below).
   It is the only entry that imports `@google-cloud/storage`.
+- `@superschematic/http-runtime/redis`, a `MemoryStore` on Redis or
+  Valkey over a derived memory store connection (D75, below). It is the
+  only entry that imports `@redis/client`.
 - `@superschematic/http-runtime/worker`, the claim loop of a stack's
   worker (D53, below). It imports nothing.
 - `@superschematic/http-runtime/telemetry`, OpenTelemetry trace export
@@ -106,8 +135,9 @@ Its entry points:
 - `@superschematic/http-runtime/r2`, a `Bucket` over a Worker's R2
   binding, which presigns S3 URLs with WebCrypto.
 
-The main entry, `./hono`, `./workers`, `./d1` and `./r2` import nothing
-from `node:` and read no Bun global, so a Worker bundles them with no
+The main entry, `./hono`, `./openapi`, `./mcp`, `./workers`, `./d1` and
+`./r2` import nothing from `node:` and read no Bun global, so a Worker
+bundles them with no
 `nodejs_compat`; `scripts/workers-check.mjs` holds them to it (below).
 
 ## Authentication and permissions
@@ -359,6 +389,35 @@ the open; the connector does read the instance's settings from the Cloud
 SQL Admin API when the pool opens. `ping(pool, timeoutMs)` resolves when
 `SELECT 1` answers in time, which is what `/readyz` asks of each pool.
 
+A pool `connectPostgres` opens reads a BIGINT as a number, refused past
+2^53 - 1 with an error that names the cast, a NUMERIC as its exact text
+and a DATE as its `YYYY-MM-DD` text, as the TypeScript types hold them,
+through type parsers of its own (`postgresTypeParsers`), never `pg.types`
+(D79); `typeParsers: false` keeps pg's. The value codec of the same entry
+reads and writes a column as the types hold it: `uuidToDb(id)` writes a
+UUID, base62 on the wire or hyphenated, as the hyphenated text a `UUID`
+column takes, and `uuidFromDb` reads one back as base62, the form
+`ctx.principal.subject` and every generated type hold;
+`decodeRow(row, fields)` reads a raw query's row by the fields a DB's
+types package describes (a table's `columns` in its `./orm` entry, a
+queue's `fields` in its `./queues` entry), and `encodeParam(value, codec)`
+binds a value as its column takes it. Both go by the column's type, never
+by the value's: a JSON or JSONB column is read as pg parses it, so a JSON
+string stays a string, and bound as its JSON text, `null` the JSON null in
+a column that may not be null.
+
+`ormOf(pool, definition, user?)` runs a DB's generated repositories, which
+its types' `./orm` entry describes and whose `createOrm(pool)` calls it
+(D79): each table's statements, which the generator writes from the one
+source the Go ORM's come from, filled in the Go ORM's order, so the two
+send the same SQL. A repository reads and writes rows through the codec;
+`withUser(id)` and `as(principal)` act as a user, whom `createdBy`,
+`updatedBy` and `deletedBy` record, and a write that needs one throws
+`NoUserError` without it; `transaction(fn)` gives `fn` repositories on one
+connection, with `query` and `exec`, and rolls back when it throws. A key
+no live row holds is `NotFoundError`, and a page key that names no row
+`PageKeyError`.
+
 The same entry runs a queue (D53) over a definition a DB service's
 TypeScript types export from their `./queues` entry, such as
 `orderPlacedQueue`: the queue's table, its arguments, the column each
@@ -430,6 +489,49 @@ client takes the application default credentials and signs as the
 workload's account through IAM's `signBlob`. `src/gcs.test.ts` runs
 against a fake-gcs-server that `SUPERSCHEMATIC_TEST_GCS_EMULATOR` names.
 
+`MemoryStore`, from the main entry, is what `Deps` holds per memory store
+an API lists in its `memoryStores` (D75): `available`, `publish` and
+`subscribe` on a channel, and `increment`, `count`, `claim` and `delete`
+on a key, each by a `Ref` that the store's generated definitions build
+(`shopCache.stockChanged.for(productId)` returns a `Channel<Signal>`, and
+a key's `for` or `forTTL` a `Key`). A disabled, closed or unreachable
+store throws `MemoryStoreUnavailableError` at once, and the caller takes
+its fallback path. `memoryStoreName` joins a declaration and its parts,
+each one segment, and throws `MemoryStoreNameError` for one that is not.
+`disabledMemoryStore(name)` refuses every call, and
+`InProcessMemoryStore` keeps keys and channels in the process, with TTLs
+against a clock a test sets. `Channel<T>` drops and counts a message that
+does not decode; a `Signal` encodes as `{}`. `MemoryStoreRateLimitStore`
+is the shared rate limit of an API whose config names a
+`rateLimitStore`: httprate's sliding window over the reserved
+`rate-limit` counters, falling back to an in-process `MemoryRateLimitStore`
+while the store is unavailable or a call fails.
+`openRedisMemoryStore(connection, { logger })`, from
+`@superschematic/http-runtime/redis`, opens one with `@redis/client`
+(node-redis), an optional peer dependency that a server installs only when
+its APIs list a store. Bun's own `RedisClient` takes a password only in
+its URL and reuses it on reconnect, which an IAM token per connection
+rules out. Open never fails for a server that is down: it pings once
+within a second, then reconnects with jittered backoff from 100 ms to 5 s
+while a health ping every 2 s keeps `available` true to the connection.
+A call takes at most 500 ms with one retry, the client sends no `CLIENT`
+command and asks for no maintenance notifications, `rediss://` verifies
+the server against the connection's CA over TLS 1.2 or later, trusting
+the CA as an anchor even when it is an intermediate (gcp gives the first
+certificate of Memorystore's managed server CA chain), and with
+`auth: iam` each new connection authenticates as `default` with an access
+token from the metadata server (`GCE_METADATA_HOST` overrides its host).
+The store has one subscriber connection, refuses a message over 64 KiB
+before sending it, and logs no URL, token or part. `src/redis.test.ts`
+runs against the server `SUPERSCHEMATIC_TEST_MEMORY_STORE` names, a
+loopback `redis://` URL whose database is not 0, and the TLS and IAM cases
+against `SUPERSCHEMATIC_TEST_MEMORY_STORE_TLS`, its CA file
+`SUPERSCHEMATIC_TEST_MEMORY_STORE_CA` and its password
+`SUPERSCHEMATIC_TEST_MEMORY_STORE_PASSWORD`, and the intermediate CA case
+against `SUPERSCHEMATIC_TEST_MEMORY_STORE_TLS_CHAIN` and the intermediate's
+PEM file `SUPERSCHEMATIC_TEST_MEMORY_STORE_TLS_CHAIN_CA`. The runtime records no
+OpenTelemetry metrics, so the store records none.
+
 ## On Cloudflare Workers
 
 A TypeScript server or job some environment places on the `cloudflare`
@@ -487,7 +589,8 @@ edge's token id and its secret the hex SHA-256 of the token's value, which
 it computes once. `presignV4` signs AWS's published example as AWS does.
 
 `scripts/workers-check.mjs` bundles the main entry, `./hono`,
-`./workers`, `./d1` and `./r2` from `dist/` as a Worker's `bundle.ts`
+`./openapi`, `./mcp`, `./workers`, `./d1` and `./r2` from `dist/` as a
+Worker's `bundle.ts`
 does, `bun build --target=browser --conditions=workerd` with `.wasm`
 modules external, and fails on an import from `node:` (read from the
 bundle's metafile, since Bun's browser target swaps such a module for a

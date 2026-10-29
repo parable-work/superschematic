@@ -1,7 +1,8 @@
 # Served with shop-reviews by the declared server Storefront. Its edges are
 # shop-db, its authDb, shop-api, which it calls, and shop-media, the bucket
 # it lists with shop-reviews (D54). It leaves one operation to a handler of
-# its own (@manualRouteRegistration, D51).
+# its own (@manualRouteRegistration, D51), whose rate limit counts in
+# shop-cache, the memory store it lists (D75).
 name: shop-orders
 kind: API
 authDb: shop-db
@@ -11,6 +12,9 @@ calls:
   - { name: shop-api, kind: API }
 buckets:
   - { name: shop-media, kind: Bucket }
+memoryStores:
+  - { name: shop-cache, kind: MemoryStore }
+rateLimitStore: { name: shop-cache, kind: MemoryStore }
 outputs:
   types:
     go: { enabled: true }

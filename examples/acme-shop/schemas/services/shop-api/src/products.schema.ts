@@ -1,6 +1,6 @@
 import { Generic, Identity, Temporal } from "superscalar";
 import { Nullable, Validate } from "@superschematic/schema";
-import { Authenticated, HttpMethod, QueryParam, requirePermission, rest, source } from "@superschematic/api";
+import { Authenticated, HttpMethod, QueryParam, rateLimit, requirePermission, rest, source } from "@superschematic/api";
 import { Product } from "@acme/shop-db";
 
 // What the API returns for a product: the columns of the Product table a
@@ -36,9 +36,23 @@ export abstract class ProductImageUpload {
 }
 
 export class ProductQueries extends Authenticated {
+  // At most 120 a minute from one address, which every replica counts in
+  // shop-cache, shop-api's rateLimitStore (D75).
   @rest(HttpMethod.GET, "products/{id}")
   @requirePermission(["products.read"])
+  @rateLimit({ requestsPerMinute: 120 })
   getProduct(id: Identity.UUID): ProductView {
+    throw new Error("schema declaration only");
+  }
+
+  // Waits up to waitSeconds, at most 30, for the product to have an image,
+  // and returns it as it is then. The replica that records an image wakes
+  // the waiter, on whichever replica it is, through shop-cache (D75); the
+  // waiter still reads the product now and then, since a wake-up can be
+  // lost.
+  @rest(HttpMethod.GET, "products/{id}/image")
+  @requirePermission(["products.read"])
+  waitForProductImage(id: Identity.UUID, waitSeconds: QueryParam<Generic.Int64>): ProductView {
     throw new Error("schema declaration only");
   }
 

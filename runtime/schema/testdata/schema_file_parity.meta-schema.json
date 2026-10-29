@@ -882,30 +882,110 @@
               "config": {
                 "additionalProperties": false,
                 "properties": {
+                  "anchorPermission": {
+                    "description": "The permission that lets a caller move the anchor of a code block on another's message with moveAnchor, as a git extension does after a push. Absent, only the message's author and a caller holding moderatePermission may.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "attachments": {
+                    "additionalProperties": false,
+                    "description": "What an attachment block may describe. The engine keeps a file's description, never its bytes: the deployment stores and serves the file, through an upload route of its own.",
+                    "properties": {
+                      "maxBytes": {
+                        "description": "The largest file an attachment block may describe, in bytes; no limit when absent.",
+                        "maximum": 9007199254740991,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "mediaTypes": {
+                        "description": "The media types an attachment may have, each type/subtype or type/* in lower case; any when absent.",
+                        "items": {
+                          "maxLength": 255,
+                          "pattern": "^[a-z0-9][a-z0-9!#$\u0026^_.+-]{0,126}/([a-z0-9][a-z0-9!#$\u0026^_.+-]{0,126}|\\*)$",
+                          "type": "string"
+                        },
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "schemes": {
+                        "description": "The URI schemes an attachment's uri may use, in lower case: https and bucket, say, for files a deployment serves from a bucket by a scheme of its own. https alone when absent. Schemes that run code or carry the bytes themselves are refused.",
+                        "items": {
+                          "not": {
+                            "enum": [
+                              "javascript",
+                              "vbscript",
+                              "data",
+                              "file",
+                              "blob",
+                              "about"
+                            ]
+                          },
+                          "pattern": "^[a-z][a-z0-9+.-]{0,31}$",
+                          "type": "string"
+                        },
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      }
+                    },
+                    "type": "object"
+                  },
                   "blocks": {
-                    "description": "The block kinds a post or an edit may give; every kind when absent, none when empty.",
+                    "description": "The block kinds a post, an edit or a finish may give: ref, action, code and attachment; every kind when absent, none when empty.",
                     "items": {
                       "enum": [
                         "ref",
-                        "action"
+                        "action",
+                        "code",
+                        "attachment"
                       ]
                     },
                     "type": "array",
                     "uniqueItems": true
                   },
+                  "composeTimeoutMs": {
+                    "description": "How long a composing message's author may append nothing before the engine's runner interrupts it, in milliseconds; 60000 when absent. The runner looks for such messages every quarter of it, or every 15 seconds when that is sooner.",
+                    "maximum": 3600000,
+                    "minimum": 5000,
+                    "type": "integer"
+                  },
+                  "deliverPermission": {
+                    "description": "The permission a notifier or an agent dispatcher needs to claim and settle the deliveries of this type's messages, beside the policy's Comments.claimDeliveries and Comments.settleDeliveries. Absent, nobody claims them, and they serve only the inbox.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "deliveryRetentionMs": {
+                    "description": "How long a delivery is kept from when it was made, in milliseconds, whatever its state but a live claim; the inbox's mentions reach back as far. 2592000000, 30 days, when absent.",
+                    "maximum": 31536000000,
+                    "minimum": 86400000,
+                    "type": "integer"
+                  },
                   "editWindowMs": {
-                    "description": "How long after posting its author may edit a message, in milliseconds; no limit when absent. A caller holding moderatePermission is not held to it.",
+                    "description": "How long after a message's postedAt its author may edit it, in milliseconds; no limit when absent. A caller holding moderatePermission is not held to it.",
                     "minimum": 1000,
                     "type": "integer"
                   },
+                  "maxAttempts": {
+                    "description": "How many times a delivery is claimed before a failure, or a claim that lapses, drops it; 5 when absent.",
+                    "maximum": 20,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
                   "maxBodyLength": {
-                    "description": "The longest body a post or an edit may give, in code points; 40000 when absent.",
+                    "description": "The longest body a post, an edit or a finish may give, and the longest draft appendDraft builds, in code points; 40000 when absent.",
                     "maximum": 40000,
                     "minimum": 1,
                     "type": "integer"
                   },
+                  "maxDrafts": {
+                    "description": "The most composing messages one subject may have on an instance at once; begin refuses another. 5 when absent.",
+                    "maximum": 50,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
                   "moderatePermission": {
-                    "description": "The permission that lets a caller edit and delete another's message, edit past editWindowMs, and purge. Absent, only a message's author edits or deletes it, and nobody purges.",
+                    "description": "The permission that lets a caller edit, delete and interrupt another's message, edit past editWindowMs, move the anchor of a code block on another's message, and purge. Absent, only a message's author edits, deletes or interrupts it before composeTimeoutMs passes, and nobody purges.",
                     "minLength": 1,
                     "type": "string"
                   },
@@ -918,6 +998,12 @@
                     "description": "The permission that lets a caller resolve and reopen another's thread. Absent, only a thread's author does.",
                     "minLength": 1,
                     "type": "string"
+                  },
+                  "retryBackoffMs": {
+                    "description": "How long after its first failure a delivery is due again, in milliseconds, doubled after each later failure up to an hour; 30000 when absent.",
+                    "maximum": 3600000,
+                    "minimum": 1000,
+                    "type": "integer"
                   }
                 },
                 "type": "object"
@@ -3601,10 +3687,18 @@
             "Catalog",
             "DB",
             "General",
+            "MemoryStore",
             "Site",
             "Stack"
           ],
           "type": "string"
+        },
+        "memoryStoreDeclarations": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/MemoryStoreDeclaration"
+          },
+          "type": "array"
         },
         "name": {
           "default": "",
@@ -3653,6 +3747,84 @@
           "type": "array"
         }
       },
+      "type": "object"
+    },
+    "EnqueueCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "equals": {
+          "default": null,
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            }
+          ]
+        },
+        "field": {
+          "type": "string"
+        },
+        "isNull": {
+          "default": false,
+          "type": "boolean"
+        },
+        "notNull": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "field"
+      ],
+      "type": "object"
+    },
+    "EnqueueOnChange": {
+      "additionalProperties": false,
+      "properties": {
+        "backfill": {
+          "default": false,
+          "type": "boolean"
+        },
+        "fields": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "message": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "on": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "queue": {
+          "type": "string"
+        },
+        "when": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/EnqueueCondition"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "queue",
+        "on",
+        "message"
+      ],
       "type": "object"
     },
     "EnumDef": {
@@ -3849,6 +4021,10 @@
           ],
           "type": "string"
         },
+        "decrypted": {
+          "default": false,
+          "type": "boolean"
+        },
         "default": {
           "type": "string"
         },
@@ -3863,6 +4039,10 @@
           "$ref": "#/$defs/OperationDocs"
         },
         "encrypted": {
+          "default": false,
+          "type": "boolean"
+        },
+        "encryptedAtRest": {
           "default": false,
           "type": "boolean"
         },
@@ -3905,6 +4085,12 @@
             }
           },
           "type": "object"
+        },
+        "fileDownload": {
+          "$ref": "#/$defs/FileDownloadDef"
+        },
+        "fileUpload": {
+          "$ref": "#/$defs/FileUploadConfig"
         },
         "filterable": {
           "default": false,
@@ -4050,6 +4236,10 @@
           "default": false,
           "type": "boolean"
         },
+        "sqlName": {
+          "default": "",
+          "type": "string"
+        },
         "temporalFormat": {
           "default": "",
           "type": "string"
@@ -4073,6 +4263,9 @@
           "default": false,
           "type": "boolean"
         },
+        "validateDimensions": {
+          "type": "integer"
+        },
         "validateListMax": {
           "type": "integer"
         },
@@ -4094,6 +4287,12 @@
         "validatePattern": {
           "default": "",
           "type": "string"
+        },
+        "validatePrecision": {
+          "type": "integer"
+        },
+        "validateScale": {
+          "type": "integer"
         },
         "validateUploadMaxBytes": {
           "type": "integer"
@@ -4137,9 +4336,32 @@
       },
       "type": "object"
     },
+    "FileDownloadDef": {
+      "additionalProperties": false,
+      "properties": {
+        "contentType": {
+          "type": "string"
+        },
+        "filename": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "contentType"
+      ],
+      "type": "object"
+    },
     "FileUploadConfig": {
       "additionalProperties": false,
       "properties": {
+        "allowedExtensions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "allowedTypes": {
           "default": [],
           "items": {
@@ -4216,6 +4438,25 @@
       ],
       "type": "object"
     },
+    "IdentityFirstUser": {
+      "additionalProperties": false,
+      "properties": {
+        "permissions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "role": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "permissions"
+      ],
+      "type": "object"
+    },
     "ImageConstraints": {
       "additionalProperties": false,
       "properties": {
@@ -4266,19 +4507,47 @@
     "IndexDef": {
       "additionalProperties": false,
       "properties": {
+        "concurrently": {
+          "type": "boolean"
+        },
+        "efConstruction": {
+          "type": "integer"
+        },
+        "expression": {
+          "default": "",
+          "type": "string"
+        },
         "keys": {
           "items": {
             "type": "string"
           },
           "type": "array"
         },
+        "lists": {
+          "type": "integer"
+        },
+        "m": {
+          "type": "integer"
+        },
+        "method": {
+          "default": "",
+          "type": "string"
+        },
         "name": {
+          "default": "",
+          "type": "string"
+        },
+        "ops": {
           "default": "",
           "type": "string"
         },
         "unique": {
           "default": false,
           "type": "boolean"
+        },
+        "where": {
+          "default": "",
+          "type": "string"
         }
       },
       "required": [
@@ -4335,6 +4604,87 @@
       },
       "required": [
         "name"
+      ],
+      "type": "object"
+    },
+    "MemoryStoreDeclaration": {
+      "additionalProperties": false,
+      "properties": {
+        "doc": {
+          "default": "",
+          "type": "string"
+        },
+        "file": {
+          "default": "",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "channel",
+            "counter",
+            "claim"
+          ],
+          "type": "string"
+        },
+        "maxTtlSeconds": {
+          "default": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parts": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/MemoryStorePart"
+          },
+          "type": "array"
+        },
+        "payload": {
+          "$ref": "#/$defs/TypeRef"
+        },
+        "reserved": {
+          "default": false,
+          "type": "boolean"
+        },
+        "symbol": {
+          "type": "string"
+        },
+        "ttlSeconds": {
+          "default": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "symbol",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "MemoryStorePart": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "default": "",
+          "enum": [
+            "string",
+            "integer",
+            "boolean",
+            "enum"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/TypeRef"
+        }
+      },
+      "required": [
+        "name",
+        "type"
       ],
       "type": "object"
     },
@@ -4683,6 +5033,25 @@
       ],
       "type": "object"
     },
+    "Origin": {
+      "additionalProperties": false,
+      "properties": {
+        "apis": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ServiceRef"
+          },
+          "type": "array"
+        },
+        "site": {
+          "$ref": "#/$defs/ServiceRef"
+        }
+      },
+      "required": [
+        "site"
+      ],
+      "type": "object"
+    },
     "ProjectionCollapse": {
       "additionalProperties": false,
       "properties": {
@@ -4741,6 +5110,7 @@
           "type": "string"
         },
         "pool": {
+          "default": "",
           "type": "string"
         },
         "predicates": {
@@ -4755,7 +5125,6 @@
         }
       },
       "required": [
-        "pool",
         "name",
         "migration",
         "source"
@@ -4943,10 +5312,104 @@
       ],
       "type": "object"
     },
+    "QueryDef": {
+      "additionalProperties": false,
+      "properties": {
+        "dialects": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "notNull": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "orderBy": {
+          "$ref": "#/$defs/QueryOrderBy"
+        },
+        "page": {
+          "$ref": "#/$defs/QueryPage"
+        },
+        "params": {
+          "type": "string"
+        },
+        "returns": {
+          "default": "",
+          "type": "string"
+        },
+        "row": {
+          "type": "string"
+        },
+        "sql": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "params",
+        "row",
+        "sql"
+      ],
+      "type": "object"
+    },
+    "QueryOrderBy": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "default": "",
+          "type": "string"
+        },
+        "options": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "param": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "param",
+        "options"
+      ],
+      "type": "object"
+    },
+    "QueryPage": {
+      "additionalProperties": false,
+      "properties": {
+        "desc": {
+          "default": false,
+          "type": "boolean"
+        },
+        "key": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "type": "object"
+    },
     "QueueDef": {
       "additionalProperties": false,
       "properties": {
         "backoff": {
+          "default": "",
+          "type": "string"
+        },
+        "key": {
           "default": "",
           "type": "string"
         },
@@ -4958,12 +5421,20 @@
           "default": "",
           "type": "string"
         },
+        "onDuplicate": {
+          "default": "",
+          "type": "string"
+        },
         "retain": {
           "default": "",
           "type": "string"
         },
         "retries": {
           "type": "integer"
+        },
+        "serialize": {
+          "default": false,
+          "type": "boolean"
         }
       },
       "type": "object"
@@ -4983,6 +5454,37 @@
           "type": "array"
         }
       },
+      "type": "object"
+    },
+    "RawSQLDef": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "default": "",
+          "type": "string"
+        },
+        "dialects": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "down": {
+          "default": "",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "up": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "up"
+      ],
       "type": "object"
     },
     "ReferenceDef": {
@@ -5029,6 +5531,25 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "RoleSeed": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "permissions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "permissions"
+      ],
       "type": "object"
     },
     "ScalarDef": {
@@ -5291,6 +5812,7 @@
             "Catalog",
             "DB",
             "General",
+            "MemoryStore",
             "Site",
             "Stack"
           ],
@@ -5348,6 +5870,13 @@
             "$ref": "#/$defs/DeployableRef"
           },
           "type": "array"
+        },
+        "origins": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Origin"
+          },
+          "type": "array"
         }
       },
       "type": "object"
@@ -5384,6 +5913,10 @@
     "TypeDef": {
       "additionalProperties": false,
       "properties": {
+        "allowUnknownFields": {
+          "default": false,
+          "type": "boolean"
+        },
         "behaviors": {
           "default": [],
           "items": {
@@ -5408,6 +5941,13 @@
         },
         "display": {
           "$ref": "#/$defs/TypeDisplay"
+        },
+        "enqueueOnChange": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/EnqueueOnChange"
+          },
+          "type": "array"
         },
         "envVars": {
           "default": false,
@@ -5494,11 +6034,21 @@
         "projection": {
           "$ref": "#/$defs/ProjectionDef"
         },
+        "query": {
+          "$ref": "#/$defs/QueryDef"
+        },
         "queue": {
           "$ref": "#/$defs/QueueDef"
         },
         "rawHeritage": {
           "$ref": "#/$defs/RawHeritage"
+        },
+        "rawSql": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RawSQLDef"
+          },
+          "type": "array"
         },
         "role": {
           "enum": [
@@ -5508,15 +6058,27 @@
             "EmbeddedStruct",
             "APIOperationSet",
             "Trait",
-            "Projection"
+            "Projection",
+            "Query"
           ],
           "type": "string"
+        },
+        "seedRoles": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RoleSeed"
+          },
+          "type": "array"
         },
         "server": {
           "$ref": "#/$defs/ServerDecl"
         },
         "source": {
           "$ref": "#/$defs/SourceRef"
+        },
+        "sqlName": {
+          "default": "",
+          "type": "string"
         },
         "stack": {
           "$ref": "#/$defs/StackDecl"
@@ -5736,6 +6298,16 @@
     "UserSessionsConfig": {
       "additionalProperties": false,
       "properties": {
+        "defaultRoles": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "firstUser": {
+          "$ref": "#/$defs/IdentityFirstUser"
+        },
         "noLogin": {
           "default": false,
           "type": "boolean"
@@ -5747,6 +6319,10 @@
         "register": {
           "default": false,
           "type": "boolean"
+        },
+        "registration": {
+          "default": "",
+          "type": "string"
         }
       },
       "type": "object"

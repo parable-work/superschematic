@@ -20,6 +20,11 @@ use support::targets;
 /// engine-notes' policy as a rule table.
 fn notes_rules() -> Value {
     json!({"rules": [
+        // A behavior's operation across the namespace (D77): one that reads
+        // keeps the schemas the caller may read, so anyone may call it;
+        // one that writes, a holder of <behavior>.<operation>.
+        {"behavior": true, "action": "read", "allow": true},
+        {"behavior": true, "require": "{behavior}.{operation}"},
         // Making, archiving and listing namespaces: the example makes none
         // while it runs.
         {"action": "manage", "allow": false},
@@ -34,6 +39,8 @@ fn notes_rules() -> Value {
 /// engine-jobs' policy as a rule table.
 fn jobs_rules() -> Value {
     json!({"rules": [
+        {"behavior": true, "action": "read", "allow": true},
+        {"behavior": true, "require": "{behavior}.{operation}"},
         {"action": "manage", "allow": false},
         {"action": ["define", "publish"], "require": "schemas.{action}"},
         // A worker may do the work, and nothing else that writes.
@@ -83,6 +90,13 @@ impl AccessPolicy for NotesFunction {
             schema,
             operation,
         } = asked(request);
+        if let Some(behavior) = request.behavior() {
+            return action == "read"
+                || holds(
+                    principal,
+                    &[format!("{behavior}.{}", operation.unwrap_or_default())],
+                );
+        }
         if action == "manage" {
             return false;
         }
@@ -119,6 +133,13 @@ impl AccessPolicy for JobsFunction {
             schema,
             operation,
         } = asked(request);
+        if let Some(behavior) = request.behavior() {
+            return action == "read"
+                || holds(
+                    principal,
+                    &[format!("{behavior}.{}", operation.unwrap_or_default())],
+                );
+        }
         if action == "manage" {
             return false;
         }
@@ -203,6 +224,20 @@ fn questions<'a>(
                 namespace,
                 operation: None,
             });
+            for action in [SchemaAction::Read, SchemaAction::Write] {
+                for operation in ["inbox", "claimDeliveries"] {
+                    for listing in [false, true] {
+                        out.push(AccessRequest::Behavior {
+                            principal,
+                            action,
+                            namespace,
+                            behavior: "Comments",
+                            operation,
+                            listing,
+                        });
+                    }
+                }
+            }
         }
     }
     out
@@ -247,6 +282,7 @@ fn engine_notes_policy_is_a_rule_table() {
         Principal::new("dana", ["schemas"]),
         Principal::new("erin", ["schemas.define", "notes.publish", "notes.review"]),
         Principal::new("nobody", Vec::<String>::new()),
+        Principal::new("nate", ["Comments.claimDeliveries"]),
         worker_service(Principal::new("frank", ["notes.read"]), "editor"),
         Principal::service("crawler", &[], "sa-2"),
     ];
@@ -277,6 +313,7 @@ fn engine_jobs_policy_is_a_rule_table() {
         ),
         Principal::new("auditor", ["jobs.read", "schemas.publish"]),
         Principal::new("nobody", Vec::<String>::new()),
+        Principal::new("dispatcher", ["Comments"]),
         worker_service(Principal::new("worker-2", ["jobs.work"]), "worker"),
     ];
     let mut operations: Vec<&str> = WORK_OPERATIONS.to_vec();

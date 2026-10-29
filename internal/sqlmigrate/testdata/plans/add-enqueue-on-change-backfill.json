@@ -1,0 +1,40 @@
+{
+  "dialect": "postgres",
+  "from": "c6a507a2df09c6a4bc9b1efff54222ca4fd6d49dba3b1e107e3b73a830f106b5",
+  "hash": "59215bac89ba21d2185f52aa79cd09f9906b305633a03b843b0982b6c79b39f7",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION order_enqueue_order_shipped() RETURNS trigger AS $$\nBEGIN\n  -- Enqueues a message of OrderShipped after a write to order (D80).\n  IF TG_OP = 'UPDATE' AND NOT (OLD.note IS DISTINCT FROM NEW.note) THEN\n    RETURN NULL;\n  END IF;\n  IF NEW.note IS NOT NULL THEN\n    INSERT INTO order_shipped_queue (order_id, note) VALUES (NEW.id, NEW.note)\n      ON CONFLICT (order_id) WHERE state = 'ready' DO UPDATE SET note = excluded.note, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = now();\n  END IF;\n  RETURN NULL;\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/order_enqueue_order_shipped",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:trigger/order/trg_order_enqueue_order_shipped",
+          "reason": "Backfilling trg_order_enqueue_order_shipped enqueues a message for every row of order that meets its conditions while the new trigger's lock blocks writes to order; for a large table, add the trigger without backfill and run stack queue backfill.",
+          "subject": "trigger/order/trg_order_enqueue_order_shipped"
+        }
+      ],
+      "index": 2,
+      "op": "createTrigger",
+      "phase": "expand",
+      "statements": [
+        "CREATE TRIGGER trg_order_enqueue_order_shipped\n  AFTER INSERT OR UPDATE ON \"order\"\n  FOR EACH ROW EXECUTE FUNCTION order_enqueue_order_shipped()",
+        "INSERT INTO order_shipped_queue (order_id, note)\nSELECT src.id, src.note\nFROM \"order\" AS src\nWHERE src.note IS NOT NULL\nON CONFLICT (order_id) WHERE state = 'ready' DO UPDATE SET note = excluded.note, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = now()"
+      ],
+      "subject": "trigger/order/trg_order_enqueue_order_shipped",
+      "transactional": true
+    }
+  ],
+  "to": "a3cf47cb9748a275d34dae0faba84a6a1c7d797666fd12b3c7c2a2bdff670b1f",
+  "toModel": null,
+  "version": 1
+}

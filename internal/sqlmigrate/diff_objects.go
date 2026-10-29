@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // diffFunctions matches functions by name, following the renames of the
@@ -53,19 +55,45 @@ func (d *differ) diffFunctions() {
 
 // prevFunction returns the previous name of a function of the new model:
 // for a function named after a renamed table ("order_capture_history"),
-// the same function of the old table, when the previous model has it.
+// the same function of the old table, and for an @enqueueOnChange's
+// function, named after its table and its queue's
+// ("order_enqueue_order_shipped", D80), the one of the old names of
+// either (D85), when the previous model has it.
 func (d *differ) prevFunction(tf *Function, from map[string]*Function, to map[string]bool) string {
+	names := []string{tf.Name}
 	for prev, name := range d.renames.tableTo {
 		tt := d.toTables[name]
 		if tt == nil || tt.Origin != tf.Origin || !strings.HasPrefix(tf.Name, name+"_") {
 			continue
 		}
-		candidate := prev + strings.TrimPrefix(tf.Name, name)
-		if from[candidate] != nil && !to[candidate] {
-			return candidate
+		names = append(names, prev+strings.TrimPrefix(tf.Name, name))
+	}
+	for _, name := range names {
+		for _, candidate := range append([]string{name}, d.prevEnqueueNames(name)...) {
+			if candidate != tf.Name && from[candidate] != nil && !to[candidate] {
+				return candidate
+			}
 		}
 	}
 	return tf.Name
+}
+
+// prevEnqueueNames are the names an @enqueueOnChange's function or
+// trigger, named after its queue's table with no _queue, had before that
+// table's rename: name with the old table's in place of the new one's.
+func (d *differ) prevEnqueueNames(name string) []string {
+	var out []string
+	for prev, renamed := range d.renames.tableTo {
+		base, prevBase := strings.TrimSuffix(renamed, ir.QueueTableSuffix), strings.TrimSuffix(prev, ir.QueueTableSuffix)
+		if i := strings.LastIndex(name, "_enqueue_"+base); i >= 0 {
+			rest := name[i+len("_enqueue_"+base):]
+			if rest == "" || strings.HasPrefix(rest, "_") {
+				out = append(out, name[:i]+"_enqueue_"+prevBase+rest)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // excludeHazard adds a history hazard to the replacement of a capture
@@ -125,13 +153,15 @@ func (d *differ) executes(table, function string) bool {
 // triggerPattern matches the CREATE TRIGGER statements sqlgen writes.
 var triggerPattern = regexp.MustCompile(`^CREATE TRIGGER \S+\n  (.+) ON \S+\n  FOR EACH ROW EXECUTE FUNCTION (\S+)\(\)$`)
 
-// parseTrigger returns when a trigger fires and the function it executes.
+// parseTrigger returns when a trigger fires and the function it executes,
+// by its name unquoted, as a Function names it: a name in mixed case, from
+// @table (D85), is quoted in the statement.
 func parseTrigger(t *Trigger) (timing, function string, ok bool) {
 	m := triggerPattern.FindStringSubmatch(t.Definition)
 	if m == nil {
 		return "", "", false
 	}
-	return m[1], m[2], true
+	return m[1], strings.Trim(m[2], `"`), true
 }
 
 // diffTriggers matches triggers by table and name, following renames. A
@@ -144,14 +174,22 @@ func (d *differ) diffTriggers() {
 	matched := map[string]bool{}
 	for _, tt := range d.to.Triggers {
 		prevTable := d.renames.prevTable(tt.Table)
-		prevName := tt.Name
+		names := []string{tt.Name}
 		if prefix := "trg_" + tt.Table + "_"; prevTable != tt.Table && strings.HasPrefix(tt.Name, prefix) {
-			prevName = "trg_" + prevTable + "_" + strings.TrimPrefix(tt.Name, prefix)
+			names = append([]string{"trg_" + prevTable + "_" + strings.TrimPrefix(tt.Name, prefix)}, names...)
 		}
-		ft := from[prevTable+"/"+prevName]
-		if ft == nil {
-			prevName = tt.Name
-			ft = from[prevTable+"/"+prevName]
+		// An @enqueueOnChange's trigger is named after its queue's table
+		// too, which a rename may change (D85).
+		for _, name := range names {
+			names = append(names, d.prevEnqueueNames(name)...)
+		}
+		prevName := tt.Name
+		var ft *Trigger
+		for _, name := range names {
+			if ft = from[prevTable+"/"+name]; ft != nil {
+				prevName = name
+				break
+			}
 		}
 		seed := d.seeds[tt.Table]
 		if ft == nil {
@@ -159,10 +197,12 @@ func (d *differ) diffTriggers() {
 				seed.seed.triggers = append(seed.seed.triggers, tt)
 				continue
 			}
-			d.add(&change{
+			c := d.add(&change{
 				op: opCreateTrigger, phase: Expand, subject: triggerSubject(tt.Table, tt.Name),
 				table: tt.Table, trigger: tt,
 			})
+			// A new table has no rows to backfill (D88).
+			c.backfill = tt.Backfill != "" && d.existing(c)
 			continue
 		}
 		matched[ft.Table+"/"+ft.Name] = true

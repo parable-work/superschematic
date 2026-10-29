@@ -66,13 +66,15 @@ var mcpInvocationKeyPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
 var mcpRecordKeys = []string{"handle", "hidden", "hiddenReason", "_meta", "name", "description", "icon"}
 
 // mcpReservedKeys are the keys an invocation policy key cannot be: the
-// record's own and the authoring key @mcp reads the hidden reason from.
-var mcpReservedKeys = append(slices.Clone(mcpRecordKeys), "reason")
+// record's own, the authoring key @mcp reads the hidden reason from, and
+// hiddenBy, under which the engine's tools document names why it hides a
+// tool (D58, amended), so no record holds a policy under that key.
+var mcpReservedKeys = append(slices.Clone(mcpRecordKeys), "reason", "hiddenBy")
 
 // ValidateMCPInvocationKey checks a key an invocation policy may be written
 // under: a letter, then letters, digits or underscores, and not one of the
-// keys the mcp record or @mcp already use (handle, hidden, hiddenReason,
-// reason, _meta, name, description, icon).
+// keys the mcp record, @mcp or the engine's record already use (handle,
+// hidden, hiddenReason, hiddenBy, reason, _meta, name, description, icon).
 func ValidateMCPInvocationKey(key string) error {
 	if !mcpInvocationKeyPattern.MatchString(key) {
 		return fmt.Errorf("invocation policy key %q must be a letter followed by letters, digits or underscores", key)

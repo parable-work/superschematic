@@ -120,6 +120,18 @@ func TestTypeToMap_StrictRejectsUnknown(t *testing.T) {
 	assert.True(t, ok)
 }
 
+// TestTypeToMap_StrictDropsUnknownOfAnAllowingType holds D87: a type that
+// is @allowUnknownFields drops the keys it does not declare in strict mode
+// too.
+func TestTypeToMap_StrictDropsUnknownOfAnAllowingType(t *testing.T) {
+	schema := testSchema()
+	schema.Types["Address"].AllowUnknownFields = true
+	s := New(schema, WithStrict(true))
+	out, errs := s.TypeToMap("Address", map[string]any{"street": "1 Main", "zip": "z"})
+	require.False(t, errs.HasErrors(), "errs=%v", errs)
+	assert.Equal(t, map[string]any{"street": "1 Main"}, out)
+}
+
 func TestTypeToJSON(t *testing.T) {
 	s := New(testSchema())
 	in := map[string]any{

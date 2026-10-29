@@ -2,6 +2,7 @@ package verify
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
@@ -12,7 +13,8 @@ import (
 // behaviorRegistry registers test behaviors under core names, as the
 // registry allows for the core: Pallet takes a required config, adds a field
 // and an operation; Audit requires Pallet; Clearance conflicts with Pallet;
-// Shelved adds Pallet's field; Recount adds Pallet's operation.
+// Shelved adds Pallet's field; Recount adds Pallet's operation; Tally and
+// Census each add a namespace operation named count (D77).
 func behaviorRegistry(t *testing.T) *registry.Registry {
 	t.Helper()
 	reg := registry.New(naming.Naming{})
@@ -26,6 +28,8 @@ func behaviorRegistry(t *testing.T) *registry.Registry {
 		`{"name":"Clearance","conflicts":["Pallet"],"fields":[{"name":"markdown"}]}`,
 		`{"name":"Shelved","fields":[{"name":"onHand"},{"name":"shelf"}]}`,
 		`{"name":"Recount","operations":[` + op("restock") + `]}`,
+		`{"name":"Tally","operations":[` + strings.Replace(op("count"), `"name":"count"`, `"name":"count","scope":"namespace"`, 1) + `]}`,
+		`{"name":"Census","operations":[` + strings.Replace(op("count"), `"name":"count"`, `"name":"count","scope":"namespace"`, 1) + `]}`,
 	} {
 		if err := reg.RegisterBehavior(registry.BehaviorSpec{Declaration: json.RawMessage(decl)}); err != nil {
 			t.Fatal(err)
@@ -63,7 +67,7 @@ func TestBehaviorsVerify(t *testing.T) {
 		{"accepted", []ir.BehaviorRef{stock(`{"aisles":2}`), {Name: "Audit"}}, nil},
 		{"requirement listed first", []ir.BehaviorRef{{Name: "Audit"}, stock(`{"aisles":2}`)}, nil},
 		{"unknown", []ir.BehaviorRef{{Name: "Ghost"}},
-			[]string{`src/item.schema.json: type Item: behavior "Ghost" is not a registered behavior (registered: Approvals, Assignment, Audit, Blueprint, Branches, Budget, Calendar, Clearance, Comments, Constants, Dependencies, Derived, Holds, Lease, Links, Numbering, Pallet, Payments, Presence, Provenance, Queue, Reactions, Recount, Retries, Revisions, Rollups, Search, Shelved, StateRules, Stock, Timers, Variants, Workflow)`}},
+			[]string{`src/item.schema.json: type Item: behavior "Ghost" is not a registered behavior (registered: Approvals, Assignment, Audit, Blueprint, Branches, Budget, Calendar, Census, Clearance, Comments, Constants, Dependencies, Derived, Holds, Lease, Links, Numbering, Pallet, Payments, Presence, Provenance, Queue, Reactions, Recount, Retries, Revisions, Rollups, Search, Shelved, StateRules, Stock, Tally, Timers, Variants, Workflow)`}},
 		{"config rejected", []ir.BehaviorRef{stock(`{"aisles":0}`)},
 			[]string{"src/item.schema.json: type Item: behavior Pallet config: "}},
 		{"config missing", []ir.BehaviorRef{{Name: "Pallet"}},
@@ -80,6 +84,10 @@ func TestBehaviorsVerify(t *testing.T) {
 		{"field named like another behavior's", []ir.BehaviorRef{stock(`{"aisles":2}`), {Name: "Shelved"}}, nil},
 		{"operation collides", []ir.BehaviorRef{stock(`{"aisles":2}`), {Name: "Recount"}},
 			[]string{"src/item.schema.json: type Item: behaviors Pallet and Recount both add operation restock"}},
+		// A namespace operation is called by its behavior's name, not on
+		// the type, so two behaviors' namespace operations of one name
+		// share none.
+		{"namespace operations share a name", []ir.BehaviorRef{{Name: "Tally"}, {Name: "Census"}}, nil},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			r := Run(behaviorSchema(test.refs...), Input{Registry: reg})

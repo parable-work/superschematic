@@ -65,6 +65,11 @@ func TestRenderGoldens(t *testing.T) {
 		// the tls provider pinned as the binary pins it.
 		{name: "gcp-mixedshop-staging", env: func(t *testing.T) *ir.ResolvedEnvironment { return gcpGolden(t, "MixedShop", "Staging") },
 			versions: map[string]string{"gcp": gcp.ProviderVersion, stack.GenericKeyPackage: stack.GenericKeyProviderVersion}},
+		// shop-web serving shop-api on its origin (D91): the site's load
+		// balancer's endpoint group and backend for shop-api's service, and
+		// the URL map's rules for its path.
+		{name: "gcp-originshop-staging", env: func(t *testing.T) *ir.ResolvedEnvironment { return gcpGolden(t, "OriginShop", "Staging") },
+			versions: gcpVersions},
 		// acme-shop's storefront on Workers, its bundle pinned as a deploy
 		// pins it, with the cloudflare provider pinned as the binary pins it
 		// (D64).
@@ -74,6 +79,11 @@ func TestRenderGoldens(t *testing.T) {
 		// assets, the site's files and the bundles pinned as a deploy pins
 		// them (D64).
 		{name: "cloudflare-web-staging", env: webEnvironment,
+			versions: map[string]string{cloudflare.Package: cloudflare.ProviderVersion}},
+		// The site serving shop-storefront on its origin (D91): the site's
+		// SITE_ORIGIN, its service binding to shop-storefront's Worker and
+		// the script first for the API's path.
+		{name: "cloudflare-origin-staging", env: originWebEnvironment,
 			versions: map[string]string{cloudflare.Package: cloudflare.ProviderVersion}},
 		{name: "demo-shared", env: func(*testing.T) *ir.ResolvedEnvironment { return sharedEnvironment() },
 			versions: map[string]string{"random": randomVersion}},

@@ -30,6 +30,8 @@ export interface BehaviorDeclaration {
   readonly fields?: readonly BehaviorFieldDeclaration[];
   /** The operations it adds beside create, get, list, update and delete. */
   readonly operations?: readonly BehaviorOperationDeclaration[];
+  /** Its signals (D77): messages about an instance the engine delivers to the event streams open on it and keeps nowhere. */
+  readonly signals?: readonly BehaviorSignalDeclaration[];
   /**
    * The JSON Schema of the entry a caller sends for it in the
    * preconditions of an update, a delete or an operation, which its guard
@@ -57,6 +59,13 @@ export interface BehaviorFieldDeclaration {
    * event records such a move, so Reactions' changes refuses one (D56).
    */
   readonly volatile?: boolean;
+  /**
+   * True for a volatile field whose value is the caller's, not the
+   * instance's, as Comments.unread is (D77): a read computes it for its
+   * caller, and no event patch, create event or reference move records it.
+   * Only a volatile field may say so.
+   */
+  readonly perReader?: boolean;
 }
 
 export interface BehaviorOperationDeclaration {
@@ -70,8 +79,11 @@ export interface BehaviorOperationDeclaration {
   readonly writes?: boolean;
   /**
    * What it runs on: `instance` (or absent), one instance a call names by
-   * id; `schema`, the schema as a whole, with no instance. A string, as a
-   * JSON module types it; checkDeclaration refuses any other value.
+   * id; `schema`, the schema as a whole, with no instance; `namespace`
+   * (D77), the behavior's own tables across every schema of a namespace
+   * that composes it, with no instance and no schema, called by the
+   * behavior's name (engine.behaviors.invoke). A string, as a JSON module
+   * types it; registration refuses any other value.
    */
   readonly scope?: string;
   /**
@@ -81,17 +93,43 @@ export interface BehaviorOperationDeclaration {
    * declares one declares every field volatile.
    */
   readonly beside?: boolean;
-  /** False for a beside operation that appends no event; absent, it appends one. */
+  /** False for a beside operation that appends no event; absent, it appends one. A namespace operation sets neither beside nor log. */
   readonly log?: boolean;
+  /**
+   * `read` for a beside operation with `log: false` that writes only its
+   * caller's own state, a read marker say (D77): the policy is asked
+   * `read` for it, so a caller who may only read the instance may call
+   * it, and an archived namespace lets it run. Absent, a writing
+   * operation asks `write`.
+   */
+  readonly asks?: string;
   /** The MCP invocation policy of its tool (D11); absent for the policy's default. */
   readonly invocationPolicy?: string;
 }
 
+/** One signal a behavior declares (D77). */
+export interface BehaviorSignalDeclaration {
+  /** camelCase, unique among its signals. */
+  readonly name: string;
+  readonly description?: string;
+  /** The JSON Schema of its data. */
+  readonly paramsSchema: JSONSchema;
+  /**
+   * Who may send it: a caller the policy lets read the schema (read), or
+   * write it (write), or the behavior's own operations alone (operation).
+   * A string, as a JSON module types it.
+   */
+  readonly access: string;
+}
+
+/** Who may send a signal. */
+export type SignalAccess = 'read' | 'write' | 'operation';
+
 /** What an operation runs on. */
-export type OperationScope = 'instance' | 'schema';
+export type OperationScope = 'instance' | 'schema' | 'namespace';
 
 /** The scopes an operation declares. */
-export const OPERATION_SCOPES: readonly OperationScope[] = ['instance', 'schema'];
+export const OPERATION_SCOPES: readonly OperationScope[] = ['instance', 'schema', 'namespace'];
 
 /** A JSON Schema: an object, or true or false. */
 export type JSONSchema = boolean | { readonly [key: string]: unknown };

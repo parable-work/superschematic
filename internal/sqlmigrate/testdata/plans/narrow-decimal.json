@@ -1,0 +1,47 @@
+{
+  "dialect": "postgres",
+  "from": "ff7a5a600291546aedf3cf33bd1acdd379a8e31ce583871a52d1522c9acf8efd",
+  "hash": "202e6c28722bccca64e94bae94a1899ea17da86fc7783b161dc03a1104dbcfc9",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/product/column/rate",
+          "reason": "Product.rate changes from NUMERIC to NUMERIC(6,2): the cast truncates or rounds values NUMERIC(6,2) cannot hold exactly.",
+          "subject": "table/product/column/rate"
+        },
+        {
+          "class": "blocking",
+          "id": "blocking:table/product/column/rate",
+          "reason": "The change rewrites product and rebuilds its indexes under an ACCESS EXCLUSIVE lock.",
+          "subject": "table/product/column/rate"
+        },
+        {
+          "class": "compat",
+          "id": "compat:table/product/column/rate",
+          "reason": "Product.rate changes from NUMERIC to NUMERIC(6,2): servers built from the previous version still read and write NUMERIC.",
+          "subject": "table/product/column/rate"
+        },
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/product/column/rate",
+          "reason": "Product.rate changes from NUMERIC to NUMERIC(6,2): the cast fails on a value NUMERIC(6,2) cannot hold.",
+          "subject": "table/product/column/rate"
+        }
+      ],
+      "index": 1,
+      "op": "alterColumnType",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE product\n  ALTER COLUMN rate TYPE NUMERIC(6,2) USING rate::NUMERIC(6,2)"
+      ],
+      "subject": "table/product/column/rate",
+      "transactional": true
+    }
+  ],
+  "to": "053c77bc6a93d306c0402d2ff789e7bd14f459389c4dd2e800ea69846a8bea2c",
+  "toModel": null,
+  "version": 1
+}

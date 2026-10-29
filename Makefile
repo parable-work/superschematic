@@ -50,7 +50,7 @@ CORE_BIN := bin/superschematic-core
 # cache entries, as they were. release.yml builds with the same two flags.
 GO_BUILD_FLAGS := -trimpath -buildvcs=false
 
-.PHONY: all setup build test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
+.PHONY: all setup build cli test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
         go-goldens catalog-check schema-file-types schema-file-types-check behaviors behaviors-check \
         gcp-schemas gcp-schemas-check cloudflare-schemas cloudflare-schemas-check generic-schemas generic-schemas-check ts python rust engine-rust acme-engine-rust \
         engine-rust-soak engine-archive engine-go engine-link-check engine-servers \
@@ -80,6 +80,16 @@ setup:
 
 build: go-build $(BIN)
 
+# The CLI alone, for a checkout without Rust (D82): bin/superschematic and
+# the migration runner bin/superschematic-migrate, over superscalar's static
+# archive, the one thing the CLI links, which scripts/superscalar-dep.sh
+# --archive builds, or downloads prebuilt where cargo is missing. The
+# migration runner needs no cgo.
+cli:
+	scripts/superscalar-dep.sh --archive >/dev/null
+	cd cmd/superschematic && go build $(GO_BUILD_FLAGS) -o $(CURDIR)/$(BIN) .
+	cd runtime/migrate/go && CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -o $(CURDIR)/bin/superschematic-migrate ./cmd/superschematic-migrate
+
 $(BIN): FORCE
 	cd cmd/superschematic && go build $(GO_BUILD_FLAGS) -o $(CURDIR)/$(BIN) .
 
@@ -106,11 +116,13 @@ go-lint:
 
 # Rewrite every golden file from the generators, and the schema-file JSON
 # Schema and TypeScript types. Review the diff by eye. Each package's tests
-# run from the Go module that holds it.
+# run from the Go module that holds it, with an hour each: with the
+# TypeScript gates on, extensions/topcoat's alone outrun go test's ten
+# minutes.
 go-goldens: schema-file-types
-	@for p in $$(grep -rl 'flag.Bool("update' --include='*_test.go' . | grep -v '^./third_party/' | xargs -n1 dirname | sort -u); do \
+	@for p in $$(grep -rl 'flag.Bool("update"' --include='*_test.go' . | grep -v '^./third_party/' | xargs -n1 dirname | sort -u); do \
 		p=./$${p#./}; m=$$p; while [ ! -f $$m/go.mod ]; do m=$$(dirname $$m); done; \
-		(cd $$m && go test -count=1 .$${p#$$m} -update) || exit 1; done
+		(cd $$m && go test -count=1 -timeout 60m .$${p#$$m} -update) || exit 1; done
 
 # The TypeScript and Python scalar catalogs are written from the superscalar
 # Go package, the TypeScript one with each scalar's value class from the
@@ -228,7 +240,10 @@ python:
 # logging, and the two at once, as a worker runs (D65); and gcs, a bucket on
 # GCS (D54), whose tests run against fakes, and against the fake-gcs-server
 # SUPERSCHEMATIC_TEST_GCS_EMULATOR names, when it is set, and beside a
-# worker's two, as a worker with a bucket builds; and otel, a deployable's
+# worker's two, as a worker with a bucket builds; memorystore-redis, a memory
+# store on Redis (D75), whose tests run on the Valkey
+# SUPERSCHEMATIC_TEST_MEMORY_STORE names, when it is set, and beside a
+# worker's two; and otel, a deployable's
 # trace export (D67), alone and with postgres, as a worker builds it.
 rust:
 	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
@@ -246,6 +261,9 @@ rust:
 		&& cargo test --features postgres,logging \
 		&& cargo clippy --all-targets --features gcs -- -D warnings && cargo test --features gcs \
 		&& cargo clippy --all-targets --features gcs,postgres,logging -- -D warnings \
+		&& cargo clippy --all-targets --features memorystore-redis -- -D warnings \
+		&& cargo test --features memorystore-redis \
+		&& cargo clippy --all-targets --features memorystore-redis,postgres,logging -- -D warnings \
 		&& cargo clippy --all-targets --features otel -- -D warnings && cargo test --features otel \
 		&& cargo clippy --all-targets --features postgres,otel -- -D warnings \
 		&& cargo test --features postgres,otel \

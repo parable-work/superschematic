@@ -11,8 +11,12 @@
 // callers field. Every bucket deployable shares one storage emulator,
 // fake-gcs-server, in a container of its own, with a bucket per Bucket
 // service, and a bucket edge derives the bucket's name and the emulator's
-// endpoint (D54). An app (D78) is a process as a Rust server is, on a port
-// of its own, ready once it listens there.
+// endpoint (D54). Every memoryStore deployable shares one Valkey server, in
+// a container of its own with no persistence, and a memoryStore edge
+// derives the store's name and the server's redis URL, with no
+// authentication (D75).
+// An app (D78) is a process as a Rust server is, on a port of its own,
+// ready once it listens there.
 //
 // The target registers like any other (Register), but the core registers
 // it, so a binary with no extension linked runs `stack dev`. Its resource
@@ -73,6 +77,10 @@ const (
 	// fake-gcs-server, which speaks GCS's API (D54).
 	BucketPlatform = "local.gcs"
 
+	// MemoryStorePlatform keeps a memory store on the environment's Valkey
+	// container, which every store of the environment shares (D75).
+	MemoryStorePlatform = "local.valkey"
+
 	// WorkerPlatform runs a worker as a process with no port, ready once it
 	// starts, beside the servers (D53).
 	WorkerPlatform = "local.worker"
@@ -122,6 +130,15 @@ const (
 	WorkerHTTPConnector   = "local.worker-process"
 	WorkerBucketConnector = "local.worker-gcs"
 
+	// MemoryStoreConnector, JobMemoryStoreConnector,
+	// WorkerMemoryStoreConnector and DeriverMemoryStoreConnector connect a
+	// process, a job, a worker and a deriver, in any language, to a memory
+	// store on the Valkey container: the field is the same for each (D75).
+	MemoryStoreConnector        = "local.process-valkey"
+	JobMemoryStoreConnector     = "local.job-valkey"
+	WorkerMemoryStoreConnector  = "local.worker-valkey"
+	DeriverMemoryStoreConnector = "local.deriver-valkey"
+
 	// RunnerSQLConnector connects an engine's runner to its engine
 	// database, its one edge (D58).
 	RunnerSQLConnector = "local.runner-postgres"
@@ -161,8 +178,8 @@ const (
 
 // The resource types the target's platforms emit: the `local` provider's.
 const (
-	// TypeContainer is a Docker container: the environment's Postgres, and
-	// its storage emulator (D54). It may give the image a command and its
+	// TypeContainer is a Docker container: the environment's Postgres, its
+	// storage emulator (D54) and its memory store (D75). It may give the image a command and its
 	// arguments, and says how the provisioner knows it is ready: a command
 	// run inside it, or a path it answers over HTTP.
 	TypeContainer = "local:docker/container:Container"
@@ -197,7 +214,8 @@ const (
 
 	// TypeSite is a site the provisioner builds once and serves from a
 	// file server of its own, with the site's config and its single-page
-	// fallback (D55).
+	// fallback (D55), or whose dev server it runs behind a proxy that
+	// serves the site and the APIs it calls on one origin (D82).
 	TypeSite = "local:site/site:Site"
 
 	// TypeBucket is a bucket on the environment's storage emulator, which
@@ -223,7 +241,7 @@ const (
 	LanguageRust = "rust"
 )
 
-// Register adds the local target, its four platforms and six connectors,
+// Register adds the local target, its platforms and connectors,
 // the schema of each resource type they emit, and its provisioner. The
 // provisioner is a new Provisioner with its defaults.
 func Register(r *registry.Registry) error {
@@ -251,7 +269,10 @@ func Register(r *registry.Registry) error {
 			NameOf:          processName,
 			AddressOf:       siteAddress,
 			PublicAddressOf: siteAddress,
-			Lower:           lowerSite,
+			// The site's proxy serves its origin's APIs (D91), as it
+			// serves a dev server's (D82).
+			ServesOrigin: true,
+			Lower:        lowerSite,
 		},
 		{
 			Name: JobPlatform,
@@ -331,6 +352,13 @@ func Register(r *registry.Registry) error {
 			AddressOf: bucketAddress,
 			Lower:     lowerBucket,
 		},
+		{
+			Name:      MemoryStorePlatform,
+			Kind:      ir.DeployableMemoryStore,
+			NameOf:    memoryStoreDeployableName,
+			AddressOf: memoryStoreAddress,
+			Lower:     lowerMemoryStore,
+		},
 	} {
 		spec.Provider = Provider
 		if err := r.RegisterPlatform(spec); err != nil {
@@ -360,6 +388,10 @@ func Register(r *registry.Registry) error {
 		{Name: AppSQLiteConnector, Edge: ir.EdgeSQL, From: AppPlatform, To: SQLitePlatform, Connect: connectSQLite},
 		{Name: AppHTTPConnector, Edge: ir.EdgeHTTP, From: AppPlatform, To: ServerPlatform, Connect: connectHTTP},
 		{Name: AppBucketConnector, Edge: ir.EdgeBucket, From: AppPlatform, To: BucketPlatform, Connect: connectBucket},
+		{Name: MemoryStoreConnector, Edge: ir.EdgeMemoryStore, From: ServerPlatform, To: MemoryStorePlatform, Connect: connectMemoryStore},
+		{Name: JobMemoryStoreConnector, Edge: ir.EdgeMemoryStore, From: JobPlatform, To: MemoryStorePlatform, Connect: connectMemoryStore},
+		{Name: WorkerMemoryStoreConnector, Edge: ir.EdgeMemoryStore, From: WorkerPlatform, To: MemoryStorePlatform, Connect: connectMemoryStore},
+		{Name: DeriverMemoryStoreConnector, Edge: ir.EdgeMemoryStore, From: DeriverPlatform, To: MemoryStorePlatform, Connect: connectMemoryStore},
 	} {
 		if err := r.RegisterConnector(spec); err != nil {
 			return err
@@ -375,15 +407,16 @@ func Register(r *registry.Registry) error {
 	return r.RegisterTarget(registry.TargetSpec{
 		Name: Target,
 		Platforms: map[ir.DeployableKind]string{
-			ir.DeployableServer:   ServerPlatform,
-			ir.DeployableDatabase: DatabasePlatform,
-			ir.DeployableJob:      JobPlatform,
-			ir.DeployableSite:     SitePlatform,
-			ir.DeployableBucket:   BucketPlatform,
-			ir.DeployableWorker:   WorkerPlatform,
-			ir.DeployableRunner:   RunnerPlatform,
-			ir.DeployableDeriver:  DeriverPlatform,
-			ir.DeployableApp:      AppPlatform,
+			ir.DeployableServer:      ServerPlatform,
+			ir.DeployableDatabase:    DatabasePlatform,
+			ir.DeployableJob:         JobPlatform,
+			ir.DeployableSite:        SitePlatform,
+			ir.DeployableBucket:      BucketPlatform,
+			ir.DeployableMemoryStore: MemoryStorePlatform,
+			ir.DeployableWorker:      WorkerPlatform,
+			ir.DeployableRunner:      RunnerPlatform,
+			ir.DeployableDeriver:     DeriverPlatform,
+			ir.DeployableApp:         AppPlatform,
 		},
 		DatabasePlatforms: map[string]string{registry.SQLDialectSQLite: SQLitePlatform},
 		Values:            json.RawMessage(targetValues),
@@ -398,15 +431,17 @@ func Register(r *registry.Registry) error {
 }
 
 // targetValues is the schema of a local environment's values: the
-// Postgres image and the host port its container publishes, and the
-// storage emulator's (D54).
+// Postgres image and the host port its container publishes, the storage
+// emulator's (D54), and the memory store's (D75).
 const targetValues = `{
   "type": "object",
   "properties": {
     "postgresImage": {"type": "string", "minLength": 1},
     "postgresPort": {"type": "integer", "minimum": 1, "maximum": 65535},
     "storageImage": {"type": "string", "minLength": 1},
-    "storagePort": {"type": "integer", "minimum": 1, "maximum": 65535}
+    "storagePort": {"type": "integer", "minimum": 1, "maximum": 65535},
+    "memoryStoreImage": {"type": "string", "minLength": 1},
+    "memoryStorePort": {"type": "integer", "minimum": 1, "maximum": 65535}
   },
   "additionalProperties": false
 }`
@@ -522,6 +557,15 @@ var resourceTypes = map[string]string{
 	    "output": {"type": "string", "minLength": 1},
 	    "fallback": {"type": "string", "minLength": 1},
 	    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+	    "dev": {
+	      "type": "object",
+	      "required": ["command", "port"],
+	      "properties": {
+	        "command": {"type": "string", "pattern": "^[^\\s]+$"},
+	        "port": {"type": "integer", "minimum": 1, "maximum": 65535}
+	      },
+	      "additionalProperties": false
+	    },
 	    "config": {
 	      "type": "object",
 	      "required": ["apis"],
@@ -532,7 +576,8 @@ var resourceTypes = map[string]string{
 	        "additionalProperties": false
 	      }}},
 	      "additionalProperties": false
-	    }
+	    },
+	    "origin": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string", "minLength": 1}}
 	  },
 	  "additionalProperties": false
 	}`,

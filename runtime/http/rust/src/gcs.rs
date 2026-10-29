@@ -330,6 +330,14 @@ impl GcsClient {
             target,
         })
     }
+
+    /// The access token of the workload's account, which the client holds
+    /// until shortly before it expires: what a memory store with `auth:
+    /// iam` sends as each new connection's password (D75).
+    #[cfg(feature = "memorystore-redis")]
+    pub(crate) async fn access_token(&self) -> Result<String, String> {
+        self.shared.access_token().await
+    }
 }
 
 impl fmt::Debug for GcsClient {

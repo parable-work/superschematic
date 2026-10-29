@@ -168,6 +168,10 @@
             "minLength": 2,
             "type": "string"
           },
+          "pending": {
+            "description": "Whether the user waits for an administrator's approval, and so cannot sign in.",
+            "type": "boolean"
+          },
           "roles": {
             "description": "The roles the user holds.",
             "items": {
@@ -181,6 +185,7 @@
           "login",
           "name",
           "disabled",
+          "pending",
           "roles"
         ],
         "type": "object"
@@ -289,6 +294,35 @@
         "required": [
           "login",
           "password"
+        ],
+        "type": "object"
+      },
+      "RegisterResult": {
+        "description": "What register answers under registration approval: whether the user waits for an administrator's approval, and the session of one who does not.",
+        "properties": {
+          "expiresAt": {
+            "description": "When the session ends; absent while the user waits for approval.",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "pending": {
+            "description": "Whether the user waits for an administrator's approval, with no session.",
+            "type": "boolean"
+          },
+          "token": {
+            "description": "The session's bearer token; absent for a cookie session and while the user waits for approval.",
+            "nullable": true,
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/SessionUser",
+            "description": "The registered user."
+          }
+        },
+        "required": [
+          "pending",
+          "user"
         ],
         "type": "object"
       },
@@ -833,6 +867,16 @@
       "get": {
         "description": "Lists the users and the roles each holds.",
         "operationId": "AccountAdminListUsersHandler",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "pending",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -1104,6 +1148,117 @@
           }
         ],
         "summary": "getUser",
+        "tags": [
+          "account-admin"
+        ]
+      }
+    },
+    "/api/auth/admin/users/{id}/approve": {
+      "post": {
+        "description": "Approves a user who registered to wait for approval, who can then sign in with the roles register granted them. The caller's own permissions must cover those roles'.",
+        "operationId": "AccountAdminApproveUserHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/IdentityUser"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "unauthorized: The request carries no usable session."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: The caller lacks the route's permission. cross_origin: The cross-origin check refused a cookie request."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: No user has the id."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_pending: The user is not waiting for approval."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "approveUser",
         "tags": [
           "account-admin"
         ]
@@ -1776,7 +1931,7 @@
                 }
               }
             },
-            "description": "cross_origin: The cross-origin check refused a cookie session's login."
+            "description": "cross_origin: The cross-origin check refused a cookie session's login. pending_approval: The password verifies, and the user waits for an administrator's approval."
           },
           "500": {
             "content": {
@@ -2034,7 +2189,7 @@
     },
     "/api/auth/register": {
       "post": {
-        "description": "Creates a user with the login, name and password given and signs them in, as login does.",
+        "description": "Creates a user with the login, name and password given, who waits for an administrator's approval: it answers 202 with pending true and starts no session. The first administrator, when the set names one, is signed in as login does.",
         "operationId": "AccountRegisterHandler",
         "requestBody": {
           "content": {
@@ -2053,7 +2208,7 @@
                 "schema": {
                   "properties": {
                     "data": {
-                      "$ref": "#/components/schemas/LoginResult"
+                      "$ref": "#/components/schemas/RegisterResult"
                     },
                     "meta": {
                       "$ref": "#/components/schemas/ResponseMeta"
@@ -2067,7 +2222,29 @@
                 }
               }
             },
-            "description": "Successful response"
+            "description": "The user is active, signed in as login signs them in"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RegisterResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The user waits for an administrator's approval: pending is true and no session started"
           },
           "400": {
             "content": {

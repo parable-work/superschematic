@@ -18,9 +18,19 @@ use superschematic_engine_napi::BehaviorSet;
 /// Every behavior the addon is built with: the core's, then the work
 /// queue's, then the commerce ones.
 fn behaviors() -> BehaviorSet {
-    superschematic_engine_behaviors::core()
+    let behaviors = superschematic_engine_behaviors::core()
         .extend(superschematic_engine_workqueue::workqueue())
-        .extend(superschematic_engine_commerce::commerce())
+        .extend(superschematic_engine_commerce::commerce());
+    // The test addon's test.Chatter and test.Inbox, which an engine
+    // registers when its options name them.
+    #[cfg(feature = "js-behaviors")]
+    let behaviors = behaviors.extend(BehaviorSet::new().with(chatter::Chatter).with(inbox::Inbox));
+    behaviors
 }
+
+#[cfg(feature = "js-behaviors")]
+mod chatter;
+#[cfg(feature = "js-behaviors")]
+mod inbox;
 
 superschematic_engine_napi::export_engine_napi!(behaviors = behaviors);

@@ -1,6 +1,6 @@
 ---
 title: Engine behaviors
-description: Compose the engine's behaviors on a type in TypeScript or JSON; read their fields under each behavior's name; engine types in a DB schema and their engine document; label a type's instances, states and transitions with @display; create parameters; schema-level operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants, Branches, Timers, StateRules, Numbering, Approvals, Derived and Provenance behaviors.
+description: Compose the engine's behaviors on a type in TypeScript or JSON; read their fields under each behavior's name; engine types in a DB schema and their engine document; label a type's instances, states and transitions with @display; create parameters; schema-level and namespace operations; refusals with codes and preconditions on writes; the runner that runs reactions and schedules; the outcomes of Workflow's terminal states; and the core's Dependencies, Links, Rollups, Search, Reactions, Constants, Variants, Branches, Timers, StateRules, Numbering, Approvals, Derived and Provenance behaviors.
 sidebar:
   order: 7
 ---
@@ -9,8 +9,8 @@ sidebar:
 with `Workflow`, `Comments` and `Revisions`. This page covers the rest of
 the behaviors the engine runs with no extension, and the mechanisms the
 newer ones lean on: parameters a create gives its behaviors, operations
-that run on a whole schema, and the runner that does work after a change
-commits.
+that run on a whole schema or across a namespace, and the runner that
+does work after a change commits.
 
 The
 [engine README](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#core-behaviors)
@@ -36,7 +36,7 @@ server does.
 | Behavior | What it adds | Requires | Covered in |
 | --- | --- | --- | --- |
 | `Workflow` | a `status` that moves only along declared transitions, each optionally behind a permission, and that a list filters on; `enteredAt`, when it last moved; an [outcome](#outcomes) for each terminal state | | [The engine](/superschematic/guides/engine/#workflow) |
-| `Comments` | a conversation on the instance: messages and their one-level threads, which their authors edit and delete and others react to, pin and resolve, every operation beside the instance | | [The engine](/superschematic/guides/engine/#comments) |
+| `Comments` | a conversation on the instance: messages and their one-level threads, which their authors edit and delete and others react to, pin and resolve, every operation beside the instance; blocks beside a message's body (refs, action cards, code anchored at a revision, which `moveAnchor` moves, and attachments the deployment stores); a reply streamed as it is written (`begin`, `appendDraft`, `finish`), the [signals](/superschematic/guides/engine/#signals) `typing`, `viewing` and `draft`, each reader's read markers and follows, the pinned messages (`listPinned`), who a message was written for when its author acted for someone, and across the namespace an inbox, a search of the messages' bodies and the deliveries a notifier or an agent dispatcher claims | | [The engine](/superschematic/guides/engine/#comments) |
 | `Revisions` | a revision at every change, and an optional propose, approve and reject step | | [The engine](/superschematic/guides/engine/#revisions) |
 | `Dependencies` | blockers that hold a transition until they finish | `Workflow` | [Dependencies](#dependencies) |
 | `Links` | named links to instances of other schemas, optionally pinned to a revision or a release | | [Links](#links) |
@@ -174,8 +174,13 @@ same.
   instance keep, moves with no event of its own instance:
   `Dependencies.blocked`, `Links.targets`, `Rollups.values`,
   `Lease.active`, `Budget.meters`, and Comments' `messages`,
-  `lastMessageAt` and `threads`. Its declaration says `"volatile": true`,
-  and so does the describe document.
+  `lastMessageAt`, `threads`, `composing` and `unread`. Its declaration
+  says `"volatile": true`, and so does the describe document. Comments'
+  `unread` is the one field that differs by who reads: the reader's
+  count of top-level messages of others since its read marker. It also
+  says `"perReader": true`, so no event records it: an operation's patch,
+  an update's and a create event's instance leave it out, and a read
+  computes it for each caller.
 - **The log.** An event's change is a merge patch of `{ data, behaviors }`:
   a create the whole instance, an update its patch under `data` and what
   its behaviors' fields took under `behaviors`. An operation beside the
@@ -183,6 +188,13 @@ same.
   tables: its event has no `seq`, carries `beside: true` and the
   operation's `result` in place of a patch, and leaves the instance's
   ETag where it was.
+- **Signals.** What a behavior says about an instance without storing it,
+  a typing indicator or a draft's next chunk, is a signal, not a field:
+  the engine hands it to the event streams opened with signals and keeps
+  nowhere ([signals](/superschematic/guides/engine/#signals)). A read
+  never returns one, and the generated types below hold none; the
+  [typed client](/superschematic/guides/engine/#typed-wrappers-for-your-schemas)
+  types their data.
 
 ### In the generated types
 
@@ -401,8 +413,13 @@ more keys of the database's `outputs.engine` say how:
   `"permission"` unless set, which allows an action on a type to a caller
   holding `<Type>.<action>` (`Ticket.read`, `Ticket.write`,
   `Ticket.define`, `Ticket.publish`), the permissions the API's
-  `permissions.json` then lists; `"allowAll"`, for tests and local use; or
-  `{ "rules": [...] }`, the engine's ordered rules.
+  `permissions.json` then lists, and to a caller [acting for
+  someone](/superschematic/guides/engine/#callers-and-the-access-policy)
+  only when it also holds `actFor`; `"allowAll"`, for tests and local
+  use; or `{ "rules": [...] }`, the engine's ordered rules, where only a
+  rule that names `actingFor` allows a caller acting for someone, and a
+  deny that leaves it out refuses such a caller as it refuses one acting
+  as itself.
 - **`retention`** is how long the event log keeps events, as the engine's
   `retention` option reads it (see the runner below): `maxAgeMs`,
   `maxEvents` or both, and `maxHoldMs`, `everyMs` and `batchSize`, each
@@ -594,8 +611,9 @@ refuses a title that is not one of the type's own text fields, a summary
 field that is neither the type's nor its behaviors', and a state or a
 transition the `Workflow` config does not list, with the compiler's
 wording. The describe document carries the instance type's display, its
-fields with their `@docs` titles and `@icon`s, and each operation's
-title. [Documentation decorators](/superschematic/reference/documentation/#display-on-a-type)
+fields with their `@docs` titles, `@icon`s and `@display`s (`multiline`,
+and `currency`, a code or another field by its JSON key), and each
+operation's title. [Documentation decorators](/superschematic/reference/documentation/#display-on-a-type)
 has every rule.
 
 ## Create parameters
@@ -680,6 +698,67 @@ tables where no read of an instance shows the change, as
 `settleEmbeddings` stores vectors. Each
 route answers 404 for an operation of the other scope. Over MCP, the tool
 takes the operation's parameters and no instance id.
+
+## Namespace operations
+
+An operation a behavior declares with `scope: "namespace"` runs on the
+behavior's own tables across every schema of a namespace that composes
+it, with no instance and no schema: "my mentions" or "what is unread"
+over every conversation. Comments declares four:
+
+| Operation | What it does |
+| --- | --- |
+| `inbox` | the caller's mentions, the threads it follows with replies of others, and the conversations it has read with new top-level messages, newest first, read-only |
+| `searchMessages` | the messages whose bodies hold the query's words, ranked, over the schemas the caller may read, read-only |
+| `claimDeliveries` | claims due deliveries, one per message and subject that should hear of it, under a token that lapses |
+| `settleDeliveries` | settles claimed deliveries `sent`, `failed` (tried again after a backoff) or `dropped` |
+
+Each is called by its behavior's name:
+
+```
+POST /namespaces/{namespace}/behaviors/{behavior}/operations/{operation}
+```
+
+```ts
+engine.behaviors.invoke(me, { namespace: 'default', behavior: 'Comments', operation: 'inbox', params: { limit: 20 } });
+client.behaviors.invoke('Comments', 'inbox', { limit: 20 });
+```
+
+It is no operation of a type: a schema's operation routes, `invoke` and
+`invokeSchema` answer 404 for it, the describe document lists it under
+its behavior as `namespaceOperations`, not among the type's operations,
+and `engine-client` types it apart from every schema's client,
+`commentsNamespaceClient(client, namespace?)`
+([typed wrappers](/superschematic/guides/engine/#typed-wrappers-for-your-schemas)).
+Its MCP tool is named after the behavior: `comments.inbox`, handle
+`comments_inbox`. Two behaviors of a type may each declare one of the
+same name, since neither is the type's. A namespace operation is never
+beside an instance and appends no event; a writing one writes only its
+behavior's tables, under the namespace's writer, and an archived
+namespace refuses it.
+
+The access policy is asked a question that names the behavior and no
+schema: `{ principal, action, namespace, behavior, operation }`, `action`
+`read` or `write` as the operation declares, and with `listing: true`
+while the tools document lists its tool. The engine keeps a row of a
+schema only when the caller may read that schema, asking `read` once per
+schema per call and skipping a refused one, so a policy may let every
+read one through. `permissionPolicy()` does, and allows a writing one to
+a caller holding `<behavior>.<operation>`: `Comments.claimDeliveries`.
+A policy of rules matches the question with a rule's `behavior`.
+
+A behavior's handler gets a `NamespaceContext`: `can()`, `configs()`,
+each composing schema with its config, read-only instance calls, and
+`sql`, whose `readable()` names the schemas the caller may read for a
+statement to join. The engine README's
+[namespace operations](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#namespace-operations)
+section has the rules, for an extension's behavior too.
+
+An instance operation that writes only its caller's own state, and
+appends no event, may declare `"asks": "read"` beside `"beside": true`
+and `"log": false`: the policy is asked `read` for it, so a caller who
+may only read the instance may call it, and an archived namespace lets
+it run. Comments' `markRead` and `follow` do.
 
 ## Refusals and preconditions
 
@@ -1866,7 +1945,7 @@ some writes until a person accepts them.
 | | |
 | --- | --- |
 | Config | `fields`: the own top-level fields it records, every one when absent. `review`, optional: `sources`, the other behaviors the type composes whose writes enter review; `below`, a confidence at or above which a write is accepted with no reviewer (every write from a source is proposed when absent); `permission`, what a reviewer needs. `gates`, optional: by state of the type's Workflow, `{ reviewed }`, the recorded fields or `"all"` that a move into it requires out of review |
-| Fields | `fields`: by recorded field, its last write, `{ source, by, at, confidence?, review? }`; `source` is `caller` for a caller's create or update, else the behavior whose operation wrote it, `by` the principal's subject, `review` `{ state, by?, at? }` with a state of `proposed`, `accepted`, `rejected` or `edited`. `inReview`: whether any field is proposed, which a list filters on (`where: { "Provenance.inReview": true }`) |
+| Fields | `fields`: by recorded field, its last write, `{ source, by, for?, at, confidence?, review? }`; `source` is `caller` for a caller's create or update, else the behavior whose operation wrote it, `by` the principal's subject, `for` the subject it [acted for](/superschematic/guides/engine/#callers-and-the-access-policy), when it acted for one, `review` `{ state, by?, at? }` with a state of `proposed`, `accepted`, `rejected` or `edited`. `inReview`: whether any field is proposed, which a list filters on (`where: { "Provenance.inReview": true }`) |
 | Operations | `accept({ fields })`; `reject({ fields, patch? })`, which clears each field, or sets it to the patch's value, through its own `update()` |
 | Guard | a transition into a gated state while a field its gate lists is proposed is `vetoed` (`unreviewed_fields`), with `{ state, fields }` in `details.details` |
 | Vetoes | `not_recorded`; `not_in_review`, an accept or a reject of a field that is not proposed; `unreviewed_fields`. A caller without the review's `permission` is `forbidden` (403) to accept and to reject |

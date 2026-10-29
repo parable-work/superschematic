@@ -88,6 +88,16 @@ type ModuleOutput struct {
 	// imports json and math for its host-value validator.
 	HasGenericJSON bool
 
+	// HasDecimal is true when a scalar maps to decimal.Decimal
+	// (Generic.Decimal, D84); scalars.py imports the decimal module for it.
+	HasDecimal bool
+
+	// HasDecimalDigits and HasVectorDimensions are true when a type's
+	// validate_all checks a field's digit rules (D84), with the helpers
+	// types.py then holds.
+	HasDecimalDigits    bool
+	HasVectorDimensions bool
+
 	// HasJSONParse is true when a scalar's wrapper takes and returns JSON
 	// values (pythonParsesJSON); scalars.py imports json, and superscalar
 	// when it is installed, for it.
@@ -275,6 +285,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 		if pythonParsesJSON(scalar) {
 			output.HasJSONParse = true
 		}
+		if isPythonDecimal(scalar) {
+			output.HasDecimal = true
+		}
 	}
 
 	imported, err := resolveImports(schema, opts)
@@ -306,6 +319,16 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	inputTypes := codegen.ExtractTypes(schema, output.Scalars, extraction, ir.RoleAPIInput)
 	output.Types = append(objectTypes, inputTypes...)
 	output.HasVersionedTypes = codegen.HasHistoryTypes(objectTypes)
+	for _, t := range output.Types {
+		for _, f := range t.Fields {
+			if f.Digits != nil && f.Digits.Decimal {
+				output.HasDecimalDigits = true
+			}
+			if f.Digits != nil && f.Digits.Dimensions > 0 {
+				output.HasVectorDimensions = true
+			}
+		}
+	}
 
 	if len(output.Unions) > 0 {
 		model, err := codegen.BuildReadModel(schema, opts.Dependencies)

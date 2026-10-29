@@ -123,8 +123,8 @@ func TestWorkerSettings(t *testing.T) {
 }
 
 // TestWorkerRefusals: Cloud Run stops a worker pool's instance ten seconds
-// after SIGTERM, so a grace of ten seconds or more is refused, and a
-// worker's account id fits 30 characters.
+// after SIGTERM, so a grace of ten seconds or more is refused. A worker
+// whose name is too long for its account id is named short (D97).
 func TestWorkerRefusals(t *testing.T) {
 	reg := assemble(t)
 	withWorker := func(w ir.Worker) []stack.Service {
@@ -152,7 +152,16 @@ func TestWorkerRefusals(t *testing.T) {
 	}
 	long := stacktest.FulfilOrders
 	long.Name = "ReconcileWarehouseStock"
-	refused(t, withWorker(long), "give the worker's class or its API a shorter name")
+	env, err := stack.Resolve(reg, stack.Input{Stack: shop(), Services: withWorker(long), Environment: "Staging"})
+	if err != nil {
+		t.Fatalf("a long name: %v", err)
+	}
+	pool := node(t, env, "shop-orders-reconcile-warehouse-stock.worker-pool").Properties
+	account := node(t, env, "shop-orders-reconcile-warehouse-stock.account").Properties
+	if name, _ := pool["name"].(string); len(name) > 30 || name != account["accountId"] {
+		t.Errorf("the worker pool is %v and its account %v, want one name in 30 characters", pool["name"], account["accountId"])
+	}
+	wantJSON(t, "the worker pool's labels", pool["labels"], `{"superschematic-deployable":"shop-orders-reconcile-warehouse-stock"}`)
 
 	// A range of instances needs a scaler, which is not built (D53,
 	// amended); a maximum equal to the instances is a fixed count.

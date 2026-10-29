@@ -40,6 +40,9 @@ type {{ .TypeName }}RepositoryInterface interface {
 	FindPage(ctx context.Context, filter *{{ .TypeName }}Filter, opts *{{ .TypeName }}PageOptions) (*{{ .TypeName }}Page, error)
 	CreateOne(ctx context.Context, input *types.{{ .TypeName }}) (*types.{{ .TypeName }}, error)
 	CreateMany(ctx context.Context, inputs []*types.{{ .TypeName }}) ([]*types.{{ .TypeName }}, error)
+	UpsertOne(ctx context.Context, input *types.{{ .TypeName }}, on {{ .TypeName }}UniqueKey, update *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error)
+	UpsertOneResult(ctx context.Context, input *types.{{ .TypeName }}, on {{ .TypeName }}UniqueKey, update *{{ .TypeName }}Update, opts *UpsertOptions) (UpsertResult[*types.{{ .TypeName }}], error)
+	UpsertMany(ctx context.Context, inputs []*types.{{ .TypeName }}, on {{ .TypeName }}UniqueKey, update {{ .TypeName }}Fields, opts *UpsertOptions) ([]UpsertResult[*types.{{ .TypeName }}], error)
 	UpdateOne(ctx context.Context, id {{ .PrimaryKeyType }}, update *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error)
 	{{- if .HasVersion }}
 	UpdateOneIfVersion(ctx context.Context, id {{ .PrimaryKeyType }}, expectedVersion int64, update *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error)
@@ -53,16 +56,26 @@ type {{ .TypeName }}RepositoryInterface interface {
 	{{- if .HasSoftDelete }}
 	HardDeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) error
 	{{- end }}
+	{{- if .EncryptedFields }}
+	Reencrypt(ctx context.Context, batch int) (int, error)
+	{{- end }}
+	{{- if .VectorFields }}
+	Nearest(ctx context.Context, field {{ .TypeName }}VectorField, vector types.EmbeddingVector, opts *{{ .TypeName }}NearestOptions) ([]{{ .TypeName }}Neighbour, error)
+	{{- end }}
 }
 {{- end }}
 
 // DatabaseInterface defines the interface-first ORM database surface.
 type DatabaseInterface interface {
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
+	TransactionWith(ctx context.Context, opts TxOptions, fn func(TxInterface) error) error
 	Ping(ctx context.Context) error
 	Close()
 	{{- range .Repositories }}
 	Get{{ .TypeName }}Repository() {{ .TypeName }}RepositoryInterface
+	{{- end }}
+	{{- if .HasQueries }}
+	GetQueries() *Queries
 	{{- end }}
 }
 
@@ -70,8 +83,12 @@ type DatabaseInterface interface {
 type TxInterface interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
+	Transaction(ctx context.Context, fn func(TxInterface) error) error
 	{{- range .Repositories }}
 	Get{{ .TypeName }}Repository() {{ .TypeName }}RepositoryInterface
+	{{- end }}
+	{{- if .HasQueries }}
+	GetQueries() *Queries
 	{{- end }}
 }
 
@@ -106,6 +123,17 @@ func (db *NoOpDatabase) Transaction(_ context.Context, fn func(TxInterface) erro
 	return fn(db.tx)
 }
 
+// TransactionWith executes the callback with a deterministic no-op
+// transaction, whatever its options.
+func (db *NoOpDatabase) TransactionWith(_ context.Context, _ TxOptions, fn func(TxInterface) error) error {
+	return fn(db.tx)
+}
+
+// Transaction executes the callback with the same no-op transaction.
+func (tx *NoOpTx) Transaction(_ context.Context, fn func(TxInterface) error) error {
+	return fn(tx)
+}
+
 // Ping always succeeds for no-op database.
 func (db *NoOpDatabase) Ping(_ context.Context) error {
 	return nil
@@ -113,6 +141,25 @@ func (db *NoOpDatabase) Ping(_ context.Context) error {
 
 // Close is a no-op for no-op database.
 func (db *NoOpDatabase) Close() {}
+{{- if .HasQueries }}
+
+// GetQueries returns the declared queries, each of which reads no rows.
+func (db *NoOpDatabase) GetQueries() *Queries {
+	return &Queries{runner: noOpQueryRunner{}}
+}
+
+// GetQueries returns the declared queries, each of which reads no rows.
+func (tx *NoOpTx) GetQueries() *Queries {
+	return &Queries{runner: noOpQueryRunner{}}
+}
+
+// noOpQueryRunner answers every declared query with no rows.
+type noOpQueryRunner struct{}
+
+func (noOpQueryRunner) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	return noOpRows{}, nil
+}
+{{- end }}
 
 // Exec is a no-op for no-op transactions.
 func (tx *NoOpTx) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
@@ -213,6 +260,22 @@ func (r *NoOp{{ .Name }}) CreateMany(_ context.Context, inputs []*types.{{ .Type
 	return inputs, nil
 }
 
+func (r *NoOp{{ .Name }}) UpsertOne(_ context.Context, input *types.{{ .TypeName }}, _ {{ .TypeName }}UniqueKey, _ *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error) {
+	return input, nil
+}
+
+func (r *NoOp{{ .Name }}) UpsertOneResult(_ context.Context, input *types.{{ .TypeName }}, _ {{ .TypeName }}UniqueKey, _ *{{ .TypeName }}Update, _ *UpsertOptions) (UpsertResult[*types.{{ .TypeName }}], error) {
+	return UpsertResult[*types.{{ .TypeName }}]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOp{{ .Name }}) UpsertMany(_ context.Context, inputs []*types.{{ .TypeName }}, _ {{ .TypeName }}UniqueKey, _ {{ .TypeName }}Fields, _ *UpsertOptions) ([]UpsertResult[*types.{{ .TypeName }}], error) {
+	results := make([]UpsertResult[*types.{{ .TypeName }}], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.{{ .TypeName }}]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
 func (r *NoOp{{ .Name }}) UpdateOne(_ context.Context, _ {{ .PrimaryKeyType }}, _ *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error) {
 	return nil, ErrNotFound
 }
@@ -247,6 +310,18 @@ func (r *NoOp{{ .Name }}) DeleteMany(_ context.Context, _ *{{ .TypeName }}Filter
 
 func (r *NoOp{{ .Name }}) HardDeleteOne(_ context.Context, _ {{ .PrimaryKeyType }}) error {
 	return nil
+}
+{{- end }}
+{{- if .EncryptedFields }}
+
+func (r *NoOp{{ .Name }}) Reencrypt(_ context.Context, _ int) (int, error) {
+	return 0, nil
+}
+{{- end }}
+{{- if .VectorFields }}
+
+func (r *NoOp{{ .Name }}) Nearest(_ context.Context, _ {{ .TypeName }}VectorField, _ types.EmbeddingVector, _ *{{ .TypeName }}NearestOptions) ([]{{ .TypeName }}Neighbour, error) {
+	return nil, nil
 }
 {{- end }}
 {{- end }}

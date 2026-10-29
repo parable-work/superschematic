@@ -1,6 +1,15 @@
 -- Drop statements for schema: {{ .SchemaName }}
 -- This file is auto-generated. Do not edit manually.
 -- WARNING: This will drop all tables and data!
+{{- if rawSQLDowns .RawSQL }}
+
+-- Undo the raw SQL the schema declares (@rawSql), last piece first
+{{- range $piece := rawSQLDowns .RawSQL }}
+{{- range $piece.Down }}
+{{ . }};
+{{- end }}
+{{- end }}
+{{- end }}
 {{- if .Projections }}
 
 -- Drop projection views first (they read the tables below)
@@ -9,11 +18,20 @@ DROP VIEW IF EXISTS {{ $view.QualifiedView }};
 {{- end }}
 {{- end }}
 
+{{- if .EnqueueTriggers }}
+
+-- Drop the triggers and functions that enqueue on a write
+{{- range $enqueue := .EnqueueTriggers }}
+DROP TRIGGER IF EXISTS {{ quote $enqueue.TriggerName }} ON {{ $enqueue.QuotedTable }};
+DROP FUNCTION IF EXISTS {{ quote $enqueue.FunctionName }}();
+{{- end }}
+{{- end }}
+
 -- Drop indexes
 {{- range $table := .Tables | reverse }}
 {{- if $table.Indexes }}
 {{- range $idx := $table.Indexes }}
-DROP INDEX IF EXISTS {{ $idx.Name }} CASCADE;
+DROP INDEX IF EXISTS {{ quote $idx.Name }} CASCADE;
 {{- end }}
 {{- end }}
 {{- end }}
@@ -21,22 +39,22 @@ DROP INDEX IF EXISTS {{ $idx.Name }} CASCADE;
 
 -- Drop history capture triggers and functions
 {{- range $history := .HistoryTables | reverseHistoryTables }}
-DROP TRIGGER IF EXISTS {{ $history.VersionTriggerName }} ON {{ $history.QuotedSourceTableName }};
-DROP TRIGGER IF EXISTS {{ $history.WriteTriggerName }} ON {{ $history.QuotedSourceTableName }};
-DROP TRIGGER IF EXISTS {{ $history.DeleteTriggerName }} ON {{ $history.QuotedSourceTableName }};
+DROP TRIGGER IF EXISTS {{ quote $history.VersionTriggerName }} ON {{ $history.QuotedSourceTableName }};
+DROP TRIGGER IF EXISTS {{ quote $history.WriteTriggerName }} ON {{ $history.QuotedSourceTableName }};
+DROP TRIGGER IF EXISTS {{ quote $history.DeleteTriggerName }} ON {{ $history.QuotedSourceTableName }};
 {{- if gt $history.RetentionDays 0 }}
-DROP FUNCTION IF EXISTS {{ $history.PruneFunctionName }}(INTEGER, INTEGER);
+DROP FUNCTION IF EXISTS {{ quote $history.PruneFunctionName }}(INTEGER, INTEGER);
 {{- end }}
-DROP FUNCTION IF EXISTS {{ $history.FunctionName }}();
+DROP FUNCTION IF EXISTS {{ quote $history.FunctionName }}();
 {{- end }}
 
 -- Drop history indexes
 {{- range $history := .HistoryTables | reverseHistoryTables }}
-DROP INDEX IF EXISTS {{ $history.RecordedIndexName }} CASCADE;
+DROP INDEX IF EXISTS {{ quote $history.RecordedIndexName }} CASCADE;
 {{- if eq $history.PartitionBy "month" }}
-DROP INDEX IF EXISTS {{ $history.VersionIndexName }} CASCADE;
+DROP INDEX IF EXISTS {{ quote $history.VersionIndexName }} CASCADE;
 {{- else }}
-DROP INDEX IF EXISTS {{ $history.UniqueIndexName }} CASCADE;
+DROP INDEX IF EXISTS {{ quote $history.UniqueIndexName }} CASCADE;
 {{- end }}
 {{- end }}
 
@@ -52,8 +70,8 @@ DROP TABLE IF EXISTS {{ $history.QuotedName }} CASCADE;
 
 -- Drop version bump triggers and functions
 {{- range $optimistic := .OptimisticTables | reverseOptimisticTables }}
-DROP TRIGGER IF EXISTS {{ $optimistic.TriggerName }} ON {{ $optimistic.QuotedTableName }};
-DROP FUNCTION IF EXISTS {{ $optimistic.FunctionName }}();
+DROP TRIGGER IF EXISTS {{ quote $optimistic.TriggerName }} ON {{ $optimistic.QuotedTableName }};
+DROP FUNCTION IF EXISTS {{ quote $optimistic.FunctionName }}();
 {{- end }}
 {{- end }}
 

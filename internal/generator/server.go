@@ -1146,6 +1146,8 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 		in.Deriver = &servergen.DeriverInput{Name: s.Deriver.Name}
 	}
 	var scaffolds []*tsrestgen.APIOutput
+	// The API whose router answers the server's POST /api/mcp (D81).
+	mcp := ""
 	for _, ref := range s.Services {
 		served, err := r.servedRun(stackName, s.Name, ref.Name)
 		if err != nil {
@@ -1157,6 +1159,12 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 		}
 		if output == nil {
 			return nil, nil, fmt.Errorf("stack %s: server %s serves %s, which declares no operations", stackName, s.Name, ref.Name)
+		}
+		if output.MCP != nil && s.Kind == ir.DeployableServer {
+			if mcp != "" {
+				return nil, nil, fmt.Errorf("stack %s: server %s serves %s and %s, which both turn on outputs.api.mcp, and one server answers POST %s for one API; serve them from two servers, or turn mcp off in one (D81)", stackName, s.Name, mcp, ref.Name, tsrestgen.MCPPath)
+			}
+			mcp = ref.Name
 		}
 		if err := r.checkIdentityDescriptor(stackName, s.Name, output); err != nil {
 			return nil, nil, err
@@ -1183,9 +1191,15 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 			scaffolds = append(scaffolds, output)
 		} else if _, err := os.Stat(filepath.Join(dir, servergen.TypeScriptPackageFile)); errors.Is(err, fs.ErrNotExist) {
 			return nil, nil, fmt.Errorf("stack %s: server %s serves %s, whose implementation %s holds no package.json, by which the Bun workspace links it; add one named %s", stackName, s.Name, ref.Name, dir, r.Options.Naming.NpmImplementationPackage(ref.Name))
-		} else if s.Kind == ir.DeployableServer && output.HasManualRoutes() {
-			if err := r.checkTypeScriptManualRoutes(stackName, output); err != nil {
-				return nil, nil, err
+		} else {
+			// The build no longer writes the implementation, whose
+			// package.json predates what the API gained since, such as a
+			// worker that hands it the database's messages (D100).
+			r.warnScaffoldDependencies(fmt.Sprintf("stack %s: the implementation of %s", stackName, ref.Name), dir, output.ImplementationDependencies(), "its scaffold depends on now")
+			if s.Kind == ir.DeployableServer && output.HasManualRoutes() {
+				if err := r.checkTypeScriptManualRoutes(stackName, output); err != nil {
+					return nil, nil, err
+				}
 			}
 		}
 		pkg, err := servergen.ImplementationPackage(r.Options.Naming, ref.Name, dir)
@@ -1301,9 +1315,19 @@ func (r run) planRust(stackName string, s *ir.ResolvedDeployable, cors map[strin
 		}
 		if !exists {
 			scaffolds = append(scaffolds, output)
-		} else if s.Kind == ir.DeployableServer && len(output.ManualEndpoints) > 0 {
-			if err := r.checkRustManualRoutes(stackName, output); err != nil {
-				return nil, nil, nil, err
+		} else {
+			// The build no longer writes the implementation, whose
+			// Cargo.toml predates what the API gained since, such as a
+			// manual route its handlers answer with axum's types (D100). A
+			// build with no runtime checkout to name a path to is refused
+			// by the server's plan, below.
+			if deps, err := rustrestgen.ImplementationDependencies(output, dir, APIDir(out, ref.Name), r.Options.Paths, r.Options.Naming); err == nil {
+				r.warnCrateDependencies(fmt.Sprintf("stack %s: the implementation of %s", stackName, ref.Name), dir, deps, "its scaffold depends on now")
+			}
+			if s.Kind == ir.DeployableServer && len(output.ManualEndpoints) > 0 {
+				if err := r.checkRustManualRoutes(stackName, output); err != nil {
+					return nil, nil, nil, err
+				}
 			}
 		}
 		impl, err := servergen.ReadRustImplementation(r.Options.Naming, ref.Name, dir)
@@ -1552,6 +1576,18 @@ func (r run) goServerModules(o *apigen.APIOutput, job bool) []servergen.Module {
 	}
 	for _, call := range o.Deps.Calls {
 		modules = append(modules, servergen.Module{Path: call.Module, Dir: SDKDir(out, LangGo, call.Service), Direct: true})
+	}
+	for _, m := range o.Deps.MemoryStores {
+		// The implementation names the store's channels and keys with its
+		// Go definitions, which reach the types modules of its payloads
+		// and enums (D75).
+		if m.Definitions == "" {
+			continue
+		}
+		modules = append(modules, servergen.Module{Path: m.Definitions, Dir: TypesDir(out, LangGo, m.Service)})
+		for _, t := range m.Modules {
+			modules = append(modules, servergen.Module{Path: t, Dir: TypesDir(out, LangGo, path.Base(t))})
+		}
 	}
 	modules = append(modules,
 		runtimeModule(n.HTTPRuntimeGoModule, paths.HTTPRuntimeGo, true),

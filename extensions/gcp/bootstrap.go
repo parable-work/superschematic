@@ -74,14 +74,18 @@ var apiServices = []string{
 // not this environment exports to Cloud Trace (D67, amended): another
 // environment in the same project may, and bootstrap sees only its own.
 // Enabling an API grants nothing; the trace agent role, which only an
-// exporting deployable's account holds, is what admits a writer.
+// exporting deployable's account holds, is what admits a writer. A memory
+// store's instance needs Memorystore, and Network Connectivity, whose
+// service connection policy lets it create its endpoints (D75).
 var graphServices = map[string][]string{
-	"gcp:cloudrunv2/":         {"run.googleapis.com", "cloudtrace.googleapis.com", "telemetry.googleapis.com"},
-	"gcp:cloudscheduler/":     {"cloudscheduler.googleapis.com"},
-	"gcp:sql/":                {"sqladmin.googleapis.com", "run.googleapis.com"},
-	"gcp:compute/":            {"compute.googleapis.com"},
-	"gcp:certificatemanager/": {"certificatemanager.googleapis.com"},
-	"gcp:dns/":                {"dns.googleapis.com"},
+	"gcp:cloudrunv2/":          {"run.googleapis.com", "cloudtrace.googleapis.com", "telemetry.googleapis.com"},
+	"gcp:cloudscheduler/":      {"cloudscheduler.googleapis.com"},
+	"gcp:sql/":                 {"sqladmin.googleapis.com", "run.googleapis.com"},
+	"gcp:compute/":             {"compute.googleapis.com"},
+	"gcp:certificatemanager/":  {"certificatemanager.googleapis.com"},
+	"gcp:dns/":                 {"dns.googleapis.com"},
+	"gcp:memorystore/":         {"memorystore.googleapis.com", "networkconnectivity.googleapis.com"},
+	"gcp:networkconnectivity/": {"networkconnectivity.googleapis.com"},
 }
 
 // servicesFor returns the APIs a bootstrap of env enables, sorted.
@@ -115,6 +119,18 @@ var (
 	// role holds storage.buckets.create and storage.buckets.setIamPolicy,
 	// and IAM checks a bucket's create on the project, where a condition
 	// on the bucket's name cannot narrow it.
+	//
+	// A memory store (D75) takes two more. Memorystore's admin role
+	// creates, updates and deletes a Memorystore for Valkey instance: its
+	// editor role, the next narrower, updates one but neither creates nor
+	// deletes it, and the instance has no IAM policy of its own to narrow
+	// a grant to. Network Connectivity's consumer network admin role
+	// creates the service connection policy on the environment's network,
+	// and nothing of its hubs or spokes. The connection role an edge grants
+	// a workload's account is a project grant held by a condition, which
+	// resourcemanager.projectIamAdmin already sets, as it sets a Cloud SQL
+	// edge's; compute.networkAdmin already makes the network and the
+	// endpoints' subnet.
 	deployerRoles = []string{
 		"roles/artifactregistry.writer",
 		"roles/certificatemanager.owner",
@@ -127,6 +143,8 @@ var (
 		"roles/iam.serviceAccountAdmin",
 		"roles/iam.serviceAccountUser",
 		"roles/logging.viewer",
+		"roles/memorystore.admin",
+		"roles/networkconnectivity.consumerNetworkAdmin",
 		"roles/resourcemanager.projectIamAdmin",
 		"roles/run.admin",
 		"roles/secretmanager.admin",
@@ -181,8 +199,20 @@ var accountRoles = []string{"deployer", "planner", "builder", "migrator"}
 const githubIssuer = "https://token.actions.githubusercontent.com"
 
 // accountID is the id of one of the stack's CI accounts:
-// `<stack>-deployer`, `<stack>-planner`.
-func accountID(stack, role string) string { return kebab(stack) + "-" + role }
+// `<stack>-deployer`, `<stack>-planner`. A stack whose name leaves its
+// longest role's id over an account id's 30 characters names all four
+// with its name shortened alike (accountStack, D97).
+func accountID(stack, role string) string { return accountStack(stack) + "-" + role }
+
+// accountStack is the stack's part of its CI accounts' ids: its name, or
+// one shortened to leave room for its longest role.
+func accountStack(stack string) string {
+	longest := 0
+	for _, role := range accountRoles {
+		longest = max(longest, len(role))
+	}
+	return shorten(kebab(stack), accountIDMax-1-longest, "-")
+}
 
 // accountMember is the IAM member of one of the stack's CI accounts.
 func accountMember(v values, stack, role string) string {
@@ -297,14 +327,6 @@ func BootstrapEnvironment(env *ir.ResolvedEnvironment, ci GitHubCI) (*ir.Resolve
 		}
 	}
 	stack := kebab(env.Stack)
-	for _, role := range accountRoles {
-		if id := accountID(env.Stack, role); len(id) > 30 {
-			return nil, fmt.Errorf("gcp: the service account id %s is %d characters, and GCP allows 30; name the stack with at most %d", id, len(id), 30-len(role)-1)
-		}
-	}
-	if pool := workloadIdentityPool(env.Stack); len(pool) > 32 {
-		return nil, fmt.Errorf("gcp: the workload identity pool id %s is longer than GCP's 32 characters; name the stack with at most 25", pool)
-	}
 	var nodes []*ir.Resource
 	add := func(id, typ string, props map[string]any) {
 		res := &ir.Resource{ID: id, Type: typ, Properties: props, Phase: ir.PhaseInfrastructure, Owners: []string{"bootstrap"}}

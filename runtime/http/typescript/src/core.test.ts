@@ -8,6 +8,7 @@ import {
   decodeListOfLists,
   decodeParam,
   decodeParams,
+  declaredKeysOnly,
   envelopeResponse,
   hasAnyPermission,
   problemBody,
@@ -160,6 +161,15 @@ describe('parameter decoding', () => {
       name === 'a' ? ['1'] : undefined
     );
     expect(decoded).toEqual({ a: 1 });
+  });
+});
+
+describe('a webhook input', () => {
+  test('keeps only the declared keys, spelled as declared, and leaves any other value to the parser (D87)', () => {
+    const body = { item_id: 'a', environment: 'sandbox', Item_Id: 'b', error: { error_code: 'X', extra: 1 } };
+    expect(declaredKeysOnly(body, ['item_id', 'error', 'webhook_code'])).toEqual({ item_id: 'a', error: { error_code: 'X', extra: 1 } });
+    expect(body.environment).toBe('sandbox');
+    for (const value of [null, 'text', 7, ['item_id']]) expect(declaredKeysOnly(value, ['item_id'])).toBe(value);
   });
 });
 

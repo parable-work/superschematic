@@ -20,7 +20,9 @@ func (p *Parser) walkTypeDef(td *ir.TypeDef, raw map[string]any, result map[stri
 		p.walkField(field, key, raw, result, errs, strict)
 	}
 
-	if strict {
+	// A type that is @allowUnknownFields accepts the keys it does not
+	// declare, in strict mode too, and result holds only its own (D87).
+	if strict && !td.AllowUnknownFields {
 		for k := range raw {
 			if _, ok := known[k]; ok {
 				continue

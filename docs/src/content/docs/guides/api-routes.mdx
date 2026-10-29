@@ -114,6 +114,13 @@ routers ([Rust](/superschematic/install/rust/#rust-servers)).
 A method's arguments say where each value comes from:
 
 - **Path**: an argument named in the path, such as `id` in `orders/{id}`.
+  A parameter is in braces, as OpenAPI writes it. The load refuses a
+  segment written as a router's `:id`, which every generator would publish
+  and route as the text `:id`, and gives the path in braces:
+
+  ```
+  src/businesses.schema.ts:12:25: @rest path "businesses/:businessId/export" writes a path parameter as ":businessId", which OpenAPI and the generated routers read as text; write it in braces: "businesses/{businessId}/export"
+  ```
 - **Query**: `QueryParam<T>`. `Nullable<T>` makes it optional, and the Go
   implementation receives a pointer (`minRating *float64`) or a nil slice. A
   list is read from repeated keys and comma-separated values
@@ -139,7 +146,9 @@ page places an order with
 Before a method runs, the server decodes every argument, checks it
 against its type and constraints, and answers 400 with every failure at
 once, keyed by path, as an RFC 9457 problem body. A top-level key an
-input type does not declare is refused too, by every server. A list of order lines
+input type does not declare is refused too, by every server, unless the
+type is `@allowUnknownFields` or the operation a `@webhook`, whose input
+drops it ([Webhooks](#webhooks)). A list of order lines
 must hold one to 50 lines, and a country must match `^[A-Z]{2}$`:
 
 <Snippet file="go/orders_test.go" symbol="TestValidation" />
@@ -304,6 +313,120 @@ those it keeps, and over SQLite it reads the row's value of a column of
 the list's own, so a price compares as a number. A cursor whose row is
 gone is the 400 of a cursor it cannot read.
 
+## Files
+
+### Uploads
+
+A field of an input type declared `FileUpload<C>` is a file. Its
+operation's body is `multipart/form-data`: each file is a part named as its
+field, and the input's other fields travel as JSON in a part named `data`.
+A JSON body, which holds no file, is read too. The storefront imports a
+cart's lines from a CSV:
+
+```ts
+import { FileUpload, HttpMethod, requirePermission, rest } from "@superschematic/api";
+
+// A CSV of lines to add to a cart: a header row, then one sku,quantity
+// row a line, at most 64 KiB.
+export abstract class ImportCartLinesInput {
+  lines: FileUpload<{ maxBytes: 65536; contentTypes: ["text/csv"]; extensions: [".csv"] }>;
+}
+
+export class CartMutations {
+  @rest(HttpMethod.POST, "carts/{cartId}/lines/import")
+  @requirePermission(["carts.write"])
+  importCartLines(cartId: Identity.UUID, input: ImportCartLinesInput): CartView {
+    throw new Error("schema declaration only");
+  }
+}
+```
+
+- `maxBytes` bounds the file, 100 MiB when unsaid. `contentTypes` lists
+  the media types the part's `Content-Type` may name, compared without
+  parameters, so `text/csv; charset=utf-8` is `text/csv`; a part without
+  one is `application/octet-stream`. `extensions` lists the endings its
+  filename may have, in any case. Each one unsaid admits any file, and
+  `Nullable<FileUpload>` makes the file optional.
+- Every server checks the files first, in the input's field order, then
+  reads the other fields as it reads a JSON input, setting aside the
+  errors at the file fields, which the JSON never holds. A file its field
+  does not admit is a [refused input](/superschematic/install/go/#serve-a-generated-api):
+  `errors` holds its error at its field, `required`, `uploadMaxBytes`,
+  `uploadContentType` or `uploadExtension`, and the implementation never
+  runs:
+
+  ```json
+  {"type": "about:blank", "title": "Bad Request", "status": 400, "code": "bad_request",
+   "detail": "Request body does not match the declared input",
+   "details": {"location": "body", "reason": "validation failed"},
+   "errors": {"lines": [{"validator": "uploadExtension", "message": "file name does not end in .csv"}]}}
+  ```
+
+  A body that is neither multipart nor JSON is "Request body is not
+  multipart/form-data". So is one of more than 1000 parts, or whose part
+  headers run past 10000 lines of file parts or 10 MiB in all: both
+  servers read multipart under the limits of Go's `ReadForm`.
+- `@bodyLimit` caps the whole body, and a larger one answers 413. Without
+  it, the TypeScript server caps it at its files' limits beside its JSON
+  cap, and the Go server does not cap it.
+- The Go method takes `files map[string]*FileUploadData` after the input,
+  each with its `Filename`, `ContentType`, `Size` and `Data`. The
+  TypeScript method takes `args.files`, each a `File`, and `args.input`
+  without the file fields. The Rust server refuses the operation unless it
+  is `@manualRouteRegistration` ([Rust](/superschematic/install/rust/#serve-a-generated-api)).
+- A file is one string field of a type that is only an operation's input,
+  the single input of a `POST`, `PUT` or `PATCH` that is not encrypted;
+  the build refuses any other. A field of an extension's upload scalar is a
+  file too, under the scalar's limits
+  ([Write an extension](/superschematic/extending/write-an-extension/#a-scalar-catalog)).
+- The SDKs send the file beside the input
+  ([Client SDKs](/superschematic/guides/client-sdks/#files)), and the
+  OpenAPI document describes the multipart body: the `data` part, each
+  file as binary with its limits, and its media types as the part's
+  `encoding`.
+
+### Downloads
+
+An operation whose result is `FileDownload<C>` answers a file, not the
+JSON envelope. The storefront exports a cart as the CSV its import reads:
+
+```ts
+export class CartQueries {
+  @rest(HttpMethod.GET, "carts/{cartId}/export")
+  @requirePermission(["carts.read"])
+  exportCart(cartId: Identity.UUID): FileDownload<{ contentType: "text/csv; charset=utf-8"; filename: "cart.csv" }> {
+    throw new Error("schema declaration only");
+  }
+}
+```
+
+- The implementation returns the file. In TypeScript it is
+  `{ body, filename?, headers? }`: the body is text, sent as UTF-8, bytes,
+  a `Blob`, or a `ReadableStream`, sent as the implementation writes it.
+  In Go it is `*FileDownload{Body, Filename, Header}`, whose `Body` the
+  route copies as it reads it and closes when it can.
+- The server sets `Content-Type` to C's `contentType`, and
+  `Content-Disposition` to an attachment under the implementation's
+  filename, or C's `filename` when it names none (RFC 6266):
+  `attachment; filename="M_rz.csv"; filename*=UTF-8''M%C3%A4rz.csv` for
+  a name with a letter outside ASCII. `filename` holds the name with each
+  such letter, and each of `"`, `\` and `%`, as `_`, and `filename*` the
+  name itself; a directory or a control character in the name is dropped.
+  The Go and TypeScript servers write the same header for every name
+  (`runtime/http/testdata/content_disposition_parity.json`). Its
+  `Cache-Control` is `no-store` unless the implementation sets one, and a
+  refusal is still a problem body.
+- The OpenAPI document describes the 200 as C's media type, a binary
+  string, with its `Content-Disposition` header.
+- The TypeScript SDK returns `{ blob, filename, contentType }`, and the
+  Go and Python SDKs a `DownloadedFile`
+  ([Client SDKs](/superschematic/guides/client-sdks/#files)). The Rust SDK
+  and the Rust server refuse the operation for now, naming it; support
+  follows.
+- A file is no tool result: the [tool documents](/superschematic/reference/mcp-tools/)
+  list the operation hidden, and the build refuses a visible `@mcp` on it.
+  A `FileDownload` result is never null, encrypted or `@paginated`.
+
 ## Errors
 
 An implementation returns an error to fail the call. The generated package
@@ -418,6 +541,39 @@ sends its own request from its own servers and no SDK holds the signing
 secret `@hmacVerified` checks. A route your own clients or services call
 is an ordinary route, not a webhook.
 
+A provider adds keys to its payloads over time, so a webhook's input
+reads only the keys its type declares and drops the others, in every
+server, where any other input refuses them (D87). The declared keys are
+checked as on any route, and the method gets its typed input with no
+manual route:
+
+```ts
+export abstract class PlaidWebhookEvent {
+  webhook_type: string;
+  webhook_code: string;
+  item_id: string;
+}
+
+export class PlaidWebhooks {
+  @webhook
+  @publicRoute
+  @hmacVerified({ provider: "plaid" })
+  @rest(HttpMethod.POST, "plaid/webhook")
+  plaidWebhook(input: PlaidWebhookEvent): Accepted {
+    throw new Error("schema declaration only");
+  }
+}
+```
+
+A body with an `environment` key reaches `plaidWebhook` as the three
+declared keys; one without `item_id` is refused. A key is declared only as
+the type spells it, so `Item_Id` is dropped too, in Go as elsewhere. A
+nested object's keys follow its own type: mark it `@allowUnknownFields` to
+drop them in every decoder of it
+([Modeling types](/superschematic/guides/modeling-types/#lenient-decoding)).
+A provider whose payload is a closed contract keeps the refusal with
+`@strictJSON` on the input type.
+
 `@hmacVerified({ provider: "stripe" })` puts a signature check in front of
 the route, in every server. `Implementations` gains a verifier for each
 provider the schema names, which you write, and the server does not start
@@ -446,15 +602,115 @@ Rust one's `build_router_with_manual_routes`. A service that mounts the
 route itself wraps it: in Go with the verifier from `WebhookVerifiers`,
 in Rust with `webhook_verified(route, verifier)`.
 
+### A JWT that carries the body's hash
+
+Some providers sign a webhook with a JWT instead of an HMAC. Plaid sends an
+ES256 JWT in `Plaid-Verification`: its `kid` names the key to ask
+`/webhook_verification_key/get` for, and its `request_body_sha256` claim
+is the SHA-256 of the raw body. Each runtime has this verifier built in:
+
+| Server | The verifier |
+|---|---|
+| Go | `webhook.JWTBodyHashVerifier(webhook.JWTBodyHashOptions{...})` from the runtime's `webhook` package, a `func(http.Handler) http.Handler` |
+| TypeScript | `jwtBodyHashVerifier({...})` from `@superschematic/http-runtime/hono` |
+| Rust | `JwtBodyHashVerifier::new(JwtBodyHashOptions {...})`, whose `verify(request, next)` your `WebhookVerifier` calls |
+
+It checks, in order:
+
+1. The header holds a compact JWS whose `alg` is the configured one
+   (`ES256`; `none` and every other `alg` are refused) and whose `kid`
+   names a key.
+2. The signature verifies with that key.
+3. `iat` is no older than the maximum age, and no further ahead than the
+   clock skew (60 seconds unless set).
+4. The claim equals the lowercase hex SHA-256 of the raw body, compared in
+   constant time.
+
+A refusal is 401 `invalid_signature`. When the key cannot be fetched and
+none is held, the answer is 503 `service_unavailable`, so the provider
+sends the webhook again. A body over the cap (1 MiB unless set) is 413.
+The route then reads the body as usual.
+
+The keys come from a lookup by `kid`, or from a JWKS URL fetched whole. A
+key is held for an hour. An unknown `kid` is looked up at once, but the
+provider is asked at most once a minute, so a flood of made-up kids costs
+one lookup a minute, and a held key keeps verifying meanwhile. A lookup
+has 10 seconds, and a JWKS URL's answer at most 1 MiB; past either, the
+lookup has failed. A token whose `alg` is not `ES256`, `none` among them,
+is refused before any key is looked up.
+
+```ts
+import { jwtBodyHashVerifier } from "@superschematic/http-runtime/hono";
+
+const implementations: Implementations = {
+  // ...one object per operation namespace
+  webhookVerifiers: {
+    plaid: jwtBodyHashVerifier({
+      header: "plaid-verification",
+      // The key with this kid, or null for one Plaid has expired.
+      jwks: async kid => {
+        const { key } = (await plaid.webhookVerificationKeyGet({ key_id: kid })).data;
+        return key.expired_at === null ? key : null;
+      },
+      alg: "ES256",
+      maxAge: "5m",
+      bodyHashClaim: "request_body_sha256",
+    }),
+  },
+};
+```
+
+In Go, `MaxAge` is a `time.Duration` and the lookup returns a
+`*serviceauth.JWK`, nil when there is no such key:
+
+```go
+plaidVerifier, err := webhook.JWTBodyHashVerifier(webhook.JWTBodyHashOptions{
+	Header:        "Plaid-Verification",
+	Keys:          plaidKey, // func(ctx context.Context, kid string) (*serviceauth.JWK, error)
+	Alg:           webhook.AlgES256,
+	MaxAge:        5 * time.Minute,
+	BodyHashClaim: "request_body_sha256",
+})
+```
+
+The three runtimes run the same vectors
+(`runtime/http/testdata/webhook_jwt_parity.json`).
+
 ## OpenAPI
 
-The build writes `api/<service>/openapi.json`, and the Go and Rust servers
-serve it at `GET /api/openapi.json` with a browsable page at
-`GET /api/docs`. The TypeScript router serves neither; its package exports
-the document as `<package>/openapi.json` for you to serve. Each
+The build writes `api/<service>/openapi.json`, and every server serves it
+at `GET /api/openapi.json` as `application/json`, with a browsable
+[RapiDoc](https://rapidocweb.com/) page at `GET /api/docs`. Each
 schema comment becomes a description, and each constraint the matching
 JSON Schema keyword: `minLength`, `pattern`, `minimum`, and `minItems` and
 `maxItems` for `listMin` and `listMax`.
+
+The served document states version `1.0.0` and one server,
+`http://localhost:8080`, unless the service says otherwise. The Rust and
+TypeScript routers can also serve neither route:
+
+| Server | Version | Server URL | Neither route |
+| --- | --- | --- | --- |
+| Go | `Config.OpenAPIVersion` | `Config.OpenAPIBaseURL` | always served |
+| Rust | `RouterOptions.openapi_version` | `RouterOptions.openapi_base_url` | `serve_openapi: false` |
+| TypeScript | `openAPIVersion` | `openAPIBaseURL` | `serveOpenAPI: false` |
+
+The TypeScript package embeds the document in `openapi.ts`, so serving it
+reads no file, on Bun, Node.js and Workers alike. It still exports
+`openapi.json` as `<package>/openapi.json`. A server that serves several
+APIs answers both routes from the first API's router.
+
+With `outputs.api.mcp` on, a TypeScript API also serves its MCP tools at
+`POST /api/mcp`
+([An API's MCP endpoint](/superschematic/reference/mcp-tools/#an-apis-mcp-endpoint)).
+A tool whose `@mcp` says `invocationPolicy: "ask"` runs there only once
+the person confirms the call, by MCP elicitation or a two-step token, so
+the API's config names the secret the endpoint signs confirmations with,
+`outputs.api.mcpConfirmationKey`
+([Confirming a tool that asks](/superschematic/reference/mcp-tools/#confirming-a-tool-that-asks)).
+The endpoint asks only about a call the tool's route would run: a call
+the route refuses, for its arguments or for its caller, gets the route's
+error at once.
 
 ## The TypeScript server
 

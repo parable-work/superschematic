@@ -26,7 +26,26 @@ shop reads its suppliers' product feeds as `FeedItem` rows:
   the file.
 - The comment above a type or a field becomes its documentation in every
   language, in OpenAPI and, for a table, in the SQL. Write it for the
-  reader of the API.
+  reader of the API. `//`, `/* */` and `/** */` comments read alike. The
+  documentation is the comments directly above the declaration: one that
+  a blank line parts from it is a note in the source, not its
+  documentation. A file's section markers are left out too: a rule
+  (`// -----`, `// =====`, `/* ***** */`), a banner (a title between two
+  runs, `// ---- Plaid ----`, `// === Accounts ===`) and a title between
+  two rules, at the head of a comment, with the empty lines after them,
+  and a rule at its tail. A rule between lines of text, and text that
+  holds dashes (`// Amount - in cents`), stay:
+
+  ```ts
+  // ---- Plaid ---------------------------------------------------------
+
+  // The state of a linked Plaid item.
+  export enum PlaidItemStatus {
+  ```
+
+  documents `PlaidItemStatus` as "The state of a linked Plaid item." A
+  `/** @title */` tag in a comment a blank line parts from an enum's
+  member fails the load, since the member's title would be lost.
 - `extends` copies the base class's fields, first, into the subclass. The
   base class is still generated as a type of its own. In a DB schema it is
   not a table: `shop-db`'s `Auditable` gives every table its timestamps.
@@ -80,13 +99,20 @@ To make a branded value:
   `parse<Scalar>Strict`, which throws, or `parse<Scalar>`, which returns
   null: `parseContactEmailStrict(form.email)`. Request and search params,
   form fields, storage reads and third-party responses are such places.
+  The types package re-exports `parse<Scalar>Strict` and
+  `normalize<Scalar>Strict` for each scalar its schema uses, beside the
+  scalar's validators, so an implementation that depends on the types
+  package needs no dependency on superscalar of its own:
+  `import { normalizeIdentitySlugStrict } from '@acme/shop-db-types'`.
 - Carry the type from there: type a parameter or a variable as the
   generated field (`Order['productId']`) or as its symbol.
 - Do not cast to a brand (`as ContactEmail`). The cast skips the check the
   brand stands for.
 
 The generated scalar validators still take the base type, so they check a
-value that has not been parsed yet. `parse<Type>Json` and `parse<Type>Yaml`
+value that has not been parsed yet, and the `parse<Scalar>` beside some
+of them returns the base type too, where the re-exported
+`parse<Scalar>Strict` returns the brand. `parse<Type>Json` and `parse<Type>Yaml`
 check every field before they return a typed value, and a generated router
 checks a request before the implementation sees it. The shop's TypeScript
 client parses its ids and the recipient's name before it sends them:
@@ -120,14 +146,23 @@ type and is left out when `0`.
 
 ## Defaults
 
-`Default<T, V>` fills in a value when a payload leaves the field out. It is
-a default for decoders, not for the database: the Go, TypeScript, Python
-and Rust decoders all apply it, and the SQL column has no default. The
-build checks `V` as a validator checks a value: its type, its scalar's
+`Default<T, V>` fills in a value when a payload leaves the field out. The
+Go, TypeScript, Python and Rust decoders all apply it. On a required field
+of a DB table it is the column's `DEFAULT` too, when `V` is text, a number,
+a boolean or an enum member, so a row written outside the generated code
+takes it as well ([Columns](/superschematic/guides/database-tables/#columns)).
+The build checks `V` as a validator checks a value: its type, its scalar's
 lengths, pattern and range, and the field's own `Validate<T, C>` rules. A
 default that breaks them fails the build. A new order starts `Placed`:
 
 <Snippet file="schemas/services/shop-db/src/orders.schema.ts" from="export abstract class Order extends" to="status: Default" />
+
+`Default<T, "now">` on a required `Temporal.DateTime`, `Temporal.Date` or
+`Temporal.Time` field of a DB table is the time of the insert, which the
+database writes: its column's `DEFAULT` is `CURRENT_TIMESTAMP`,
+`CURRENT_DATE` or `CURRENT_TIME`, and no decoder fills it in. Without it
+such a column has no default, unless it is `createdAt` or `updatedAt`
+([Columns](/superschematic/guides/database-tables/#columns)).
 
 ## Constraints
 
@@ -142,13 +177,36 @@ its lines and checks the country code:
 | `minLength`, `maxLength`, `pattern` | strings; lengths count and patterns match Unicode code points, and a pattern's `\d`, `\w` and `\b` are ASCII classes |
 | `listMin`, `listMax` | lists (`Validate<T[], { ... }>`); `[]` satisfies a required list |
 | `uploadMaxBytes` | file-upload scalars |
+| `precision`, `scale` | `Generic.Decimal`, a value or each element of a list: at most `scale` digits after the point, 0 unless set, and at most `precision - scale` before it; a DB column is `NUMERIC(p,s)` |
+| `dimensions` | `Embedding.Vector`, a value or each element of a list: exactly that many numbers; a DB column is pgvector's `vector(n)` |
 
-`minLength`, `maxLength`, `listMin`, `listMax` and `uploadMaxBytes` are
-whole numbers. A fraction fails the load and names the key and the value
+`minLength`, `maxLength`, `listMin`, `listMax`, `uploadMaxBytes`,
+`precision`, `scale` and `dimensions` are whole numbers. A fraction fails the load and names the key and the value
 (`Validate maxLength must be a finite JavaScript-safe integer literal, got 2.5`)
 rather than being cut to a whole number. A pattern's `\s` is ASCII
 whitespace in Go, Python and Rust, and Unicode whitespace in TypeScript,
 so the validators differ only on a non-ASCII space.
+
+A decimal's digits count on its canonical form, superscalar's: no sign,
+no leading zero before the point (`0` has none) and no trailing zero after
+it, so `+007.50` has one digit each side. A value that breaks a digit rule
+fails `precision` or `scale`, and may fail both; a value that is no decimal
+fails the scalar's own `pattern`, and its digits are not counted. A vector
+of another length fails `dimensions`, whether it arrives as a JSON array or
+as its JSON text. `precision` and `scale` belong on a `Generic.Decimal`,
+`dimensions` on an `Embedding.Vector`, each on a single value or a list of
+them, and an operation's argument takes none of them: anything else fails
+the load and names the fix.
+
+```ts
+import { Embedding, Finance, Generic } from "superscalar";
+
+export abstract class LedgerLine {
+  amount: Finance.SignedMoney;                                    // BIGINT, a debit negative
+  rate: Validate<Generic.Decimal, { precision: 10; scale: 4 }>;   // NUMERIC(10,4)
+  embedding: Validate<Embedding.Vector, { dimensions: 1024 }>;    // vector(1024)
+}
+```
 
 The generated validators check them: `Validate()` in Go, `validate<Type>`
 and the parsers in TypeScript, `validate_all()` in Python, and
@@ -166,8 +224,11 @@ that its package generates no validator for (one that is not a table, a
 view, an embedded struct or an input type) is checked for presence only.
 
 The generated servers check every request against them and answer 400,
-and every generated SDK checks an input before it sends it. The database
-does not: constraints are not part of the DDL.
+and every generated SDK checks an input before it sends it. On a DB table,
+`min` and `max` on a number column and `minLength` and `maxLength` on a
+text column are the column's `CHECK` constraint too, which a row written
+outside the generated code meets as well; a pattern and the list rules are
+not part of the DDL ([Columns](/superschematic/guides/database-tables/#columns)).
 
 ## Enums
 
@@ -178,7 +239,8 @@ An enum is a TypeScript `enum` of string values. Numeric enums are refused.
 Go gets `type Currency string` with a constant per member, `IsValid()` and
 `Values()`. TypeScript gets the same `enum`, Python a `str` `Enum` and Rust
 an `enum` with one serde rename per member. A value outside the enum fails
-validation with the `enum` rule.
+validation with the `enum` rule, and a DB table's column of the enum has a
+`CHECK` that its members' values hold it to.
 
 A member may take a title, the label a UI shows for it in place of its
 name in words. An enum member takes no decorator, so the title is a JSDoc
@@ -221,8 +283,9 @@ Here is `FeedItem` as the Rust types crate declares it:
 By default the decoders are lenient about keys a type does not declare, in
 the way each language usually is:
 
-- Go: `FeedItemFromJSON` refuses an unknown key and `FeedItemFromJSONNonStrict`
-  skips it.
+- Go: `FeedItemFromJSON` and `FeedItemFromJSONNonStrict` skip an unknown
+  key, as `encoding/json` does; a server refuses one at the top level of
+  an input body.
 - TypeScript: `parseFeedItemJson` refuses one and `parseFeedItemJsonNonStrict`
   skips it.
 - Python: the pydantic models skip unknown keys.
@@ -252,6 +315,41 @@ payload with an extra `colour` key, in each language:
 `@denyUnknownFields` is the Rust half alone: it adds
 `#[serde(deny_unknown_fields)]` and changes no other language.
 
+## Lenient decoding
+
+`@allowUnknownFields` on a type goes the other way: every decoder of it,
+in every language, accepts a key it does not declare and drops it, so the
+code sees only the declared fields, which are checked as before (D87). A
+server reading it as an operation's input drops the key too, where it
+refuses one for any other input type. It suits a payload a producer newer
+than its consumer sends: a provider's webhook, whose input reads this way
+by default ([Webhooks](/superschematic/guides/api-routes/#webhooks)).
+
+```ts
+import { allowUnknownFields } from "@superschematic/schema";
+
+@allowUnknownFields
+export abstract class PlaidError {
+  error_code: string;
+  error_message: Nullable<string>;
+}
+```
+
+- Go: `UnmarshalJSON` keeps only the declared keys before it decodes, so
+  `PlaidErrorFromJSON` drops `display_message`, and `Error_Code`, which
+  `encoding/json` would read into `error_code`.
+- TypeScript: `parsePlaidErrorJson` and its siblings drop the keys, and so
+  does `parsePlaidErrorFromJSON`, which reads the type where it is nested.
+- Python: the pydantic model skips them, as it does for any type.
+- Rust: `prepare_plaid_error` drops them whatever its caller asks, and
+  serde skips them.
+
+The schema runtimes' strict parse and serialize accept and drop them too.
+A key is declared only as the type spells it. It applies to that type
+only: a nested type's undeclared keys follow its own declaration. A type
+is never both `@allowUnknownFields` and `@strictJSON` or
+`@denyUnknownFields`.
+
 ## Environment variables
 
 A General or API schema can declare a service's configuration. Put `@envVars`,
@@ -280,6 +378,19 @@ export abstract class ServiceConfig {
 A field is a `string`, a `number` (read as an integer), a `boolean`
 (`true` or `false`), an enum, or a scalar, which runs its validators.
 `Default<T, V>` makes a variable optional; any other field is required.
+
+A schema may put `@envVars` on more than one class when each extends the
+next, as a class that declares a shared secret and the service's settings
+that extend it do
+([Encrypted fields](/superschematic/guides/database-tables/#encrypted-fields)).
+The service's config is then the `@envVars` class no other `@envVars`
+class extends, directly or through a plain class between them. Its
+variables are its own fields and those of every class it extends. The
+loaders, `values-schema.json`, a stack and the API's handle all read that
+class. Two `@envVars` classes neither of which extends the other fail the
+load, which names both: make one extend the other, or remove `@envVars`
+from one. A plain base class, without `@envVars`, works as well, since an
+`@envVars` class holds every field it inherits.
 
 The build writes a loader that reads and checks every variable and
 reports every one that is missing or invalid at once, never a value:
@@ -335,3 +446,10 @@ TypeScript API package's `loadEnvConfig()` and the Rust API crate's
   `SecretValue` that prints as `[secret]` until you call `reveal()`.
 
 Rust types have no mask helper.
+
+`Secret<T>` does not encrypt a value: a DB table's `Secret<T>` field is
+stored as it is, and anyone who reads the database, a backup or a replica
+reads it. A field that must be encrypted at rest is `Encrypted<string>`
+from `@superschematic/db`, which is a `Secret<T>` too, and which the ORMs
+seal and open with the DB service's keys
+([Encrypted fields](/superschematic/guides/database-tables/#encrypted-fields)).

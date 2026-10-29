@@ -104,13 +104,7 @@ func checkDisplayCurrency(schema *ir.Schema, td *ir.TypeDef, what string, fields
 		}
 		return
 	}
-	var sibling *ir.FieldDef
-	for _, other := range fields {
-		if other != nil && (other.Name == c.Field || other.JSONTag != "" && other.JSONTag == c.Field) {
-			sibling = other
-			break
-		}
-	}
+	sibling := currencyField(fields, c.Field)
 	names := make([]string, 0, len(fields))
 	for _, other := range fields {
 		if other != nil && other != f {
@@ -129,6 +123,24 @@ func checkDisplayCurrency(schema *ir.Schema, td *ir.TypeDef, what string, fields
 	case !ir.TextValue(schema, sibling.TypeRef):
 		r.errorf(td.Owner, "type %s: %s %s takes @display currency { field: %q }, which is %s; a currency field holds a single Finance.Currency or text value", td.Name, what, f.Name, c.Field, typeLabel(sibling.TypeRef))
 	}
+}
+
+// currencyField finds the field a @display currency { field } names: by its
+// name first, then by its JSON key, as the engine's describe and Topcoat's
+// views read it, so a name that is also another field's JSON key names the
+// field of that name.
+func currencyField(fields []*ir.FieldDef, name string) *ir.FieldDef {
+	for _, other := range fields {
+		if other != nil && other.Name == name {
+			return other
+		}
+	}
+	for _, other := range fields {
+		if other != nil && other.JSONTag != "" && other.JSONTag == name {
+			return other
+		}
+	}
+	return nil
 }
 
 // integerValue reports whether ref, read in schema, is a single whole

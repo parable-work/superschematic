@@ -32,8 +32,8 @@ func TestToolSchemasGoldenUserRoutes(t *testing.T) {
 		t.Fatalf("generate: %v", err)
 	}
 	tools := buildToolSchemas(t, output)
-	if len(tools) != 19 {
-		t.Fatalf("got %d tools, want the 18 operations of the two sets and greet", len(tools))
+	if len(tools) != 20 {
+		t.Fatalf("got %d tools, want the 19 operations of the two sets and greet", len(tools))
 	}
 	compareToolSchemasGolden(t, fixture, tools)
 }

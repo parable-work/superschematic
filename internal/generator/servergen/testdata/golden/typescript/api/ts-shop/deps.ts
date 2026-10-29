@@ -16,10 +16,11 @@
 // createManualRoutes (D51; section 8.6).
 
 import type { Pool } from 'pg';
-import type { Authenticator, Bucket, Logger } from '@superschematic/http-runtime';
+import type { Authenticator, Bucket, Logger, MemoryStore } from '@superschematic/http-runtime';
 import type { ManualRouteHandler } from '@superschematic/http-runtime/hono';
 import type { TsPricingSDK } from '@schemas/ts-pricing-sdk';
 import type { CartAbandoned } from '@schemas/ts-db-types';
+import type { TsDbOrm } from '@schemas/ts-db-types/orm';
 import type { EnvConfig } from './config';
 import type { Implementations } from './interfaces';
 
@@ -27,12 +28,29 @@ import type { Implementations } from './interfaces';
 export interface Deps {
   /** The API's configuration: its @envVars settings and the fields its edges derive (loadEnvConfig). */
   readonly config: EnvConfig;
-  /** A pool of ts-db, the API's database. */
+  /** A pool of ts-db, the API's database, for the SQL the repositories do not express. */
   readonly db: Pool;
+  /**
+   * The repositories of ts-db's tables over db (D79), a table's rows
+   * read and written as its types' ./orm entry declares them, with no SQL of
+   * the implementation's. In an operation it acts as the caller, whom
+   * createdBy, updatedBy and deletedBy record, and in a job or a worker as
+   * no one: orm.asSystem() acts as the database's system actor, and
+   * orm.withUser(id) as another user (D87). orm.transaction(fn) writes in
+   * one transaction, which enqueue takes.
+   */
+  readonly orm: TsDbOrm;
   /** A client of ts-pricing, which the API calls. It sends the server's service credential. */
   readonly tsPricing: TsPricingSDK;
   /** ts-media, a bucket the API lists: private object storage it puts, gets, deletes and lists objects in, and signs URLs for (D54). */
   readonly tsMedia: Bucket;
+  /**
+   * ts-cache, a memory store the API lists (D75): use it through the store's
+   * generated definitions. It refuses every call at once while it is
+   * disabled or unreachable, and the caller takes its fallback path; a
+   * subscribe while it is unreachable is held until it reconnects.
+   */
+  readonly tsCache: MemoryStore;
   /** The API's logger. */
   readonly logger: Logger;
 }

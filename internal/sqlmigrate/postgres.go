@@ -92,6 +92,17 @@ func (p postgresDialect) render(c *change) (rendered, error) {
 		return p.addUnique(c), nil
 	case opAddForeignKey, opReplaceFK:
 		return p.foreignKey(c), nil
+	case opAddCheck, opReplaceCheck:
+		return p.check(c), nil
+	case opDropCheck:
+		return one(stepFor(c, "ALTER TABLE "+q(c.table)+" DROP CONSTRAINT "+q(c.oldCheck.Name))), nil
+	case opRunRawSQL:
+		return one(stepFor(c, c.raw.Statements...)), nil
+	case opUndoRawSQL:
+		if len(c.oldRaw.Down) == 0 {
+			return noSQL(c), nil
+		}
+		return one(stepFor(c, c.oldRaw.Down...)), nil
 	case opCreateFunction:
 		return one(stepFor(c, c.function.Definition)), nil
 	case opReplaceFunction:
@@ -102,11 +113,18 @@ func (p postgresDialect) render(c *change) (rendered, error) {
 		}
 		return one(stepFor(c, c.function.Definition)), nil
 	case opCreateTrigger:
+		if c.backfill {
+			return one(backfillStep(stepFor(c, c.trigger.Definition, c.trigger.Backfill), c)), nil
+		}
 		return one(stepFor(c, c.trigger.Definition)), nil
 	case opReplaceTrigger:
 		return one(stepFor(c, "DROP TRIGGER "+q(c.trigger.Name)+" ON "+q(c.table), c.trigger.Definition)), nil
 	case opSeedHistory:
 		return one(p.seedHistory(c)), nil
+	case opSeedRole:
+		return one(stepFor(c, c.role.Insert)), nil
+	case opUpdateRole:
+		return one(stepFor(c, c.role.Update)), nil
 	case opCreateView:
 		return one(stepFor(c, createViewSQL(c.view)...)), nil
 	case opReplaceView:
@@ -165,6 +183,9 @@ func createTableSQL(t *Table) []string {
 	}
 	for _, u := range t.Uniques {
 		lines = append(lines, "  CONSTRAINT "+q(u.Name)+" UNIQUE ("+quoteList(u.Columns)+")")
+	}
+	for _, c := range t.Checks {
+		lines = append(lines, "  CONSTRAINT "+q(c.Name)+" CHECK ("+c.spec().Expression(q)+")")
 	}
 	create := "CREATE TABLE " + q(t.Name) + " (\n" + strings.Join(lines, ",\n") + "\n)"
 	if t.PartitionBy != "" {
@@ -274,6 +295,11 @@ func indexSQL(table string, idx *Index, concurrently bool) string {
 	columns := make([]string, len(idx.Columns))
 	for i, col := range idx.Columns {
 		columns[i] = q(col)
+	}
+	if idx.Expression != "" {
+		columns = []string{"(" + idx.Expression + ")"}
+	}
+	for i := range columns {
 		if idx.Opclass != "" {
 			columns[i] += " " + idx.Opclass
 		}
@@ -283,6 +309,9 @@ func indexSQL(table string, idx *Index, concurrently bool) string {
 		method = "BTREE"
 	}
 	fmt.Fprintf(&b, "%s ON %s USING %s (%s)", q(idx.Name), q(table), method, strings.Join(columns, ", "))
+	if idx.With != "" {
+		b.WriteString(" WITH (" + idx.With + ")")
+	}
 	if idx.Where != "" {
 		b.WriteString(" WHERE " + idx.Where)
 	}
@@ -291,23 +320,31 @@ func indexSQL(table string, idx *Index, concurrently bool) string {
 
 // index creates or replaces an index. On a table the previous version has
 // it is built concurrently, outside a transaction, except on a partitioned
-// table, where Postgres cannot.
+// table, where Postgres cannot, and for an index that declares
+// concurrently: false (D83).
 func (postgresDialect) index(c *change) *Step {
 	name := q(c.index.Name)
-	if c.created || c.partitioned {
+	if c.created || c.partitioned || c.index.InTransaction {
 		var statements []string
 		if c.op == opReplaceIndex {
 			statements = append(statements, "DROP INDEX "+name)
 		}
 		step := stepFor(c, append(statements, indexSQL(c.table, c.index, false))...)
-		if !c.created {
+		switch {
+		case c.created:
+		case c.partitioned:
 			blocking(step, fmt.Sprintf("%s is partitioned, so the index is built without CONCURRENTLY and blocks writes to it for the length of the build.", c.table))
+		default:
+			blocking(step, fmt.Sprintf("The index declares concurrently: false, so it is built inside the step's transaction and blocks writes to %s for the length of the build.", c.table))
 		}
 		return step
 	}
 	var statements []string
 	if c.op == opReplaceIndex {
 		statements = append(statements, "DROP INDEX CONCURRENTLY IF EXISTS "+name)
+	}
+	if c.dedupe != nil {
+		statements = append(statements, dedupeSQL(c.table, c.dedupe, "now()", q))
 	}
 	step := stepFor(c, append(statements, indexSQL(c.table, c.index, true))...)
 	step.Transactional = false
@@ -363,6 +400,26 @@ func (postgresDialect) foreignKey(c *change) rendered {
 	return rendered{steps: []*Step{add, validate}, main: 1}
 }
 
+// check adds or replaces a CHECK constraint (D83). On a table the plan
+// creates, CREATE TABLE declares it. On a table the previous version has,
+// it is added NOT VALID, which takes its lock only briefly, and validated in
+// a step of its own, which reads the table without blocking writes.
+func (postgresDialect) check(c *change) rendered {
+	ck := c.check
+	if c.created {
+		return rendered{}
+	}
+	table, name := q(c.table), q(ck.Name)
+	var statements []string
+	if c.op == opReplaceCheck {
+		statements = append(statements, "ALTER TABLE "+table+" DROP CONSTRAINT "+name)
+	}
+	add := stepFor(c, append(statements, "ALTER TABLE "+table+" ADD CONSTRAINT "+name+" CHECK ("+ck.spec().Expression(q)+") NOT VALID")...)
+	validate := stepFor(c, "ALTER TABLE "+table+" VALIDATE CONSTRAINT "+name)
+	validate.Op = "validateCheck"
+	return rendered{steps: []*Step{add, validate}, main: 1}
+}
+
 // setNotNull makes a column of a table the previous version has NOT NULL
 // without holding an exclusive lock for a scan: a CHECK constraint is
 // added NOT VALID and validated, and SET NOT NULL then uses it instead of
@@ -411,8 +468,25 @@ func (postgresDialect) seedHistory(c *change) *Step {
 	return step
 }
 
-// qualifiedView is a view's schema-qualified name.
+// backfillStep marks step, which creates c's @enqueueOnChange trigger and
+// then enqueues a message for each row of its table that meets the
+// trigger's conditions (D88), blocking: the trigger's lock keeps every
+// write out until the transaction commits, so no row is missed or
+// enqueued twice, and the insert takes time that grows with the table.
+// On SQLite the step holds the database's write lock as long.
+func backfillStep(step *Step, c *change) *Step {
+	blocking(step, fmt.Sprintf(
+		"Backfilling %s enqueues a message for every row of %s that meets its conditions while the new trigger's lock blocks writes to %s; for a large table, add the trigger without backfill and run stack queue backfill.",
+		c.trigger.Name, c.table, c.table))
+	return step
+}
+
+// qualifiedView is a view's schema-qualified name, or its name alone for a
+// view beside the tables in the search_path's schema (D90).
 func qualifiedView(v *View) string {
+	if v.Schema == "" {
+		return q(v.Name)
+	}
 	return q(v.Schema) + "." + q(v.Name)
 }
 

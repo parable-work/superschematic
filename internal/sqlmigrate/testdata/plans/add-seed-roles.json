@@ -1,0 +1,21 @@
+{
+  "dialect": "postgres",
+  "from": "96a48391fce0dd6c1f12a70df1615d277a417c110efdf9aa5fa2315848deba91",
+  "hash": "1489f547454443a0e40b520385f62a54917902d0517e87d96d537a718a301432",
+  "service": "fixture-user-model-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "seedRole",
+      "phase": "expand",
+      "statements": [
+        "INSERT INTO role (\"name\", permissions) VALUES ('member', ARRAY['identity.roles.read']::TEXT[])\nON CONFLICT (\"name\") DO UPDATE SET permissions = EXCLUDED.permissions WHERE cardinality(role.permissions) = 0"
+      ],
+      "subject": "role/role/member",
+      "transactional": true
+    }
+  ],
+  "to": "c9415cf956b80ecfd198e7bf75fb8c1aac8b4b74af6a4b23a4d84c07912aaead",
+  "toModel": null,
+  "version": 1
+}

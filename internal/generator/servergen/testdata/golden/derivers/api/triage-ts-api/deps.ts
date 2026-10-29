@@ -10,7 +10,7 @@
 // createDerivers (D74).
 
 import type { Pool } from 'pg';
-import type { Logger } from '@superschematic/http-runtime';
+import type { Logger, MemoryStore } from '@superschematic/http-runtime';
 import type { Ticket } from '@schemas/triage-db-types';
 import type { EngineBackground } from '@superschematic/engine/server';
 import type { EnvConfig } from './config';
@@ -22,6 +22,13 @@ export interface Deps {
   readonly config: EnvConfig;
   /** A pool of triage-db, the API's database. */
   readonly db: Pool;
+  /**
+   * triage-cache, a memory store the API lists (D75): use it through the store's
+   * generated definitions. It refuses every call at once while it is
+   * disabled or unreachable, and the caller takes its fallback path; a
+   * subscribe while it is unreachable is held until it reconnects.
+   */
+  readonly triageCache: MemoryStore;
   /**
    * The engine of triage-db, the API's engine database (D58), which the
    * entrypoint opens in the background, so it starts while the database is

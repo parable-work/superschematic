@@ -69,6 +69,9 @@ pub enum EngineErrorCode {
     /// The schema's live version composes a behavior this engine cannot
     /// run.
     Unavailable,
+    /// A caller sent more signals on one instance than the engine's
+    /// `signals.perSecond` lets a principal send (D77).
+    RateLimited,
     /// Another writer held the database's lock past the busy timeout:
     /// SQLite's `SQLITE_BUSY`, or a Postgres lock or connection wait (D58).
     /// The call wrote nothing and may be tried again.
@@ -78,7 +81,7 @@ pub enum EngineErrorCode {
 impl EngineErrorCode {
     /// Every code, in the order the TypeScript engine declares them, then
     /// `busy`.
-    pub const ALL: [EngineErrorCode; 16] = [
+    pub const ALL: [EngineErrorCode; 17] = [
         EngineErrorCode::InvalidSchema,
         EngineErrorCode::IncompatibleChange,
         EngineErrorCode::NameTaken,
@@ -94,6 +97,7 @@ impl EngineErrorCode {
         EngineErrorCode::Vetoed,
         EngineErrorCode::ValueTooLarge,
         EngineErrorCode::Unavailable,
+        EngineErrorCode::RateLimited,
         EngineErrorCode::Busy,
     ];
 
@@ -115,6 +119,7 @@ impl EngineErrorCode {
             EngineErrorCode::Vetoed => "vetoed",
             EngineErrorCode::ValueTooLarge => "value_too_large",
             EngineErrorCode::Unavailable => "unavailable",
+            EngineErrorCode::RateLimited => "rate_limited",
             EngineErrorCode::Busy => "busy",
         }
     }
@@ -134,6 +139,7 @@ impl EngineErrorCode {
             EngineErrorCode::SeqMismatch => 412,
             EngineErrorCode::ValueTooLarge => 413,
             EngineErrorCode::InvalidSchema | EngineErrorCode::InvalidInstance => 422,
+            EngineErrorCode::RateLimited => 429,
             EngineErrorCode::Unavailable | EngineErrorCode::Busy => 503,
         }
     }
@@ -975,6 +981,7 @@ mod tests {
                 ("vetoed", 409),
                 ("value_too_large", 413),
                 ("unavailable", 503),
+                ("rate_limited", 429),
                 ("busy", 503),
             ]
         );

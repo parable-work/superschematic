@@ -12,7 +12,8 @@ import (
 // the deploy writes into the site's config for each environment. Each API a
 // site calls gets a CORS field on its server, ir.CORSField, whose value
 // lists the public origin of each site that calls it: the server answers
-// CORS for those origins and no other.
+// CORS for those origins and no other. A site that serves the API on its
+// own origin (origins.go, D91) is not among them.
 
 // bindSite binds a site's config: one derived binding per site edge, named
 // after the API it reaches (ir.DerivedFieldNames.Field). A site reads no
@@ -28,11 +29,14 @@ func (r *resolver) bindSite(d *deployable) {
 	d.res.Bindings = bindings
 }
 
-// siteEdgesTo returns the site edges to the API service api, sorted by ID.
+// siteEdgesTo returns the site edges to the API service api from sites
+// that call it from their own origin, sorted by ID: an edge of a site that
+// serves api on its origin (D91) is left out, since the page calls it from
+// that origin, which needs no CORS.
 func (r *resolver) siteEdgesTo(api string) []string {
 	var ids []string
 	for _, id := range sortedKeys(r.edges) {
-		if e := r.edges[id].res; e.Kind == ir.EdgeSite && e.Service.Name == api {
+		if e := r.edges[id]; e.res.Kind == ir.EdgeSite && e.res.Service.Name == api && !inOrigin(e) {
 			ids = append(ids, id)
 		}
 	}

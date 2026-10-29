@@ -1,0 +1,21 @@
+{
+  "dialect": "postgres",
+  "from": "c6787cdef058267033f38e38e6c4e788b8fc54fcc00776b78d8b4db345c93d96",
+  "hash": "788ed8cf0964b3d0af13fc4662902fe2e210f009c5c6311e27cec8b66b5fbdf3",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "setDefault",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" ALTER COLUMN placed_at SET DEFAULT CURRENT_TIMESTAMP"
+      ],
+      "subject": "table/order/column/placed_at",
+      "transactional": true
+    }
+  ],
+  "to": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "toModel": null,
+  "version": 1
+}

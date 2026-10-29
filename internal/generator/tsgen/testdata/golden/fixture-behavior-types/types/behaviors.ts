@@ -127,12 +127,13 @@ export interface RequestBehaviors {
     readonly stale: Array<'category' | 'summary'>;
   };
   readonly Provenance: {
-    /** By recorded field written since Provenance was added: { source, by, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; review is { state, by?, at? }, state proposed, accepted, rejected or edited. */
+    /** By recorded field written since Provenance was added: { source, by, for?, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; for is the subject it acted for, when it acted for one (D77); review is { state, by?, at? }, state proposed, accepted, rejected or edited. */
     readonly fields: {
       body?: {
         at: number;
         by: string;
         confidence?: number;
+        for?: string;
         review?: {
           at?: number;
           by?: string;
@@ -144,6 +145,7 @@ export interface RequestBehaviors {
         at: number;
         by: string;
         confidence?: number;
+        for?: string;
         review?: {
           at?: number;
           by?: string;
@@ -155,6 +157,7 @@ export interface RequestBehaviors {
         at: number;
         by: string;
         confidence?: number;
+        for?: string;
         review?: {
           at?: number;
           by?: string;
@@ -166,6 +169,7 @@ export interface RequestBehaviors {
         at: number;
         by: string;
         confidence?: number;
+        for?: string;
         review?: {
           at?: number;
           by?: string;
@@ -191,12 +195,16 @@ export interface TicketBehaviors {
     readonly enteredAt?: number;
   };
   readonly Comments: {
-    /** How many posted messages the conversation has, top-level and replies; deleted and purged ones are not counted. */
+    /** How many posted and interrupted messages the conversation has, top-level and replies; composing, deleted and purged ones are not counted. */
     readonly messages: number;
-    /** When the latest posted message was posted, in epoch milliseconds; absent while there is none. */
+    /** The greatest postedAt of a posted or interrupted message, in epoch milliseconds; absent while there is none. */
     readonly lastMessageAt?: number;
-    /** The posted top-level messages, each a thread, whether resolved or not: { open, resolved }. */
+    /** The posted and interrupted top-level messages, each a thread, whether resolved or not: { open, resolved }. */
     readonly threads: { open: number; resolved: number };
+    /** The subjects writing a message now: each subject with a composing message on the instance, once, in the order of its earliest composing message's id; empty while nobody is. */
+    readonly composing: string[];
+    /** The caller's: how many posted and interrupted top-level messages of others came to stand after the caller's read marker on the conversation. 0 until the caller first reads the conversation with markRead or posts in it top-level, so a conversation nobody opened is unread for nobody. Replies are read thread by thread, in the inbox, and not counted here. */
+    readonly unread: number;
   };
   readonly Revisions: {
     /** The number of the instance's latest revision. */

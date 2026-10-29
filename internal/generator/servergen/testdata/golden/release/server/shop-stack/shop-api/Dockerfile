@@ -25,7 +25,7 @@
 # it on distroless cc, which holds the glibc and libgcc it needs and nothing
 # else, as a non-root user.
 
-ARG GO_VERSION=1.26.4
+ARG GO_VERSION=1.27.3
 
 FROM golang:${GO_VERSION}-trixie AS build
 ENV GOTOOLCHAIN=local CGO_ENABLED=1

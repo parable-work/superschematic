@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "queries": [
+    {
+      "name": "lineItemTotals",
+      "hash": "sha256:b4f38d0bd200fdc911fa5ed4f52be664118659b571aec314202225905f79f97a",
+      "params": [
+        "text"
+      ],
+      "columns": [
+        {
+          "name": "lines",
+          "type": "bigint"
+        },
+        {
+          "name": "spent",
+          "type": "bigint"
+        },
+        {
+          "name": "earned",
+          "type": "bigint"
+        }
+      ]
+    }
+  ]
+}

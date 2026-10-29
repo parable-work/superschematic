@@ -16,8 +16,15 @@ import (
 // reason. The loader checks the same rules and fills in the same default;
 // they are applied again here for IR that did not come through it.
 func resolveOperationMCP(op *ir.FieldDef, namespace string, invocation ToolInvocationPolicy) (*ir.OperationMCP, error) {
+	if op.MCP == nil && op.FileDownload != nil {
+		// A file is no tool result (D81): the tool is listed hidden.
+		return &ir.OperationMCP{Hidden: true, HiddenReason: ir.FileDownloadToolReason}, nil
+	}
 	if op.MCP == nil {
 		return nil, nil
+	}
+	if op.FileDownload != nil && !op.MCP.Hidden {
+		return nil, fmt.Errorf("apigen: operation %s.%s answers a FileDownload, which is no tool result; declare @mcp({ hidden: true, reason }) or no @mcp", namespace, op.Name)
 	}
 	if err := ir.ValidateOperationMCP(op.MCP); err != nil {
 		return nil, fmt.Errorf("apigen: operation %s.%s has an invalid @mcp: %w", namespace, op.Name, err)

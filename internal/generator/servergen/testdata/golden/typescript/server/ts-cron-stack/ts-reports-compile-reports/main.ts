@@ -18,8 +18,9 @@
 // [implementation_paths] typescript template (section 8.6):
 // @schemas/ts-reports-implementation, at typescript/ts-reports
 
-import { createLogger } from '@superschematic/http-runtime';
+import { createLogger, disabledMemoryStore, type MemoryStore, type MemoryStoreConnection } from '@superschematic/http-runtime';
 import { startTelemetry } from '@superschematic/http-runtime/telemetry';
+import { openRedisMemoryStore } from '@superschematic/http-runtime/redis';
 import * as tsReportsApi from '@schemas/ts-reports-api';
 import * as tsReportsImpl from '@schemas/ts-reports-implementation';
 
@@ -38,9 +39,17 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
   pools.push({ end: () => telemetry.shutdown() });
   const tsReportsConfig = configure('ts-reports', () => tsReportsApi.loadEnvConfig());
 
+  // One memory store per store, shared by every API that lists it (D75):
+  // on Redis, or disabled when its field is unset. Opening never waits for a
+  // store that is down, which reconnects in the background, and readiness
+  // never asks for one.
+  const tsCacheStore = await openMemoryStore('ts-cache', 'TS_CACHE_MEMORY_STORE', tsReportsConfig.TS_CACHE_MEMORY_STORE);
+  pools.push({ end: () => tsCacheStore.close() });
+
   // ts-reports: its jobs, built from its Deps.
   const tsReportsDeps: tsReportsApi.Deps = {
     config: tsReportsConfig,
+    tsCache: tsCacheStore,
     logger: logger.child({ api: 'ts-reports' }),
   };
   const jobs = await construct('ts-reports', 'jobs', () => tsReportsImpl.createJobs(tsReportsDeps));
@@ -96,6 +105,27 @@ async function construct<T>(api: string, what: string, build: () => T | Promise<
     return await build();
   } catch (error) {
     throw new Error(`${what} of ${api}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
+}
+
+/**
+ * Opens the memory store service from the memory store field named field,
+ * connection (D75): on Redis, through the HTTP runtime's ./redis entry,
+ * which pings it once within a second and otherwise reconnects in the
+ * background. An unset field is a disabled store, and so is a connection
+ * the runtime refuses, which logs one error line: the job runs without
+ * the store, and each call takes its fallback path.
+ */
+async function openMemoryStore(service: string, field: string, connection: MemoryStoreConnection | null): Promise<MemoryStore> {
+  if (connection === null) {
+    logger.info('memory store disabled: its field is unset', { memoryStore: service, field });
+    return disabledMemoryStore(service);
+  }
+  try {
+    return await openRedisMemoryStore(connection, { logger });
+  } catch (error) {
+    logger.error('memory store refused; running without it', { memoryStore: service, field, error });
+    return disabledMemoryStore(service);
   }
 }
 

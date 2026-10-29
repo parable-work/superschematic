@@ -52,7 +52,7 @@ function ticketSchema(): Record<string, unknown> {
   return document;
 }
 
-type Record_ = { source: string; by: string; at: number; confidence?: number; review?: { state: string; by?: string } };
+type Record_ = { source: string; by: string; for?: string; at: number; confidence?: number; review?: { state: string; by?: string } };
 
 for (const driver of drivers) {
   function opened(): Engine {
@@ -102,6 +102,15 @@ for (const driver of drivers) {
       assert.deepEqual(engine.instances.invoke(rae, 'Ticket', 't1', 'accept', { fields: ['priority'] }), { accepted: ['priority'], inReview: false });
       engine.instances.invoke(alice, 'Ticket', 't1', 'transition', { to: 'assigned' });
       assert.equal(engine.instances.get(alice, 'Ticket', 't1')?.behaviors.Workflow?.status, 'assigned');
+    });
+
+    test('a write acting for a subject (D77) records for beside by', () => {
+      const engine = opened();
+      const agent: Principal = { subject: 'agent:triage', permissions: [], actingFor: { subject: 'bob' } };
+      engine.instances.update(agent, 'Ticket', 't1', { body: 'Refused twice.' });
+      const { fields } = provenanceOf(engine);
+      assert.deepEqual([fields.body?.source, fields.body?.by, fields.body?.for], ['caller', 'agent:triage', 'bob']);
+      assert.equal('for' in (fields.subject ?? {}), false, 'a write acting for no one records no for');
     });
 
     test("reject replaces a proposal as the reviewer's write, which Derived records as an override", () => {

@@ -1,6 +1,6 @@
 import { Contact, Identity, Temporal } from "superscalar";
 import { Nullable } from "@superschematic/schema";
-import { AutoGenerate, Relation, User, UserRole, key, unique } from "@superschematic/db";
+import { AutoGenerate, Relation, User, UserRole, key, seedRoles, unique } from "@superschematic/db";
 
 // Base class providing audit fields to every table.
 export abstract class Auditable {
@@ -19,7 +19,12 @@ export abstract class Account extends Auditable implements User<{ login: "email"
   displayName: Identity.Name;
 }
 
-// A named set of permissions granted to accounts.
+// A named set of permissions granted to accounts. Every database holds a
+// reader, who reads notes, and an editor, who writes them too.
+@seedRoles([
+  { name: "reader", permissions: ["notes.read"] },
+  { name: "editor", permissions: ["notes.read", "notes.write"] },
+])
 export abstract class Role extends Auditable implements UserRole {
   @key
   id: AutoGenerate<Identity.UUID>;

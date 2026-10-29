@@ -41,3 +41,42 @@ export function expectList(errors: ValidationErrors, path: string, value: unknow
 export function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
+{{- if .DecimalDigits}}
+
+// checkDecimalDigits checks the digit rules of a Generic.Decimal (D84) on
+// one value at path: its canonical form holds at most integerDigits digits
+// before the point, without leading zeros, and at most scale after it,
+// without trailing zeros. A value that is no decimal's text is the scalar's
+// to report, and is not counted.
+export function checkDecimalDigits(errors: ValidationErrors, path: string, value: unknown, integerDigits: number, scale: number): void {
+  if (typeof value !== "string") return;
+  const m = /^[+-]?([0-9]+)(?:\.([0-9]+))?$/u.exec(value.trim());
+  if (!m) return;
+  if (m[1]!.replace(/^0+/u, "").length > integerDigits) {
+    addFieldError(errors, path, "precision", `must have at most ${integerDigits} digits before the decimal point`);
+  }
+  if ((m[2] ?? "").replace(/0+$/u, "").length > scale) {
+    addFieldError(errors, path, "scale", `must have at most ${scale} digits after the decimal point`);
+  }
+}
+{{- end}}
+{{- if .VectorDimensions}}
+
+// checkVectorDimensions checks the dimensions of an Embedding.Vector (D84)
+// on one value at path: the JSON array, or the array its JSON text holds,
+// has exactly dimensions numbers. Any other value is the scalar's to
+// report.
+export function checkVectorDimensions(errors: ValidationErrors, path: string, value: unknown, dimensions: number): void {
+  let vector = value;
+  if (typeof vector === "string" && vector !== "") {
+    try {
+      vector = JSON.parse(vector);
+    } catch {
+      return;
+    }
+  }
+  if (Array.isArray(vector) && vector.length !== dimensions) {
+    addFieldError(errors, path, "dimensions", `must have exactly ${dimensions} dimensions`);
+  }
+}
+{{- end}}

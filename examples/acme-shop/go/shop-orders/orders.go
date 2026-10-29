@@ -42,7 +42,6 @@ func (o *Orders) PlaceOrder(ctx context.Context, input *types.PlaceOrderInput) (
 	if err != nil {
 		return nil, err
 	}
-	ctx = actingUser(ctx)
 	var placed *db.Order
 	err = o.DB.Transaction(ctx, func(tx orm.TxInterface) error {
 		// Each line's product, at its price now. The order stores its
@@ -184,7 +183,6 @@ func (o *Orders) ListOrders(ctx context.Context, statuses []types.OrderStatus, p
 // it, is the 409 of one no longer placed, or the 404 of one the caller
 // may not see or no one placed.
 func (o *Orders) CancelOrder(ctx context.Context, id types.IdentityUUID, reason string) (*types.OrderView, error) {
-	ctx = actingUser(ctx)
 	filter, err := callersOrderFilter(ctx, id)
 	if err != nil {
 		return nil, err
@@ -314,7 +312,6 @@ func (r *Reviews) WriteReview(ctx context.Context, productID types.IdentityUUID,
 	if err != nil {
 		return nil, err
 	}
-	ctx = actingUser(ctx)
 	review, err := r.DB.GetReviewRepository().CreateOne(ctx, &db.Review{
 		Product: db.Product{Id: &productID},
 		Author:  db.User{Id: &author},
@@ -354,15 +351,4 @@ func caller(ctx context.Context) (db.IdentityUUID, error) {
 		return db.IdentityUUID{}, api.UnauthorizedError(err)
 	}
 	return id, nil
-}
-
-// actingUser tells the ORM who is making the request, so a soft delete
-// records deletedBy. The generated server authenticates the caller and puts
-// their id on the context; the ORM reads the user from its own context key,
-// so each method that writes rows hands the caller over.
-func actingUser(ctx context.Context) context.Context {
-	if id, err := scalars.ParseUUID(api.GetPrincipalID(ctx)); err == nil {
-		return orm.WithUserID(ctx, id)
-	}
-	return ctx
 }

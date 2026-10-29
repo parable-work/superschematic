@@ -92,6 +92,11 @@ pub struct FieldDef {
     pub validate_list_min: Option<f64>,
     pub validate_list_max: Option<f64>,
     pub validate_pattern: String,
+    /// A Generic.Decimal's digits in all and after the point, and an
+    /// Embedding.Vector's length (D84). None means unbounded.
+    pub validate_precision: Option<f64>,
+    pub validate_scale: Option<f64>,
+    pub validate_dimensions: Option<f64>,
     pub arguments: Vec<ArgumentDef>,
     pub key: bool,
     pub unique: bool,

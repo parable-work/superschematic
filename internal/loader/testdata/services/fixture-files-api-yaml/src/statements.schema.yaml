@@ -1,0 +1,108 @@
+name: fixture-files-api
+kind: API
+scalars:
+  Identity.UUID:
+    name: Identity.UUID
+    languagePrimitive: string
+    typeMappings:
+      sql: UUID
+types:
+  # What an import read.
+  ImportResult:
+    name: ImportResult
+    role: EmbeddedStruct
+    fields:
+      - name: accountId
+        typeRef:
+          name: Identity.UUID
+        required: true
+      - name: filename
+        typeRef:
+          name: string
+        required: true
+      - name: lines
+        typeRef:
+          name: number
+        required: true
+      - name: receipt
+        typeRef:
+          name: string
+      - name: note
+        typeRef:
+          name: string
+  # A bank statement to import: the account it belongs to, the statement as
+  # a CSV or OFX file of at most 1 KiB, an optional receipt, and a note.
+  ImportStatementInput:
+    name: ImportStatementInput
+    role: APIInput
+    fields:
+      - name: accountId
+        typeRef:
+          name: Identity.UUID
+        required: true
+      - name: statement
+        typeRef:
+          name: string
+        required: true
+        fileUpload:
+          maxSize: 1024
+          allowedTypes:
+            - text/csv
+            - application/x-ofx
+          allowedExtensions:
+            - .csv
+            - .ofx
+            - .qfx
+      - name: receipt
+        typeRef:
+          name: string
+        fileUpload: {}
+      - name: note
+        typeRef:
+          name: string
+operationSets:
+  - name: Statements
+    operations:
+      # Imports a statement's lines; the whole request is at most 1 MiB.
+      - name: importStatement
+        typeRef:
+          name: ImportResult
+        required: true
+        arguments:
+          - name: input
+            typeRef:
+              name: ImportStatementInput
+            required: true
+        httpMethod: POST
+        restPath: statements
+        middleware:
+          bodyLimit: 1
+      # The lines an account's statements held, as CSV.
+      - name: exportStatement
+        typeRef:
+          name: ""
+        required: true
+        arguments:
+          - name: accountId
+            typeRef:
+              name: Identity.UUID
+            required: true
+        httpMethod: GET
+        restPath: statements/{accountId}/export
+        fileDownload:
+          contentType: text/csv; charset=utf-8
+          filename: statement.csv
+      # The last statement an account imported, as it was sent and named.
+      - name: originalStatement
+        typeRef:
+          name: ""
+        required: true
+        arguments:
+          - name: accountId
+            typeRef:
+              name: Identity.UUID
+            required: true
+        httpMethod: GET
+        restPath: statements/{accountId}/original
+        fileDownload:
+          contentType: application/octet-stream

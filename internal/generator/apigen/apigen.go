@@ -128,14 +128,18 @@ type (
 
 // FileUploadField represents a file upload field in an endpoint's input type.
 type FileUploadField struct {
-	Name             string
-	GoName           string
-	ScalarType       string
-	MaxSize          int64
-	AllowedTypes     []string
-	Category         string
-	Required         bool
-	ImageConstraints *ir.ImageConstraints
+	Name         string
+	GoName       string
+	ScalarType   string
+	MaxSize      int64
+	AllowedTypes []string
+	// AllowedExtensions are the filename extensions the part's filename
+	// may end in, with the dot, matched without regard to case (D81);
+	// empty admits any.
+	AllowedExtensions []string
+	Category          string
+	Required          bool
+	ImageConstraints  *ir.ImageConstraints
 }
 
 // EndpointInfo represents one REST API endpoint extracted from an operation.
@@ -159,6 +163,12 @@ type EndpointInfo struct {
 	HasInput      bool
 	// InputRequired reports whether the input argument is non-null.
 	InputRequired bool
+	// InputAllowsUnknownFields reports whether every server decodes the
+	// input accepting a top-level key its type does not declare and
+	// dropping it (D87): its type is @allowUnknownFields, or the operation
+	// is a @webhook and its type is neither @strictJSON nor
+	// @denyUnknownFields. Every other input refuses such a key (D42).
+	InputAllowsUnknownFields bool
 
 	OutputType    string // schema output type name
 	OutputGoType  string // qualified Go type expression for the output
@@ -229,6 +239,12 @@ type EndpointInfo struct {
 
 	HasFileUpload    bool
 	FileUploadFields []FileUploadField
+
+	// FileDownload is the operation's FileDownload<C> result (D81), nil for
+	// every other endpoint: the route answers the file's bytes with its
+	// Content-Type and a Content-Disposition filename, not the envelope,
+	// and OutputType is empty.
+	FileDownload *ir.FileDownloadDef
 
 	// Middleware values resolved from the operation set defaults plus
 	// field-level overrides. Nil means no directive.
@@ -338,6 +354,11 @@ type APIOutput struct {
 	// and implements none of them. Nil in the output Generate returns,
 	// whose Endpoints hold every operation.
 	IdentityEndpoints []EndpointInfo
+
+	// Registration is the API's @userSessions when its register admits
+	// users otherwise than open registration with no roles does (D81), and
+	// nil otherwise: the identity wiring passes it to the runtime.
+	Registration *ir.UserSessionsConfig
 
 	HasAuth                  bool
 	HasEncryptedEndpoints    bool
@@ -808,6 +829,7 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	}
 	output.Jobs = jobsOf(schema)
 	output.Workers = workersOf(schema)
+	output.Registration = IdentityRegistration(schema)
 	output.IndirectModules = goutil.UniqueModules([]string{output.TypesModule}, []string{upstreamTypesModule})
 	output.UpstreamVersionGraph = declaresVersionGraph(opts.UpstreamIR)
 	if opts.IsPublic && opts.UpstreamSchema != "" {
@@ -1015,6 +1037,13 @@ func extractNamespace(setName string) string {
 	return codegen.ToKebabCase(name)
 }
 
+// RateLimitOperation names the operation in the shared rate limit's keys
+// (D75): its namespace and its name, `product.getProduct`, as every
+// language's server names it.
+func (e EndpointInfo) RateLimitOperation() string {
+	return e.Namespace + "." + e.Name
+}
+
 // defaultMethodForSet returns the HTTP method for operations that omit an
 // explicit method. Mutation- and action-style sets default to POST.
 func defaultMethodForSet(setName string) string {
@@ -1040,6 +1069,11 @@ func handlerName(namespace, operation string) string {
 func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *ir.OperationSet, types *typeMapper, schema *ir.Schema, provider AuthProvider, invocation ToolInvocationPolicy) (*EndpointInfo, error) {
 	if err := ir.ValidateOperationDocs(op.Docs); err != nil {
 		return nil, fmt.Errorf("apigen: operation %s.%s has invalid docs: %w", namespace, op.Name, err)
+	}
+	// The decorator refuses a :name segment where it is read (D100); the
+	// data forms carry the path as it is.
+	if err := ir.ValidateRestPath(op.RestPath); err != nil {
+		return nil, fmt.Errorf("apigen: operation %s.%s: %w", namespace, op.Name, err)
 	}
 	mcp, err := resolveOperationMCP(op, namespace, invocation)
 	if err != nil {
@@ -1141,6 +1175,13 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		}
 	}
 
+	inputAllowsUnknownFields := false
+	if inputType != "" {
+		if typeDef, ok := types.findTypeDef(inputType); ok {
+			inputAllowsUnknownFields = InputAllowsUnknownFields(op, typeDef)
+		}
+	}
+
 	requiresAuth := op.Auth || op.RequireOwnership || len(op.Permissions) > 0
 
 	rateLimit, bodyLimit, timeout := resolveMiddleware(set.Middleware, op.Middleware)
@@ -1172,6 +1213,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		InputTypeFields:              inputTypeFields,
 		HasInput:                     hasInput,
 		InputRequired:                inputRequired,
+		InputAllowsUnknownFields:     inputAllowsUnknownFields,
 		OutputType:                   op.TypeRef.Name,
 		OutputGoType:                 outputGoType,
 		OutputIsArray:                op.TypeRef.IsArray,
@@ -1194,6 +1236,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		ServiceCallers:               ir.EffectiveServiceCallers(set, op),
 		HasFileUpload:                len(fileUploadFields) > 0,
 		FileUploadFields:             fileUploadFields,
+		FileDownload:                 op.FileDownload,
 		RateLimit:                    rateLimit,
 		BodyLimit:                    bodyLimit,
 		Timeout:                      timeout,
@@ -1230,6 +1273,21 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 	}
 
 	return endpoint, nil
+}
+
+// InputAllowsUnknownFields reports whether the servers decode op's input,
+// of type input, accepting and dropping a top-level key the type does not
+// declare (D87): a type that is @allowUnknownFields does so wherever it is
+// decoded, and a @webhook's input does so unless its type is @strictJSON or
+// @denyUnknownFields, since a provider adds keys to its payloads over time.
+func InputAllowsUnknownFields(op *ir.FieldDef, input *ir.TypeDef) bool {
+	if input == nil {
+		return false
+	}
+	if input.AllowUnknownFields {
+		return true
+	}
+	return op != nil && op.Webhook && !input.StrictJSON && !input.DenyUnknownFields
 }
 
 // buildPath assembles the full route path. An explicit @rest path wins;
@@ -1344,9 +1402,10 @@ func declaresVersionGraph(schema *ir.Schema) bool {
 }
 
 // resolveUUIDTypeExpr finds the schema's UUID-like scalar and returns its
-// qualified Go type expression.
+// qualified Go type expression: the least of those whose leaf is UUID, else
+// the least of the others, whatever order the scalars are walked in (D94).
 func resolveUUIDTypeExpr(schema *ir.Schema) string {
-	var fallback string
+	var exact, fallback string
 	for name, scalarDef := range schema.Scalars {
 		tokens := codegen.BuildScalarTokens(name)
 		traits := codegen.BuildScalarTraits(scalarDef, tokens, "")
@@ -1355,11 +1414,17 @@ func resolveUUIDTypeExpr(schema *ir.Schema) string {
 		}
 		expr := "types." + tokens.Symbol
 		if strings.EqualFold(tokens.Leaf(), "uuid") {
-			return expr
+			if exact == "" || expr < exact {
+				exact = expr
+			}
+			continue
 		}
 		if fallback == "" || expr < fallback {
 			fallback = expr
 		}
+	}
+	if exact != "" {
+		return exact
 	}
 	return fallback
 }
@@ -1613,50 +1678,53 @@ func (m *typeMapper) extractFileUploadFields(inputTypeName string) ([]FileUpload
 
 	var fields []FileUploadField
 	for _, field := range typeDef.Fields {
-		scalarDef, ok := m.findScalarDef(field.TypeRef.Name)
-		if !ok || scalarDef.FileUpload == nil {
+		fu := ir.FileUploadOf(field, m.findScalarDef)
+		if fu == nil {
 			continue
 		}
 
 		if field.TypeRef.IsArrayOfArrays {
 			return nil, fmt.Errorf("input field %s.%s: a file upload cannot be an array of arrays", inputTypeName, field.Name)
 		}
-		fu := scalarDef.FileUpload
 		maxSize := int64(fu.MaxSize)
 		allowedTypes := fu.AllowedTypes
 		if field.ValidateUploadMaxBytes != nil {
 			maxSize = *field.ValidateUploadMaxBytes
 		}
 		if maxSize <= 0 {
-			maxSize = 100 * 1024 * 1024
+			maxSize = ir.DefaultUploadMaxBytes
 		}
 		if allowedTypes == nil {
 			allowedTypes = []string{}
 		}
+		var imageConstraints *ir.ImageConstraints
+		if field.FileUpload == nil {
+			if scalarDef, ok := m.findScalarDef(field.TypeRef.Name); ok {
+				imageConstraints = scalarDef.ImageConstraints
+			}
+		}
 
 		fields = append(fields, FileUploadField{
-			Name:             field.Name,
-			GoName:           codegen.ToPascalCase(field.Name),
-			ScalarType:       field.TypeRef.Name,
-			MaxSize:          maxSize,
-			AllowedTypes:     allowedTypes,
-			Category:         fu.Category,
-			Required:         field.Required,
-			ImageConstraints: scalarDef.ImageConstraints,
+			Name:              field.Name,
+			GoName:            codegen.ToPascalCase(field.Name),
+			ScalarType:        field.TypeRef.Name,
+			MaxSize:           maxSize,
+			AllowedTypes:      allowedTypes,
+			AllowedExtensions: append([]string{}, fu.AllowedExtensions...),
+			Category:          fu.Category,
+			Required:          field.Required,
+			ImageConstraints:  imageConstraints,
 		})
 	}
 	return fields, nil
 }
 
+// findScalarDef finds the scalar name in the first of ir.LookupScopes that
+// declares it: the schema, the dependency it imports name from, then the
+// others by service name, never in the order of a map walk (D94).
 func (m *typeMapper) findScalarDef(name string) (*ir.ScalarDef, bool) {
-	if scalarDef, ok := m.schema.Scalars[name]; ok {
-		return scalarDef, true
-	}
-	for _, dep := range m.dependencies {
-		if dep == nil {
-			continue
-		}
-		if scalarDef, ok := dep.Scalars[name]; ok {
+	for _, scope := range ir.LookupScopes(m.schema, m.dependencies, name) {
+		if scalarDef, ok := scope.Schema.Scalars[name]; ok {
 			return scalarDef, true
 		}
 	}

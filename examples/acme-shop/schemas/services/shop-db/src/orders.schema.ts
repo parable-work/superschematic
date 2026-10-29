@@ -1,6 +1,6 @@
 import { Contact, Generic, Identity, Temporal } from "superscalar";
 import { Default, Nullable, Validate, jsonField } from "@superschematic/schema";
-import { AutoGenerate, HasMany, Relation, index, key, queue, searchField, unique } from "@superschematic/db";
+import { AutoGenerate, HasMany, Relation, enqueueOnChange, index, key, queue, searchField, unique } from "@superschematic/db";
 
 import { Auditable, Product, User } from "./shop.schema";
 
@@ -29,8 +29,27 @@ export enum OrderStatus {
   Cancelled = "cancelled"
 }
 
-// A shopper's order. Staff look orders up by customer, newest first.
+// Placed with each order, in the transaction that writes it, and by the
+// trigger on an order put back to placed: shop-orders' worker FulfilOrders
+// handles each message, and a message whose handler fails is retried every
+// half minute, five times at most. One waits per order: an order placed
+// again while its message waits adds none.
+@queue({ retries: 5, backoff: "30s", key: "orderId", onDuplicate: "skip" })
+export abstract class OrderPlaced {
+  orderId: Identity.UUID;
+}
+
+// A shopper's order. Staff look orders up by customer, newest first. An
+// order put back to placed, by staff or by a script in psql, is fulfilled
+// again: the database's trigger enqueues its OrderPlaced, whatever wrote
+// the row.
 @index<Order>(["customer", "placedAt"])
+@enqueueOnChange<OrderPlaced, Order>(OrderPlaced, {
+  on: ["update"],
+  fields: ["status"],
+  when: [{ field: "status", equals: OrderStatus.Placed }],
+  message: { orderId: "id" },
+})
 export abstract class Order extends Auditable {
   @key
   id: AutoGenerate<Identity.UUID>;
@@ -39,7 +58,7 @@ export abstract class Order extends Auditable {
 
   status: Default<OrderStatus, OrderStatus.Placed>;
 
-  placedAt: Temporal.DateTime;
+  placedAt: Default<Temporal.DateTime, "now">;
 
   // Where the order ships.
   shippingAddress: ShippingAddress;
@@ -61,14 +80,6 @@ export abstract class Order extends Auditable {
   totalCents: Generic.Int64;
 
   lines: HasMany<OrderLine>;
-}
-
-// Placed with each order, in the transaction that writes it: shop-orders'
-// worker FulfilOrders handles each message, and a message whose handler
-// fails is retried every half minute, five times at most.
-@queue({ retries: 5, backoff: "30s" })
-export abstract class OrderPlaced {
-  orderId: Identity.UUID;
 }
 
 // One product on an order, at the price the shopper paid.

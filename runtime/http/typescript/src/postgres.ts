@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { Duplex } from 'node:stream';
 import pg from 'pg';
 import type { Pool, PoolConfig } from 'pg';
+import { withTypeParsers } from './pgcodec.js';
 import type { CloudSqlConnection, DatabaseConnection } from './stackconfig.js';
 
 /*
@@ -14,6 +15,13 @@ so the main entry never imports pg. pg is an optional peer dependency, and
 so is @google-cloud/cloud-sql-connector, which only a server some
 environment places on Cloud SQL needs, as only such a Go server links the
 Go connector (section 8.1).
+
+A pool reads BIGINT, NUMERIC and DATE as the TypeScript types hold them
+(D79): a number, refused past 2^53 - 1, the exact text, and the
+YYYY-MM-DD text, through type parsers of its own (postgresTypeParsers),
+never pg's global ones, so a pool opened elsewhere in the process is left
+as it was. typeParsers: false keeps pg's: text for a BIGINT and a NUMERIC,
+and a Date at local midnight for a DATE.
 
 A connection string opens a pool with pg. A Cloud SQL connector
 configuration opens one whose connections the connector dials, over its
@@ -63,7 +71,7 @@ type Fits<T extends CloudSqlConnectorModule> = T;
 type _InstalledConnectorFits = Fits<typeof import('@google-cloud/cloud-sql-connector')>;
 
 /** The pool settings connectPostgres takes beside the connection, which it sets itself. */
-export type PostgresPoolSettings = Omit<PoolConfig, 'connectionString' | 'host' | 'port' | 'user' | 'password' | 'database' | 'stream' | 'ssl'>;
+export type PostgresPoolSettings = Omit<PoolConfig, 'connectionString' | 'host' | 'port' | 'user' | 'password' | 'database' | 'stream' | 'ssl' | 'types'>;
 
 export interface ConnectPostgresOptions {
   /** Pool settings: max, idleTimeoutMillis and the like. */
@@ -76,6 +84,13 @@ export interface ConnectPostgresOptions {
   readonly onIdleError?: (error: Error) => void;
   /** Loads the Cloud SQL connector; a dynamic import of @google-cloud/cloud-sql-connector by default. For tests. */
   readonly loadConnector?: () => Promise<CloudSqlConnectorModule>;
+  /**
+   * Whether the pool reads BIGINT as a number, refused past 2^53 - 1,
+   * NUMERIC as its exact text and DATE as its YYYY-MM-DD text
+   * (postgresTypeParsers, D79); true unless false, which keeps pg's own
+   * parsers. Either way pg's global types are left alone.
+   */
+  readonly typeParsers?: boolean;
 }
 
 /** The package a Cloud SQL configuration needs. */
@@ -159,7 +174,7 @@ class CloudSqlPool extends pg.Pool {
   }
 }
 
-async function cloudSqlPool(db: CloudSqlConnection, settings: PostgresPoolSettings, load: () => Promise<CloudSqlConnectorModule>): Promise<Pool> {
+async function cloudSqlPool(db: CloudSqlConnection, settings: PoolConfig, load: () => Promise<CloudSqlConnectorModule>): Promise<Pool> {
   const state = acquireConnector(load);
   try {
     const { module, connector } = await state.connector;
@@ -181,14 +196,19 @@ async function cloudSqlPool(db: CloudSqlConnection, settings: PostgresPoolSettin
  * Opens a pool over db: pg over a connection string, or the Cloud SQL
  * connector with IAM database authentication over a Cloud SQL connector
  * configuration. Rejects for a Cloud SQL configuration when the connector
- * is not installed or cannot read the instance's settings, and for a D1
- * binding, which only a Worker reaches (D64).
+ * is not installed or cannot read the instance's settings, for a D1
+ * binding, which only a Worker reaches (D64), and for a Hyperdrive binding,
+ * which a Worker opens with ./hyperdrive's hyperdrivePool (D92).
  */
 export async function connectPostgres(db: DatabaseConnection, options: ConnectPostgresOptions = {}): Promise<Pool> {
   if ('d1' in db) {
     throw new Error(`D1 database ${db.d1.database} is no Postgres database: a Worker reaches it through its binding ${db.d1.binding} (D64)`);
   }
-  const settings = options.pool ?? {};
+  if ('hyperdrive' in db) {
+    throw new Error(`Hyperdrive config ${db.hyperdrive.config} is reached through a Worker's binding ${db.hyperdrive.binding} alone (D92)`);
+  }
+  const settings: PoolConfig = { ...(options.pool ?? {}) };
+  if (options.typeParsers !== false) settings.types = withTypeParsers(pg.types);
   const pool = 'cloudSql' in db ? await cloudSqlPool(db.cloudSql, settings, options.loadConnector ?? importConnector) : new pg.Pool({ ...settings, connectionString: db.url });
   const onIdleError = options.onIdleError ?? ((error: Error) => console.error(`postgres: an idle connection failed: ${error.message}`));
   pool.on('error', onIdleError);
@@ -285,3 +305,103 @@ export async function ping(pool: Pick<Pool, 'query'>, timeoutMs: number): Promis
 // its ./queues entry.
 export { ClaimLostError, enqueue, parseArray, postgresQueue } from './queue.js';
 export type { PostgresQueue, Queue, QueueClaim, QueueDefinition, QueueField, QueueQueryable, QueueQueryConfig, QueueStatements } from './queue.js';
+
+// The value codec (D79): a UUID's two forms, a row read as the types hold
+// it and a value bound as its column takes it, over the descriptors a DB's
+// types package carries, and the type parsers each pool reads with.
+export { uuidFromDb, uuidToDb } from './uuid.js';
+export {
+  PG_TYPES,
+  canonicalDecimal,
+  columnKey,
+  decodeRow,
+  decodeValue,
+  encodeParam,
+  numericText,
+  parseInt8,
+  postgresTypeParsers,
+  vectorText,
+  withTypeParsers,
+} from './pgcodec.js';
+export type { RowField, TypeParsers, ValueCodec } from './pgcodec.js';
+
+// The envelopes of a table's Encrypted<T> fields (D85), which the
+// repositories seal and open with the DB service's field keys, and the
+// SecretValue a read holds each one in.
+export { FIELD_ENVELOPE_VERSION, FieldEncryptionError, FieldKeyring, fieldKeyId, newRowKey, parseFieldKeys } from './fieldcrypt.js';
+export type { FieldCell, FieldEncryptionReason, FieldKeys } from './fieldcrypt.js';
+export { SECRET_MASK, SecretValue, revealed } from './secret.js';
+export type { Revealable } from './secret.js';
+
+// The generated repositories (D79): the tables a DB's types package
+// describes in its ./orm entry, whose createOrm calls ormOf over a pool.
+export { NoUserError, NotFoundError, ORM_MEMBERS, PageKeyError, TooManyRowsError, fill, ormOf } from './orm.js';
+// A DB service's declared queries (D86), which its ./orm entry describes
+// and its ORM's queries member runs.
+export { queriesOf } from './queries.js';
+export type { QueryDefinition, QueryOrderDefinition, QueryPageDefinition, QueryPageOptions, QueryRun } from './queries.js';
+export type {
+  Actor,
+  EncryptedRepository,
+  BoolFilter,
+  Clauses,
+  DateFilter,
+  DateTimeFilter,
+  DurationFilter,
+  FindOptions,
+  IncludeOf,
+  IsolationLevel,
+  IterativeScan,
+  JsonFilter,
+  Loaded,
+  ManyDefinition,
+  NearestDefinition,
+  NearestOptions,
+  NearestSettingDefinition,
+  Neighbour,
+  NullFilter,
+  NumberFilter,
+  OrderBy,
+  Orm,
+  OrmDefinition,
+  OrmMembers,
+  OrmOptions,
+  OrmPool,
+  OrmQueryConfig,
+  OrmQueryOptions,
+  OrmQueryResult,
+  OrmQueryable,
+  OrmTx,
+  PageOptions,
+  PageSortOf,
+  PointFilter,
+  ReadOptions,
+  ReadRepository,
+  ReferenceDefinition,
+  ReferencedByFilter,
+  Related,
+  RelationDefinition,
+  Repository,
+  RowPage,
+  SoftDeleteRepository,
+  Checked,
+  StringFilter,
+  TableColumn,
+  TableDefinition,
+  TableStatements,
+  TotalOf,
+  TransactionOptions,
+  UniqueKeyDefinition,
+  UpsertField,
+  UpsertManyOptions,
+  UpsertOptions,
+  UpsertResult,
+  UpsertStatus,
+  UuidFilter,
+  VectorMetric,
+  VectorRepository,
+} from './orm.js';
+// The system actor an ORM's asSystem() acts as, for a job's or a worker's
+// writes (D87).
+export { DEFAULT_SYSTEM_ACTOR, systemActorOf } from './orm.js';
+export type { SystemActor } from './orm.js';
