@@ -275,9 +275,9 @@ func (w *walker) evaluateReference(node *astNode, depth int) (any, *SchemaError)
 	}
 
 	if decl := sym.ValueDeclaration; decl != nil && decl.Kind == kindVariableDeclaration {
-		if list := decl.Parent; list != nil && list.Kind == kindVariableDeclarationList && uint32(list.Flags)&nodeFlagsConst == 0 {
+		if list := decl.Parent; list != nil && list.Kind == kindVariableDeclarationList && list.Flags&nodeFlagsConst == 0 {
 			keyword := "var"
-			if uint32(list.Flags)&nodeFlagsLet != 0 {
+			if list.Flags&nodeFlagsLet != 0 {
 				keyword = "let"
 			}
 			return nil, errorAtNode(node, "%q is declared with %s; the static walk reads a const's initializer, which no assignment changes: declare it const", sym.Name, keyword)

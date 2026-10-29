@@ -3,11 +3,12 @@
 // produces the v2 Schema IR.
 //
 // This file is the thin pinned wrapper over the compiler: it is the ONLY file
-// in the package that imports the fork's shim packages
-// (github.com/microsoft/typescript-go/shim/...). Everything else in tsreader
-// programs against the local aliases and bindings declared here, so compiler
-// API churn localizes to this file. The fork version is pinned in go.mod and
-// upgraded in dedicated PRs.
+// in the package that imports the shim packages
+// (github.com/microsoft/typescript-go/shim/...). The shim is its own module,
+// github.com/parable-work/typescript-shim, over Microsoft's unmodified
+// compiler. Everything else in tsreader programs against the local aliases
+// and bindings declared here, so compiler API churn localizes to this file.
+// go.mod pins the shim and the compiler, and dedicated PRs upgrade them.
 package tsreader
 
 import (
@@ -41,108 +42,106 @@ type (
 	tsProgram     = tscompiler.Program
 )
 
-// AST node kinds.
+// AST node kinds. Each one aliases a shim constant, never a number, because
+// a compiler release can renumber the Kind enum.
 const (
-	kindNumericLiteral           = tsast.KindNumericLiteral
-	kindStringLiteral            = tsast.KindStringLiteral
-	kindIdentifier               = tsast.KindIdentifier
-	kindDecorator                = tsast.KindDecorator
-	kindPropertyDeclaration      = tsast.KindPropertyDeclaration
-	kindMethodDeclaration        = tsast.KindMethodDeclaration
-	kindTypeReference            = tsast.KindTypeReference
-	kindArrayType                = tsast.KindArrayType
-	kindUnionType                = tsast.KindUnionType
-	kindObjectLiteralExpression  = tsast.KindObjectLiteralExpression
-	kindPropertyAccessExpression = tsast.KindPropertyAccessExpression
-	kindCallExpression           = tsast.KindCallExpression
-	kindClassDeclaration         = tsast.KindClassDeclaration
-	kindInterfaceDeclaration     = tsast.KindInterfaceDeclaration
-	kindTypeAliasDeclaration     = tsast.KindTypeAliasDeclaration
-	kindEnumDeclaration          = tsast.KindEnumDeclaration
-	kindHeritageClause           = tsast.KindHeritageClause
-	kindSourceFile               = tsast.KindSourceFile
-	// The latest fork shim keeps only the first-pass walker constants public.
-	// These values match internal/ast/kind_stringer_generated.go at the pinned
-	// replacement version.
-	kindExtendsKeyword              = tsast.Kind(95)
-	kindImplementsKeyword           = tsast.Kind(118)
-	kindImportDeclaration           = tsast.Kind(273)
-	kindNamedImports                = tsast.Kind(276)
-	kindNamespaceImport             = tsast.Kind(275)
-	kindImportSpecifier             = tsast.Kind(277)
-	kindArrayLiteralExpression      = tsast.Kind(210)
-	kindTrueKeyword                 = tsast.Kind(111)
-	kindFalseKeyword                = tsast.Kind(96)
-	kindNullKeyword                 = tsast.Kind(105)
-	kindPrefixUnaryExpression       = tsast.Kind(225)
-	kindNoSubstitutionTemplate      = tsast.Kind(14)
-	kindMinusToken                  = tsast.Kind(40)
-	kindTypeLiteral                 = tsast.Kind(188)
-	kindTupleType                   = tsast.Kind(190)
-	kindPropertySignature           = tsast.Kind(172)
-	kindLiteralType                 = tsast.Kind(202)
-	kindParameter                   = tsast.Kind(170)
-	kindEnumMember                  = tsast.Kind(306)
-	kindExpressionWithTypeArguments = tsast.Kind(234)
-	kindPropertyAssignment          = tsast.Kind(303)
-	kindExportAssignment            = tsast.Kind(278)
-	kindTypeOperator                = tsast.Kind(199)
-	kindParenthesizedType           = tsast.Kind(197)
-	kindQualifiedName               = tsast.Kind(167)
-	kindComputedPropertyName        = tsast.Kind(168)
-	kindStringKeyword               = tsast.Kind(154)
-	kindNumberKeyword               = tsast.Kind(150)
-	kindBooleanKeyword              = tsast.Kind(135)
-	kindObjectKeyword               = tsast.Kind(151)
-	kindAnyKeyword                  = tsast.Kind(132)
-	kindUnknownKeyword              = tsast.Kind(159)
-	kindVariableStatement           = tsast.Kind(244)
-	kindVariableDeclaration         = tsast.Kind(261)
-	kindQuestionToken               = tsast.Kind(57)
-	kindAsExpression                = tsast.Kind(235)
-	kindVariableDeclarationList     = tsast.Kind(262)
-	kindTemplateExpression          = tsast.Kind(229)
-	kindBinaryExpression            = tsast.Kind(227)
+	kindNumericLiteral              = tsast.KindNumericLiteral
+	kindStringLiteral               = tsast.KindStringLiteral
+	kindIdentifier                  = tsast.KindIdentifier
+	kindDecorator                   = tsast.KindDecorator
+	kindPropertyDeclaration         = tsast.KindPropertyDeclaration
+	kindMethodDeclaration           = tsast.KindMethodDeclaration
+	kindTypeReference               = tsast.KindTypeReference
+	kindArrayType                   = tsast.KindArrayType
+	kindUnionType                   = tsast.KindUnionType
+	kindObjectLiteralExpression     = tsast.KindObjectLiteralExpression
+	kindPropertyAccessExpression    = tsast.KindPropertyAccessExpression
+	kindCallExpression              = tsast.KindCallExpression
+	kindClassDeclaration            = tsast.KindClassDeclaration
+	kindInterfaceDeclaration        = tsast.KindInterfaceDeclaration
+	kindTypeAliasDeclaration        = tsast.KindTypeAliasDeclaration
+	kindEnumDeclaration             = tsast.KindEnumDeclaration
+	kindHeritageClause              = tsast.KindHeritageClause
+	kindSourceFile                  = tsast.KindSourceFile
+	kindExtendsKeyword              = tsast.KindExtendsKeyword
+	kindImplementsKeyword           = tsast.KindImplementsKeyword
+	kindImportDeclaration           = tsast.KindImportDeclaration
+	kindNamedImports                = tsast.KindNamedImports
+	kindNamespaceImport             = tsast.KindNamespaceImport
+	kindImportSpecifier             = tsast.KindImportSpecifier
+	kindArrayLiteralExpression      = tsast.KindArrayLiteralExpression
+	kindTrueKeyword                 = tsast.KindTrueKeyword
+	kindFalseKeyword                = tsast.KindFalseKeyword
+	kindNullKeyword                 = tsast.KindNullKeyword
+	kindPrefixUnaryExpression       = tsast.KindPrefixUnaryExpression
+	kindNoSubstitutionTemplate      = tsast.KindNoSubstitutionTemplateLiteral
+	kindMinusToken                  = tsast.KindMinusToken
+	kindTypeLiteral                 = tsast.KindTypeLiteral
+	kindTupleType                   = tsast.KindTupleType
+	kindPropertySignature           = tsast.KindPropertySignature
+	kindLiteralType                 = tsast.KindLiteralType
+	kindParameter                   = tsast.KindParameter
+	kindEnumMember                  = tsast.KindEnumMember
+	kindExpressionWithTypeArguments = tsast.KindExpressionWithTypeArguments
+	kindPropertyAssignment          = tsast.KindPropertyAssignment
+	kindExportAssignment            = tsast.KindExportAssignment
+	kindTypeOperator                = tsast.KindTypeOperator
+	kindParenthesizedType           = tsast.KindParenthesizedType
+	kindQualifiedName               = tsast.KindQualifiedName
+	kindComputedPropertyName        = tsast.KindComputedPropertyName
+	kindStringKeyword               = tsast.KindStringKeyword
+	kindNumberKeyword               = tsast.KindNumberKeyword
+	kindBooleanKeyword              = tsast.KindBooleanKeyword
+	kindObjectKeyword               = tsast.KindObjectKeyword
+	kindAnyKeyword                  = tsast.KindAnyKeyword
+	kindUnknownKeyword              = tsast.KindUnknownKeyword
+	kindVariableStatement           = tsast.KindVariableStatement
+	kindVariableDeclaration         = tsast.KindVariableDeclaration
+	kindQuestionToken               = tsast.KindQuestionToken
+	kindAsExpression                = tsast.KindAsExpression
+	kindVariableDeclarationList     = tsast.KindVariableDeclarationList
+	kindTemplateExpression          = tsast.KindTemplateExpression
+	kindBinaryExpression            = tsast.KindBinaryExpression
 )
 
 // Modifier flags.
 const (
-	modifierFlagsExport   = 1 << 5
-	modifierFlagsAbstract = 1 << 6
+	modifierFlagsExport   = tsast.ModifierFlagsExport
+	modifierFlagsAbstract = tsast.ModifierFlagsAbstract
 )
 
 // Node flags: a variable declaration list's let and const.
 const (
-	nodeFlagsLet   = 1 << 0
-	nodeFlagsConst = 1 << 1
+	nodeFlagsLet   = tsast.NodeFlagsLet
+	nodeFlagsConst = tsast.NodeFlagsConst
 )
 
 // Symbol flags.
 const (
-	symbolFlagsAlias      = 1 << 21
-	symbolFlagsFunction   = 1 << 4
-	symbolFlagsClass      = 1 << 5
-	symbolFlagsModule     = 1<<9 | 1<<10
-	symbolFlagsInterface  = 1 << 6
-	symbolFlagsEnum       = 1<<7 | 1<<8
-	symbolFlagsTypeAlias  = 1 << 19
-	symbolFlagsEnumMember = 1 << 3
+	symbolFlagsAlias      = tsast.SymbolFlagsAlias
+	symbolFlagsFunction   = tsast.SymbolFlagsFunction
+	symbolFlagsClass      = tsast.SymbolFlagsClass
+	symbolFlagsModule     = tsast.SymbolFlagsModule
+	symbolFlagsInterface  = tsast.SymbolFlagsInterface
+	symbolFlagsEnum       = tsast.SymbolFlagsEnum
+	symbolFlagsTypeAlias  = tsast.SymbolFlagsTypeAlias
+	symbolFlagsEnumMember = tsast.SymbolFlagsEnumMember
 )
 
 // Type flags.
 const (
-	typeFlagsString         = 1 << 5
-	typeFlagsNumber         = 1 << 6
-	typeFlagsBoolean        = 1 << 8
-	typeFlagsStringLiteral  = 1 << 10
-	typeFlagsNumberLiteral  = 1 << 11
-	typeFlagsBooleanLiteral = 1 << 13
-	typeFlagsEnumLiteral    = 1 << 15
-	typeFlagsUnion          = 1 << 27
-	typeFlagsIntersection   = 1 << 28
-	typeFlagsStringLike     = 1<<5 | 1<<10 | 1<<22 | 1<<23
-	typeFlagsNumberLike     = 1<<6 | 1<<11 | 1<<16
-	typeFlagsBooleanLike    = 1<<8 | 1<<13
+	typeFlagsString         = tschecker.TypeFlagsString
+	typeFlagsNumber         = tschecker.TypeFlagsNumber
+	typeFlagsBoolean        = tschecker.TypeFlagsBoolean
+	typeFlagsStringLiteral  = tschecker.TypeFlagsStringLiteral
+	typeFlagsNumberLiteral  = tschecker.TypeFlagsNumberLiteral
+	typeFlagsBooleanLiteral = tschecker.TypeFlagsBooleanLiteral
+	typeFlagsEnumLiteral    = tschecker.TypeFlagsEnumLiteral
+	typeFlagsUnion          = tschecker.TypeFlagsUnion
+	typeFlagsIntersection   = tschecker.TypeFlagsIntersection
+	typeFlagsStringLike     = tschecker.TypeFlagsStringLike
+	typeFlagsNumberLike     = tschecker.TypeFlagsNumberLike
+	typeFlagsBooleanLike    = tschecker.TypeFlagsBooleanLike
 )
 
 // AST helpers.
@@ -156,8 +155,8 @@ func getSourceFileOfNode(node *astNode) *astSourceFile {
 	return nil
 }
 
-func hasSyntacticModifier(node *astNode, flags uint32) bool {
-	return uint32(node.ModifierFlags())&flags != 0
+func hasSyntacticModifier(node *astNode, flags tsast.ModifierFlags) bool {
+	return node.ModifierFlags()&flags != 0
 }
 
 // corsaProgram bundles a Corsa Program with its type checker and the checker
