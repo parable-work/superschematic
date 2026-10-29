@@ -15,7 +15,9 @@ import (
 // column of that type does. The view's key is the column that reads its
 // source's key, or the one column it collapses by: what getOne reads by
 // and a page's keyset places a row by. A projection with neither has no
-// repository.
+// repository. A view keyed by its source's key over a source with search
+// fields searches as the source does (D99): its filter's search text keeps
+// the rows whose source row the source's filter's would keep.
 
 // ViewName is the view of a projection, as a statement names it: its
 // pool-qualified name, quoted where it must be, or its name alone when it
@@ -42,11 +44,12 @@ func ViewsOf(schema *ir.Schema, dependencies map[string]*ir.Schema) ([]TableMode
 		if def == nil {
 			continue
 		}
-		key := ViewKey(schema, td)
+		key, ofSource := viewKey(schema, td)
 		if key == "" {
 			continue
 		}
 		view := TableModel{Type: td.Name, Name: def.Name, Quoted: ViewName(def)}
+		source := schema.Types[def.Source]
 		for _, f := range td.Fields {
 			ref := f.TypeRef
 			scalar, isScalar := scalars[ref.Name]
@@ -75,21 +78,45 @@ func ViewsOf(schema *ir.Schema, dependencies map[string]*ir.Schema) ([]TableMode
 			}
 			view.Columns = append(view.Columns, c)
 		}
+		if ofSource && searches(source) {
+			table := TableName(source)
+			view.Search = true
+			view.SearchColumn = Qualify(table, SearchTextColumn)
+			view.SearchProbe = Qualify(def.Name, view.Key) + " IN (SELECT " + Qualify(table, KeyColumnOf(source)) + " FROM " + QuoteIdentifier(table) + "%s)"
+		}
 		views = append(views, view)
 	}
 	return views, nil
 }
 
+// searches reports whether td, a table, has a search field, and so the
+// search_text column.
+func searches(td *ir.TypeDef) bool {
+	for _, f := range td.Fields {
+		if f != nil && f.SearchField {
+			return true
+		}
+	}
+	return false
+}
+
 // ViewKey is the field of a projection that is its key, or "": the column
 // that reads its source table's key, else the one column it collapses by.
 func ViewKey(schema *ir.Schema, td *ir.TypeDef) string {
+	key, _ := viewKey(schema, td)
+	return key
+}
+
+// viewKey is ViewKey, and whether the key reads the source's key, so each
+// of the view's rows is one of the source's.
+func viewKey(schema *ir.Schema, td *ir.TypeDef) (string, bool) {
 	def := td.Projection
 	if def == nil {
-		return ""
+		return "", false
 	}
 	source := schema.Types[def.Source]
 	if source == nil {
-		return ""
+		return "", false
 	}
 	sourceKey := ""
 	for _, f := range source.Fields {
@@ -110,11 +137,11 @@ func ViewKey(schema *ir.Schema, td *ir.TypeDef) string {
 	}
 	if sourceKey != "" {
 		if key := reads(ir.ProjectionBaseAlias + "." + sourceKey); key != "" {
-			return key
+			return key, true
 		}
 	}
 	if def.Collapse != nil && len(def.Collapse.By) == 1 {
-		return reads(def.Collapse.By[0])
+		return reads(def.Collapse.By[0]), false
 	}
-	return ""
+	return "", false
 }

@@ -1070,6 +1070,11 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 	if err := ir.ValidateOperationDocs(op.Docs); err != nil {
 		return nil, fmt.Errorf("apigen: operation %s.%s has invalid docs: %w", namespace, op.Name, err)
 	}
+	// The decorator refuses a :name segment where it is read (D100); the
+	// data forms carry the path as it is.
+	if err := ir.ValidateRestPath(op.RestPath); err != nil {
+		return nil, fmt.Errorf("apigen: operation %s.%s: %w", namespace, op.Name, err)
+	}
 	mcp, err := resolveOperationMCP(op, namespace, invocation)
 	if err != nil {
 		return nil, err
@@ -1397,9 +1402,10 @@ func declaresVersionGraph(schema *ir.Schema) bool {
 }
 
 // resolveUUIDTypeExpr finds the schema's UUID-like scalar and returns its
-// qualified Go type expression.
+// qualified Go type expression: the least of those whose leaf is UUID, else
+// the least of the others, whatever order the scalars are walked in (D94).
 func resolveUUIDTypeExpr(schema *ir.Schema) string {
-	var fallback string
+	var exact, fallback string
 	for name, scalarDef := range schema.Scalars {
 		tokens := codegen.BuildScalarTokens(name)
 		traits := codegen.BuildScalarTraits(scalarDef, tokens, "")
@@ -1408,11 +1414,17 @@ func resolveUUIDTypeExpr(schema *ir.Schema) string {
 		}
 		expr := "types." + tokens.Symbol
 		if strings.EqualFold(tokens.Leaf(), "uuid") {
-			return expr
+			if exact == "" || expr < exact {
+				exact = expr
+			}
+			continue
 		}
 		if fallback == "" || expr < fallback {
 			fallback = expr
 		}
+	}
+	if exact != "" {
+		return exact
 	}
 	return fallback
 }
@@ -1707,15 +1719,12 @@ func (m *typeMapper) extractFileUploadFields(inputTypeName string) ([]FileUpload
 	return fields, nil
 }
 
+// findScalarDef finds the scalar name in the first of ir.LookupScopes that
+// declares it: the schema, the dependency it imports name from, then the
+// others by service name, never in the order of a map walk (D94).
 func (m *typeMapper) findScalarDef(name string) (*ir.ScalarDef, bool) {
-	if scalarDef, ok := m.schema.Scalars[name]; ok {
-		return scalarDef, true
-	}
-	for _, dep := range m.dependencies {
-		if dep == nil {
-			continue
-		}
-		if scalarDef, ok := dep.Scalars[name]; ok {
+	for _, scope := range ir.LookupScopes(m.schema, m.dependencies, name) {
+		if scalarDef, ok := scope.Schema.Scalars[name]; ok {
 			return scalarDef, true
 		}
 	}

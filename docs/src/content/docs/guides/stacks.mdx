@@ -253,6 +253,10 @@ export abstract class OrdersConfig extends PaymentsSecrets {
 A secret is identified by the type that declares the field and the
 field's name. When `shop-api`'s config extends the same `PaymentsSecrets`,
 both servers read one `PaymentsSecrets.STRIPE_KEY` in each environment.
+The base may carry `@envVars` too: the API's config is still the
+`@envVars` class no other extends, here `OrdersConfig`, and `env` sets its
+fields, the inherited ones among them
+([Environment variables](/superschematic/guides/modeling-types/#environment-variables)).
 
 Each API's build writes its handle to `src/service.generated.ts`. An API's
 handle carries its kind and its `@envVars` class as type parameters
@@ -1645,6 +1649,30 @@ every environment with Cloud Run.
 | image | `<region>-docker.pkg.dev/<project>/<stack>/<server or job>`, names in kebab case, pinned to the digest a deploy is given |
 | parameter | names suffixed with the parameter and its value (`shop-api-pr123`), a database per value (`shop_db_pr123`) on the parent's instance, whose secrets and network the member inherits, and a bucket per value, which the member's destroy empties; a memory store is the parent's, under names that carry the member's |
 
+A server's, a job's or a worker's name is also its service account's id,
+which holds 30 characters, and the names the target makes from a
+service's, a class's or the stack's name have limits of their own. A
+name the target makes that a limit would refuse is shortened instead
+(D97): a prefix of it, a hyphen, and seven hex digits of the SHA-256 of
+the whole name, so the same name always shortens alike and two names
+shorten apart. A finances API's job `SyncAllPlaidItems` is the deployable
+`finances-api-sync-all-plaid-items`, 33 characters, and its Cloud Run job,
+scheduler job and account are `finances-api-sync-all-` and the hash, with
+the whole name in the Cloud Run job's label `superschematic-deployable`;
+`stack run` and every command still take the deployable's name. In a
+member of a parameterized environment the shortened name leaves six
+characters for the parameter's value. A name that fits is never
+shortened, so a deployed resource keeps its name.
+
+| Name | Made from | Limit | Shortened |
+| --- | --- | --- | --- |
+| a server's, job's, worker's, runner's, deriver's or app's Cloud Run resource, its account, its scheduler job, its exposed load balancer's nodes and host | the deployable's name: its API's, with its class's or its database's | 30, the account id's | to 30, with the label on the Cloud Run resource; a deployable the stack declares by name is refused instead, naming it |
+| a bucket, `<project>-<stack>-<bucket>`, and a site's bucket, `<project>-<site>` | the project, the stack and the service | 63 | to 63, with the label on the bucket |
+| a memory store's instance | the project, the stack and the store | 63 | to 63, with the label on the instance |
+| a database, `<db service>` in snake case | the DB service | 63 | to 63, with an underscore before the hash |
+| a site's endpoint group and backend service for an API of its origin, `<site>-<api>-neg` and `-api` | the site and the API | 63 | the API's part, with both named in the node's description |
+| bootstrap's accounts, `<stack>-deployer` and the others, and its pool, `<stack>-github` | the stack | 30 and 32 | the stack's part, alike in every account |
+
 Settings and their defaults:
 
 | Platform | Setting | Default |
@@ -2248,6 +2276,16 @@ the database's owner create. The generated CI's deploy job reads the
 connection string from the secret `HYPERDRIVE_ORIGIN_<DB>_<STACK>_<ENV>`
 in its GitHub environment, which `stack bootstrap --github` sets from your
 shell. `stack destroy` leaves the config and the origin alone.
+
+`stack queue` reaches the origin the same way (D96): `stack queue dead
+Staging finances-db.PlaidSyncRequested` and its `retry`, `drop` and
+`backfill` run `superschematic-migrate queue` on your machine with the
+connection string in `HYPERDRIVE_ORIGIN_FINANCES_DB`, after the same check
+of the config's host, port, database and user, and say which variable to
+set when your shell holds none
+([Dead messages](/superschematic/guides/queues/#dead-messages)). A config
+that caches reads does not stop it, since it does not read through the
+config.
 
 An API over the user model whose `authDb` is on Hyperdrive signs its
 users in on Workers as on Bun (D92): the identity store runs on the same

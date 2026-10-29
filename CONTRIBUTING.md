@@ -124,8 +124,8 @@ every design decision (cited as D1, D2, ... in code and commits).
 
 | Tool          | Version | How it is pinned                                   |
 | ------------- | ------- | -------------------------------------------------- |
-| Go            | 1.26.4  | `tools.env` (`GO_VERSION`), also `GOTOOLCHAIN` and every `go.mod` |
-| golangci-lint | 2.11.4  | `tools.env` (`GOLANGCI_LINT_VERSION`)              |
+| Go            | 1.27.3  | `tools.env` (`GO_VERSION`), also `GOTOOLCHAIN` and every `go.mod` |
+| golangci-lint | 2.15.0  | `tools.env` (`GOLANGCI_LINT_VERSION`)              |
 | Node          | 24      | `tools.env` (`NODE_VERSION`)                       |
 | Bun           | 1.4.2   | `tools.env` (`BUN_VERSION`)                        |
 | Python        | 3.9 or newer | floor in `runtime/schema/python/pyproject.toml` and `runtime/versiongraph/python/pyproject.toml`; CI tests on `tools.env` (`PYTHON_VERSION`), and the version-graph binding on 3.9 too |
@@ -138,7 +138,7 @@ every design decision (cited as D1, D2, ... in code and commits).
 Setup on a fresh machine:
 
 ```
-export GOTOOLCHAIN=go1.26.4
+export GOTOOLCHAIN=go1.27.3
 rustup toolchain install 1.99.0 --target wasm32-unknown-unknown
 make setup
 ```
@@ -320,31 +320,68 @@ docker run -d --name superschematic-pgvector -e POSTGRES_PASSWORD=superschematic
 export SUPERSCHEMATIC_VECTOR_TEST_DATABASE_URL='postgres://postgres:superschematic@localhost:55433/postgres?sslmode=disable'
 ```
 
-### A deploy to Google Cloud
+### A deploy to the cloud
 
-No CI job deploys to Google Cloud. A maintainer proves the gcp target
-(milestone 3 of `docs/stack-model.md`) with a run from a checkout, against
-a fresh project they own, signed in with `gcloud auth login` and
-`gcloud auth application-default login`:
+No CI job deploys on a push or a pull request. A maintainer proves the
+gcp and cloudflare targets with `examples/deploy-smoke` (D97), a project
+shaped like a finances app: an API over the user model with a vector
+column, a keyed queue its TypeScript worker drains, a declared query, a
+job whose name is too long for a GCP service account, and a site on one
+origin with the API (D91). `scripts/smoke.sh <environment>` deploys
+`smoke-stack`'s `Gcp` or `Cloudflare`, checks it through the site's
+origin, signing in with a cookie, running the query and `nearest` and
+waiting for the worker to drain a message, prints the sign-ins' and the
+drain's times, and destroys it (`--keep` leaves it up, `--destroy`
+removes it later). `smoke.sh Dev` runs the same checks against `stack
+dev`, with no cloud. The example's README lists them.
 
-1. `make build`, and the `pulumi` CLI on `PATH`.
-2. Give `examples/acme-shop`'s `shop-stack` a gcp environment, beside
-   `Dev`, with the project and region, and the gcp target's types (the
-   stacks guide, "Type a target's values"). Keep the edit local: the
-   example builds with the core binary, which refuses a gcp environment.
-3. From `examples/acme-shop`, `../../bin/superschematic stack bootstrap
-   <environment> --repository ""`, which needs no GitHub repository.
-4. `export SUPERSCHEMATIC_MIGRATE_IMAGE="$(scripts/migrate-dev-image.sh
-   <project> <region> shop-stack)"` from the checkout's root, since a
-   binary built from a checkout names no release whose runner image the
-   deploy could build.
-5. `stack plan`, `stack deploy`, then call the APIs at the `run.app` URLs
-   `stack outputs` prints, and `stack destroy` (`--yes` away from a
-   terminal). Bootstrap's resources and the stack's images stay until the
-   project goes.
+The deploy runs from a checkout, with `make cli`'s `bin/superschematic`,
+the pulumi CLI on `PATH` and Bun, against a project or an account you own.
+The committed stack names placeholders, and the script writes yours in
+their place from its environment for the run:
 
-`third_party` must be a directory, not a link to another checkout: a
-build's context keeps a link as a link, as Docker's does.
+| Target | Once, with an owner's credentials | Each run |
+| --- | --- | --- |
+| gcp | `gcloud auth login` and `gcloud auth application-default login`, then `SMOKE_GCP_PROJECT=... SMOKE_GCP_REGION=... examples/deploy-smoke/scripts/smoke.sh Gcp --bootstrap`: bootstrap enables the APIs and makes the state bucket, the stack's repository and accounts, and Workload Identity Federation for the checkout's GitHub repository (`SMOKE_GITHUB_REPOSITORY` names another, `""` none) | `SMOKE_GCP_PROJECT`, `SMOKE_GCP_REGION` and application default credentials; gcloud, with which `scripts/migrate-dev-image.sh` builds the migration runner's image unless `SUPERSCHEMATIC_MIGRATE_IMAGE` names one |
+| cloudflare | Workers Paid: a sign-in hashes with the identity runtime's argon2id, about 120 ms of CPU, and Workers Free allows 10 ms. A Postgres the smoke owns, on Neon, Supabase or Cloud SQL, in `HYPERDRIVE_ORIGIN_SMOKE_DB`; a Hyperdrive config of it, `wrangler hyperdrive create smoke-stack-cloudflare-smoke-db --connection-string="$HYPERDRIVE_ORIGIN_SMOKE_DB" --caching-disabled`; then `smoke.sh Cloudflare --bootstrap` with your own `CLOUDFLARE_API_TOKEN`: bootstrap takes `PULUMI_CONFIG_PASSPHRASE` as the state's passphrase, makes the stack's CI tokens, and prints the account's workers.dev subdomain and Secrets Store id as it records them | `SMOKE_CLOUDFLARE_ACCOUNT_ID`, `SMOKE_CLOUDFLARE_WORKERS_SUBDOMAIN`, `SMOKE_CLOUDFLARE_SECRETS_STORE_ID`, `SMOKE_HYPERDRIVE_ID`, `HYPERDRIVE_ORIGIN_SMOKE_DB`, `CLOUDFLARE_API_TOKEN` and `PULUMI_CONFIG_PASSPHRASE`. The destroy empties the origin's tables, with psql or Docker's postgres image, since the next deploy has no manifest and migrates it from empty |
+
+Both take `SMOKE_ADMIN_PASSWORD`, the password of the smoke's
+administrator, `admin@smoke.test` (`SMOKE_ADMIN_LOGIN`): the first run on
+a database registers them, and later runs sign them in, so keep it.
+Bootstrap's resources, the stack's images, the Hyperdrive config and the
+origin stay after a destroy. `third_party` must be a directory, not a link
+to another checkout: a build's context keeps a link as a link, as
+Docker's does.
+
+`.github/workflows/deploy-smoke.yml` runs the script on GitHub Actions,
+by hand alone (`workflow_dispatch`, with the target as its input, and
+`keep`), from `main`. Its job runs in the GitHub environment named as the
+stack's environment, `Gcp` or `Cloudflare`, which holds:
+
+| Environment | Variables | Secrets |
+| --- | --- | --- |
+| `Gcp` | `SMOKE_GCP_PROJECT`, `SMOKE_GCP_REGION`, `SMOKE_GCP_WORKLOAD_IDENTITY_PROVIDER` (`projects/<number>/locations/global/workloadIdentityPools/smoke-stack-github/providers/github`), `SMOKE_GCP_SERVICE_ACCOUNT` (`smoke-stack-deployer@<project>.iam.gserviceaccount.com`) | `SMOKE_ADMIN_PASSWORD` |
+| `Cloudflare` | `SMOKE_CLOUDFLARE_ACCOUNT_ID`, `SMOKE_CLOUDFLARE_WORKERS_SUBDOMAIN`, `SMOKE_CLOUDFLARE_SECRETS_STORE_ID`, `SMOKE_HYPERDRIVE_ID` | `CLOUDFLARE_API_TOKEN` (bootstrap's `smoke-stack-deployer` token), `PULUMI_CONFIG_PASSPHRASE`, `HYPERDRIVE_ORIGIN_SMOKE_DB`, `SMOKE_ADMIN_PASSWORD` |
+
+On gcp the job signs in through bootstrap's federation as the deployer,
+which admits a manual run of `main` in the environment of that name alone
+(D69).
+
+What a run proves, which the tests prove only under fakes and the pinned
+workerd (D91 and D92 Left):
+
+| Target | Behaviour | The check that shows it |
+| --- | --- | --- |
+| gcp | The load balancer passes the browser's `Host` to Cloud Run through a serverless network endpoint group | a sign-in that sends `Origin` alone is taken as same-origin, a bad password's 401 and not a 403, which the identity runtime does only when the `Host` it sees is the site's; one from another origin is refused |
+| gcp | `pathPrefixRewrite` on a `fullPathMatch` rule makes the path `/`, and the prefix rule's the rest | every API call under `/api/smoke-api/` reaches its route |
+| gcp | `INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER` admits the site's load balancer | the same calls reach `smoke-api`, which has no public address |
+| gcp | The files' rules serve the fallback, and the API's 404 passes | a path of no file serves the page; a missing line item answers the API's 404 |
+| cloudflare | `runWorkerFirst` takes the API's paths before the assets | the config and every API call answer from the Workers, not the assets |
+| cloudflare | A service binding's request carries the browser's `Host` and a body | the sign-in that sends `Origin` alone, and each POST's JSON body |
+| cloudflare | Cloudflare accepts the version's Hyperdrive binding, and Hyperdrive reaches a real origin over TLS | the deploy, then every call that reads or writes, the declared query and `nearest` among them |
+| cloudflare | The Cron drainer's wall time and CPU | the time from the enqueue to the drain, within a firing a minute; the drainer Worker's invocation in Workers Logs |
+| cloudflare | argon2id's CPU on a sign-in | the sign-ins' times, the first of an isolate about 120 ms more for the hash it makes as it builds the identity service; their CPU in Workers Logs |
+| gcp | A job whose derived name is past a GCP limit deploys | `smoke-api-sync-all-linked-accounts`'s Cloud Run job, scheduler job and account, named `smoke-api-sync-all-lin-` and a hash (D97) |
 
 ## Rules
 

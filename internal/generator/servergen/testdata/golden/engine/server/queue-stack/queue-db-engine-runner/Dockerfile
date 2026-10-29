@@ -30,7 +30,7 @@
 # it on distroless cc, which holds the glibc and libgcc it needs and nothing
 # else, as a non-root user.
 
-ARG GO_VERSION=1.26.4
+ARG GO_VERSION=1.27.3
 ARG RUST_VERSION=1.99.0
 
 FROM rust:${RUST_VERSION}-trixie AS superscalar

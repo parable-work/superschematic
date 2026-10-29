@@ -4,7 +4,8 @@
 //! or update, or the behavior whose operation wrote it, by the entry its
 //! update() attributed it with (D16, amended: an operation's update()
 //! attributes what it writes) or else the operation's own behavior; the
-//! principal's subject; the time; and the confidence the attribution gave.
+//! principal's subject, and the subject it acted for (D77); the time; and
+//! the confidence the attribution gave.
 //!
 //! With review, a write from a source the review names is proposed, or
 //! accepted with no reviewer when its confidence reaches `below`. A
@@ -71,7 +72,7 @@ pub struct ProvenanceConfig {
 const NAME: &str = "Provenance";
 
 const COLUMNS: &str =
-    "record, field, source, by_subject, at, confidence, review, reviewed_by, reviewed_at";
+    "record, field, source, by_subject, for_subject, at, confidence, review, reviewed_by, reviewed_at";
 
 const PROPOSED: &str = "proposed";
 
@@ -112,6 +113,8 @@ struct Written<'a> {
     field: &'a str,
     source: &'a str,
     by: &'a str,
+    /// The subject the writer acted for (D77).
+    for_subject: Option<&'a str>,
     confidence: Option<f64>,
     review: Option<&'a str>,
     reviewed_by: Option<&'a str>,
@@ -131,6 +134,7 @@ fn record<C>(cx: &InstanceCx<'_, C>, written: &Written<'_>) -> Result<()> {
     at.extend([
         SqlValue::from(written.source),
         SqlValue::from(written.by),
+        SqlValue::from(written.for_subject),
         SqlValue::Integer(now),
         written.confidence.map_or(SqlValue::Null, SqlValue::Real),
         written.review.map_or(SqlValue::Null, SqlValue::from),
@@ -142,7 +146,7 @@ fn record<C>(cx: &InstanceCx<'_, C>, written: &Written<'_>) -> Result<()> {
         },
     ]);
     sql.run(
-        format!("INSERT INTO {table} (namespace, schema, id, field, source, by_subject, at, confidence, review, reviewed_by, reviewed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
+        format!("INSERT INTO {table} (namespace, schema, id, field, source, by_subject, for_subject, at, confidence, review, reviewed_by, reviewed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
         &at,
     )?;
     Ok(())
@@ -308,6 +312,7 @@ fn reject(_: &Provenance, cx: &OperationCx<'_, ProvenanceConfig>, params: &Value
         .collect();
     cx.update(&Value::Object(patch))?;
     let subject = cx.principal().subject.clone();
+    let for_subject = cx.principal().acting_for_subject().map(str::to_owned);
     for field in &fields {
         record(
             cx,
@@ -315,6 +320,7 @@ fn reject(_: &Provenance, cx: &OperationCx<'_, ProvenanceConfig>, params: &Value
                 field,
                 source: NAME,
                 by: &subject,
+                for_subject: for_subject.as_deref(),
                 confidence: None,
                 review: Some("rejected"),
                 reviewed_by: Some(&subject),
@@ -359,6 +365,7 @@ fn after_change(
     };
     let data = cx.data()?;
     let subject = cx.principal().subject.clone();
+    let for_subject = cx.principal().acting_for_subject().map(str::to_owned);
     let mut wrote = false;
     for field in &config.fields {
         let after = data.get(field);
@@ -386,6 +393,7 @@ fn after_change(
                 field,
                 source,
                 by: &subject,
+                for_subject: for_subject.as_deref(),
                 confidence,
                 review,
                 reviewed_by: (review == Some("edited")).then_some(subject.as_str()),
@@ -595,25 +603,39 @@ impl Behavior for Provenance {
                 )?;
                 Ok(())
             }),
-            migrations: vec![BehaviorMigration::new(1, "records")
-                .column("in_review", ColumnSpec::integer().not_null().default(0))
-                .index("in_review", &["in_review"])
-                .table(
-                    TableSpec::new("records")
-                        .row_id("record")
-                        .column("namespace", ColumnSpec::text().not_null())
-                        .column("schema", ColumnSpec::text().not_null())
-                        .column("id", ColumnSpec::text().not_null())
-                        .column("field", ColumnSpec::text().not_null())
-                        .column("source", ColumnSpec::text().not_null())
-                        .column("by_subject", ColumnSpec::text().not_null())
-                        .column("at", ColumnSpec::integer().not_null())
-                        .column("confidence", ColumnSpec::real())
-                        .column("review", ColumnSpec::text())
-                        .column("reviewed_by", ColumnSpec::text())
-                        .column("reviewed_at", ColumnSpec::integer())
-                        .unique(&["namespace", "schema", "id", "field"]),
-                )],
+            migrations: vec![
+                BehaviorMigration::new(1, "records")
+                    .column("in_review", ColumnSpec::integer().not_null().default(0))
+                    .index("in_review", &["in_review"])
+                    .table(
+                        TableSpec::new("records")
+                            .row_id("record")
+                            .column("namespace", ColumnSpec::text().not_null())
+                            .column("schema", ColumnSpec::text().not_null())
+                            .column("id", ColumnSpec::text().not_null())
+                            .column("field", ColumnSpec::text().not_null())
+                            .column("source", ColumnSpec::text().not_null())
+                            .column("by_subject", ColumnSpec::text().not_null())
+                            .column("at", ColumnSpec::integer().not_null())
+                            .column("confidence", ColumnSpec::real())
+                            .column("review", ColumnSpec::text())
+                            .column("reviewed_by", ColumnSpec::text())
+                            .column("reviewed_at", ColumnSpec::integer())
+                            .unique(&["namespace", "schema", "id", "field"]),
+                    ),
+                // Who a write acted for (D77), beside who made it; a record
+                // written before it acted for no one.
+                BehaviorMigration::new(2, "acting for").up(|sql| {
+                    sql.run(
+                        format!(
+                            "ALTER TABLE {} ADD COLUMN for_subject TEXT",
+                            sql.table("records")?
+                        ),
+                        &[],
+                    )?;
+                    Ok(())
+                }),
+            ],
             guard: Some(guard),
             operations: vec![("accept", accept), ("reject", reject)],
             fields: vec![
@@ -630,6 +652,9 @@ impl Behavior for Provenance {
                         let mut entry = Map::new();
                         entry.insert("source".into(), Value::from(row.text("source")?));
                         entry.insert("by".into(), Value::from(row.text("by_subject")?));
+                        if let Some(for_subject) = row.opt_text("for_subject")? {
+                            entry.insert("for".into(), Value::from(for_subject));
+                        }
                         entry.insert("at".into(), Value::from(row.i64("at")?));
                         if let Some(confidence) = row.opt_f64("confidence")? {
                             entry.insert("confidence".into(), json!(confidence));

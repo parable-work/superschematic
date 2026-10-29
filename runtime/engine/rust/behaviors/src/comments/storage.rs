@@ -5,9 +5,13 @@
 //! composing message's columns, their two indexes and the table of its
 //! draft's chunks (batch 2); migration 4, `inbox`, which adds each
 //! message's stand, the conversation's last stand, and the tables of read
-//! markers, follows and deliveries (batch 3); the row a message is read
-//! from, and the counts a write keeps (`comments-contract.md`, "Storage",
-//! "Migration 3", "Migration 4").
+//! markers, follows and deliveries (batch 3); migration 5, `acting_for`,
+//! which adds the columns of who a message, an edit, a reaction and a
+//! resolve were for (batch 4); migration 6, `search`, which adds the
+//! search index of the standing messages' bodies, filled from the messages
+//! that stand, and the index of the pinned ones (batch 5); the row a
+//! message is read from, and the counts a write keeps
+//! (`comments-contract.md`, "Storage", "Migration 3" to "Migration 6").
 //!
 //! Every statement is the same on SQLite and Postgres (D58): each
 //! parameter's type is the column's it is compared with or written to.
@@ -40,9 +44,14 @@ pub(super) const READS: &str = "comment_reads";
 pub(super) const FOLLOWS: &str = "comment_follows";
 /// One row per message and subject that should hear of it.
 pub(super) const DELIVERIES: &str = "comment_deliveries";
+/// One row per standing message, whose `row` keys its body in
+/// [`SEARCH_TEXT`].
+pub(super) const SEARCH: &str = "comment_search";
+/// The full-text index of the standing messages' bodies, by `rowid`.
+pub(super) const SEARCH_TEXT: &str = "comment_search_text";
 
 /// A message row's columns, as [`Message::of`] reads them.
-pub(super) const MESSAGE_COLUMNS: &str = "message, thread, quotes, author, via, state, body, blocks, mentions, created_at, posted_at, edited_at, edits, pinned, client_id, resolved_by, resolved_at, draft_length, last_append_at, stand";
+pub(super) const MESSAGE_COLUMNS: &str = "message, thread, quotes, author, via, state, body, blocks, mentions, created_at, posted_at, edited_at, edits, pinned, client_id, resolved_by, resolved_at, draft_length, last_append_at, stand, for_subject, resolved_for";
 
 /// The states a message is in.
 pub(super) const COMPOSING: &str = "composing";
@@ -53,7 +62,7 @@ pub(super) const DELETED: &str = "deleted";
 /// The condition on a message row that it stands: posted or interrupted.
 pub(super) const STANDS: &str = "state IN ('posted', 'interrupted')";
 
-/// Comments' migrations: 1 as shipped, then 2, 3 and 4.
+/// Comments' migrations: 1 as shipped, then 2 to 6.
 pub(super) fn migrations() -> Vec<BehaviorMigration> {
     vec![
         BehaviorMigration::new(1, "comments")
@@ -210,7 +219,84 @@ pub(super) fn migrations() -> Vec<BehaviorMigration> {
                     )),
             )
             .up(add_stands),
+        BehaviorMigration::new(5, "acting_for").up(add_acting_for),
+        BehaviorMigration::new(6, "search")
+            .table(
+                TableSpec::new(SEARCH)
+                    .row_id("row")
+                    .column("namespace", ColumnSpec::text().not_null())
+                    .column("schema", ColumnSpec::text().not_null())
+                    .column("id", ColumnSpec::text().not_null())
+                    .column("message", ColumnSpec::integer().not_null())
+                    .column("thread_root", ColumnSpec::integer().not_null())
+                    .unique(&["namespace", "schema", "id", "message"]),
+            )
+            .up(add_search),
     ]
+}
+
+// add_acting_for adds who a message, an edit, a reaction and a resolve were
+// for: nullable text, NULL on every row before it.
+fn add_acting_for(sql: &BehaviorSql<'_, '_>) -> superschematic_engine::storage::Result<()> {
+    for (table, column) in [
+        (MESSAGES, "for_subject"),
+        (MESSAGES, "resolved_for"),
+        (EDITS, "for_subject"),
+        (REACTIONS, "for_subject"),
+    ] {
+        sql.run(
+            format!(
+                "ALTER TABLE {} ADD COLUMN {column} {}",
+                sql.table(table)?,
+                ColumnSpec::text().definition(sql.dialect())?
+            ),
+            &[],
+        )?;
+    }
+    Ok(())
+}
+
+// add_search creates the full-text index of the bodies, fills it with
+// every standing message in stand order per instance, and indexes the
+// pinned messages. On Postgres the index folds diacritics through unaccent
+// where the database has it or the engine may create it, and folds case
+// alone where not: every engine that composes Comments migrates this, and
+// none fails for the extension (`Unaccent::IfAvailable`).
+fn add_search(sql: &BehaviorSql<'_, '_>) -> superschematic_engine::storage::Result<()> {
+    sql.create_fulltext_with(
+        SEARCH_TEXT,
+        &["body"],
+        superschematic_engine::storage::fulltext::Unaccent::IfAvailable,
+    )?;
+    let messages = sql.table(MESSAGES)?;
+    let search = sql.table(SEARCH)?;
+    let text = sql.table(SEARCH_TEXT)?;
+    sql.run(
+        format!(
+            "INSERT INTO {search} (namespace, schema, id, message, thread_root)
+             SELECT namespace, schema, id, message, COALESCE(thread, message) FROM {messages}
+              WHERE {STANDS}
+              ORDER BY namespace, schema, id, stand"
+        ),
+        &[],
+    )?;
+    sql.run(
+        format!(
+            "INSERT INTO {text} (rowid, body)
+             SELECT s.row, m.body FROM {search} s
+               JOIN {messages} m
+                 ON m.namespace = s.namespace AND m.schema = s.schema AND m.id = s.id AND m.message = s.message"
+        ),
+        &[],
+    )?;
+    sql.run(
+        format!(
+            "CREATE INDEX {} ON {messages} (namespace, schema, id, message) WHERE pinned = 1",
+            sql.table("comment_messages_pinned")?
+        ),
+        &[],
+    )?;
+    Ok(())
 }
 
 // add_stands adds each message's stand and the conversation's last stand,
@@ -429,6 +515,8 @@ pub(super) struct Message {
     pub thread: Option<i64>,
     pub quotes: Option<i64>,
     pub author: String,
+    /// Who it was written for: the caller's for at its post or begin.
+    pub for_subject: Option<String>,
     pub via: Option<String>,
     pub state: String,
     pub body: String,
@@ -443,6 +531,8 @@ pub(super) struct Message {
     pub edits: i64,
     pub pinned: bool,
     pub resolved_by: Option<String>,
+    /// The resolver's for, while resolved.
+    pub resolved_for: Option<String>,
     pub resolved_at: Option<i64>,
     /// The draft's length in code points, while composing.
     pub draft_length: Option<i64>,
@@ -460,6 +550,7 @@ impl Message {
             thread: row.opt_i64("thread")?,
             quotes: row.opt_i64("quotes")?,
             author: row.text("author")?.to_owned(),
+            for_subject: row.opt_text("for_subject")?.map(str::to_owned),
             via: row.opt_text("via")?.map(str::to_owned),
             state: row.text("state")?.to_owned(),
             body: row.text("body")?.to_owned(),
@@ -471,6 +562,7 @@ impl Message {
             edits: row.i64("edits")?,
             pinned: row.i64("pinned")? != 0,
             resolved_by: row.opt_text("resolved_by")?.map(str::to_owned),
+            resolved_for: row.opt_text("resolved_for")?.map(str::to_owned),
             resolved_at: row.opt_i64("resolved_at")?,
             draft_length: row.opt_i64("draft_length")?,
             last_append_at: row.opt_i64("last_append_at")?,

@@ -197,3 +197,34 @@ func TestCallersField(t *testing.T) {
 		t.Errorf("without a service clause: %+v, %v", output, err)
 	}
 }
+
+// TestTheConfigIsTheEnvVarsClassNoOtherExtends: with the documented pair,
+// @envVars FieldKeys and @envVars FinancesConfig extends FieldKeys, the
+// loaders read FinancesConfig and the fields it holds, FieldKeys' among
+// them, on every walk of the schema's types; two @envVars classes neither
+// of which extends the other are refused, naming both (D94).
+func TestTheConfigIsTheEnvVarsClassNoOtherExtends(t *testing.T) {
+	keys := &ir.FieldDef{Name: "FINANCES_DB_FIELD_KEYS", TypeRef: ir.TypeRef{Name: "string"}, Required: true, Secret: true}
+	inherited := *keys
+	inherited.InheritedFrom = "FieldKeys"
+	schema := &ir.Schema{Name: "finances-api", Kind: ir.SchemaKindAPI, Types: map[string]*ir.TypeDef{
+		"FieldKeys": {Name: "FieldKeys", EnvVars: true, Fields: []*ir.FieldDef{keys}},
+		"FinancesConfig": {Name: "FinancesConfig", EnvVars: true, Extends: "FieldKeys", Fields: []*ir.FieldDef{
+			&inherited,
+			{Name: "EMBEDDING_MODEL", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+		}},
+	}}
+	for range 100 {
+		output, err := GenerateWithOptions(schema, Options{SchemaName: "finances-api", Naming: naming.Default(), Derived: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if output.TypeName != "FinancesConfig" || len(output.Fields) != 2 || output.Fields[0].Key != "FINANCES_DB_FIELD_KEYS" || !output.Fields[0].Secret {
+			t.Fatalf("output = %s with %+v, want FinancesConfig with FieldKeys' secret and EMBEDDING_MODEL", output.TypeName, output.Fields)
+		}
+	}
+	schema.Types["FinancesConfig"].Extends = ""
+	if _, err := GenerateWithOptions(schema, Options{SchemaName: "finances-api"}); err == nil || !strings.Contains(err.Error(), "envgen: finances-api has two @envVars classes, FieldKeys and FinancesConfig, and neither extends the other") {
+		t.Errorf("two configs: %v", err)
+	}
+}

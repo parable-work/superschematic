@@ -725,7 +725,20 @@ identity and service authenticators and passes them to
 `build_router_with_manual_routes`, and serves the routers with
 `/healthz`, `/readyz`, JSON logs and a drain on SIGTERM. A stack's build
 refuses an implementation that declares no `create_manual_routes` while
-its API declares a manual route, and says what to add. The build scaffolds a
+its API declares a manual route, and says what to add. One whose
+`Cargo.toml` lacks a dependency its scaffold would write now, as axum
+after the API gains a manual route, or a memory store's definitions after
+it lists one, draws a warning that names the entry to add (D100):
+
+```
+warning: stack shop-stack: the implementation of shop-stock, at rust/shop-stock, does not depend on axum, which its scaffold depends on now; the build wrote the crate's Cargo.toml once and does not write it again, so add
+
+    axum = "0.8.9"
+
+to its [dependencies] (D100)
+```
+
+The build scaffolds a
 missing implementation crate at the `rust` template, and the server's
 `Cargo.toml` depends on it by the package name its `Cargo.toml` gives it,
 so you may rename it. Each build of the stack copies the crate into the

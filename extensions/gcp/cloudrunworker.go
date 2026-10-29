@@ -62,7 +62,7 @@ func lowerWorker(ctx registry.PlatformContext) (registry.Lowered, error) {
 	container["envs"] = append(envs, map[string]any{"name": ir.WorkerConcurrencyVariable, "value": strconv.Itoa(run.Concurrency)})
 	template := w.template
 	template["containers"] = []any{container}
-	out.Resources = append(out.Resources, &ir.Resource{ID: d.Name + ".worker-pool", Type: TypeWorkerPool, Properties: map[string]any{
+	out.Resources = append(out.Resources, &ir.Resource{ID: d.Name + ".worker-pool", Type: TypeWorkerPool, Properties: w.labeled(map[string]any{
 		"project":            v.project,
 		"location":           v.region,
 		"name":               d.ResourceName,
@@ -72,7 +72,7 @@ func lowerWorker(ctx registry.PlatformContext) (registry.Lowered, error) {
 			"manualInstanceCount": run.Instances,
 		},
 		"template": template,
-	}})
+	})})
 	return out, nil
 }
 
@@ -97,7 +97,7 @@ func lowerRunner(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}
 	template := w.template
 	template["containers"] = []any{w.container}
-	out.Resources = append(out.Resources, &ir.Resource{ID: d.Name + ".worker-pool", Type: TypeWorkerPool, Properties: map[string]any{
+	out.Resources = append(out.Resources, &ir.Resource{ID: d.Name + ".worker-pool", Type: TypeWorkerPool, Properties: w.labeled(map[string]any{
 		"project":            v.project,
 		"location":           v.region,
 		"name":               d.ResourceName,
@@ -107,7 +107,7 @@ func lowerRunner(ctx registry.PlatformContext) (registry.Lowered, error) {
 			"manualInstanceCount": run.Instances,
 		},
 		"template": template,
-	}})
+	})})
 	return out, nil
 }
 
@@ -134,7 +134,7 @@ func lowerDeriver(ctx registry.PlatformContext) (registry.Lowered, error) {
 	container["envs"] = append(envs, map[string]any{"name": ir.WorkerConcurrencyVariable, "value": strconv.Itoa(run.Concurrency)})
 	template := w.template
 	template["containers"] = []any{container}
-	out.Resources = append(out.Resources, &ir.Resource{ID: d.Name + ".worker-pool", Type: TypeWorkerPool, Properties: map[string]any{
+	out.Resources = append(out.Resources, &ir.Resource{ID: d.Name + ".worker-pool", Type: TypeWorkerPool, Properties: w.labeled(map[string]any{
 		"project":            v.project,
 		"location":           v.region,
 		"name":               d.ResourceName,
@@ -144,6 +144,6 @@ func lowerDeriver(ctx registry.PlatformContext) (registry.Lowered, error) {
 			"manualInstanceCount": run.Instances,
 		},
 		"template": template,
-	}})
+	})})
 	return out, nil
 }

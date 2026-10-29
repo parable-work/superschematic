@@ -4,12 +4,15 @@
 // transaction: the category totals rolled up to the parent, generate_series
 // time buckets, the transaction list paged by a keyset, a list in an order
 // an enum picks, budgets with exact decimals and dates, and the transfer
-// matcher's candidates.
+// matcher's candidates. The dashboard's four reports share one filter, a
+// string constant their SQL interpolates, one of them over the line_list
+// projection's view; its totals return one row, and a line of a name one
+// row or none (D95).
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { hyperdrivePool, withHyperdrive } from '@superschematic/http-runtime/hyperdrive';
-import { fill } from '@superschematic/http-runtime/postgres';
+import { NotFoundError, TooManyRowsError, fill } from '@superschematic/http-runtime/postgres';
 import { createOrm, fixtureQueriesDbQueries, type FixtureQueriesDbOrm, type TransactionListQueryPageKey } from './orm';
-import type { BucketUnit, FinanceSignedMoney, GenericDecimal, GenericInt64, IdentityName, IdentityUUID, LineOrder, TemporalDate } from './types';
+import type { BucketUnit, DashboardFilter, FinanceSignedMoney, GenericDecimal, GenericInt64, IdentityName, IdentityUUID, LineOrder, TemporalDate } from './types';
 import { database, dsn, recording, type TestDatabase } from './harness';
 
 const name = (text: string) => text as IdentityName;
@@ -157,5 +160,64 @@ describe.skipIf(dsn === '')('declared queries', () => {
       return [...onPool, ...inSavepoint];
     });
     expect(overHyperdrive.map(r => r.id)).toEqual([ids.groceries!, ids.groceries!]);
+  });
+
+  const dashboard: DashboardFilter = { ...january, accountIds: null, categoryIds: null, search: null };
+
+  test('the dashboard reports share one filter, each statement holding it in place, its parameters numbered alike', async () => {
+    const filter = 'li."date" BETWEEN $1 AND $2\n      AND ($3::uuid[] IS NULL OR li.account_id = ANY($3))';
+    for (const report of ['dashboardTotals', 'dashboardCategories', 'dashboardLines', 'matchingLine']) {
+      expect(fixtureQueriesDbQueries[report]!.text).toContain(filter);
+      expect(fixtureQueriesDbQueries[report]!.text).toContain("($5::text IS NULL OR li.\"name\" ILIKE '%%' || $5 || '%%')");
+    }
+    expect(await orm.queries.dashboardCategories(dashboard)).toEqual([
+      { categoryId: ids.groceries!, total: -4000, lines: count(1) },
+      { categoryId: ids.food!, total: -1500, lines: count(1) },
+      { categoryId: null, total: 250000, lines: count(3) },
+    ]);
+    expect(await orm.queries.dashboardCategories({ ...dashboard, categoryIds: [ids.food!] })).toEqual([{ categoryId: ids.food!, total: -1500, lines: count(1) }]);
+  });
+
+  test('dashboardLines reads the line_list projection through the filter, its required columns never null', async () => {
+    const rows = await orm.queries.dashboardLines(dashboard);
+    expect(rows.map(r => [r.name, r.accountName, r.categoryName])).toEqual([
+      ['From checking', name('Savings'), null],
+      ['To savings', name('Checking'), null],
+      ['Salary', name('Checking'), null],
+      ['Cafe', name('Checking'), name('Food')],
+      ['Market', name('Checking'), name('Groceries')],
+    ]);
+    expect(await orm.queries.dashboardLines({ ...dashboard, search: 'MAR' })).toEqual([
+      { id: ids.market!, date: at('2026-01-05T10:00:00Z'), name: 'Market', accountName: name('Checking'), categoryName: name('Groceries') },
+    ]);
+  });
+
+  test('dashboardTotals returns its one row, which an empty filter still reads, on the pool and in a transaction', async () => {
+    const totals = await orm.queries.dashboardTotals(dashboard);
+    expect(totals).toEqual({ spent: money(-55500), earned: money(300000), lines: count(5) });
+    expect(await orm.queries.dashboardTotals({ ...dashboard, accountIds: [ids.savings!] })).toEqual({ spent: money(0), earned: money(50000), lines: count(1) });
+    expect(await orm.queries.dashboardTotals({ ...dashboard, search: 'nothing holds this' })).toEqual({ spent: money(0), earned: money(0), lines: count(0) });
+    expect(await orm.transaction(tx => tx.queries.dashboardTotals(dashboard))).toEqual(totals);
+  });
+
+  test('a query that returns one row fails on none, as getOne does, and on more than one', async () => {
+    expect(await orm.queries.accountNamed({ name: name('Checking') })).toEqual({ id: ids.checking!, name: name('Checking') });
+    await expect(orm.queries.accountNamed({ name: name('Nobody') })).rejects.toThrow(NotFoundError);
+    await expect(orm.queries.accountNamed({ name: name('Nobody') })).rejects.toThrow('orm: query accountNamed returns one row, and its statement read none');
+    await orm.account.createOne({ name: name('Joint') });
+    await orm.account.createOne({ name: name('Joint') });
+    await expect(orm.queries.accountNamed({ name: name('Joint') })).rejects.toThrow(TooManyRowsError);
+    await expect(orm.queries.accountNamed({ name: name('Joint') })).rejects.toThrow('orm: query accountNamed returns one row, and its statement read 2');
+  });
+
+  test('a query that returns one row or none answers null for none, and fails on more than one', async () => {
+    expect(await orm.queries.matchingLine({ ...dashboard, name: 'Market' })).toEqual({ id: ids.market!, date: at('2026-01-05T10:00:00Z'), amount: money(-4000) });
+    expect(await orm.queries.matchingLine({ ...dashboard, name: 'Rent' })).toBeNull();
+    const march = { ...dashboard, start: at('2027-03-01T00:00:00Z'), end: at('2027-03-31T23:59:59Z') };
+    await orm.lineItem.createOne({ date: at('2027-03-02T08:00:00Z'), name: 'Coffee', amount: money(-300), accountId: ids.savings! });
+    expect((await orm.queries.matchingLine({ ...march, name: 'Coffee' }))?.amount).toBe(money(-300));
+    await orm.lineItem.createOne({ date: at('2027-03-09T08:00:00Z'), name: 'Coffee', amount: money(-350), accountId: ids.savings! });
+    await expect(orm.queries.matchingLine({ ...march, name: 'Coffee' })).rejects.toThrow(TooManyRowsError);
+    await expect(orm.queries.matchingLine({ ...march, name: 'Coffee' })).rejects.toThrow('orm: query matchingLine returns one row or none, and its statement read 2');
   });
 });

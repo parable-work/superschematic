@@ -1,0 +1,1465 @@
+{
+  "version": 1,
+  "stack": "smoke-stack",
+  "environment": "Gcp",
+  "target": "gcp",
+  "provisioner": "pulumi",
+  "values": {
+    "project": "superschematic-smoke",
+    "region": "us-central1"
+  },
+  "deployables": [
+    {
+      "name": "smoke-api",
+      "kind": "server",
+      "platform": "gcp.cloudrun",
+      "services": [
+        {
+          "name": "smoke-api",
+          "kind": "API"
+        }
+      ],
+      "language": "TYPESCRIPT",
+      "artifact": "image",
+      "origins": [
+        "smoke-web"
+      ],
+      "resourceName": "smoke-api",
+      "address": {
+        "$output": {
+          "resource": "smoke-api.service",
+          "name": "uri"
+        }
+      },
+      "bindings": [
+        {
+          "field": "SMOKE_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "cloudSql": {
+              "database": {
+                "$output": {
+                  "resource": "smoke-db.database.smoke-db",
+                  "name": "name"
+                }
+              },
+              "instance": {
+                "$output": {
+                  "resource": "smoke-db.instance",
+                  "name": "connectionName"
+                }
+              },
+              "user": "smoke-api@superschematic-smoke.iam"
+            }
+          },
+          "edge": "sql:smoke-api->smoke-db"
+        }
+      ]
+    },
+    {
+      "name": "smoke-api-drain-line-items",
+      "kind": "worker",
+      "platform": "gcp.cloudrunworker",
+      "services": [
+        {
+          "name": "smoke-api",
+          "kind": "API"
+        }
+      ],
+      "language": "TYPESCRIPT",
+      "artifact": "image",
+      "worker": {
+        "api": "smoke-api",
+        "name": "DrainLineItems",
+        "queue": "DrainLineItem",
+        "database": "smoke-db",
+        "instances": 1,
+        "concurrency": 2,
+        "graceSeconds": 8
+      },
+      "resourceName": "smoke-api-drain-line-items",
+      "bindings": [
+        {
+          "field": "SMOKE_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "cloudSql": {
+              "database": {
+                "$output": {
+                  "resource": "smoke-db.database.smoke-db",
+                  "name": "name"
+                }
+              },
+              "instance": {
+                "$output": {
+                  "resource": "smoke-db.instance",
+                  "name": "connectionName"
+                }
+              },
+              "user": "smoke-api-drain-line-items@superschematic-smoke.iam"
+            }
+          },
+          "edge": "sql:smoke-api-drain-line-items->smoke-db"
+        }
+      ]
+    },
+    {
+      "name": "smoke-api-sync-all-linked-accounts",
+      "kind": "job",
+      "platform": "gcp.cloudrunjob",
+      "services": [
+        {
+          "name": "smoke-api",
+          "kind": "API"
+        }
+      ],
+      "language": "TYPESCRIPT",
+      "artifact": "image",
+      "job": {
+        "api": "smoke-api",
+        "name": "SyncAllLinkedAccounts",
+        "schedule": "0 4 * * *",
+        "timeZone": "UTC",
+        "timeoutSeconds": 300
+      },
+      "resourceName": "smoke-api-sync-all-lin-1b1ec80",
+      "bindings": [
+        {
+          "field": "SMOKE_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "cloudSql": {
+              "database": {
+                "$output": {
+                  "resource": "smoke-db.database.smoke-db",
+                  "name": "name"
+                }
+              },
+              "instance": {
+                "$output": {
+                  "resource": "smoke-db.instance",
+                  "name": "connectionName"
+                }
+              },
+              "user": "smoke-api-sync-all-lin-1b1ec80@superschematic-smoke.iam"
+            }
+          },
+          "edge": "sql:smoke-api-sync-all-linked-accounts->smoke-db"
+        }
+      ]
+    },
+    {
+      "name": "smoke-db",
+      "kind": "database",
+      "platform": "gcp.cloudsql",
+      "services": [
+        {
+          "name": "smoke-db",
+          "kind": "DB"
+        }
+      ],
+      "dialect": "postgres",
+      "resourceName": "smoke-db",
+      "address": {
+        "$output": {
+          "resource": "smoke-db.instance",
+          "name": "connectionName"
+        }
+      }
+    },
+    {
+      "name": "smoke-web",
+      "kind": "site",
+      "platform": "gcp.site",
+      "services": [
+        {
+          "name": "smoke-web",
+          "kind": "Site"
+        }
+      ],
+      "calls": [
+        {
+          "name": "smoke-api",
+          "kind": "API"
+        }
+      ],
+      "site": {
+        "dir": "web/smoke-web",
+        "build": "build",
+        "output": "dist",
+        "fallback": "index.html",
+        "origin": [
+          {
+            "service": "smoke-api",
+            "server": "smoke-api",
+            "path": "/api/smoke-api"
+          }
+        ]
+      },
+      "exposed": true,
+      "resourceName": "smoke-web",
+      "address": {
+        "$concat": [
+          "http://",
+          {
+            "$output": {
+              "resource": "smoke-web.address",
+              "name": "address"
+            }
+          }
+        ]
+      },
+      "publicAddress": {
+        "$concat": [
+          "http://",
+          {
+            "$output": {
+              "resource": "smoke-web.address",
+              "name": "address"
+            }
+          }
+        ]
+      },
+      "bindings": [
+        {
+          "field": "smoke-api",
+          "source": "derived",
+          "value": {
+            "url": {
+              "$concat": [
+                "http://",
+                {
+                  "$output": {
+                    "resource": "smoke-web.address",
+                    "name": "address"
+                  }
+                },
+                "/api/smoke-api"
+              ]
+            }
+          },
+          "edge": "site:smoke-web->smoke-api"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "site:smoke-web->smoke-api",
+      "kind": "site",
+      "from": "smoke-web",
+      "to": "smoke-api",
+      "service": {
+        "name": "smoke-api",
+        "kind": "API"
+      },
+      "connector": "gcp.site-cloudrun",
+      "field": "smoke-api"
+    },
+    {
+      "id": "sql:smoke-api->smoke-db",
+      "kind": "sql",
+      "from": "smoke-api",
+      "to": "smoke-db",
+      "service": {
+        "name": "smoke-db",
+        "kind": "DB"
+      },
+      "connector": "gcp.cloudrun-cloudsql",
+      "field": "SMOKE_DB_DATABASE"
+    },
+    {
+      "id": "sql:smoke-api-drain-line-items->smoke-db",
+      "kind": "sql",
+      "from": "smoke-api-drain-line-items",
+      "to": "smoke-db",
+      "service": {
+        "name": "smoke-db",
+        "kind": "DB"
+      },
+      "connector": "gcp.cloudrunworker-cloudsql",
+      "field": "SMOKE_DB_DATABASE"
+    },
+    {
+      "id": "sql:smoke-api-sync-all-linked-accounts->smoke-db",
+      "kind": "sql",
+      "from": "smoke-api-sync-all-linked-accounts",
+      "to": "smoke-db",
+      "service": {
+        "name": "smoke-db",
+        "kind": "DB"
+      },
+      "connector": "gcp.cloudrunjob-cloudsql",
+      "field": "SMOKE_DB_DATABASE"
+    }
+  ],
+  "resources": {
+    "resources": [
+      {
+        "id": "smoke-api-drain-line-items.account",
+        "type": "gcp:serviceaccount/account:Account",
+        "properties": {
+          "accountId": "smoke-api-drain-line-items",
+          "displayName": "smoke-stack Gcp worker smoke-api-drain-line-items",
+          "project": "superschematic-smoke"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "smoke-api-drain-line-items"
+        ]
+      },
+      {
+        "id": "smoke-api-drain-line-items.cloudsql-client.smoke-db",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "condition": {
+            "expression": "resource.type == \"sqladmin.googleapis.com/Instance\" && resource.name == \"projects/superschematic-smoke/instances/smoke-db\"",
+            "title": "Cloud SQL instance smoke-db"
+          },
+          "member": {
+            "$output": {
+              "resource": "smoke-api-drain-line-items.account",
+              "name": "member"
+            }
+          },
+          "project": "superschematic-smoke",
+          "role": "roles/cloudsql.client"
+        },
+        "dependsOn": [
+          "smoke-api-drain-line-items.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:smoke-api-drain-line-items->smoke-db"
+        ]
+      },
+      {
+        "id": "smoke-api-drain-line-items.cloudsql-login.smoke-db",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "condition": {
+            "expression": "resource.type == \"sqladmin.googleapis.com/Instance\" && resource.name == \"projects/superschematic-smoke/instances/smoke-db\"",
+            "title": "Cloud SQL instance smoke-db"
+          },
+          "member": {
+            "$output": {
+              "resource": "smoke-api-drain-line-items.account",
+              "name": "member"
+            }
+          },
+          "project": "superschematic-smoke",
+          "role": "roles/cloudsql.instanceUser"
+        },
+        "dependsOn": [
+          "smoke-api-drain-line-items.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:smoke-api-drain-line-items->smoke-db"
+        ]
+      },
+      {
+        "id": "smoke-api-drain-line-items.database-user.smoke-db",
+        "type": "gcp:sql/user:User",
+        "properties": {
+          "deletionPolicy": "ABANDON",
+          "instance": {
+            "$output": {
+              "resource": "smoke-db.instance",
+              "name": "name"
+            }
+          },
+          "name": "smoke-api-drain-line-items@superschematic-smoke.iam",
+          "project": "superschematic-smoke",
+          "type": "CLOUD_IAM_SERVICE_ACCOUNT"
+        },
+        "dependsOn": [
+          "smoke-api-drain-line-items.account",
+          "smoke-db.instance"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:smoke-api-drain-line-items->smoke-db"
+        ]
+      },
+      {
+        "id": "smoke-api-drain-line-items.worker-pool",
+        "type": "gcp:cloudrunv2/workerPool:WorkerPool",
+        "properties": {
+          "deletionProtection": false,
+          "location": "us-central1",
+          "name": "smoke-api-drain-line-items",
+          "project": "superschematic-smoke",
+          "scaling": {
+            "manualInstanceCount": 1,
+            "scalingMode": "MANUAL"
+          },
+          "template": {
+            "containers": [
+              {
+                "envs": [
+                  {
+                    "name": "SMOKE_DB_DATABASE_CLOUD_SQL_DATABASE",
+                    "value": {
+                      "$output": {
+                        "resource": "smoke-db.database.smoke-db",
+                        "name": "name"
+                      }
+                    }
+                  },
+                  {
+                    "name": "SMOKE_DB_DATABASE_CLOUD_SQL_INSTANCE",
+                    "value": {
+                      "$output": {
+                        "resource": "smoke-db.instance",
+                        "name": "connectionName"
+                      }
+                    }
+                  },
+                  {
+                    "name": "SMOKE_DB_DATABASE_CLOUD_SQL_USER",
+                    "value": "smoke-api-drain-line-items@superschematic-smoke.iam"
+                  },
+                  {
+                    "name": "WORKER_CONCURRENCY",
+                    "value": "2"
+                  }
+                ],
+                "image": "us-central1-docker.pkg.dev/superschematic-smoke/smoke-stack/smoke-api-drain-line-items",
+                "resources": {
+                  "limits": {
+                    "cpu": "1",
+                    "memory": "512Mi"
+                  }
+                },
+                "volumeMounts": [
+                  {
+                    "mountPath": "/cloudsql",
+                    "name": "cloudsql"
+                  }
+                ]
+              }
+            ],
+            "serviceAccount": {
+              "$output": {
+                "resource": "smoke-api-drain-line-items.account",
+                "name": "email"
+              }
+            },
+            "volumes": [
+              {
+                "cloudSqlInstance": {
+                  "instances": [
+                    {
+                      "$output": {
+                        "resource": "smoke-db.instance",
+                        "name": "connectionName"
+                      }
+                    }
+                  ]
+                },
+                "name": "cloudsql"
+              }
+            ]
+          }
+        },
+        "dependsOn": [
+          "smoke-api-drain-line-items.account",
+          "smoke-db.database.smoke-db",
+          "smoke-db.instance"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-drain-line-items"
+        ]
+      },
+      {
+        "id": "smoke-api-sync-all-linked-accounts.account",
+        "type": "gcp:serviceaccount/account:Account",
+        "properties": {
+          "accountId": "smoke-api-sync-all-lin-1b1ec80",
+          "displayName": "smoke-stack Gcp job smoke-api-sync-all-linked-accounts",
+          "project": "superschematic-smoke"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "smoke-api-sync-all-linked-accounts"
+        ]
+      },
+      {
+        "id": "smoke-api-sync-all-linked-accounts.cloudsql-client.smoke-db",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "condition": {
+            "expression": "resource.type == \"sqladmin.googleapis.com/Instance\" && resource.name == \"projects/superschematic-smoke/instances/smoke-db\"",
+            "title": "Cloud SQL instance smoke-db"
+          },
+          "member": {
+            "$output": {
+              "resource": "smoke-api-sync-all-linked-accounts.account",
+              "name": "member"
+            }
+          },
+          "project": "superschematic-smoke",
+          "role": "roles/cloudsql.client"
+        },
+        "dependsOn": [
+          "smoke-api-sync-all-linked-accounts.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:smoke-api-sync-all-linked-accounts->smoke-db"
+        ]
+      },
+      {
+        "id": "smoke-api-sync-all-linked-accounts.cloudsql-login.smoke-db",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "condition": {
+            "expression": "resource.type == \"sqladmin.googleapis.com/Instance\" && resource.name == \"projects/superschematic-smoke/instances/smoke-db\"",
+            "title": "Cloud SQL instance smoke-db"
+          },
+          "member": {
+            "$output": {
+              "resource": "smoke-api-sync-all-linked-accounts.account",
+              "name": "member"
+            }
+          },
+          "project": "superschematic-smoke",
+          "role": "roles/cloudsql.instanceUser"
+        },
+        "dependsOn": [
+          "smoke-api-sync-all-linked-accounts.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:smoke-api-sync-all-linked-accounts->smoke-db"
+        ]
+      },
+      {
+        "id": "smoke-api-sync-all-linked-accounts.database-user.smoke-db",
+        "type": "gcp:sql/user:User",
+        "properties": {
+          "deletionPolicy": "ABANDON",
+          "instance": {
+            "$output": {
+              "resource": "smoke-db.instance",
+              "name": "name"
+            }
+          },
+          "name": "smoke-api-sync-all-lin-1b1ec80@superschematic-smoke.iam",
+          "project": "superschematic-smoke",
+          "type": "CLOUD_IAM_SERVICE_ACCOUNT"
+        },
+        "dependsOn": [
+          "smoke-api-sync-all-linked-accounts.account",
+          "smoke-db.instance"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:smoke-api-sync-all-linked-accounts->smoke-db"
+        ]
+      },
+      {
+        "id": "smoke-api-sync-all-linked-accounts.job",
+        "type": "gcp:cloudrunv2/job:Job",
+        "properties": {
+          "deletionProtection": false,
+          "labels": {
+            "superschematic-deployable": "smoke-api-sync-all-linked-accounts"
+          },
+          "location": "us-central1",
+          "name": "smoke-api-sync-all-lin-1b1ec80",
+          "project": "superschematic-smoke",
+          "template": {
+            "taskCount": 1,
+            "template": {
+              "containers": [
+                {
+                  "envs": [
+                    {
+                      "name": "SMOKE_DB_DATABASE_CLOUD_SQL_DATABASE",
+                      "value": {
+                        "$output": {
+                          "resource": "smoke-db.database.smoke-db",
+                          "name": "name"
+                        }
+                      }
+                    },
+                    {
+                      "name": "SMOKE_DB_DATABASE_CLOUD_SQL_INSTANCE",
+                      "value": {
+                        "$output": {
+                          "resource": "smoke-db.instance",
+                          "name": "connectionName"
+                        }
+                      }
+                    },
+                    {
+                      "name": "SMOKE_DB_DATABASE_CLOUD_SQL_USER",
+                      "value": "smoke-api-sync-all-lin-1b1ec80@superschematic-smoke.iam"
+                    }
+                  ],
+                  "image": "us-central1-docker.pkg.dev/superschematic-smoke/smoke-stack/smoke-api-sync-all-linked-accounts",
+                  "resources": {
+                    "limits": {
+                      "cpu": "1",
+                      "memory": "512Mi"
+                    }
+                  },
+                  "volumeMounts": [
+                    {
+                      "mountPath": "/cloudsql",
+                      "name": "cloudsql"
+                    }
+                  ]
+                }
+              ],
+              "maxRetries": 0,
+              "serviceAccount": {
+                "$output": {
+                  "resource": "smoke-api-sync-all-linked-accounts.account",
+                  "name": "email"
+                }
+              },
+              "timeout": "300s",
+              "volumes": [
+                {
+                  "cloudSqlInstance": {
+                    "instances": [
+                      {
+                        "$output": {
+                          "resource": "smoke-db.instance",
+                          "name": "connectionName"
+                        }
+                      }
+                    ]
+                  },
+                  "name": "cloudsql"
+                }
+              ]
+            }
+          }
+        },
+        "dependsOn": [
+          "smoke-api-sync-all-linked-accounts.account",
+          "smoke-db.database.smoke-db",
+          "smoke-db.instance"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-sync-all-linked-accounts"
+        ]
+      },
+      {
+        "id": "smoke-api-sync-all-linked-accounts.schedule",
+        "type": "gcp:cloudscheduler/job:Job",
+        "properties": {
+          "description": "Runs job smoke-api-sync-all-linked-accounts of smoke-stack Gcp on its schedule",
+          "httpTarget": {
+            "httpMethod": "POST",
+            "oauthToken": {
+              "serviceAccountEmail": {
+                "$output": {
+                  "resource": "smoke-api-sync-all-linked-accounts.account",
+                  "name": "email"
+                }
+              }
+            },
+            "uri": {
+              "$concat": [
+                "https://run.googleapis.com/v2/projects/superschematic-smoke/locations/us-central1/jobs/",
+                {
+                  "$output": {
+                    "resource": "smoke-api-sync-all-linked-accounts.job",
+                    "name": "name"
+                  }
+                },
+                ":run"
+              ]
+            }
+          },
+          "name": "smoke-api-sync-all-lin-1b1ec80",
+          "project": "superschematic-smoke",
+          "region": "us-central1",
+          "schedule": "0 4 * * *",
+          "timeZone": "UTC"
+        },
+        "dependsOn": [
+          "smoke-api-sync-all-linked-accounts.account",
+          "smoke-api-sync-all-linked-accounts.job",
+          "smoke-api-sync-all-linked-accounts.schedule-invoker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-sync-all-linked-accounts"
+        ]
+      },
+      {
+        "id": "smoke-api-sync-all-linked-accounts.schedule-invoker",
+        "type": "gcp:cloudrunv2/jobIamMember:JobIamMember",
+        "properties": {
+          "location": "us-central1",
+          "member": {
+            "$output": {
+              "resource": "smoke-api-sync-all-linked-accounts.account",
+              "name": "member"
+            }
+          },
+          "name": {
+            "$output": {
+              "resource": "smoke-api-sync-all-linked-accounts.job",
+              "name": "name"
+            }
+          },
+          "project": "superschematic-smoke",
+          "role": "roles/run.invoker"
+        },
+        "dependsOn": [
+          "smoke-api-sync-all-linked-accounts.account",
+          "smoke-api-sync-all-linked-accounts.job"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-sync-all-linked-accounts"
+        ]
+      },
+      {
+        "id": "smoke-api.account",
+        "type": "gcp:serviceaccount/account:Account",
+        "properties": {
+          "accountId": "smoke-api",
+          "displayName": "smoke-stack Gcp server smoke-api",
+          "project": "superschematic-smoke"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "smoke-api"
+        ]
+      },
+      {
+        "id": "smoke-api.cloudsql-client.smoke-db",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "condition": {
+            "expression": "resource.type == \"sqladmin.googleapis.com/Instance\" && resource.name == \"projects/superschematic-smoke/instances/smoke-db\"",
+            "title": "Cloud SQL instance smoke-db"
+          },
+          "member": {
+            "$output": {
+              "resource": "smoke-api.account",
+              "name": "member"
+            }
+          },
+          "project": "superschematic-smoke",
+          "role": "roles/cloudsql.client"
+        },
+        "dependsOn": [
+          "smoke-api.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:smoke-api->smoke-db"
+        ]
+      },
+      {
+        "id": "smoke-api.cloudsql-login.smoke-db",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "condition": {
+            "expression": "resource.type == \"sqladmin.googleapis.com/Instance\" && resource.name == \"projects/superschematic-smoke/instances/smoke-db\"",
+            "title": "Cloud SQL instance smoke-db"
+          },
+          "member": {
+            "$output": {
+              "resource": "smoke-api.account",
+              "name": "member"
+            }
+          },
+          "project": "superschematic-smoke",
+          "role": "roles/cloudsql.instanceUser"
+        },
+        "dependsOn": [
+          "smoke-api.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:smoke-api->smoke-db"
+        ]
+      },
+      {
+        "id": "smoke-api.database-user.smoke-db",
+        "type": "gcp:sql/user:User",
+        "properties": {
+          "deletionPolicy": "ABANDON",
+          "instance": {
+            "$output": {
+              "resource": "smoke-db.instance",
+              "name": "name"
+            }
+          },
+          "name": "smoke-api@superschematic-smoke.iam",
+          "project": "superschematic-smoke",
+          "type": "CLOUD_IAM_SERVICE_ACCOUNT"
+        },
+        "dependsOn": [
+          "smoke-api.account",
+          "smoke-db.instance"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:smoke-api->smoke-db"
+        ]
+      },
+      {
+        "id": "smoke-api.service",
+        "type": "gcp:cloudrunv2/service:Service",
+        "properties": {
+          "customAudiences": [
+            "//run.googleapis.com/projects/superschematic-smoke/locations/us-central1/services/smoke-api"
+          ],
+          "deletionProtection": false,
+          "ingress": "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER",
+          "invokerIamDisabled": true,
+          "location": "us-central1",
+          "name": "smoke-api",
+          "project": "superschematic-smoke",
+          "template": {
+            "containers": [
+              {
+                "envs": [
+                  {
+                    "name": "SMOKE_DB_DATABASE_CLOUD_SQL_DATABASE",
+                    "value": {
+                      "$output": {
+                        "resource": "smoke-db.database.smoke-db",
+                        "name": "name"
+                      }
+                    }
+                  },
+                  {
+                    "name": "SMOKE_DB_DATABASE_CLOUD_SQL_INSTANCE",
+                    "value": {
+                      "$output": {
+                        "resource": "smoke-db.instance",
+                        "name": "connectionName"
+                      }
+                    }
+                  },
+                  {
+                    "name": "SMOKE_DB_DATABASE_CLOUD_SQL_USER",
+                    "value": "smoke-api@superschematic-smoke.iam"
+                  }
+                ],
+                "image": "us-central1-docker.pkg.dev/superschematic-smoke/smoke-stack/smoke-api",
+                "livenessProbe": {
+                  "failureThreshold": 3,
+                  "httpGet": {
+                    "path": "/healthz",
+                    "port": 8080
+                  },
+                  "periodSeconds": 15,
+                  "timeoutSeconds": 5
+                },
+                "ports": {
+                  "containerPort": 8080
+                },
+                "resources": {
+                  "cpuIdle": true,
+                  "limits": {
+                    "cpu": "1",
+                    "memory": "512Mi"
+                  }
+                },
+                "startupProbe": {
+                  "failureThreshold": 24,
+                  "httpGet": {
+                    "path": "/readyz",
+                    "port": 8080
+                  },
+                  "periodSeconds": 5,
+                  "timeoutSeconds": 4
+                },
+                "volumeMounts": [
+                  {
+                    "mountPath": "/cloudsql",
+                    "name": "cloudsql"
+                  }
+                ]
+              }
+            ],
+            "serviceAccount": {
+              "$output": {
+                "resource": "smoke-api.account",
+                "name": "email"
+              }
+            },
+            "volumes": [
+              {
+                "cloudSqlInstance": {
+                  "instances": [
+                    {
+                      "$output": {
+                        "resource": "smoke-db.instance",
+                        "name": "connectionName"
+                      }
+                    }
+                  ]
+                },
+                "name": "cloudsql"
+              }
+            ]
+          }
+        },
+        "dependsOn": [
+          "smoke-api.account",
+          "smoke-db.database.smoke-db",
+          "smoke-db.instance"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api"
+        ]
+      },
+      {
+        "id": "smoke-db.database.smoke-db",
+        "type": "gcp:sql/database:Database",
+        "properties": {
+          "instance": {
+            "$output": {
+              "resource": "smoke-db.instance",
+              "name": "name"
+            }
+          },
+          "name": "smoke_db",
+          "project": "superschematic-smoke"
+        },
+        "dependsOn": [
+          "smoke-db.instance"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "smoke-db"
+        ]
+      },
+      {
+        "id": "smoke-db.instance",
+        "type": "gcp:sql/databaseInstance:DatabaseInstance",
+        "properties": {
+          "databaseVersion": "POSTGRES_16",
+          "deletionProtection": false,
+          "name": "smoke-db",
+          "project": "superschematic-smoke",
+          "region": "us-central1",
+          "settings": {
+            "availabilityType": "ZONAL",
+            "backupConfiguration": {
+              "enabled": true,
+              "pointInTimeRecoveryEnabled": false
+            },
+            "connectorEnforcement": "REQUIRED",
+            "databaseFlags": [
+              {
+                "name": "cloudsql.iam_authentication",
+                "value": "on"
+              }
+            ],
+            "deletionProtectionEnabled": false,
+            "edition": "ENTERPRISE",
+            "ipConfiguration": {
+              "ipv4Enabled": true
+            },
+            "tier": "db-custom-1-3840"
+          }
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "smoke-db"
+        ]
+      },
+      {
+        "id": "smoke-db.migrator",
+        "type": "gcp:sql/user:User",
+        "properties": {
+          "databaseRoles": [
+            "cloudsqlsuperuser"
+          ],
+          "deletionPolicy": "ABANDON",
+          "instance": {
+            "$output": {
+              "resource": "smoke-db.instance",
+              "name": "name"
+            }
+          },
+          "name": "smoke-stack-migrator@superschematic-smoke.iam",
+          "project": "superschematic-smoke",
+          "type": "CLOUD_IAM_SERVICE_ACCOUNT"
+        },
+        "dependsOn": [
+          "smoke-db.instance"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "smoke-db"
+        ]
+      },
+      {
+        "id": "smoke-web.address",
+        "type": "gcp:compute/globalAddress:GlobalAddress",
+        "properties": {
+          "ipVersion": "IPV4",
+          "name": "smoke-web-ip",
+          "project": "superschematic-smoke"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "smoke-web"
+        ]
+      },
+      {
+        "id": "smoke-web.anchor",
+        "type": "gcp:compute/backendService:BackendService",
+        "properties": {
+          "loadBalancingScheme": "EXTERNAL_MANAGED",
+          "name": "smoke-web-anchor",
+          "project": "superschematic-smoke"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "smoke-web"
+        ]
+      },
+      {
+        "id": "smoke-web.api.smoke-api.backend",
+        "type": "gcp:compute/backendService:BackendService",
+        "properties": {
+          "backends": [
+            {
+              "group": {
+                "$output": {
+                  "resource": "smoke-web.api.smoke-api.endpoint-group",
+                  "name": "id"
+                }
+              }
+            }
+          ],
+          "enableCdn": false,
+          "loadBalancingScheme": "EXTERNAL_MANAGED",
+          "name": "smoke-web-smoke-api-api",
+          "project": "superschematic-smoke"
+        },
+        "dependsOn": [
+          "smoke-web.api.smoke-api.endpoint-group"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-web"
+        ]
+      },
+      {
+        "id": "smoke-web.api.smoke-api.endpoint-group",
+        "type": "gcp:compute/regionNetworkEndpointGroup:RegionNetworkEndpointGroup",
+        "properties": {
+          "cloudRun": {
+            "service": {
+              "$output": {
+                "resource": "smoke-api.service",
+                "name": "name"
+              }
+            }
+          },
+          "name": "smoke-web-smoke-api-neg",
+          "networkEndpointType": "SERVERLESS",
+          "project": "superschematic-smoke",
+          "region": "us-central1"
+        },
+        "dependsOn": [
+          "smoke-api.service"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-web"
+        ]
+      },
+      {
+        "id": "smoke-web.backend",
+        "type": "gcp:compute/backendBucket:BackendBucket",
+        "properties": {
+          "bucketName": {
+            "$output": {
+              "resource": "smoke-web.bucket",
+              "name": "name"
+            }
+          },
+          "cdnPolicy": {
+            "cacheMode": "USE_ORIGIN_HEADERS"
+          },
+          "enableCdn": true,
+          "name": "smoke-web-backend",
+          "project": "superschematic-smoke"
+        },
+        "dependsOn": [
+          "smoke-web.bucket"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "smoke-web"
+        ]
+      },
+      {
+        "id": "smoke-web.bucket",
+        "type": "gcp:storage/bucket:Bucket",
+        "properties": {
+          "forceDestroy": true,
+          "location": "US-CENTRAL1",
+          "name": "superschematic-smoke-smoke-web",
+          "project": "superschematic-smoke",
+          "publicAccessPrevention": "inherited",
+          "uniformBucketLevelAccess": true,
+          "website": {
+            "mainPageSuffix": "index.html"
+          }
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "smoke-web"
+        ]
+      },
+      {
+        "id": "smoke-web.forwarding-rule",
+        "type": "gcp:compute/globalForwardingRule:GlobalForwardingRule",
+        "properties": {
+          "ipAddress": {
+            "$output": {
+              "resource": "smoke-web.address",
+              "name": "address"
+            }
+          },
+          "ipProtocol": "TCP",
+          "loadBalancingScheme": "EXTERNAL_MANAGED",
+          "name": "smoke-web-http",
+          "portRange": "80",
+          "project": "superschematic-smoke",
+          "target": {
+            "$output": {
+              "resource": "smoke-web.http-proxy",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "smoke-web.address",
+          "smoke-web.http-proxy"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "smoke-web"
+        ]
+      },
+      {
+        "id": "smoke-web.http-proxy",
+        "type": "gcp:compute/targetHttpProxy:TargetHttpProxy",
+        "properties": {
+          "name": "smoke-web-http",
+          "project": "superschematic-smoke",
+          "urlMap": {
+            "$output": {
+              "resource": "smoke-web.url-map",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "smoke-web.url-map"
+        ],
+        "phase": "exposure",
+        "owners": [
+          "smoke-web"
+        ]
+      },
+      {
+        "id": "smoke-web.public-read",
+        "type": "gcp:storage/bucketIAMMember:BucketIAMMember",
+        "properties": {
+          "bucket": {
+            "$output": {
+              "resource": "smoke-web.bucket",
+              "name": "name"
+            }
+          },
+          "member": "allUsers",
+          "role": "roles/storage.objectViewer"
+        },
+        "dependsOn": [
+          "smoke-web.bucket"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "smoke-web"
+        ]
+      },
+      {
+        "id": "smoke-web.url-map",
+        "type": "gcp:compute/uRLMap:URLMap",
+        "properties": {
+          "defaultService": {
+            "$output": {
+              "resource": "smoke-web.backend",
+              "name": "id"
+            }
+          },
+          "hostRules": [
+            {
+              "hosts": [
+                "*"
+              ],
+              "pathMatcher": "files"
+            }
+          ],
+          "name": "smoke-web-lb",
+          "pathMatchers": [
+            {
+              "defaultService": {
+                "$output": {
+                  "resource": "smoke-web.backend",
+                  "name": "id"
+                }
+              },
+              "name": "files",
+              "routeRules": [
+                {
+                  "customErrorResponsePolicy": {
+                    "errorResponseRules": [
+                      {
+                        "matchResponseCodes": [
+                          "404"
+                        ],
+                        "overrideResponseCode": 200,
+                        "path": "/{site-digest}/index.html"
+                      }
+                    ],
+                    "errorService": {
+                      "$output": {
+                        "resource": "smoke-web.backend",
+                        "name": "id"
+                      }
+                    }
+                  },
+                  "matchRules": [
+                    {
+                      "fullPathMatch": "/"
+                    }
+                  ],
+                  "priority": 1,
+                  "routeAction": {
+                    "urlRewrite": {
+                      "pathPrefixRewrite": "/{site-digest}/index.html"
+                    }
+                  },
+                  "service": {
+                    "$output": {
+                      "resource": "smoke-web.backend",
+                      "name": "id"
+                    }
+                  }
+                },
+                {
+                  "matchRules": [
+                    {
+                      "fullPathMatch": "/__superschematic/none"
+                    }
+                  ],
+                  "priority": 2,
+                  "service": {
+                    "$output": {
+                      "resource": "smoke-web.anchor",
+                      "name": "id"
+                    }
+                  }
+                },
+                {
+                  "headerAction": {
+                    "requestHeadersToAdds": [
+                      {
+                        "headerName": "X-Forwarded-Prefix",
+                        "headerValue": "/api/smoke-api",
+                        "replace": true
+                      }
+                    ]
+                  },
+                  "matchRules": [
+                    {
+                      "fullPathMatch": "/api/smoke-api"
+                    }
+                  ],
+                  "priority": 3,
+                  "routeAction": {
+                    "urlRewrite": {
+                      "pathPrefixRewrite": "/"
+                    }
+                  },
+                  "service": {
+                    "$output": {
+                      "resource": "smoke-web.api.smoke-api.backend",
+                      "name": "id"
+                    }
+                  }
+                },
+                {
+                  "headerAction": {
+                    "requestHeadersToAdds": [
+                      {
+                        "headerName": "X-Forwarded-Prefix",
+                        "headerValue": "/api/smoke-api",
+                        "replace": true
+                      }
+                    ]
+                  },
+                  "matchRules": [
+                    {
+                      "prefixMatch": "/api/smoke-api/"
+                    }
+                  ],
+                  "priority": 4,
+                  "routeAction": {
+                    "urlRewrite": {
+                      "pathPrefixRewrite": "/"
+                    }
+                  },
+                  "service": {
+                    "$output": {
+                      "resource": "smoke-web.api.smoke-api.backend",
+                      "name": "id"
+                    }
+                  }
+                },
+                {
+                  "customErrorResponsePolicy": {
+                    "errorResponseRules": [
+                      {
+                        "matchResponseCodes": [
+                          "404"
+                        ],
+                        "overrideResponseCode": 200,
+                        "path": "/{site-digest}/index.html"
+                      }
+                    ],
+                    "errorService": {
+                      "$output": {
+                        "resource": "smoke-web.backend",
+                        "name": "id"
+                      }
+                    }
+                  },
+                  "matchRules": [
+                    {
+                      "prefixMatch": "/"
+                    }
+                  ],
+                  "priority": 5,
+                  "routeAction": {
+                    "urlRewrite": {
+                      "pathPrefixRewrite": "/{site-digest}/"
+                    }
+                  },
+                  "service": {
+                    "$output": {
+                      "resource": "smoke-web.backend",
+                      "name": "id"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "project": "superschematic-smoke"
+        },
+        "dependsOn": [
+          "smoke-web.anchor",
+          "smoke-web.api.smoke-api.backend",
+          "smoke-web.backend"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-web"
+        ]
+      }
+    ]
+  },
+  "deployOrder": [
+    {
+      "step": "infrastructure",
+      "resources": [
+        "smoke-api-drain-line-items.account",
+        "smoke-api-drain-line-items.cloudsql-client.smoke-db",
+        "smoke-api-drain-line-items.cloudsql-login.smoke-db",
+        "smoke-api-drain-line-items.database-user.smoke-db",
+        "smoke-api-sync-all-linked-accounts.account",
+        "smoke-api-sync-all-linked-accounts.cloudsql-client.smoke-db",
+        "smoke-api-sync-all-linked-accounts.cloudsql-login.smoke-db",
+        "smoke-api-sync-all-linked-accounts.database-user.smoke-db",
+        "smoke-api.account",
+        "smoke-api.cloudsql-client.smoke-db",
+        "smoke-api.cloudsql-login.smoke-db",
+        "smoke-api.database-user.smoke-db",
+        "smoke-db.database.smoke-db",
+        "smoke-db.instance",
+        "smoke-db.migrator",
+        "smoke-web.address",
+        "smoke-web.anchor",
+        "smoke-web.backend",
+        "smoke-web.bucket",
+        "smoke-web.public-read"
+      ]
+    },
+    {
+      "step": "migrate",
+      "migration": "expand",
+      "deployables": [
+        "smoke-db"
+      ]
+    },
+    {
+      "step": "rollout",
+      "wave": 1,
+      "deployables": [
+        "smoke-api",
+        "smoke-api-drain-line-items",
+        "smoke-api-sync-all-linked-accounts"
+      ],
+      "resources": [
+        "smoke-api-drain-line-items.worker-pool",
+        "smoke-api-sync-all-linked-accounts.job",
+        "smoke-api-sync-all-linked-accounts.schedule",
+        "smoke-api-sync-all-linked-accounts.schedule-invoker",
+        "smoke-api.service"
+      ]
+    },
+    {
+      "step": "rollout",
+      "wave": 2,
+      "deployables": [
+        "smoke-web"
+      ],
+      "resources": [
+        "smoke-web.api.smoke-api.backend",
+        "smoke-web.api.smoke-api.endpoint-group",
+        "smoke-web.url-map"
+      ]
+    },
+    {
+      "step": "migrate",
+      "migration": "contract",
+      "deployables": [
+        "smoke-db"
+      ]
+    },
+    {
+      "step": "exposure",
+      "resources": [
+        "smoke-web.forwarding-rule",
+        "smoke-web.http-proxy"
+      ]
+    }
+  ]
+}

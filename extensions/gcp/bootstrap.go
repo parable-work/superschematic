@@ -199,8 +199,20 @@ var accountRoles = []string{"deployer", "planner", "builder", "migrator"}
 const githubIssuer = "https://token.actions.githubusercontent.com"
 
 // accountID is the id of one of the stack's CI accounts:
-// `<stack>-deployer`, `<stack>-planner`.
-func accountID(stack, role string) string { return kebab(stack) + "-" + role }
+// `<stack>-deployer`, `<stack>-planner`. A stack whose name leaves its
+// longest role's id over an account id's 30 characters names all four
+// with its name shortened alike (accountStack, D97).
+func accountID(stack, role string) string { return accountStack(stack) + "-" + role }
+
+// accountStack is the stack's part of its CI accounts' ids: its name, or
+// one shortened to leave room for its longest role.
+func accountStack(stack string) string {
+	longest := 0
+	for _, role := range accountRoles {
+		longest = max(longest, len(role))
+	}
+	return shorten(kebab(stack), accountIDMax-1-longest, "-")
+}
 
 // accountMember is the IAM member of one of the stack's CI accounts.
 func accountMember(v values, stack, role string) string {
@@ -315,14 +327,6 @@ func BootstrapEnvironment(env *ir.ResolvedEnvironment, ci GitHubCI) (*ir.Resolve
 		}
 	}
 	stack := kebab(env.Stack)
-	for _, role := range accountRoles {
-		if id := accountID(env.Stack, role); len(id) > 30 {
-			return nil, fmt.Errorf("gcp: the service account id %s is %d characters, and GCP allows 30; name the stack with at most %d", id, len(id), 30-len(role)-1)
-		}
-	}
-	if pool := workloadIdentityPool(env.Stack); len(pool) > 32 {
-		return nil, fmt.Errorf("gcp: the workload identity pool id %s is longer than GCP's 32 characters; name the stack with at most 25", pool)
-	}
 	var nodes []*ir.Resource
 	add := func(id, typ string, props map[string]any) {
 		res := &ir.Resource{ID: id, Type: typ, Properties: props, Phase: ir.PhaseInfrastructure, Owners: []string{"bootstrap"}}

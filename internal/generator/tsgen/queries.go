@@ -34,6 +34,30 @@ type ORMQuery struct {
 
 	OrderBy *ORMQueryOrder
 	Page    *ORMQueryPage
+
+	// Returns is what a call answers: "many", "one" or "optional" (D95).
+	Returns string
+}
+
+// ResultType is the TypeScript type a call of the query resolves to: its
+// rows, its one row, or its row or null (D95). A paged query's is its
+// page's.
+func (q ORMQuery) ResultType() string {
+	switch {
+	case q.Page != nil:
+		return "RowPage<" + q.RowType + ", " + q.Page.KeyType + ">"
+	case q.Returns == ir.QueryReturnsOne:
+		return q.RowType
+	case q.Returns == ir.QueryReturnsOptional:
+		return q.RowType + " | null"
+	}
+	return q.RowType + "[]"
+}
+
+// ReturnsOne reports whether a call answers one row, or one or none,
+// rather than the rows, which the runtime is told.
+func (q ORMQuery) ReturnsOne() bool {
+	return q.Returns == ir.QueryReturnsOne || q.Returns == ir.QueryReturnsOptional
 }
 
 // ORMQueryOrder is a query's dynamic sort.
@@ -77,6 +101,7 @@ func typeScriptQueries(schema *ir.Schema, opts Options, types map[string]*TypeIn
 			ParamsType: qualifyTypes(q.Params, known),
 			RowType:    qualifyTypes(q.Row, known),
 			Text:       q.Text,
+			Returns:    q.Returns,
 		}
 		if td := schema.Types[q.Type]; td != nil {
 			query.Doc = codegen.DocText(td.Description, td.Comment)

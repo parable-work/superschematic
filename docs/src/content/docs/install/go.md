@@ -14,7 +14,7 @@ and a Go SDK. The build refuses the config without it.
 
 ## Requirements
 
-- Go 1.26.4 (`GOTOOLCHAIN=go1.26.4`).
+- Go 1.27.3 (`GOTOOLCHAIN=go1.27.3`).
 - `CGO_ENABLED=1` and a C compiler. The compiler links
   [superscalar](https://github.com/parable-work/superscalar) through cgo
   against a static archive.
@@ -58,7 +58,7 @@ binary for linux and darwin on x64 and arm64, as
 `darwin-x64`, `darwin-arm64`). Until then, build it from a checkout:
 
 ```
-export GOTOOLCHAIN=go1.26.4
+export GOTOOLCHAIN=go1.27.3
 eval "$(scripts/superscalar-dep.sh --export)"
 cd cmd/superschematic
 go build -trimpath -buildvcs=false -o ../../bin/superschematic .

@@ -94,9 +94,10 @@ func TestRelationsOfAFinanceSchema(t *testing.T) {
 // view beside the tables, its columns in the declaration's order named in
 // snake case, filtered and sorted as a table's columns of their types,
 // keyed by the column that reads its source's key, and its statements the
-// reads TableStatementsOf writes over the view.
+// reads TableStatementsOf writes over the view; and its search over its
+// source's search column (D99), one probe of the source's keys.
 func TestViewsOfAProjection(t *testing.T) {
-	_, views := financesTables(t)
+	tables, views := financesTables(t)
 	if len(views) != 1 || views[0].Type != "TransactionListRow" {
 		t.Fatalf("views = %+v, want TransactionListRow", views)
 	}
@@ -127,5 +128,17 @@ func TestViewsOfAProjection(t *testing.T) {
 	}
 	if s.Page != "SELECT %s FROM transaction_list%s%s LIMIT %d" {
 		t.Errorf("the view's page = %q", s.Page)
+	}
+	if line := tables["LineItem"]; !line.Search || line.SearchColumn != "line_item.search_text" || line.SearchProbe != "" {
+		t.Errorf("LineItem's search = %v %q %q, want its own column and no probe", line.Search, line.SearchColumn, line.SearchProbe)
+	}
+	if !view.Search || view.SearchColumn != "line_item.search_text" {
+		t.Errorf("the view's search = %v %q, want LineItem's column", view.Search, view.SearchColumn)
+	}
+	if view.SearchProbe != "transaction_list.id IN (SELECT line_item.id FROM line_item%s)" {
+		t.Errorf("the view's search probe = %q", view.SearchProbe)
+	}
+	if got := SearchConditionOf(&view); got != `line_item.search_text ILIKE $%d ESCAPE '\'` {
+		t.Errorf("a word of the view's search = %q", got)
 	}
 }

@@ -882,12 +882,63 @@
               "config": {
                 "additionalProperties": false,
                 "properties": {
+                  "anchorPermission": {
+                    "description": "The permission that lets a caller move the anchor of a code block on another's message with moveAnchor, as a git extension does after a push. Absent, only the message's author and a caller holding moderatePermission may.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "attachments": {
+                    "additionalProperties": false,
+                    "description": "What an attachment block may describe. The engine keeps a file's description, never its bytes: the deployment stores and serves the file, through an upload route of its own.",
+                    "properties": {
+                      "maxBytes": {
+                        "description": "The largest file an attachment block may describe, in bytes; no limit when absent.",
+                        "maximum": 9007199254740991,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "mediaTypes": {
+                        "description": "The media types an attachment may have, each type/subtype or type/* in lower case; any when absent.",
+                        "items": {
+                          "maxLength": 255,
+                          "pattern": "^[a-z0-9][a-z0-9!#$\u0026^_.+-]{0,126}/([a-z0-9][a-z0-9!#$\u0026^_.+-]{0,126}|\\*)$",
+                          "type": "string"
+                        },
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "schemes": {
+                        "description": "The URI schemes an attachment's uri may use, in lower case: https and bucket, say, for files a deployment serves from a bucket by a scheme of its own. https alone when absent. Schemes that run code or carry the bytes themselves are refused.",
+                        "items": {
+                          "not": {
+                            "enum": [
+                              "javascript",
+                              "vbscript",
+                              "data",
+                              "file",
+                              "blob",
+                              "about"
+                            ]
+                          },
+                          "pattern": "^[a-z][a-z0-9+.-]{0,31}$",
+                          "type": "string"
+                        },
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      }
+                    },
+                    "type": "object"
+                  },
                   "blocks": {
-                    "description": "The block kinds a post, an edit or a finish may give; every kind when absent, none when empty.",
+                    "description": "The block kinds a post, an edit or a finish may give: ref, action, code and attachment; every kind when absent, none when empty.",
                     "items": {
                       "enum": [
                         "ref",
-                        "action"
+                        "action",
+                        "code",
+                        "attachment"
                       ]
                     },
                     "type": "array",
@@ -934,7 +985,7 @@
                     "type": "integer"
                   },
                   "moderatePermission": {
-                    "description": "The permission that lets a caller edit, delete and interrupt another's message, edit past editWindowMs, and purge. Absent, only a message's author edits, deletes or interrupts it before composeTimeoutMs passes, and nobody purges.",
+                    "description": "The permission that lets a caller edit, delete and interrupt another's message, edit past editWindowMs, move the anchor of a code block on another's message, and purge. Absent, only a message's author edits, deletes or interrupts it before composeTimeoutMs passes, and nobody purges.",
                     "minLength": 1,
                     "type": "string"
                   },
@@ -5288,6 +5339,10 @@
           "$ref": "#/$defs/QueryPage"
         },
         "params": {
+          "type": "string"
+        },
+        "returns": {
+          "default": "",
           "type": "string"
         },
         "row": {

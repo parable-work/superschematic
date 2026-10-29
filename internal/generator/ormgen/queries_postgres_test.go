@@ -15,7 +15,8 @@ const queriesFixture = "fixture-queries-db"
 // pool and in a transaction, its params bound as their columns take them
 // and its rows read by column name into the row type's fields, the
 // dashboard's category totals, generate_series time buckets and paged
-// transaction list among them.
+// transaction list among them, and the reports that share one filter, of
+// which the totals return one row and a line of a name one or none (D95).
 func TestDeclaredQueriesOnPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -28,7 +29,7 @@ func TestDeclaredQueriesOnPostgres(t *testing.T) {
 	if os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL") == "" {
 		return
 	}
-	for _, test := range []string{"TestDeclaredQueriesOnPostgres", "TestDeclaredQueriesNoOp"} {
+	for _, test := range []string{"TestDeclaredQueriesOnPostgres", "TestOneRowQueriesOnPostgres", "TestDeclaredQueriesNoOp"} {
 		if !strings.Contains(out, "--- PASS: "+test) {
 			t.Fatalf("the generated ORM module did not run %s", test)
 		}
@@ -39,6 +40,7 @@ const queriesORMTest = `package orm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -286,11 +288,112 @@ func TestDeclaredQueriesOnPostgres(t *testing.T) {
 	}
 }
 
-// TestDeclaredQueriesNoOp: the no-op database's queries read no rows.
+// TestOneRowQueriesOnPostgres runs the dashboard's reports, which share
+// one filter, a string constant their SQL interpolates, one of them over
+// the line_list projection's view; and the queries that return one row, or
+// one or none, with none, one and more than one to read (D95).
+func TestOneRowQueriesOnPostgres(t *testing.T) {
+	ctx, db := openQueries(t)
+	checking, err := db.Account.CreateOne(ctx, &types.Account{Name: "Checking"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	food, err := db.Category.CreateOne(ctx, &types.Category{Name: "Food"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := func(date, name string, amount int64, category *types.Category) *types.LineItem {
+		t.Helper()
+		created, err := db.LineItem.CreateOne(ctx, &types.LineItem{Date: at(t, date), Name: name, Amount: types.FinanceSignedMoney(amount), Account: *checking, Category: category})
+		if err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+		return created
+	}
+	market := line("2026-01-05T10:00:00Z", "Market", -4000, food)
+	line("2026-01-15T08:00:00Z", "Salary", 250000, nil)
+	filter := types.DashboardFilter{Start: at(t, "2026-01-01T00:00:00Z"), End: at(t, "2026-01-31T23:59:59Z")}
+
+	// The one row, of a filter that holds lines and of one that holds none.
+	totals, err := db.Queries.DashboardTotals(ctx, filter)
+	if err != nil || totals != (types.DashboardTotalsRow{Spent: -4000, Earned: 250000, Lines: 2}) {
+		t.Fatalf("dashboard totals = %+v, %v", totals, err)
+	}
+	nothing := filter
+	nothing.Search = "nothing holds this"
+	if empty, err := db.Queries.DashboardTotals(ctx, nothing); err != nil || empty != (types.DashboardTotalsRow{}) {
+		t.Fatalf("dashboard totals of no lines = %+v, %v", empty, err)
+	}
+	err = db.Transaction(ctx, func(tx TxInterface) error {
+		inTx, err := tx.GetQueries().DashboardTotals(ctx, filter)
+		if err == nil && inTx != totals {
+			err = fmt.Errorf("dashboard totals in a transaction = %+v", inTx)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The rows, through the same filter: grouped, and over the view.
+	categories, err := db.Queries.DashboardCategories(ctx, filter)
+	if err != nil || len(categories) != 2 || categories[0].Total != -4000 || categories[0].CategoryId == nil || *categories[0].CategoryId != *food.Id || categories[1].CategoryId != nil {
+		t.Fatalf("dashboard categories = %+v, %v", categories, err)
+	}
+	listed, err := db.Queries.DashboardLines(ctx, filter)
+	if err != nil || len(listed) != 2 || listed[0].Name != "Salary" || listed[0].CategoryName != nil || listed[1].AccountName != "Checking" || listed[1].CategoryName == nil || *listed[1].CategoryName != "Food" {
+		t.Fatalf("dashboard lines = %+v, %v", listed, err)
+	}
+
+	// One row: ErrNotFound for none, ErrTooManyRows for more than one.
+	account, err := db.Queries.AccountNamed(ctx, types.AccountNamedParams{Name: "Checking"})
+	if err != nil || account.Id != *checking.Id {
+		t.Fatalf("the account named Checking = %+v, %v", account, err)
+	}
+	if _, err := db.Queries.AccountNamed(ctx, types.AccountNamedParams{Name: "Nobody"}); !errors.Is(err, ErrNotFound) || !strings.Contains(err.Error(), "query accountNamed returns one row, and its statement read none") {
+		t.Fatalf("no account = %v", err)
+	}
+	for range 2 {
+		if _, err := db.Account.CreateOne(ctx, &types.Account{Name: "Joint"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Queries.AccountNamed(ctx, types.AccountNamedParams{Name: "Joint"}); !errors.Is(err, ErrTooManyRows) || !strings.Contains(err.Error(), "query accountNamed returns one row, and its statement read 2") {
+		t.Fatalf("two accounts = %v", err)
+	}
+
+	// One row or none: nil for none, ErrTooManyRows for more than one.
+	matching := func(name string) types.MatchingLineParams {
+		return types.MatchingLineParams{Start: filter.Start, End: filter.End, Name: name}
+	}
+	found, err := db.Queries.MatchingLine(ctx, matching("Market"))
+	if err != nil || found == nil || found.Id != *market.Id || found.Amount != -4000 {
+		t.Fatalf("the line named Market = %+v, %v", found, err)
+	}
+	if none, err := db.Queries.MatchingLine(ctx, matching("Rent")); none != nil || err != nil {
+		t.Fatalf("no line named Rent = %+v, %v", none, err)
+	}
+	line("2026-01-20T08:00:00Z", "Coffee", -300, nil)
+	line("2026-01-21T08:00:00Z", "Coffee", -350, nil)
+	if _, err := db.Queries.MatchingLine(ctx, matching("Coffee")); !errors.Is(err, ErrTooManyRows) || !strings.Contains(err.Error(), "query matchingLine returns one row or none, and its statement read 2") {
+		t.Fatalf("two lines named Coffee = %v", err)
+	}
+}
+
+// TestDeclaredQueriesNoOp: the no-op database's queries read no rows, so
+// one that returns one row fails as it does on none, and one that returns
+// one or none answers nil (D95).
 func TestDeclaredQueriesNoOp(t *testing.T) {
-	rows, err := NewNoOpDatabase().GetQueries().Budgets(context.Background(), types.BudgetsParams{})
+	queries := NewNoOpDatabase().GetQueries()
+	rows, err := queries.Budgets(context.Background(), types.BudgetsParams{})
 	if err != nil || len(rows) != 0 {
 		t.Fatalf("no-op budgets = %v, %v", rows, err)
+	}
+	if _, err := queries.AccountNamed(context.Background(), types.AccountNamedParams{Name: "Checking"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("no-op account named = %v", err)
+	}
+	if line, err := queries.MatchingLine(context.Background(), types.MatchingLineParams{Name: "Market"}); line != nil || err != nil {
+		t.Fatalf("no-op matching line = %+v, %v", line, err)
 	}
 }
 `

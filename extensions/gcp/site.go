@@ -86,9 +86,11 @@ func sitePublicAddress(ctx registry.PlatformContext) any {
 
 // siteBucket names a site's bucket: the project, then the site's resource
 // name, `acme-staging-shop-web`, or `acme-staging-shop-web-pr123` under a
-// parameter. A bucket's name is global, and a project's id is too.
-func siteBucket(v values, d ir.ResolvedDeployable) any {
-	return join(v.project, "-", d.ResourceName)
+// parameter. A bucket's name is global, and a project's id is too. A name
+// over a bucket's 63 characters is shortened (D97), and the second result
+// says so.
+func siteBucket(env registry.StackEnvironment, v values, d ir.ResolvedDeployable) (any, bool) {
+	return fitted(env, v.project+"-"+kebab(d.Name), "-", 63)
 }
 
 // lowerSite lowers a site to:
@@ -122,9 +124,21 @@ func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 	if d.Site == nil {
 		return registry.Lowered{}, fmt.Errorf("site %s says nothing of how it builds", d.Name)
 	}
-	bucket := siteBucket(v, d)
+	bucket, short := siteBucket(env, v, d)
 	if err := checkLength("the bucket name of "+d.Name, bucket, 3, 63, renameOf(d)); err != nil {
 		return registry.Lowered{}, err
+	}
+	bucketProps := map[string]any{
+		"project":                  v.project,
+		"name":                     bucket,
+		"location":                 strings.ToUpper(v.region),
+		"uniformBucketLevelAccess": true,
+		"publicAccessPrevention":   "inherited",
+		"forceDestroy":             true,
+		"website":                  map[string]any{"mainPageSuffix": "index.html"},
+	}
+	if labels := nameLabels(d, short); labels != nil {
+		bucketProps["labels"] = labels
 	}
 	lb := loadBalancer{v: v, d: d}
 	infrastructure := func(res *ir.Resource) *ir.Resource {
@@ -133,15 +147,7 @@ func lowerSite(ctx registry.PlatformContext) (registry.Lowered, error) {
 	}
 	files := lb.out("backend", "id")
 	backends := []*ir.Resource{
-		{ID: lb.id("bucket"), Type: TypeBucket, Phase: ir.PhaseInfrastructure, Properties: map[string]any{
-			"project":                  v.project,
-			"name":                     bucket,
-			"location":                 strings.ToUpper(v.region),
-			"uniformBucketLevelAccess": true,
-			"publicAccessPrevention":   "inherited",
-			"forceDestroy":             true,
-			"website":                  map[string]any{"mainPageSuffix": "index.html"},
-		}},
+		{ID: lb.id("bucket"), Type: TypeBucket, Phase: ir.PhaseInfrastructure, Properties: bucketProps},
 		{ID: lb.id("public-read"), Type: TypeBucketIAMMember, Phase: ir.PhaseInfrastructure, Properties: map[string]any{
 			"bucket": lb.out("bucket", "name"),
 			"role":   "roles/storage.objectViewer",
@@ -253,23 +259,32 @@ func lowerOrigin(lb loadBalancer, v values, d ir.ResolvedDeployable, first int) 
 				return nil, nil, registry.Unrealizable("site %s serves %s on its origin, and %s's server %s is on another provider; the site's load balancer reaches an API of its origin through a serverless network endpoint group of its Cloud Run service, so place %s on Cloud Run or leave it out of the origin", d.Name, api.Service, api.Service, api.Server, api.Server)
 			}
 		}
-		service := kebab(api.Service)
+		// The nodes are named after the site and the API; a name over 63
+		// characters keeps the site's part and shortens the API's (D97),
+		// and the node's description names both.
+		service, short := fit(join(d.ResourceName, "-", kebab(api.Service), "-neg"), kebab(api.Service), "-", 63)
 		for _, suffix := range []string{"-neg", "-api"} {
 			if err := checkLength("the load balancer's "+suffix[1:]+" of "+api.Service+" on site "+d.Name, join(d.ResourceName, "-", service, suffix), 1, 63, "the site or the API"); err != nil {
 				return nil, nil, err
 			}
 		}
+		described := func(props map[string]any) map[string]any {
+			if short {
+				props["description"] = fmt.Sprintf("API %s on the origin of site %s", api.Service, d.Name)
+			}
+			return props
+		}
 		part := "api." + api.Service + "."
-		group := lb.node(part+"endpoint-group", TypeEndpointGroup, service+"-neg", map[string]any{
+		group := lb.node(part+"endpoint-group", TypeEndpointGroup, service+"-neg", described(map[string]any{
 			"region":              v.region,
 			"networkEndpointType": "SERVERLESS",
 			"cloudRun":            map[string]any{"service": ir.Output{Resource: api.Server + ".service", Name: "name"}},
-		})
-		backend := lb.node(part+"backend", TypeBackendService, service+"-api", map[string]any{
+		}))
+		backend := lb.node(part+"backend", TypeBackendService, service+"-api", described(map[string]any{
 			"loadBalancingScheme": "EXTERNAL_MANAGED",
 			"backends":            []any{map[string]any{"group": lb.out(part+"endpoint-group", "id")}},
 			"enableCdn":           false,
-		})
+		}))
 		group.Phase, backend.Phase = ir.PhaseRollout, ir.PhaseRollout
 		nodes = append(nodes, group, backend)
 		route := func(priority int, match map[string]any) map[string]any {

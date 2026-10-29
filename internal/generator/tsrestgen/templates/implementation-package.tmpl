@@ -10,17 +10,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "{{ .PackageName }}": "workspace:*",
-    "{{ .TypesPackage }}": "workspace:*",
-{{- if and .Deps.DatabaseTypesPackage (ne .Deps.DatabaseTypesPackage .TypesPackage) }}
-    "{{ .Deps.DatabaseTypesPackage }}": "workspace:*",
+{{- range $i, $dep := .ImplementationDependencies }}{{ if $i }},{{ end }}
+    "{{ $dep.Name }}": "{{ $dep.Spec }}"
 {{- end }}
-{{- range .Deps.MemoryStores }}
-{{- if .Definitions }}
-    "{{ .Definitions }}": "workspace:*",
-{{- end }}
-{{- end }}
-    "{{ .RuntimePackage }}": "*"
   },
   "devDependencies": {
     "@types/node": "{{ .NodeTypesVersion }}",

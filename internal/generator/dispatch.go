@@ -438,6 +438,17 @@ func (r run) generateSQL() error {
 		r.Skip("sql")
 		return nil
 	}
+	// A projection's migration, once built, is never rewritten (D102): the
+	// service's projections.lock records the files each stamp names, and a
+	// stamp whose files would change fails the build before it writes.
+	var stamps *ProjectionsLock
+	var stampsChanged bool
+	if r.Options.ServicePath != "" {
+		stamps, stampsChanged, err = checkProjectionStamps(r.Options.ServicePath, ownMigrationsDir(r.Options.ServicePath, r.Outputs), output.Projections, r.Options.RewriteMigrations)
+		if err != nil {
+			return fmt.Errorf("generator: sql for %s: %w", r.Config.Name, err)
+		}
+	}
 	// A DB service's queries are the ones its queries.lock verified on
 	// Postgres (D86); the build reads the lock and runs no database.
 	if r.Options.ServicePath != "" {
@@ -466,6 +477,13 @@ func (r run) generateSQL() error {
 	}
 	if len(output.Projections) > 0 {
 		r.Logf("  + sql projections: %d view migration(s) in %s\n", len(output.Projections), migrationsDir)
+	}
+	if stampsChanged {
+		path := filepath.Join(r.Options.ServicePath, ProjectionsLockFile)
+		if err := WriteProjectionsLock(path, stamps); err != nil {
+			return fmt.Errorf("generator: sql projections for %s: %w", r.Config.Name, err)
+		}
+		r.Logf("  + sql projections: recorded the migration stamps built in %s\n", path)
 	}
 
 	if r.Outputs.SQLDialect(registry.SQLDialectSQLite) {

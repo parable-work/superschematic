@@ -1143,9 +1143,15 @@ file := program.SourceFile("label.d.ts")
 - `Diagnostics(names...)` reports only the named files. Leave out a file
   whose declarations you trust; they still resolve.
 - `Checker()` and `SourceFile()` return the pinned compiler's types
-  (`github.com/microsoft/typescript-go/shim/checker` and `.../ast`); import
+  (`github.com/microsoft/typescript-go/shim/checker` and `.../ast`). Import
   the shim to name a node kind. `ErrorAt(node, ...)` makes a located error
   in the same form as the diagnostics.
+- The pinned compiler is Microsoft's unmodified TypeScript 7.0.2
+  (`github.com/microsoft/TypeScript/tsc`). The shim module
+  (`github.com/parable-work/typescript-shim`) exposes its packages. Go
+  does not pass a `replace` on to a module that requires yours, so your
+  extension's `go.mod` repeats the two `replace` lines of the root
+  `go.mod`, as `examples/acme-schematic/go.mod` does.
 - A program is for one goroutine. `Close` releases the checker.
 
 acme's `fields <file.d.ts> <type>` type-checks a declaration file and

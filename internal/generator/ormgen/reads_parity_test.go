@@ -15,7 +15,9 @@ import (
 // page with its relations included, nested, the one-to-many @hasMany
 // include, and a to-one include on GetOne and FindOne; and the
 // TransactionListRow projection's GetOne, FindOne, FindMany and FindPage,
-// filtered on joined columns, and its next page. Each call's include in
+// filtered on joined columns, and its next page; and allOf (D99), two OR
+// groups ANDed, after an anyOf branch of no condition and in an
+// UpdateMany, and on the projection beside its searchText. Each call's include in
 // TypeScript names what its Go Fields select, each relation's columns and
 // the nested relations.
 func TestReadParityOfGoAndTypeScriptOnPostgres(t *testing.T) {
@@ -88,6 +90,12 @@ try {
   await call('findEither', () => orm.lineItem.findMany({ anyOf: either, searchText: 'coffee', userId: { eq: ann.id } }, { select: ['id', 'name'], limit: 10 }));
   await call('findEitherOrAll', () => orm.lineItem.findMany({ anyOf: [{ categoryId: { in: [food.id] } }, {}], amount: { lt: n(0) } }, { select: ['id'] }));
   await call('updateThroughCategory', () => orm.lineItem.updateMany({ anyOf: either, category: { name: { eq: n('Dining') } } }, { description: 'out' }));
+  const coffee = [{ name: { ilike: 'coffee' } }, { description: { ilike: 'coffee' } }];
+  await call('findBothGroups', () => orm.lineItem.findMany({ allOf: [{ anyOf: either }, { anyOf: coffee }], userId: { eq: ann.id } }, { select: ['id', 'name'], limit: 10 }));
+  await call('findAllOfAfterAll', () =>
+    orm.lineItem.findMany({ amount: { lt: n(0) }, allOf: [{ anyOf: [{ categoryId: { in: [food.id] } }, {}] }, { anyOf: coffee }] }, { select: ['id'] })
+  );
+  await call('updateBothGroups', () => orm.lineItem.updateMany({ allOf: [{ anyOf: either }, { anyOf: coffee }] }, { description: 'coffee, checked' }));
   const page = await call('pageDashboard', () =>
     orm.lineItem.findPage(
       { date: { gte: day(1), lt: day(31) }, anyOf: either, businessId: { eq: shop.id }, amount: { between: [n(-5000), n(0)] }, searchText: 'coffee' },
@@ -128,6 +136,13 @@ try {
   await call('getListed', () => orm.transactionListRow.getOne(beans.id));
   await call('findListed', () => orm.transactionListRow.findOne({ userName: { ilike: 'an' } }, { orderBy: [{ field: 'amount', desc: true }] }));
   await call('findManyListed', () => orm.transactionListRow.findMany({ categoryName: { isNull: true } }, { orderBy: [{ field: 'date' }], limit: 5, offset: 0 }));
+  await call('findListedSearch', () =>
+    orm.transactionListRow.findMany(
+      { searchText: 'coffee beans', allOf: [{ anyOf: [{ categoryId: { in: [food.id] } }, { parentCategoryId: { in: [food.id] } }] }, { amount: { lt: n(0) } }] },
+      { orderBy: [{ field: 'date' }], limit: 5 }
+    )
+  );
+  await call('pageListedSearch', () => orm.transactionListRow.findPage({ searchText: 'coffee' }, { sort: { field: 'date', desc: true }, limit: 1 }));
   writeFileSync(out!, JSON.stringify(calls, null, 2));
 } finally {
   await base.end();
@@ -296,6 +311,17 @@ func TestReadParity(t *testing.T) {
 	out2 := "out"
 	_, err = db.LineItem.UpdateMany(ctx, &LineItemFilter{AnyOf: either, Category: &CategoryFilter{Name: &StringFilter{Eq: str("Dining")}}}, &LineItemUpdate{Description: &out2})
 	must(err)
+	coffeeText := &StringFilter{ILike: str("coffee")}
+	both := []LineItemFilter{{AnyOf: either}, {AnyOf: []LineItemFilter{{Name: coffeeText}, {Description: coffeeText}}}}
+	rec.call("findBothGroups")
+	_, _, err = db.LineItem.FindMany(ctx, &LineItemFilter{AllOf: both, UserID: &UUIDFilter{Eq: ann.Id}}, &LineItemFindOptions{Fields: idName, Limit: 10})
+	must(err)
+	rec.call("findAllOfAfterAll")
+	_, _, err = db.LineItem.FindMany(ctx, &LineItemFilter{Amount: &Int64Filter{Lt: i64(0)}, AllOf: []LineItemFilter{{AnyOf: []LineItemFilter{{CategoryID: inFood}, {}}}, both[1]}}, &LineItemFindOptions{Fields: LineItemFields{Id: true}})
+	must(err)
+	rec.call("updateBothGroups")
+	_, err = db.LineItem.UpdateMany(ctx, &LineItemFilter{AllOf: both}, &LineItemUpdate{Description: str("coffee, checked")})
+	must(err)
 	rec.call("pageDashboard")
 	start, end := time.Time(day(1)), time.Time(day(31))
 	page, err := db.LineItem.FindPage(ctx, &LineItemFilter{
@@ -360,6 +386,13 @@ func TestReadParity(t *testing.T) {
 	must(err)
 	rec.call("findManyListed")
 	_, _, err = db.TransactionListRow().FindMany(ctx, &TransactionListRowFilter{CategoryName: &StringFilter{IsNull: &yes}}, &TransactionListRowFindOptions{OrderBy: []TransactionListRowOrderBy{{Field: TransactionListRowOrderByDate}}, Limit: 5})
+	must(err)
+	rec.call("findListedSearch")
+	_, _, err = db.TransactionListRow().FindMany(ctx, &TransactionListRowFilter{SearchText: str("coffee beans"), AllOf: []TransactionListRowFilter{{AnyOf: listEither}, {Amount: &Int64Filter{Lt: i64(0)}}}},
+		&TransactionListRowFindOptions{OrderBy: []TransactionListRowOrderBy{{Field: TransactionListRowOrderByDate}}, Limit: 5})
+	must(err)
+	rec.call("pageListedSearch")
+	_, err = db.TransactionListRow().FindPage(ctx, &TransactionListRowFilter{SearchText: str("coffee")}, &TransactionListRowPageOptions{Sort: TransactionListRowSort{Field: TransactionListRowSortByDate, Desc: true}, Limit: 1})
 	must(err)
 
 	data, err := json.MarshalIndent(rec.calls, "", "  ")

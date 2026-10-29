@@ -233,7 +233,7 @@ type RequestDerivedFieldsSummaryOverridden struct {
 
 // RequestProvenance holds the fields a Request's Provenance adds, as a read returns them: a field with no value is absent.
 type RequestProvenance struct {
-	// By recorded field written since Provenance was added: { source, by, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; review is { state, by?, at? }, state proposed, accepted, rejected or edited.
+	// By recorded field written since Provenance was added: { source, by, for?, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; for is the subject it acted for, when it acted for one (D77); review is { state, by?, at? }, state proposed, accepted, rejected or edited.
 	Fields RequestProvenanceFields `json:"fields"`
 	// Whether any recorded field is proposed. A list filters on it.
 	InReview bool `json:"inReview"`
@@ -252,6 +252,7 @@ type RequestProvenanceFieldsBody struct {
 	At         int64                              `json:"at"`
 	By         string                             `json:"by"`
 	Confidence *float64                           `json:"confidence,omitempty"`
+	For        *string                            `json:"for,omitempty"`
 	Review     *RequestProvenanceFieldsBodyReview `json:"review,omitempty"`
 	Source     string                             `json:"source"`
 }
@@ -269,6 +270,7 @@ type RequestProvenanceFieldsCategory struct {
 	At         int64                                  `json:"at"`
 	By         string                                 `json:"by"`
 	Confidence *float64                               `json:"confidence,omitempty"`
+	For        *string                                `json:"for,omitempty"`
 	Review     *RequestProvenanceFieldsCategoryReview `json:"review,omitempty"`
 	Source     string                                 `json:"source"`
 }
@@ -286,6 +288,7 @@ type RequestProvenanceFieldsSubject struct {
 	At         int64                                 `json:"at"`
 	By         string                                `json:"by"`
 	Confidence *float64                              `json:"confidence,omitempty"`
+	For        *string                               `json:"for,omitempty"`
 	Review     *RequestProvenanceFieldsSubjectReview `json:"review,omitempty"`
 	Source     string                                `json:"source"`
 }
@@ -303,6 +306,7 @@ type RequestProvenanceFieldsSummary struct {
 	At         int64                                 `json:"at"`
 	By         string                                `json:"by"`
 	Confidence *float64                              `json:"confidence,omitempty"`
+	For        *string                               `json:"for,omitempty"`
 	Review     *RequestProvenanceFieldsSummaryReview `json:"review,omitempty"`
 	Source     string                                `json:"source"`
 }

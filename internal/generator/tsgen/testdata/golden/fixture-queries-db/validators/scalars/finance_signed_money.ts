@@ -4,6 +4,12 @@ import type { ScalarValidationResult, ValidationError } from 'superscalar/valida
 
 import { parseFinanceSignedMoney as parseFinanceSignedMoneyFromLib } from 'superscalar/scalars';
 
+// The constructors of FinanceSignedMoney, the scalar library's own, which the
+// package hands out beside the type: each returns the value as
+// FinanceSignedMoney and throws on a value Finance.SignedMoney refuses (D25,
+// amended; D100).
+export { parseFinanceSignedMoneyStrict, normalizeFinanceSignedMoneyStrict } from 'superscalar/scalars';
+
 /**
  * Validates a Finance.SignedMoney value
  */

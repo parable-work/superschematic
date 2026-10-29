@@ -157,9 +157,10 @@ type ORMOutput struct {
 	Queues []Queue
 
 	// HasSearch is true when a repository's table has search fields
-	// (Repository.HasSearch); it writes search.go, the words of a search
-	// text and each word's LIKE pattern, which the filters' SearchText
-	// conditions take (D62, amended).
+	// (Repository.HasSearch), or a projection's view searches its source's
+	// (D99); it writes search.go, the words of a search text and each
+	// word's LIKE pattern, which the filters' SearchText conditions take
+	// (D62, amended).
 	HasSearch bool
 
 	// HistoryActorCTE and ClearHistoryActor are the statements a hard
@@ -970,6 +971,12 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	hasVectors, hasVectorHistory, hasDecimalHistory, hasDecimalFilters := false, false, false, false
 	hasSearch := false
 	hasEncryptedFields := false
+	for _, p := range projections {
+		// A view searches its source's search column (D99).
+		if p.SearchProbe != "" {
+			hasSearch = true
+		}
+	}
 	for _, repo := range repositories {
 		if repo.HasSearch {
 			hasSearch = true

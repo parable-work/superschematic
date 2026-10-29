@@ -81,10 +81,13 @@ another table's relation that points at the row, each with what to read of
 it in turn. A relation's rows load in one statement for all of a read's
 rows, the target's find with no count, and leave a soft-deleted target
 out. A filter reaches through a to-one relation, its member the target's
-filter, and anyOf ORs filters of the same table.
+filter, anyOf ORs filters of the same table, and allOf ANDs them (D99), so
+two OR groups are two filters of an allOf.
 
 A projection (D90) is read through a repository of its own, which a
 table's reads run over the view: getOne, findOne, findMany and findPage.
+A view keyed by its source's key over a source with search fields takes a
+searchText, which keeps the rows whose source row holds each word (D99).
 
 The @versioned history readers are the Go ORM's alone for now.
 */
@@ -238,8 +241,10 @@ export interface TableDefinition {
   readonly softDelete?: boolean;
   /** A @versioned table whose hard deletes set the history actor. */
   readonly historyActor?: boolean;
-  /** The search column, qualified, of a table with search fields. */
+  /** The search column, qualified, of a table with search fields, or of a view's source with them (D99). */
   readonly search?: string;
+  /** A view's: the condition its search words' conditions sit in, %s their WHERE, the view's key in the keys of the source's rows they keep (D99). */
+  readonly searchProbe?: string;
   /** The unique keys by name, their fields joined by ",". */
   readonly uniqueKeys: Readonly<Record<string, UniqueKeyDefinition>>;
   readonly referencedBy?: readonly ReferenceDefinition[];
@@ -371,6 +376,14 @@ export class NoUserError extends Error {
   ) {
     super(message);
     this.name = 'NoUserError';
+  }
+}
+
+/** The error of a declared query that returns one row, or one or none, whose statement read more than one (D95). */
+export class TooManyRowsError extends Error {
+  constructor(message = 'the query read more than one row') {
+    super(message);
+    this.name = 'TooManyRowsError';
   }
 }
 
@@ -1350,10 +1363,22 @@ class TableRepository {
     }
     const search = filter.searchText;
     if (this.def.search && typeof search === 'string') {
+      const words: string[] = [];
       for (const term of searchTerms(search)) {
-        conditions.push(fill(c.search, this.def.search, ++n));
+        words.push(fill(c.search, this.def.search, ++n));
         args.push(likePattern(term));
       }
+      // A view's words are one condition, on its source's rows (D99).
+      if (!this.def.searchProbe) conditions.push(...words);
+      else if (words.length > 0) conditions.push(fill(this.def.searchProbe, this.whereOf(words)));
+    }
+    // allOf's filters' conditions are the filter's own, ANDed (D99), each
+    // one's placeholders numbered after the last.
+    const allOf = filter.allOf as readonly (Values | null | undefined)[] | null | undefined;
+    for (const each of allOf ?? []) {
+      const before = args.length;
+      conditions.push(...this.conditions(each, args, n));
+      n += args.length - before;
     }
     // anyOf ORs filters of the table (D90), each one's conditions ANDed.
     // A filter of no condition keeps every row, and so does the whole,

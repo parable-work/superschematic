@@ -17,8 +17,10 @@ import (
 
 	"github.com/parable-work/superschematic/internal/buildcache"
 	"github.com/parable-work/superschematic/internal/buildplan"
+	"github.com/parable-work/superschematic/internal/generator"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/loader/tsreader"
 	"github.com/parable-work/superschematic/internal/loader/verify"
 	"github.com/parable-work/superschematic/internal/queryverify"
@@ -617,6 +619,12 @@ func (l *checkLoad) check(service buildplan.Service) {
 		if err := queryverify.CheckLock(service.Dir, schema); err != nil {
 			findings = append(findings, checkDiagnostic{File: filepath.Join(service.Dir, queryverify.LockFile), Severity: string(verify.SeverityError), Message: err.Error()})
 		}
+		// A projection's built migration is never rewritten (D102): the
+		// pairs a build would write are held to projections.lock, as the
+		// build holds them before it writes.
+		if err := c.checkProjectionStamps(service.Dir, schema, cfg); err != nil {
+			findings = append(findings, checkDiagnostic{File: filepath.Join(service.Dir, generator.ProjectionsLockFile), Severity: string(verify.SeverityError), Message: err.Error()})
+		}
 		if hasServiceSentinel(service.Dir, cfg, c.reg) {
 			changed, err := sentinel.EmitHandle(service.Dir, cfg, c.reg, sentinel.HandleTypesOf(schema))
 			if err != nil {
@@ -642,6 +650,24 @@ func (l *checkLoad) check(service buildplan.Service) {
 		d.Service = owner
 		c.results[owner].add(d)
 	}
+}
+
+// checkProjectionStamps renders the projection migrations a build of the
+// DB service at dir would write and holds them to its projections.lock
+// (generator.CheckProjectionStamps), with no database.
+func (c *checker) checkProjectionStamps(dir string, schema *ir.Schema, cfg *schemaconfig.SchemaConfig) error {
+	if schema.Kind != ir.SchemaKindDB || len(schema.Projections()) == 0 {
+		return nil
+	}
+	outputs, err := registry.ParseOutputs(cfg.Outputs, c.reg)
+	if err != nil {
+		return nil
+	}
+	deps := map[string]*ir.Schema{}
+	for _, dep := range cfg.Dependencies {
+		deps[dep.Name] = c.schemas[dep.Name]
+	}
+	return generator.CheckProjectionStamps(dir, schema, cfg, outputs, deps, c.names)
 }
 
 // dependency is the run's dependency loader: a service already loaded

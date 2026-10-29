@@ -42,7 +42,7 @@ type repositoryCase struct {
 // and updates only if changed under a trigger, and its options of a find, a
 // transaction and a raw query (D89); fixture-finances-db's reads (D90), a
 // filter through a relation, anyOf, select and include, and a projection's
-// repository; fixture-queries-db's declared queries (D86);
+// repository, and allOf and a projection's searchText (D99); fixture-queries-db's declared queries (D86);
 // fixture-vault-db's Encrypted<T> fields (D85), sealed, opened,
 // refused and resealed; fixture-actor-db's acting user, the caller of the
 // operation being run and the system actor (D87); and fixture-vectors-db's
@@ -114,6 +114,8 @@ var repositoryCases = []repositoryCase{
 		"select reads the members it names, and an include reads the foreign key it needs without keeping it",
 		"a to-one include of a soft-deleted or unset target is null, and one-to-many includes map each row's rows",
 		"the TransactionListRow projection reads through findPage, filtered on joined columns",
+		"allOf ANDs two OR groups, nests in anyOf and in itself, and an empty one adds no condition",
+		"the TransactionListRow projection takes allOf, and searchText over LineItem's search fields",
 	}},
 	{fixture: "fixture-queries-db", files: []string{"queries.test.ts"}, tests: []string{
 		"categoryTotals rolls a sub-category up to its parent, over a range and some accounts, its rows typed and decoded",
@@ -123,6 +125,11 @@ var repositoryCases = []repositoryCase{
 		"budgets read an exact decimal and a date as the wire holds them, and an optional parent",
 		"transferCandidates finds the other side of a move within the window",
 		"a query runs in a transaction, and sends the statement sqlutil writes, its parameters positional",
+		"the dashboard reports share one filter, each statement holding it in place, its parameters numbered alike",
+		"dashboardLines reads the line_list projection through the filter, its required columns never null",
+		"dashboardTotals returns its one row, which an empty filter still reads, on the pool and in a transaction",
+		"a query that returns one row fails on none, as getOne does, and on more than one",
+		"a query that returns one row or none answers null for none, and fails on more than one",
 	}},
 	{fixture: "fixture-actor-db", files: []string{"actor.test.ts"}, tests: []string{
 		"an ORM opened with no user acts as the caller of the operation it runs in, and as no one outside one",

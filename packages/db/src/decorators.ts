@@ -130,8 +130,11 @@ export interface ProjectionOptions {
   /** The view's name inside the pool, or beside the tables. */
   readonly name: string;
   /**
-   * The 14-digit version stamp of the generated migration. An applied
-   * migration is never rewritten: a changed declaration takes a new stamp.
+   * The 14-digit version stamp of the generated migration pair, for a
+   * migration runner of your own (a stack builds the view from its plan).
+   * The first build that writes the pair records it in `projections.lock`;
+   * a changed declaration then takes a new stamp, which check and build
+   * name, since an applied migration is never rewritten (D102).
    */
   readonly migration: string;
   /** The row rules, all ANDed, in order. */
@@ -447,7 +450,10 @@ export interface QueryOptions<TParams, TRow> {
    * One SQL statement, each parameter a params field written :field. Every
    * field of the params is used and every :name is a field; a :: cast and a
    * string literal are not parameters. Each result column is a row field,
-   * by the field's column name (snake case unless @column names it).
+   * by the field's column name (snake case unless @column names it). A
+   * template literal may interpolate string constants, a const declared
+   * with a string or with such a template, in this file or one it imports,
+   * so queries share a filter: `${DASHBOARD_FILTER} GROUP BY 1`.
    */
   readonly sql: string;
   /** Row fields the query vouches are never null, which Postgres cannot tell (an aggregate, a computed column); a `-- @notNull field` comment says the same. */
@@ -456,6 +462,15 @@ export interface QueryOptions<TParams, TRow> {
   readonly orderBy?: QueryOrderBy<TParams>;
   /** Reads the rows a page at a time by a keyset of row fields. */
   readonly page?: QueryPage<TRow>;
+  /**
+   * What a call answers: "many", the rows, unless set; "one", the one row,
+   * which fails when the statement reads none (NotFoundError, ErrNotFound)
+   * or more than one (TooManyRowsError, ErrTooManyRows); "optional", the
+   * row or null, which fails when it reads more than one. A statement whose
+   * top level groups, is a UNION, or reads a set-returning function may
+   * return more than one row, so neither takes it unless it ends LIMIT 1.
+   */
+  readonly returns?: "many" | "one" | "optional";
   /** The dialects it runs on; unset is every dialect the service is built for. */
   readonly dialects?: readonly ("postgres" | "sqlite")[];
 }

@@ -2,6 +2,9 @@
 -- This file is auto-generated. Do not edit manually.
 -- WARNING: This will drop all tables and data!
 
+-- Drop projection views first (they read the tables below)
+DROP VIEW IF EXISTS line_list;
+
 -- Drop indexes
 DROP INDEX IF EXISTS idx_line_item_date CASCADE;
 DROP INDEX IF EXISTS idx_line_item_category CASCADE;

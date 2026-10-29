@@ -1,0 +1,870 @@
+{
+  "version": 1,
+  "stack": "smoke-stack",
+  "environment": "Cloudflare",
+  "target": "cloudflare",
+  "provisioner": "pulumi",
+  "values": {
+    "accountId": "0123456789abcdef0123456789abcdef",
+    "secretsStoreId": "fedcba9876543210fedcba9876543210",
+    "workersSubdomain": "smoke-subdomain"
+  },
+  "deployables": [
+    {
+      "name": "smoke-api",
+      "kind": "server",
+      "platform": "cloudflare.workers",
+      "services": [
+        {
+          "name": "smoke-api",
+          "kind": "API"
+        }
+      ],
+      "language": "TYPESCRIPT",
+      "artifact": "bundle",
+      "origins": [
+        "smoke-web"
+      ],
+      "resourceName": "smoke-stack-cloudflare-smoke-api",
+      "address": "https://smoke-stack-cloudflare-smoke-api",
+      "bindings": [
+        {
+          "field": "SMOKE_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "hyperdrive": {
+              "binding": "SMOKE_DB_DATABASE",
+              "config": "00000000000000000000000000000000"
+            }
+          },
+          "edge": "sql:smoke-api->smoke-db"
+        }
+      ]
+    },
+    {
+      "name": "smoke-api-drain-line-items",
+      "kind": "worker",
+      "platform": "cloudflare.drainer",
+      "services": [
+        {
+          "name": "smoke-api",
+          "kind": "API"
+        }
+      ],
+      "language": "TYPESCRIPT",
+      "artifact": "bundle",
+      "worker": {
+        "api": "smoke-api",
+        "name": "DrainLineItems",
+        "queue": "DrainLineItem",
+        "database": "smoke-db",
+        "instances": 1,
+        "concurrency": 2,
+        "graceSeconds": 8
+      },
+      "resourceName": "smoke-stack-cloudflare-smoke-api-drain-line-items",
+      "bindings": [
+        {
+          "field": "SMOKE_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "hyperdrive": {
+              "binding": "SMOKE_DB_DATABASE",
+              "config": "00000000000000000000000000000000"
+            }
+          },
+          "edge": "sql:smoke-api-drain-line-items->smoke-db"
+        }
+      ]
+    },
+    {
+      "name": "smoke-api-sync-all-linked-accounts",
+      "kind": "job",
+      "platform": "cloudflare.cron",
+      "services": [
+        {
+          "name": "smoke-api",
+          "kind": "API"
+        }
+      ],
+      "language": "TYPESCRIPT",
+      "artifact": "bundle",
+      "job": {
+        "api": "smoke-api",
+        "name": "SyncAllLinkedAccounts",
+        "schedule": "0 4 * * *",
+        "timeZone": "UTC",
+        "timeoutSeconds": 300
+      },
+      "resourceName": "smoke-stack-cloudflare-smoke-api-sync-all-linked-accounts",
+      "bindings": [
+        {
+          "field": "SMOKE_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "hyperdrive": {
+              "binding": "SMOKE_DB_DATABASE",
+              "config": "00000000000000000000000000000000"
+            }
+          },
+          "edge": "sql:smoke-api-sync-all-linked-accounts->smoke-db"
+        }
+      ]
+    },
+    {
+      "name": "smoke-db",
+      "kind": "database",
+      "platform": "cloudflare.hyperdrive",
+      "services": [
+        {
+          "name": "smoke-db",
+          "kind": "DB"
+        }
+      ],
+      "dialect": "postgres",
+      "settings": {
+        "hyperdrive": "00000000000000000000000000000000"
+      },
+      "resourceName": "smoke-stack-cloudflare-smoke-db"
+    },
+    {
+      "name": "smoke-web",
+      "kind": "site",
+      "platform": "cloudflare.sites",
+      "services": [
+        {
+          "name": "smoke-web",
+          "kind": "Site"
+        }
+      ],
+      "calls": [
+        {
+          "name": "smoke-api",
+          "kind": "API"
+        }
+      ],
+      "site": {
+        "dir": "web/smoke-web",
+        "build": "build",
+        "output": "dist",
+        "fallback": "index.html",
+        "origin": [
+          {
+            "service": "smoke-api",
+            "server": "smoke-api",
+            "path": "/api/smoke-api"
+          }
+        ]
+      },
+      "exposed": true,
+      "resourceName": "smoke-stack-cloudflare-smoke-web",
+      "address": "https://smoke-stack-cloudflare-smoke-web.smoke-subdomain.workers.dev",
+      "publicAddress": "https://smoke-stack-cloudflare-smoke-web.smoke-subdomain.workers.dev",
+      "bindings": [
+        {
+          "field": "smoke-api",
+          "source": "derived",
+          "value": {
+            "binding": {
+              "name": "SITE_API_SMOKE_API",
+              "worker": {
+                "$output": {
+                  "resource": "smoke-api.worker",
+                  "name": "name"
+                }
+              }
+            },
+            "url": "https://smoke-stack-cloudflare-smoke-web.smoke-subdomain.workers.dev/api/smoke-api"
+          },
+          "edge": "site:smoke-web->smoke-api"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "site:smoke-web->smoke-api",
+      "kind": "site",
+      "from": "smoke-web",
+      "to": "smoke-api",
+      "service": {
+        "name": "smoke-api",
+        "kind": "API"
+      },
+      "connector": "cloudflare.site-workers",
+      "field": "smoke-api"
+    },
+    {
+      "id": "sql:smoke-api->smoke-db",
+      "kind": "sql",
+      "from": "smoke-api",
+      "to": "smoke-db",
+      "service": {
+        "name": "smoke-db",
+        "kind": "DB"
+      },
+      "connector": "cloudflare.workers-hyperdrive",
+      "field": "SMOKE_DB_DATABASE"
+    },
+    {
+      "id": "sql:smoke-api-drain-line-items->smoke-db",
+      "kind": "sql",
+      "from": "smoke-api-drain-line-items",
+      "to": "smoke-db",
+      "service": {
+        "name": "smoke-db",
+        "kind": "DB"
+      },
+      "connector": "cloudflare.drainer-hyperdrive",
+      "field": "SMOKE_DB_DATABASE"
+    },
+    {
+      "id": "sql:smoke-api-sync-all-linked-accounts->smoke-db",
+      "kind": "sql",
+      "from": "smoke-api-sync-all-linked-accounts",
+      "to": "smoke-db",
+      "service": {
+        "name": "smoke-db",
+        "kind": "DB"
+      },
+      "connector": "cloudflare.cron-hyperdrive",
+      "field": "SMOKE_DB_DATABASE"
+    }
+  ],
+  "resources": {
+    "resources": [
+      {
+        "id": "smoke-api-drain-line-items.deployment",
+        "type": "cloudflare:index/workersDeployment:WorkersDeployment",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "scriptName": {
+            "$output": {
+              "resource": "smoke-api-drain-line-items.worker",
+              "name": "name"
+            }
+          },
+          "strategy": "percentage",
+          "versions": [
+            {
+              "percentage": 100,
+              "versionId": {
+                "$output": {
+                  "resource": "smoke-api-drain-line-items.version",
+                  "name": "id"
+                }
+              }
+            }
+          ]
+        },
+        "dependsOn": [
+          "smoke-api-drain-line-items.version",
+          "smoke-api-drain-line-items.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-drain-line-items"
+        ]
+      },
+      {
+        "id": "smoke-api-drain-line-items.schedule",
+        "type": "cloudflare:index/workersCronTrigger:WorkersCronTrigger",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "schedules": [
+            {
+              "cron": "* * * * *"
+            }
+          ],
+          "scriptName": {
+            "$output": {
+              "resource": "smoke-api-drain-line-items.worker",
+              "name": "name"
+            }
+          }
+        },
+        "dependsOn": [
+          "smoke-api-drain-line-items.deployment",
+          "smoke-api-drain-line-items.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-drain-line-items"
+        ]
+      },
+      {
+        "id": "smoke-api-drain-line-items.version",
+        "type": "cloudflare:index/workerVersion:WorkerVersion",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "bindings": [
+            {
+              "id": "00000000000000000000000000000000",
+              "name": "SMOKE_DB_DATABASE",
+              "type": "hyperdrive"
+            },
+            {
+              "name": "SMOKE_DB_DATABASE_HYPERDRIVE_BINDING",
+              "text": "SMOKE_DB_DATABASE",
+              "type": "plain_text"
+            },
+            {
+              "name": "SMOKE_DB_DATABASE_HYPERDRIVE_CONFIG",
+              "text": "00000000000000000000000000000000",
+              "type": "plain_text"
+            },
+            {
+              "name": "WORKER_CONCURRENCY",
+              "text": "2",
+              "type": "plain_text"
+            },
+            {
+              "name": "WORKER_DRAIN_SECONDS",
+              "text": "50",
+              "type": "plain_text"
+            }
+          ],
+          "compatibilityDate": "2026-09-15",
+          "compatibilityFlags": [
+            "nodejs_als"
+          ],
+          "mainModule": "main.js",
+          "modules": [
+            {
+              "contentFile": "artifacts/smoke-api-drain-line-items/{bundle-digest}/main.js",
+              "contentSha256": "{bundle-sha256:main.js}",
+              "contentType": "application/javascript+module",
+              "name": "main.js"
+            },
+            {
+              "contentFile": "artifacts/smoke-api-drain-line-items/{bundle-digest}/main.js.map",
+              "contentSha256": "{bundle-sha256:main.js.map}",
+              "contentType": "application/source-map",
+              "name": "main.js.map"
+            },
+            {
+              "contentFile": "artifacts/smoke-api-drain-line-items/{bundle-digest}/superscalar_wasm_bg.wasm",
+              "contentSha256": "{bundle-sha256:superscalar_wasm_bg.wasm}",
+              "contentType": "application/wasm",
+              "name": "superscalar_wasm_bg.wasm"
+            }
+          ],
+          "workerId": {
+            "$output": {
+              "resource": "smoke-api-drain-line-items.worker",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "smoke-api-drain-line-items.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-drain-line-items"
+        ]
+      },
+      {
+        "id": "smoke-api-drain-line-items.worker",
+        "type": "cloudflare:index/worker:Worker",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": "smoke-stack-cloudflare-smoke-api-drain-line-items",
+          "observability": {
+            "enabled": true,
+            "logs": {
+              "enabled": true,
+              "invocationLogs": true
+            }
+          },
+          "subdomain": {
+            "enabled": false,
+            "previewsEnabled": false
+          }
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "smoke-api-drain-line-items"
+        ]
+      },
+      {
+        "id": "smoke-api-sync-all-linked-accounts.deployment",
+        "type": "cloudflare:index/workersDeployment:WorkersDeployment",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "scriptName": {
+            "$output": {
+              "resource": "smoke-api-sync-all-linked-accounts.worker",
+              "name": "name"
+            }
+          },
+          "strategy": "percentage",
+          "versions": [
+            {
+              "percentage": 100,
+              "versionId": {
+                "$output": {
+                  "resource": "smoke-api-sync-all-linked-accounts.version",
+                  "name": "id"
+                }
+              }
+            }
+          ]
+        },
+        "dependsOn": [
+          "smoke-api-sync-all-linked-accounts.version",
+          "smoke-api-sync-all-linked-accounts.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-sync-all-linked-accounts"
+        ]
+      },
+      {
+        "id": "smoke-api-sync-all-linked-accounts.schedule",
+        "type": "cloudflare:index/workersCronTrigger:WorkersCronTrigger",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "schedules": [
+            {
+              "cron": "0 4 * * *"
+            }
+          ],
+          "scriptName": {
+            "$output": {
+              "resource": "smoke-api-sync-all-linked-accounts.worker",
+              "name": "name"
+            }
+          }
+        },
+        "dependsOn": [
+          "smoke-api-sync-all-linked-accounts.deployment",
+          "smoke-api-sync-all-linked-accounts.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-sync-all-linked-accounts"
+        ]
+      },
+      {
+        "id": "smoke-api-sync-all-linked-accounts.version",
+        "type": "cloudflare:index/workerVersion:WorkerVersion",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "bindings": [
+            {
+              "id": "00000000000000000000000000000000",
+              "name": "SMOKE_DB_DATABASE",
+              "type": "hyperdrive"
+            },
+            {
+              "name": "SMOKE_DB_DATABASE_HYPERDRIVE_BINDING",
+              "text": "SMOKE_DB_DATABASE",
+              "type": "plain_text"
+            },
+            {
+              "name": "SMOKE_DB_DATABASE_HYPERDRIVE_CONFIG",
+              "text": "00000000000000000000000000000000",
+              "type": "plain_text"
+            },
+            {
+              "name": "SUPERSCHEMATIC_BUNDLE",
+              "text": "{bundle-digest}",
+              "type": "plain_text"
+            }
+          ],
+          "compatibilityDate": "2026-09-15",
+          "compatibilityFlags": [
+            "nodejs_als"
+          ],
+          "mainModule": "main.js",
+          "modules": [
+            {
+              "contentFile": "artifacts/smoke-api-sync-all-linked-accounts/{bundle-digest}/main.js",
+              "contentSha256": "{bundle-sha256:main.js}",
+              "contentType": "application/javascript+module",
+              "name": "main.js"
+            },
+            {
+              "contentFile": "artifacts/smoke-api-sync-all-linked-accounts/{bundle-digest}/main.js.map",
+              "contentSha256": "{bundle-sha256:main.js.map}",
+              "contentType": "application/source-map",
+              "name": "main.js.map"
+            },
+            {
+              "contentFile": "artifacts/smoke-api-sync-all-linked-accounts/{bundle-digest}/superscalar_wasm_bg.wasm",
+              "contentSha256": "{bundle-sha256:superscalar_wasm_bg.wasm}",
+              "contentType": "application/wasm",
+              "name": "superscalar_wasm_bg.wasm"
+            }
+          ],
+          "workerId": {
+            "$output": {
+              "resource": "smoke-api-sync-all-linked-accounts.worker",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "smoke-api-sync-all-linked-accounts.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-sync-all-linked-accounts"
+        ]
+      },
+      {
+        "id": "smoke-api-sync-all-linked-accounts.worker",
+        "type": "cloudflare:index/worker:Worker",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": "smoke-stack-cloudflare-smoke-api-sync-all-linked-accounts",
+          "observability": {
+            "enabled": true,
+            "logs": {
+              "enabled": true,
+              "invocationLogs": true
+            }
+          },
+          "subdomain": {
+            "enabled": false,
+            "previewsEnabled": false
+          }
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "smoke-api-sync-all-linked-accounts"
+        ]
+      },
+      {
+        "id": "smoke-api-sync-all-linked-accounts.workflow",
+        "type": "cloudflare:index/workflow:Workflow",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "className": "JobRun",
+          "scriptName": {
+            "$output": {
+              "resource": "smoke-api-sync-all-linked-accounts.worker",
+              "name": "name"
+            }
+          },
+          "workflowName": "smoke-stack-cloudflare-smoke-api-sync-all-linked-accounts"
+        },
+        "dependsOn": [
+          "smoke-api-sync-all-linked-accounts.deployment",
+          "smoke-api-sync-all-linked-accounts.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-sync-all-linked-accounts"
+        ]
+      },
+      {
+        "id": "smoke-api.deployment",
+        "type": "cloudflare:index/workersDeployment:WorkersDeployment",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "scriptName": {
+            "$output": {
+              "resource": "smoke-api.worker",
+              "name": "name"
+            }
+          },
+          "strategy": "percentage",
+          "versions": [
+            {
+              "percentage": 100,
+              "versionId": {
+                "$output": {
+                  "resource": "smoke-api.version",
+                  "name": "id"
+                }
+              }
+            }
+          ]
+        },
+        "dependsOn": [
+          "smoke-api.version",
+          "smoke-api.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api"
+        ]
+      },
+      {
+        "id": "smoke-api.version",
+        "type": "cloudflare:index/workerVersion:WorkerVersion",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "bindings": [
+            {
+              "id": "00000000000000000000000000000000",
+              "name": "SMOKE_DB_DATABASE",
+              "type": "hyperdrive"
+            },
+            {
+              "name": "SMOKE_DB_DATABASE_HYPERDRIVE_BINDING",
+              "text": "SMOKE_DB_DATABASE",
+              "type": "plain_text"
+            },
+            {
+              "name": "SMOKE_DB_DATABASE_HYPERDRIVE_CONFIG",
+              "text": "00000000000000000000000000000000",
+              "type": "plain_text"
+            }
+          ],
+          "compatibilityDate": "2026-09-15",
+          "compatibilityFlags": [
+            "nodejs_als"
+          ],
+          "mainModule": "main.js",
+          "modules": [
+            {
+              "contentFile": "artifacts/smoke-api/{bundle-digest}/main.js",
+              "contentSha256": "{bundle-sha256:main.js}",
+              "contentType": "application/javascript+module",
+              "name": "main.js"
+            },
+            {
+              "contentFile": "artifacts/smoke-api/{bundle-digest}/main.js.map",
+              "contentSha256": "{bundle-sha256:main.js.map}",
+              "contentType": "application/source-map",
+              "name": "main.js.map"
+            },
+            {
+              "contentFile": "artifacts/smoke-api/{bundle-digest}/superscalar_wasm_bg.wasm",
+              "contentSha256": "{bundle-sha256:superscalar_wasm_bg.wasm}",
+              "contentType": "application/wasm",
+              "name": "superscalar_wasm_bg.wasm"
+            }
+          ],
+          "workerId": {
+            "$output": {
+              "resource": "smoke-api.worker",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "smoke-api.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api"
+        ]
+      },
+      {
+        "id": "smoke-api.worker",
+        "type": "cloudflare:index/worker:Worker",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": "smoke-stack-cloudflare-smoke-api",
+          "observability": {
+            "enabled": true,
+            "logs": {
+              "enabled": true,
+              "invocationLogs": true
+            }
+          },
+          "subdomain": {
+            "enabled": false,
+            "previewsEnabled": false
+          }
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "smoke-api"
+        ]
+      },
+      {
+        "id": "smoke-web.deployment",
+        "type": "cloudflare:index/workersDeployment:WorkersDeployment",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "scriptName": {
+            "$output": {
+              "resource": "smoke-web.worker",
+              "name": "name"
+            }
+          },
+          "strategy": "percentage",
+          "versions": [
+            {
+              "percentage": 100,
+              "versionId": {
+                "$output": {
+                  "resource": "smoke-web.version",
+                  "name": "id"
+                }
+              }
+            }
+          ]
+        },
+        "dependsOn": [
+          "smoke-web.version",
+          "smoke-web.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-web"
+        ]
+      },
+      {
+        "id": "smoke-web.version",
+        "type": "cloudflare:index/workerVersion:WorkerVersion",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "assets": {
+            "config": {
+              "htmlHandling": "none",
+              "notFoundHandling": "none",
+              "runWorkerFirst": [
+                "/__superschematic/*",
+                "/api/smoke-api",
+                "/api/smoke-api/*"
+              ]
+            },
+            "directory": "artifacts/smoke-web/{site-digest}"
+          },
+          "bindings": [
+            {
+              "name": "ASSETS",
+              "type": "assets"
+            },
+            {
+              "name": "SITE_CONFIG",
+              "text": "{\"apis\":{\"smoke-api\":{\"url\":\"https://smoke-stack-cloudflare-smoke-web.smoke-subdomain.workers.dev/api/smoke-api\"}}}",
+              "type": "plain_text"
+            },
+            {
+              "name": "SITE_FALLBACK",
+              "text": "index.html",
+              "type": "plain_text"
+            },
+            {
+              "name": "SITE_ORIGIN",
+              "text": "[{\"path\":\"/api/smoke-api\",\"binding\":\"SITE_API_SMOKE_API\"}]",
+              "type": "plain_text"
+            },
+            {
+              "name": "SITE_API_SMOKE_API",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            }
+          ],
+          "compatibilityDate": "2026-09-15",
+          "mainModule": "site.js",
+          "modules": [
+            {
+              "contentBase64": "Ly8gVGhlIHNjcmlwdCBvZiBhIHN0YXRpYyBzaXRlJ3MgV29ya2VyIG9uIENsb3VkZmxhcmUgKGRvY3Mvc3RhY2stbW9kZWwubWQsCi8vIHNlY3Rpb24gMTguOCwgRDY0KS4gVGhlIGNsb3VkZmxhcmUgZXh0ZW5zaW9uIGVtYmVkcyBpdCwgc28gZXZlcnkgc2l0ZSdzCi8vIFdvcmtlciBydW5zIHRoZXNlIGJ5dGVzLCBpbiBldmVyeSByZWxlYXNlLiBDbG91ZGZsYXJlIHNlcnZlcyBhIGZpbGUgb2YgdGhlCi8vIHNpdGUncyBidWlsZCBhcyBhIHN0YXRpYyBhc3NldCB3aXRob3V0IHJ1bm5pbmcgaXQ7IGl0IHJ1bnMgZm9yIGEgcGF0aAovLyB0aGF0IG5hbWVzIG5vIGZpbGUsIGFuZCBmaXJzdCBmb3IgZXZlcnkgcGF0aCB1bmRlciAvX19zdXBlcnNjaGVtYXRpYy8KLy8gYW5kIHVuZGVyIGVhY2ggQVBJIG9mIHRoZSBzaXRlJ3Mgb3JpZ2luLgovLwovLyBJdCBhbnN3ZXJzIGEgR0VUIG9yIGEgSEVBRCBvZjoKLy8gICAtIC9fX3N1cGVyc2NoZW1hdGljL2NvbmZpZy5qc29uIHdpdGggU0lURV9DT05GSUcsIHRoZSBzaXRlJ3MgY29uZmlnIGZvcgovLyAgICAgaXRzIGVudmlyb25tZW50LCB3aGljaCBuYW1lcyBlYWNoIEFQSSBpdCBjYWxscyB3aXRoIGl0cyBwdWJsaWMKLy8gICAgIGFkZHJlc3MsIG5ldmVyIGNhY2hlZDsKLy8gICAtIGEgZGlyZWN0b3J5IG9mIHRoZSBidWlsZCB3aXRoIGl0cyBpbmRleC5odG1sLCBhcyBzdGFjayBkZXYncyBmaWxlCi8vICAgICBzZXJ2ZXIgZG9lcywgc2luY2UgdGhlIGFzc2V0cyBtYXRjaCBhIHBhdGggdG8gYSBmaWxlIGV4YWN0bHkKLy8gICAgIChodG1sSGFuZGxpbmc6IG5vbmUpOwovLyAgIC0gYW55IG90aGVyIHBhdGggd2l0aCBTSVRFX0ZBTExCQUNLLCB0aGUgYnVpbGQncyBzaW5nbGUtcGFnZSBmYWxsYmFjaywKLy8gICAgIGF0IDIwMCwgb3IgNDA0IHdoZW4gdGhlIHNpdGUgaGFzIG5vbmUuCi8vIEFueSBvdGhlciBtZXRob2QgZ2V0cyA0MDUuCi8vCi8vIEEgc2l0ZSB3aXRoIGFuIG9yaWdpbiAoRDkxKSBuYW1lcyBlYWNoIEFQSSBvZiBpdCBpbiBTSVRFX09SSUdJTiwgYSBKU09OCi8vIGxpc3Qgb2Yge3BhdGgsIGJpbmRpbmd9IG9yIHtwYXRoLCB1cmx9LiBBIHJlcXVlc3QgZm9yIGFuIEFQSSdzIHBhdGgsIG9yCi8vIGFueSBwYXRoIHVuZGVyIGl0LCB3aXRoIGFueSBtZXRob2QsIGdvZXMgdG8gdGhlIEFQSSdzIFdvcmtlciB0aHJvdWdoIHRoZQovLyBzZXJ2aWNlIGJpbmRpbmcsIG9yIHRvIHRoZSBBUEkncyBwdWJsaWMgYWRkcmVzcywgd2l0aCB0aGUgcGF0aCB0YWtlbgovLyBvZmYsIHRoZSBxdWVyeSBrZXB0LCB0aGUgYnJvd3NlcidzIEhvc3Qgb24gdGhlIFVSTCBhIGJpbmRpbmcgY2FycmllcywKLy8gYW5kIFgtRm9yd2FyZGVkLUhvc3QsIC1Qcm90bywgLVByZWZpeCBhbmQgLUZvciBzZXQsIGFzIHN0YWNrIGRldidzIHByb3h5Ci8vIGZvcndhcmRzIGl0IChEODIpOyBhIHJlZGlyZWN0IHdpdGhpbiB0aGUgQVBJJ3Mgcm91dGVzIGdldHMgdGhlIHBhdGggYmFjay4KCmNvbnN0IENPTkZJR19QQVRIID0gJy9fX3N1cGVyc2NoZW1hdGljL2NvbmZpZy5qc29uJzsKCi8qKiBUaGUgQVBJcyBvZiB0aGUgc2l0ZSdzIG9yaWdpbiwgcmVhZCBmcm9tIFNJVEVfT1JJR0lOIG9uY2UgcGVyIGlzb2xhdGUuICovCmxldCBvcmlnaW47CgpleHBvcnQgZGVmYXVsdCB7CiAgYXN5bmMgZmV0Y2gocmVxdWVzdCwgZW52KSB7CiAgICBjb25zdCB1cmwgPSBuZXcgVVJMKHJlcXVlc3QudXJsKTsKICAgIGNvbnN0IGFwaSA9IG9yaWdpbkFQSShlbnYsIHVybC5wYXRobmFtZSk7CiAgICBpZiAoYXBpKSByZXR1cm4gZm9yd2FyZChyZXF1ZXN0LCBlbnYsIHVybCwgYXBpKTsKICAgIGlmIChyZXF1ZXN0Lm1ldGhvZCAhPT0gJ0dFVCcgJiYgcmVxdWVzdC5tZXRob2QgIT09ICdIRUFEJykgewogICAgICByZXR1cm4gdGV4dCg0MDUsICdtZXRob2Qgbm90IGFsbG93ZWQnLCB7IGFsbG93OiAnR0VULCBIRUFEJyB9KTsKICAgIH0KICAgIGlmICh1cmwucGF0aG5hbWUgPT09IENPTkZJR19QQVRIKSB7CiAgICAgIHJldHVybiBuZXcgUmVzcG9uc2UocmVxdWVzdC5tZXRob2QgPT09ICdIRUFEJyA/IG51bGwgOiBlbnYuU0lURV9DT05GSUcsIHsKICAgICAgICBoZWFkZXJzOiB7ICdjb250ZW50LXR5cGUnOiAnYXBwbGljYXRpb24vanNvbicsICdjYWNoZS1jb250cm9sJzogJ25vLXN0b3JlJyB9LAogICAgICB9KTsKICAgIH0KICAgIGNvbnN0IGluZGV4ID0gYXdhaXQgYXNzZXQoZW52LCByZXF1ZXN0LCB1cmwucGF0aG5hbWUucmVwbGFjZSgvXC8/JC91LCAnL2luZGV4Lmh0bWwnKSk7CiAgICBpZiAoaW5kZXgpIHJldHVybiBpbmRleDsKICAgIGlmIChlbnYuU0lURV9GQUxMQkFDSykgewogICAgICBjb25zdCBmYWxsYmFjayA9IGF3YWl0IGFzc2V0KGVudiwgcmVxdWVzdCwgYC8ke2Vudi5TSVRFX0ZBTExCQUNLfWApOwogICAgICBpZiAoZmFsbGJhY2spIHJldHVybiBmYWxsYmFjazsKICAgIH0KICAgIHJldHVybiB0ZXh0KDQwNCwgJ25vdCBmb3VuZCcpOwogIH0sCn07CgovKiogVGhlIEFQSSBvZiB0aGUgc2l0ZSdzIG9yaWdpbiB3aG9zZSBwYXRoIGhvbGRzIHBhdGhuYW1lLCBvciB1bmRlZmluZWQuICovCmZ1bmN0aW9uIG9yaWdpbkFQSShlbnYsIHBhdGhuYW1lKSB7CiAgaWYgKCFlbnYuU0lURV9PUklHSU4pIHJldHVybiB1bmRlZmluZWQ7CiAgb3JpZ2luID8/PSBKU09OLnBhcnNlKGVudi5TSVRFX09SSUdJTik7CiAgcmV0dXJuIG9yaWdpbi5maW5kKChhcGkpID0+IHBhdGhuYW1lID09PSBhcGkucGF0aCB8fCBwYXRobmFtZS5zdGFydHNXaXRoKGAke2FwaS5wYXRofS9gKSk7Cn0KCi8qKiBUaGUgcmVxdWVzdCBmb3J3YXJkZWQgdG8gdGhlIEFQSSdzIHNlcnZlciwgdGhlIEFQSSdzIHBhdGggdGFrZW4gb2ZmLiAqLwphc3luYyBmdW5jdGlvbiBmb3J3YXJkKHJlcXVlc3QsIGVudiwgdXJsLCBhcGkpIHsKICBjb25zdCByZXN0ID0gdXJsLnBhdGhuYW1lLnNsaWNlKGFwaS5wYXRoLmxlbmd0aCkgfHwgJy8nOwogIGNvbnN0IHRhcmdldCA9IG5ldyBVUkwoYXBpLmJpbmRpbmcgPyB1cmwub3JpZ2luIDogYXBpLnVybC5yZXBsYWNlKC9cLyQvdSwgJycpICsgcmVzdCk7CiAgaWYgKGFwaS5iaW5kaW5nKSB0YXJnZXQucGF0aG5hbWUgPSByZXN0OwogIHRhcmdldC5zZWFyY2ggPSB1cmwuc2VhcmNoOwogIGNvbnN0IGhlYWRlcnMgPSBuZXcgSGVhZGVycyhyZXF1ZXN0LmhlYWRlcnMpOwogIGlmICghYXBpLmJpbmRpbmcpIGhlYWRlcnMuZGVsZXRlKCdob3N0Jyk7CiAgaGVhZGVycy5zZXQoJ3gtZm9yd2FyZGVkLWhvc3QnLCB1cmwuaG9zdCk7CiAgaGVhZGVycy5zZXQoJ3gtZm9yd2FyZGVkLXByb3RvJywgdXJsLnByb3RvY29sLnNsaWNlKDAsIC0xKSk7CiAgaGVhZGVycy5zZXQoJ3gtZm9yd2FyZGVkLXByZWZpeCcsIGFwaS5wYXRoKTsKICBjb25zdCBjbGllbnQgPSByZXF1ZXN0LmhlYWRlcnMuZ2V0KCdjZi1jb25uZWN0aW5nLWlwJyk7CiAgaWYgKGNsaWVudCkgaGVhZGVycy5zZXQoJ3gtZm9yd2FyZGVkLWZvcicsIGNsaWVudCk7CiAgY29uc3QgaW5pdCA9IHsgbWV0aG9kOiByZXF1ZXN0Lm1ldGhvZCwgaGVhZGVycywgcmVkaXJlY3Q6ICdtYW51YWwnIH07CiAgaWYgKHJlcXVlc3QubWV0aG9kICE9PSAnR0VUJyAmJiByZXF1ZXN0Lm1ldGhvZCAhPT0gJ0hFQUQnKSBpbml0LmJvZHkgPSByZXF1ZXN0LmJvZHk7CiAgY29uc3QgcmVzcG9uc2UgPSBhcGkuYmluZGluZyA/IGF3YWl0IGVudlthcGkuYmluZGluZ10uZmV0Y2godGFyZ2V0LCBpbml0KSA6IGF3YWl0IGZldGNoKHRhcmdldCwgaW5pdCk7CiAgY29uc3QgbG9jYXRpb24gPSByZXNwb25zZS5oZWFkZXJzLmdldCgnbG9jYXRpb24nKTsKICBpZiAobG9jYXRpb24gPT09IG51bGwpIHJldHVybiByZXNwb25zZTsKICBjb25zdCBhbnN3ZXIgPSBuZXcgUmVzcG9uc2UocmVzcG9uc2UuYm9keSwgcmVzcG9uc2UpOwogIGFuc3dlci5oZWFkZXJzLnNldCgnbG9jYXRpb24nLCBwcmVmaXhlZChsb2NhdGlvbiwgYXBpLnBhdGgsIHVybCwgdGFyZ2V0KSk7CiAgcmV0dXJuIGFuc3dlcjsKfQoKLyoqCiAqIEEgcmVkaXJlY3QncyBsb2NhdGlvbiB3aXRoIHRoZSBBUEkncyBwYXRoIHB1dCBiYWNrLCB3aGVuIGl0IHBvaW50cwogKiB3aXRoaW4gdGhlIEFQSSdzIHJvdXRlczogYSBwYXRoLWFic29sdXRlIGxvY2F0aW9uLCBvciBvbmUgb24gdGhlIHNpdGUncwogKiBob3N0IG9yIHRoZSBzZXJ2ZXIncy4gQW55IG90aGVyIGxvY2F0aW9uIGlzIGxlZnQgYXMgaXQgaXMuCiAqLwpmdW5jdGlvbiBwcmVmaXhlZChsb2NhdGlvbiwgcHJlZml4LCBzaXRlLCB0YXJnZXQpIHsKICBsZXQgdTsKICB0cnkgewogICAgdSA9IG5ldyBVUkwobG9jYXRpb24sIHRhcmdldCk7CiAgfSBjYXRjaCB7CiAgICByZXR1cm4gbG9jYXRpb247CiAgfQogIGNvbnN0IHBhdGhBYnNvbHV0ZSA9IGxvY2F0aW9uLnN0YXJ0c1dpdGgoJy8nKSAmJiAhbG9jYXRpb24uc3RhcnRzV2l0aCgnLy8nKTsKICBpZiAoIXBhdGhBYnNvbHV0ZSAmJiB1Lmhvc3QgIT09IHNpdGUuaG9zdCAmJiB1Lmhvc3QgIT09IHRhcmdldC5ob3N0KSByZXR1cm4gbG9jYXRpb247CiAgcmV0dXJuIHByZWZpeCArIHUucGF0aG5hbWUgKyB1LnNlYXJjaCArIHUuaGFzaDsKfQoKLyoqIFRoZSBzaXRlJ3MgZmlsZSBhdCBwYXRoLCBhcyB0aGUgYXNzZXRzIHNlcnZlIGl0LCBvciB1bmRlZmluZWQgd2hlbiB0aGVyZSBpcyBub25lLiAqLwphc3luYyBmdW5jdGlvbiBhc3NldChlbnYsIHJlcXVlc3QsIHBhdGgpIHsKICBjb25zdCB1cmwgPSBuZXcgVVJMKHJlcXVlc3QudXJsKTsKICB1cmwucGF0aG5hbWUgPSBwYXRoOwogIHVybC5zZWFyY2ggPSAnJzsKICBjb25zdCByZXNwb25zZSA9IGF3YWl0IGVudi5BU1NFVFMuZmV0Y2gobmV3IFJlcXVlc3QodXJsLCB7IG1ldGhvZDogcmVxdWVzdC5tZXRob2QsIGhlYWRlcnM6IHJlcXVlc3QuaGVhZGVycyB9KSk7CiAgcmV0dXJuIHJlc3BvbnNlLnN0YXR1cyA9PT0gNDA0ID8gdW5kZWZpbmVkIDogcmVzcG9uc2U7Cn0KCi8qKiBBIHBsYWluLXRleHQgYW5zd2VyLiAqLwpmdW5jdGlvbiB0ZXh0KHN0YXR1cywgYm9keSwgaGVhZGVycyA9IHt9KSB7CiAgcmV0dXJuIG5ldyBSZXNwb25zZShgJHtib2R5fVxuYCwgeyBzdGF0dXMsIGhlYWRlcnM6IHsgJ2NvbnRlbnQtdHlwZSc6ICd0ZXh0L3BsYWluOyBjaGFyc2V0PXV0Zi04JywgLi4uaGVhZGVycyB9IH0pOwp9Cg==",
+              "contentType": "application/javascript+module",
+              "name": "site.js"
+            }
+          ],
+          "workerId": {
+            "$output": {
+              "resource": "smoke-web.worker",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "smoke-api.worker",
+          "smoke-web.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-web"
+        ]
+      },
+      {
+        "id": "smoke-web.worker",
+        "type": "cloudflare:index/worker:Worker",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": "smoke-stack-cloudflare-smoke-web",
+          "observability": {
+            "enabled": true,
+            "logs": {
+              "enabled": true,
+              "invocationLogs": true
+            }
+          },
+          "subdomain": {
+            "enabled": true,
+            "previewsEnabled": false
+          }
+        },
+        "dependsOn": [
+          "smoke-api.worker"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "smoke-web"
+        ]
+      }
+    ]
+  },
+  "deployOrder": [
+    {
+      "step": "infrastructure",
+      "resources": [
+        "smoke-api-drain-line-items.worker",
+        "smoke-api-sync-all-linked-accounts.worker",
+        "smoke-api.worker",
+        "smoke-web.worker"
+      ]
+    },
+    {
+      "step": "migrate",
+      "migration": "expand",
+      "deployables": [
+        "smoke-db"
+      ]
+    },
+    {
+      "step": "rollout",
+      "wave": 1,
+      "deployables": [
+        "smoke-api",
+        "smoke-api-drain-line-items",
+        "smoke-api-sync-all-linked-accounts"
+      ],
+      "resources": [
+        "smoke-api-drain-line-items.deployment",
+        "smoke-api-drain-line-items.schedule",
+        "smoke-api-drain-line-items.version",
+        "smoke-api-sync-all-linked-accounts.deployment",
+        "smoke-api-sync-all-linked-accounts.schedule",
+        "smoke-api-sync-all-linked-accounts.version",
+        "smoke-api-sync-all-linked-accounts.workflow",
+        "smoke-api.deployment",
+        "smoke-api.version"
+      ]
+    },
+    {
+      "step": "rollout",
+      "wave": 2,
+      "deployables": [
+        "smoke-web"
+      ],
+      "resources": [
+        "smoke-web.deployment",
+        "smoke-web.version"
+      ]
+    },
+    {
+      "step": "migrate",
+      "migration": "contract",
+      "deployables": [
+        "smoke-db"
+      ]
+    }
+  ]
+}

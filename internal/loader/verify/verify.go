@@ -4,7 +4,8 @@
 // of any one authoring syntax: schema-kind / import-path compatibility,
 // cross-kind type-reference rules, the classes decorator arguments name,
 // full @source structural verification,
-// trait shape checks, version graph declarations,
+// trait shape checks, version graph declarations, the one @envVars class
+// that is a service's config (D94),
 // the User and UserRole traits and the user model's route sets, projection view
 // declarations, the fields Encrypted<T> stores and the names @table and
 // @column give tables and columns (D85), the contexts that
@@ -243,6 +244,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkDerivers(schema, r)
 	checkMemoryStore(schema, in, r)
 	checkApps(schema, r)
+	checkEnvVarsTypes(schema, r)
 	checkDerivedFields(schema, in, r)
 	checkIndexTables(schema, r)
 	checkIndexKeys(schema, r)

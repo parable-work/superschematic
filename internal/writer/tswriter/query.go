@@ -63,6 +63,9 @@ func queryArgs(className string, q *ir.QueryDef) string {
 		}
 		parts = append(parts, page+" }")
 	}
+	if returns := q.Returning(); returns != ir.QueryReturnsMany {
+		parts = append(parts, "returns: "+quote(returns))
+	}
 	if len(q.Dialects) > 0 {
 		parts = append(parts, "dialects: ["+quotedList(q.Dialects)+"]")
 	}

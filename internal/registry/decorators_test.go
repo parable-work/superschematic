@@ -276,6 +276,30 @@ func TestCoreApplyBodiesReproduceWalkerBehaviour(t *testing.T) {
 	if err := apply("rest", TargetOperation, Node{Field: op}, "FETCH"); err == nil || err.Error() != `unsupported HTTP method "FETCH"` {
 		t.Errorf("rest error = %v", err)
 	}
+	// A :name segment is a router's parameter, which OpenAPI and every
+	// generated router read as text: the path is refused, at the argument,
+	// with the braces written in (D100). A colon inside a segment is text.
+	for path, want := range map[string]string{
+		"businesses/:businessId/export":     `@rest path "businesses/:businessId/export" writes a path parameter as ":businessId", which OpenAPI and the generated routers read as text; write it in braces: "businesses/{businessId}/export"`,
+		"/orgs/:org/members/:member/":       `@rest path "/orgs/:org/members/:member/" writes path parameters as ":org" and ":member", which OpenAPI and the generated routers read as text; write it in braces: "/orgs/{org}/members/{member}/"`,
+		"a/:b/c/:d/:e":                      `@rest path "a/:b/c/:d/:e" writes path parameters as ":b", ":d" and ":e", which OpenAPI and the generated routers read as text; write it in braces: "a/{b}/c/{d}/{e}"`,
+		"orders/{orderId}:cancel":           "",
+		"orders/{orderId}/notes/:":          "",
+		"reports/{year}/v1:summary/{month}": "",
+	} {
+		pathOp := &ir.FieldDef{}
+		err := apply("rest", TargetOperation, Node{Field: pathOp}, "GET", path)
+		switch {
+		case want == "" && (err != nil || pathOp.RestPath != path):
+			t.Errorf("rest %q = %q, err %v", path, pathOp.RestPath, err)
+		case want != "" && (err == nil || err.Error() != want || pathOp.RestPath != ""):
+			t.Errorf("rest %q error = %v, RestPath %q; want %s", path, err, pathOp.RestPath, want)
+		}
+		var argErr *ArgError
+		if want != "" && (!errors.As(err, &argErr) || argErr.Index != 1) {
+			t.Errorf("rest %q error %v locates no path argument", path, err)
+		}
+	}
 	if err := apply("requirePermission", TargetOperation, Node{Field: op}, []any{}); err == nil || err.Error() != "@requirePermission requires a non-empty array of permission strings" {
 		t.Errorf("requirePermission error = %v", err)
 	}

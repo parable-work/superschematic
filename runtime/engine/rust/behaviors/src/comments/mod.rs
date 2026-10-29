@@ -40,11 +40,27 @@
 //! namespace, and the schedule `prune` removes them once
 //! `deliveryRetentionMs` passes. Migration 4 adds them.
 //!
+//! A principal acting for a subject (D77 primitive 4, batch 4) writes as
+//! itself: the author, the reactor, the marker and the follow are its own,
+//! and acting for someone grants nothing. The message records the subject
+//! as its `for`, and each edit, reaction and resolve the caller's; the
+//! subject follows the thread as a mentioned one does, hears nothing of
+//! the message, and finds it unread. Migration 5 adds the columns.
+//!
+//! Batch 5 adds `code` blocks, which `moveAnchor` moves to another
+//! revision without an edit, `attachment` blocks held to the config's
+//! `attachments`, `listPinned`, and the namespace operation
+//! `searchMessages` over a full-text index of the standing messages'
+//! bodies, which every write that makes one stand, edits its body,
+//! deletes or purges it keeps; migration 6 adds the index and fills it.
+//!
 //! configChange: Comments can be added to a schema that has instances,
 //! which start with an empty conversation, and cannot be removed from one:
 //! their messages would stay behind with nothing to delete them. A config
 //! change applies to the next call.
 
+mod anchors;
+mod blocks;
 mod checks;
 mod deliveries;
 mod drafts;
@@ -52,6 +68,7 @@ mod follows;
 mod inbox;
 mod reads;
 mod record;
+mod search;
 mod storage;
 mod writes;
 
@@ -86,6 +103,30 @@ const PRUNE_EVERY_MS: i64 = 3_600_000;
 /// The longest interval of the schedule `interrupt`.
 const MAX_INTERRUPT_EVERY_MS: i64 = 15_000;
 
+/// What an attachment block may describe (`attachments` in the config).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AttachmentsConfig {
+    /// The largest `bytes` an attachment block may give; no limit when
+    /// `None`.
+    pub max_bytes: Option<i64>,
+    /// The media types an attachment may have, each `type/subtype` or
+    /// `type/*`; any when `None`.
+    pub media_types: Option<Vec<String>>,
+    /// The schemes an attachment's `uri` may use: the whole list, `https`
+    /// alone when the config gives none.
+    pub schemes: Vec<String>,
+}
+
+impl Default for AttachmentsConfig {
+    fn default() -> Self {
+        AttachmentsConfig {
+            max_bytes: None,
+            media_types: None,
+            schemes: vec!["https".to_owned()],
+        }
+    }
+}
+
 /// Comments' config. Every member is optional; `{}` and no config are the
 /// same.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -118,6 +159,11 @@ pub struct CommentsConfig {
     pub retry_backoff_ms: i64,
     /// How long a delivery is kept from when it was made.
     pub delivery_retention_ms: i64,
+    /// Lets a caller moveAnchor a code block of another's message; only
+    /// the author and a moderator when `None`.
+    pub anchor_permission: Option<String>,
+    /// What an attachment block may describe.
+    pub attachments: AttachmentsConfig,
 }
 
 impl Default for CommentsConfig {
@@ -135,7 +181,26 @@ impl Default for CommentsConfig {
             max_attempts: DEFAULT_MAX_ATTEMPTS,
             retry_backoff_ms: DEFAULT_RETRY_BACKOFF_MS,
             delivery_retention_ms: DEFAULT_DELIVERY_RETENTION_MS,
+            anchor_permission: None,
+            attachments: AttachmentsConfig::default(),
         }
+    }
+}
+
+// strings reads an array of strings the configSchema checked.
+fn strings(raw: Option<&Value>, name: &str) -> Result<Option<Vec<String>>> {
+    match raw {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| {
+                item.as_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| Error::config(format!("Comments: {name} lists strings")))
+            })
+            .collect::<Result<Vec<_>>>()
+            .map(Some),
+        Some(_) => Err(Error::config(format!("Comments: {name} is an array"))),
     }
 }
 
@@ -173,6 +238,16 @@ impl CommentsConfig {
                 .unwrap_or(DEFAULT_RETRY_BACKOFF_MS),
             delivery_retention_ms: integer(raw.get("deliveryRetentionMs"))
                 .unwrap_or(DEFAULT_DELIVERY_RETENTION_MS),
+            anchor_permission: text("anchorPermission"),
+            attachments: match raw.get("attachments") {
+                None | Some(Value::Null) => AttachmentsConfig::default(),
+                Some(attachments) => AttachmentsConfig {
+                    max_bytes: integer(attachments.get("maxBytes")),
+                    media_types: strings(attachments.get("mediaTypes"), "attachments.mediaTypes")?,
+                    schemes: strings(attachments.get("schemes"), "attachments.schemes")?
+                        .unwrap_or_else(|| AttachmentsConfig::default().schemes),
+                },
+            },
         })
     }
 
@@ -230,6 +305,9 @@ impl Behavior for Comments {
                 ("unpin", |_, cx, params| writes::unpin(cx, params)),
                 ("resolve", |_, cx, params| writes::resolve(cx, params)),
                 ("reopen", |_, cx, params| writes::reopen(cx, params)),
+                ("moveAnchor", |_, cx, params| {
+                    anchors::move_anchor(cx, params)
+                }),
                 ("begin", |_, cx, params| drafts::begin(cx, params)),
                 ("appendDraft", |_, cx, params| {
                     drafts::append_draft(cx, params)
@@ -244,11 +322,15 @@ impl Behavior for Comments {
                 ("listReactions", |_, cx, params| {
                     reads::list_reactions(cx, params)
                 }),
+                ("listPinned", |_, cx, params| reads::list_pinned(cx, params)),
                 ("markRead", |_, cx, params| follows::mark_read(cx, params)),
                 ("follow", |_, cx, params| follows::follow(cx, params)),
             ],
             namespace_operations: vec![
                 ("inbox", |_, cx, params| inbox::inbox(cx, params)),
+                ("searchMessages", |_, cx, params| {
+                    search::search_messages(cx, params)
+                }),
                 ("claimDeliveries", |_, cx, params| {
                     deliveries::claim_deliveries(cx, params)
                 }),

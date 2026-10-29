@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	validator "github.com/santhosh-tekuri/jsonschema/v6"
+
 	"github.com/parable-work/superschematic/internal/generator/naming"
 )
 
@@ -184,9 +186,11 @@ func TestCoreBehaviors(t *testing.T) {
 	}
 	// Comments' operations (D77): every writing one on an instance is
 	// beside it and logged but appendDraft, whose draft only signals carry,
-	// and markRead and follow, which only their caller reads back; the
-	// instance reads are not beside; inbox, claimDeliveries and
-	// settleDeliveries run on the namespace, the inbox reading and the
+	// and markRead and follow, which only their caller reads back;
+	// moveAnchor, which moves a code block's anchor and is no edit, is
+	// beside and logged too; the instance reads, listPinned among them,
+	// are not beside; inbox, searchMessages, claimDeliveries and
+	// settleDeliveries run on the namespace, the first two reading and the
 	// other two writing.
 	var commentOps []string
 	for _, op := range comments.Operations {
@@ -199,26 +203,104 @@ func TestCoreBehaviors(t *testing.T) {
 	if want := []string{"post:instance:true:true:true", "begin:instance:true:true:true", "appendDraft:instance:true:true:false", "finish:instance:true:true:true",
 		"interrupt:instance:true:true:true", "edit:instance:true:true:true", "deleteMessage:instance:true:true:true", "purge:instance:true:true:true",
 		"react:instance:true:true:true", "unreact:instance:true:true:true", "pin:instance:true:true:true", "unpin:instance:true:true:true",
-		"resolve:instance:true:true:true", "reopen:instance:true:true:true", "markRead:instance:true:true:false", "follow:instance:true:true:false",
+		"resolve:instance:true:true:true", "reopen:instance:true:true:true", "moveAnchor:instance:true:true:true", "markRead:instance:true:true:false", "follow:instance:true:true:false",
 		"listMessages:instance:false:false:true", "getMessage:instance:false:false:true", "listEdits:instance:false:false:true",
-		"listReactions:instance:false:false:true", "inbox:namespace:false:false:true", "claimDeliveries:namespace:true:false:true",
+		"listReactions:instance:false:false:true", "listPinned:instance:false:false:true", "inbox:namespace:false:false:true",
+		"searchMessages:namespace:false:false:true", "claimDeliveries:namespace:true:false:true",
 		"settleDeliveries:namespace:true:false:true"}; !slices.Equal(commentOps, want) {
 		t.Errorf("Comments operations (name:scope:writes:beside:logged) = %v, want %v", commentOps, want)
 	}
 	// Each message record carries its stand, the order read markers count
-	// in, and listMessages the caller's marker on its listing.
+	// in, and the subject it was written for beside its author (D77,
+	// acting for a subject), its resolve's for beside by, and blocks of
+	// all four kinds; listMessages carries the caller's marker on its
+	// listing, and listPinned's page holds records.
+	type schemaNode struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+		Items      json.RawMessage            `json:"items"`
+	}
+	node := func(raw json.RawMessage) schemaNode {
+		var out schemaNode
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatalf("Comments schema %s: %v", raw, err)
+		}
+		return out
+	}
+	checkRecord := func(where string, record schemaNode) {
+		for _, member := range []string{"stand", "for", "via", "resolved"} {
+			if record.Properties[member] == nil {
+				t.Errorf("Comments %s record has no %s", where, member)
+			}
+		}
+		if node(record.Properties["resolved"]).Properties["for"] == nil {
+			t.Errorf("Comments %s record's resolved has no for", where)
+		}
+		var kind struct {
+			Enum []string `json:"enum"`
+		}
+		if err := json.Unmarshal(node(node(record.Properties["blocks"]).Items).Properties["kind"], &kind); err != nil || !slices.Equal(kind.Enum, []string{"ref", "action", "code", "attachment"}) {
+			t.Errorf("Comments %s record's block kinds = %v, want ref, action, code, attachment", where, kind.Enum)
+		}
+	}
+	records := 0
 	for _, op := range comments.Operations {
-		var result struct {
-			Properties map[string]json.RawMessage `json:"properties"`
-		}
-		if err := json.Unmarshal(op.ResultSchema, &result); err != nil {
-			t.Fatalf("Comments.%s resultSchema: %v", op.Name, err)
-		}
+		result := node(op.ResultSchema)
 		if _, record := result.Properties["postedAt"]; record != (result.Properties["stand"] != nil) {
 			t.Errorf("Comments.%s result has postedAt %v and stand %v, want both or neither", op.Name, record, result.Properties["stand"] != nil)
 		}
+		if result.Properties["postedAt"] != nil && op.Scope != OperationScopeNamespace {
+			records++
+			checkRecord(op.Name, result)
+		}
+		if op.Name == "listMessages" || op.Name == "listPinned" {
+			checkRecord(op.Name+" items", node(node(result.Properties["items"]).Items))
+		}
 		if op.Name == "listMessages" && result.Properties["readUpTo"] == nil {
 			t.Errorf("Comments.listMessages result has no readUpTo")
+		}
+		if slices.Contains([]string{"listEdits", "listReactions", "inbox", "searchMessages", "claimDeliveries"}, op.Name) &&
+			node(node(result.Properties["items"]).Items).Properties["for"] == nil {
+			t.Errorf("Comments.%s items have no for", op.Name)
+		}
+	}
+	if records != 14 {
+		t.Errorf("Comments has %d operations that return one message's record, want 14", records)
+	}
+	// The blocks post, finish and edit take are the four kinds, each
+	// closed to the members it declares.
+	for _, op := range comments.Operations {
+		name := op.Name
+		if !slices.Contains([]string{"post", "finish", "edit"}, name) {
+			continue
+		}
+		var params struct {
+			Properties struct {
+				Blocks struct {
+					Items struct {
+						OneOf []struct {
+							AdditionalProperties *bool `json:"additionalProperties"`
+							Properties           struct {
+								Kind struct {
+									Const string `json:"const"`
+								} `json:"kind"`
+							} `json:"properties"`
+						} `json:"oneOf"`
+					} `json:"items"`
+				} `json:"blocks"`
+			} `json:"properties"`
+		}
+		if err := json.Unmarshal(op.ParamsSchema, &params); err != nil {
+			t.Fatalf("Comments.%s paramsSchema: %v", name, err)
+		}
+		var kinds []string
+		for _, kind := range params.Properties.Blocks.Items.OneOf {
+			if kind.AdditionalProperties == nil || *kind.AdditionalProperties {
+				t.Errorf("Comments.%s %s block is open", name, kind.Properties.Kind.Const)
+			}
+			kinds = append(kinds, kind.Properties.Kind.Const)
+		}
+		if !slices.Equal(kinds, []string{"ref", "action", "code", "attachment"}) {
+			t.Errorf("Comments.%s block kinds = %v, want ref, action, code, attachment", name, kinds)
 		}
 	}
 	// Every work-queue operation writes but countClaimable and checkReserve,
@@ -257,7 +339,7 @@ func TestCoreBehaviors(t *testing.T) {
 		{workflow, []string{"already_in_state", "terminal_state", "transition_not_allowed", "no_status"}},
 		{comments, []string{"no_message", "not_a_thread", "not_in_thread", "deleted", "composing", "not_composing", "not_author", "edit_window_passed", "too_many_edits",
 			"already_reacted", "not_reacted", "too_many_reactions", "already_pinned", "not_pinned", "already_resolved", "not_resolved", "block_not_allowed", "ref_not_found",
-			"not_idle", "too_many_drafts", "draft_too_long", "not_configured", "unknown_delivery", "token_stale", "not_claimed"}},
+			"attachment_not_allowed", "no_block", "not_code", "anchor_unchanged", "not_idle", "too_many_drafts", "draft_too_long", "not_configured", "unknown_delivery", "token_stale", "not_claimed"}},
 		{dependencies, []string{"blocked", "already_blocking", "cycle", "gated"}},
 		{links, []string{"no_revision", "no_release", "required_link", "required_target", "too_many", "not_linked"}},
 		{rollups, []string{"not_held"}},
@@ -313,7 +395,19 @@ func TestCoreBehaviors(t *testing.T) {
 		{comments, `{"maxDrafts": 51}`, "behavior Comments config: "},
 		{comments, `{"maxLength": 10}`, "behavior Comments config: "},
 		{comments, `{"maxBodyLength": 40001}`, "behavior Comments config: "},
-		{comments, `{"blocks": ["code"]}`, "behavior Comments config: "},
+		{comments, `{"blocks": ["code", "attachment"], "anchorPermission": "comments.anchor"}`, ""},
+		{comments, `{"blocks": ["file"]}`, "behavior Comments config: "},
+		{comments, `{"anchorPermission": ""}`, "behavior Comments config: "},
+		{comments, `{"attachments": {}}`, ""},
+		{comments, `{"attachments": {"maxBytes": 26214400, "mediaTypes": ["image/*", "application/pdf"], "schemes": ["https", "bucket"]}}`, ""},
+		{comments, `{"attachments": {"maxBytes": 0}}`, "behavior Comments config: "},
+		{comments, `{"attachments": {"mediaTypes": []}}`, "behavior Comments config: "},
+		{comments, `{"attachments": {"mediaTypes": ["Image/PNG"]}}`, "behavior Comments config: "},
+		{comments, `{"attachments": {"mediaTypes": ["image/png; q=1"]}}`, "behavior Comments config: "},
+		{comments, `{"attachments": {"schemes": ["javascript"]}}`, "behavior Comments config: "},
+		{comments, `{"attachments": {"schemes": ["data"]}}`, "behavior Comments config: "},
+		{comments, `{"attachments": {"schemes": ["HTTPS"]}}`, "behavior Comments config: "},
+		{comments, `{"attachments": {"bucket": true}}`, "behavior Comments config: "},
 		{comments, `{"deliverPermission": "comments.deliver", "maxAttempts": 20, "retryBackoffMs": 3600000, "deliveryRetentionMs": 31536000000}`, ""},
 		{comments, `{"maxAttempts": 1, "retryBackoffMs": 1000, "deliveryRetentionMs": 86400000}`, ""},
 		{comments, `{"deliverPermission": ""}`, "behavior Comments config: "},
@@ -819,4 +913,68 @@ func fieldNames(fields []BehaviorField) []string {
 		names[i] = field.Name
 	}
 	return names
+}
+
+// TestCommentsBlockParams holds the code and attachment blocks (D77, step
+// 5) and the operations steps 4 and 5 add to what their paramsSchemas say:
+// what the schema refuses is never the behavior's to check, and what the
+// behavior checks (a code block's lines and path parts, an https URI's
+// host, the config's attachments) passes the schema.
+func TestCommentsBlockParams(t *testing.T) {
+	reg := New(naming.Default())
+	comments, _ := reg.Behavior("Comments")
+	params := map[string]json.RawMessage{}
+	for _, op := range comments.Operations {
+		params[op.Name] = op.ParamsSchema
+	}
+	code := `{"kind": "code", "repo": "github.com/acme/shop", "path": "src/orders/place.rs", "revision": "9c1f2e7", "lines": [40, 52], "snippet": "fn place() {}"}`
+	attachment := `{"kind": "attachment", "uri": "https://files.example.com/a/7c1e", "name": "build log.txt", "mediaType": "text/plain", "bytes": 20480, "sha256": "` + strings.Repeat("ab", 32) + `"}`
+	for _, c := range []struct {
+		operation, params string
+		ok                bool
+	}{
+		{"post", `{"body": "see", "blocks": [` + code + `, ` + attachment + `]}`, true},
+		{"edit", `{"message": 1, "blocks": [` + code + `]}`, true},
+		{"finish", `{"message": 1, "blocks": [` + attachment + `]}`, true},
+		// The behavior's own checks: lines out of order, a path part, a
+		// uri the config does not take.
+		{"post", `{"body": "x", "blocks": [{"kind": "code", "repo": "r", "path": "../etc/passwd", "revision": "a", "lines": [9, 2], "snippet": ""}]}`, true},
+		{"post", `{"body": "x", "blocks": [{"kind": "attachment", "uri": "bucket:shop/7c1e", "name": "a.png", "mediaType": "image/png", "bytes": 0, "sha256": "` + strings.Repeat("0", 64) + `"}]}`, true},
+		{"post", `{"body": "x", "blocks": [{"kind": "code", "repo": "r", "path": "a", "revision": "a", "lines": [1], "snippet": ""}]}`, false},
+		{"post", `{"body": "x", "blocks": [{"kind": "code", "repo": "r", "path": "a", "revision": "a", "lines": [0, 1], "snippet": ""}]}`, false},
+		{"post", `{"body": "x", "blocks": [{"kind": "code", "repo": "r r", "path": "a", "revision": "a", "lines": [1, 1], "snippet": ""}]}`, false},
+		{"post", `{"body": "x", "blocks": [{"kind": "code", "repo": "r", "path": "a", "revision": "a", "lines": [1, 1]}]}`, false},
+		{"post", `{"body": "x", "blocks": [{"kind": "code", "repo": "r", "path": "a", "revision": "a", "lines": [1, 1], "snippet": "", "original": {}}]}`, false},
+		{"post", `{"body": "x", "blocks": [{"kind": "code", "repo": "r", "path": "a", "revision": "a", "lines": [1, 1], "snippet": "` + strings.Repeat("x", 8001) + `"}]}`, false},
+		{"post", `{"body": "x", "blocks": [{"kind": "attachment", "uri": "https://h/a", "name": "a/b.png", "mediaType": "image/png", "bytes": 1, "sha256": "` + strings.Repeat("0", 64) + `"}]}`, false},
+		{"post", `{"body": "x", "blocks": [{"kind": "attachment", "uri": "https://h/a", "name": "a\u0001b", "mediaType": "image/png", "bytes": 1, "sha256": "` + strings.Repeat("0", 64) + `"}]}`, false},
+		{"post", `{"body": "x", "blocks": [{"kind": "attachment", "uri": "https://h/a", "name": "   ", "mediaType": "image/png", "bytes": 1, "sha256": "` + strings.Repeat("0", 64) + `"}]}`, false},
+		{"post", `{"body": "x", "blocks": [{"kind": "attachment", "uri": "https://h/a", "name": "a.png", "mediaType": "Image/PNG", "bytes": 1, "sha256": "` + strings.Repeat("0", 64) + `"}]}`, false},
+		{"post", `{"body": "x", "blocks": [{"kind": "attachment", "uri": "https://h/a", "name": "a.png", "mediaType": "image/png", "bytes": 1, "sha256": "` + strings.Repeat("A", 64) + `"}]}`, false},
+		{"post", `{"body": "x", "blocks": [{"kind": "attachment", "uri": "HTTPS://h/a", "name": "a.png", "mediaType": "image/png", "bytes": 1, "sha256": "` + strings.Repeat("0", 64) + `"}]}`, false},
+		{"post", `{"body": "x", "blocks": [{"kind": "attachment", "uri": "https://h/a b", "name": "a.png", "mediaType": "image/png", "bytes": -1, "sha256": "` + strings.Repeat("0", 64) + `"}]}`, false},
+		{"moveAnchor", `{"message": 1, "block": 0, "revision": "f00d", "lines": [3, 9]}`, true},
+		{"moveAnchor", `{"message": 1, "block": 20, "revision": "f00d", "lines": [3, 9]}`, false},
+		{"moveAnchor", `{"message": 1, "block": 0, "revision": "f00d", "lines": [3, 9], "snippet": "x"}`, false},
+		{"listPinned", `{}`, true},
+		{"listPinned", `{"limit": 101}`, false},
+		{"searchMessages", `{"query": "walnut desk", "schema": "Ticket", "instanceId": "t1", "thread": 4, "limit": 100}`, true},
+		// needs schema, needs instanceId: the behavior's checks.
+		{"searchMessages", `{"query": "walnut", "thread": 4}`, true},
+		{"searchMessages", `{"query": "   "}`, false},
+		{"searchMessages", `{"query": "` + strings.Repeat("w", 501) + `"}`, false},
+		{"searchMessages", `{"query": "walnut", "syntax": "fts5"}`, false},
+	} {
+		compiled, err := compileSchema(params[c.operation], "superschematic://test/comments/"+c.operation+".json")
+		if err != nil {
+			t.Fatalf("Comments.%s paramsSchema: %v", c.operation, err)
+		}
+		decoded, err := validator.UnmarshalJSON(strings.NewReader(c.params))
+		if err != nil {
+			t.Fatalf("%s: %v", c.params, err)
+		}
+		if err := compiled.Validate(decoded); (err == nil) != c.ok {
+			t.Errorf("Comments.%s %s: error %v, want ok %v", c.operation, c.params, err, c.ok)
+		}
+	}
 }

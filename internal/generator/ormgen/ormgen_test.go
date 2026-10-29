@@ -89,8 +89,9 @@ func TestWriteORMGolden(t *testing.T) {
 		{"fixture-vectors-db", []string{"repository_chunk.go", "repository_ledger_line.go", "repository_passage.go", "repository_text_embedding.go", "nearest.go", "encrypted.go"}},
 		// A bank sync's upserts of many rows, only if changed (D89).
 		{"fixture-sync-db", []string{"repository_bank_account.go", "repository_line_item.go", "queues.go"}},
-		// Declared queries (D86): queries.go runs them.
-		{"fixture-queries-db", []string{"repository_account.go", "repository_category.go", "repository_line_item.go", "repository_transfer_group.go", "queries.go"}},
+		// Declared queries (D86): queries.go runs them, a query over the
+		// line_list projection's view among them (D95).
+		{"fixture-queries-db", []string{"repository_account.go", "repository_category.go", "repository_line_item.go", "repository_transfer_group.go", "projections.go", "queries.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)

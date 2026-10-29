@@ -30,7 +30,7 @@ const (
 
 // GoVersion is the go directive of the module, as every generated
 // module's.
-const GoVersion = "1.26.4"
+const GoVersion = "1.27.3"
 
 // zeroVersion is the version a go.mod requires a module at that a replace
 // points at a directory.

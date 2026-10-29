@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -87,7 +88,7 @@ func TestQueriesVerifyAndARenamedColumn(t *testing.T) {
 
 	stdout, stderr, err := runCommand(t, "queries", "verify", serviceDir, "--database-url", url)
 	require.NoError(t, err, stderr)
-	assert.Contains(t, stdout, "verified 6 queries of fixture-queries-db")
+	assert.Contains(t, stdout, "verified 11 queries of fixture-queries-db")
 	written, err := os.ReadFile(lockPath)
 	require.NoError(t, err)
 	committed, err := os.ReadFile(filepath.Join(queriesFixture, queryverify.LockFile))
@@ -181,7 +182,8 @@ func TestQueriesVerifyRefusesAServiceOfAnotherKind(t *testing.T) {
 }
 
 // TestCheckWatchStampsTheQueriesLock: check --watch re-checks a service
-// whose queries.lock queries verify rewrote.
+// whose queries.lock queries verify rewrote, and one whose file of string
+// constants a query's SQL interpolates changed (D95).
 func TestCheckWatchStampsTheQueriesLock(t *testing.T) {
 	serviceDir := prepareQueriesService(t)
 	c, err := newChecker(&app{}, "", serviceDir)
@@ -189,6 +191,12 @@ func TestCheckWatchStampsTheQueriesLock(t *testing.T) {
 	stamps := c.snapshot()
 	_, ok := stamps[filepath.Join(serviceDir, queryverify.LockFile)]
 	assert.True(t, ok, "the snapshot stamps %s", queryverify.LockFile)
+	filters := filepath.Join(serviceDir, "src", "filters.ts")
+	_, ok = stamps[filters]
+	assert.True(t, ok, "the snapshot stamps src/filters.ts")
+	report := c.runSettled(nil)
+	require.True(t, report.OK, "%+v", report.Diagnostics)
+	assert.Equal(t, []string{"fixture-queries-db"}, c.servicesOf([]string{filters}))
 }
 
 // TestCheckHoldsQueriesToTheirLock: with no database, check refuses a
@@ -212,4 +220,112 @@ func TestCheckHoldsQueriesToTheirLock(t *testing.T) {
 	stdout, _, err = runCommand(t, "check", serviceDir)
 	require.Error(t, err)
 	assert.Contains(t, stdout, "query categoryTotals has not been verified: queries.lock holds no entry for it")
+}
+
+// dashboardReports are fixture-queries-db's queries that interpolate the
+// dashboard's filter, a string constant of src/filters.ts (D95).
+var dashboardReports = []string{"dashboardCategories", "dashboardLines", "dashboardTotals", "matchingLine"}
+
+// editService rewrites the file rel of the service at serviceDir,
+// replacing from, which it must hold, with to.
+func editService(t *testing.T, serviceDir, rel, from, to string) {
+	t.Helper()
+	path := filepath.Join(serviceDir, filepath.FromSlash(rel))
+	source, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Contains(t, string(source), from)
+	require.NoError(t, os.WriteFile(path, []byte(strings.Replace(string(source), from, to, 1)), 0o644))
+}
+
+// TestCheckHoldsASharedFilterToTheLock is H2's acceptance with no database
+// (D95): four reports share one filter, a string constant their SQL
+// interpolates, and editing it makes check fail naming each of the four
+// and no other query; editing the projection one of them reads names that
+// one, and changing what a query returns names it.
+func TestCheckHoldsASharedFilterToTheLock(t *testing.T) {
+	for _, tc := range []struct {
+		name, file, from, to string
+		stale                []string
+	}{
+		{"the filter", "src/filters.ts", `li."name" ILIKE`, `li."name" LIKE`, dashboardReports},
+		{"a constant the filter interpolates", "src/filters.ts", `li."date" BETWEEN :start AND :end`, `li."date" >= :start AND li."date" < :end`, dashboardReports},
+		{"the projection", "src/line-list.projection.schema.ts", `{ "category.id": "base.category" }, "left")`, `{ "category.id": "base.category" })`, []string{"dashboardLines"}},
+		{"what a query returns", "src/dashboard.schema.ts", `WHERE ${LINE_FILTER}` + "`" + `,
+  returns: "one",`, `WHERE ${LINE_FILTER}` + "`" + `,
+  returns: "optional",`, []string{"dashboardTotals"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			serviceDir := prepareQueriesService(t)
+			_, stderr, err := runCommand(t, "check", serviceDir)
+			require.NoError(t, err, stderr)
+			editService(t, serviceDir, tc.file, tc.from, tc.to)
+			stdout, _, err := runCommand(t, "check", serviceDir)
+			require.Error(t, err)
+			for _, name := range []string{"accountLines", "accountNamed", "budgets", "categoryTotals", "dashboardCategories", "dashboardLines", "dashboardTotals", "matchingLine", "timeBuckets", "transactionList", "transferCandidates"} {
+				stale := "query " + name + " changed since it was verified"
+				if slices.Contains(tc.stale, name) {
+					assert.Contains(t, stdout, stale)
+				} else {
+					assert.NotContains(t, stdout, stale)
+				}
+			}
+		})
+	}
+}
+
+// TestQueriesVerifyReverifiesASharedFilter is H2's acceptance on Postgres
+// (D95): after the dashboard's filter changes, queries verify prepares the
+// four reports again and writes their new hashes, and check holds; the
+// others keep theirs.
+func TestQueriesVerifyReverifiesASharedFilter(t *testing.T) {
+	url := queriesDatabase(t)
+	serviceDir := prepareQueriesService(t)
+	lockPath := filepath.Join(serviceDir, queryverify.LockFile)
+	before, err := queryverify.ReadLock(lockPath)
+	require.NoError(t, err)
+
+	editService(t, serviceDir, "src/filters.ts", `li."name" ILIKE`, `li."name" LIKE`)
+	_, _, err = runCommand(t, "check", serviceDir)
+	require.Error(t, err)
+	stdout, stderr, err := runCommand(t, "queries", "verify", serviceDir, "--database-url", url)
+	require.NoError(t, err, stderr)
+	assert.Contains(t, stdout, "verified 11 queries of fixture-queries-db")
+	_, stderr, err = runCommand(t, "check", serviceDir)
+	require.NoError(t, err, stderr)
+
+	after, err := queryverify.ReadLock(lockPath)
+	require.NoError(t, err)
+	hashes := map[string]string{}
+	for _, q := range before.Queries {
+		hashes[q.Name] = q.Hash
+	}
+	for _, q := range after.Queries {
+		assert.Equal(t, !slices.Contains(dashboardReports, q.Name), hashes[q.Name] == q.Hash, "query %s's hash", q.Name)
+	}
+
+	// A filter that breaks the SQL fails verify, naming each report.
+	editService(t, serviceDir, "src/filters.ts", `li.account_id = ANY`, `li.acount_id = ANY`)
+	_, _, err = runCommand(t, "queries", "verify", serviceDir, "--database-url", url)
+	require.Error(t, err)
+	for _, name := range dashboardReports {
+		assert.Contains(t, err.Error(), "query "+name+": Postgres refuses it: column li.acount_id does not exist")
+	}
+}
+
+// TestQueriesVerifyRefusesManyRowsUnderOne: a query that returns one row
+// whose statement groups its rows is refused before Postgres is asked,
+// naming the query and the fix (D95).
+func TestQueriesVerifyRefusesManyRowsUnderOne(t *testing.T) {
+	serviceDir := prepareQueriesService(t)
+	editService(t, serviceDir, "src/dashboard.schema.ts", `    GROUP BY li.category_id
+    ORDER BY total, li.category_id`+"`"+`,
+})`, `    GROUP BY li.category_id
+    ORDER BY total, li.category_id`+"`"+`,
+  returns: "one",
+})`)
+	for _, args := range [][]string{{"check", serviceDir}, {"queries", "verify", serviceDir, "--database-url", "postgres://unused.invalid/postgres"}} {
+		stdout, _, err := runCommand(t, args...)
+		require.Error(t, err)
+		assert.Contains(t, stdout+err.Error(), `query dashboardCategories returns "one", and its SQL groups its rows with GROUP BY, which returns a row per group, so it may return more than one row; return "many", or end the statement with LIMIT 1 when it never returns more than one`)
+	}
 }

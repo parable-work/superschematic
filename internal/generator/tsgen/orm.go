@@ -124,8 +124,13 @@ type ORMTable struct {
 	SoftDelete   bool
 	HistoryActor bool
 	// Search is the search column, qualified, of a table with search
-	// fields; empty otherwise.
-	Search string
+	// fields, or of a view's source with them; empty otherwise. On a view,
+	// SearchProbe is the condition the words' conditions sit in, the
+	// view's key in the keys of the source's rows they keep, and
+	// SearchSource the source's type (D99).
+	Search       string
+	SearchProbe  string
+	SearchSource string
 
 	UniqueKeys   []ORMUniqueKey
 	ReferencedBy []ORMReference
@@ -341,7 +346,7 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 			table.Doc = codegen.DocText(td.Description, td.Comment)
 		}
 		if t.Search {
-			table.Search = sqlutil.Qualify(t.Name, sqlutil.SearchTextColumn)
+			table.Search = t.SearchColumn
 		}
 		statements := map[string]string{}
 		for _, st := range sqlutil.TableStatementsOf(t).AllStatements() {
@@ -444,6 +449,9 @@ func ormViews(schema *ir.Schema, opts Options, out *ORMInfo, projections []TypeI
 		if td := schema.Types[v.Type]; td != nil {
 			view.Doc = codegen.DocText(td.Description, td.Comment)
 			view.Relation = td.Projection.Relation()
+			if v.Search {
+				view.Search, view.SearchProbe, view.SearchSource = v.SearchColumn, v.SearchProbe, td.Projection.Source
+			}
 		}
 		statements := map[string]string{}
 		for _, st := range sqlutil.TableStatementsOf(v).AllStatements() {

@@ -1674,6 +1674,6 @@ fn migration_2_moves_version_1s_comments_into_threads_one_level_deep() {
                     .collect::<superschematic_engine::storage::Result<Vec<_>>>()
             })
             .unwrap();
-        assert_eq!(ledger, [1, 2, 3, 4]);
+        assert_eq!(ledger, [1, 2, 3, 4, 5, 6]);
     }
 }

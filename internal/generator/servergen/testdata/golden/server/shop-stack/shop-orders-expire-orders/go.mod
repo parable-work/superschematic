@@ -12,7 +12,7 @@
 
 module example.com/schemas/server/shop-stack/shop-orders-expire-orders
 
-go 1.26.4
+go 1.27.3
 
 require (
 	cloud.google.com/go/storage v1.69.0

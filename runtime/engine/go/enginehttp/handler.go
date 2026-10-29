@@ -17,6 +17,13 @@
 //		Timeout: runtimemiddleware.Timeout(10*time.Second, getLogger),
 //	}))
 //
+// With Options.ActingFor, the routes honor the Acting-For request header
+// (D77): its value is the subject the caller acts for, which the engine's
+// principal carries and every event it writes records as for. Unset, the
+// header is ignored, and a request that carries it is answered as if it
+// did not. Set, the header is read by one rule (ActingForSubject), and a
+// request with more than one is 400 invalid_argument.
+//
 // An event stream is pulled without waiting (Stream.Poll) whenever the
 // engine's one waiter sees a commit (Engine.Changed) or a quarter of the
 // heartbeat passes, each frame flushed with http.ResponseController, the
@@ -35,6 +42,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -121,6 +129,52 @@ type Options struct {
 	// stream ends then, as when its client goes away, so a server's
 	// shutdown waits for no stream (http.Server.RegisterOnShutdown).
 	Done <-chan struct{}
+	// ActingFor decides whether a request's Acting-For header is honored
+	// (D77), given the engine's principal for the caller, the subject the
+	// header names and the request: the principal then acts for the
+	// subject, and the access policy decides what it may do. Nil ignores
+	// the header; HonorActingFor honors it for every caller.
+	ActingFor func(principal engine.Principal, subject string, r *http.Request) bool
+}
+
+// ActingForHeader is the request header that names the subject a caller
+// acts for (D77).
+const ActingForHeader = "Acting-For"
+
+// HonorActingFor is an Options.ActingFor that honors the Acting-For header
+// for every caller the host authenticated, leaving the rest to the access
+// policy.
+func HonorActingFor(engine.Principal, string, *http.Request) bool { return true }
+
+// ErrActingFor is the error ActingForSubject returns for a header it
+// refuses.
+var ErrActingFor = errors.New("the request carries more than one Acting-For header, or one whose subject holds a comma, a control or a whitespace character")
+
+// ActingForSubject is the subject a request's Acting-For headers name
+// (D77), by the one rule the Rust engine and the TypeScript host apply
+// too: ASCII whitespace around it (space, tab, LF, FF, CR) is trimmed,
+// and nothing else; none, or an empty one, is "". More than one header is
+// refused, and so is a comma, which is how two read once folded into one,
+// and a control character or any other whitespace, Unicode's included:
+// the subject Options.ActingFor approves is then the one the engine
+// records, byte for byte.
+func ActingForSubject(values []string) (string, error) {
+	if len(values) == 0 {
+		return "", nil
+	}
+	if len(values) > 1 {
+		return "", ErrActingFor
+	}
+	subject := strings.Trim(values[0], " \t\n\f\r")
+	if subject == "" {
+		return "", nil
+	}
+	for _, r := range subject {
+		if r == ',' || unicode.Is(unicode.Cc, r) || unicode.Is(unicode.White_Space, r) {
+			return "", ErrActingFor
+		}
+	}
+	return subject, nil
 }
 
 // Handler serves the engine's routes. Mount it at Options.Prefix (chi's
@@ -253,6 +307,16 @@ func (h *handler) route(route engine.Route) http.HandlerFunc {
 			RequestID: id,
 			Options:   h.api,
 		}
+		subject, err := h.actingFor(caller, r)
+		if err != nil {
+			WriteProblem(w, http.StatusBadRequest, err.Error(), "invalid_argument", id, nil)
+			return
+		}
+		if subject != "" {
+			honored := *h.api
+			honored.ActingFor = subject
+			request.Options = &honored
+		}
 		response, err := h.e.ServeHTTPRequest(r.Context(), request, body)
 		switch {
 		case errors.Is(err, engine.ErrClosed):
@@ -336,6 +400,66 @@ func (h *handler) stream(w http.ResponseWriter, r *http.Request, response *engin
 		case <-timer.C:
 		}
 	}
+}
+
+// actingFor is the subject the mount decided the caller acts for (D77),
+// which the engine then uses as it is: "" when the mount ignores the
+// header, there is no caller, the header is absent or empty, or
+// Options.ActingFor refuses it; ErrActingFor when ActingForSubject refuses
+// the header.
+func (h *handler) actingFor(caller engine.Caller, r *http.Request) (string, error) {
+	if h.options.ActingFor == nil {
+		return "", nil
+	}
+	principal, ok := principalOf(caller, r)
+	if !ok {
+		return "", nil
+	}
+	subject, err := ActingForSubject(r.Header.Values(ActingForHeader))
+	if err != nil || subject == "" {
+		return "", err
+	}
+	if !h.options.ActingFor(principal, subject, r) {
+		return "", nil
+	}
+	return subject, nil
+}
+
+// principalOf is the engine's principal for a caller, as the engine
+// establishes it (D37): the end user's, with the calling service beside it;
+// the service's own, standing in, when it brings no end user and the
+// request no Authorization header; none otherwise.
+func principalOf(caller engine.Caller, r *http.Request) (engine.Principal, bool) {
+	if caller.Refused != nil {
+		return engine.Principal{}, false
+	}
+	if caller.Principal != nil {
+		if caller.Principal.Subject == "" {
+			return engine.Principal{}, false
+		}
+		principal := *caller.Principal
+		principal.Service = nil
+		if caller.Service != nil {
+			principal.Service = &engine.PrincipalService{
+				Deployable: caller.Service.Deployable,
+				Serves:     caller.Service.Serves,
+				Subject:    caller.Service.Subject,
+			}
+		}
+		return principal, true
+	}
+	if caller.Service == nil || strings.TrimSpace(r.Header.Get("Authorization")) != "" {
+		return engine.Principal{}, false
+	}
+	return engine.Principal{
+		Subject: "service:" + caller.Service.Deployable,
+		Service: &engine.PrincipalService{
+			Deployable: caller.Service.Deployable,
+			Serves:     caller.Service.Serves,
+			Subject:    caller.Service.Subject,
+			StandsIn:   true,
+		},
+	}, true
 }
 
 // headersOf is a request's headers as the engine reads them: lowercase

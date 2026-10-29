@@ -1,6 +1,6 @@
 module example.com/schemas/orm/fixture-optimistic-db
 
-go 1.26.4
+go 1.27.3
 
 require (
 	example.com/schemas/types/go/fixture-optimistic-db v0.0.0-00010101000000-000000000000

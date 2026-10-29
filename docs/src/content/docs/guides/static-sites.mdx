@@ -75,9 +75,9 @@ site`, `web/{service}` unless set, under the repository root, and is a
 member of the output root's Bun workspace, so it imports the SDKs of the
 APIs it calls with `workspace:*`. When the directory is missing, the
 build scaffolds a minimal site there once: `index.html`, `src/main.ts`, a
-`package.json` whose `build` script bundles them with `bun build`, and a
-`.gitignore` for the output. It is yours to change, or to replace with
-your framework's project.
+`package.json` whose `build` script runs its `typecheck` script and then
+bundles them with `bun build`, and a `.gitignore` for the output. It is
+yours to change, or to replace with your framework's project.
 
 Every build writes the site's typed browser config into the package,
 `config.generated.ts`. Its `loadApis()` fetches the config the
@@ -98,6 +98,39 @@ a cookie session, `fetch`, a timeout. The scaffold's `package.json`
 depends on each SDK with `workspace:*`. An API whose config generates no
 TypeScript SDK has its `baseUrl` alone; enable `outputs.sdk.typescript`
 in its config for a client, or call it with `fetch`.
+
+The build writes the package's `package.json` once, with the scaffold, so
+an API the site's config names later is missing from it, and the site
+would not bundle (`Could not resolve "@acme/shop-api-sdk"`). Each build
+of the site then warns, naming the line to add; the build does not add it
+to a file that is yours:
+
+```
+warning: site shop-web: its package, at web/shop-web, does not depend on @acme/shop-api-sdk, which config.generated.ts imports; the build wrote the package's package.json once and does not write it again, so add
+
+    "@acme/shop-api-sdk": "workspace:*"
+
+to its dependencies (D100)
+```
+
+`bun build` checks no type, so a call an SDK's TypeScript refuses would
+bundle and fail only in the browser. The scaffold's build therefore runs
+`typecheck`, `tsc --noEmit`, first, over the site and the SDKs its config
+imports (D101): `stack dev --build-sites`, a deploy and the generated CI
+all build with it. A site scaffolded before that bundles without it, and
+each build of the site warns until you change the script:
+
+```
+warning: site shop-web: its package, at web/shop-web, builds without a type-check, with the build script its scaffold wrote before D101; the build wrote the package's package.json once and does not write it again, so change the script to
+
+    "build": "bun run typecheck && rm -rf dist && bun build ./index.html --outdir=dist --public-path=/ --minify"
+
+which type-checks the site, and the SDKs it calls, before it bundles them (D101)
+```
+
+A build script of your own draws no warning. With a framework's bundler,
+type-check in the script too, as Vite's templates do: `tsc -b && vite
+build`.
 
 The SDK checks each value through superscalar, whose browser build a
 bundler takes through the `browser` export condition: `bun build

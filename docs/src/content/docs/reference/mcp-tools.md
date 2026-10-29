@@ -485,6 +485,30 @@ the revision it speaks and what it says it can do:
 | 2026-07-28, its envelope's `clientCapabilities` elicit forms (`elicitation: {}` or `elicitation: { form: {} }`) | `resultType: "input_required"`, with one input request, `confirm`, an `elicitation/create` whose `message` is the call's summary and whose `requestedSchema` asks for nothing, and a `requestState` | the client's retry of the call with `inputResponses.confirm` `{ action: "accept" }` and the `requestState` echoed |
 | any other: a 2025 revision, or 2026-07-28 without form elicitation | a tool error, `428 confirmation_required`, whose `details` hold `summary`, `confirmationToken` and `expiresAt` | the same call with `confirmationToken` added to its arguments |
 
+Only a call that would run is confirmed. Before the endpoint answers
+either, and before it redeems a token or a `requestState`, it checks the
+call through the route of the tool's operation, as far as the
+implementation: the arguments, decoded and validated as the route decodes
+them, and the route's body limit, service clause, authentication and
+permission check. A call they refuse answers the route's problem at once,
+as a tool error, and no one is asked: an argument the tool does not take
+is `400 bad_request`, `update_order takes id, revision, note, not "input"`,
+a value the route refuses is its 400, a body over the route's limit its
+413, and a caller the route refuses its 401 or 403. A confirmation sent
+with such a call, as a token or as a `requestState` with any answer, is
+not used up, so it still runs the call it was given for.
+
+What the check cannot see runs once the call is confirmed, and a refusal
+there uses the confirmation up: the route's rate limit, which counts the
+calls that run, so a call asked about, confirmed and run takes one token;
+the implementation's own checks, such as whether the caller owns the row
+(`@requireOwnership` only needs a caller), whether it exists, or whether
+its revision still matches; a `@manualRouteRegistration` handler's reading
+of the request; and anything that changes in between, such as a session
+signed out. A tool the caller's permissions do not cover is not in its
+list, and a call of it is the invalid-params error before anything else,
+as above.
+
 The official SDK's client answers an `input_required` result itself: it
 asks the person through its elicitation handler and retries. A client
 that declined (`decline`) or dismissed (`cancel`) the request gets a tool
@@ -592,10 +616,16 @@ name, and where one takes create parameters, as `Links` and
 A behavior's namespace operation (`scope: "namespace"`), which runs
 across every schema of the namespace that composes the behavior, has one
 tool, named after the behavior (`comments.inbox`, handle
-`comments_inbox`), that takes `params` alone; the access policy's
+`comments_inbox`; `comments.searchMessages`, handle
+`comments_search_messages`), that takes `params` alone; the access policy's
 question for it, which names the behavior and no schema, with
 `listing: true`, hides it from a caller it refuses
 ([Engine behaviors](/superschematic/guides/engine-behaviors/#namespace-operations)).
+The endpoint honors the `Acting-For` header, the subject an agent calls
+for, only when the host mounts it with `actingFor` as it does the HTTP
+API; then every call of the request acts for that subject, and the
+events it writes record it as `for`
+([The engine](/superschematic/guides/engine/#callers-and-the-access-policy)).
 Its `hiddenBy` names the same causes as a schema's tool (below):
 `deployment` when `tools.hidden` names it, `archived` for one that writes
 in an archived namespace, `policy` when that question refuses the caller,

@@ -4,6 +4,12 @@ import type { ScalarValidationResult, ValidationError } from 'superscalar/valida
 
 import { parseGenericDecimal as parseGenericDecimalFromLib } from 'superscalar/scalars';
 
+// The constructors of GenericDecimal, the scalar library's own, which the
+// package hands out beside the type: each returns the value as
+// GenericDecimal and throws on a value Generic.Decimal refuses (D25,
+// amended; D100).
+export { parseGenericDecimalStrict, normalizeGenericDecimalStrict } from 'superscalar/scalars';
+
 const GenericDecimalPattern = new RegExp("^[+-]?[0-9]+(\\.[0-9]+)?$", "u");
 
 /**

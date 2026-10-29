@@ -2,8 +2,6 @@ package generator
 
 import (
 	"fmt"
-	"maps"
-	"slices"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
@@ -112,16 +110,18 @@ func (r run) fieldKeysField(db string, dbSchema *ir.Schema) (*ir.FieldDef, error
 	return fd, nil
 }
 
-// envVarsSecret is the field of schema's @envVars classes that is the
-// secret typeName.field, as a stack names one, or why there is none: no
-// class holds a field of its name, the one that does is another class's
-// secret, or it is no required Secret<string>.
+// envVarsSecret is the field of schema's config, its @envVars class
+// (ir.Schema.EnvVarsType, D94), that is the secret typeName.field, as a
+// stack names one, or why there is none: the class holds no field of its
+// name, the one it holds is another class's secret, or it is no required
+// Secret<string>. The config holds the fields of every class it extends,
+// so a secret its base declares is the config's too.
 func envVarsSecret(schema *ir.Schema, typeName, field string) (*ir.FieldDef, string) {
-	for _, name := range slices.Sorted(maps.Keys(schema.Types)) {
-		td := schema.Types[name]
-		if !td.EnvVars {
-			continue
-		}
+	td, err := schema.EnvVarsType()
+	if err != nil {
+		return nil, err.Error()
+	}
+	if td != nil {
 		for _, fd := range td.Fields {
 			if fd == nil || fd.Name != field {
 				continue

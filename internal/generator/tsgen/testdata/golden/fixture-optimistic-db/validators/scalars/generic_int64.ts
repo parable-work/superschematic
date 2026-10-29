@@ -4,6 +4,12 @@ import type { ScalarValidationResult, ValidationError } from 'superscalar/valida
 
 import { parseGenericInt64 as parseGenericInt64FromLib } from 'superscalar/scalars';
 
+// The constructors of GenericInt64, the scalar library's own, which the
+// package hands out beside the type: each returns the value as
+// GenericInt64 and throws on a value Generic.Int64 refuses (D25,
+// amended; D100).
+export { parseGenericInt64Strict, normalizeGenericInt64Strict } from 'superscalar/scalars';
+
 /**
  * Validates a Generic.Int64 value
  */

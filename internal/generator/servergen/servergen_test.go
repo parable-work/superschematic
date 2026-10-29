@@ -475,7 +475,7 @@ func TestTheScaffoldNeverOverwrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	mod := filepath.Join(dir, servergen.ModFile)
-	editedMod := []byte("module example.com/mine/orders\n\ngo 1.26.4\n")
+	editedMod := []byte("module example.com/mine/orders\n\ngo 1.27.3\n")
 	if err := os.WriteFile(mod, editedMod, 0o644); err != nil {
 		t.Fatal(err)
 	}
