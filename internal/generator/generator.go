@@ -235,7 +235,7 @@ func (r run) runPipeline(pipeline []registry.GeneratorSpec) error {
 // the first such generator, the type and the behavior; types, which
 // renders behaviors' fields, and the generators of a DB schema, whose
 // engine types the engine keeps (D58), are never it for a behavior on the
-// type, and sql and types never for one on a field. build --emit-ir,
+// type, and sql, orm and types never for one on a field. build --emit-ir,
 // format and json-schema run no generator and accept the schema (D16).
 func refuseBehaviors(schema *ir.Schema, enabled []registry.GeneratorSpec) error {
 	typeName, behavior, found := schema.FindBehavior()

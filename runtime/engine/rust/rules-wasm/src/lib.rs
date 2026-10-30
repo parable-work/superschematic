@@ -1,12 +1,15 @@
 //! The pure core of the behaviors (D103) for a host that reaches it through
-//! WebAssembly: `superschematic-rules` with the behaviors
-//! `superschematic-rules-behaviors` ports, behind a C ABI whose every value
-//! is JSON ([`ffi`]). `@superschematic/rules` (`runtime/rules/typescript`)
+//! a C ABI: `superschematic-rules` with the behaviors
+//! `superschematic-rules-behaviors` ports, every value of the ABI JSON
+//! ([`ffi`]). `@superschematic/rules` (`runtime/rules/typescript`)
 //! loads the `wasm32-unknown-unknown` build, as
 //! `@superschematic/versiongraph` loads the version graph's
 //! (`runtime/versiongraph/rust/src/ffi.rs` is the precedent), and the HTTP
 //! runtime's adapter (`runtime/http/typescript/src/rules.ts`) runs its host
-//! loop over it.
+//! loop over it. The Go binding (`runtime/rules/go`) links the native
+//! build's static archive through cgo, which `scripts/rules-archive.sh`
+//! stages as `libsuperschematic_rules.a`, and its adapter runs the same
+//! loop.
 //!
 //! Three operations, each a JSON document in and one out:
 //!
@@ -31,14 +34,18 @@
 //! `invalid_input`, and a panic `internal`; [`run_json`] says which by its
 //! second value.
 //!
-//! The core is built once, the first time an operation runs, and kept: a
-//! behavior reads its declaration file when it is registered, which a
-//! command should not pay for.
+//! The core is built once per process (on wasm, once per instance), the
+//! first time an operation runs, and kept: a behavior reads its declaration
+//! file when it is registered, which a command should not pay for. Every
+//! thread shares it, since [`Core`] is `Send` and `Sync`, so the Go
+//! binding's goroutines, on whatever threads cgo runs them, run one core.
 //!
 //! [`Step`]: superschematic_rules::Step
 //! [`Refusal`]: superschematic_rules::Refusal
 
 pub mod ffi;
+
+use std::sync::LazyLock;
 
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -46,12 +53,19 @@ use serde_json::{json, Value};
 
 use superschematic_rules::{Action, Answers, Caller, Command, Core, Outcome, Step, TypeSpec};
 
-thread_local! {
-    // The core every operation runs on: each behavior ported so far
-    // (superschematic_rules_behaviors::core()). A wasm32-unknown-unknown
-    // module runs on one thread, so this is the module's one core.
-    static CORE: Core = superschematic_rules_behaviors::core();
-}
+// The core every operation runs on: each behavior ported so far
+// (superschematic_rules_behaviors::core()), built the first time an
+// operation runs and shared by every thread after: Core is Send and Sync,
+// so the Go binding's goroutines, on whatever threads cgo runs them, run
+// one core. A wasm32-unknown-unknown module runs on one thread.
+static CORE: LazyLock<Core> = LazyLock::new(superschematic_rules_behaviors::core);
+
+// The core is shared across threads, which only a Send and Sync core may
+// be; a behavior that broke it would fail to compile here.
+const _: () = {
+    const fn shared<T: Send + Sync>() {}
+    shared::<Core>();
+};
 
 /// An operation of the ABI.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -106,7 +120,7 @@ pub fn error_document(code: &str, message: &str) -> String {
 }
 
 fn output(op: Op, input: &[u8]) -> Result<Value, (&'static str, String)> {
-    CORE.with(|core| output_on(core, op, input))
+    output_on(&CORE, op, input)
 }
 
 fn output_on(core: &Core, op: Op, input: &[u8]) -> Result<Value, (&'static str, String)> {

@@ -4,7 +4,7 @@ package orm
 
 import (
 	"context"
-{{- if or .Versioned .HasJSONUnionCollections }}
+{{- if or .Versioned .HasJSONUnionCollections .HasBehaviors }}
 	"encoding/json"
 {{- end }}
 	"fmt"
@@ -25,6 +25,9 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 {{- end }}
 	types "{{ .TypesModule }}"
+{{- if .HasBehaviors }}
+	rules "{{ .RulesGoModule }}"
+{{- end }}
 )
 
 {{- range .Fields }}
@@ -126,7 +129,7 @@ func refuseNull{{ .TypeName }}UpdateGenericJSONElements(update *{{ .TypeName }}U
 		return nil
 	}
 	{{- range .GenericJSONListFields }}
-	{{- if and (not .IsPrimaryKey) (not .IsAuditField) (not .IsInternalMetadata) }}
+	{{- if and (not .IsPrimaryKey) (not .IsAuditField) (not .IsInternalMetadata) (not .IsOwned) }}
 	if update.{{ toGoName .Name }} != nil {
 		if err := {{ .GenericJSONNullCheck (printf "*update.%s" (toGoName .Name)) }}; err != nil {
 			return err
@@ -631,6 +634,9 @@ type {{ .Name }} struct {
 	tx   pgx.Tx    // Set when using Transaction
 	txDB *Database // Parent database for transaction (enables accessing other repos)
 }
+{{- if .HasBehaviors }}
+{{ template "behaviorTypes" . }}
+{{- end }}
 
 // Allowed fields for {{ .TypeName }} (for validation and ordering)
 var {{ .TypeName }}AllowedFields = map[string]bool{
@@ -2361,6 +2367,10 @@ func (r *{{ .Name }}) pageKeyExists(ctx context.Context, key any) error {
 	return nil
 }
 
+{{- if .HasBehaviors }}
+{{ template "behaviorCreateOne" . }}
+{{- else }}
+
 // CreateOne inserts a new {{ .TypeName }} record
 func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }}) (*types.{{ .TypeName }}, error) {
 	{{- if .GenericJSONListFields }}
@@ -2608,6 +2618,7 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 	return result, nil
 	{{- end }}
 }
+{{- end }}
 
 
 // {{ lowerFirst .TypeName }}UniqueKeys are the conflict targets of {{ .TypeName }}'s unique keys, and
@@ -2709,6 +2720,10 @@ func (r *{{ .Name }}) scanReturned(row pgx.Row, inserted *bool) (*types.{{ .Type
 	{{- end }}
 }
 
+{{- if .HasBehaviors }}
+{{ template "behaviorUpsertOne" . }}
+{{- else }}
+
 // UpsertOne inserts input, or, when a row already holds its value of the
 // unique key on, applies update to that row instead, and returns the row
 // (D79). The insert writes what CreateOne writes and the update what
@@ -2761,6 +2776,7 @@ func (r *{{ .Name }}) UpsertOneResult(ctx context.Context, input *types.{{ .Type
 		return write(&{{ .Name }}{tx: tx, txDB: r.database()})
 	})
 }
+{{- end }}
 
 // upsertRow is UpsertOneResult on the repository's connection: the upsert,
 // a read of the row it left as it was, only if changed, and the second
@@ -2964,7 +2980,7 @@ func (r *{{ .Name }}) upsertRow(ctx context.Context, input *types.{{ .TypeName }
 	var setClauses, compareCurrent, compareNext []string
 
 	{{- range .Fields }}
-	{{- if and (not .IsPrimaryKey) (not .IsAuditField) (not .IsInternalMetadata) }}
+	{{- if and (not .IsPrimaryKey) (not .IsAuditField) (not .IsInternalMetadata) (not .IsOwned) }}
 	{{- if not .IsRequired }}
 	if update.{{ toGoName .Name }} != nil && update.{{ toGoName .Name }}SetNull {
 		return nil, fmt.Errorf("{{ .DBName }} cannot be updated with both value and null assignment")
@@ -3121,6 +3137,10 @@ func (r *{{ .Name }}) upsertRow(ctx context.Context, input *types.{{ .TypeName }
 	{{- end }}
 }
 
+{{- if .HasBehaviors }}
+{{ template "behaviorUpsertMany" . }}
+{{- else }}
+
 // UpsertMany inserts each input, or, when a row already holds its value of
 // the unique key on, sets each field update names of that row to the value
 // the input would have inserted, and returns each input's row and what it
@@ -3165,6 +3185,7 @@ func (r *{{ .Name }}) UpsertMany(ctx context.Context, inputs []*types.{{ .TypeNa
 		return (&{{ .Name }}{tx: tx, txDB: r.database()}).upsertBatches(ctx, inputs, on, update, batch, opts.OnlyIfChanged)
 	})
 }
+{{- end }}
 
 // upsertBatches is UpsertMany on the repository's connection, a batch at a
 // time: each batch's statement, a read of the rows it left as they were,
@@ -3214,7 +3235,7 @@ func (r *{{ .Name }}) upsertBatches(ctx context.Context, inputs []*types.{{ .Typ
 	// inserted, which an upsert only if changed compares with the row's.
 	var setClauses, compareCurrent, compareNext []string
 	{{- range .Fields }}
-	{{- if and (not .IsPrimaryKey) (not .IsAuditField) (not .IsInternalMetadata) (not .IsEncrypted) }}
+	{{- if and (not .IsPrimaryKey) (not .IsAuditField) (not .IsInternalMetadata) (not .IsEncrypted) (not .IsOwned) }}
 	if update.{{ toGoName .Name }} {
 		setClauses = append(setClauses, {{ goRawString .SQL.SetExcluded }})
 		compareCurrent = append(compareCurrent, {{ goRawString .SQL.Compared }})
@@ -3490,6 +3511,9 @@ func (r *{{ .Name }}) resealed(ctx context.Context, result *UpsertResult[*types.
 	return &UpsertResult[*types.{{ .TypeName }}]{Row: row, Status: UpsertUpdated}, nil
 }
 {{- end }}
+{{- if .HasBehaviors }}
+{{ template "behaviorCreateMany" . }}
+{{- else }}
 
 // CreateMany inserts multiple {{ .TypeName }} records in a single statement
 func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeName }}) ([]*types.{{ .TypeName }}, error) {
@@ -3643,6 +3667,10 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 
 	return results, nil
 }
+{{- end }}
+{{- if .HasBehaviors }}
+{{ template "behaviorUpdateOne" . }}
+{{- else }}
 
 // UpdateOne updates a single {{ .TypeName }} record by ID
 func (r *{{ .Name }}) UpdateOne(ctx context.Context, id {{ .PrimaryKeyType }}, update *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error) {
@@ -3883,6 +3911,7 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 	return result, nil
 	{{- end }}
 }
+{{- end }}
 
 // UpdateMany updates multiple {{ .TypeName }} records matching the filter
 func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Filter, update *{{ .TypeName }}Update) (int, error) {
@@ -3904,7 +3933,7 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	paramNum := 0
 
 	{{- range .Fields }}
-	{{- if and (not .IsPrimaryKey) (not .IsAuditField) (not .IsInternalMetadata) }}
+	{{- if and (not .IsPrimaryKey) (not .IsAuditField) (not .IsInternalMetadata) (not .IsOwned) }}
 	{{- if not .IsRequired }}
 	if update.{{ toGoName .Name }} != nil && update.{{ toGoName .Name }}SetNull {
 		return 0, fmt.Errorf("{{ .DBName }} cannot be updated with both value and null assignment")
@@ -4029,6 +4058,9 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 }
 
 {{- if .HasSoftDelete }}
+{{- if .HasBehaviors }}
+{{ template "behaviorDeleteOne" . }}
+{{- else }}
 
 // DeleteOne soft deletes a single {{ .TypeName }} record by ID
 func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) error {
@@ -4061,8 +4093,9 @@ func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) e
 
 	return nil
 }
+{{- end }}
 
-{{- if .HasVersion }}
+{{- if .HasIfVersion }}
 
 // DeleteOneIfVersion soft deletes a single {{ .TypeName }} only if its current
 // _version matches expectedVersion. It returns ErrVersionConflict when the row
@@ -4172,6 +4205,9 @@ func (r *{{ .Name }}) HardDeleteOne(ctx context.Context, id {{ .PrimaryKeyType }
 }
 
 {{- else }}
+{{- if .HasBehaviors }}
+{{ template "behaviorDeleteOne" . }}
+{{- else }}
 
 // DeleteOne permanently deletes a single {{ .TypeName }} record by ID{{ if .HistoryActorCol }}.
 // The history tombstone records the context user as its {{ .HistoryActorCol }}.{{ end }}
@@ -4211,7 +4247,8 @@ func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) e
 
 	return nil
 }
-{{- if .HasVersion }}
+{{- end }}
+{{- if .HasIfVersion }}
 
 // DeleteOneIfVersion permanently deletes a single {{ .TypeName }} only if its
 // current _version matches expectedVersion. It returns ErrVersionConflict when
@@ -4419,4 +4456,712 @@ leaves an optional column unset: CreateMany's and UpsertMany's rows (D89).
 		}
 		{{- end }}
 		{{- end }}
+{{- end }}
+
+{{- /*
+behaviorTypes are the declarations of a table whose fields are behaviors
+(D103): its create input, the types each use's operations name, the
+interface of each use's operations and the method it hangs under, and the
+helpers its writes through the core share.
+*/}}
+{{- define "behaviorTypes" }}
+{{- $repo := . }}
+
+{{ docComment "" (printf "%sCreate is what a create of a row of %s sets: every field of types.%s but the audit fields, which the repository stamps, the fields its behaviors own (D103), which only their operations change, and its version. A member left unset takes its column's default, or the schema's." .TypeName .TypeName .TypeName) }}
+type {{ .TypeName }}Create struct {
+	{{- range .OrderedMembers }}
+	{{- if .IsRelationship }}
+	{{ toGoName .Relationship.FieldName }} {{ .Relationship.MemberGoType }}
+	{{- else if and (not .Field.IsAuditField) (not .Field.IsInternalMetadata) (not .Field.IsOwned) }}
+	{{ toGoName .Field.Name }} {{ .Field.MemberGoType }}
+	{{- end }}
+	{{- end }}
+}
+
+// row is the row input creates, without the fields the behaviors own and
+// the version, which the core and the database give it.
+func (input *{{ .TypeName }}Create) row() *types.{{ .TypeName }} {
+	row := &types.{{ .TypeName }}{}
+	if input == nil {
+		return row
+	}
+	{{- range .OrderedMembers }}
+	{{- if .IsRelationship }}
+	row.{{ toGoName .Relationship.FieldName }} = input.{{ toGoName .Relationship.FieldName }}
+	{{- else if and (not .Field.IsAuditField) (not .Field.IsInternalMetadata) (not .Field.IsOwned) }}
+	row.{{ toGoName .Field.Name }} = input.{{ toGoName .Field.Name }}
+	{{- end }}
+	{{- end }}
+	return row
+}
+{{- range .Uses }}
+{{- $use := . }}
+{{- range .Enums }}
+
+{{ docComment "" .Doc }}
+type {{ .Name }} string
+
+// The values of {{ .Name }}.
+const (
+	{{- $enum := .Name }}
+	{{- range .Members }}
+	{{ .Const }} {{ $enum }} = {{ printf "%q" .Value }}
+	{{- end }}
+)
+{{- end }}
+{{- range .Structs }}
+
+{{ docComment "" .Doc }}
+type {{ .Name }} struct {
+	{{- range .Members }}
+	{{- with .Doc }}
+{{ docComment "\t" . }}
+	{{- end }}
+	{{ .Name }} {{ .Type }} {{ .Tag }}
+	{{- end }}
+}
+{{- end }}
+
+{{ docComment "" .Doc }}
+type {{ .Interface }} interface {
+	{{- range .Operations }}
+{{ docComment "\t" .MethodDoc }}
+	{{ .GoName }}(ctx context.Context, id {{ $repo.PrimaryKeyType }}, params {{ .Params }}) ({{ .ResultReturn }}, error)
+	{{- end }}
+}
+
+// {{ .GoName }} returns the operations of {{ $repo.TypeName }}'s {{ .ID }}.
+func (r *{{ $repo.Name }}) {{ .GoName }}() {{ .Interface }} { return {{ .Value }}{r: r} }
+
+{{ docComment "" (printf "%s runs %s through the behaviors' core on the repository's connection." .Value .Interface) }}
+type {{ .Value }} struct{ r *{{ $repo.Name }} }
+{{- range .Operations }}
+
+{{ docComment "" (printf "%s runs %s's %s on the row id names, in a transaction, and returns its result. It returns ErrNotFound when no live row holds id, and any other refusal of the core's as the *rules.Refusal it is." .GoName $use.ID .Name) }}
+func (o {{ $use.Value }}) {{ .GoName }}(ctx context.Context, id {{ $repo.PrimaryKeyType }}, params {{ .Params }}) ({{ .ResultReturn }}, error) {
+	{{- if eq .Params "json.RawMessage" }}
+	var given any = params
+	if len(params) == 0 {
+		given = nil
+	}
+	{{- end }}
+	return inTransaction(ctx, o.r.database(), o.r.tx, func(tx pgx.Tx) ({{ .ResultReturn }}, error) {
+		var out {{ .ResultReturn }}
+		raw, err := rules.RunOperation(ctx, rulesHost(tx), {{ printf "%q" $repo.TypeName }}, {{ $repo.WireKey "id" }}, {{ printf "%q" $use.ID }}, {{ printf "%q" .Name }}, {{ if eq .Params "json.RawMessage" }}given{{ else }}params{{ end }}, behaviorCaller(ctx), o.r.operationOptions(ctx))
+		if err != nil {
+			return out, behaviorNotFound(err, {{ printf "%q" $repo.TypeName }}, id)
+		}
+		{{- if .ResultIsStruct }}
+		out = &{{ .Result }}{}
+		if err := json.Unmarshal(raw, out); err != nil {
+			return nil, fmt.Errorf("orm: the result of {{ $repo.TypeName }}'s {{ $use.ID }} {{ .Name }}, %s: %w", raw, err)
+		}
+		{{- else }}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return out, fmt.Errorf("orm: the result of {{ $repo.TypeName }}'s {{ $use.ID }} {{ .Name }}, %s: %w", raw, err)
+		}
+		{{- end }}
+		return out, nil
+	})
+}
+{{- end }}
+{{- end }}
+
+{{ docComment "" (printf "coreOwn is row's own fields as the behaviors' core reads them (D103), by the layout's field names: each own column's value as encoding/json writes it, a date-time as epoch milliseconds, and a member the insert leaves unset absent.%s" (or (and .EncryptedFields " An encrypted field's envelope is no value of the core's.") "")) }}
+func (r *{{ .Name }}) coreOwn(row *types.{{ .TypeName }}) map[string]any {
+	own := map[string]any{}
+	{{- range .CoreOwn }}
+	{{- if .Relationship }}
+	{{- $rel := .Relationship }}
+	{
+		var zero {{ $.UUIDGoType }}
+		{{- if $rel.IsRequired }}
+		if id, ok := {{ lowerFirst $.TypeName }}UUIDValue(row.{{ toGoName $rel.FieldName }}.Id); ok && id != zero {
+			own[{{ printf "%q" .Field }}] = id
+		}
+		{{- else }}
+		if row.{{ toGoName $rel.FieldName }} != nil {
+			if id, ok := {{ lowerFirst $.TypeName }}UUIDValue(row.{{ toGoName $rel.FieldName }}.Id); ok && id != zero {
+				own[{{ printf "%q" .Field }}] = id
+			}
+		}
+		{{- end }}
+	}
+	{{- else if .Present "row" }}
+	if {{ .Present "row" }} {
+		own[{{ printf "%q" .Field }}] = {{ .Value "row" }}
+	}
+	{{- else }}
+	own[{{ printf "%q" .Field }}] = {{ .Value "row" }}
+	{{- end }}
+	{{- end }}
+	return own
+}
+
+// createKey is the key a create of row names, in its wire form, or "" when
+// row leaves it to the core's adapter.
+func (r *{{ .Name }}) createKey(row *types.{{ .TypeName }}) string {
+	{{- if .PrimaryKeyIsUUID }}
+	var zero {{ $.UUIDGoType }}
+	if id, ok := {{ lowerFirst .TypeName }}UUIDValue(row.{{ toGoName .PrimaryKeyField }}); ok && id != zero {
+		return id.String()
+	}
+	return ""
+	{{- else if .PrimaryKeyIsPointer }}
+	if row.{{ toGoName .PrimaryKeyField }} == nil {
+		return ""
+	}
+	return fmt.Sprint(*row.{{ toGoName .PrimaryKeyField }})
+	{{- else }}
+	var zero {{ .PrimaryKeyType }}
+	if row.{{ toGoName .PrimaryKeyField }} == zero {
+		return ""
+	}
+	return fmt.Sprint(row.{{ toGoName .PrimaryKeyField }})
+	{{- end }}
+}
+
+// createColumns are the columns CreateOne's insert writes of row, by column,
+// each bound as the insert binds it, but the key, which the command names,
+// and the columns the behaviors own, which the core sets (D103).
+func (r *{{ .Name }}) createColumns(row *types.{{ .TypeName }}) (map[string]any, error) {
+	columns := map[string]any{}
+	{{- range .Fields }}
+	{{- if and (not .IsPrimaryKey) (not .IsInternalMetadata) (not .IsOwned) (ne .Name "createdAt") (ne .Name "updatedAt") }}
+	{{- if and .IsRequired (not .IsAutoGenerated) (not .DefaultsToNow) }}
+	{{- template "behaviorColumnValue" (.At "row") }}
+	{{- else }}
+	{{- if .OptionalNilCheck }}
+	if row.{{ toGoName .Name }} != nil {
+	{{- else }}
+	if !reflect.ValueOf(row.{{ toGoName .Name }}).IsZero() {
+	{{- end }}
+		{{- template "behaviorColumnValue" (.At "row") }}
+	}
+	{{- end }}
+	{{- end }}
+	{{- end }}
+	{{- range .CreateRelationships }}
+	{
+		var zeroID {{ $.UUIDGoType }}
+		{{- if .IsRequired }}
+		if relID, ok := {{ lowerFirst $.TypeName }}UUIDValue(row.{{ toGoName .FieldName }}.Id); ok && relID != zeroID {
+			columns[{{ printf "%q" .DBColumnName }}] = relID.ToUUID()
+		}
+		{{- else }}
+		if row.{{ toGoName .FieldName }} != nil {
+			if relID, ok := {{ lowerFirst $.TypeName }}UUIDValue(row.{{ toGoName .FieldName }}.Id); ok && relID != zeroID {
+				columns[{{ printf "%q" .DBColumnName }}] = relID.ToUUID()
+			}
+		}
+		{{- end }}
+	}
+	{{- end }}
+	return columns, nil
+}
+
+// corePatch is update's own fields as the behaviors' core reads them (D103):
+// each own field it sets, by the layout's field name, a cleared one null.
+func (r *{{ .Name }}) corePatch(update *{{ .TypeName }}Update) map[string]any {
+	patch := map[string]any{}
+	{{- range .CoreOwn }}
+	{{- if .Relationship }}
+	{{- $member := printf "%sID" (toGoName .Relationship.FieldName) }}
+	{{- if not .Relationship.IsRequired }}
+	if update.{{ $member }}SetNull {
+		patch[{{ printf "%q" .Field }}] = nil
+	} else if update.{{ $member }} != nil {
+	{{- else }}
+	if update.{{ $member }} != nil {
+	{{- end }}
+		patch[{{ printf "%q" .Field }}] = *update.{{ $member }}
+	}
+	{{- else }}
+	{{- $member := toGoName .Column.Name }}
+	{{- if not .Column.IsRequired }}
+	if update.{{ $member }}SetNull {
+		patch[{{ printf "%q" .Field }}] = nil
+	} else if update.{{ $member }} != nil {
+	{{- else }}
+	if update.{{ $member }} != nil {
+	{{- end }}
+		patch[{{ printf "%q" .Field }}] = {{ .CoreValue (printf "*update.%s" $member) }}
+	}
+	{{- end }}
+	{{- end }}
+	return patch
+}
+
+{{ docComment "" (printf "updateColumns are the columns UpdateOne sets of update, by column, each bound as its statement binds it, with updatedAt and updatedBy. A column the behaviors own is the core's to refuse, and %sUpdate holds none." .TypeName) }}
+func (r *{{ .Name }}) updateColumns(ctx context.Context, update *{{ .TypeName }}Update) (map[string]any, error) {
+	columns := map[string]any{}
+	{{- range .Fields }}
+	{{- if and (not .IsPrimaryKey) (not .IsAuditField) (not .IsInternalMetadata) (not .IsOwned) }}
+	{{- if not .IsRequired }}
+	if update.{{ toGoName .Name }} != nil && update.{{ toGoName .Name }}SetNull {
+		return nil, fmt.Errorf("{{ .DBName }} cannot be updated with both value and null assignment")
+	}
+	if update.{{ toGoName .Name }}SetNull {
+		columns[{{ printf "%q" .DBName }}] = nil
+	} else if update.{{ toGoName .Name }} != nil {
+	{{- else }}
+	if update.{{ toGoName .Name }} != nil {
+	{{- end }}
+		{{- template "behaviorUpdateValue" . }}
+	}
+	{{- end }}
+	{{- end }}
+	{{- range .CreateRelationships }}
+	{{- if not .IsRequired }}
+	if update.{{ toGoName .FieldName }}ID != nil && update.{{ toGoName .FieldName }}IDSetNull {
+		return nil, fmt.Errorf("{{ .DBColumnName }} cannot be updated with both value and null assignment")
+	}
+	if update.{{ toGoName .FieldName }}IDSetNull {
+		columns[{{ printf "%q" .DBColumnName }}] = nil
+	} else if update.{{ toGoName .FieldName }}ID != nil {
+	{{- else }}
+	if update.{{ toGoName .FieldName }}ID != nil {
+	{{- end }}
+		columns[{{ printf "%q" .DBColumnName }}] = update.{{ toGoName .FieldName }}ID.ToUUID()
+	}
+	{{- end }}
+	{{- if .HasField "updatedAt" }}
+	columns[{{ printf "%q" (.FieldColumn "updatedAt") }}] = time.Now()
+	{{- end }}
+	{{- if .HasField "updatedBy" }}
+	if update.UpdatedBy != nil {
+		columns[{{ printf "%q" (.FieldColumn "updatedBy") }}] = *update.UpdatedBy
+	} else if HasUserID(ctx) {
+		columns[{{ printf "%q" (.FieldColumn "updatedBy") }}] = GetUserID(ctx)
+	}{{ if $.RequireUpdatedBy }} else {
+		return nil, ErrNoUserInContext
+	}{{ end }}
+	{{- end }}
+	return columns, nil
+}
+
+{{- $stamps := ", none on a table with no updatedAt or updatedBy" }}
+{{- if and (.HasField "updatedAt") (.HasField "updatedBy") }}{{ $stamps = ": updatedAt, and updatedBy when the context has a user" }}
+{{- else if .HasField "updatedAt" }}{{ $stamps = ": updatedAt" }}
+{{- else if .HasField "updatedBy" }}{{ $stamps = ": updatedBy, when the context has a user" }}{{ end }}
+
+{{ docComment "" (printf "operationOptions are the stamps an operation's write of the row sets%s." $stamps) }}
+func (r *{{ .Name }}) operationOptions(ctx context.Context) *rules.ExecuteOptions {
+	{{- if or (.HasField "updatedAt") (.HasField "updatedBy") }}
+	columns := map[string]any{}
+	{{- if .HasField "updatedAt" }}
+	columns[{{ printf "%q" (.FieldColumn "updatedAt") }}] = time.Now()
+	{{- end }}
+	{{- if .HasField "updatedBy" }}
+	if HasUserID(ctx) {
+		columns[{{ printf "%q" (.FieldColumn "updatedBy") }}] = GetUserID(ctx)
+	}
+	{{- end }}
+	return &rules.ExecuteOptions{OwnColumns: columns}
+	{{- else }}
+	return nil
+	{{- end }}
+}
+
+{{ docComment "" (printf "createThroughCore is CreateOne on the repository's transaction: input's row stamped%s, created by the behaviors' core, whose uses initialize the fields they own, with the columns the insert writes, and read back." (or (and .EncryptedFields " and sealed") "")) }}
+func (r *{{ .Name }}) createThroughCore(ctx context.Context, input *{{ .TypeName }}Create) (*types.{{ .TypeName }}, error) {
+	row := input.row()
+	{{- if .GenericJSONListFields }}
+	if err := refuseNull{{ .TypeName }}GenericJSONElements(row); err != nil {
+		return nil, fmt.Errorf("create {{ .TypeName }}: %w", err)
+	}
+	{{- end }}
+	{{- template "behaviorStamps" . }}
+	{{- if .EncryptedFields }}
+
+	// The key, generated when unset, and each encrypted field sealed under
+	// it (D85).
+	sealed, err := r.seal(row)
+	if err != nil {
+		return nil, fmt.Errorf("create {{ .TypeName }}: %w", err)
+	}
+	row = sealed
+	{{- end }}
+	columns, err := r.createColumns(row)
+	if err != nil {
+		return nil, err
+	}
+	opts := &rules.CreateOptions{ID: r.createKey(row), ExecuteOptions: rules.ExecuteOptions{OwnColumns: columns}}
+	{{- if or .PrimaryKeyIsUUID .PrimaryKey.IsStringLike }}
+	key, err := rules.RunCreate(ctx, rulesHost(r.tx), {{ printf "%q" .TypeName }}, r.coreOwn(row), behaviorCaller(ctx), opts)
+	if err != nil {
+		return nil, err
+	}
+	{{- else }}
+	// The core's key is the row's own, which the create names.
+	if _, err := rules.RunCreate(ctx, rulesHost(r.tx), {{ printf "%q" .TypeName }}, r.coreOwn(row), behaviorCaller(ctx), opts); err != nil {
+		return nil, err
+	}
+	{{- end }}
+	{{- if .PrimaryKeyIsUUID }}
+	id, err := {{ .KeyParse }}(key)
+	if err != nil {
+		return nil, fmt.Errorf("create {{ .TypeName }}: the core's key %q: %w", key, err)
+	}
+	{{- else if .PrimaryKey.IsStringLike }}
+	id := {{ .PrimaryKeyType }}(key)
+	{{- else if .PrimaryKeyIsPointer }}
+	id := *row.{{ toGoName .PrimaryKeyField }}
+	{{- else }}
+	id := row.{{ toGoName .PrimaryKeyField }}
+	{{- end }}
+	return r.GetOne(ctx, id, nil)
+}
+
+// upsertInputs are inputs as an upsert inserts them (D103): each one's row
+// with the fields its behaviors own as the core's create of it gives them,
+// run to its change set and not applied, so the insert writes what CreateOne
+// would have, and the update, which sets none of them, leaves them as the
+// row holds them. A refusal of the core's is returned before anything is
+// written.
+func (r *{{ .Name }}) upsertInputs(ctx context.Context, inputs []*{{ .TypeName }}Create) ([]*types.{{ .TypeName }}, error) {
+	host := rulesHost(r.tx)
+	rows := make([]*types.{{ .TypeName }}, 0, len(inputs))
+	for _, input := range inputs {
+		row := input.row()
+		owned, err := rules.PrepareCreate(ctx, host, {{ printf "%q" .TypeName }}, r.coreOwn(row), behaviorCaller(ctx), &rules.CreateOptions{ID: r.createKey(row)})
+		if err != nil {
+			return nil, err
+		}
+		{{- range .OwnedFields }}
+		{{- if .DateTime }}
+		if at, err := rules.TimeOfMillis(owned[{{ printf "%q" .Use }}][{{ printf "%q" .Name }}]); err != nil {
+			return nil, fmt.Errorf("upsert {{ $.TypeName }}: the core's {{ .Use }}.{{ .Name }}: %w", err)
+		} else if at != nil {
+			{{- if .Pointer }}
+			value := {{ .GoType }}(*at)
+			row.{{ .Member }} = &value
+			{{- else }}
+			row.{{ .Member }} = {{ .GoType }}(*at)
+			{{- end }}
+		}
+		{{- else }}
+		if value, ok := owned[{{ printf "%q" .Use }}][{{ printf "%q" .Name }}]; ok {
+			if err := json.Unmarshal(value, &row.{{ .Member }}); err != nil {
+				return nil, fmt.Errorf("upsert {{ $.TypeName }}: the core's {{ .Use }}.{{ .Name }} %s: %w", value, err)
+			}
+		}
+		{{- end }}
+		{{- end }}
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+{{- end }}
+
+{{- /*
+behaviorStamps sets row's createdBy and updatedBy from the context, as
+CreateOne stamps its input.
+*/}}
+{{- define "behaviorStamps" }}
+	{{- range .Fields }}
+	{{- if eq .Name "createdBy" }}
+	if !HasUserID(ctx) {
+		return nil, ErrNoUserInContext
+	}
+	row.CreatedBy = GetUserID(ctx)
+	{{- end }}
+	{{- if eq .Name "updatedBy" }}
+	{{- if .IsRequired }}
+	row.UpdatedBy = GetUserID(ctx)
+	{{- else }}
+	{{- if $.RequireUpdatedBy }}
+	if !HasUserID(ctx) {
+		return nil, ErrNoUserInContext
+	}
+	{{- end }}
+	if HasUserID(ctx) {
+		userID := GetUserID(ctx)
+		row.UpdatedBy = &userID
+	}
+	{{- end }}
+	{{- end }}
+	{{- end }}
+{{- end }}
+
+{{- /*
+behaviorColumnValue sets columns[<column>] to the value of a field (a
+FieldAt) as CreateOne's insert binds it.
+*/}}
+{{- define "behaviorColumnValue" }}
+{{- $v := .Member }}
+{{- with .Field }}
+	{{- if .IsJSONField }}
+	jsonValue{{ toGoName .Name }}, err := {{ if .IsArrayOfArrays }}marshalArrayOfArraysFieldValue{{ else }}marshalJSONFieldValue{{ end }}({{ $v }})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal JSON field {{ .Name }}: %w", err)
+	}
+	columns[{{ printf "%q" .DBName }}] = jsonValue{{ toGoName .Name }}
+	{{- else if .IsUUIDScalar }}
+	columns[{{ printf "%q" .DBName }}] = {{ $v }}.ToUUID()
+	{{- else if .IsDateTimeScalar }}
+	columns[{{ printf "%q" .DBName }}] = time.Time({{ if .DerefValue }}*{{ end }}{{ $v }})
+	{{- else if .IsVector }}
+	columns[{{ printf "%q" .DBName }}] = vectorValue({{ if .DerefValue }}*{{ end }}{{ $v }})
+	{{- else if .IsGeoPoint }}
+	columns[{{ printf "%q" .DBName }}] = {{ template "geoPoint" $v }}
+	{{- else if .IsGeoPointList }}
+	columns[{{ printf "%q" .DBName }}] = {{ .GeoPointListValue $v }}
+	{{- else if .IsInterval }}
+	// An INTERVAL goes as its microseconds, which pgx encodes from a
+	// time.Duration, sign and all.
+	columns[{{ printf "%q" .DBName }}] = time.Duration({{ if .DerefValue }}*{{ end }}{{ $v }})
+	{{- else if .IsIntervalList }}
+	columns[{{ printf "%q" .DBName }}] = intervalList({{ $v }})
+	{{- else if .EnumDefault }}
+	// An unset enum takes its schema default; "" is never a member.
+	if {{ $v }} == "" {
+		columns[{{ printf "%q" .DBName }}] = {{ .GoType }}({{ printf "%q" .EnumDefault }})
+	} else {
+		columns[{{ printf "%q" .DBName }}] = {{ $v }}
+	}
+	{{- else if .DerefValue }}
+	columns[{{ printf "%q" .DBName }}] = *{{ $v }}
+	{{- else }}
+	columns[{{ printf "%q" .DBName }}] = {{ $v }}
+	{{- end }}
+{{- end }}
+{{- end }}
+
+{{- /*
+behaviorUpdateValue sets columns[<column>] to the value an update sets a
+field to, as UpdateOne's statement binds it.
+*/}}
+{{- define "behaviorUpdateValue" }}
+		{{- if .IsJSONField }}
+		jsonValue{{ toGoName .Name }}, err := {{ if .IsArrayOfArrays }}marshalArrayOfArraysFieldValue{{ else }}marshalJSONFieldValue{{ end }}(*update.{{ toGoName .Name }})
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal JSON field {{ .Name }}: %w", err)
+		}
+		columns[{{ printf "%q" .DBName }}] = jsonValue{{ toGoName .Name }}
+		{{- else if .IsUUIDScalar }}
+		columns[{{ printf "%q" .DBName }}] = (*update.{{ toGoName .Name }}).ToUUID()
+		{{- else if .IsDateTimeScalar }}
+		columns[{{ printf "%q" .DBName }}] = time.Time(*update.{{ toGoName .Name }})
+		{{- else if .IsVector }}
+		columns[{{ printf "%q" .DBName }}] = vectorValue(*update.{{ toGoName .Name }})
+		{{- else if .IsGeoPoint }}
+		columns[{{ printf "%q" .DBName }}] = {{ template "geoPoint" (printf "update.%s" (toGoName .Name)) }}
+		{{- else if .IsGeoPointList }}
+		columns[{{ printf "%q" .DBName }}] = {{ .GeoPointListValue (printf "*update.%s" (toGoName .Name)) }}
+		{{- else if .IsInterval }}
+		// An INTERVAL goes as its microseconds, which pgx encodes from a
+		// time.Duration, sign and all.
+		columns[{{ printf "%q" .DBName }}] = time.Duration(*update.{{ toGoName .Name }})
+		{{- else if .IsIntervalList }}
+		columns[{{ printf "%q" .DBName }}] = intervalList(*update.{{ toGoName .Name }})
+		{{- else }}
+		columns[{{ printf "%q" .DBName }}] = *update.{{ toGoName .Name }}
+		{{- end }}
+{{- end }}
+
+{{- /*
+The writes of a table whose fields are behaviors (D103), each through the
+core in a transaction: CreateOne, CreateMany, UpdateOne, DeleteOne, and the
+upserts, which insert what the core's create gives a row.
+*/}}
+{{- define "behaviorCreateOne" }}
+
+{{ docComment "" (printf "CreateOne inserts a new %s row through the behaviors' core (D103), in a transaction: each behavior's create initializes the fields it owns, and the row is read back. A refusal of the core's is returned as the *rules.Refusal it is." .TypeName) }}
+func (r *{{ .Name }}) CreateOne(ctx context.Context, input *{{ .TypeName }}Create) (*types.{{ .TypeName }}, error) {
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (*types.{{ .TypeName }}, error) {
+		return (&{{ .Name }}{tx: tx, txDB: r.database()}).createThroughCore(ctx, input)
+	})
+}
+{{- end }}
+
+{{- define "behaviorCreateMany" }}
+
+{{ docComment "" (printf "CreateMany inserts multiple %s rows, each a create of the behaviors' core (D103), in order, in one transaction." .TypeName) }}
+func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*{{ .TypeName }}Create) ([]*types.{{ .TypeName }}, error) {
+	if len(inputs) == 0 {
+		return []*types.{{ .TypeName }}{}, nil
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]*types.{{ .TypeName }}, error) {
+		repo := &{{ .Name }}{tx: tx, txDB: r.database()}
+		rows := make([]*types.{{ .TypeName }}, 0, len(inputs))
+		for _, input := range inputs {
+			row, err := repo.createThroughCore(ctx, input)
+			if err != nil {
+				return nil, err
+			}
+			rows = append(rows, row)
+		}
+		return rows, nil
+	})
+}
+{{- end }}
+
+{{- define "behaviorUpdateOne" }}
+
+{{ docComment "" (printf "UpdateOne updates a single %s row by ID through the behaviors' core (D103), in a transaction: the own fields update sets, which holds no field a behavior owns, and the row is read back. It returns ErrNotFound when no live row holds id, and any other refusal of the core's as the *rules.Refusal it is." .TypeName) }}
+func (r *{{ .Name }}) UpdateOne(ctx context.Context, id {{ .PrimaryKeyType }}, update *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error) {
+	if update == nil {
+		update = &{{ .TypeName }}Update{}
+	}
+	{{- if .GenericJSONListFields }}
+	if err := refuseNull{{ .TypeName }}UpdateGenericJSONElements(update); err != nil {
+		return nil, fmt.Errorf("update {{ .TypeName }}: %w", err)
+	}
+	{{- end }}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (*types.{{ .TypeName }}, error) {
+		repo := &{{ .Name }}{tx: tx, txDB: r.database()}
+		{{- if .EncryptedFields }}
+		// Each encrypted field the update sets, sealed for the row (D85).
+		sealedUpdate, err := repo.sealUpdate(id, update)
+		if err != nil {
+			return nil, fmt.Errorf("update {{ .TypeName }}: %w", err)
+		}
+		update := sealedUpdate
+		{{- end }}
+		patch := repo.corePatch(update)
+		columns, err := repo.updateColumns(ctx, update)
+		if err != nil {
+			return nil, err
+		}
+		if len(patch) == 0 && len(columns) == 0 {
+			return nil, fmt.Errorf("no fields to update")
+		}
+		if err := rules.RunUpdate(ctx, rulesHost(tx), {{ printf "%q" .TypeName }}, {{ .WireKey "id" }}, patch, behaviorCaller(ctx), &rules.ExecuteOptions{OwnColumns: columns}); err != nil {
+			return nil, behaviorNotFound(err, {{ printf "%q" .TypeName }}, id)
+		}
+		return repo.GetOne(ctx, id, nil)
+	})
+}
+{{- end }}
+
+{{- define "behaviorDeleteOne" }}
+
+{{- $verb := "permanently deletes" }}
+{{- $how := "" }}
+{{- if .HasSoftDelete }}{{ $verb = "soft deletes" }}{{ $how = ": the live row is stamped deleted in place of deleted" }}
+{{- else if .HistoryActorCol }}{{ $how = printf ". The history tombstone records the context user as its %s" .HistoryActorCol }}{{ end }}
+
+{{ docComment "" (printf "DeleteOne %s a single %s row by ID through the behaviors' core (D103), in a transaction%s. It returns ErrNotFound when no live row holds id, and any other refusal of the core's as the *rules.Refusal it is." $verb .TypeName $how) }}
+func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) error {
+	{{- if .HasSoftDelete }}
+	if !HasUserID(ctx) {
+		return ErrNoUserInContext
+	}
+	{{- end }}
+	_, err := inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (struct{}, error) {
+		opts := &rules.ExecuteOptions{}
+		{{- if .HasSoftDelete }}
+		opts.SoftDelete = map[string]any{ {{- printf "%q" .DeletedAtCol }}: time.Now()}
+		{{- if .HasDeletedBy }}
+		opts.SoftDelete[{{ printf "%q" (.FieldColumn "deletedBy") }}] = GetUserID(ctx)
+		{{- end }}
+		{{- else if .HistoryActorCol }}
+		if _, err := tx.Exec(ctx, historyActorCTE+"SELECT _history_actor FROM history_actor", historyActor(ctx)); err != nil {
+			return struct{}{}, fmt.Errorf("failed to set the history actor: %w", err)
+		}
+		{{- end }}
+		if err := rules.RunDelete(ctx, rulesHost(tx), {{ printf "%q" .TypeName }}, {{ .WireKey "id" }}, behaviorCaller(ctx), opts); err != nil {
+			return struct{}{}, behaviorNotFound(err, {{ printf "%q" .TypeName }}, id)
+		}
+		{{- if and (not .HasSoftDelete) .HistoryActorCol }}
+		if err := clearHistoryActor(ctx, tx); err != nil {
+			return struct{}{}, err
+		}
+		{{- end }}
+		return struct{}{}, nil
+	})
+	return err
+}
+{{- end }}
+
+{{- define "behaviorUpsertOne" }}
+
+{{ docComment "" (printf "UpsertOne inserts input, or, when a row already holds its value of the unique key on, applies update to that row instead, and returns the row (D79). The insert writes the row with the fields its behaviors own as the core's create gives them (D103), and the update sets update's own fields alone; an update that sets no field leaves the row as it is.%s" (or (and .HasSoftDelete " A soft-deleted row that holds the key is left as it is, and UpsertOne returns ErrNotFound.") "")) }}
+func (r *{{ .Name }}) UpsertOne(ctx context.Context, input *{{ .TypeName }}Create, on {{ .TypeName }}UniqueKey, update *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error) {
+	result, err := r.UpsertOneResult(ctx, input, on, update, nil)
+	if err != nil {
+		return nil, err
+	}
+	return result.Row, nil
+}
+
+// UpsertOneResult is UpsertOne, and what it did with the row: inserted it,
+// updated the row that held the key, or left that row as it was (D89).
+// With opts.OnlyIfChanged it updates the row only when a field the update
+// sets differs from what the row holds, which it reads back otherwise. It
+// runs in a transaction of its own when none is open: the core's create of
+// the row comes first, in it (D103).
+func (r *{{ .Name }}) UpsertOneResult(ctx context.Context, input *{{ .TypeName }}Create, on {{ .TypeName }}UniqueKey, update *{{ .TypeName }}Update, opts *UpsertOptions) (UpsertResult[*types.{{ .TypeName }}], error) {
+	var none UpsertResult[*types.{{ .TypeName }}]
+	key, ok := {{ lowerFirst .TypeName }}UniqueKeys[on]
+	if !ok {
+		return none, fmt.Errorf("orm: {{ .TypeName }} has no unique key %q", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if opts.OnlyIfChanged && key.rows == "" {
+		return none, upsertExpressionKey("UpsertOneResult", "{{ .TypeName }}", string(on))
+	}
+	if update == nil {
+		update = &{{ .TypeName }}Update{}
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (UpsertResult[*types.{{ .TypeName }}], error) {
+		repo := &{{ .Name }}{tx: tx, txDB: r.database()}
+		rows, err := repo.upsertInputs(ctx, []*{{ .TypeName }}Create{input})
+		if err != nil {
+			return none, err
+		}
+		result, err := repo.upsertRow(ctx, rows[0], on, update, opts.OnlyIfChanged)
+		if err != nil {
+			return none, err
+		}
+		return *result, nil
+	})
+}
+{{- end }}
+
+{{- define "behaviorUpsertMany" }}
+
+{{ docComment "" (printf "UpsertMany inserts each input, or, when a row already holds its value of the unique key on, sets each field update names of that row to the value the input would have inserted, and returns each input's row and what it did with it, in the inputs' order (D89). Each insert writes the row with the fields its behaviors own as the core's create gives them (D103), and update names none of them: only their operations change them. It runs in a transaction of its own when none is open, the core's creates first, then a statement per batch of rows, opts.Batch or as many as Postgres binds the parameters of. An update that names no field leaves each row that holds a key as it is.%s Two inputs of one batch that hold one key fail the statement, and a key over an expression, whose rows the statement's cannot be matched to the inputs by, is refused." (or (and .HasSoftDelete " A soft-deleted row that holds a key is left as it is, and UpsertMany returns ErrNotFound.") "")) }}
+func (r *{{ .Name }}) UpsertMany(ctx context.Context, inputs []*{{ .TypeName }}Create, on {{ .TypeName }}UniqueKey, update {{ .TypeName }}Fields, opts *UpsertOptions) ([]UpsertResult[*types.{{ .TypeName }}], error) {
+	key, ok := {{ lowerFirst .TypeName }}UniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: {{ .TypeName }} has no unique key %q", string(on))
+	}
+	if key.rows == "" {
+		return nil, upsertExpressionKey("UpsertMany", "{{ .TypeName }}", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	{{- range .Fields }}
+	{{- if or .IsPrimaryKey .IsAuditField .IsInternalMetadata }}
+	if update.{{ toGoName .Name }} {
+		return nil, fmt.Errorf("orm: UpsertMany of {{ $.TypeName }} sets the fields an update sets, not {{ .Name }}")
+	}
+	{{- end }}
+	{{- end }}
+	{{- range .OwnedFields }}
+	if update.{{ .Member }} {
+		return nil, fmt.Errorf("orm: UpsertMany of {{ $.TypeName }} sets the fields an update sets, not %q, which behavior {{ .Behavior }} on {{ .Use }} owns (D103): only its operations change it", {{ printf "%q" .Field }})
+	}
+	{{- end }}
+	batch, err := upsertBatch("{{ .TypeName }}", opts.Batch, {{ .BatchRows }})
+	if err != nil {
+		return nil, err
+	}
+	if len(inputs) == 0 {
+		return []UpsertResult[*types.{{ .TypeName }}]{}, nil
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]UpsertResult[*types.{{ .TypeName }}], error) {
+		repo := &{{ .Name }}{tx: tx, txDB: r.database()}
+		rows, err := repo.upsertInputs(ctx, inputs)
+		if err != nil {
+			return nil, err
+		}
+		return repo.upsertBatches(ctx, rows, on, update, batch, opts.OnlyIfChanged)
+	})
+}
 {{- end }}

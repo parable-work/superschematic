@@ -1886,6 +1886,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "superschematic-rules-adapter"
+version = "0.0.0"
+dependencies = [
+ "bytes",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "superschematic-rules",
+ "superschematic-rules-behaviors",
+ "superschematic-rules-testkit",
+ "tokio",
+ "tokio-postgres",
+ "uuid",
+]
+
+[[package]]
 name = "superschematic-rules-behaviors"
 version = "0.0.0"
 dependencies = [

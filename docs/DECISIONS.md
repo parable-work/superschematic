@@ -13673,9 +13673,10 @@ change's to settle.
 7. The conversion, and engine types removed from the servers and from
    acme-shop's `shop-db`.
 
-Status: step 1 built, and step 2's TypeScript half; Go's and Rust's
-adapters, the API generators' operations and steps 3 to 7 are not. The
-names and rules are reversible until the first release.
+Status: step 1 built, and step 2's adapters, TypeScript's, Go's and
+Rust's, with the TypeScript and Go repositories over them; what remains of
+step 2 is the API generators' operations, and steps 3 to 7 are not built.
+The names and rules are reversible until the first release.
 - **The core.** `runtime/engine/rust/rules` (`superschematic-rules`)
   depends on serde and serde_json alone and builds for
   wasm32-unknown-unknown. `Core::run(type, command, answers)` returns
@@ -13733,7 +13734,10 @@ names and rules are reversible until the first release.
   refused `@optimistic`).
 - **The layout.** `internal/generator/behaviorlayout` holds the layout
   rule in Go and writes the layout document that the generated `orm.ts`
-  embeds (`<database>Rules`).
+  embeds (`<database>Rules`) and the generated Go ORM's `rules.go`
+  (`RulesLayout`). A list or a map has no conversion in it, since no
+  adapter converts its elements: a list of date-times reaches the core as
+  its column holds it, where a single date-time is epoch milliseconds.
 - **The core in TypeScript.** `@superschematic/rules`
   (`runtime/rules/typescript`) loads the core as a wasm module over
   `rules-wasm`'s JSON C ABI. It imports nothing, and a Node.js smoke test
@@ -13757,16 +13761,78 @@ names and rules are reversible until the first release.
   `orm.order.status.transition(key, { to: 'paid' })`, typed from the
   declaration as the config narrows it. A raw SQL write of an owned
   column is never refused.
-- **Other generators.** The Go ORM, the API generators and the SDKs
-  refuse a table whose fields are behaviors, naming the generator, the
-  table, the field and the behavior. A database with such a table builds
-  today with TypeScript types and sql, until Go's adapter.
+- **The core in Go.** `superschematic-rules-wasm` builds a static archive
+  too, its staticlib, which `scripts/rules-archive.sh` stages as
+  `libsuperschematic_rules.a` (`make rules-archive`). The module
+  `runtime/rules/go` binds it through cgo over the same JSON C ABI:
+  `rules.Native()` is one core per process, built the first time any
+  operation runs and shared by every goroutine, and the native `rules_run`
+  is tested from 16 threads in Rust and 64 goroutines in Go. The link
+  check (`scripts/engine-link-check.sh`) proves four archives,
+  superscalar's, the version graph's, the engine's and this one, link
+  into one binary, each defining its own C functions alone, and a
+  release's archives tarball ships it with its header.
+- **Go's adapter.** The same module holds it, generic and small, as
+  `rules.ts` is: `Execute` and its wrappers over a `Store`, with stores
+  over a pgx transaction (`postgres`: an advisory lock, and a savepoint
+  per change set) and over a `database/sql` one (`sqlite`, any driver: a
+  check of each read made under a lock first in the unit that writes).
+  Every row write is fenced on `_version`, a moved command runs again up
+  to eight times before it is refused as `busy`, and a soft-deletable
+  table's live rows alone are read and written. Its refusals are
+  `rules.ts`'s, word for word. A Go or Rust SQLite store runs in the
+  caller's interactive transaction, whose reads its fences check, so the
+  caller is to begin it IMMEDIATE (`_txlock=immediate`;
+  `TransactionBehavior::Immediate`): it holds SQLite's one writer from its
+  start, and two commands run one after the other. A DEFERRED one's write
+  past another connection's commit fails with `SQLITE_BUSY`, which each
+  refuses as `busy`, nothing written, not as the driver's error. The
+  define check is kept per core and layout, as `rules.ts` keeps it.
+- **The Go ORM.** The `orm` generator renders a table whose fields are
+  behaviors. Its row holds the owned columns, and `<Type>Create`, its
+  create's and upsert's input, and `<Type>Update` hold none.
+  `CreateOne`, `CreateMany`, `UpdateOne` and `DeleteOne` run through the
+  core in the repository's transaction; an upsert inserts a new row with
+  the owned fields the core's create gives it and updates a held row by
+  its own fields alone, as the repository's `updateMany` does.
+  `UpdateMany`, `DeleteMany` and `HardDeleteOne` bypass the core, and
+  `UpdateOneIfVersion` and `DeleteOneIfVersion` are not generated for
+  such a table. Each use's operations sit under a method named for its
+  field, `db.Order.Status().Transition(ctx, id,
+  orm.OrderStatusTransitionParams{To: orm.OrderStatusStatePaid})`, typed
+  from the declaration as the config narrows it: a state type with a
+  constant per state (`<Type><Use>State<Value>`) and a struct for each
+  operation's parameters and result. An operation on a key no live row
+  holds returns an error that is both `ErrNotFound` and the core's
+  `not_found` refusal (`*rules.Refusal`). The layout is a JSON constant in
+  the generated `rules.go`, and `go.mod` requires the rules module
+  (naming's `rules_go_module`, replaced by `[paths] rules_go` in a
+  checkout). A raw `Tx.Exec` write of an owned column is never refused.
+  `TestWorkflowTablesOnPostgres` builds and tests the generated module
+  over the archive on Postgres, in tsgen's `workflow.test.ts` cases and
+  their messages.
+- **Rust.** `superschematic-rules-adapter`
+  (`runtime/engine/rust/rules-adapter`), a crate of the engine's
+  workspace, is the adapter for a hand-written Rust server: over the
+  core's crates directly, with no C ABI, an async store over
+  tokio-postgres (feature `postgres`) and a synchronous one
+  over rusqlite (feature `sqlite`), both off by default, with `rules.ts`'s
+  statements, refusals and messages. The Rust types have no ORM over it.
+- **Other generators.** The API generators and the SDKs refuse a table
+  whose fields are behaviors, naming the generator, the table, the field
+  and the behavior, and a Go API whose `go.mod` would require the ORM of a
+  database with such a table is refused, naming the API, the database,
+  the table, the field and the behavior: neither its `go.mod` nor a Go
+  server's image reaches the rules module yet. A database with such a
+  table builds with its types, sql and the Go ORM.
 - **The transcript.** `rules-testkit` writes `core-workflow.json` out as a
   transcript (`runtime/engine/testdata/rules/core-workflow.transcript.json`)
   and a test fails when it is stale. The adapter replays it on bun:sqlite
   and on Postgres: 16 scenarios, 96 steps (34 commands, 61 checks and one
   raw write) and 0 mismatches, with 62 left out for the reasons the file
-  gives.
+  gives. Go's adapter replays it on SQLite and on Postgres, and Rust's on
+  rusqlite and on Postgres, with the same counts and the same floor, 0
+  mismatches each.
 - **The end-to-end test.** `fixture-workflow-db` is written in
   `.schema.ts`: an order with a permission on a transition, and a
   shipment with two Workflows. tsgen's `TestWorkflowTablesEndToEnd` holds
@@ -13782,8 +13848,10 @@ names and rules are reversible until the first release.
   - A read under a lock of a kind other than a row or whether a table has
     rows (a sub-table's rows by a condition, a count). Its check in a
     SQLite or D1 batch comes with it.
-  - A prebuilt rules module under D82. Until then `@superschematic/rules`
-    builds only where cargo is.
+  - A prebuilt rules module and archive under D82. Until then
+    `@superschematic/rules` builds only where cargo is, and the Go module
+    links in a checkout only where cargo is (`scripts/rules-archive.sh`
+    stages the archive); a release's archives tarball holds it.
   - The layout holds only tables that compose a field behavior, so
     `Cx::create_row` and `Cx::call_on` reach those tables alone.
   - Typed operations (`behaviortypes.Narrow`) and the field types in
@@ -13796,3 +13864,41 @@ names and rules are reversible until the first release.
     a transcript that lost commands and gained checks. The 61 checks call
     the core directly, so the adapter's `hasRows` answer is tested by the
     store's own tests alone.
+  - The Rust adapter is unpublished, as the core's crates are, so the
+    HTTP runtime's crate (`runtime/http/rust`) does not offer it until
+    they publish.
+  - A generated Go API and its server over a database with a table whose
+    fields are behaviors, refused today: its `go.mod`'s require and
+    replace of the rules module, the server's image staging the rules
+    archive (a checkout's built from the engine's workspace, a release's
+    from the archives tarball, which holds it) and its CI's, with the API
+    generators' operations.
+  - The Go ORM stays Postgres-only, so Go's SQLite store has no ORM over
+    it, and its end-to-end test runs on Postgres alone.
+  - A Go row's owned value field is its declared type (`string`), not the
+    config's states, which the ORM's `<Type><Use>State` constants compare
+    with by conversion.
+  - `UpdateOneIfVersion` and `DeleteOneIfVersion` on a table whose fields
+    are behaviors.
+  - A row key that is no UUID, given for a UUID-keyed table, is a plain
+    error in TypeScript and Go and an `internal` refusal in Rust: a 500
+    in each, worded apart.
+  - A JSON own field whose value is a string: Go's adapter binds a JSON
+    column's value as its JSON text, so the string reads back a string,
+    where TypeScript's binds a string as it is. The adapters are to agree,
+    and a transcript case would hold them to it.
+  - An own field the layout leaves unconverted reaches the core apart in
+    each adapter, which no ported behavior reads yet and declarative rules
+    (step 5) will. On Postgres, Go reads a `DATE` as an instant's ISO
+    text, and a `TIME` or an `INTERVAL` as pgx's struct, where TypeScript
+    and Rust read the column's text. A list of date-times is left out of
+    the Go ORM's create's own fields, which TypeScript's passes, and reads
+    back as RFC 3339 with the server's offset in Go, `toISOString` text in
+    TypeScript and `to_jsonb` text with the session's offset in Rust.
+  - The three adapters decode a malformed layout document apart: Go
+    refuses an entry whose type is not its key, or that names no table,
+    key column or version column, which TypeScript and Rust load.
+  - `ExecuteOptions`' own columns replace a change set's own fields
+    rather than add to them, in every adapter: an operation's audit stamps
+    would drop an own field a behavior's operation wrote, which no ported
+    behavior does.

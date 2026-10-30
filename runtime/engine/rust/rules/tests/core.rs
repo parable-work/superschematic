@@ -696,6 +696,29 @@ fn order_at(count: i64, version: i64) -> Row {
     )
 }
 
+// ---- a core's id ----
+
+/// A core's id is its own and changes when it adds a behavior, so a host
+/// that keeps what it learns of a core by its id learns again of one made
+/// where a dropped one was, or of one that changed.
+#[test]
+fn a_cores_id_is_its_own_and_changes_when_it_adds_a_behavior() {
+    let mut one = superschematic_rules::Core::new().with(Counter);
+    let other = superschematic_rules::Core::new().with(Counter);
+    assert_ne!(one.id(), other.id());
+
+    let before = one.id();
+    one.push(Relay);
+    assert_ne!(one.id(), before);
+    assert_ne!(one.id(), other.id());
+
+    let at = std::ptr::from_ref(&one) as usize;
+    let dropped = one.id();
+    one = superschematic_rules::Core::new().with(Counter);
+    assert_eq!(std::ptr::from_ref(&one) as usize, at);
+    assert_ne!(one.id(), dropped);
+}
+
 // ---- the read exchange ----
 
 #[test]

@@ -18,14 +18,16 @@ export CGO_LDFLAGS="$(scripts/engine-archive.sh --print)"
 cd runtime/engine/go && go test ./...
 ```
 
-A Go binary that links superscalar's archive and the version graph's too
-puts all three `-L` flags in `CGO_LDFLAGS` (`scripts/superscalar-dep.sh
---print`, `scripts/versiongraph-archive.sh --print`). The three are built
-with one Rust release, each defines its own C functions alone, and
-`scripts/engine-link-check.sh` proves they link into one binary. Outside
-this checkout, a release's `superschematic-archives_<version>_<platform>.tar.gz`
-holds the three under `lib/` and the header under `include/`: build with
-`CGO_LDFLAGS=-L<dir>/lib`.
+A Go binary that links superscalar's archive, the version graph's and the
+behaviors' core's too (`runtime/rules/go`, D103) puts all four `-L` flags
+in `CGO_LDFLAGS` (`scripts/superscalar-dep.sh --print`,
+`scripts/versiongraph-archive.sh --print`, `scripts/rules-archive.sh
+--print`). The four are built with one Rust release, each defines its own
+C functions alone, and `scripts/engine-link-check.sh` proves they link
+into one binary. Outside this checkout, a release's
+`superschematic-archives_<version>_<platform>.tar.gz` holds the four under
+`lib/` and the engine's and the behaviors' core's headers under
+`include/`: build with `CGO_LDFLAGS=-L<dir>/lib`.
 
 The core's archive (`runtime/engine/rust/ffi`) runs the core's behaviors
 (`superschematic_engine_behaviors::core()`). A project whose schemas
@@ -185,7 +187,7 @@ document as the engine writes one, for a host's own refusals.
 ```
 make engine-archive && cd runtime/engine/go && CGO_LDFLAGS="$(../../../scripts/engine-archive.sh --print)" go test ./...
 make engine-go               # the replays over the test kit's archive
-make engine-link-check       # one binary over the three archives
+make engine-link-check       # one binary over the four archives
 ```
 
 `enginehttp/replay_test.go` replays the HTTP corpus

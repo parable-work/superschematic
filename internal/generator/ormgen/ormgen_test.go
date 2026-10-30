@@ -10,9 +10,17 @@ import (
 	"time"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
+
+// workflowFixture is the DB service whose tables' fields are behaviors
+// (D103), written as field types: an Order whose status is a Workflow with
+// a permission on a transition, and a Shipment with two, its status and
+// its paymentStatus.
+const workflowFixture = "fixture-workflow-db"
 
 var update = flag.Bool("update", false, "rewrite golden files")
 
@@ -26,7 +34,16 @@ func generateFixtureDB(t *testing.T) *ORMOutput {
 func generateFixture(t *testing.T, svc string) *ORMOutput {
 	t.Helper()
 
-	schema, err := loader.LoadService(filepath.Join(fixturesDir, svc))
+	// fixture-workflow-db's tables' fields are behaviors (D103), which the
+	// loader adds the owned fields of and the generator renders from the
+	// core's registry.
+	var loadOpts []loader.Option
+	var reg *registry.Registry
+	if svc == workflowFixture {
+		reg = registry.New(naming.Default())
+		loadOpts = append(loadOpts, loader.WithRegistry(reg))
+	}
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, svc), loadOpts...)
 	if err != nil {
 		t.Fatalf("load %s: %v", svc, err)
 	}
@@ -37,8 +54,9 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 		TypesModule: "example.com/schemas/types/go/" + svc,
 		// fixture-queue-db lists the sqlite dialect, whose queues the ORM
 		// claims on SQLite too.
-		SQLite: svc == queueFixture,
-		Clock:  codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
+		SQLite:   svc == queueFixture,
+		Registry: reg,
+		Clock:    codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 	})
 	if err != nil {
 		t.Fatalf("generate: %v", err)
@@ -92,6 +110,10 @@ func TestWriteORMGolden(t *testing.T) {
 		// Declared queries (D86): queries.go runs them, a query over the
 		// line_list projection's view among them (D95).
 		{"fixture-queries-db", []string{"repository_account.go", "repository_category.go", "repository_line_item.go", "repository_transfer_group.go", "projections.go", "queries.go"}},
+		// Tables whose fields are behaviors (D103): rules.go embeds their
+		// layout, and each repository runs its writes and its fields'
+		// operations through the core.
+		{workflowFixture, []string{"repository_order.go", "repository_shipment.go", "rules.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)

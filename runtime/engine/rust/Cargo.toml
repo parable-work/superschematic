@@ -9,10 +9,11 @@ resolver = "2"
 # this directory: they build with this lock file and this toolchain, and
 # `cargo --workspace` lints and tests them with the rest. The pure core of
 # D103 (rules), the behaviors ported onto it (rules-behaviors), its
-# in-memory reference host (rules-testkit) and its WebAssembly binding
-# (rules-wasm, which @superschematic/rules loads) sit beside the engine
-# until it goes.
-members = ["abi", "addon", "behaviors", "engine", "ffi", "napi", "rules", "rules-behaviors", "rules-testkit", "rules-wasm", "storage", "testkit", "testkit-ffi", "../../engine-workqueue/rust", "../../engine-commerce/rust"]
+# in-memory reference host (rules-testkit), its WebAssembly binding
+# (rules-wasm, which @superschematic/rules loads) and its adapter for a
+# hand-written Rust server over tokio-postgres or rusqlite (rules-adapter)
+# sit beside the engine until it goes.
+members = ["abi", "addon", "behaviors", "engine", "ffi", "napi", "rules", "rules-adapter", "rules-behaviors", "rules-testkit", "rules-wasm", "storage", "testkit", "testkit-ffi", "../../engine-workqueue/rust", "../../engine-commerce/rust"]
 
 [workspace.package]
 version = "0.0.0"

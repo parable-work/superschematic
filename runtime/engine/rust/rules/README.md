@@ -416,12 +416,20 @@ for both; only the layout differs.
 
 ## The adapter
 
-Each language has one adapter (D103): TypeScript's is the HTTP runtime's
+Each language has one adapter (D103). TypeScript's is the HTTP runtime's
 `src/rules.ts` (exported from its `./postgres` and `./d1` entries), over
 `@superschematic/rules` (`runtime/rules/typescript`),
 the core built for `wasm32-unknown-unknown` from `../rules-wasm`, whose C
-ABI takes and returns JSON as `runtime/versiongraph`'s does. An adapter
-holds no behavior's name; it reads the layout document (below) and runs the
+ABI takes and returns JSON as `runtime/versiongraph`'s does. Go's is the
+module `runtime/rules/go` (its `README.md`): package `rules` binds the
+same crate's native build, the static archive `libsuperschematic_rules.a`
+that `scripts/rules-archive.sh` stages, through cgo over the same C ABI,
+and holds the adapter, with a store over pgx (`postgres`) and one over
+`database/sql` (`sqlite`); the generated Go ORM runs over it. Rust's is
+`../rules-adapter` (`superschematic-rules-adapter`, its `README.md`), over
+the crates directly with no C ABI, for a hand-written server, with a
+store over tokio-postgres and one over rusqlite. An adapter holds no
+behavior's name; it reads the layout document (below) and runs the
 host loop above inside the caller's transaction, beside the caller's other
 writes. For each command:
 
@@ -507,7 +515,9 @@ writes (`UPDATE_TRANSCRIPTS=1` rewrites it), and holds it to a floor of 96
 steps: 61 define and publish checks, 34 commands and one raw write, in the
 14 scenarios a core with no test fixtures runs. TypeScript's replay is the
 HTTP runtime's `src/rules-transcript.test.ts`, held to the same floor on
-bun:sqlite and on Postgres.
+bun:sqlite and on Postgres; Go's is `runtime/rules/go`'s
+`transcript_test.go`, on SQLite and on Postgres, and Rust's
+`../rules-adapter/tests/transcript.rs`, on rusqlite and on Postgres.
 
 ## The layout document
 
@@ -564,7 +574,11 @@ owned fields, its audit fields and its internal metadata; a to-one
 relation's column holds its target's key and is named as a generated row
 holds it, `<field>Id`, with the target key's type. The generated `orm.ts`
 embeds the document as `<database>Rules` and passes it to the HTTP
-runtime's ORM in its definition's `rules`.
+runtime's ORM in its definition's `rules`; the generated Go ORM embeds it
+in `rules.go`, parsed once as `RulesLayout`, which its repositories run
+the adapter over. A list or a map has no `convert`: no adapter converts
+its elements, so a list of date-times reaches the core as its column holds
+it.
 
 ## Checks
 
@@ -623,3 +637,37 @@ the generated DDL on bun:sqlite and on the Postgres
 `SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL` names, and runs the same cases
 through the adapter over the generated layout on SQLite and through the
 generated repository on Postgres.
+
+Go's binding and adapter:
+
+```
+make rules-archive
+cd runtime/rules/go && go vet ./... && go test -race -count=1 ./...
+scripts/engine-link-check.sh
+```
+
+The first stages the archive (`scripts/rules-archive.sh`, cargo's release
+build of `../rules-wasm` as a staticlib). The second runs the binding from
+many goroutines at once, the adapter's and the stores' tests and the
+transcript's replay on SQLite, and on Postgres as well when
+`SUPERSCHEMATIC_RULES_TEST_DATABASE_URL` names one, each in a schema it
+creates and drops. The third links the four archives a Go server links,
+superscalar's, the version graph's, the engine's and this one, into one
+binary, after checking that each defines its own C functions alone. The
+generated Go ORM is held to the adapter by
+`go test ./internal/generator/ormgen -run TestWorkflowTablesOnPostgres`:
+it generates `fixture-workflow-db`'s Go types, ORM and DDL, and builds and
+tests the ORM module over the staged archive on the Postgres
+`SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL` names.
+
+Rust's adapter:
+
+```
+cd runtime/engine/rust
+cargo clippy -p superschematic-rules-adapter --all-targets --all-features -- -D warnings
+cargo test -p superschematic-rules-adapter --all-features
+```
+
+runs its tests over a store in memory, its stores' tests and the
+transcript's replay on rusqlite, and on Postgres as well when
+`SUPERSCHEMATIC_RULES_TEST_DATABASE_URL` names one.

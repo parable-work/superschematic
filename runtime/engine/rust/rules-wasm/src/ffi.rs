@@ -1,6 +1,8 @@
-//! The C ABI, which `@superschematic/rules` loads from the
+//! The C ABI (D103), which two hosts load: `@superschematic/rules` from the
 //! `wasm32-unknown-unknown` build, as runtime/versiongraph's `vg_*` is
-//! loaded (D103). Every value is JSON; the module imports nothing.
+//! loaded, and the Go binding (`runtime/rules/go`) from the native build's
+//! static archive, whose header is `runtime/rules/go/include/superschematic_rules.h`.
+//! Every value is JSON; the module imports nothing.
 //!
 //! Each operation is `rules_<op>(in_ptr, in_len, out_ptr, out_len) -> i32`:
 //! the input is `in_len` bytes of JSON at `in_ptr`, and the core writes a
@@ -12,7 +14,10 @@
 //! `rules_free(ptr, len)`. A wasm host allocates the input with
 //! `rules_alloc(len)` and releases it with `rules_dealloc(ptr, len)`; it
 //! places the two out slots in memory from `rules_alloc` too, which carries
-//! no alignment.
+//! no alignment. `rules_alloc` and `rules_dealloc` exist in the wasm32
+//! build alone: a native host passes its own memory for the input and the
+//! out slots, and frees each output with `rules_free`. A native host may
+//! call from any number of threads at once, all of which run one core.
 //!
 //! The operations ([`crate`] says each one's documents): `rules_run`,
 //! `rules_declarations` and `rules_check`.
@@ -47,8 +52,11 @@ unsafe fn call(
     } else {
         std::slice::from_raw_parts(in_ptr, in_len)
     };
-    // A panic is a defect; on wasm32-unknown-unknown it aborts the module
-    // instead, which the host reports as the instance's trap.
+    // A panic is a defect, held here as an internal error document on a
+    // native target (the release profile unwinds; a panic while the core is
+    // first built poisons it, and every later call answers internal too).
+    // On wasm32-unknown-unknown it aborts the module instead, which the
+    // host reports as the instance's trap.
     let (document, ok) =
         catch_unwind(AssertUnwindSafe(|| run_json(op, input))).unwrap_or_else(|_| {
             (
@@ -207,6 +215,36 @@ mod tests {
         let (code, text) = invoke(rules_run, b"{not json");
         assert_eq!(code, RULES_ERROR);
         assert!(text.contains("invalid_json"), "{text}");
+    }
+
+    #[test]
+    fn a_native_host_runs_one_core_from_several_threads_at_once() {
+        let input = br#"{"spec": {"name": "Order", "uses": [{"behavior": "Workflow", "config": {"states": ["draft", "paid"], "transitions": [{"from": "draft", "to": "paid"}]}, "anchor": {"field": "status"}}]}, "command": {"caller": {"subject": "sam"}, "now": 1000, "request": "r1", "action": {"kind": "operation", "key": "o1", "useId": "status", "operation": "transition", "params": {"to": "paid"}}}}"#;
+        let barrier = std::sync::Barrier::new(16);
+        let answers: Vec<(i32, String)> = std::thread::scope(|scope| {
+            let threads: Vec<_> = (0..16)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        (0..25)
+                            .map(|_| invoke(rules_run, input))
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            threads
+                .into_iter()
+                .flat_map(|thread| thread.join().expect("a thread panicked"))
+                .collect()
+        });
+        assert_eq!(answers.len(), 16 * 25);
+        for (code, text) in &answers {
+            assert_eq!(*code, RULES_OK, "{text}");
+            assert_eq!(
+                text,
+                r#"{"read":[{"kind":"row","type":"Order","key":"o1"}]}"#
+            );
+        }
     }
 
     #[test]

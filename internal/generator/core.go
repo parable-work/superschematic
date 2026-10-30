@@ -128,9 +128,12 @@ func RegisterCore(reg *registry.Registry) error {
 		{
 			Name: ormGenerator,
 			// An engine type gets no repository (D58). A table whose
-			// fields are behaviors (D103) is not rendered yet: its
-			// repository would write the owned fields and skip the core.
-			RendersBehaviors: true,
+			// fields are behaviors (D103) is rendered: its repository
+			// reads the owned fields, leaves them out of its inputs and
+			// runs creates, updates, deletes and each use's operations
+			// through the core.
+			RendersBehaviors:      true,
+			RendersFieldBehaviors: true,
 			Dirs: func(c registry.GenerateContext) []string {
 				return []string{ORMDir(c.Options.OutputRoot, c.Config.Name)}
 			},

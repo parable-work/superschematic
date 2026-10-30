@@ -1,0 +1,46 @@
+[package]
+name = "superschematic-rules-adapter"
+description = "The behaviors' adapter for a hand-written Rust server (D103): the pure core's host loop in the caller's tokio-postgres or rusqlite transaction, over a build-time project's layout"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# One store per database, each off by default, so a server builds the
+# client it already holds and no other.
+[features]
+default = []
+# The host loop over a tokio-postgres client inside a transaction: an
+# advisory lock per lock key and a savepoint per change set.
+postgres = ["dep:tokio-postgres", "dep:bytes"]
+# The host loop over a rusqlite connection: a check of each read made under
+# a lock and the change set in one savepoint.
+sqlite = ["dep:rusqlite"]
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+# The engine's JSON features (D58): a number keeps its text, an object its
+# members' order, as the core reads and writes them.
+serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
+# The core alone: the adapter holds no behavior's name, and a server builds
+# its core with the behaviors its project composes.
+superschematic-rules = { path = "../rules" }
+# A create's key when it names none, and a command's request id.
+uuid = { version = "1.28.0", features = ["v4"] }
+tokio-postgres = { version = "0.7.18", optional = true }
+# The buffer a parameter writes its text into, already in tokio-postgres's
+# tree.
+bytes = { version = "1.11", optional = true }
+rusqlite = { version = "0.40.2", features = ["bundled"], optional = true }
+
+[dev-dependencies]
+# Workflow, which the tests run the adapter on beside toy behaviors of
+# their own, and the transcript the replay reads.
+superschematic-rules-behaviors = { path = "../rules-behaviors" }
+superschematic-rules-testkit = { path = "../rules-testkit" }
+tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

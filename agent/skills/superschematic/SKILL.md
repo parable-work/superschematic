@@ -231,6 +231,14 @@ Most are load errors; knowing them saves a build round-trip:
   A `@jsonField` class, a `@queue` message, a `@projection`, a `@query`
   class and the params and row types it names, and a type that composes
   a behavior are not tables.
+- A field typed as a behavior (`status: Workflow<{ ... }>`) keeps its
+  table a table (D103): the behavior's fields are columns
+  (`status`, `status_entered_at`) that the generated repositories read
+  and leave out of their create, update and upsert inputs. Change them
+  with the use's operations, `orm.order.status.transition(id, { to })` in
+  TypeScript and `db.Order.Status().Transition(ctx, id, ...)` in Go. A raw
+  SQL write of one is not refused, so an operator can repair a row, but
+  it skips the behavior's rules: do not write one to move a state. A Go API over a database with such a table is refused for now.
 - A service's config is the `@envVars` class no other `@envVars` class
   extends; it holds the fields of each class it extends. Two `@envVars`
   classes that do not extend one another fail the load: make the
