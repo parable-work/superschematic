@@ -1878,6 +1878,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "superschematic-rules"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "superschematic-rules-behaviors"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "superschematic-rules",
+]
+
+[[package]]
+name = "superschematic-rules-testkit"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
+ "superschematic-engine-testkit",
+ "superschematic-rules",
+ "superschematic-rules-behaviors",
+]
+
+[[package]]
 name = "superschematic-schema-ir"
 version = "0.0.0"
 dependencies = [

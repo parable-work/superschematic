@@ -1,0 +1,22 @@
+[package]
+name = "superschematic-rules-testkit"
+description = "The pure core's reference host (D103): an adapter over memory, and the replayer that holds the core and its behaviors to the recorded scenarios"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
+superschematic-rules = { path = "../rules" }
+superschematic-rules-behaviors = { path = "../rules-behaviors" }
+# The engine's test kit, for its scenario loader (load, ScenarioFile), which
+# reads a recorded file and puts each shared value in its places. Without
+# its default features it builds neither database, so this crate leaves the
+# workspace's feature checks as they are.
+superschematic-engine-testkit = { path = "../testkit", default-features = false }
+
+[lints]
+workspace = true
