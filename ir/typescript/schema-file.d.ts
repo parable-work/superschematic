@@ -69,6 +69,12 @@ export interface BehaviorRef {
    */
   config?: unknown;
   /**
+   * The anchor field of a field-anchored use (D103): the field whose type is
+   * the behavior, which holds its value and names its columns and operations.
+   * Absent for a use on the whole type.
+   */
+  field?: string;
+  /**
    * The behavior's registered name: bare for a core behavior,
    * <extension>.<Name> for an extension's. A registry admits the behaviors it
    * registers.

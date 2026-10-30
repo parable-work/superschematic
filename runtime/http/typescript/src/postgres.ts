@@ -405,3 +405,42 @@ export type {
 // writes (D87).
 export { DEFAULT_SYSTEM_ACTOR, systemActorOf } from './orm.js';
 export type { SystemActor } from './orm.js';
+// The behaviors' adapter (D103): the generated orm.ts of a database whose
+// tables compose behaviors embeds its layout and passes the core in.
+export {
+  MAX_ATTEMPTS,
+  RulesRefusal,
+  busyRefusal,
+  execute,
+  lazyCore,
+  postgresRulesStore,
+  prepareCreate,
+  readRow,
+  runCreate,
+  runDelete,
+  runOperation,
+  runUpdate,
+  withRulesCore,
+} from './rules.js';
+export type {
+  CoreCaller,
+  CoreChangeSet,
+  CoreCommand,
+  CoreOwned,
+  CoreRefusal,
+  CoreTypeSpec,
+  ExecuteOptions,
+  RulesCallOptions,
+  RulesColumn,
+  RulesCore,
+  RulesHost,
+  RulesLayout,
+  RulesLive,
+  RulesOperation,
+  RulesOwnedField,
+  RulesResult,
+  RulesStore,
+  RulesTable,
+  RulesUse,
+  UseOperations,
+} from './rules.js';

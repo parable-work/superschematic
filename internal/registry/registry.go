@@ -212,6 +212,9 @@ func (r *Registry) Finalize() error {
 	if err := r.checkBehaviorReferences(); err != nil {
 		return err
 	}
+	if err := r.checkBehaviorFieldTypes(); err != nil {
+		return err
+	}
 	if err := r.checkStackReferences(); err != nil {
 		return err
 	}

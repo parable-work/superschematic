@@ -45,9 +45,10 @@
     }
   },
   "fields": [
-    { "name": "status", "description": "The state the instance is in." },
-    { "name": "enteredAt", "description": "When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition." }
+    { "name": "status", "description": "The state the instance is in.", "type": "string" },
+    { "name": "enteredAt", "description": "When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition.", "type": "Temporal.DateTime" }
   ],
+  "value": "status",
   "operations": [
     {
       "name": "transition",

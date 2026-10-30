@@ -1494,6 +1494,16 @@ func planTypeScriptDocker(in TypeScriptInput, s *TypeScriptServer, dir string) (
 		}
 		d.Include = append(d.Include, vg+"/package.json")
 	}
+	if rules := in.Paths.RulesTypeScript; rules != "" {
+		// And the behaviors' core (D103), whose package no server's
+		// database reaches until the API serves a table whose fields are
+		// behaviors.
+		r, ok := rel(rules)
+		if !ok {
+			return nil, outside("the behaviors' core's TypeScript package", rules), nil
+		}
+		d.Include = append(d.Include, r+"/package.json")
+	}
 	if len(s.Engines) > 0 {
 		// The engine stage builds the engine's Node-API addon from the Cargo
 		// workspace beside its package, and the build stage emits its

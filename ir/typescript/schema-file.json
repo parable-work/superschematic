@@ -3317,6 +3317,10 @@
         "config": {
           "default": {}
         },
+        "field": {
+          "default": "",
+          "type": "string"
+        },
         "name": {
           "enum": [
             "Approvals",

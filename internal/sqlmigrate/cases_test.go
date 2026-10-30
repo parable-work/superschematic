@@ -423,12 +423,12 @@ var planCases = []planCase{
 			fieldNamed(s, "Order", "total").TypeRef = ir.TypeRef{Name: "number"}
 			fieldNamed(s, "OrderSummary", "total").TypeRef = ir.TypeRef{Name: "number"}
 		}},
-	{name: "optimistic-on", noSQLite: "sqlite does not support @optimistic", after: func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true }},
-	{name: "optimistic-off", noSQLite: "sqlite does not support @optimistic", before: func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true }},
-	{name: "optimistic-to-versioned", noSQLite: "sqlite does not support @optimistic or @versioned",
+	{name: "optimistic-on", after: func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true }},
+	{name: "optimistic-off", before: func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true }},
+	{name: "optimistic-to-versioned", noSQLite: "sqlite does not support @versioned",
 		before: func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true },
 		after:  func(s *ir.Schema) { versioned(s, "Product", nil) }},
-	{name: "versioned-to-optimistic", noSQLite: "sqlite does not support @optimistic or @versioned",
+	{name: "versioned-to-optimistic", noSQLite: "sqlite does not support @versioned",
 		before: func(s *ir.Schema) { versioned(s, "Product", nil) },
 		after:  func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true }},
 

@@ -13543,7 +13543,7 @@ Left:
   keeps its runner's files, is not read for the next stamp.
 The rules are reversible until the first release.
 
-## D103. A behavior adds fields, sub-tables, operations and rules to a table that stays a table, its rules run in a pure Rust core every language embeds, and a project defines its types at build time or at run time, never both (D16, D50, D58, D64, D70 amended)
+## D103. A behavior adds fields, sub-tables, operations and rules to a table that stays a table, its rules run in a pure Rust core every language embeds, and a project defines its types at build time or at run time, never both (D16, D27, D50, D58, D64, D70 amended)
 
 D16 ported a server that takes schemas as data: one table of instances
 with their fields as JSON, an event log, and schemas defined and
@@ -13608,7 +13608,7 @@ This entry records the design before any of it is built.
 | The core is pure. It takes a command (a create, an update, a delete, an operation, a due deadline, an event from the outbox) with the time it runs at, and the state it asks for, and returns a refusal or a change set. It opens no connection and no file and reads no clock. | A core that does its own I/O against the app's tables: a connection of its own, so no transaction with the caller's writes; a socket, so no WebAssembly build; a database driver in every binding. The core as every write's only path, which loses the ORM's upserts (D89) and transactions across tables. Behavior hooks inside the ORM's transaction through callbacks across the binding, which D58 turned down for the policy and which a synchronous core cannot make to an asynchronous host |
 | The core asks for what it reads, the host answers, and the core goes on: a row of a type by key, a sub-table's rows by a condition, a count. An asynchronous host (Node.js's pg, Bun) and a synchronous one answer alike. Before the reads a rule across rows decides on, the core asks for a lock key. | One request of everything a command might read, which over-reads every command to serve the few that branch |
 | A change set names logical targets: a row's columns that a behavior owns, sub-table rows to insert, update or delete, outbox events, deadlines to arm or clear, and the version each written row is expected at. When a version does not match, the adapter runs the command again from fresh state, a bounded number of times, and then refuses it as `busy` (D58's code). | Physical SQL in the change set, which ties the core to one layout and one dialect |
-| A row's writes are held by the version check, the column `@optimistic` already keeps. A rule across rows, the last unit of stock or two bookings of one room, takes the lock its key names: on Postgres a transaction's advisory lock, on SQLite and D1 the one writer that already holds. A generated constraint backs a rule where the dialect has one, as an exclusion constraint does `Calendar`'s on Postgres. | D58's one writer per namespace, which D70 relies on and which serializes every commerce write of a shop |
+| A row's writes are held by the version check, the column `@optimistic` already keeps. A rule across rows, the last unit of stock or two bookings of one room, takes the lock its key names: on Postgres a transaction's advisory lock; on SQLite and D1, whose one writer holds only the batch that writes and not the reads before it, a check in that batch that each read made under the lock still answers as it did, which runs the command again when one does not. A generated constraint backs a rule where the dialect has one, as an exclusion constraint does `Calendar`'s on Postgres. | D58's one writer per namespace, which D70 relies on and which serializes every commerce write of a shop |
 | Each language reaches the core through a binding: the C ABI for Go, as now; Node-API or WebAssembly for TypeScript, which the change that builds it chooses between on Node.js and Bun; WebAssembly on Workers and in a browser; PyO3 for Python; the crate for Rust. | The engine's bindings as they are, each of which carries a database driver |
 | Each language has one adapter, generic and small: it answers the core's reads through the caller's transaction, takes its locks, applies its change sets and runs the version loop, reading the layout (below) to map logical targets to tables and columns. A behavior adds no code to any adapter or generator. | A generator per behavior per language |
 | The recorded scenarios (`runtime/engine/testdata/scenarios`) are the specification. Every adapter replays them on SQLite and on Postgres, as D58 has every binding do. | |
@@ -13673,8 +13673,9 @@ change's to settle.
 7. The conversion, and engine types removed from the servers and from
    acme-shop's `shop-db`.
 
-Status: step 1 built; steps 2 to 7 are not. The names and rules are
-reversible until the first release.
+Status: step 1 built, and step 2's TypeScript half; Go's and Rust's
+adapters, the API generators' operations and steps 3 to 7 are not. The
+names and rules are reversible until the first release.
 - **The core.** `runtime/engine/rust/rules` (`superschematic-rules`)
   depends on serde and serde_json alone and builds for
   wasm32-unknown-unknown. `Core::run(type, command, answers)` returns
@@ -13703,8 +13704,95 @@ reversible until the first release.
   status, message and details. The floor is 154. The four skipped steps
   test the engine's store: the test's own SQL against its columns, and
   own-field validation.
-- **Left for later steps.** `Cx::unchanged()` for an idempotent operation
-  that writes nothing; refusing writes made in a delete's after-change
-  hooks, which are dropped today; `requires` in a declaration; outbox
-  events of a behavior's own, which come with `Reactions`; the core
-  checking a deadline is still armed, which today each adapter must do.
+- **The field form (step 2, TypeScript).** A DB table writes a behavior
+  as a field type, `status: Workflow<{ ... }>`. The TypeScript reader
+  reads it through the checker (nested tuples, object types and literals,
+  and `typeof` a constant declared `as const`) into a use anchored on the
+  field (`ir.BehaviorRef.Field`). The data forms write `behaviors: [{
+  name, field, config }]`, and `format --to=ts` writes the field type
+  back. A list read from a union keeps the order the union is written in,
+  in place or in the alias that names it (`(A | B)[]`, `Array<A | B>`,
+  `States[]`). One whose written order the reader cannot find is refused,
+  since the checker's order is not the schema's and Workflow's initial
+  state defaults to the first. The `@behavior` decorator still makes an
+  engine type until step 7, and a type takes one form or the other.
+- **The columns.** A declaration names its value field and types each
+  field it holds (`value`, `fields[].type`: Workflow's `status` a
+  `string`, its `enteredAt` a `Temporal.DateTime`, epoch milliseconds in
+  the core). Once the behaviors' own checks pass, and before the rest of
+  the verification pass, the loader adds each declared field to the table
+  (`internal/loader/behaviorfields`), marked with its use
+  (`ir.FieldDef.Behavior`). So an index, a uniqueness, a display field, a
+  projection's column and `@enqueueOnChange` name one as they name the
+  table's own. The value field takes the anchor's own column, NOT NULL;
+  every other takes `<anchor>_<declared field>` in snake case
+  (`status_entered_at`, `payment_status_entered_at`). The table gets
+  `@optimistic`'s `_version`, the version each change set holds a row to.
+  sqlgen writes the columns and D27 plans them. On SQLite `@optimistic`'s
+  bump is an `AFTER UPDATE` trigger, which D1 needs (D27 amended: SQLite
+  refused `@optimistic`).
+- **The layout.** `internal/generator/behaviorlayout` holds the layout
+  rule in Go and writes the layout document that the generated `orm.ts`
+  embeds (`<database>Rules`).
+- **The core in TypeScript.** `@superschematic/rules`
+  (`runtime/rules/typescript`) loads the core as a wasm module over
+  `rules-wasm`'s JSON C ABI. It imports nothing, and a Node.js smoke test
+  runs it.
+- **The adapter.** The HTTP runtime's `src/rules.ts`, exported from
+  `./postgres` and `./d1`, runs the host loop in the caller's
+  transaction. On Postgres it takes an advisory lock and applies each
+  change set in a savepoint. On SQLite and D1 it applies one batch with a
+  guard after each fenced write; since their reads come before that
+  batch, it begins with a check of each read made under a lock. It reads
+  and writes a soft-deletable table's live rows alone (the layout's
+  `live`), and runs a moved command eight times before refusing it as
+  `busy`.
+- **The repository.** The generated repository holds the owned columns in
+  its rows and leaves them out of its create, update and upsert inputs. It
+  creates, updates and deletes a row through the core. An upsert inserts
+  a new row with the owned fields the core's create gives it (run to its
+  change set and not applied), and updates a row the key holds by its own
+  fields alone, as `updateMany` does. An operation on a key no live row
+  holds throws `NotFoundError`. Each use's operations sit under its field,
+  `orm.order.status.transition(key, { to: 'paid' })`, typed from the
+  declaration as the config narrows it. A raw SQL write of an owned
+  column is never refused.
+- **Other generators.** The Go ORM, the API generators and the SDKs
+  refuse a table whose fields are behaviors, naming the generator, the
+  table, the field and the behavior. A database with such a table builds
+  today with TypeScript types and sql, until Go's adapter.
+- **The transcript.** `rules-testkit` writes `core-workflow.json` out as a
+  transcript (`runtime/engine/testdata/rules/core-workflow.transcript.json`)
+  and a test fails when it is stale. The adapter replays it on bun:sqlite
+  and on Postgres: 16 scenarios, 96 steps (34 commands, 61 checks and one
+  raw write) and 0 mismatches, with 62 left out for the reasons the file
+  gives.
+- **The end-to-end test.** `fixture-workflow-db` is written in
+  `.schema.ts`: an order with a permission on a transition, and a
+  shipment with two Workflows. tsgen's `TestWorkflowTablesEndToEnd` holds
+  the generated layout and DDL to the adapter on both dialects.
+- **Left for later steps.**
+  - `Cx::unchanged()` for an idempotent operation that writes nothing.
+  - Refusing writes made in a delete's after-change hooks, which are
+    dropped today.
+  - `requires` in a declaration.
+  - Outbox events of a behavior's own, which come with `Reactions`.
+  - The core checking a deadline is still armed, which today each
+    adapter must do.
+  - A read under a lock of a kind other than a row or whether a table has
+    rows (a sub-table's rows by a condition, a count). Its check in a
+    SQLite or D1 batch comes with it.
+  - A prebuilt rules module under D82. Until then `@superschematic/rules`
+    builds only where cargo is.
+  - The layout holds only tables that compose a field behavior, so
+    `Cx::create_row` and `Cx::call_on` reach those tables alone.
+  - Typed operations (`behaviortypes.Narrow`) and the field types in
+    `@superschematic/db` are per-behavior code, as D58's are, until step 5
+    derives both from a behavior's class declaration. Until then an
+    extension's field behavior has the data forms alone.
+  - A concurrent create of one key: the loser gets the database's unique
+    violation, not the `conflict` refusal.
+  - The replay's floor is one total. A floor per kind of step would catch
+    a transcript that lost commands and gained checks. The 61 checks call
+    the core directly, so the adapter's `hasRows` answer is tested by the
+    store's own tests alone.

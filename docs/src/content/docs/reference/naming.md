@@ -186,6 +186,16 @@ TypeScript types package whose schema declares a version graph imports
 the facade base from its `/facade` entry point and lists the package as a
 dependency ([Use the engine from TypeScript](/superschematic/reference/version-graphs/#use-the-engine-from-typescript)).
 
+### `rules_npm_package`
+
+Default: `@superschematic/rules`
+
+npm package name of the behaviors' core built for WebAssembly (D103). A
+generated TypeScript types package whose database has a table whose
+fields are behaviors (`status: Workflow<{ ... }>`) imports its `initSync`
+in `orm.ts`, which passes the core to the HTTP runtime's adapter, and
+lists the package as a dependency.
+
 ### `versiongraph_pypi_dist`
 
 Default: `superschematic-versiongraph`
@@ -619,6 +629,19 @@ to the checkout, which the install copies from its `dist/`, so build the
 runtime first (`bun install && bun run build` in
 `runtime/http/typescript`). Unset, the install fetches the package, which
 fails with a 404 until it is published.
+
+### `paths.rules_typescript`
+
+Default: unset. This repository's own file sets
+`runtime/rules/typescript`.
+
+Directory of the behaviors' core's npm package (`package.json`, D103). A
+generated TypeScript types package whose database has a table whose
+fields are behaviors depends on `@superschematic/rules` with `*`; with this
+key set, the output root's Bun workspace overrides that with a `file:`
+path to the checkout, which the install copies from its `dist/`, so build
+it first (`bun install && bun run build` in `runtime/rules/typescript`,
+which builds the core's wasm module with cargo).
 
 ### `paths.ptr`
 

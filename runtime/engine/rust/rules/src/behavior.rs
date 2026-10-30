@@ -80,11 +80,13 @@ impl From<Refusal> for Stop {
 ///
 /// The layout every host and generator derives from it, with no code of a
 /// behavior's own (D103): on a field anchor `f`, the value field maps to
-/// `f` and every other owned field to `f_<field in snake case>` (Workflow
-/// on `status`: `status`, `status_entered_at`); on a type anchor, every
-/// owned field maps to `<storage key>_<field in snake case>`, the storage
-/// key being the behavior's name lowercased with each run of other
-/// characters one `_` (Workflow: `workflow_status`,
+/// `f` in snake case and every other owned field to `<f in snake
+/// case>_<field in snake case>` (Workflow on `status`: `status`,
+/// `status_entered_at`; on `paymentStatus`: `payment_status`,
+/// `payment_status_entered_at`), snake case as the README defines it; on
+/// a type anchor, every owned field maps to `<storage key>_<field in snake
+/// case>`, the storage key being the behavior's name lowercased with each
+/// run of other characters one `_` (Workflow: `workflow_status`,
 /// `workflow_entered_at`), so an own field of the same name sits beside it.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

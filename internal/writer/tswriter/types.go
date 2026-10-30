@@ -9,6 +9,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -278,7 +279,9 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 	if def.EnvVars {
 		fmt.Fprintf(&e.body, "@%s\n", e.use("envVars"))
 	}
-	for _, ref := range def.Behaviors {
+	// A use anchored on a field is written as that field's type, below
+	// (D103).
+	for _, ref := range def.TypeBehaviors() {
 		e.emitBehavior(def.Name, ref)
 	}
 	if def.Display != nil {
@@ -288,7 +291,8 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 
 	// A class with no fields of its own, such as each class of a Stack
 	// schema, closes on its line, as the @job and @worker classes do.
-	if !slices.ContainsFunc(def.Fields, func(fd *ir.FieldDef) bool { return fd.InheritedFrom == "" }) {
+	uses := def.FieldBehaviors()
+	if len(uses) == 0 && !slices.ContainsFunc(def.Fields, func(fd *ir.FieldDef) bool { return fd.InheritedFrom == "" && !fd.Owned() }) {
 		fmt.Fprintf(&e.body, "export abstract class %s%s {}\n", e.ident(def.Name, "type"), e.heritageClause(def))
 		return
 	}
@@ -296,8 +300,9 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 
 	first := true
 	for _, fd := range def.Fields {
-		if fd.InheritedFrom != "" {
-			// Pre-flattened heritage fields re-flatten from the base class.
+		if fd.InheritedFrom != "" || fd.Owned() {
+			// Pre-flattened heritage fields re-flatten from the base class,
+			// and a behavior's fields from the use that adds them (D103).
 			continue
 		}
 		fieldOwner := fmt.Sprintf("%s.%s", def.Name, fd.Name)
@@ -312,7 +317,74 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 		}
 		fmt.Fprintf(&e.body, "  %s: %s;\n", e.ident(fd.Name, "field"), e.fieldTypeExpr(fd, fieldOwner, structField))
 	}
+	for _, ref := range uses {
+		if !first {
+			e.body.WriteString("\n")
+		}
+		first = false
+		fmt.Fprintf(&e.body, "  %s: %s;\n", e.ident(ref.Field, "field"), e.behaviorFieldType(def.Name, ref))
+	}
 	e.body.WriteString("}\n")
+}
+
+// behaviorFieldPackage declares each behavior's field type, under the
+// behavior's name, as the reader knows it (tsreader's behaviorCarrier).
+const behaviorFieldPackage = "@superschematic/db"
+
+// behaviorFieldType renders a use anchored on a field as the field's type
+// (D103), `Workflow<{ states: ["draft", "paid"]; ... }>`: the behavior's
+// field type with its config as a type argument of literal types, which
+// the reader reads back to the same config. The loader adds the
+// behavior's fields after the walk, wherever the anchor sits among the
+// class's own, so it is written after them.
+func (e *emitter) behaviorFieldType(typeName string, ref ir.BehaviorRef) string {
+	owner := fmt.Sprintf("%s.%s", typeName, ref.Field)
+	if !identifierPattern.MatchString(ref.Name) {
+		e.failf("%s: behavior %s has no field type in %s, so the use has no TypeScript authoring form", owner, ref.Name, behaviorFieldPackage)
+		return ref.Name
+	}
+	carrier := ref.Name
+	if e.declares(carrier) {
+		alias := carrier + "Field"
+		for i := 2; e.declares(alias); i++ {
+			alias = fmt.Sprintf("%sField%d", carrier, i)
+		}
+		carrier = e.useAs(behaviorFieldPackage, ref.Name, alias)
+	} else {
+		e.importSymbol(naming.Active().Specifier(behaviorFieldPackage), carrier)
+	}
+	config := any(map[string]any{})
+	if len(ref.Config) > 0 {
+		if err := json.Unmarshal(ref.Config, &config); err != nil {
+			e.failf("%s: behavior %s config: %v", owner, ref.Name, err)
+		}
+	}
+	return carrier + "<" + literalType(config) + ">"
+}
+
+// literalType renders a decoded JSON value as the TypeScript literal type
+// that stands for it: an object as an object type of its members, keys
+// sorted, a list as a tuple, and a string, a number, a boolean or null as
+// its literal type.
+func literalType(value any) string {
+	switch v := value.(type) {
+	case map[string]any:
+		if len(v) == 0 {
+			return "{}"
+		}
+		parts := make([]string, 0, len(v))
+		for _, key := range sortedKeys(v) {
+			parts = append(parts, propertyName(key)+": "+literalType(v[key]))
+		}
+		return "{ " + strings.Join(parts, "; ") + " }"
+	case []any:
+		parts := make([]string, len(v))
+		for i, item := range v {
+			parts[i] = literalType(item)
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	}
+	return valueLiteral(value)
 }
 
 // emitBehavior renders one @behavior(name, config?) line. Several render in

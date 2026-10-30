@@ -209,6 +209,20 @@ func (r *Result) warnf(file string, format string, args ...any) {
 	})
 }
 
+// CheckBehaviors runs the behaviors' checks alone (checkBehaviors), which
+// Run runs among the rest: each behavior is registered and configured as
+// its declaration says, and each field-anchored use is what the loader's
+// pass that adds its fields relies on (checkFieldAnchors). The loader runs
+// it before that pass, which it runs before Run, so every check that
+// resolves a field by its name (an index, a projection's column,
+// @enqueueOnChange) reads the fields a behavior owns as the table's own
+// (D103).
+func CheckBehaviors(schema *ir.Schema, in Input) *Result {
+	r := &Result{}
+	checkBehaviors(schema, in.registry(), r)
+	return r
+}
+
 // Run executes the full verification pass on an assembled schema. The pass
 // canonicalizes derived @source metadata (Virtual, OmittedFromSource) as it
 // verifies, so the IR a generator sees is exactly what verification proved.

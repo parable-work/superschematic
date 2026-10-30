@@ -438,6 +438,21 @@ type GeneratorSpec struct {
 	// (D58). An API's own type never composes one: behaviors compose on
 	// DB types.
 	RendersBehaviors bool
+	// RendersFieldBehaviors marks a generator whose output covers what a
+	// field-anchored behavior adds to a table that stays a table (D103,
+	// ir.TypeDef.FieldBehaviors): the columns of the fields it owns,
+	// which the loader adds as fields (ir.FieldDef.Behavior), read-only in
+	// a repository's inputs, and its operations, or nothing of the table
+	// at all. Run refuses to run a generator without it on a schema one of
+	// whose tables composes one, or that imports a DB service's table
+	// that does, rather than render the owned columns as writable or drop
+	// the operations. Of the core's generators, sql sets it, which writes
+	// the columns, and types, whose TypeScript package's repositories
+	// (orm.ts) read the owned columns and run the operations through the
+	// behaviors' core and whose other languages write the owned fields as
+	// any field; enginedoc, projectengine and envConfig, which read no
+	// table, set it too.
+	RendersFieldBehaviors bool
 	// ReadsCalls marks a generator whose output imports the SDK of each
 	// API the service calls: the core API server's Deps
 	// (docs/stack-model.md, section 8.5). The build plan runs it in the

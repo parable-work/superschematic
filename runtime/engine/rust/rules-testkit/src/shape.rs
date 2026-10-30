@@ -21,11 +21,13 @@ pub const NAMESPACE: &str = "default";
 const NEW_VERSION_ADVICE: &str = "A new version may only add optional fields and enum values, widen bounds, change documentation and make the behavior changes each behavior allows; publish any other change under a new schema name";
 
 /// One own field a schema document declares, for the store's own-field
-/// check.
+/// check and a transcript's table.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FieldDef {
     pub name: String,
     pub required: bool,
+    /// Its JSON type, from its `typeRef` ([`json_type`]).
+    pub json_type: String,
 }
 
 /// A schema document read for the host: the type the core runs, and the
@@ -78,10 +80,40 @@ pub fn read_document(document: &Value) -> Result<Defined, String> {
             Some(FieldDef {
                 name: field.get("name")?.as_str()?.to_owned(),
                 required: field.get("required").and_then(Value::as_bool) == Some(true),
+                json_type: json_type(field),
             })
         })
         .collect();
     Ok(Defined { spec, fields })
+}
+
+/// The JSON type of a field a schema document declares: `string`,
+/// `number`, `integer` or `boolean` for the builtin its `typeRef` names, a
+/// string for a `Temporal` or `Identity` scalar, `array` for a list or a
+/// map's (`isArray`), and `object` for anything else.
+pub fn json_type(field: &Value) -> String {
+    let type_ref = field.get("typeRef");
+    let flag = |name: &str| {
+        type_ref
+            .and_then(|type_ref| type_ref.get(name))
+            .and_then(Value::as_bool)
+            == Some(true)
+    };
+    if flag("isMap") {
+        return "object".to_owned();
+    }
+    if flag("isArray") {
+        return "array".to_owned();
+    }
+    let name = type_ref
+        .and_then(|type_ref| type_ref.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    match name {
+        "string" | "number" | "integer" | "boolean" => name.to_owned(),
+        _ if name.starts_with("Temporal.") || name.starts_with("Identity.") => "string".to_owned(),
+        _ => "object".to_owned(),
+    }
 }
 
 /// The own-field problems the store refuses a create's fields or an

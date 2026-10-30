@@ -74,6 +74,9 @@ func TestDefinitionForComposesBehaviors(t *testing.T) {
 		{`[{"name": "acme.Rating"}]`, false},
 		{`[{"name": "acme.Flag", "config": {"on": true}}]`, false},
 		{`[{"name": "acme.Flag", "extra": 1}]`, false},
+		// A field-anchored use names its anchor field (D103).
+		{`[{"name": "acme.Rating", "field": "stars", "config": {"maxStars": 5}}]`, true},
+		{`[{"name": "acme.Flag", "field": 1}]`, false},
 	} {
 		err := validateAgainstDef(reg, typeWithBehaviors(test.behaviors), "TypeDef", "product.schema.json")
 		if (err == nil) != test.ok {

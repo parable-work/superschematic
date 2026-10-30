@@ -232,6 +232,12 @@ func (d *declarations) writeDef(name string, schema any) error {
 			d.sawBehaviorName = true
 			d.writeComment("  ", "The behavior's registered name: bare for a core behavior, <extension>.<Name> for an extension's. A registry admits the behaviors it registers.")
 			typ = "string"
+		case name == "BehaviorRef" && key == "field":
+			typ, err = d.typeOf(props[key], propAt)
+			if err != nil {
+				return err
+			}
+			d.writeComment("  ", "The anchor field of a field-anchored use (D103): the field whose type is the behavior, which holds its value and names its columns and operations. Absent for a use on the whole type.")
 		case name == "BehaviorRef" && key == "config":
 			if err := d.behaviorConfig(props[key], propAt); err != nil {
 				return err

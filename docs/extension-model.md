@@ -896,7 +896,8 @@ shape is `BehaviorDeclaration`:
 | `configSchema` | the JSON Schema of the config a type gives the behavior; absent, the behavior takes none |
 | `createParamsSchema` | the JSON Schema of the parameters a create gives the behavior for the new instance, which an engine passes to its `initialize`: an object schema whose `additionalProperties` is `false` or a schema; absent, a create gives it none |
 | `requires`, `conflicts` | behaviors a type that lists this one must also list, or may not |
-| `fields` | the fields it adds: `name`, `description`, `volatile`, true for a field that can move without an event of its own instance, and `perReader`, true for a volatile one whose value is the caller's (below) |
+| `fields` | the fields it adds: `name`, `description`, `volatile`, true for a field that can move without an event of its own instance, `perReader`, true for a volatile one whose value is the caller's, and `type`, the column it takes on a table (below) |
+| `value` | the field that holds the behavior's value when a type carries it on a field (D103): one of `fields`, which takes the anchor field's name and column; absent, the behavior cannot be anchored on a field |
 | `operations` | the operations it adds: `name` (camelCase), `description`, `paramsSchema` (an object schema with `"additionalProperties": false`), `resultSchema`, `writes`, `scope` (`instance`, the default, `schema` or `namespace`), `beside`, `log` and `asks` (below), and `invocationPolicy`, a value of the registry's policy (section 3.15) or absent for its default |
 | `signals` | the messages about an instance an engine delivers to the event streams open on it and keeps nowhere (D77): `name` (camelCase, unique among its signals), `description`, `paramsSchema` (the JSON Schema of its data) and `access`, who may send it: `read` or `write`, a caller the policy lets read or write the schema, or `operation`, the behavior's own operations alone |
 | `preconditionSchema` | the JSON Schema of the entry a caller sends for the behavior in the preconditions of an update, a delete or an operation, which an engine checks and hands to the behavior's guard: an object schema with `"additionalProperties": false`; absent, the behavior takes none |
@@ -929,9 +930,16 @@ marker, may say `"asks": "read"`: an engine asks the access policy
 `read` for it rather than `write`. `RegisterBehavior` refuses any other
 value of `asks`, and `asks` on any other operation.
 
-A field carries a name, a description and whether it is volatile, no
-type. A field's type can depend on the behavior's config, and the loader
-needs only the name to refuse a collision. A volatile field
+A field carries a name, a description and whether it is volatile. On an
+engine type it needs no type: its type can depend on the behavior's
+config, and the loader needs only the name to refuse a collision. On a
+table, which a field-anchored use keeps (D103), each field is a column, and
+its `type` says which: a builtin (`string`, `number`, `boolean`) or a
+scalar of the registry's catalog, which the generators map as an own
+field's; a date-time scalar is epoch milliseconds in the core. Finalize
+refuses a type that is neither, and `RegisterBehavior` refuses a type on a
+volatile field and a `value` that names no field; the engine checks both
+and leaves them out of the declaration it answers with. A volatile field
 (`"volatile": true`) can move without an event of its own instance: it
 is computed when the instance is read, from other instances, the clock
 or the config, as `Rollups.values` and `Dependencies.blocked` are. No
@@ -1023,6 +1031,34 @@ must include the augmentation, through an import of the authoring package
 or a `tsconfig.json` `include` entry. The registry still decides: a
 declared name the binary does not register fails the load. `format
 --to=ts` writes one `@behavior` per entry, in list order.
+
+A behavior whose declaration names a `value` is also a field's type on a
+DB table (D103): `status: Workflow<{ states: ["draft", "paid"]; ... }>`,
+where `@superschematic/db` exports the field type under the behavior's
+name and the walker knows it by the symbol's package, as it knows
+`Relation`. The use's entry names the field (`{ name, field, config }`),
+and the table stays a table. The walker reads the config, a type argument
+of literal types, through the checker: object types, tuples, string,
+number and boolean literal types and null, nested to any depth, a union of
+literals (alone or as an array's element, `("a" | "b")[]`,
+`Array<"a" | "b">`, or through a type alias of either) as the list of its
+members in the order written, and `typeof` a constant declared `as
+const`; anything else fails at the member, with its path in the config,
+and so does a union of literals whose written order the walker cannot
+find, since the checker's order is not the schema's. It writes no field
+for the anchor: the loader adds each declared field as a column once the
+behaviors' checks pass and before the rest of verify, the anchor's value
+field among them, for every authoring form alike, so an index, a display
+field, a projection's column and `@enqueueOnChange` name one as they name
+a field of the table's own. A type's uses are its `@behavior`s, then its field
+types in field order. The walker refuses, at the field, a field type on a
+type that is not a DB table, one for a behavior that names no `value`, an
+optional or decorated one, one inside a wrapper or a list, one a class
+inherits from a base class or a trait, and a config its schema rejects;
+verify refuses a type that composes behaviors both ways. `format --to=ts`
+writes each field-anchored use back as its field's type, after the class's
+own fields, and leaves out the fields the loader added and the
+`@optimistic` they imply.
 
 The loader checks every type's list in every frontend (verify, after the
 core checks and before the kind's `Verify`), and each failure names the

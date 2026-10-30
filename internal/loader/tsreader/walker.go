@@ -30,6 +30,10 @@ type walker struct {
 	// heritage chains and @source targets resolve once.
 	classFields map[*astNode][]*ir.FieldDef
 
+	// classUses holds, beside classFields, the behaviors each class
+	// declaration composes on its own fields (D103), in field order.
+	classUses map[*astNode][]fieldUse
+
 	// imports accumulates cross-service named imports: package -> symbols.
 	imports map[string]map[string]bool
 
@@ -89,6 +93,7 @@ func newWalker(sp *serviceProgram, cfg *SchemaConfig, schema *ir.Schema, package
 		servicePath:   sp.servicePath,
 		reg:           reg,
 		classFields:   make(map[*astNode][]*ir.FieldDef),
+		classUses:     make(map[*astNode][]fieldUse),
 		imports:       make(map[string]map[string]bool),
 		externals:     make(map[string]bool),
 		externalTypes: make(map[string]*ir.TypeDef),
@@ -788,6 +793,7 @@ func (w *walker) walkStructClass(node *astNode, name string, decorators []decora
 
 	// After the decorators, which settle the role and @jsonField.
 	w.checkIdentityTraitPlacement(node, td)
+	w.applyFieldBehaviors(node, td)
 
 	// A @job class declares a job of the API, which @job's Apply recorded
 	// in Schema.Jobs: it is no type (D52). A @worker class is no type
@@ -1030,8 +1036,9 @@ func heritageClauses(node *astNode) []*astNode {
 
 // resolveClassFieldDefs returns the flattened fields of a class: base-class
 // and trait fields first (with InheritedFrom set to the declaring type), then
-// the class's own properties. Results are memoized; heritage must stay within
-// classes the program can see.
+// the class's own properties. A property whose type is a behavior is no
+// field: its use goes to classUses (behaviorFieldOf). Results are memoized;
+// heritage must stay within classes the program can see.
 func (w *walker) resolveClassFieldDefs(node *astNode) ([]*ir.FieldDef, bool) {
 	if fields, ok := w.classFields[node]; ok {
 		return fields, true
@@ -1085,6 +1092,11 @@ func (w *walker) resolveClassFieldDefs(node *astNode) ([]*ir.FieldDef, bool) {
 				ok = false
 				continue
 			}
+			if serr := w.inheritedBehaviorField(className(node), t, id.decl, id.name); serr != nil {
+				w.addErr(serr)
+				ok = false
+				continue
+			}
 			for _, bf := range baseFields {
 				inherited := *bf
 				if inherited.InheritedFrom == "" {
@@ -1098,10 +1110,20 @@ func (w *walker) resolveClassFieldDefs(node *astNode) ([]*ir.FieldDef, bool) {
 		}
 	}
 
+	var uses []fieldUse
 	for _, m := range node.AsClassDeclaration().Members.Nodes {
 		if m.Kind != kindPropertyDeclaration {
 			w.addErr(errorAtNode(m, "only property declarations are allowed on data types"))
 			ok = false
+			continue
+		}
+		if use, handled, serr := w.behaviorFieldOf(className(node), m); handled {
+			if serr != nil {
+				w.addErr(serr)
+				ok = false
+				continue
+			}
+			uses = append(uses, use)
 			continue
 		}
 		fd, serr := w.fieldFromProperty(m)
@@ -1114,7 +1136,17 @@ func (w *walker) resolveClassFieldDefs(node *astNode) ([]*ir.FieldDef, bool) {
 	}
 
 	w.classFields[node] = fields
+	w.classUses[node] = uses
 	return fields, ok
+}
+
+// className is a class declaration's name, for an error; a class the walk
+// reads is named.
+func className(node *astNode) string {
+	if name := node.Name(); name != nil {
+		return name.Text()
+	}
+	return "(anonymous class)"
 }
 
 // fieldFromProperty converts a property declaration into a FieldDef.
@@ -1258,7 +1290,11 @@ func (w *walker) applySource(td *ir.TypeDef, src *decoratorRef) {
 
 	target := targetService + "." + id.name
 	if external {
-		w.externalTypes[target] = &ir.TypeDef{Name: id.name, Fields: sourceFields}
+		var uses []ir.BehaviorRef
+		for _, use := range w.classUses[id.decl] {
+			uses = append(uses, use.ref)
+		}
+		w.externalTypes[target] = &ir.TypeDef{Name: id.name, Fields: sourceFields, Behaviors: uses}
 		w.flattenRelatedTypes(targetService, sourceFields)
 	}
 
@@ -1339,6 +1375,7 @@ func (w *walker) resolveDetached(decl *astNode) []*ir.FieldDef {
 	for node := range w.classFields {
 		if !classes[node] {
 			delete(w.classFields, node)
+			delete(w.classUses, node)
 		}
 	}
 	for name := range w.schema.Scalars {

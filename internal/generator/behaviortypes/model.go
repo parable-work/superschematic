@@ -173,16 +173,19 @@ func MemberName(name string) string {
 }
 
 // Build models the behaviors' fields of each type of the schema that
-// composes behaviors, in the order of the types' names; it is nil when
-// none does. reg declares the behaviors: each must be registered and its
-// config one its declaration takes, as the loader checked. Build refuses a
-// name it would write that the schema already declares or that two of its
-// own would share, and two members of one struct or enum one name.
+// composes behaviors on the type, in the order of the types' names; it is
+// nil when none does. A behavior anchored on a field of a table (D103)
+// adds its fields as the table's own (ir.FieldDef.Behavior), which the
+// type's own fields type, so it writes no <T>Behaviors. reg declares the
+// behaviors: each must be registered and its config one its declaration
+// takes, as the loader checked. Build refuses a name it would write that
+// the schema already declares or that two of its own would share, and two
+// members of one struct or enum one name.
 func Build(schema *ir.Schema, reg *registry.Registry) ([]Type, error) {
 	var tds []*ir.TypeDef
 	for _, types := range []map[string]*ir.TypeDef{schema.Types, schema.Inputs} {
 		for _, td := range types {
-			if td != nil && len(td.Behaviors) > 0 {
+			if len(td.TypeBehaviors()) > 0 {
 				tds = append(tds, td)
 			}
 		}
@@ -192,7 +195,7 @@ func Build(schema *ir.Schema, reg *registry.Registry) ([]Type, error) {
 	}
 	slices.SortFunc(tds, func(a, b *ir.TypeDef) int { return strings.Compare(a.Name, b.Name) })
 	if reg == nil {
-		return nil, fmt.Errorf("type %s composes behavior %s, and no registry declares the behaviors", tds[0].Name, tds[0].Behaviors[0].Name)
+		return nil, fmt.Errorf("type %s composes behavior %s, and no registry declares the behaviors", tds[0].Name, tds[0].TypeBehaviors()[0].Name)
 	}
 	names := declaredNames(schema)
 	out := make([]Type, 0, len(tds))
@@ -261,7 +264,7 @@ func buildType(schema *ir.Schema, td *ir.TypeDef, reg *registry.Registry) (Type,
 	t := Type{Name: td.Name, BehaviorsName: BehaviorsName(td.Name)}
 	target := Target{Schema: schema.Name, Base: td.Name, Document: schema, Instance: td}
 	b := typeBuilder{t: &t, aliases: map[string]Alias{}}
-	for _, ref := range td.Behaviors {
+	for _, ref := range td.TypeBehaviors() {
 		declaration, ok := reg.Behavior(ref.Name)
 		if !ok {
 			return t, fmt.Errorf("type %s composes behavior %s, which the registry does not declare", td.Name, ref.Name)

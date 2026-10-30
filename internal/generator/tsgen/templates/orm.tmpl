@@ -27,10 +27,28 @@ are two filters of an allOf (D99).
 Each table's definition also describes its rows for the runtime's
 decodeRow, so a raw query of its columns reads back as its row type:
 query(text, values, { decode: <table>Table }) reads them so (D89).
+{{- if .ORM.Rules}}
+
+A table whose fields are behaviors (D103), status: Workflow<{ ... }>, stays
+a table: each field a behavior owns is a column its row holds, which the
+inputs of a create, an update and an upsert leave out, since only the
+behavior's operations change it. Its repository holds each such field's
+operations under the field, orm.order.status.transition(key, { to: 'paid'
+}), and creates, updates and deletes its rows through the behaviors' core,
+which the runtime's adapter runs in the ORM's transaction over the layout
+{{.ORM.RulesConst}} records. An upsert inserts a new row with the owned
+fields the core's create gives it, and updates a row the key holds by its
+own fields alone. A raw SQL write of an owned column is never refused.
+{{- end}}
 */
 
 {{- with .ORM}}
+{{- if .Rules}}
+import { initSync } from '{{$.Naming.RulesNpmPackage}}';
+import { ormOf, withRulesCore } from '{{$.Naming.HTTPRuntimeNpmPackage}}/postgres';
+{{- else}}
 import { ormOf } from '{{$.Naming.HTTPRuntimeNpmPackage}}/postgres';
+{{- end}}
 import type { {{join .RuntimeTypes ", "}} } from '{{$.Naming.HTTPRuntimeNpmPackage}}/postgres';
 {{- if .UsesTypes}}
 import type * as T from './types';
@@ -119,6 +137,27 @@ export interface {{.Type}}Relations {
 export type {{.Type}}VectorField = {{tsUnion .VectorFields}};
 {{- end}}
 
+{{- if .Uses}}
+
+/** The behaviors on fields of {{.Type}} (D103): each field's operations, under the field, each run through the behaviors' core on the row whose key it takes. */
+export interface {{.Type}}Uses {
+{{- range .Uses}}
+  /** The operations of {{.ID}}, a {{.Behavior}}. */
+  readonly {{.ID}}: UseOperations<{
+{{- range .Operations}}
+{{- if .Doc}}
+    /** {{tsDoc .Doc "     * "}} */
+{{- end}}
+    {{.Name}}: {
+      params: {{.Params}};
+      result: {{.Result}};
+    };
+{{- end}}
+  }, {{$t.KeyType}}>;
+{{- end}}
+}
+{{- end}}
+
 /** The repository of {{.Type}}. */
 export type {{.Type}}Repository = {{if .SoftDelete}}SoftDeleteRepository{{else}}Repository{{end}}<
   {{.Type}}Row,
@@ -132,7 +171,7 @@ export type {{.Type}}Repository = {{if .SoftDelete}}SoftDeleteRepository{{else}}
   {{.Type}}PageKey,
   {{.Type}}Relations
 >{{if .Encrypted}} & EncryptedRepository{{end}}{{if .VectorFields}} &
-  VectorRepository<{{.Type}}Row, {{.Type}}Filter, {{.Type}}VectorField, {{.KeyType}}>{{end}};
+  VectorRepository<{{.Type}}Row, {{.Type}}Filter, {{.Type}}VectorField, {{.KeyType}}>{{end}}{{if .Uses}} & {{.Type}}Uses{{end}};
 
 /** The {{.Table}} table, as the runtime reads and writes it. */
 export const {{.Const}}: TableDefinition = {
@@ -339,6 +378,12 @@ export type {{.Name}}Orm = Orm<{{.Name}}Repositories>;
 /** The repositories of {{$.SchemaName}} in a transaction, with its raw SQL. */
 export type {{.Name}}Tx = OrmTx<{{.Name}}Repositories>;
 
+{{- if .Rules}}
+
+/** Where the behaviors' core finds each table whose fields are behaviors (D103): its table, key, version, the column a soft-deletable table's live rows hold NULL, and own columns, each behavior's owned columns and operations, and the type as the core runs it. */
+export const {{.RulesConst}}: RulesLayout = {{.RulesLayout}};
+{{- end}}
+
 /** The tables of {{$.SchemaName}} and the clauses their statements are written with. */
 export const {{.Const}}: OrmDefinition = {
   clauses: {
@@ -385,13 +430,22 @@ export const {{.Const}}: OrmDefinition = {
 {{- if .Queries}}
   queries: {{.QueriesConst}},
 {{- end}}
+{{- if .Rules}}
+  rules: {{.RulesConst}},
+{{- end}}
 };
 
 /**
  * Opens the repositories of {{$.SchemaName}} over pool, acting as the user
- * options names, or as the user it is when a string.
+ * options names, or as the user it is when a string.{{if .Rules}} The behaviors'
+ * core is options.rules, or the rules package's, made when a behavior first
+ * runs.{{end}}
  */
 export function createOrm(pool: OrmPool, options?: string | null | OrmOptions): {{.Name}}Orm {
+{{- if .Rules}}
+  return ormOf<{{.Name}}Repositories>(pool, {{.Const}}, withRulesCore(options, initSync));
+{{- else}}
   return ormOf<{{.Name}}Repositories>(pool, {{.Const}}, options);
+{{- end}}
 }
 {{- end}}

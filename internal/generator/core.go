@@ -86,8 +86,12 @@ func RegisterCore(reg *registry.Registry) error {
 			// Each language's types write <T>Behaviors for a type that
 			// composes behaviors: each behavior's fields as a read
 			// returns them, narrowed by the type's config (D58). The
-			// own-field type stays the instance's data.
-			RendersBehaviors: true,
+			// own-field type stays the instance's data. A table whose
+			// fields are behaviors (D103) holds their owned fields as
+			// fields of its own, and its TypeScript repositories read
+			// them and run the behaviors' operations through the core.
+			RendersBehaviors:      true,
+			RendersFieldBehaviors: true,
 			Dirs: func(c registry.GenerateContext) []string {
 				var dirs []string
 				for _, lang := range c.Outputs.EnabledTypeLanguages() {
@@ -107,9 +111,12 @@ func RegisterCore(reg *registry.Registry) error {
 			Name:         "sql",
 			OutputKey:    "sql",
 			OutputSchema: sqlOutputSchema,
-			// An engine type, a DB type that composes a behavior, gets
-			// no table: the engine keeps its instances (D58).
-			RendersBehaviors: true,
+			// An engine type, a DB type that composes a behavior on the
+			// type, gets no table: the engine keeps its instances (D58).
+			// A table whose fields are behaviors gets their owned fields'
+			// columns and @optimistic's _version (D103).
+			RendersBehaviors:      true,
+			RendersFieldBehaviors: true,
 			Dirs: func(c registry.GenerateContext) []string {
 				return []string{SQLDir(c.Options.OutputRoot, c.Config.Name)}
 			},
@@ -120,7 +127,9 @@ func RegisterCore(reg *registry.Registry) error {
 		},
 		{
 			Name: ormGenerator,
-			// An engine type gets no repository (D58).
+			// An engine type gets no repository (D58). A table whose
+			// fields are behaviors (D103) is not rendered yet: its
+			// repository would write the owned fields and skip the core.
 			RendersBehaviors: true,
 			Dirs: func(c registry.GenerateContext) []string {
 				return []string{ORMDir(c.Options.OutputRoot, c.Config.Name)}
@@ -167,7 +176,8 @@ func RegisterCore(reg *registry.Registry) error {
 			// It reads the @envVars class alone, which composes no
 			// behavior, so a General schema whose types compose
 			// behaviors builds: its types write <T>Behaviors (D58).
-			RendersBehaviors: true,
+			RendersBehaviors:      true,
+			RendersFieldBehaviors: true,
 			Dirs: func(c registry.GenerateContext) []string {
 				return []string{APIDir(c.Options.OutputRoot, c.Config.Name)}
 			},
@@ -268,9 +278,10 @@ func RegisterCore(reg *registry.Registry) error {
 			// a schema leaves absent would keep a cached service from
 			// being up to date. It removes the crate itself when the
 			// schema no longer needs one.
-			Name:             projectengineGenerator,
-			Kinds:            []string{string(ir.SchemaKindDB), string(ir.SchemaKindGeneral)},
-			RendersBehaviors: true,
+			Name:                  projectengineGenerator,
+			Kinds:                 []string{string(ir.SchemaKindDB), string(ir.SchemaKindGeneral)},
+			RendersBehaviors:      true,
+			RendersFieldBehaviors: true,
 			Generate: func(c registry.GenerateContext) error {
 				r := run{c}
 				return r.measure("output.engine-rust", r.generateProjectEngine)
@@ -285,10 +296,11 @@ func RegisterCore(reg *registry.Registry) error {
 			// schema with no engine type, and claims no directory: the
 			// document sits in the Go types module, which the types
 			// generator claims. outputs.engine names the namespace.
-			Name:             enginedocGenerator,
-			OutputKey:        "engine",
-			OutputSchema:     engineOutputSchema,
-			RendersBehaviors: true,
+			Name:                  enginedocGenerator,
+			OutputKey:             "engine",
+			OutputSchema:          engineOutputSchema,
+			RendersBehaviors:      true,
+			RendersFieldBehaviors: true,
 			Generate: func(c registry.GenerateContext) error {
 				r := run{c}
 				return r.measure("output.engine", r.generateEngineDocument)

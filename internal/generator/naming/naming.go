@@ -118,6 +118,12 @@ type Naming struct {
 	// TypeScript types import when their schema declares a graph.
 	VersionGraphNpmPackage string `toml:"versiongraph_npm_package"`
 
+	// RulesNpmPackage is the behaviors' core built for WebAssembly (D103):
+	// the generated TypeScript repositories of a database whose tables'
+	// fields are behaviors import its initSync and pass the core to the
+	// HTTP runtime's adapter.
+	RulesNpmPackage string `toml:"rules_npm_package"`
+
 	// EngineNpmPackage is the engine (D16), whose ./client subpath the
 	// module `superschematic engine-client` writes imports (D49).
 	EngineNpmPackage string `toml:"engine_npm_package"`
@@ -509,6 +515,10 @@ type PathsConfig struct {
 	// package.json), which the output root's Bun workspace overrides the
 	// generated packages' dependency on it with (D51).
 	HTTPRuntimeTypeScript string `toml:"http_runtime_typescript"`
+	// RulesTypeScript holds the behaviors' core's npm package (its
+	// package.json, D103), which the output root's Bun workspace overrides
+	// the generated types packages' dependency on it with.
+	RulesTypeScript string `toml:"rules_typescript"`
 	// Ptr holds the ptr Go module when it is a module of its own rather
 	// than a package of the schema runtime.
 	Ptr string `toml:"ptr"`
@@ -545,6 +555,7 @@ type LocalPaths struct {
 	HTTPRuntimeGo          string
 	HTTPRuntimeRust        string
 	HTTPRuntimeTypeScript  string
+	RulesTypeScript        string
 	Ptr                    string
 	BuildContext           string
 }
@@ -579,6 +590,7 @@ func (n Naming) LocalPaths(repoRoot string) LocalPaths {
 		HTTPRuntimeGo:          resolve(n.Paths.HTTPRuntimeGo),
 		HTTPRuntimeRust:        resolve(n.Paths.HTTPRuntimeRust),
 		HTTPRuntimeTypeScript:  resolve(n.Paths.HTTPRuntimeTypeScript),
+		RulesTypeScript:        resolve(n.Paths.RulesTypeScript),
 		Ptr:                    resolve(n.Paths.Ptr),
 		BuildContext:           resolve(n.Paths.BuildContext),
 	}
@@ -619,6 +631,7 @@ func (p PathsConfig) checkRelative() error {
 		{"http_runtime_go", p.HTTPRuntimeGo},
 		{"http_runtime_rust", p.HTTPRuntimeRust},
 		{"http_runtime_typescript", p.HTTPRuntimeTypeScript},
+		{"rules_typescript", p.RulesTypeScript},
 		{"ptr", p.Ptr},
 		{"build_context", p.BuildContext},
 	} {
@@ -782,6 +795,7 @@ func Default() Naming {
 		PtrGoModule:              "github.com/parable-work/superschematic/runtime/schema/go/ptr",
 		HTTPRuntimeNpmPackage:    "@superschematic/http-runtime",
 		VersionGraphNpmPackage:   "@superschematic/versiongraph",
+		RulesNpmPackage:          "@superschematic/rules",
 		EngineNpmPackage:         "@superschematic/engine",
 		VersionGraphPyPIDist:     "superschematic-versiongraph",
 		VersionGraphPythonModule: "superschematic_versiongraph",
@@ -847,6 +861,7 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.PtrGoModule, d.PtrGoModule)
 	fill(&n.HTTPRuntimeNpmPackage, d.HTTPRuntimeNpmPackage)
 	fill(&n.VersionGraphNpmPackage, d.VersionGraphNpmPackage)
+	fill(&n.RulesNpmPackage, d.RulesNpmPackage)
 	fill(&n.EngineNpmPackage, d.EngineNpmPackage)
 	fill(&n.VersionGraphPyPIDist, d.VersionGraphPyPIDist)
 	fill(&n.VersionGraphPythonModule, d.VersionGraphPythonModule)

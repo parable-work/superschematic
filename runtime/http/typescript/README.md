@@ -108,8 +108,9 @@ Its entry points:
   confirmations.
 - `@superschematic/http-runtime/postgres`, a `pg` Pool over a derived
   database connection, the Postgres value codec, the generated
-  repositories' runtime, and a queue's enqueue and claims (below). It is
-  the only entry that imports `pg`.
+  repositories' runtime, the behaviors' adapter on Postgres (D103,
+  `src/rules.ts`), and a queue's enqueue and claims (below). It is the only
+  entry that imports `pg`.
 - `@superschematic/http-runtime/identity`, the core user model's runtime
   (D50, below). The main entry point does not load it.
 - `@superschematic/http-runtime/gcs`, a `Bucket` on GCS, or on an
@@ -128,7 +129,9 @@ Its entry points:
   reads its env and bindings with on Cloudflare Workers (D64, below).
 - `@superschematic/http-runtime/d1`, `SqlDatabase`, the runtime's copy of
   D1's interface, which `Deps.db` is for a database whose DB service lists
-  `sqlite` first, and `ping`.
+  `sqlite` first, `ping`, and the behaviors' adapter (D103, `src/rules.ts`)
+  with `sqliteRulesStore`, which runs a command of a table whose fields are
+  behaviors over the layout its generated `orm.ts` embeds.
 - `@superschematic/http-runtime/sqlite`, `openSqlite(path)`, a
   `SqlDatabase` over `bun:sqlite` for `stack dev`, and `sqliteFile(url)`,
   the path a `sqlite:` URL names. It runs under Bun alone.

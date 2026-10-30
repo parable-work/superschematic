@@ -189,9 +189,13 @@ the run changes it is the context's `own()`, `get(field)` and
 Before the reads a rule across rows decides on (the last unit of stock, two
 bookings of one room), a hook calls `ctx.lock(key)?`. A `LockKey` is the
 behavior's logical name for what it serializes (`Stock/sku-1`); the host maps
-it to its locks: on Postgres a transaction's advisory lock, on SQLite and D1
-the one writer that already holds. A run asks for locks before reads, and
-decides on no answer made before the latest lock (`Answers::get`).
+it to its locks: on Postgres a transaction's advisory lock. SQLite and D1
+take none, and a host's reads there come before the one batch that writes,
+so the host checks in that batch that each read made under a lock still
+answers as it did, and runs the command again when one does not: of two
+commands that take one key, the second then decides over the first's
+writes. A run asks for locks before reads, and decides on no answer made
+before the latest lock (`Answers::get`).
 
 ## The change set
 
@@ -383,26 +387,184 @@ to map each logical name, by rules every adapter and generator derives from
 the declarations, so a behavior adds no code to any of them (D103):
 
 - a type to its table, a row's key to the key column, a row's version to its
-  `@optimistic` column;
+  `@optimistic` column, and a soft-deletable table's rows to its live ones,
+  whose `deletedAt` column is NULL;
 - an owned field `(use id, field)` to a column of the type's table: on a
-  field anchor `f`, the declaration's value field to `f` and every other
-  field to `f_<field in snake case>` (Workflow on `status`: `status`,
-  `status_entered_at`); on a type anchor, every field to `<storage
-  key>_<field in snake case>`, the storage key being the behavior's name
-  lowercased with each run of other characters one `_` (Workflow:
-  `workflow_status`, `workflow_entered_at`), so an own field of the same
-  name sits beside it, as `core-workflow.json` records an own `status`
-  beside Workflow's;
+  field anchor `f`, the declaration's value field to `f`'s own column, `f`
+  in snake case, and every other field to `<f in snake case>_<field in
+  snake case>` (Workflow on `status`: `status`, `status_entered_at`; on
+  `paymentStatus`: `payment_status`, `payment_status_entered_at`); on a
+  type anchor, every field to `<storage key>_<field in snake case>`, the
+  storage key being the behavior's name lowercased with each run of other
+  characters one `_` (Workflow: `workflow_status`, `workflow_entered_at`),
+  so an own field of the same name sits beside it, as `core-workflow.json`
+  records an own `status` beside Workflow's. Snake case is the
+  generators' own: a `_` before each capital that follows a lowercase
+  letter or a digit, each `-` a `_`, and the whole lowercased, so a run of
+  capitals stays one word (`lastIPAddress`: `last_ipaddress`);
 - a sub-table `(use id, table)` to a table with a foreign key to the row;
 - an outbox event and a deadline to the rows of the outbox and the deadline
   sub-table;
-- a lock key to an advisory lock, or to nothing where one writer holds.
+- a lock key to an advisory lock, or, on SQLite and D1, to a check in the
+  change set's batch of each read made under it.
 
 A build-time project's layout is the type's own table (D103, "A build-time
 project"); a runtime project's is its fixed tables, an instance's own fields
 in a JSON column and each behavior's rows in a shared sub-table keyed by
 schema and id ("A runtime project"). The core and the adapter are the same
 for both; only the layout differs.
+
+## The adapter
+
+Each language has one adapter (D103): TypeScript's is the HTTP runtime's
+`src/rules.ts` (exported from its `./postgres` and `./d1` entries), over
+`@superschematic/rules` (`runtime/rules/typescript`),
+the core built for `wasm32-unknown-unknown` from `../rules-wasm`, whose C
+ABI takes and returns JSON as `runtime/versiongraph`'s does. An adapter
+holds no behavior's name; it reads the layout document (below) and runs the
+host loop above inside the caller's transaction, beside the caller's other
+writes. For each command:
+
+1. It builds the command with the caller, the time in epoch milliseconds
+   and a request id of its own, unique per command and kept for every run,
+   and gives a create that names no key one of its own: a UUID's wire form
+   for a UUID key and a UUID's text for a string key. It refuses a create
+   with no key of any other type (`invalid_argument`), since the change set
+   names every row it writes by its key.
+2. It runs the core. For a `row` read it selects the row by its key: its
+   own columns, as the core's own fields, and each use's owned columns, as
+   that use's owned fields by declared name, each converted to the core's
+   JSON (a timestamp to epoch milliseconds), a NULL column absent, and its
+   version. For `hasRows` it asks whether the table has a row; for `spec`
+   it answers the layout's spec of the type, or none for a type the layout
+   lacks. A soft-deletable table's reads see its live rows alone (the
+   layout's `live`), so a row the repository holds deleted is `not_found`
+   to the core. It records each answer with the locks it held when it read.
+3. For a lock key it takes the lock, on Postgres
+   `pg_advisory_xact_lock(hashtextextended(key, 0))`, which the
+   transaction holds until it ends, before the reads it guards. SQLite and
+   D1 take none (the store's locks are `fenced`): their reads run outside
+   the batch that writes, so the batch begins with a check of each read the
+   command made under a lock, a row still at the version read or still
+   absent, a table that still has rows or still none, and a check that
+   fails moves the command as a fenced write does. It records the key and
+   runs again, and the core asks again for the reads made before it.
+4. A refusal it throws whole: class, code, status, message and details.
+5. A change set it applies as one unit: on Postgres in a savepoint of the
+   caller's transaction, which a moved row or a failed statement rolls back
+   to, leaving the transaction going on; on SQLite and D1 as one batch,
+   with a guard after each fenced statement that fails the batch when the
+   statement changed another number of rows. A create inserts its key, the
+   own fields and the owned columns, and is refused as `conflict` when the
+   table holds the key, as the reference host refuses it; an update sets the
+   patch's own columns (a null for a field the table has no column for
+   clears nothing, as a merge patch's null for a member it lacks), the owned
+   columns and `_version = _version + 1` `WHERE key = k AND _version =
+   expected`; a delete deletes `WHERE key = k AND _version = expected`; a
+   soft-deletable table's update and delete hold the row live as well, so a
+   soft delete made under a command moves the row. A caller that encodes the command's own row itself (the generated
+   repository's UUIDs, envelopes and audit stamps) passes its own columns,
+   which bind in place of the change set's own fields, and a soft-deletable
+   table's repository the columns a delete of the row sets in place of
+   deleting it (deletedAt, deletedBy), fenced alike. A fenced statement
+   that changes no row, or a check that fails, means the row moved: the
+   adapter undoes the unit, forgets its answers and runs the command again
+   from fresh state, with the same request id, up to eight runs, then
+   refuses it as `busy`. A
+   sub-table row, an outbox event or a deadline it refuses as `internal`
+   until the change that gives each a table (D103's order of the work, step
+   3): Workflow writes none.
+6. It returns `changes.result`.
+
+An upsert's insert applies no change set of the core's, so it binds what
+the core's create of the row gives it: the adapter runs the create to its
+change set and applies nothing (`prepareCreate`), and the repository
+inserts the row with the owned fields that change set holds and updates a
+row the unique key already holds by its own fields alone, as the
+repository's `updateMany` does.
+
+A row's version is the column `@optimistic` keeps, `_version`, which a
+trigger bumps on every update (`BEFORE UPDATE` on Postgres, `AFTER
+UPDATE` on SQLite and D1); a table that composes a behavior gets it.
+The version is what the core holds each written row to, so a write that
+another transaction made since the read, an ORM write or a raw one, moves
+the row and runs the command again. A lock key is the behavior's logical
+name for what a rule across rows serializes; the adapter never parses it.
+
+When deadlines come (step 3), an adapter runs a deadline command only while
+the deadline is still armed at the time the command names, checked before
+each run and again in the apply, which spends it: the core does not check
+it yet.
+
+Every adapter replays the recorded scenarios as transcripts:
+`superschematic-rules-testkit` writes `core-workflow.json` out as
+`runtime/engine/testdata/rules/core-workflow.transcript.json` (its
+`transcript` module is the format), the core's commands and what each must
+answer, through the replayer's own mapping, and an adapter's tests replay it
+against tables of their own on SQLite and on Postgres. The testkit's
+`tests/transcript.rs` fails when the checked-in file is not what the writer
+writes (`UPDATE_TRANSCRIPTS=1` rewrites it), and holds it to a floor of 96
+steps: 61 define and publish checks, 34 commands and one raw write, in the
+14 scenarios a core with no test fixtures runs. TypeScript's replay is the
+HTTP runtime's `src/rules-transcript.test.ts`, held to the same floor on
+bun:sqlite and on Postgres.
+
+## The layout document
+
+The generator writes, for each table that composes field-anchored
+behaviors, where the core's names live
+(`internal/generator/behaviorlayout`, which holds the layout rule in Go),
+and the generated ORM embeds it: the table, its key column and IR type, the
+version column, a soft-deletable table's `deletedAt` column (`live`), its
+own fields' columns, each use's id, behavior, anchor and
+owned columns (each declared field by its declared name, its IR field, its
+column, its IR type and how it converts), each use's operations, and the
+type as the core runs it, in `TypeSpec`'s JSON. For an `Order` whose
+`status` is a `Workflow`:
+
+```json
+{
+  "types": {
+    "Order": {
+      "type": "Order",
+      "table": "order",
+      "key": { "field": "id", "column": "id", "type": "Identity.UUID" },
+      "version": "_version",
+      "own": [{ "field": "title", "column": "title", "type": "string" }],
+      "uses": [
+        {
+          "id": "status",
+          "behavior": "Workflow",
+          "anchor": "status",
+          "fields": [
+            { "name": "status", "field": "status", "column": "status", "type": "string", "value": true },
+            { "name": "enteredAt", "field": "statusEnteredAt", "column": "status_entered_at", "type": "Temporal.DateTime", "convert": "epochMillis" }
+          ],
+          "operations": [{ "name": "transition", "writes": true }]
+        }
+      ],
+      "spec": {
+        "name": "Order",
+        "uses": [{ "behavior": "Workflow", "config": { "states": ["draft", "paid"], "transitions": [{ "from": "draft", "to": "paid" }] }, "anchor": { "field": "status" } }]
+      }
+    }
+  }
+}
+```
+
+A declared field's column type is its declaration's `type` (Workflow's
+`status` a `string`, `enteredAt` a `Temporal.DateTime`), and a date-time is
+epoch milliseconds in the core: the adapter binds and reads a `Date` on
+Postgres and the text `Date.prototype.toISOString` writes on SQLite. The
+declaration's `value` names the field that takes the anchor field's own
+name and column.
+
+The own columns are the table's columns but its key, its version, its
+owned fields, its audit fields and its internal metadata; a to-one
+relation's column holds its target's key and is named as a generated row
+holds it, `<field>Id`, with the target key's type. The generated `orm.ts`
+embeds the document as `<database>Rules` and passes it to the HTTP
+runtime's ORM in its definition's `rules`.
 
 ## Checks
 
@@ -412,6 +574,8 @@ cargo fmt --all --check
 cargo clippy -p superschematic-rules --all-targets -- -D warnings
 cargo test -p superschematic-rules
 cargo build -p superschematic-rules -p superschematic-rules-behaviors --target wasm32-unknown-unknown
+cargo test -p superschematic-rules-wasm
+cargo build -p superschematic-rules-wasm --target wasm32-unknown-unknown
 ```
 
 with `RUSTUP_TOOLCHAIN` set to the toolchain `tools.env` pins.
@@ -429,4 +593,33 @@ behavior to.
 `core-workflow.json` on Workflow through the reference host and fails on any
 step that answers otherwise than the engine, or when fewer steps are
 checked than its floor; `cargo test -p superschematic-rules-testkit` runs
-it.
+it, and `tests/transcript.rs` with it.
+
+TypeScript's binding and adapter:
+
+```
+cd runtime/rules/typescript && bun install && bun run test
+cd runtime/http/typescript && bun test src/rules*.test.ts
+```
+
+The first builds the module with the workspace's `dist` profile (one
+codegen unit, LTO, no symbol table: about 530 KB, 180 KB gzipped, against
+785 KB from a release build), copies it into `dist/`, and runs the loader's
+and the contract's tests under Bun and a smoke under Node. The second runs
+the adapter over an in-memory transaction, over bun:sqlite and Postgres, and
+the transcript's replay on both; its Postgres cases read
+`SUPERSCHEMATIC_RULES_TEST_DATABASE_URL` and are skipped without it, and its
+tests build the module first whenever cargo is on `PATH`, so they never run
+one older than the crates (cargo skips a build of crates that have not
+changed, and `scripts/build-wasm.mjs` leaves `dist/` alone when the module
+is the one it holds). The Go tests that build the package
+(`internal/testpaths`' `BuildRulesPackage`) rebuild it when a file of these
+crates, of `behaviors/declarations` or the workspace's lock file changes.
+
+The generator's layout is held to the adapter by
+`go test ./internal/generator/tsgen -run TestWorkflowTablesEndToEnd`: it
+generates `fixture-workflow-db`'s package from its `.schema.ts`, applies
+the generated DDL on bun:sqlite and on the Postgres
+`SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL` names, and runs the same cases
+through the adapter over the generated layout on SQLite and through the
+generated repository on Postgres.

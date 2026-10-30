@@ -9,6 +9,10 @@
 //! defined and published versions, its rows, their sub-table rows, the
 //! outbox, the armed deadlines and the change log. It knows no behavior.
 //!
+//! [`transcript`] writes a recording out as the core's commands and what
+//! each must answer, which every language's adapter replays against real
+//! tables ([`Transcript`], whose module is the format).
+//!
 //! [`replay`] maps a recording's engine calls onto a host and compares what
 //! the core and its behaviors decide: a record's own and behavior fields,
 //! an operation's result, an event's change, and every refusal whole, the
@@ -51,12 +55,17 @@ pub mod host;
 pub mod replay;
 pub mod shape;
 mod symbols;
+pub mod transcript;
 
 pub use host::{
     Applied, ApplyError, Armed, DeadlineKey, Logged, MemoryHost, Outboxed, Store, StoredRow,
     SubRowKey, TypeVersions, MAX_ATTEMPTS,
 };
 pub use replay::{replay, replay_path, scenario_path, Mismatch, Report, ScenarioReport, Skipped};
+pub use transcript::{
+    transcript, transcript_path, Transcript, TranscriptClock, TranscriptExpect, TranscriptField,
+    TranscriptRow, TranscriptScenario, TranscriptSkip, TranscriptStep, TranscriptType,
+};
 
 use superschematic_rules::Core;
 

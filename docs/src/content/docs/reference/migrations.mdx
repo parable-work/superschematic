@@ -720,8 +720,10 @@ SQLite has no form of these, so a service that lists `sqlite` and uses one
 fails its build, and `migrate plan --dialect sqlite` fails, each naming
 the feature and the dialect:
 
-- `@versioned` and `@optimistic`, whose triggers SQLite's adapter does not
-  read yet;
+- `@versioned`, whose triggers SQLite's adapter does not read yet
+  (`@optimistic` plans on SQLite: its bump is an `AFTER UPDATE` trigger
+  that gives the row it updated the next `_version`, which a table whose
+  fields are behaviors takes, D103);
 - projections;
 - an index method other than BTREE, such as the GIN or GIST an `@index`
   over a list, a JSON or an `LTREE` column picks, and an operator class
@@ -946,7 +948,7 @@ adopt.
 - The planner does not read raw SQL: a change Postgres refuses while a
   piece depends on a column fails its step.
 - A change the plan cannot express fails the plan and names it.
-- SQLite refuses `@versioned`, `@optimistic`, projections, an index
+- SQLite refuses `@versioned`, projections, an index
   method other than BTREE and an operator class, and `LTREE` and the
   PostGIS types ([Refusals](#refusals)).
 - A SQLite rebuild copies every table that references the rebuilt one,

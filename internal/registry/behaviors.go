@@ -96,6 +96,11 @@ type BehaviorDeclaration struct {
 	Conflicts []string `json:"conflicts,omitempty"`
 	// Fields are the fields the behavior adds to a type.
 	Fields []BehaviorField `json:"fields,omitempty"`
+	// Value names the field that holds the behavior's value when a type
+	// carries it on a field (D103): one of Fields, which takes the anchor
+	// field's name and column (Workflow's status, on `status:
+	// Workflow<...>`). Absent, the behavior cannot be anchored on a field.
+	Value string `json:"value,omitempty"`
 	// Operations are the operations the behavior adds to a type, beside
 	// the create, get, list, update and delete every schema has.
 	Operations []BehaviorOperation `json:"operations,omitempty"`
@@ -125,15 +130,25 @@ type BehaviorVeto struct {
 }
 
 // BehaviorField is a field a behavior adds to a type. It carries a name, a
-// description and whether it is volatile and per reader, no type: a
-// field's type can depend on the behavior's config. An instance keeps a
+// description, whether it is volatile and per reader, and the type of the
+// column it takes on a table. An instance of an engine type keeps a
 // behavior's fields under the behavior's name, apart from the type's own
 // and every other behavior's, so a field collides with nothing (D16,
 // amended: a behavior's fields sit under its name); a string names one by
-// BehaviorFieldPath.
+// BehaviorFieldPath. On a table a field-anchored use's fields are columns
+// (D103), named by the layout rule internal/generator/behaviorlayout
+// states.
 type BehaviorField struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	// Type is the IR type of the column the field takes on a table that
+	// carries the behavior on a field (D103): a builtin (string, number,
+	// boolean) or a scalar of the registry's catalog, which the generators
+	// map as they map an own field's. A date-time scalar (Temporal.DateTime)
+	// is epoch milliseconds in the core, which the adapters convert. Absent
+	// on a behavior no table carries yet; a field-anchored use needs every
+	// field of its behavior typed.
+	Type string `json:"type,omitempty"`
 	// Volatile is true for a field that can move without an event of its
 	// own instance: computed when the instance is read, from other
 	// instances, the clock or the config. No event records such a move, so
@@ -290,7 +305,8 @@ const behaviorNameDescriptor = "a letter A-Z followed by letters and digits"
 // other than "instance" or "schema"; a signal whose name is not camelCase
 // or repeats, whose paramsSchema is absent or does not compile, or whose
 // access is not "read", "write" or "operation"; a field name that is not an
-// identifier or repeats; a preconditionSchema that does not compile, is
+// identifier or repeats, a volatile field with a type, and a value that
+// names no field of the declaration; a preconditionSchema that does not compile, is
 // not an object schema or does not set "additionalProperties": false; a
 // veto code that is not lowercase snake case of at most 64 characters, or
 // repeats; a Package that is not an npm package name; and a Rust crate on a
@@ -299,7 +315,8 @@ const behaviorNameDescriptor = "a letter A-Z followed by letters and digits"
 // not a path into the crate (checkBehaviorRust). Finalize checks what needs
 // the whole registry: requires and conflicts name registered behaviors,
 // each operation's invocation policy is a value of the registry's policy,
-// and behaviors that name one Rust crate name it at one path.
+// behaviors that name one Rust crate name it at one path, and each field's
+// type is a builtin or a scalar of the catalog (checkBehaviorFieldTypes).
 func (r *Registry) RegisterBehavior(spec BehaviorSpec) error {
 	var decl BehaviorDeclaration
 	dec := json.NewDecoder(bytes.NewReader(spec.Declaration))
@@ -459,6 +476,34 @@ func checkBehaviorFields(decl BehaviorDeclaration) error {
 		seen[field.Name] = true
 		if field.PerReader && !field.Volatile {
 			return fmt.Errorf("registry: behavior %s field %s is perReader but not volatile: a value each reader reads its own of is computed at a read", decl.Name, field.Name)
+		}
+		if field.Type != "" && field.Volatile {
+			return fmt.Errorf("registry: behavior %s field %s is volatile and has a type: a value computed at a read takes no column", decl.Name, field.Name)
+		}
+	}
+	if decl.Value != "" && !seen[decl.Value] {
+		return fmt.Errorf("registry: behavior %s value %q is not one of its fields", decl.Name, decl.Value)
+	}
+	return nil
+}
+
+// behaviorFieldBuiltins are the builtin types a behavior's field may take
+// beside the catalog's scalars: those sqlutil.ScalarSQLTypes maps.
+var behaviorFieldBuiltins = []string{"string", "number", "boolean"}
+
+// checkBehaviorFieldTypes holds every declared field's type to a builtin
+// or a scalar of the registry's catalog (D103). Finalize runs it, after an
+// extension's catalog has registered.
+func (r *Registry) checkBehaviorFieldTypes() error {
+	catalog := r.Scalars()
+	for _, b := range r.Behaviors() {
+		for _, field := range b.Fields {
+			if field.Type == "" || slices.Contains(behaviorFieldBuiltins, field.Type) {
+				continue
+			}
+			if _, ok := catalog.Scalar(field.Type); !ok {
+				return fmt.Errorf("registry: behavior %s field %s type %q is neither a builtin (%s) nor a scalar of the catalog", b.Name, field.Name, field.Type, strings.Join(behaviorFieldBuiltins, ", "))
+			}
 		}
 	}
 	return nil

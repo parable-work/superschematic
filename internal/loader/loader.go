@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/loader/behaviorfields"
 	"github.com/parable-work/superschematic/internal/loader/identity"
 	"github.com/parable-work/superschematic/internal/loader/jsonreader"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
@@ -497,13 +498,36 @@ func (o *loadOptions) referenceDependenciesFor(servicePath string, schema *ir.Sc
 
 // runVerify executes the format-agnostic verification pass on the assembled
 // schema: warnings go to WithWarnings's function or print to
-// [WarningWriter], errors fail the load. A schema that verifies has its
-// version graphs expanded into ordinary types, the
-// tables its User and UserRole traits own added and its user model route
-// sets filled from its authDb (D50), any scalar only the generated fields
-// use is hydrated from the registry, and the services its stack
-// declarations name join its references (D41).
+// [WarningWriter], errors fail the load. The fields its field-anchored
+// behaviors own join their tables before the pass (D103,
+// behaviorfields.Expand), once the behaviors' own checks hold what that
+// relies on (verify.CheckBehaviors), so an index, a uniqueness, a display
+// field, a projection's column and @enqueueOnChange may name one as they
+// name the table's own; when those checks fail, the pass runs over the
+// schema as written and reports them among its findings. A schema that
+// verifies has its version graphs expanded into ordinary types, the tables
+// its User and UserRole traits own added and its user model route sets
+// filled from its authDb (D50), any scalar only the generated fields use
+// is hydrated from the registry, and the services its stack declarations
+// name join its references (D41).
 func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema, error) {
+	reg := vin.Registry
+	if reg == nil {
+		reg = registry.New(vin.Naming.OrDefault())
+	}
+	if verify.CheckBehaviors(schema, vin).Err() == nil {
+		owned, err := behaviorfields.Expand(schema, reg)
+		if err != nil {
+			return nil, err
+		}
+		// The pass reads the owned fields' scalars as it reads the
+		// table's own.
+		if len(owned) > 0 {
+			if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+				return nil, err
+			}
+		}
+	}
 	res := verify.Run(schema, vin)
 	for _, warning := range res.Warnings {
 		if o.warn != nil {
@@ -519,10 +543,6 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	added = append(added, identity.Expand(schema)...)
 	added = append(added, identity.ExpandRoutes(schema, vin.AuthDB, vin.Naming.OrDefault().IdentityPermissionPrefix)...)
 	if len(added) > 0 {
-		reg := vin.Registry
-		if reg == nil {
-			reg = registry.New(vin.Naming.OrDefault())
-		}
 		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
 			return nil, err
 		}

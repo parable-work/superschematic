@@ -41,6 +41,10 @@
 //! cannot be mapped (a call outside this surface, a behavior written in
 //! TypeScript that no fixture ports, a fixture's operation that tests the
 //! store) is skipped with its reason.
+//!
+//! [`crate::transcript`] writes a recording out as a transcript through this
+//! same mapping: the replayer records each command, check and raw write it
+//! made on the host, with what the host answered, as it makes it.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -52,9 +56,10 @@ use superschematic_engine_testkit::{load, ScenarioFile};
 use superschematic_rules::{Action, Caller, Code, Command, Core, Declaration, Refusal, TypeSpec};
 
 use crate::fixtures;
-use crate::host::MemoryHost;
+use crate::host::{Applied, MemoryHost};
 use crate::shape::{self, FieldDef};
 use crate::symbols::Symbols;
+use crate::transcript::{Recorded, TranscriptClock};
 
 /// Where the wall clock of a replay starts: an instant of the recording's
 /// span (thirteen digits), far from any fixed clock's.
@@ -197,11 +202,24 @@ pub fn replay_path(path: &Path, make_core: &dyn Fn() -> Core) -> Result<Report, 
 /// each engine a scenario opens, with the test behaviors a scenario names
 /// added from [`fixtures`].
 pub fn replay(file: &ScenarioFile, make_core: &dyn Fn() -> Core) -> Report {
+    replay_recording(file, make_core, false).0
+}
+
+/// Replays a file as [`replay`] does and, when `record` is set, records
+/// for each scenario, in order, what a transcript holds of it: the
+/// commands, checks and raw writes the replay made on the host and what
+/// the host answered ([`Recorded`]).
+pub(crate) fn replay_recording(
+    file: &ScenarioFile,
+    make_core: &dyn Fn() -> Core,
+    record: bool,
+) -> (Report, Vec<Recorded>) {
     let runs = make_core().names();
     let mut report = Report {
         file: file.name.clone(),
         scenarios: Vec::new(),
     };
+    let mut recorded = Vec::new();
     for scenario in &file.scenarios {
         let steps = scenario
             .get("steps")
@@ -209,6 +227,7 @@ pub fn replay(file: &ScenarioFile, make_core: &dyn Fn() -> Core) -> Report {
             .cloned()
             .unwrap_or_default();
         let mut run = Run::new(&file.name, scenario, make_core, steps.len());
+        run.recorded = record.then(Recorded::default);
         match skip_reason(&file.name, scenario, &runs) {
             Some(reason) => {
                 for (index, step) in steps.iter().enumerate() {
@@ -221,9 +240,10 @@ pub fn replay(file: &ScenarioFile, make_core: &dyn Fn() -> Core) -> Report {
                 }
             }
         }
+        recorded.extend(run.recorded.take());
         report.scenarios.push(run.report);
     }
-    report
+    (report, recorded)
 }
 
 // names reads a scenario's list of names under a key.
@@ -411,6 +431,10 @@ struct Run<'r> {
     wall: i64,
     halted: Option<(usize, String)>,
     report: ScenarioReport,
+    /// The step being made, from 1, and its call, for the recording.
+    current: (usize, String),
+    /// What a transcript holds of the scenario, when one is written.
+    recorded: Option<Recorded>,
 }
 
 impl<'r> Run<'r> {
@@ -428,6 +452,8 @@ impl<'r> Run<'r> {
             symbols: Symbols::default(),
             wall: WALL_START,
             halted: None,
+            current: (0, String::new()),
+            recorded: None,
             report: ScenarioReport {
                 name: scenario
                     .get("name")
@@ -454,6 +480,7 @@ impl<'r> Run<'r> {
             self.skip(index, step, reason);
             return;
         }
+        self.current = (index + 1, call_of(step).to_owned());
         let done = if step.get("js").and_then(Value::as_bool) == Some(true) {
             Done::Halted("only the recording's own host runs it (js)".to_owned())
         } else {
@@ -618,6 +645,12 @@ impl<'r> Run<'r> {
             Some("fixed") => Clock::Fixed(step.get("now").and_then(Value::as_i64).unwrap_or(0)),
             _ => Clock::Wall,
         };
+        if let Some(recorded) = &mut self.recorded {
+            recorded.opened(match clock {
+                Clock::Fixed(reading) => TranscriptClock::Fixed(reading),
+                Clock::Wall => TranscriptClock::Wall,
+            });
+        }
         // Two opens of one path are one file: the second reopens what the
         // first wrote.
         let store = self
@@ -765,6 +798,10 @@ impl<'r> Run<'r> {
         {
             return halted;
         }
+        if let Some(recorded) = &mut self.recorded {
+            let database = self.engines[cx.at].path.clone();
+            recorded.raw(&self.current, &database, write);
+        }
         Done::Skipped(
             "it writes behaviors' columns with SQL of its own, whose result (changes, lastInsertRowid) is SQLite's; the replayer applied the write to the row past the adapter, as a raw write a host does not refuse (D103)"
                 .to_owned(),
@@ -795,7 +832,18 @@ impl<'r> Run<'r> {
         let type_name = defined.spec.name.clone();
         let engine = &mut self.engines[cx.at];
         let live_version = engine.host.store().live_version(&type_name);
+        let check = engine.host.define_command(&defined.spec, cx.caller, cx.now);
+        let spec = defined.spec.clone();
         let outcome = engine.host.define(defined.spec, cx.caller, cx.now);
+        if let Some(recorded) = &mut self.recorded {
+            recorded.check(
+                &self.current,
+                &engine.path,
+                spec,
+                check,
+                outcome.as_ref().err(),
+            );
+        }
         if outcome.is_ok() {
             engine.drafts.insert(type_name.clone(), defined.fields);
         }
@@ -814,13 +862,24 @@ impl<'r> Run<'r> {
         };
         let engine = &mut self.engines[cx.at];
         let live_version = engine.host.store().live_version(type_name);
-        let outcome = engine
-            .host
-            .publish(type_name, cx.caller, cx.now)
-            .map(|published| match published {
-                Some(version) => json!({ "version": version, "published": true }),
-                None => json!({ "published": false }),
-            });
+        let pending = engine.host.publish_command(type_name, cx.caller, cx.now);
+        let published = engine.host.publish(type_name, cx.caller, cx.now);
+        if let (Some(recorded), Some((spec, check))) = (&mut self.recorded, pending) {
+            recorded.check(
+                &self.current,
+                &engine.path,
+                spec.clone(),
+                check,
+                published.as_ref().err(),
+            );
+            if let (Ok(Some(_)), Some(fields)) = (&published, engine.drafts.get(type_name)) {
+                recorded.published(spec, fields);
+            }
+        }
+        let outcome = published.map(|published| match published {
+            Some(version) => json!({ "version": version, "published": true }),
+            None => json!({ "published": false }),
+        });
         if outcome.is_ok() {
             if let Some(fields) = engine.drafts.remove(type_name) {
                 engine.fields.insert(type_name.to_owned(), fields);
@@ -1001,14 +1060,42 @@ impl<'r> Run<'r> {
 
     // write runs a create or an update and compares the record it leaves.
     fn write(&mut self, cx: &Cx<'_>, type_name: &str, action: Action) -> Done {
-        let engine = &mut self.engines[cx.at];
-        let live_version = engine.host.store().live_version(type_name);
+        let live_version = self.engines[cx.at].host.store().live_version(type_name);
         let command = Command::new(cx.caller.clone(), cx.now, action);
-        let outcome = engine
-            .host
-            .execute(type_name, command)
-            .map(|applied| record_of(&engine.host, type_name, &applied.key));
+        let outcome = self.execute(cx.at, type_name, command);
+        let host = &self.engines[cx.at].host;
+        let outcome = outcome.map(|applied| record_of(host, type_name, &applied.key));
         self.judge(cx, type_name, live_version, outcome, compare_record)
+    }
+
+    // execute runs a command on an engine's host, and records it with what
+    // the host answered and the row it leaves when a transcript is written.
+    fn execute(
+        &mut self,
+        at: usize,
+        type_name: &str,
+        command: Command,
+    ) -> Result<Applied, Refusal> {
+        let engine = &mut self.engines[at];
+        let command = engine.host.prepare(command);
+        let live = engine.host.store().live(type_name).cloned();
+        let outcome = engine.host.execute(type_name, command.clone());
+        if let Some(recorded) = &mut self.recorded {
+            let row = command
+                .action
+                .key()
+                .and_then(|key| engine.host.store().row(type_name, key));
+            recorded.command(
+                &self.current,
+                &engine.path,
+                type_name,
+                live.as_ref(),
+                command.clone(),
+                &outcome,
+                row,
+            );
+        }
+        outcome
     }
 
     fn delete(&mut self, cx: &Cx<'_>) -> Done {
@@ -1018,8 +1105,7 @@ impl<'r> Run<'r> {
         ) else {
             return Done::Skipped("a delete without a schema and an id".to_owned());
         };
-        let engine = &mut self.engines[cx.at];
-        let live_version = engine.host.store().live_version(type_name);
+        let live_version = self.engines[cx.at].host.store().live_version(type_name);
         let command = Command::new(
             cx.caller.clone(),
             cx.now,
@@ -1027,7 +1113,7 @@ impl<'r> Run<'r> {
                 key: key.to_owned(),
             },
         );
-        let outcome = match engine.host.execute(type_name, command) {
+        let outcome = match self.execute(cx.at, type_name, command) {
             Ok(_) => Ok(Value::Bool(true)),
             // The engine answers false for a row that is not there.
             Err(refusal) if refusal.code == Code::NotFound => Ok(Value::Bool(false)),
@@ -1105,9 +1191,7 @@ impl<'r> Run<'r> {
                         params,
                     },
                 );
-                engine
-                    .host
-                    .execute(type_name, command)
+                self.execute(cx.at, type_name, command)
                     .map(|applied| applied.result().clone())
             }
             _ => {

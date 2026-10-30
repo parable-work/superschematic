@@ -9,9 +9,11 @@ import (
 // generates, and the fields, indexes and prune pins it adds to member types
 // (ir.OriginVersionGraph), and the tables, fields and indexes the user
 // model's traits add and the operations, types and enum its route sets add
-// (ir.OriginIdentity). Any Origin marks loader output. The declarations
-// stay, so a written schema file expands to the same IR when it is read
-// back. schema itself is not modified.
+// (ir.OriginIdentity). Any Origin marks loader output, and so does a field
+// a behavior owns, which the loader adds for a use anchored on a field,
+// with the @optimistic that use implies (D103). The declarations stay, so a
+// written schema file expands to the same IR when it is read back. schema
+// itself is not modified.
 func withoutExpansion(schema *ir.Schema) *ir.Schema {
 	expanded := false
 	for _, td := range schema.Types {
@@ -88,7 +90,7 @@ func authoredSet(set *ir.OperationSet) *ir.OperationSet {
 // or prune pin the loader added.
 func typeHasExpansion(td *ir.TypeDef) bool {
 	for _, fd := range td.Fields {
-		if fd.Origin != "" {
+		if fd.Origin != "" || fd.Owned() {
 			return true
 		}
 	}
@@ -108,14 +110,22 @@ func typeHasExpansion(td *ir.TypeDef) bool {
 }
 
 // authoredType returns a copy of td without the fields, indexes and prune
-// pins the loader added.
+// pins the loader added. A table whose behaviors' fields the loader added
+// is @optimistic because of them, unless it is @versioned (D103), so the
+// copy leaves that out too: each use is written, and reading it back adds
+// both again.
 func authoredType(td *ir.TypeDef) *ir.TypeDef {
 	copied := *td
 	copied.Fields = nil
+	owned := false
 	for _, fd := range td.Fields {
-		if fd.Origin == "" {
+		owned = owned || fd.Owned()
+		if fd.Origin == "" && !fd.Owned() {
 			copied.Fields = append(copied.Fields, fd)
 		}
+	}
+	if owned && !td.Versioned {
+		copied.Optimistic = false
 	}
 	copied.Indexes = nil
 	for _, idx := range td.Indexes {
