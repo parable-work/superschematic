@@ -414,14 +414,15 @@ impl BehaviorDeclaration {
 
 /// A declaration without the members only a table's layout reads (D103):
 /// its `value` and each field's `type`, which the engine, keeping no
-/// table, never answers with.
+/// table, never answers with. It shifts them out, so the members after
+/// them keep the order the declaration writes them in.
 fn without_layout_members(mut value: Value) -> Value {
     if let Value::Object(members) = &mut value {
-        members.remove("value");
+        members.shift_remove("value");
         if let Some(Value::Array(fields)) = members.get_mut("fields") {
             for field in fields {
                 if let Value::Object(field) = field {
-                    field.remove("type");
+                    field.shift_remove("type");
                 }
             }
         }
@@ -977,6 +978,32 @@ mod tests {
         .expect("Workflow's declaration is sound");
         assert!(workflow.json.get("value").is_none());
         assert!(workflow.json["fields"][1].get("type").is_none());
+        // What follows them keeps its place, as the corpus records it.
+        let members: Vec<&str> = workflow
+            .json
+            .as_object()
+            .expect("an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            members,
+            [
+                "name",
+                "description",
+                "configSchema",
+                "fields",
+                "operations",
+                "vetoes"
+            ]
+        );
+        let field: Vec<&str> = workflow.json["fields"][1]
+            .as_object()
+            .expect("an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(field, ["name", "description"]);
     }
 
     #[test]
