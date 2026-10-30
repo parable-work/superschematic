@@ -1,6 +1,6 @@
 [package]
 name = "superschematic-rules-wasm"
-description = "The pure core of the behaviors (D103) with the behaviors ported onto it, behind a JSON-in, JSON-out C ABI that @superschematic/rules loads as a WebAssembly module"
+description = "The pure core of the behaviors (D103) with the behaviors ported onto it, behind a JSON-in, JSON-out C ABI that @superschematic/rules loads as a WebAssembly module and the Go binding (runtime/rules/go) links as a static archive"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,8 +12,10 @@ publish.workspace = true
 name = "superschematic_rules_wasm"
 # cdylib for the wasm32-unknown-unknown module @superschematic/rules
 # (runtime/rules/typescript) loads, built with plain cargo as
-# runtime/versiongraph's is; rlib for this crate's tests and docs.
-crate-type = ["cdylib", "rlib"]
+# runtime/versiongraph's is; staticlib for the Go binding (runtime/rules/go,
+# cgo), which scripts/rules-archive.sh stages as libsuperschematic_rules.a;
+# rlib for this crate's tests and docs.
+crate-type = ["cdylib", "rlib", "staticlib"]
 
 # Like the core, nothing here does I/O (D103): the module imports nothing
 # from its host.

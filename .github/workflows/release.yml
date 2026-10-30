@@ -12,8 +12,9 @@ name: release
 # build-archives, beside verify, packs per runner the static archives a
 # generated Go server links through cgo, which no module the module proxy
 # serves carries: superscalar's, built from the pinned checkout, the
-# version graph's and the engine's (with its C ABI's header), all with
-# tools.env's Rust, so they link into one binary, which the runner's link
+# version graph's, the engine's and the behaviors' core's (each of the last
+# two with its C ABI's header; D58, D103), all with tools.env's Rust, so
+# they link into one binary, which the runner's link
 # check proves on each of the four platforms (scripts/release-archives.sh,
 # scripts/engine-link-check.sh; docs/stack-model.md, section 8.2; D47,
 # amended; D58), and packs the engine's prebuilt Node-API addon for its
@@ -209,11 +210,11 @@ jobs:
           NAME: ${{ matrix.name }}
         run: scripts/release-archives.sh "$VERSION" "$NAME" dist
 
-      - name: Link check (one binary over the three archives, on this platform)
+      - name: Link check (one binary over the four archives, on this platform)
         # The archives the tarball packed, already built: each defines its
         # own C functions alone, and one Go binary that imports the
-        # superscalar, version graph and engine bindings links them and
-        # runs.
+        # superscalar, version graph, engine and rules bindings links them
+        # and runs.
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
           CGO_ENABLED: "1"
@@ -721,12 +722,12 @@ jobs:
             echo "## Artifacts"
             echo
             echo "The CLI is \`superschematic_${VERSION}_<platform>.tar.gz\`, the CLI with the Topcoat extension linked too \`superschematic-topcoat_${VERSION}_<platform>.tar.gz\`, the identity runner \`superschematic-identity_${VERSION}_<platform>.tar.gz\` and the migration runner \`superschematic-migrate_${VERSION}_<platform>.tar.gz\`, for linux-x64, linux-arm64, darwin-x64 and darwin-arm64."
-            echo "\`superschematic-archives_${VERSION}_<platform>.tar.gz\` holds the static archives a generated Go server links through cgo, superscalar's, the version graph's and the engine's, under \`lib/\`, and the engine's C ABI header under \`include/\`: build with \`CGO_LDFLAGS=-L<dir>/lib\`. The CLI pins each one's digest in the Dockerfiles and workflows it generates."
+            echo "\`superschematic-archives_${VERSION}_<platform>.tar.gz\` holds the static archives a generated Go server links through cgo, superscalar's, the version graph's, the engine's and the behaviors' core's, under \`lib/\`, and the engine's and the behaviors' core's C ABI headers under \`include/\`: build with \`CGO_LDFLAGS=-L<dir>/lib\`. The CLI pins each one's digest in the Dockerfiles and workflows it generates."
             echo "\`@superschematic/engine\` installs the engine's prebuilt Node-API addon from \`@superschematic/engine-<target>\`, one npm package per platform: darwin-arm64, darwin-x64, linux-x64-gnu and linux-arm64-gnu."
             echo "Every binary was built from commit \`$GITHUB_SHA\` and is listed in \`SHA256SUMS\`."
             echo "Verify provenance with: \`gh attestation verify <asset> --repo ${GITHUB_REPOSITORY}\`."
             echo
-            echo "Go modules: \`go get github.com/${GITHUB_REPOSITORY}@$TAG\`, \`.../ir@$TAG\`, \`.../runtime/schema/go@$TAG\`, \`.../runtime/http/go@$TAG\`, \`.../runtime/versiongraph/go@$TAG\`, \`.../runtime/engine/go@$TAG\`, \`.../runtime/migrate/go@$TAG\`."
+            echo "Go modules: \`go get github.com/${GITHUB_REPOSITORY}@$TAG\`, \`.../ir@$TAG\`, \`.../runtime/schema/go@$TAG\`, \`.../runtime/http/go@$TAG\`, \`.../runtime/versiongraph/go@$TAG\`, \`.../runtime/engine/go@$TAG\`, \`.../runtime/rules/go@$TAG\`, \`.../runtime/migrate/go@$TAG\`."
           } > notes.md
           flags=()
           if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi

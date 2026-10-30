@@ -146,6 +146,18 @@ the core's static archive through cgo; the
 [Go install page](/superschematic/install/go/#requirements) says how to
 build it.
 
+### `rules_go_module`
+
+Default: `github.com/parable-work/superschematic/runtime/rules/go`
+
+Go module path of the behaviors' core's Go binding and adapter (D103). A
+generated Go ORM requires it when its schema has a table whose fields are
+behaviors: its repositories run their creates, updates, deletes and each
+use's operations through the core. The module links the core's static
+archive through cgo: a release's archives tarball holds it and its header
+(`CGO_LDFLAGS=-L<dir>/lib`), and in a checkout `scripts/rules-archive.sh`
+builds it where cargo is (D82).
+
 ### `versiongraph_rust_crate`
 
 Default: `superschematic-versiongraph-engine`
@@ -473,6 +485,15 @@ crate names the crate's version instead of a path.
 Default: unset. This repository's own file sets `runtime/versiongraph/go`.
 
 Directory of the version-graph core's Go binding module.
+
+### `paths.rules_go`
+
+Default: unset. This repository's own file sets `runtime/rules/go`.
+
+Directory of the behaviors' core's Go module (D103). With this key set, a
+generated Go ORM whose schema has a table whose fields are behaviors
+replaces the module with the checkout, where the module links the archive
+`scripts/rules-archive.sh` stages under its `lib/<goos>_<goarch>`.
 
 ### `paths.versiongraph_typescript`
 

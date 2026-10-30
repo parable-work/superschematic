@@ -35,6 +35,7 @@ schema_ir_go_module = "github.com/parable-work/superschematic/ir"
 schema_runtime_go_module = "github.com/parable-work/superschematic/runtime/schema/go"
 schema_runtime_rust_crate = "superschematic-schema-runtime"
 versiongraph_go_module = "github.com/parable-work/superschematic/runtime/versiongraph/go"
+rules_go_module = "github.com/parable-work/superschematic/runtime/rules/go"
 versiongraph_rust_crate = "superschematic-versiongraph-engine"
 engine_go_module = "github.com/parable-work/superschematic/runtime/engine/go"
 http_runtime_go_module = "github.com/parable-work/superschematic/runtime/http/go"
@@ -123,6 +124,7 @@ http_runtime_go = "runtime/http/go"
 http_runtime_rust = "runtime/http/rust"
 http_runtime_typescript = "runtime/http/typescript"
 rules_typescript = "runtime/rules/typescript"
+rules_go = "runtime/rules/go"
 
 # How the config fields an API's edges derive in a stack are named: its
 # database connection, the endpoint of each API it `calls`, and the

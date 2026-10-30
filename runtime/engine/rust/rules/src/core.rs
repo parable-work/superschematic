@@ -12,6 +12,7 @@
 //! its own. A host whose reads are asynchronous writes the loop itself, the
 //! same way.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -41,6 +42,14 @@ pub(crate) struct Registered {
 pub struct Core {
     behaviors: Vec<Registered>,
     matcher: Arc<dyn PermissionMatcher>,
+    id: u64,
+}
+
+/// The id the next core, or the next behavior a core adds, takes.
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+fn next_id() -> u64 {
+    NEXT_ID.fetch_add(1, Ordering::Relaxed)
 }
 
 impl Default for Core {
@@ -48,6 +57,7 @@ impl Default for Core {
         Core {
             behaviors: Vec::new(),
             matcher: Arc::new(DottedPermissions),
+            id: next_id(),
         }
     }
 }
@@ -90,6 +100,7 @@ impl Core {
             Some(known) => *known = registered,
             None => self.behaviors.push(registered),
         }
+        self.id = next_id();
     }
 
     /// The core with a permission matcher of a deployment's own in place
@@ -102,6 +113,14 @@ impl Core {
     /// The matcher a behavior's `can()` asks.
     pub fn matcher(&self) -> &dyn PermissionMatcher {
         self.matcher.as_ref()
+    }
+
+    /// The core as its behaviors stand, unique in the process: no other
+    /// core has it, and the core takes a new one when it adds a behavior. A
+    /// host keeps what it learns of a core's behaviors by it, such as an
+    /// adapter's define check of a layout.
+    pub fn id(&self) -> u64 {
+        self.id
     }
 
     /// The declared name of each behavior, in the order they were added.

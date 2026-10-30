@@ -546,6 +546,7 @@ func (r run) generateORM() error {
 			ModuleClosure: closure,
 			SQLite:        r.Outputs.SQLDialect(registry.SQLDialectSQLite),
 			Actor:         r.ormActor(),
+			Registry:      r.Registry,
 			Clock:         r.Options.Clock,
 		})
 		return err
@@ -1199,6 +1200,9 @@ func (r run) goServerOutput() (*apigen.APIOutput, error) {
 		if err != nil {
 			return nil, fmt.Errorf("generator: load upstream auth schema %s: %w", output.UpstreamSchema, err)
 		}
+		if err := refuseGoAPIOverRules(r.Config.Name, output.UpstreamSchema, upstream); err != nil {
+			return nil, err
+		}
 		roots = append(roots, upstream)
 	}
 	for _, root := range append([]*ir.Schema{r.Schema}, roots...) {
@@ -1212,6 +1216,20 @@ func (r run) goServerOutput() (*apigen.APIOutput, error) {
 		output.AddIndirectModules(closure)
 	}
 	return output, nil
+}
+
+// refuseGoAPIOverRules refuses a Go API whose go.mod requires the ORM of
+// db when a table of db has fields that are behaviors (D103): that ORM
+// runs them through the rules Go module, which links the behaviors' core's
+// static archive, and neither a generated Go API's go.mod nor a Go
+// server's image reaches that module yet. The API generators' operations
+// bring both.
+func refuseGoAPIOverRules(api, db string, schema *ir.Schema) error {
+	typeName, field, behavior, found := schema.FindFieldBehavior()
+	if !found {
+		return nil
+	}
+	return fmt.Errorf("generator: the Go API %s requires the ORM of %s, whose type %s composes behavior %s on its field %s: that ORM links the behaviors' core, and a generated Go API and its server do not build with it yet (D103)", api, db, typeName, behavior, field)
 }
 
 // goDeps returns what the Go server's Deps holds beside its config and
@@ -1252,6 +1270,9 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 		schema, err := r.LoadDependency(db)
 		if err != nil {
 			return deps, nil, fmt.Errorf("generator: load %s, the database of %s: %w", db, r.Config.Name, err)
+		}
+		if err := refuseGoAPIOverRules(r.Config.Name, db, schema); err != nil {
+			return deps, nil, err
 		}
 		deps.Database = db
 		deps.ORMModule = r.Options.Naming.GoORMModule(db)

@@ -98,6 +98,13 @@ type Naming struct {
 	// graph. It links the core's static archive through cgo.
 	VersionGraphGoModule string `toml:"versiongraph_go_module"`
 
+	// RulesGoModule is the Go binding and adapter of the behaviors' core
+	// (D103), which a generated Go ORM requires when its schema has a
+	// table whose fields are behaviors: its repositories run their writes
+	// and each use's operations through the core. It links the core's
+	// static archive through cgo.
+	RulesGoModule string `toml:"rules_go_module"`
+
 	// EngineGoModule is the Go binding of the behavior engine (D58), which
 	// the entrypoint of a Go server whose API's database holds engine
 	// types imports to open the engine and mount its routes. It links the
@@ -460,6 +467,10 @@ type PathsConfig struct {
 	SchemaRuntimeRust string `toml:"schema_runtime_rust"`
 	// VersionGraphGo holds the version-graph core's Go binding module.
 	VersionGraphGo string `toml:"versiongraph_go"`
+	// RulesGo holds the behaviors' core's Go module (D103): its binding of
+	// the core's static archive and the adapter a generated Go ORM runs
+	// over.
+	RulesGo string `toml:"rules_go"`
 	// VersionGraphTypeScript holds the version-graph runtime's npm package
 	// (its package.json).
 	VersionGraphTypeScript string `toml:"versiongraph_typescript"`
@@ -541,6 +552,7 @@ type LocalPaths struct {
 	SchemaRuntimeGo        string
 	SchemaRuntimeRust      string
 	VersionGraphGo         string
+	RulesGo                string
 	VersionGraphTypeScript string
 	VersionGraphRust       string
 	EngineRust             string
@@ -576,6 +588,7 @@ func (n Naming) LocalPaths(repoRoot string) LocalPaths {
 		SchemaRuntimeGo:        resolve(n.Paths.SchemaRuntimeGo),
 		SchemaRuntimeRust:      resolve(n.Paths.SchemaRuntimeRust),
 		VersionGraphGo:         resolve(n.Paths.VersionGraphGo),
+		RulesGo:                resolve(n.Paths.RulesGo),
 		VersionGraphTypeScript: resolve(n.Paths.VersionGraphTypeScript),
 		VersionGraphRust:       resolve(n.Paths.VersionGraphRust),
 		EngineRust:             resolve(n.Paths.EngineRust),
@@ -617,6 +630,7 @@ func (p PathsConfig) checkRelative() error {
 		{"schema_runtime_go", p.SchemaRuntimeGo},
 		{"schema_runtime_rust", p.SchemaRuntimeRust},
 		{"versiongraph_go", p.VersionGraphGo},
+		{"rules_go", p.RulesGo},
 		{"versiongraph_typescript", p.VersionGraphTypeScript},
 		{"versiongraph_rust", p.VersionGraphRust},
 		{"engine_rust", p.EngineRust},
@@ -788,6 +802,7 @@ func Default() Naming {
 		SchemaRuntimeGoModule:    "github.com/parable-work/superschematic/runtime/schema/go",
 		SchemaRuntimeRustCrate:   "superschematic-schema-runtime",
 		VersionGraphGoModule:     "github.com/parable-work/superschematic/runtime/versiongraph/go",
+		RulesGoModule:            "github.com/parable-work/superschematic/runtime/rules/go",
 		VersionGraphRustCrate:    "superschematic-versiongraph-engine",
 		EngineGoModule:           "github.com/parable-work/superschematic/runtime/engine/go",
 		HTTPRuntimeGoModule:      "github.com/parable-work/superschematic/runtime/http/go",
@@ -854,6 +869,7 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.SchemaRuntimeGoModule, d.SchemaRuntimeGoModule)
 	fill(&n.SchemaRuntimeRustCrate, d.SchemaRuntimeRustCrate)
 	fill(&n.VersionGraphGoModule, d.VersionGraphGoModule)
+	fill(&n.RulesGoModule, d.RulesGoModule)
 	fill(&n.VersionGraphRustCrate, d.VersionGraphRustCrate)
 	fill(&n.EngineGoModule, d.EngineGoModule)
 	fill(&n.HTTPRuntimeGoModule, d.HTTPRuntimeGoModule)

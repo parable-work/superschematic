@@ -4,6 +4,9 @@ package orm
 
 import (
 	"context"
+{{- if .OperationsUseRawJSON }}
+	"encoding/json"
+{{- end }}
 {{- if .HasVersionedRepositories }}
 	"time"
 {{- end }}
@@ -38,18 +41,18 @@ type {{ .TypeName }}RepositoryInterface interface {
 	FindOne(ctx context.Context, filter *{{ .TypeName }}Filter, opts *{{ .TypeName }}FindOptions) (*types.{{ .TypeName }}, error)
 	FindMany(ctx context.Context, filter *{{ .TypeName }}Filter, opts *{{ .TypeName }}FindOptions) ([]*types.{{ .TypeName }}, int, error)
 	FindPage(ctx context.Context, filter *{{ .TypeName }}Filter, opts *{{ .TypeName }}PageOptions) (*{{ .TypeName }}Page, error)
-	CreateOne(ctx context.Context, input *types.{{ .TypeName }}) (*types.{{ .TypeName }}, error)
-	CreateMany(ctx context.Context, inputs []*types.{{ .TypeName }}) ([]*types.{{ .TypeName }}, error)
-	UpsertOne(ctx context.Context, input *types.{{ .TypeName }}, on {{ .TypeName }}UniqueKey, update *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error)
-	UpsertOneResult(ctx context.Context, input *types.{{ .TypeName }}, on {{ .TypeName }}UniqueKey, update *{{ .TypeName }}Update, opts *UpsertOptions) (UpsertResult[*types.{{ .TypeName }}], error)
-	UpsertMany(ctx context.Context, inputs []*types.{{ .TypeName }}, on {{ .TypeName }}UniqueKey, update {{ .TypeName }}Fields, opts *UpsertOptions) ([]UpsertResult[*types.{{ .TypeName }}], error)
+	CreateOne(ctx context.Context, input *{{ .CreateInput }}) (*types.{{ .TypeName }}, error)
+	CreateMany(ctx context.Context, inputs []*{{ .CreateInput }}) ([]*types.{{ .TypeName }}, error)
+	UpsertOne(ctx context.Context, input *{{ .CreateInput }}, on {{ .TypeName }}UniqueKey, update *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error)
+	UpsertOneResult(ctx context.Context, input *{{ .CreateInput }}, on {{ .TypeName }}UniqueKey, update *{{ .TypeName }}Update, opts *UpsertOptions) (UpsertResult[*types.{{ .TypeName }}], error)
+	UpsertMany(ctx context.Context, inputs []*{{ .CreateInput }}, on {{ .TypeName }}UniqueKey, update {{ .TypeName }}Fields, opts *UpsertOptions) ([]UpsertResult[*types.{{ .TypeName }}], error)
 	UpdateOne(ctx context.Context, id {{ .PrimaryKeyType }}, update *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error)
-	{{- if .HasVersion }}
+	{{- if .HasIfVersion }}
 	UpdateOneIfVersion(ctx context.Context, id {{ .PrimaryKeyType }}, expectedVersion int64, update *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error)
 	{{- end }}
 	UpdateMany(ctx context.Context, filter *{{ .TypeName }}Filter, update *{{ .TypeName }}Update) (int, error)
 	DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) error
-	{{- if .HasVersion }}
+	{{- if .HasIfVersion }}
 	DeleteOneIfVersion(ctx context.Context, id {{ .PrimaryKeyType }}, expectedVersion int64) error
 	{{- end }}
 	DeleteMany(ctx context.Context, filter *{{ .TypeName }}Filter) (int, error)
@@ -61,6 +64,9 @@ type {{ .TypeName }}RepositoryInterface interface {
 	{{- end }}
 	{{- if .VectorFields }}
 	Nearest(ctx context.Context, field {{ .TypeName }}VectorField, vector types.EmbeddingVector, opts *{{ .TypeName }}NearestOptions) ([]{{ .TypeName }}Neighbour, error)
+	{{- end }}
+	{{- range .Uses }}
+	{{ .GoName }}() {{ .Interface }}
 	{{- end }}
 }
 {{- end }}
@@ -184,6 +190,7 @@ func (noOpRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
 {{- range .Repositories }}
 {{ $typeName := .TypeName }}
 {{ $repoName := .Name }}
+{{- $keyType := .PrimaryKeyType }}
 
 func (db *NoOpDatabase) Get{{ .TypeName }}Repository() {{ .TypeName }}RepositoryInterface {
 	return db.{{ .TypeName }}
@@ -249,6 +256,37 @@ func (r *NoOp{{ .Name }}) FindPage(_ context.Context, _ *{{ .TypeName }}Filter, 
 	return &{{ .TypeName }}Page{Rows: []*types.{{ .TypeName }}{}}, nil
 }
 
+{{- if .HasBehaviors }}
+
+func (r *NoOp{{ .Name }}) CreateOne(_ context.Context, input *{{ .TypeName }}Create) (*types.{{ .TypeName }}, error) {
+	return input.row(), nil
+}
+
+func (r *NoOp{{ .Name }}) CreateMany(_ context.Context, inputs []*{{ .TypeName }}Create) ([]*types.{{ .TypeName }}, error) {
+	rows := make([]*types.{{ .TypeName }}, len(inputs))
+	for i, input := range inputs {
+		rows[i] = input.row()
+	}
+	return rows, nil
+}
+
+func (r *NoOp{{ .Name }}) UpsertOne(_ context.Context, input *{{ .TypeName }}Create, _ {{ .TypeName }}UniqueKey, _ *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error) {
+	return input.row(), nil
+}
+
+func (r *NoOp{{ .Name }}) UpsertOneResult(_ context.Context, input *{{ .TypeName }}Create, _ {{ .TypeName }}UniqueKey, _ *{{ .TypeName }}Update, _ *UpsertOptions) (UpsertResult[*types.{{ .TypeName }}], error) {
+	return UpsertResult[*types.{{ .TypeName }}]{Row: input.row(), Status: UpsertInserted}, nil
+}
+
+func (r *NoOp{{ .Name }}) UpsertMany(_ context.Context, inputs []*{{ .TypeName }}Create, _ {{ .TypeName }}UniqueKey, _ {{ .TypeName }}Fields, _ *UpsertOptions) ([]UpsertResult[*types.{{ .TypeName }}], error) {
+	results := make([]UpsertResult[*types.{{ .TypeName }}], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.{{ .TypeName }}]{Row: input.row(), Status: UpsertInserted}
+	}
+	return results, nil
+}
+{{- else }}
+
 func (r *NoOp{{ .Name }}) CreateOne(_ context.Context, input *types.{{ .TypeName }}) (*types.{{ .TypeName }}, error) {
 	return input, nil
 }
@@ -275,12 +313,13 @@ func (r *NoOp{{ .Name }}) UpsertMany(_ context.Context, inputs []*types.{{ .Type
 	}
 	return results, nil
 }
+{{- end }}
 
 func (r *NoOp{{ .Name }}) UpdateOne(_ context.Context, _ {{ .PrimaryKeyType }}, _ *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error) {
 	return nil, ErrNotFound
 }
 
-{{- if .HasVersion }}
+{{- if .HasIfVersion }}
 
 func (r *NoOp{{ .Name }}) UpdateOneIfVersion(_ context.Context, _ {{ .PrimaryKeyType }}, _ int64, _ *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error) {
 	return nil, ErrNotFound
@@ -295,7 +334,7 @@ func (r *NoOp{{ .Name }}) DeleteOne(_ context.Context, _ {{ .PrimaryKeyType }}) 
 	return nil
 }
 
-{{- if .HasVersion }}
+{{- if .HasIfVersion }}
 
 func (r *NoOp{{ .Name }}) DeleteOneIfVersion(_ context.Context, _ {{ .PrimaryKeyType }}, _ int64) error {
 	return nil
@@ -323,6 +362,24 @@ func (r *NoOp{{ .Name }}) Reencrypt(_ context.Context, _ int) (int, error) {
 func (r *NoOp{{ .Name }}) Nearest(_ context.Context, _ {{ .TypeName }}VectorField, _ types.EmbeddingVector, _ *{{ .TypeName }}NearestOptions) ([]{{ .TypeName }}Neighbour, error) {
 	return nil, nil
 }
+{{- end }}
+{{- range .Uses }}
+{{- $use := . }}
+
+// {{ .GoName }} returns operations of {{ $typeName }}'s {{ .ID }} that find no row.
+func (r *NoOp{{ $repoName }}) {{ .GoName }}() {{ .Interface }} {
+	return {{ .NoOp }}{}
+}
+
+{{ docComment "" (printf "%s answers each operation of %s with ErrNotFound." .NoOp .Interface) }}
+type {{ .NoOp }} struct{}
+{{- range .Operations }}
+
+func ({{ $use.NoOp }}) {{ .GoName }}(_ context.Context, _ {{ $keyType }}, _ {{ .Params }}) ({{ .ResultReturn }}, error) {
+	var none {{ .ResultReturn }}
+	return none, ErrNotFound
+}
+{{- end }}
 {{- end }}
 {{- end }}
 

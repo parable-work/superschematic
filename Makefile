@@ -24,15 +24,17 @@ export RUSTUP_TOOLCHAIN ?= $(RUST_VERSION)
 # command that links a scalar-dependent package needs this in CGO_LDFLAGS.
 # The version-graph binding (runtime/versiongraph/go) links the core's static
 # archive, which scripts/versiongraph-archive.sh (make versiongraph) stages,
-# and the engine's (runtime/engine/go) the engine's, which
-# scripts/engine-archive.sh (make engine-archive) stages.
-export CGO_LDFLAGS := $(shell scripts/superscalar-dep.sh --print) $(shell scripts/versiongraph-archive.sh --print) $(shell scripts/engine-archive.sh --print)
+# the engine's (runtime/engine/go) the engine's, which
+# scripts/engine-archive.sh (make engine-archive) stages, and the behaviors'
+# core's (runtime/rules/go, D103) its own, which scripts/rules-archive.sh
+# (make rules-archive) stages.
+export CGO_LDFLAGS := $(shell scripts/superscalar-dep.sh --print) $(shell scripts/versiongraph-archive.sh --print) $(shell scripts/engine-archive.sh --print) $(shell scripts/rules-archive.sh --print)
 
 # Where make engine-go stages the test kit's engine archive, which the corpus
 # replay links in place of the core's (it is never shipped).
 ENGINE_REPLAY_LIB := $(CURDIR)/runtime/engine/go/lib/testkit/$(shell go env GOOS)_$(shell go env GOARCH)
 
-GO_MODULES := . ir runtime/schema/go runtime/http/go runtime/versiongraph/go runtime/engine/go runtime/migrate/go extensions/gcp extensions/cloudflare extensions/pulumi extensions/topcoat cmd/superschematic
+GO_MODULES := . ir runtime/schema/go runtime/http/go runtime/versiongraph/go runtime/engine/go runtime/rules/go runtime/migrate/go extensions/gcp extensions/cloudflare extensions/pulumi extensions/topcoat cmd/superschematic
 
 # Two programs, one CLI (docs/stack-model.md, section 13). BIN is the binary
 # a release ships and a user installs: cmd/superschematic, a Go module of its
@@ -53,7 +55,7 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false
 .PHONY: all setup build cli test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
         go-goldens catalog-check schema-file-types schema-file-types-check behaviors behaviors-check \
         gcp-schemas gcp-schemas-check cloudflare-schemas cloudflare-schemas-check generic-schemas generic-schemas-check ts python rust engine-rust acme-engine-rust \
-        engine-rust-soak engine-archive engine-go engine-link-check engine-servers \
+        engine-rust-soak engine-archive engine-go engine-link-check engine-servers rules-archive \
         versiongraph versiongraph-scenarios versiongraph-scenarios-ts versiongraph-scenarios-rust \
         versiongraph-scenarios-python docs cli-smoke example-migrations scrub versions clean
 
@@ -99,13 +101,13 @@ $(CORE_BIN): FORCE
 
 FORCE:
 
-go-build: versiongraph engine-archive
+go-build: versiongraph engine-archive rules-archive
 	@for m in $(GO_MODULES); do echo "==> go build $$m"; (cd $$m && go build ./...) || exit 1; done
 
 go-vet:
 	@for m in $(GO_MODULES); do echo "==> go vet $$m"; (cd $$m && go vet ./...) || exit 1; done
 
-go-test: versiongraph engine-archive
+go-test: versiongraph engine-archive rules-archive
 	@for m in $(GO_MODULES); do echo "==> go test $$m"; (cd $$m && go test -count=1 ./...) || exit 1; done
 
 go-fmt-check:
@@ -302,6 +304,9 @@ rust:
 # SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL names one (say a container of your
 # own on a spare port, postgres://postgres:<password>@localhost:<port>/postgres?sslmode=disable),
 # each in a schema it creates and drops; without it they skip that pass.
+# The behaviors' Rust adapter (rules-adapter, D103) runs its store tests and
+# replays the core's transcript on SQLite, and on Postgres as well when
+# SUPERSCHEMATIC_RULES_TEST_DATABASE_URL names one, in schemas of its own.
 # The test kit replays the scenario corpus
 # (runtime/engine/testdata/scenarios, or the directory ENGINE_CORPUS_DIR
 # names) on the same databases, and the HTTP corpus through the engine's
@@ -322,6 +327,12 @@ engine-rust:
 # (runtime/engine/go/lib/<goos>_<goarch>).
 engine-archive:
 	scripts/engine-archive.sh >/dev/null
+
+# The behaviors' core's static archive (D103), superschematic-rules-wasm's
+# native build, staged where its Go binding links it
+# (runtime/rules/go/lib/<goos>_<goarch>).
+rules-archive:
+	scripts/rules-archive.sh >/dev/null
 
 # The engine's Go binding (runtime/engine/go), whose own tests go-test runs
 # over the core's archive, replays the HTTP corpus
@@ -358,9 +369,10 @@ engine-servers: versiongraph engine-archive
 	scripts/engine-napi.sh
 	go test -count=1 -timeout 80m -run '$(ENGINE_SERVER_TESTS)' ./internal/generator/servergen/
 
-# One Go binary that links superscalar's, the version graph's and the
-# engine's archives together and calls each (scripts/engine-link-check.sh),
-# after checking that each archive defines its own C functions alone.
+# One Go binary that links superscalar's, the version graph's, the engine's
+# and the behaviors' core's archives together and calls each
+# (scripts/engine-link-check.sh), after checking that each of the four
+# defines its own C functions alone.
 engine-link-check:
 	scripts/engine-link-check.sh
 

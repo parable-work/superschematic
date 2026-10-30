@@ -100,6 +100,17 @@ func ConvertOf(typeName string) Convert {
 	return ConvertNone
 }
 
+// convertOfRef is how an adapter converts a field of type ref: ConvertOf
+// its type for a value, and none for a list or a map, whose elements no
+// adapter converts, so a list of date-times reaches the core as the column
+// holds it.
+func convertOfRef(ref ir.TypeRef) Convert {
+	if ref.IsArray || ref.IsMap {
+		return ConvertNone
+	}
+	return ConvertOf(ref.Name)
+}
+
 // Layout is the layout document of a DB schema: each table that composes a
 // field-anchored behavior, by its type's name. A table with none is not in
 // it, and a schema with none has no document.
@@ -169,7 +180,8 @@ type Column struct {
 	// such as Temporal.DateTime or Identity.UUID).
 	Type string `json:"type"`
 
-	// Convert is how the adapter converts its value; absent for none.
+	// Convert is how the adapter converts its value; absent for none, and
+	// for a list or a map, whose depth the column does not carry.
 	Convert Convert `json:"convert,omitempty"`
 }
 
@@ -396,7 +408,7 @@ func tableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel, reg
 			column.Convert = ConvertOf(column.Type)
 			t.Own = append(t.Own, column)
 		default:
-			t.Own = append(t.Own, Column{Field: c.Field, Column: c.Name, Type: c.Def.TypeRef.Name, Convert: ConvertOf(c.Def.TypeRef.Name)})
+			t.Own = append(t.Own, Column{Field: c.Field, Column: c.Name, Type: c.Def.TypeRef.Name, Convert: convertOfRef(c.Def.TypeRef)})
 		}
 	}
 	if t.Key.Column == "" {
@@ -424,7 +436,7 @@ func tableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel, reg
 			}
 			use.Fields = append(use.Fields, OwnedField{
 				Name:   declared.Name,
-				Column: Column{Field: fd.Name, Column: column, Type: fd.TypeRef.Name, Convert: ConvertOf(fd.TypeRef.Name)},
+				Column: Column{Field: fd.Name, Column: column, Type: fd.TypeRef.Name, Convert: convertOfRef(fd.TypeRef)},
 				Value:  value,
 			})
 		}

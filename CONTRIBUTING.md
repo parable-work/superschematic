@@ -86,9 +86,10 @@ By making a contribution to this project, I certify that:
 | [`docs/`](docs/) | The docs site, the decision log and the design documents |
 | [`superschematic.toml`](superschematic.toml) | The default naming file, every key written out |
 
-The repository has twelve Go modules: the root (the compiler), `ir`,
+The repository has thirteen Go modules: the root (the compiler), `ir`,
 `runtime/schema/go`, `runtime/http/go`, `runtime/versiongraph/go`,
-`runtime/engine/go` (the engine's binding),
+`runtime/engine/go` (the engine's binding), `runtime/rules/go` (the
+behaviors' core's binding and adapter, D103),
 `runtime/migrate/go` (the migration runner), `extensions/gcp`,
 `extensions/cloudflare`, `extensions/pulumi`, `extensions/topcoat` and
 `cmd/superschematic` (the installed binary). Generated code imports the
@@ -488,8 +489,8 @@ building anything. `0.0.0` means unreleased.
 The Go modules are versioned by tags, one per module because each is its own
 module: `vX.Y.Z` (root), `ir/vX.Y.Z`, `runtime/schema/go/vX.Y.Z`,
 `runtime/http/go/vX.Y.Z`, `runtime/versiongraph/go/vX.Y.Z`,
-`runtime/engine/go/vX.Y.Z`, `runtime/migrate/go/vX.Y.Z`,
-`extensions/gcp/vX.Y.Z`,
+`runtime/engine/go/vX.Y.Z`, `runtime/rules/go/vX.Y.Z`,
+`runtime/migrate/go/vX.Y.Z`, `extensions/gcp/vX.Y.Z`,
 `extensions/cloudflare/vX.Y.Z`, `extensions/pulumi/vX.Y.Z`,
 `extensions/topcoat/vX.Y.Z` and
 `cmd/superschematic/vX.Y.Z` (`bump_version.py go-modules` lists them, and
@@ -567,6 +568,7 @@ A release is three steps, each started by a person. For the first release,
    `runtime/http/go/v0.1.0-alpha.1`,
    `runtime/versiongraph/go/v0.1.0-alpha.1`,
    `runtime/engine/go/v0.1.0-alpha.1`,
+   `runtime/rules/go/v0.1.0-alpha.1`,
    `runtime/migrate/go/v0.1.0-alpha.1` and the extension and
    `cmd/superschematic` tags on the same commit. `release.yml` runs
    the full CI and builds the CLI (`cmd/superschematic`, the core with the
@@ -594,7 +596,7 @@ A release is three steps, each started by a person. For the first release,
 After the release, `go get github.com/parable-work/superschematic@v0.1.0-alpha.1`
 (and `.../ir@`, `.../runtime/schema/go@`, `.../runtime/http/go@`,
 `.../runtime/versiongraph/go@`, `.../runtime/engine/go@`,
-`.../runtime/migrate/go@`,
+`.../runtime/rules/go@`, `.../runtime/migrate/go@`,
 `.../extensions/gcp@`, `.../extensions/pulumi@` and
 `.../extensions/topcoat@` at the same version) resolves, so a downstream
 distribution can link the official extensions. The migration runner needs no cgo. The other Go modules

@@ -177,12 +177,13 @@ version graph's Go binding links its own. `go/README.md` is its guide.
 - The replay (`go/enginehttp/replay_test.go`) holds it to the HTTP corpus
   through `enginehttp`, and to the engine's own scenario files through
   `Engine.Do`, on SQLite and on Postgres, with the Rust replay's counts.
-- `scripts/engine-link-check.sh` links superscalar's, the version graph's
-  and the engine's archives into one Go binary and runs it: each archive
-  defines its own C functions alone (the version graph's `vg_*` is a
-  feature the engine's build leaves off), all three built with one Rust
-  release. The release ships the engine's archive and header in each
-  platform's archives tarball.
+- `scripts/engine-link-check.sh` links superscalar's, the version graph's,
+  the engine's and the behaviors' core's (`runtime/rules/go`, D103)
+  archives into one Go binary and runs it: each archive defines its own C
+  functions alone (the version graph's `vg_*` is a feature the engine's
+  build leaves off), all four built with one Rust release. The release
+  ships the engine's archive and header, and the behaviors' core's, in
+  each platform's archives tarball.
 
 ## Breaking changes at the cutover
 
@@ -6093,7 +6094,7 @@ The Go binding (`go/`) builds and tests with `make engine-archive`, which
 stages the core's archive, then `go test ./...` in `go/` with
 `CGO_LDFLAGS="$(scripts/engine-archive.sh --print)"`; `make engine-go`
 replays the corpora through it over the test kit's archive, on the same
-databases; `make engine-link-check` links the three archives into one
+databases; `make engine-link-check` links the four archives into one
 binary.
 
 ### The Rust engine through its Node-API addon

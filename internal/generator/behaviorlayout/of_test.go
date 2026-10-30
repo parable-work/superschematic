@@ -112,6 +112,31 @@ func TestTableOfMissingOwnedField(t *testing.T) {
 	}
 }
 
+// A list or a map of date-times has no convert: no adapter converts its
+// elements, so it reaches the core as its column holds it, where a single
+// date-time is epoch milliseconds.
+func TestOfAListOfDateTimesIsNotConverted(t *testing.T) {
+	schema, reg := load(t)
+	order := schema.Types["Order"]
+	order.Fields = append(order.Fields,
+		&ir.FieldDef{Name: "remindAt", TypeRef: ir.TypeRef{Name: "Temporal.DateTime", IsArray: true}},
+		&ir.FieldDef{Name: "seenAt", TypeRef: ir.TypeRef{Name: "Temporal.DateTime", IsMap: true}},
+	)
+	layout, err := behaviorlayout.Of(schema, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	converts := map[string]behaviorlayout.Convert{}
+	for _, column := range layout.Types["Order"].Own {
+		converts[column.Field] = column.Convert
+	}
+	for field, want := range map[string]behaviorlayout.Convert{"placedAt": behaviorlayout.ConvertEpochMillis, "remindAt": behaviorlayout.ConvertNone, "seenAt": behaviorlayout.ConvertNone} {
+		if got, ok := converts[field]; !ok || got != want {
+			t.Errorf("Order's own column %s converts as %q (held %v), want %q", field, got, ok, want)
+		}
+	}
+}
+
 // A soft-deletable table's layout names the column its live rows hold
 // NULL, its deletedAt's as @column names it, which the adapter holds every
 // read and fenced write to; a table without deletedAt has none (D103).
