@@ -72,6 +72,7 @@ setup:
 	cd runtime/schema/typescript && bun install
 	cd runtime/http/typescript && bun install
 	cd runtime/versiongraph/typescript && bun install
+	cd runtime/rules/typescript && bun install
 	cd runtime/engine/typescript && bun install
 	cd runtime/engine-workqueue/typescript && bun install
 	cd runtime/engine-commerce/typescript && bun install
@@ -199,6 +200,7 @@ behaviors-check:
 ts:
 	cd packages && bun install --frozen-lockfile && bun run typecheck && bun test
 	cd runtime/schema/typescript && bun install --frozen-lockfile && bun run typecheck && bun run build && bun run test
+	cd runtime/rules/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
 	cd runtime/http/typescript && bun install --frozen-lockfile && bun run build && bun run test
 	cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
 	cd runtime/engine/typescript && bun install --frozen-lockfile

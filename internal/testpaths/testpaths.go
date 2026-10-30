@@ -76,6 +76,7 @@ func Local(t *testing.T) naming.LocalPaths {
 		HTTPRuntimeGo:          filepath.Join(root, "runtime", "http", "go"),
 		HTTPRuntimeRust:        filepath.Join(root, "runtime", "http", "rust"),
 		HTTPRuntimeTypeScript:  filepath.Join(root, "runtime", "http", "typescript"),
+		RulesTypeScript:        filepath.Join(root, "runtime", "rules", "typescript"),
 	}
 }
 

@@ -17,9 +17,12 @@ import (
 // with each field quoted as SQLite quotes it, and loses the trigram index,
 // which SQLite has no operator class for (D27, amended). SQLite keeps no
 // comments, so the model has none. A table's @enqueueOnChange (D80) is a
-// trigger per write, which holds its insert. The model refuses what SQLite
-// has no form of (D27), naming the feature: @versioned, @optimistic,
-// projections, GIN and GIST indexes, and types it has no storage for.
+// trigger per write, which holds its insert. An @optimistic table's bump,
+// which a table whose fields are behaviors takes (D103), is an AFTER UPDATE
+// trigger that gives the row it updated the next version, as Postgres's
+// BEFORE UPDATE trigger does (sqliteBumpTrigger). The model refuses what
+// SQLite has no form of (D27), naming the feature: @versioned, projections,
+// GIN and GIST indexes, and types it has no storage for.
 func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, error) {
 	m := &Model{Version: ModelVersion, Dialect: SQLite, Service: opts.SchemaName}
 	out, err := sqlgen.Generate(schema, opts)
@@ -68,6 +71,9 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 	}
 	if err := errors.Join(errs...); err != nil {
 		return nil, err
+	}
+	for _, o := range out.OptimisticTables {
+		m.Triggers = append(m.Triggers, &Trigger{Name: o.TriggerName, Table: o.TableName, Definition: sqliteBumpTrigger(o), Origin: types[o.TableName]})
 	}
 	for _, e := range out.EnqueueTriggers {
 		for i, t := range e.SQLiteTriggers(qs) {
@@ -118,13 +124,23 @@ func sqliteRefusals(out *sqlgen.DDLOutput, types map[string]string) error {
 	for _, h := range out.HistoryTables {
 		refuse("%s is @versioned", types[h.SourceTableName])
 	}
-	for _, o := range out.OptimisticTables {
-		refuse("%s is @optimistic", types[o.TableName])
-	}
 	for _, view := range out.Projections {
 		refuse("%s is a projection (%s.%s)", view.TypeName, view.Pool, view.Name)
 	}
 	return errors.Join(errs...)
+}
+
+// sqliteBumpTrigger is an @optimistic table's version bump on SQLite, whose
+// triggers cannot set NEW: after an update that leaves _version as it was,
+// it sets the row's _version to the next one, so a write fenced on the
+// version a read saw changes no row once another write has moved it. An
+// update that sets _version itself keeps what it set, and the trigger's
+// own update, which moves it, does not fire it again.
+func sqliteBumpTrigger(o sqlgen.OptimisticTable) string {
+	table := qs(o.TableName)
+	return "CREATE TRIGGER " + qs(o.TriggerName) + " AFTER UPDATE ON " + table +
+		" FOR EACH ROW WHEN NEW._version = OLD._version BEGIN UPDATE " + table +
+		" SET _version = OLD._version + 1 WHERE rowid = NEW.rowid; END"
 }
 
 // sqliteTable stores a table the Postgres model built in SQLite's types and

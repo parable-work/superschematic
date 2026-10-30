@@ -75,7 +75,8 @@
     "{{.Naming.ScalarNpmPackage}}": "{{if .ScalarLibSpec}}{{.ScalarLibSpec}}{{else}}*{{end}}",
     "js-yaml": "4.1.1"{{if .VersionGraphs}},
     "{{.Naming.VersionGraphNpmPackage}}": "{{if .VersionGraphLibSpec}}{{.VersionGraphLibSpec}}{{else}}*{{end}}"{{end}}{{if .ORM}},
-    "{{.Naming.HTTPRuntimeNpmPackage}}": "*"{{end}}{{range .PackageDependencies}},
+    "{{.Naming.HTTPRuntimeNpmPackage}}": "*"{{if .ORM.Rules}},
+    "{{.Naming.RulesNpmPackage}}": "*"{{end}}{{end}}{{range .PackageDependencies}},
     "{{.Name}}": "{{.Spec}}"{{end}}
   },{{if .ORM}}
   "peerDependencies": {

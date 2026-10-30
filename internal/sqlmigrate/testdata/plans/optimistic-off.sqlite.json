@@ -1,0 +1,46 @@
+{
+  "dialect": "sqlite",
+  "expanded": "936a1b52247adfc1f6189f63327d1a11fa837e1077bf5855b48389b18fd69b4b",
+  "from": "f8f00bebd93bb8cf0b3d1e2abde36b206fb8dc30b2b24769828f671087a39515",
+  "hash": "7e2aab128e0ef1200ddf3c16c86ad5c0c753191406fd095a40e3b12a8c390370",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropTrigger",
+      "phase": "contract",
+      "statements": [
+        "DROP TRIGGER IF EXISTS \"trg_product_bump_version\""
+      ],
+      "subject": "trigger/product/trg_product_bump_version",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/product/column/_version",
+          "reason": "Dropping product._version deletes its values.",
+          "subject": "table/product/column/_version"
+        },
+        {
+          "class": "blocking",
+          "id": "blocking:table/product/column/_version",
+          "reason": "SQLite rewrites product to drop the column, holding the database's write lock for time that grows with the table.",
+          "subject": "table/product/column/_version"
+        }
+      ],
+      "index": 2,
+      "op": "dropColumn",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"product\" DROP COLUMN \"_version\""
+      ],
+      "subject": "table/product/column/_version",
+      "transactional": true
+    }
+  ],
+  "to": "d9697f8b128d88e9877145068feef31d9bdfa8a6c367bd3cdbd76a76318119f0",
+  "toModel": null,
+  "version": 1
+}

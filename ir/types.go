@@ -79,8 +79,10 @@ type TypeDef struct {
 
 	// Behaviors lists the behaviors this type composes, in the order their
 	// checks run. A trait's fields are copied onto a type when it is read;
-	// a behavior adds fields, operations, checks and storage when an engine
-	// runs the schema. See [BehaviorRef].
+	// a type-anchored behavior adds fields, operations, checks and storage
+	// when an engine runs the schema, and a field-anchored one adds its
+	// fields as columns the loader appends to Fields (D103). See
+	// [BehaviorRef].
 	Behaviors []BehaviorRef `json:"behaviors,omitempty" yaml:"behaviors,omitempty"`
 
 	// Display is what a UI reads to render the type's instances, declared
@@ -152,7 +154,10 @@ type TypeDef struct {
 	// Optimistic (@optimistic) gives a DB table the _version column, the
 	// BEFORE UPDATE trigger that bumps it and the fenced writes
 	// UpdateOneIfVersion and DeleteOneIfVersion, with no history. Versioned
-	// implies it, so a type never carries both.
+	// implies it, so a type never carries both. The loader sets it on a
+	// table that composes a field-anchored behavior and is not Versioned:
+	// _version is the version the core's change sets hold each row to
+	// (D103).
 	Optimistic bool `json:"optimistic,omitempty" yaml:"optimistic,omitempty"`
 
 	// EnvVars indicates this type provides environment variable configuration.
@@ -638,6 +643,13 @@ type FieldDef struct {
 	// Origin is [OriginVersionGraph] for a field a version graph adds to a
 	// member type; empty for every authored field.
 	Origin string `json:"origin,omitempty" yaml:"origin,omitempty" jsonschema:"-"`
+
+	// Behavior marks a field a behavior owns (D103): a column the loader
+	// adds for a field-anchored use's declared field, which only the
+	// behavior's operations change. Nil for every other field, and for
+	// every field a reader writes; the data forms have no key for it. See
+	// [FieldBehavior].
+	Behavior *FieldBehavior `json:"behavior,omitempty" yaml:"behavior,omitempty" jsonschema:"-"`
 
 	// DistinctNull marks an optional field whose null is a state of its own,
 	// not its type's zero value. The Go generators, which render an optional

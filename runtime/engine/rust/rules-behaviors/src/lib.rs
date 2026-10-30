@@ -50,6 +50,12 @@ use superschematic_rules::Core;
 /// (`behaviors::NAMES`) of the ones ported so far.
 pub const NAMES: [&str; 1] = [workflow::NAME];
 
+/// The declaration file of each behavior [`core`] registers, in its order:
+/// the text the compiler registers and each behavior reads in place, which
+/// a binding hands its host whole (D103), each field's column type and the
+/// value field with the rest.
+pub const DECLARATIONS: [&str; 1] = [workflow::DECLARATION];
+
 /// A core with every behavior ported so far, in the engine's order, and
 /// the default permission matcher: what a host runs, extended with its own
 /// behaviors (`.with(..)`) and a deployment's matcher (`.with_matcher(..)`).
@@ -65,5 +71,18 @@ mod tests {
     #[test]
     fn core_registers_every_name_in_order() {
         assert_eq!(core().names(), NAMES);
+    }
+
+    /// DECLARATIONS holds each registered behavior's file, in NAMES' order.
+    #[test]
+    fn declarations_are_the_registered_behaviors_files() {
+        let named: Vec<String> = DECLARATIONS
+            .iter()
+            .map(|text| {
+                let file: serde_json::Value = serde_json::from_str(text).expect("a file parses");
+                file["name"].as_str().unwrap_or_default().to_owned()
+            })
+            .collect();
+        assert_eq!(named, NAMES);
     }
 }

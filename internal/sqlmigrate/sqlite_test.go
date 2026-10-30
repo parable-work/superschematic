@@ -81,8 +81,6 @@ func refusedSchemas(t *testing.T) []struct {
 	}{
 		{"@versioned", shop(func(s *ir.Schema) { versioned(s, "Order", nil) }),
 			"Order is @versioned, which the sqlite dialect does not support"},
-		{"@optimistic", shop(func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true }),
-			"Product is @optimistic, which the sqlite dialect does not support"},
 		{"projection", planCase{}.load(t, nil),
 			"OrderSummary is a projection (report.order_summary), which the sqlite dialect does not support"},
 		{"GIN index", shop(func(s *ir.Schema) {

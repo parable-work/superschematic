@@ -388,7 +388,7 @@ func projectEngine(c registry.GenerateContext, db string) bool {
 		return false
 	}
 	for _, td := range codegen.EngineTypes(schema) {
-		for _, ref := range td.Behaviors {
+		for _, ref := range td.TypeBehaviors() {
 			declared, ok := c.Registry.Behavior(ref.Name)
 			if !ok || declared.Extension != "" || declared.Package != registry.EnginePackage {
 				return true

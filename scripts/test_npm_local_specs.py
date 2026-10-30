@@ -60,7 +60,7 @@ class NpmLocalSpecsTest(unittest.TestCase):
         step = step[: step.index("- name:", 1)]
         directories = re.findall(r"\(cd ([\w./-]+) && ", step)
         directories += [f"packages/{pkg}" for pkg in re.search(r"for pkg in ([\w -]+); do", step).group(1).split()]
-        self.assertEqual(len(directories), 13, directories)
+        self.assertEqual(len(directories), 14, directories)
         for directory in directories:
             manifest = json.loads((ROOT / directory / "package.json").read_text())
             for spec in npm_local_specs.local_specs(manifest):

@@ -740,15 +740,22 @@ impl MemoryHost {
     /// when it is defined. The version replaces one defined and not
     /// published yet.
     pub fn define(&mut self, spec: TypeSpec, caller: &Caller, now: i64) -> Result<(), Refusal> {
-        let from = self.store.live(&spec.name).cloned();
-        let action = match from {
-            Some(from) => Action::Publish { from: Some(from) },
-            None => Action::Define,
-        };
-        self.check(&spec, &Command::new(caller.clone(), now, action))?;
+        let command = self.define_command(&spec, caller, now);
+        self.check(&spec, &command)?;
         let versions = self.store.types.entry(spec.name.clone()).or_default();
         versions.draft = Some(spec);
         Ok(())
+    }
+
+    /// The check [`MemoryHost::define`] runs a version with: the define
+    /// check for a type with no live version, else the publish check from
+    /// the live one.
+    pub fn define_command(&self, spec: &TypeSpec, caller: &Caller, now: i64) -> Command {
+        let action = match self.store.live(&spec.name).cloned() {
+            Some(from) => Action::Publish { from: Some(from) },
+            None => Action::Define,
+        };
+        Command::new(caller.clone(), now, action)
     }
 
     /// Publishes the version of a type defined last: the core's publish
@@ -760,18 +767,31 @@ impl MemoryHost {
         caller: &Caller,
         now: i64,
     ) -> Result<Option<usize>, Refusal> {
-        let Some(draft) = self.store.draft(type_name).cloned() else {
+        let Some((draft, command)) = self.publish_command(type_name, caller, now) else {
             return Ok(None);
         };
-        let from = self.store.live(type_name).cloned();
-        self.check(
-            &draft,
-            &Command::new(caller.clone(), now, Action::Publish { from }),
-        )?;
+        self.check(&draft, &command)?;
         let versions = self.store.types.entry(type_name.to_owned()).or_default();
         versions.published.push(draft);
         versions.draft = None;
         Ok(Some(versions.published.len()))
+    }
+
+    /// The version [`MemoryHost::publish`] would publish and the check it
+    /// runs it with, the publish check from the live version; `None` when
+    /// no version waits.
+    pub fn publish_command(
+        &self,
+        type_name: &str,
+        caller: &Caller,
+        now: i64,
+    ) -> Option<(TypeSpec, Command)> {
+        let draft = self.store.draft(type_name).cloned()?;
+        let from = self.store.live(type_name).cloned();
+        Some((
+            draft,
+            Command::new(caller.clone(), now, Action::Publish { from }),
+        ))
     }
 
     // check runs a define or publish check, which writes nothing.
@@ -799,16 +819,10 @@ impl MemoryHost {
     pub fn execute_racing(
         &mut self,
         type_name: &str,
-        mut command: Command,
+        command: Command,
         mut race: impl FnMut(&mut Store, usize),
     ) -> Result<Applied, Refusal> {
-        if let Action::Create { id: id @ None, .. } = &mut command.action {
-            *id = Some(self.ids.next());
-        }
-        if command.request.is_empty() {
-            self.requests += 1;
-            command.request = format!("request-{}", self.requests);
-        }
+        let command = self.prepare(command);
         for attempt in 0..self.attempts {
             // Each run reads fresh state, the type's live version with it,
             // and a deadline is run only while it is armed as it fell due.
@@ -850,6 +864,22 @@ impl MemoryHost {
                 self.attempts
             ),
         ))
+    }
+
+    /// The command as [`MemoryHost::execute`] runs it: a request id from
+    /// the host (`request-1`, `request-2`, and on) when it carries none,
+    /// and an id from the host's id source for a create that names none. A
+    /// command it has prepared comes back as it was, so a caller that
+    /// records what ran (a transcript) prepares it first.
+    pub fn prepare(&mut self, mut command: Command) -> Command {
+        if let Action::Create { id: id @ None, .. } = &mut command.action {
+            *id = Some(self.ids.next());
+        }
+        if command.request.is_empty() {
+            self.requests += 1;
+            command.request = format!("request-{}", self.requests);
+        }
+        command
     }
 
     /// Runs every deadline due at a time, earliest first, as the caller,

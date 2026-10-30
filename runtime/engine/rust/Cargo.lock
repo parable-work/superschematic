@@ -1898,8 +1898,19 @@ dependencies = [
 name = "superschematic-rules-testkit"
 version = "0.0.0"
 dependencies = [
+ "serde",
  "serde_json",
  "superschematic-engine-testkit",
+ "superschematic-rules",
+ "superschematic-rules-behaviors",
+]
+
+[[package]]
+name = "superschematic-rules-wasm"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
  "superschematic-rules",
  "superschematic-rules-behaviors",
 ]

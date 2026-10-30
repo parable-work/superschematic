@@ -1,12 +1,12 @@
 //! A behavior's declaration as the core reads it (D103), from the file the
 //! compiler registers and the engine embeds
 //! (`runtime/engine/rust/behaviors/declarations`): its name, the fields it
-//! owns and the one that holds a field anchor's value (`value`, which no
-//! file names yet, so a behavior adds it in code until its class declares
-//! it), its operations and whether each writes, its veto codes, and whether
-//! a create gives it parameters (a createParamsSchema). The file stays the
-//! one declaration; the core reads only what it holds a behavior to, and
-//! the rest (descriptions, schemas) is the file's.
+//! owns and the one that holds a field anchor's value (`value`), its
+//! operations and whether each writes, its veto codes, and whether a create
+//! gives it parameters (a createParamsSchema). The file stays the one
+//! declaration; the core reads only what it holds a behavior to, and the
+//! rest (descriptions, schemas, each field's column type, which a table's
+//! layout reads) is the file's.
 
 use serde_json::Value;
 use superschematic_rules::Declaration;

@@ -142,7 +142,14 @@ const (
 	typeFlagsStringLike     = tschecker.TypeFlagsStringLike
 	typeFlagsNumberLike     = tschecker.TypeFlagsNumberLike
 	typeFlagsBooleanLike    = tschecker.TypeFlagsBooleanLike
+	typeFlagsNull           = tschecker.TypeFlagsNull
+	typeFlagsUndefined      = tschecker.TypeFlagsUndefined
+	typeFlagsObject         = tschecker.TypeFlagsObject
 )
+
+// Tuple element flags: an element that is not optional, rest or variadic
+// has exactly elementFlagsRequired.
+const elementFlagsRequired = tschecker.ElementFlagsRequired
 
 // AST helpers.
 func getSourceFileOfNode(node *astNode) *astSourceFile {

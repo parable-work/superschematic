@@ -1,0 +1,29 @@
+[package]
+name = "superschematic-rules-wasm"
+description = "The pure core of the behaviors (D103) with the behaviors ported onto it, behind a JSON-in, JSON-out C ABI that @superschematic/rules loads as a WebAssembly module"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+name = "superschematic_rules_wasm"
+# cdylib for the wasm32-unknown-unknown module @superschematic/rules
+# (runtime/rules/typescript) loads, built with plain cargo as
+# runtime/versiongraph's is; rlib for this crate's tests and docs.
+crate-type = ["cdylib", "rlib"]
+
+# Like the core, nothing here does I/O (D103): the module imports nothing
+# from its host.
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+# The engine's JSON features (D58): a number keeps its text, an object its
+# members' order.
+serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
+superschematic-rules = { path = "../rules" }
+superschematic-rules-behaviors = { path = "../rules-behaviors" }
+
+[lints]
+workspace = true

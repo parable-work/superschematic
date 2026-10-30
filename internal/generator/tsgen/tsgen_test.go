@@ -32,6 +32,9 @@ func TestWriteTypesGolden(t *testing.T) {
 		deps    []string
 		// sqlite is whether the service lists the sqlite dialect.
 		sqlite bool
+		// behaviors is whether the service's tables compose behaviors,
+		// which the core's registry declares.
+		behaviors bool
 	}{
 		{service: "fixture-db"},
 		{service: "fixture-api", deps: []string{"fixture-db"}},
@@ -56,6 +59,9 @@ func TestWriteTypesGolden(t *testing.T) {
 		// Declared queries (D86): orm.ts's queries, and their params' and
 		// rows' types.
 		{service: "fixture-queries-db"},
+		// Tables whose fields are behaviors (D103): orm.ts's owned
+		// columns, the layout document and each field's operations.
+		{service: "fixture-workflow-db", behaviors: true},
 	}
 
 	for _, tc := range cases {
@@ -66,6 +72,9 @@ func TestWriteTypesGolden(t *testing.T) {
 				reg = behaviortypestest.Registry(t)
 				schema = behaviortypestest.Schema(t, reg)
 			} else {
+				if tc.behaviors {
+					reg = registry.New(naming.Default())
+				}
 				var err error
 				if schema, err = loader.LoadService(filepath.Join(fixturesDir, tc.service)); err != nil {
 					t.Fatalf("load %s: %v", tc.service, err)

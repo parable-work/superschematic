@@ -99,6 +99,31 @@ func TestRegisterBehavior(t *testing.T) {
 	}
 }
 
+// Workflow's declaration types its fields for the columns a table takes
+// and names its value field, so a type may carry it on a field (D103); a
+// field typed by a scalar of the catalog registers.
+func TestBehaviorFieldTypesAndValue(t *testing.T) {
+	reg := New(naming.Default())
+	gauge := declaration("acme.Gauge", map[string]any{
+		"fields": []any{map[string]any{"name": "level", "type": "number"}, map[string]any{"name": "readAt", "type": "Temporal.DateTime"}},
+		"value":  "level",
+	})
+	if err := reg.RegisterBehavior(BehaviorSpec{Extension: "acme", Declaration: gauge}); err != nil {
+		t.Fatal(err)
+	}
+	finalizeWithCoreGenerators(t, reg)
+	workflow, ok := reg.Behavior("Workflow")
+	if !ok {
+		t.Fatal("Workflow is not registered")
+	}
+	if workflow.Value != "status" || len(workflow.Fields) != 2 || workflow.Fields[0].Type != "string" || workflow.Fields[1].Type != "Temporal.DateTime" {
+		t.Fatalf("Workflow's value and fields = %q, %+v", workflow.Value, workflow.Fields)
+	}
+	if got, _ := reg.Behavior("acme.Gauge"); got.Value != "level" || got.Fields[1].Type != "Temporal.DateTime" {
+		t.Fatalf("acme.Gauge = %+v", got.BehaviorDeclaration)
+	}
+}
+
 // A field may say it is volatile: it moves at a read, with no event of
 // its own instance. The registered field carries the flag, and a field
 // that does not say so is not.
@@ -302,6 +327,9 @@ func TestRegisterBehaviorRejects(t *testing.T) {
 		{"beside on the schema", "acme", declaration("acme.Chat", map[string]any{"operations": []any{operation("post", map[string]any{"beside": true, "writes": true, "scope": "schema"})}}), `behavior acme.Chat operation post is beside the instance and has scope "schema": a beside operation runs on an instance`},
 		{"beside field not volatile", "acme", declaration("acme.Chat", map[string]any{"fields": []any{map[string]any{"name": "count", "volatile": true}, map[string]any{"name": "last"}}, "operations": []any{operation("post", map[string]any{"beside": true, "writes": true})}}), `behavior acme.Chat field last is not volatile, and operation post is beside the instance: a behavior with a beside operation declares every field volatile, since no event records its moves`},
 		{"per reader not volatile", "acme", declaration("acme.Chat", map[string]any{"fields": []any{map[string]any{"name": "unseen", "perReader": true}}}), `behavior acme.Chat field unseen is perReader but not volatile: a value each reader reads its own of is computed at a read`},
+		{"value not a field", "acme", declaration("acme.Gauge", map[string]any{"fields": []any{map[string]any{"name": "level", "type": "number"}}, "value": "reading"}), `behavior acme.Gauge value "reading" is not one of its fields`},
+		{"volatile typed", "acme", declaration("acme.Gauge", map[string]any{"fields": []any{map[string]any{"name": "level", "volatile": true, "type": "number"}}}), `behavior acme.Gauge field level is volatile and has a type: a value computed at a read takes no column`},
+		{"type not a string", "acme", declaration("acme.Gauge", map[string]any{"fields": []any{map[string]any{"name": "level", "type": 1}}}), "behavior declaration of extension acme: "},
 		{"per reader not a boolean", "acme", declaration("acme.Chat", map[string]any{"fields": []any{map[string]any{"name": "unseen", "volatile": true, "perReader": "yes"}}}), "behavior declaration of extension acme: "},
 		{"unlogged not beside", "acme", declaration("acme.Chat", map[string]any{"operations": []any{operation("mark", map[string]any{"writes": true, "log": false})}}), `behavior acme.Chat operation mark sets "log": false and is not beside the instance: only a beside operation appends no event`},
 		{"beside not a boolean", "acme", declaration("acme.Chat", map[string]any{"operations": []any{operation("post", map[string]any{"beside": "yes"})}}), "behavior declaration of extension acme: "},
@@ -580,6 +608,8 @@ func TestFinalizeChecksBehaviorReferences(t *testing.T) {
 			"behavior acme.Review both requires and conflicts with acme.Rating"},
 		{"policy value", []json.RawMessage{declaration("acme.Review", map[string]any{"operations": []any{operation("review", map[string]any{"invocationPolicy": "always"})}})},
 			`behavior acme.Review operation review invocationPolicy "always" is not a value of the invocationPolicy policy (auto, ask)`},
+		{"field type", []json.RawMessage{declaration("acme.Gauge", map[string]any{"fields": []any{map[string]any{"name": "level", "type": "Gauge.Level"}}})},
+			`behavior acme.Gauge field level type "Gauge.Level" is neither a builtin (string, number, boolean) nor a scalar of the catalog`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			reg := New(naming.Default())

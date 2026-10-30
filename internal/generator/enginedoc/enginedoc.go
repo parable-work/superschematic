@@ -429,7 +429,7 @@ func Behaviors(engineTypes []*ir.TypeDef, reg *registry.Registry) []Behavior {
 	seen := map[string]bool{}
 	var out []Behavior
 	for _, td := range engineTypes {
-		for _, ref := range td.Behaviors {
+		for _, ref := range td.TypeBehaviors() {
 			if seen[ref.Name] {
 				continue
 			}
@@ -536,7 +536,7 @@ type configRef struct {
 // and by sorted key.
 func configTypes(td *ir.TypeDef) ([]configRef, error) {
 	var refs []configRef
-	for _, behavior := range td.Behaviors {
+	for _, behavior := range td.TypeBehaviors() {
 		var path string
 		switch behavior.Name {
 		case "Branches":

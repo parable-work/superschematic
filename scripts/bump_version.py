@@ -27,6 +27,8 @@ Version sites (relative to the repository root):
                                       version
   runtime/versiongraph/typescript/package.json
                                       version
+  runtime/rules/typescript/package.json
+                                      version
   runtime/engine/typescript/package.json
                                       version
   runtime/engine/typescript/npm/{darwin-arm64,darwin-x64,linux-x64-gnu,linux-arm64-gnu}/package.json
@@ -261,6 +263,13 @@ def sites():
     out.append(
         (
             ROOT / "runtime" / "versiongraph" / "typescript" / "package.json",
+            [(r'(\n  "version": ")' + V + r'(",)', 1)],
+            "semver",
+        )
+    )
+    out.append(
+        (
+            ROOT / "runtime" / "rules" / "typescript" / "package.json",
             [(r'(\n  "version": ")' + V + r'(",)', 1)],
             "semver",
         )

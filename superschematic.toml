@@ -41,6 +41,7 @@ http_runtime_go_module = "github.com/parable-work/superschematic/runtime/http/go
 http_runtime_rust_crate = "superschematic-http-runtime"
 http_runtime_npm_package = "@superschematic/http-runtime"
 versiongraph_npm_package = "@superschematic/versiongraph"
+rules_npm_package = "@superschematic/rules"
 versiongraph_pypi_dist = "superschematic-versiongraph"
 versiongraph_python_module = "superschematic_versiongraph"
 engine_npm_package = "@superschematic/engine"
@@ -121,6 +122,7 @@ versiongraph_python = "runtime/versiongraph/python"
 http_runtime_go = "runtime/http/go"
 http_runtime_rust = "runtime/http/rust"
 http_runtime_typescript = "runtime/http/typescript"
+rules_typescript = "runtime/rules/typescript"
 
 # How the config fields an API's edges derive in a stack are named: its
 # database connection, the endpoint of each API it `calls`, and the

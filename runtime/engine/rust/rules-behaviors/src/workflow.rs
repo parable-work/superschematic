@@ -351,10 +351,9 @@ pub struct Workflow;
 impl Behavior for Workflow {
     type Config = WorkflowConfig;
 
-    // The declaration file names no value field yet, and the class that
-    // will declare one comes with D103's step 5: the status is the value.
+    // The declaration file names the value field, the status (D103).
     fn declaration(&self) -> Declaration {
-        declared::declaration(DECLARATION).value(STATUS)
+        declared::declaration(DECLARATION)
     }
 
     fn parse_config(

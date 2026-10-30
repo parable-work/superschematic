@@ -442,7 +442,8 @@ func closeExtensionSlots(defs map[string]any, reg *registry.Registry) error {
 
 // closeBehaviors replaces the reflected $defs/BehaviorRef, whose config is
 // any JSON, with one closed to the registry's behaviors: name is one of the
-// registered names, and each behavior's config is checked against its
+// registered names, field names the anchor field of a field-anchored use
+// (D103), and each behavior's config is checked against its
 // config schema, as a decorator's argument is checked against its Args. A
 // behavior without a config schema takes none, which the empty closed
 // object expresses ({} is also how an absent config is stored). A config
@@ -494,6 +495,7 @@ func closeBehaviors(defs map[string]any, reg *registry.Registry) error {
 		"required":             []any{"name"},
 		"properties": map[string]any{
 			"name":   name,
+			"field":  map[string]any{"type": "string"},
 			"config": map[string]any{},
 		},
 	}

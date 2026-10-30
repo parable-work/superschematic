@@ -1,0 +1,6702 @@
+{
+  "file": "core-workflow",
+  "source": "runtime/engine/testdata/scenarios/core-workflow.json",
+  "behaviors": [
+    "Workflow"
+  ],
+  "scenarios": [
+    {
+      "name": "Workflow (node) > a new instance starts in the initial state, the first state when the config names none, entered at its create",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Order",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "versions": [
+            {
+              "name": "Order",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "open",
+                      "shipped",
+                      "cancelled"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "open"
+                      },
+                      {
+                        "from": "draft",
+                        "to": "cancelled"
+                      },
+                      {
+                        "from": "open",
+                        "to": "shipped",
+                        "permission": "orders.ship"
+                      },
+                      {
+                        "from": "open",
+                        "to": "cancelled"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ]
+            },
+            {
+              "name": "Order",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "open",
+                      "shipped",
+                      "cancelled"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "open"
+                      },
+                      {
+                        "from": "draft",
+                        "to": "cancelled"
+                      },
+                      {
+                        "from": "open",
+                        "to": "shipped",
+                        "permission": "orders.ship"
+                      },
+                      {
+                        "from": "open",
+                        "to": "cancelled"
+                      }
+                    ],
+                    "initial": "open"
+                  },
+                  "anchor": "type"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "o1",
+              "own": {
+                "title": "Desk"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "o1",
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "draft",
+                  "enteredAt": 1000000
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 7,
+          "call": "schemas.define",
+          "database": "{{dir:2}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ],
+                  "initial": "open"
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 8,
+          "call": "schemas.publish",
+          "database": "{{dir:2}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ],
+                  "initial": "open"
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.create",
+          "database": "{{dir:2}}/engine.db",
+          "type": "Order",
+          "version": 1,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "o1",
+              "own": {
+                "title": "Desk"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "o1",
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 5,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 6,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 10,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 11,
+          "call": "events.read",
+          "reason": "a read of the change log, which the outbox the build-time trigger writes holds once it comes (D103's order of the work, step 3)"
+        }
+      ]
+    },
+    {
+      "name": "Workflow (node) > transition moves the status along a listed transition, and its event carries the new status and when it was entered",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Order",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "versions": [
+            {
+              "name": "Order",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "open",
+                      "shipped",
+                      "cancelled"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "open"
+                      },
+                      {
+                        "from": "draft",
+                        "to": "cancelled"
+                      },
+                      {
+                        "from": "open",
+                        "to": "shipped",
+                        "permission": "orders.ship"
+                      },
+                      {
+                        "from": "open",
+                        "to": "cancelled"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "o1",
+              "own": {
+                "title": "Desk"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "o1",
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "draft",
+                  "enteredAt": 1000000
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "open"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "from": "draft",
+              "to": "open"
+            },
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1005000
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1010000,
+            "action": {
+              "kind": "update",
+              "key": "o1",
+              "patch": {
+                "title": "Oak desk"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Oak desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1005000
+                }
+              }
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 6,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 7,
+          "call": "events.read",
+          "reason": "a read of the change log, which the outbox the build-time trigger writes holds once it comes (D103's order of the work, step 3)"
+        }
+      ]
+    },
+    {
+      "name": "Workflow (node) > an instance from before Workflow kept enteredAt has none until its next transition",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Order",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "versions": [
+            {
+              "name": "Order",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "open",
+                      "shipped",
+                      "cancelled"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "open"
+                      },
+                      {
+                        "from": "draft",
+                        "to": "cancelled"
+                      },
+                      {
+                        "from": "open",
+                        "to": "shipped",
+                        "permission": "orders.ship"
+                      },
+                      {
+                        "from": "open",
+                        "to": "cancelled"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "o1",
+              "own": {
+                "title": "Desk"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "o1",
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "draft",
+                  "enteredAt": 1000000
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "raw",
+          "step": 5,
+          "call": "storage.run",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "key": "o1",
+          "owned": {
+            "Workflow": {
+              "enteredAt": null
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1001000,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "open"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "from": "draft",
+              "to": "open"
+            },
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1001000
+                }
+              }
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 6,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 8,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Workflow (node) > its guard refuses a state the config lacks, the state it is in, a transition it does not list and a move out of a terminal state",
+      "clock": "wall",
+      "types": [
+        {
+          "name": "Order",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "versions": [
+            {
+              "name": "Order",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "open",
+                      "shipped",
+                      "cancelled"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "open"
+                      },
+                      {
+                        "from": "draft",
+                        "to": "cancelled"
+                      },
+                      {
+                        "from": "open",
+                        "to": "shipped",
+                        "permission": "orders.ship"
+                      },
+                      {
+                        "from": "open",
+                        "to": "cancelled"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600003,
+            "action": {
+              "kind": "create",
+              "id": "o1",
+              "own": {
+                "title": "Desk"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "o1",
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "draft",
+                  "enteredAt": 1767225600003
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600004,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "lost"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "OperationParamsError",
+              "message": "operation transition of behavior Workflow: /to: \"lost\" is not a state of Order (draft, open, shipped, cancelled)",
+              "details": {
+                "issues": [
+                  {
+                    "path": "/to",
+                    "message": "\"lost\" is not a state of Order (draft, open, shipped, cancelled)"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "draft",
+                  "enteredAt": 1767225600003
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600005,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "draft"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Order o1: Order o1 is already draft",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "Order o1 is already draft",
+                "vetoCode": "already_in_state",
+                "vetoDetails": {
+                  "from": "draft",
+                  "to": "draft"
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "draft",
+                  "enteredAt": 1767225600003
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600006,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "shipped"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Order o1: no transition leads from draft to shipped; from draft it can move to open, cancelled",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "no transition leads from draft to shipped; from draft it can move to open, cancelled",
+                "vetoCode": "transition_not_allowed",
+                "vetoDetails": {
+                  "from": "draft",
+                  "to": "shipped",
+                  "allowed": [
+                    "open",
+                    "cancelled"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "draft",
+                  "enteredAt": 1767225600003
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600007,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "cancelled"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "from": "draft",
+              "to": "cancelled"
+            },
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "cancelled",
+                  "enteredAt": 1767225600007
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600008,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "open"
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Order o1: cancelled is a terminal state: no transition leaves it",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "cancelled is a terminal state: no transition leaves it",
+                "vetoCode": "terminal_state",
+                "vetoDetails": {
+                  "from": "cancelled",
+                  "to": "open"
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "cancelled",
+                  "enteredAt": 1767225600007
+                }
+              }
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 10,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Workflow (node) > a transition that names a permission needs a caller who holds it",
+      "clock": "wall",
+      "types": [],
+      "steps": [],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "its engine checks permissions with a matcher of the test's own, which the reference host runs as a fixture and the core an adapter embeds does not have"
+        },
+        {
+          "step": 2,
+          "call": "schemas.define",
+          "reason": "its engine checks permissions with a matcher of the test's own, which the reference host runs as a fixture and the core an adapter embeds does not have"
+        },
+        {
+          "step": 3,
+          "call": "schemas.publish",
+          "reason": "its engine checks permissions with a matcher of the test's own, which the reference host runs as a fixture and the core an adapter embeds does not have"
+        },
+        {
+          "step": 4,
+          "call": "instances.create",
+          "reason": "its engine checks permissions with a matcher of the test's own, which the reference host runs as a fixture and the core an adapter embeds does not have"
+        },
+        {
+          "step": 5,
+          "call": "instances.invoke",
+          "reason": "its engine checks permissions with a matcher of the test's own, which the reference host runs as a fixture and the core an adapter embeds does not have"
+        },
+        {
+          "step": 6,
+          "call": "instances.invoke",
+          "reason": "its engine checks permissions with a matcher of the test's own, which the reference host runs as a fixture and the core an adapter embeds does not have"
+        },
+        {
+          "step": 7,
+          "call": "instances.invoke",
+          "reason": "its engine checks permissions with a matcher of the test's own, which the reference host runs as a fixture and the core an adapter embeds does not have"
+        },
+        {
+          "step": 8,
+          "call": "open",
+          "reason": "its engine checks permissions with a matcher of the test's own, which the reference host runs as a fixture and the core an adapter embeds does not have"
+        },
+        {
+          "step": 9,
+          "call": "schemas.define",
+          "reason": "its engine checks permissions with a matcher of the test's own, which the reference host runs as a fixture and the core an adapter embeds does not have"
+        },
+        {
+          "step": 10,
+          "call": "schemas.publish",
+          "reason": "its engine checks permissions with a matcher of the test's own, which the reference host runs as a fixture and the core an adapter embeds does not have"
+        },
+        {
+          "step": 11,
+          "call": "instances.create",
+          "reason": "its engine checks permissions with a matcher of the test's own, which the reference host runs as a fixture and the core an adapter embeds does not have"
+        },
+        {
+          "step": 12,
+          "call": "instances.invoke",
+          "reason": "its engine checks permissions with a matcher of the test's own, which the reference host runs as a fixture and the core an adapter embeds does not have"
+        },
+        {
+          "step": 13,
+          "call": "instances.invoke",
+          "reason": "its engine checks permissions with a matcher of the test's own, which the reference host runs as a fixture and the core an adapter embeds does not have"
+        },
+        {
+          "step": 14,
+          "call": "instances.invoke",
+          "reason": "its engine checks permissions with a matcher of the test's own, which the reference host runs as a fixture and the core an adapter embeds does not have"
+        }
+      ]
+    },
+    {
+      "name": "Workflow (node) > transition takes to and nothing else: no alias reaches the guard or the handler",
+      "clock": "wall",
+      "types": [
+        {
+          "name": "Order",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "versions": [
+            {
+              "name": "Order",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "open",
+                      "shipped",
+                      "cancelled"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "open"
+                      },
+                      {
+                        "from": "draft",
+                        "to": "cancelled"
+                      },
+                      {
+                        "from": "open",
+                        "to": "shipped",
+                        "permission": "orders.ship"
+                      },
+                      {
+                        "from": "open",
+                        "to": "cancelled"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600003,
+            "action": {
+              "kind": "create",
+              "id": "o1",
+              "own": {
+                "title": "Desk"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "o1",
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "draft",
+                  "enteredAt": 1767225600003
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600004,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "status": "open"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "OperationParamsError",
+              "message": "operation transition of behavior Workflow: must NOT have additional properties: status; must have required property 'to'",
+              "details": {
+                "issues": [
+                  {
+                    "path": "",
+                    "message": "must NOT have additional properties: status"
+                  },
+                  {
+                    "path": "",
+                    "message": "must have required property 'to'"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "draft",
+                  "enteredAt": 1767225600003
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600005,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "open",
+                "status": "shipped"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "OperationParamsError",
+              "message": "operation transition of behavior Workflow: must NOT have additional properties: status",
+              "details": {
+                "issues": [
+                  {
+                    "path": "",
+                    "message": "must NOT have additional properties: status"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "draft",
+                  "enteredAt": 1767225600003
+                }
+              }
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 7,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Workflow (node) > the status is not a field a create or an update sets: data holds own fields only, so a status key there is unknown",
+      "clock": "wall",
+      "types": [
+        {
+          "name": "Order",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "versions": [
+            {
+              "name": "Order",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "open",
+                      "shipped",
+                      "cancelled"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "open"
+                      },
+                      {
+                        "from": "draft",
+                        "to": "cancelled"
+                      },
+                      {
+                        "from": "open",
+                        "to": "shipped",
+                        "permission": "orders.ship"
+                      },
+                      {
+                        "from": "open",
+                        "to": "cancelled"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600003,
+            "action": {
+              "kind": "create",
+              "id": "o1",
+              "own": {
+                "title": "Desk"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "o1",
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "draft",
+                  "enteredAt": 1767225600003
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600006,
+            "action": {
+              "kind": "update",
+              "key": "o1",
+              "patch": {
+                "status": null
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "draft",
+                  "enteredAt": 1767225600003
+                }
+              }
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 5,
+          "call": "instances.create",
+          "reason": "own-field validation is the store's, and it refuses this write: Order has no field status"
+        },
+        {
+          "step": 6,
+          "call": "instances.update",
+          "reason": "own-field validation is the store's, and it refuses this write: Order has no field status"
+        },
+        {
+          "step": 8,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Workflow (node) > an own field named status sits beside Workflow's: each is read, written and filtered apart",
+      "clock": "wall",
+      "types": [
+        {
+          "name": "Order",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "status",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Order",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "open",
+                      "shipped",
+                      "cancelled"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "open"
+                      },
+                      {
+                        "from": "draft",
+                        "to": "cancelled"
+                      },
+                      {
+                        "from": "open",
+                        "to": "shipped",
+                        "permission": "orders.ship"
+                      },
+                      {
+                        "from": "open",
+                        "to": "cancelled"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600003,
+            "action": {
+              "kind": "create",
+              "id": "o1",
+              "own": {
+                "title": "Desk",
+                "status": "paid"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "o1",
+            "row": {
+              "own": {
+                "title": "Desk",
+                "status": "paid"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "draft",
+                  "enteredAt": 1767225600003
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600004,
+            "action": {
+              "kind": "create",
+              "id": "o2",
+              "own": {
+                "title": "Lamp",
+                "status": "unpaid"
+              },
+              "params": {}
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "key": "o2",
+            "row": {
+              "own": {
+                "title": "Lamp",
+                "status": "unpaid"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "draft",
+                  "enteredAt": 1767225600004
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600005,
+            "action": {
+              "kind": "operation",
+              "key": "o2",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "open"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "from": "draft",
+              "to": "open"
+            },
+            "row": {
+              "own": {
+                "title": "Lamp",
+                "status": "unpaid"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1767225600005
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600006,
+            "action": {
+              "kind": "update",
+              "key": "o1",
+              "patch": {
+                "status": "refunded"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "Desk",
+                "status": "refunded"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "draft",
+                  "enteredAt": 1767225600003
+                }
+              }
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 8,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 9,
+          "call": "instances.list",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 10,
+          "call": "instances.list",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 11,
+          "call": "instances.list",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 12,
+          "call": "instances.list",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Workflow (node) > another behavior moves the status only through transition, whose guard and permission gate run for it too",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [],
+      "steps": [],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it composes test behaviors (test.Dispatch), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 2,
+          "call": "schemas.define",
+          "reason": "it composes test behaviors (test.Dispatch), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 3,
+          "call": "schemas.publish",
+          "reason": "it composes test behaviors (test.Dispatch), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 4,
+          "call": "instances.create",
+          "reason": "it composes test behaviors (test.Dispatch), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 5,
+          "call": "instances.invoke",
+          "reason": "it composes test behaviors (test.Dispatch), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 6,
+          "call": "instances.invoke",
+          "reason": "it composes test behaviors (test.Dispatch), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 7,
+          "call": "instances.invoke",
+          "reason": "it composes test behaviors (test.Dispatch), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 8,
+          "call": "instances.invoke",
+          "reason": "it composes test behaviors (test.Dispatch), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 9,
+          "call": "instances.invoke",
+          "reason": "it composes test behaviors (test.Dispatch), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 10,
+          "call": "events.read",
+          "reason": "it composes test behaviors (test.Dispatch), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        }
+      ]
+    },
+    {
+      "name": "Workflow (node) > define refuses a config its schema lets through that is not a state machine",
+      "clock": "wall",
+      "types": [],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ],
+                  "initial": "lost"
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Order: behavior Workflow config: the initial state \"lost\" is not one of its states (draft, open, shipped, cancelled)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Order: behavior Workflow config: the initial state \"lost\" is not one of its states (draft, open, shipped, cancelled)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "held"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Order: behavior Workflow config: the transition from \"open\" to \"held\" names \"held\", which is not one of its states (draft, open, shipped, cancelled)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Order: behavior Workflow config: the transition from \"open\" to \"held\" names \"held\", which is not one of its states (draft, open, shipped, cancelled)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 4,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "open"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600003,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Order: behavior Workflow config: a transition from \"open\" to itself changes nothing",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Order: behavior Workflow config: a transition from \"open\" to itself changes nothing"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 5,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600004,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Order: behavior Workflow config: the transition from \"draft\" to \"open\" is listed twice",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Order: behavior Workflow config: the transition from \"draft\" to \"open\" is listed twice"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 6,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ],
+                  "outcomes": {
+                    "lost": "failure"
+                  }
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600005,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Order: behavior Workflow config: outcomes names \"lost\", which is not one of its states (draft, open, shipped, cancelled)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Order: behavior Workflow config: outcomes names \"lost\", which is not one of its states (draft, open, shipped, cancelled)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 7,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ],
+                  "outcomes": {
+                    "shipped": "success",
+                    "open": "failure"
+                  }
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600006,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Order: behavior Workflow config: outcomes names \"open\", which is not a terminal state: a transition leaves it, and only a terminal state has an outcome",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Order: behavior Workflow config: outcomes names \"open\", which is not a terminal state: a transition leaves it, and only a terminal state has an outcome"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 8,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [],
+                  "transitions": []
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600007,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Order: behavior Workflow config: /states: must NOT have fewer than 1 items",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "schema",
+                    "path": "/config/states",
+                    "message": "must NOT have fewer than 1 items"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 9,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "in review"
+                  ],
+                  "transitions": []
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600008,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Order: behavior Workflow config: /states/0: must match pattern \"^[A-Za-z][A-Za-z0-9_-]*$\"",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "schema",
+                    "path": "/config/states/0",
+                    "message": "must match pattern \"^[A-Za-z][A-Za-z0-9_-]*$\""
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 10,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ],
+                  "terminal": [
+                    "shipped"
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600009,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Order: behavior Workflow config: unknown key \"terminal\"",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "schema",
+                    "path": "/config",
+                    "message": "unknown key \"terminal\""
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 11,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ],
+                  "outcomes": {
+                    "cancelled": "aborted"
+                  }
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600010,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Order: behavior Workflow config: /outcomes/cancelled: must be one of \"success\", \"failure\", \"neutral\"",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "schema",
+                    "path": "/config/outcomes/cancelled",
+                    "message": "must be one of \"success\", \"failure\", \"neutral\""
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 12,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ],
+                  "outcomes": {}
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600011,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Order: behavior Workflow config: /outcomes: must NOT have fewer than 1 properties",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "schema",
+                    "path": "/config/outcomes",
+                    "message": "must NOT have fewer than 1 properties"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 13,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600012,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Order: behavior Workflow: must have required property 'config'",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "schema",
+                    "path": "",
+                    "message": "must have required property 'config'"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 14,
+          "call": "schemas.list",
+          "reason": "a read of the types the host keeps, which the transcript holds as each type's versions"
+        }
+      ]
+    },
+    {
+      "name": "Workflow (node) > a new version keeps every state; transitions, permissions and the initial state may change",
+      "clock": "wall",
+      "types": [
+        {
+          "name": "Order",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "versions": [
+            {
+              "name": "Order",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "open",
+                      "shipped",
+                      "cancelled"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "open"
+                      },
+                      {
+                        "from": "draft",
+                        "to": "cancelled"
+                      },
+                      {
+                        "from": "open",
+                        "to": "shipped",
+                        "permission": "orders.ship"
+                      },
+                      {
+                        "from": "open",
+                        "to": "cancelled"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ]
+            },
+            {
+              "name": "Order",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "open",
+                      "shipped",
+                      "cancelled",
+                      "held"
+                    ],
+                    "initial": "open",
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "open"
+                      },
+                      {
+                        "from": "draft",
+                        "to": "cancelled"
+                      },
+                      {
+                        "from": "open",
+                        "to": "shipped"
+                      },
+                      {
+                        "from": "open",
+                        "to": "held"
+                      },
+                      {
+                        "from": "held",
+                        "to": "open"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600003,
+            "action": {
+              "kind": "create",
+              "id": "o1",
+              "own": {
+                "title": "Desk"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "o1",
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "draft",
+                  "enteredAt": 1767225600003
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 5,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled",
+                    "held"
+                  ],
+                  "initial": "open",
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped"
+                    },
+                    {
+                      "from": "open",
+                      "to": "held"
+                    },
+                    {
+                      "from": "held",
+                      "to": "open"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600004,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "Order",
+                "uses": [
+                  {
+                    "behavior": "Workflow",
+                    "config": {
+                      "states": [
+                        "draft",
+                        "open",
+                        "shipped",
+                        "cancelled"
+                      ],
+                      "transitions": [
+                        {
+                          "from": "draft",
+                          "to": "open"
+                        },
+                        {
+                          "from": "draft",
+                          "to": "cancelled"
+                        },
+                        {
+                          "from": "open",
+                          "to": "shipped",
+                          "permission": "orders.ship"
+                        },
+                        {
+                          "from": "open",
+                          "to": "cancelled"
+                        }
+                      ]
+                    },
+                    "anchor": "type"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 6,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled",
+                    "held"
+                  ],
+                  "initial": "open",
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped"
+                    },
+                    {
+                      "from": "open",
+                      "to": "held"
+                    },
+                    {
+                      "from": "held",
+                      "to": "open"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600005,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "Order",
+                "uses": [
+                  {
+                    "behavior": "Workflow",
+                    "config": {
+                      "states": [
+                        "draft",
+                        "open",
+                        "shipped",
+                        "cancelled"
+                      ],
+                      "transitions": [
+                        {
+                          "from": "draft",
+                          "to": "open"
+                        },
+                        {
+                          "from": "draft",
+                          "to": "cancelled"
+                        },
+                        {
+                          "from": "open",
+                          "to": "shipped",
+                          "permission": "orders.ship"
+                        },
+                        {
+                          "from": "open",
+                          "to": "cancelled"
+                        }
+                      ]
+                    },
+                    "anchor": "type"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 1,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600006,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "open"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "from": "draft",
+              "to": "open"
+            },
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1767225600006
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 1,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600007,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "shipped"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "from": "open",
+              "to": "shipped"
+            },
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "shipped",
+                  "enteredAt": 1767225600007
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 1,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600008,
+            "action": {
+              "kind": "create",
+              "id": "id-1",
+              "own": {
+                "title": "Lamp"
+              },
+              "params": {}
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "key": "id-1",
+            "row": {
+              "own": {
+                "title": "Lamp"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1767225600008
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 10,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600009,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "Order",
+                "uses": [
+                  {
+                    "behavior": "Workflow",
+                    "config": {
+                      "states": [
+                        "draft",
+                        "open",
+                        "shipped",
+                        "cancelled",
+                        "held"
+                      ],
+                      "initial": "open",
+                      "transitions": [
+                        {
+                          "from": "draft",
+                          "to": "open"
+                        },
+                        {
+                          "from": "draft",
+                          "to": "cancelled"
+                        },
+                        {
+                          "from": "open",
+                          "to": "shipped"
+                        },
+                        {
+                          "from": "open",
+                          "to": "held"
+                        },
+                        {
+                          "from": "held",
+                          "to": "open"
+                        }
+                      ]
+                    },
+                    "anchor": "type"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "incompatible_change",
+              "status": 409,
+              "class": "IncompatibleChangeError",
+              "message": "type Order: behavior Workflow on type Order cannot change its config from {\"initial\":\"open\",\"states\":[\"draft\",\"open\",\"shipped\",\"cancelled\",\"held\"],\"transitions\":[{\"from\":\"draft\",\"to\":\"open\"},{\"from\":\"draft\",\"to\":\"cancelled\"},{\"from\":\"open\",\"to\":\"shipped\"},{\"from\":\"open\",\"to\":\"held\"},{\"from\":\"held\",\"to\":\"open\"}]} to {\"states\":[\"draft\",\"open\",\"shipped\"],\"transitions\":[{\"from\":\"draft\",\"to\":\"open\"},{\"from\":\"open\",\"to\":\"shipped\"}]}: an instance may be in \"cancelled\", \"held\", which the new config drops",
+              "details": {
+                "changes": [
+                  {
+                    "path": "Order.behaviors.Workflow",
+                    "message": "behavior Workflow on type Order cannot change its config from {\"initial\":\"open\",\"states\":[\"draft\",\"open\",\"shipped\",\"cancelled\",\"held\"],\"transitions\":[{\"from\":\"draft\",\"to\":\"open\"},{\"from\":\"draft\",\"to\":\"cancelled\"},{\"from\":\"open\",\"to\":\"shipped\"},{\"from\":\"open\",\"to\":\"held\"},{\"from\":\"held\",\"to\":\"open\"}]} to {\"states\":[\"draft\",\"open\",\"shipped\"],\"transitions\":[{\"from\":\"draft\",\"to\":\"open\"},{\"from\":\"open\",\"to\":\"shipped\"}]}: an instance may be in \"cancelled\", \"held\", which the new config drops"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 11,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": []
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600010,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "Order",
+                "uses": [
+                  {
+                    "behavior": "Workflow",
+                    "config": {
+                      "states": [
+                        "draft",
+                        "open",
+                        "shipped",
+                        "cancelled",
+                        "held"
+                      ],
+                      "initial": "open",
+                      "transitions": [
+                        {
+                          "from": "draft",
+                          "to": "open"
+                        },
+                        {
+                          "from": "draft",
+                          "to": "cancelled"
+                        },
+                        {
+                          "from": "open",
+                          "to": "shipped"
+                        },
+                        {
+                          "from": "open",
+                          "to": "held"
+                        },
+                        {
+                          "from": "held",
+                          "to": "open"
+                        }
+                      ]
+                    },
+                    "anchor": "type"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "incompatible_change",
+              "status": 409,
+              "class": "IncompatibleChangeError",
+              "message": "type Order: behavior Workflow cannot be removed from type Order, which has instances: the instances would lose their status",
+              "details": {
+                "changes": [
+                  {
+                    "path": "Order.behaviors.Workflow",
+                    "message": "behavior Workflow cannot be removed from type Order, which has instances: the instances would lose their status"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        }
+      ]
+    },
+    {
+      "name": "Workflow (node) > with no instance, a new version may drop a state; once the last one goes, it may again",
+      "clock": "wall",
+      "types": [
+        {
+          "name": "Order",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "versions": [
+            {
+              "name": "Order",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "open",
+                      "shipped",
+                      "cancelled"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "open"
+                      },
+                      {
+                        "from": "draft",
+                        "to": "cancelled"
+                      },
+                      {
+                        "from": "open",
+                        "to": "shipped",
+                        "permission": "orders.ship"
+                      },
+                      {
+                        "from": "open",
+                        "to": "cancelled"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ]
+            },
+            {
+              "name": "Order",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "open",
+                      "shipped"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "open"
+                      },
+                      {
+                        "from": "open",
+                        "to": "shipped"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ]
+            },
+            {
+              "name": "Order",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "open"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "open"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600003,
+            "action": {
+              "kind": "create",
+              "id": "o1",
+              "own": {
+                "title": "Desk"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "o1",
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "draft",
+                  "enteredAt": 1767225600003
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 5,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600004,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "Order",
+                "uses": [
+                  {
+                    "behavior": "Workflow",
+                    "config": {
+                      "states": [
+                        "draft",
+                        "open",
+                        "shipped",
+                        "cancelled"
+                      ],
+                      "transitions": [
+                        {
+                          "from": "draft",
+                          "to": "open"
+                        },
+                        {
+                          "from": "draft",
+                          "to": "cancelled"
+                        },
+                        {
+                          "from": "open",
+                          "to": "shipped",
+                          "permission": "orders.ship"
+                        },
+                        {
+                          "from": "open",
+                          "to": "cancelled"
+                        }
+                      ]
+                    },
+                    "anchor": "type"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "incompatible_change",
+              "status": 409,
+              "class": "IncompatibleChangeError",
+              "message": "type Order: behavior Workflow on type Order cannot change its config from {\"states\":[\"draft\",\"open\",\"shipped\",\"cancelled\"],\"transitions\":[{\"from\":\"draft\",\"to\":\"open\"},{\"from\":\"draft\",\"to\":\"cancelled\"},{\"from\":\"open\",\"permission\":\"orders.ship\",\"to\":\"shipped\"},{\"from\":\"open\",\"to\":\"cancelled\"}]} to {\"states\":[\"draft\",\"open\",\"shipped\"],\"transitions\":[{\"from\":\"draft\",\"to\":\"open\"},{\"from\":\"open\",\"to\":\"shipped\"}]}: an instance may be in \"cancelled\", which the new config drops",
+              "details": {
+                "changes": [
+                  {
+                    "path": "Order.behaviors.Workflow",
+                    "message": "behavior Workflow on type Order cannot change its config from {\"states\":[\"draft\",\"open\",\"shipped\",\"cancelled\"],\"transitions\":[{\"from\":\"draft\",\"to\":\"open\"},{\"from\":\"draft\",\"to\":\"cancelled\"},{\"from\":\"open\",\"permission\":\"orders.ship\",\"to\":\"shipped\"},{\"from\":\"open\",\"to\":\"cancelled\"}]} to {\"states\":[\"draft\",\"open\",\"shipped\"],\"transitions\":[{\"from\":\"draft\",\"to\":\"open\"},{\"from\":\"open\",\"to\":\"shipped\"}]}: an instance may be in \"cancelled\", which the new config drops"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.delete",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600005,
+            "action": {
+              "kind": "delete",
+              "key": "o1"
+            },
+            "request": "request-2"
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 7,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600006,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "Order",
+                "uses": [
+                  {
+                    "behavior": "Workflow",
+                    "config": {
+                      "states": [
+                        "draft",
+                        "open",
+                        "shipped",
+                        "cancelled"
+                      ],
+                      "transitions": [
+                        {
+                          "from": "draft",
+                          "to": "open"
+                        },
+                        {
+                          "from": "draft",
+                          "to": "cancelled"
+                        },
+                        {
+                          "from": "open",
+                          "to": "shipped",
+                          "permission": "orders.ship"
+                        },
+                        {
+                          "from": "open",
+                          "to": "cancelled"
+                        }
+                      ]
+                    },
+                    "anchor": "type"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 8,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600007,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "Order",
+                "uses": [
+                  {
+                    "behavior": "Workflow",
+                    "config": {
+                      "states": [
+                        "draft",
+                        "open",
+                        "shipped",
+                        "cancelled"
+                      ],
+                      "transitions": [
+                        {
+                          "from": "draft",
+                          "to": "open"
+                        },
+                        {
+                          "from": "draft",
+                          "to": "cancelled"
+                        },
+                        {
+                          "from": "open",
+                          "to": "shipped",
+                          "permission": "orders.ship"
+                        },
+                        {
+                          "from": "open",
+                          "to": "cancelled"
+                        }
+                      ]
+                    },
+                    "anchor": "type"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 9,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600008,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "Order",
+                "uses": [
+                  {
+                    "behavior": "Workflow",
+                    "config": {
+                      "states": [
+                        "draft",
+                        "open",
+                        "shipped"
+                      ],
+                      "transitions": [
+                        {
+                          "from": "draft",
+                          "to": "open"
+                        },
+                        {
+                          "from": "open",
+                          "to": "shipped"
+                        }
+                      ]
+                    },
+                    "anchor": "type"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 10,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600009,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "Order",
+                "uses": [
+                  {
+                    "behavior": "Workflow",
+                    "config": {
+                      "states": [
+                        "draft",
+                        "open",
+                        "shipped"
+                      ],
+                      "transitions": [
+                        {
+                          "from": "draft",
+                          "to": "open"
+                        },
+                        {
+                          "from": "open",
+                          "to": "shipped"
+                        }
+                      ]
+                    },
+                    "anchor": "type"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        }
+      ]
+    },
+    {
+      "name": "Workflow (node) > Workflow joins a schema with no instances, and not one that has them",
+      "clock": "wall",
+      "types": [
+        {
+          "name": "Order",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "versions": [
+            {
+              "name": "Order",
+              "uses": []
+            },
+            {
+              "name": "Order",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "open",
+                      "shipped",
+                      "cancelled"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "open"
+                      },
+                      {
+                        "from": "draft",
+                        "to": "cancelled"
+                      },
+                      {
+                        "from": "open",
+                        "to": "shipped",
+                        "permission": "orders.ship"
+                      },
+                      {
+                        "from": "open",
+                        "to": "cancelled"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ]
+            },
+            {
+              "name": "Order",
+              "uses": []
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": []
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": []
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 4,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600003,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "Order",
+                "uses": []
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 5,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600004,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "Order",
+                "uses": []
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 7,
+          "call": "schemas.define",
+          "database": "{{dir:2}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": []
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600005,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 8,
+          "call": "schemas.publish",
+          "database": "{{dir:2}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": []
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600006,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.create",
+          "database": "{{dir:2}}/engine.db",
+          "type": "Order",
+          "version": 2,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600007,
+            "action": {
+              "kind": "create",
+              "id": "id-1",
+              "own": {
+                "title": "Desk"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "id-1",
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {}
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 10,
+          "call": "schemas.define",
+          "database": "{{dir:2}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600008,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "Order",
+                "uses": []
+              }
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "incompatible_change",
+              "status": 409,
+              "class": "IncompatibleChangeError",
+              "message": "type Order: behavior Workflow cannot be added to type Order, which has instances: the instances that exist have no status to start from",
+              "details": {
+                "changes": [
+                  {
+                    "path": "Order.behaviors.Workflow",
+                    "message": "behavior Workflow cannot be added to type Order, which has instances: the instances that exist have no status to start from"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 6,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        }
+      ]
+    },
+    {
+      "name": "Workflow (node) > isTerminalState: a state no transition leaves",
+      "clock": "wall",
+      "types": [
+        {
+          "name": "Order",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "versions": [
+            {
+              "name": "Order",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "open",
+                      "shipped",
+                      "cancelled"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "open"
+                      },
+                      {
+                        "from": "draft",
+                        "to": "cancelled"
+                      },
+                      {
+                        "from": "open",
+                        "to": "shipped",
+                        "permission": "orders.ship"
+                      },
+                      {
+                        "from": "open",
+                        "to": "cancelled"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600003,
+            "action": {
+              "kind": "create",
+              "id": "o1",
+              "own": {
+                "title": "Desk"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "o1",
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "draft",
+                  "enteredAt": 1767225600003
+                }
+              }
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 5,
+          "call": "schemas.behaviors",
+          "reason": "a read of the types the host keeps, which the transcript holds as each type's versions"
+        }
+      ]
+    },
+    {
+      "name": "Workflow (node) > stateOutcome: a terminal state has the outcome outcomes names, success when it names none; any other state has none",
+      "clock": "wall",
+      "types": [
+        {
+          "name": "Order",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "versions": [
+            {
+              "name": "Order",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "open",
+                      "shipped",
+                      "cancelled"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "open"
+                      },
+                      {
+                        "from": "draft",
+                        "to": "cancelled"
+                      },
+                      {
+                        "from": "open",
+                        "to": "shipped",
+                        "permission": "orders.ship"
+                      },
+                      {
+                        "from": "open",
+                        "to": "cancelled"
+                      }
+                    ],
+                    "outcomes": {
+                      "cancelled": "failure"
+                    }
+                  },
+                  "anchor": "type"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ],
+                  "outcomes": {
+                    "cancelled": "failure"
+                  }
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ],
+                  "outcomes": {
+                    "cancelled": "failure"
+                  }
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600003,
+            "action": {
+              "kind": "create",
+              "id": "o1",
+              "own": {
+                "title": "Desk"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "o1",
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "draft",
+                  "enteredAt": 1767225600003
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600005,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "cancelled"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "from": "draft",
+              "to": "cancelled"
+            },
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "cancelled",
+                  "enteredAt": 1767225600005
+                }
+              }
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 5,
+          "call": "schemas.behaviors",
+          "reason": "a read of the types the host keeps, which the transcript holds as each type's versions"
+        }
+      ]
+    },
+    {
+      "name": "Workflow (node) > a new version may change outcomes, as it may change transitions: nothing is stored, and readers see the new one at their next read",
+      "clock": "wall",
+      "types": [
+        {
+          "name": "Order",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "versions": [
+            {
+              "name": "Order",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "open",
+                      "shipped",
+                      "cancelled"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "open"
+                      },
+                      {
+                        "from": "draft",
+                        "to": "cancelled"
+                      },
+                      {
+                        "from": "open",
+                        "to": "shipped",
+                        "permission": "orders.ship"
+                      },
+                      {
+                        "from": "open",
+                        "to": "cancelled"
+                      }
+                    ],
+                    "outcomes": {
+                      "cancelled": "failure"
+                    }
+                  },
+                  "anchor": "type"
+                }
+              ]
+            },
+            {
+              "name": "Order",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "open",
+                      "shipped",
+                      "cancelled"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "open"
+                      },
+                      {
+                        "from": "draft",
+                        "to": "cancelled"
+                      },
+                      {
+                        "from": "open",
+                        "to": "shipped",
+                        "permission": "orders.ship"
+                      },
+                      {
+                        "from": "open",
+                        "to": "cancelled"
+                      }
+                    ],
+                    "outcomes": {
+                      "cancelled": "neutral"
+                    }
+                  },
+                  "anchor": "type"
+                }
+              ]
+            },
+            {
+              "name": "Order",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "open",
+                      "shipped",
+                      "cancelled"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "open"
+                      },
+                      {
+                        "from": "draft",
+                        "to": "cancelled"
+                      },
+                      {
+                        "from": "open",
+                        "to": "shipped",
+                        "permission": "orders.ship"
+                      },
+                      {
+                        "from": "open",
+                        "to": "cancelled"
+                      }
+                    ],
+                    "outcomes": {
+                      "cancelled": "neutral",
+                      "shipped": "success"
+                    }
+                  },
+                  "anchor": "type"
+                }
+              ]
+            },
+            {
+              "name": "Order",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "draft",
+                      "open",
+                      "shipped",
+                      "cancelled"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "draft",
+                        "to": "open"
+                      },
+                      {
+                        "from": "draft",
+                        "to": "cancelled"
+                      },
+                      {
+                        "from": "open",
+                        "to": "shipped",
+                        "permission": "orders.ship"
+                      },
+                      {
+                        "from": "open",
+                        "to": "cancelled"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ],
+                  "outcomes": {
+                    "cancelled": "failure"
+                  }
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ],
+                  "outcomes": {
+                    "cancelled": "failure"
+                  }
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600003,
+            "action": {
+              "kind": "create",
+              "id": "o1",
+              "own": {
+                "title": "Desk"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "o1",
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "draft",
+                  "enteredAt": 1767225600003
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Order",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600004,
+            "action": {
+              "kind": "operation",
+              "key": "o1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "cancelled"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "from": "draft",
+              "to": "cancelled"
+            },
+            "row": {
+              "own": {
+                "title": "Desk"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "cancelled",
+                  "enteredAt": 1767225600004
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 6,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ],
+                  "outcomes": {
+                    "cancelled": "neutral"
+                  }
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600005,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "Order",
+                "uses": [
+                  {
+                    "behavior": "Workflow",
+                    "config": {
+                      "states": [
+                        "draft",
+                        "open",
+                        "shipped",
+                        "cancelled"
+                      ],
+                      "transitions": [
+                        {
+                          "from": "draft",
+                          "to": "open"
+                        },
+                        {
+                          "from": "draft",
+                          "to": "cancelled"
+                        },
+                        {
+                          "from": "open",
+                          "to": "shipped",
+                          "permission": "orders.ship"
+                        },
+                        {
+                          "from": "open",
+                          "to": "cancelled"
+                        }
+                      ],
+                      "outcomes": {
+                        "cancelled": "failure"
+                      }
+                    },
+                    "anchor": "type"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 7,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ],
+                  "outcomes": {
+                    "cancelled": "neutral"
+                  }
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600006,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "Order",
+                "uses": [
+                  {
+                    "behavior": "Workflow",
+                    "config": {
+                      "states": [
+                        "draft",
+                        "open",
+                        "shipped",
+                        "cancelled"
+                      ],
+                      "transitions": [
+                        {
+                          "from": "draft",
+                          "to": "open"
+                        },
+                        {
+                          "from": "draft",
+                          "to": "cancelled"
+                        },
+                        {
+                          "from": "open",
+                          "to": "shipped",
+                          "permission": "orders.ship"
+                        },
+                        {
+                          "from": "open",
+                          "to": "cancelled"
+                        }
+                      ],
+                      "outcomes": {
+                        "cancelled": "failure"
+                      }
+                    },
+                    "anchor": "type"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 8,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ],
+                  "outcomes": {
+                    "cancelled": "neutral",
+                    "shipped": "success"
+                  }
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600007,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "Order",
+                "uses": [
+                  {
+                    "behavior": "Workflow",
+                    "config": {
+                      "states": [
+                        "draft",
+                        "open",
+                        "shipped",
+                        "cancelled"
+                      ],
+                      "transitions": [
+                        {
+                          "from": "draft",
+                          "to": "open"
+                        },
+                        {
+                          "from": "draft",
+                          "to": "cancelled"
+                        },
+                        {
+                          "from": "open",
+                          "to": "shipped",
+                          "permission": "orders.ship"
+                        },
+                        {
+                          "from": "open",
+                          "to": "cancelled"
+                        }
+                      ],
+                      "outcomes": {
+                        "cancelled": "neutral"
+                      }
+                    },
+                    "anchor": "type"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 9,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ],
+                  "outcomes": {
+                    "cancelled": "neutral",
+                    "shipped": "success"
+                  }
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600008,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "Order",
+                "uses": [
+                  {
+                    "behavior": "Workflow",
+                    "config": {
+                      "states": [
+                        "draft",
+                        "open",
+                        "shipped",
+                        "cancelled"
+                      ],
+                      "transitions": [
+                        {
+                          "from": "draft",
+                          "to": "open"
+                        },
+                        {
+                          "from": "draft",
+                          "to": "cancelled"
+                        },
+                        {
+                          "from": "open",
+                          "to": "shipped",
+                          "permission": "orders.ship"
+                        },
+                        {
+                          "from": "open",
+                          "to": "cancelled"
+                        }
+                      ],
+                      "outcomes": {
+                        "cancelled": "neutral"
+                      }
+                    },
+                    "anchor": "type"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 10,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600009,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "Order",
+                "uses": [
+                  {
+                    "behavior": "Workflow",
+                    "config": {
+                      "states": [
+                        "draft",
+                        "open",
+                        "shipped",
+                        "cancelled"
+                      ],
+                      "transitions": [
+                        {
+                          "from": "draft",
+                          "to": "open"
+                        },
+                        {
+                          "from": "draft",
+                          "to": "cancelled"
+                        },
+                        {
+                          "from": "open",
+                          "to": "shipped",
+                          "permission": "orders.ship"
+                        },
+                        {
+                          "from": "open",
+                          "to": "cancelled"
+                        }
+                      ],
+                      "outcomes": {
+                        "cancelled": "neutral",
+                        "shipped": "success"
+                      }
+                    },
+                    "anchor": "type"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 11,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600010,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "Order",
+                "uses": [
+                  {
+                    "behavior": "Workflow",
+                    "config": {
+                      "states": [
+                        "draft",
+                        "open",
+                        "shipped",
+                        "cancelled"
+                      ],
+                      "transitions": [
+                        {
+                          "from": "draft",
+                          "to": "open"
+                        },
+                        {
+                          "from": "draft",
+                          "to": "cancelled"
+                        },
+                        {
+                          "from": "open",
+                          "to": "shipped",
+                          "permission": "orders.ship"
+                        },
+                        {
+                          "from": "open",
+                          "to": "cancelled"
+                        }
+                      ],
+                      "outcomes": {
+                        "cancelled": "neutral",
+                        "shipped": "success"
+                      }
+                    },
+                    "anchor": "type"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 14,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Order",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "draft",
+                    "open",
+                    "shipped",
+                    "cancelled"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "draft",
+                      "to": "open"
+                    },
+                    {
+                      "from": "draft",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "open",
+                      "to": "shipped",
+                      "permission": "orders.ship"
+                    },
+                    {
+                      "from": "open",
+                      "to": "cancelled"
+                    },
+                    {
+                      "from": "cancelled",
+                      "to": "draft"
+                    }
+                  ],
+                  "outcomes": {
+                    "cancelled": "failure"
+                  }
+                },
+                "anchor": "type"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600013,
+            "action": {
+              "kind": "publish",
+              "from": {
+                "name": "Order",
+                "uses": [
+                  {
+                    "behavior": "Workflow",
+                    "config": {
+                      "states": [
+                        "draft",
+                        "open",
+                        "shipped",
+                        "cancelled"
+                      ],
+                      "transitions": [
+                        {
+                          "from": "draft",
+                          "to": "open"
+                        },
+                        {
+                          "from": "draft",
+                          "to": "cancelled"
+                        },
+                        {
+                          "from": "open",
+                          "to": "shipped",
+                          "permission": "orders.ship"
+                        },
+                        {
+                          "from": "open",
+                          "to": "cancelled"
+                        }
+                      ]
+                    },
+                    "anchor": "type"
+                  }
+                ]
+              }
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Order: behavior Workflow config: outcomes names \"cancelled\", which is not a terminal state: a transition leaves it, and only a terminal state has an outcome",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Order: behavior Workflow config: outcomes names \"cancelled\", which is not a terminal state: a transition leaves it, and only a terminal state has an outcome"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 12,
+          "call": "schemas.live",
+          "reason": "a read of the types the host keeps, which the transcript holds as each type's versions"
+        },
+        {
+          "step": 13,
+          "call": "schemas.behaviors",
+          "reason": "a read of the types the host keeps, which the transcript holds as each type's versions"
+        }
+      ]
+    }
+  ]
+}

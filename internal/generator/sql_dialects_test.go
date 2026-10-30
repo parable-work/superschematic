@@ -138,7 +138,7 @@ func TestOutputsSQLDialects(t *testing.T) {
 
 // TestRunRefusesWhatSQLiteDoesNotSupport: a service that lists sqlite fails
 // its build when its schema uses a feature the SQLite dialect refuses, with
-// the feature and the dialect named.
+// the feature and the dialect named; an @optimistic table is not one.
 func TestRunRefusesWhatSQLiteDoesNotSupport(t *testing.T) {
 	load := func(fixture string) (*ir.Schema, *schemaconfig.SchemaConfig) {
 		t.Helper()
@@ -166,7 +166,6 @@ func TestRunRefusesWhatSQLiteDoesNotSupport(t *testing.T) {
 		want    string
 	}{
 		{"@versioned", "", func(s *ir.Schema) { tasting(s).Versioned = true }, "Tasting is @versioned"},
-		{"@optimistic", "", func(s *ir.Schema) { tasting(s).Optimistic = true }, "Tasting is @optimistic"},
 		{"projection", "fixture-projection", nil, "is a projection (app.preferences)"},
 		{"GIN index", "", func(s *ir.Schema) {
 			tasting(s).Indexes = []ir.IndexDef{{Keys: []string{"retastedAt"}}}
@@ -198,5 +197,13 @@ func TestRunRefusesWhatSQLiteDoesNotSupport(t *testing.T) {
 				t.Fatalf("error %q does not contain %q and the dialect", err, tc.want)
 			}
 		})
+	}
+
+	// @optimistic builds for SQLite, its bump a trigger of its own there,
+	// since a table whose fields are behaviors takes it (D103).
+	schema, cfg := load("fixture-list-defaults-db")
+	tasting(schema).Optimistic = true
+	if _, err := Run(schema, withDialects(cfg, "postgres", "sqlite"), Options{OutputRoot: t.TempDir(), Naming: naming.Default()}); err != nil {
+		t.Fatalf("an @optimistic table on sqlite: %v", err)
 	}
 }

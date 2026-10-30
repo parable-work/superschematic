@@ -16,6 +16,9 @@
       "import": "./src/index.ts"
     }
   },
+  "peerDependencies": {
+    "@superschematic/schema": "*"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun test src/**/*.test.ts"

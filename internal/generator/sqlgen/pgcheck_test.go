@@ -117,3 +117,32 @@ func TestConcurrentCreateSQLOnPostgres(t *testing.T) {
 		"PGCHECK_SQL_DIR="+sqlDir,
 	)
 }
+
+// TestWorkflowFieldsCreateSQLOnPostgres applies the create.sql and drop.sql
+// generated for fixture-workflow-db, whose tables' fields are
+// behaviors (D103), to a real Postgres; testdata/pgcheck's
+// TestWorkflowFieldsOnPostgres holds the checks. Set
+// SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL as for
+// TestProjectionMigrationsOnPostgres.
+func TestWorkflowFieldsCreateSQLOnPostgres(t *testing.T) {
+	dsn := os.Getenv("SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL to apply fixture-workflow-db's create.sql and drop.sql against Postgres")
+	}
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-workflow-db"))
+	if err != nil {
+		t.Fatalf("load fixture-workflow-db: %v", err)
+	}
+	output, err := Generate(schema, Options{SchemaName: "fixture-workflow-db"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDir := t.TempDir()
+	if err := WriteDDL(output, sqlDir); err != nil {
+		t.Fatal(err)
+	}
+	runPGCheck(t, "TestWorkflowFieldsOnPostgres",
+		"PGCHECK_DATABASE_URL="+dsn,
+		"PGCHECK_SQL_DIR="+sqlDir,
+	)
+}

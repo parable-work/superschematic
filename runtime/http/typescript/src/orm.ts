@@ -3,6 +3,7 @@ import { currentCaller } from './caller.js';
 import { FieldEncryptionError, newRowKey, parseFieldKeys, type FieldCell, type FieldKeyring, type FieldKeys } from './fieldcrypt.js';
 import { columnKey, decodeRow, decodeValue, encodeParam, postgresTypeParsers, withTypeParsers, type RowField } from './pgcodec.js';
 import { queriesOf, type QueryDefinition } from './queries.js';
+import { execute, postgresRulesStore, prepareCreate, runCreate, runDelete, runUpdate, RulesRefusal, type CoreCaller, type RulesCallOptions, type RulesCore, type RulesColumn, type RulesHost, type RulesLayout, type RulesTable } from './rules.js';
 import { parseArray } from './queue.js';
 import { likePattern, searchTerms } from './search.js';
 import { SecretValue, revealed } from './secret.js';
@@ -88,6 +89,27 @@ A projection (D90) is read through a repository of its own, which a
 table's reads run over the view: getOne, findOne, findMany and findPage.
 A view keyed by its source's key over a source with search fields takes a
 searchText, which keeps the rows whose source row holds each word (D99).
+
+A table that composes behaviors (D103, ./rules) is in the definition's
+layout (rules). Its repository creates, updates and deletes its rows
+through the behaviors' core, in a transaction, so each use's initializer,
+validation and guards run and its owned columns take the values the core
+gives them: createOne, createMany (a create of the core's per row) and
+updateOne read each row back after, an update, a delete or an operation of
+a key no live row holds throws NotFoundError, and a write of an owned field
+is refused (RulesRefusal, invalid_instance). deleteOne stamps a
+soft-deletable table's row deleted, and sets a @versioned table's history
+actor, as the repository's own deletes do. upsertOne and upsertMany run,
+in a transaction, the core's create of each input to its change set,
+without applying it (prepareCreate), and insert the row with the owned
+fields it gives, so an inserted row holds what createOne would have
+written; the update of a row the key already holds sets the update's own
+fields alone, as updateMany does, and refuses an owned one. updateMany and
+deleteMany do not go through the core. Each field-anchored use's
+operations are members under the use's id (orm.order.status.transition(key,
+{ to: 'paid' })), run as the acting user with no permissions unless the
+call names its caller, each stamping updatedAt and updatedBy on the row it
+writes. A raw SQL write of an owned column is never refused (D103).
 
 The @versioned history readers are the Go ORM's alone for now.
 */
@@ -316,6 +338,13 @@ export interface OrmDefinition {
   readonly tables: Readonly<Record<string, TableDefinition>>;
   /** The declared queries, by name, which the ORM's queries member runs (D86). */
   readonly queries?: Readonly<Record<string, QueryDefinition>>;
+  /**
+   * The layout document of the tables that compose behaviors (D103,
+   * ./rules): a repository of such a table creates, updates and deletes
+   * its rows through the core, and holds each field-anchored use's
+   * operations under the use's id. Absent for a database with none.
+   */
+  readonly rules?: RulesLayout;
 }
 
 /** A database's system actor, which asSystem() acts as (D87): a user's id and the name an app shows for it. */
@@ -809,6 +838,13 @@ export interface OrmOptions {
    * FieldEncryptionError.
    */
   readonly fieldKeys?: FieldKeys;
+  /**
+   * The behaviors' core (D103, ./rules) the repositories of a database
+   * whose definition holds a layout run their commands on: the generated
+   * createOrm passes @superschematic/rules's, made on first use
+   * (withRulesCore).
+   */
+  readonly rules?: RulesCore;
 }
 
 /** Who acts: a principal, as ctx.principal holds one. */
@@ -1025,6 +1061,8 @@ function actingUser(acting: Acting): string | undefined {
 /** The repository of one table over a runner, acting as whom acting resolves to. */
 class TableRepository {
   private readonly encrypted: readonly TableColumn[];
+  /** The table's layout in the behaviors' layout document, when it composes behaviors (D103). */
+  private readonly behaviors: RulesTable | undefined;
   /** The repositories of the ORM's tables, by member, which an include reads through (D90). */
   peers: Readonly<Record<string, TableRepository>> = {};
 
@@ -1033,9 +1071,11 @@ class TableRepository {
     readonly def: TableDefinition,
     private readonly runner: Runner,
     private readonly acting: Acting,
-    private readonly keys: FieldKeyring | undefined
+    private readonly keys: FieldKeyring | undefined,
+    private readonly rules: RulesCore | undefined = undefined
   ) {
     this.encrypted = def.columns.filter(c => c.encrypted);
+    this.behaviors = orm.rules?.types[def.name];
   }
 
   /** The acting user, resolved when a statement is written. */
@@ -1206,7 +1246,7 @@ class TableRepository {
     const pool = this.runner.pool;
     if (!pool) throw new Error(`orm: ${this.def.name} has no pool to open a transaction on`);
     return inTransaction(pool, 'BEGIN', client =>
-      fn(new TableRepository(this.orm, this.def, { queryable: client, inTransaction: true }, this.acting, this.keys))
+      fn(new TableRepository(this.orm, this.def, { queryable: client, inTransaction: true }, this.acting, this.keys, this.rules))
     );
   }
 
@@ -1691,6 +1731,7 @@ class TableRepository {
   }
 
   async createOne(input: Values): Promise<Values> {
+    if (this.behaviors) return this.atomically(repo => repo.createThroughCore(input));
     const args: unknown[] = [];
     const { columns, placeholders } = this.insertOne(this.sealed(this.stamped(input), 'create'), args);
     const s = this.def.statements;
@@ -1700,6 +1741,14 @@ class TableRepository {
 
   async createMany(inputs: readonly Values[]): Promise<Values[]> {
     if (inputs.length === 0) return [];
+    if (this.behaviors) {
+      // Each row a create of the core's, in order, in one transaction.
+      return this.atomically(async repo => {
+        const rows: Values[] = [];
+        for (const input of inputs) rows.push(await repo.createThroughCore(input));
+        return rows;
+      });
+    }
     const order = this.insertOrder();
     const rows = inputs.map(input => {
       const stamped = this.sealed(this.stamped(input), 'create');
@@ -1801,6 +1850,7 @@ class TableRepository {
   }
 
   async updateOne(id: unknown, update: Values): Promise<Values> {
+    if (this.behaviors) return this.atomically(repo => repo.updateThroughCore(id, update));
     const args: unknown[] = [];
     const sets = this.setClauses(this.sealedUpdate(update, id, 'update'), args, true);
     if (sets.length === 0) throw new Error(`orm: update ${this.def.name}: no fields to update`);
@@ -1835,13 +1885,18 @@ class TableRepository {
     const onlyIfChanged = options.onlyIfChanged === true;
     if (onlyIfChanged && !key.rows) throw this.expressionKey('upsertOne', name);
     const change = update ?? {};
+    for (const [member, value] of Object.entries(change)) {
+      if (value !== undefined) this.refuseOwnedUpdate('upsertOne', member);
+    }
     // An encrypted field the update sets is sealed under the key of the row
     // it updates, which only the upsert's statement names, so a second
     // statement sets it (D89); either the upsert or a read of a row it left
-    // as it was may need one, in its transaction.
+    // as it was may need one, in its transaction. A table that composes
+    // behaviors runs the core's create of the row in it first, whose locks
+    // it holds.
     const sealing = this.encrypted.filter(c => change[c.name] !== undefined && change[c.name] !== null);
-    const write = (repo: TableRepository): Promise<UpsertResult<Values>> => repo.upsertRow(input, name, key, change, sealing, onlyIfChanged);
-    return sealing.length > 0 || onlyIfChanged ? this.atomically(write) : write(this);
+    const write = async (repo: TableRepository): Promise<UpsertResult<Values>> => repo.upsertRow((await repo.upsertInputs([input]))[0]!, name, key, change, sealing, onlyIfChanged);
+    return this.behaviors || sealing.length > 0 || onlyIfChanged ? this.atomically(write) : write(this);
   }
 
   async upsertMany(inputs: readonly Values[], on: readonly string[], update: readonly string[], options: UpsertManyOptions = {}): Promise<UpsertResult<Values>[]> {
@@ -1854,6 +1909,7 @@ class TableRepository {
       if (!column || column.key || column.audit || column.internal) {
         throw new Error(`orm: upsertMany of ${this.def.name} sets the fields an update sets, not ${JSON.stringify(member)}`);
       }
+      this.refuseOwnedUpdate('upsertMany', member);
     }
     // In UpdateOne's order, whatever the order update names them in: the
     // fields, then the relations' keys.
@@ -1866,8 +1922,54 @@ class TableRepository {
     const most = Math.max(1, Math.floor((MAX_PARAMETERS - UPSERT_STAMPS) / this.insertOrder().length));
     const batch = Math.min(options.batch ?? most, most);
     const onlyIfChanged = options.onlyIfChanged === true;
-    const write = (repo: TableRepository): Promise<UpsertResult<Values>[]> => repo.upsertBatches(inputs, name, key, fields, batch, onlyIfChanged);
-    return inputs.length > batch || onlyIfChanged || fields.some(c => c.encrypted) ? this.atomically(write) : write(this);
+    const write = async (repo: TableRepository): Promise<UpsertResult<Values>[]> => repo.upsertBatches(await repo.upsertInputs(inputs), name, key, fields, batch, onlyIfChanged);
+    return this.behaviors || inputs.length > batch || onlyIfChanged || fields.some(c => c.encrypted) ? this.atomically(write) : write(this);
+  }
+
+  /**
+   * Throws for an upsert whose update sets member, a field a behavior owns
+   * (D103): only the behavior's operations change it, and an upsert's
+   * update runs none of them.
+   */
+  private refuseOwnedUpdate(method: string, member: string): void {
+    const column = this.def.columns.find(c => c.name === member);
+    if (!column) return;
+    const use = this.behaviors?.uses.find(u => u.fields.some(f => f.column === columnKey(column.column)));
+    if (!use) return;
+    throw new Error(`orm: ${method} of ${this.def.name} sets the fields an update sets, not ${JSON.stringify(member)}, which behavior ${use.behavior} on ${use.id} owns (D103): only its operations change it`);
+  }
+
+  /**
+   * The inputs of an upsert, each with the owned fields the core's create of
+   * the row it would insert gives it, by member, on a table that composes
+   * behaviors (D103): each create runs to its change set, its uses'
+   * validation, guards and initializers with it, and applies nothing
+   * (prepareCreate), so the insert writes what createOne would have and the
+   * update, which sets none of them, leaves them as the row holds them. A
+   * refusal of the core's is thrown before anything is written. Any other
+   * table's inputs, as they are.
+   */
+  private async upsertInputs(inputs: readonly Values[]): Promise<readonly Values[]> {
+    const behaviors = this.behaviors;
+    if (!behaviors) return inputs;
+    const host = this.rulesHost();
+    const out: Values[] = [];
+    for (const input of inputs) {
+      const keyed = input[this.def.key];
+      const id = keyed === undefined || keyed === null || keyed === '' ? undefined : this.wireKey(keyed);
+      const owned = await prepareCreate(host, this.def.name, this.coreOwn(input), this.caller(), { id });
+      const row: Values = { ...input };
+      for (const use of behaviors.uses) {
+        for (const field of use.fields) {
+          const value = owned[use.id]?.[field.name];
+          const member = this.columnNamed(field.column);
+          if (value === undefined || !member) continue;
+          row[member.name] = field.convert === 'epochMillis' && value !== null ? new Date(Number(value)) : value;
+        }
+      }
+      out.push(row);
+    }
+    return out;
   }
 
   private uniqueKey(name: string): UniqueKeyDefinition {
@@ -2051,6 +2153,7 @@ class TableRepository {
   }
 
   async deleteOne(id: unknown): Promise<void> {
+    if (this.behaviors) return this.atomically(repo => repo.deleteThroughCore(id));
     if (!this.def.softDelete) return this.hardDeleteOne(id);
     const user = this.requireUser();
     const key = this.encode(id, this.keyColumn(), 'key');
@@ -2086,6 +2189,200 @@ class TableRepository {
     const { rowCount } = await run(this.runner, text, args);
     await this.clearActor();
     if (rowCount === 0) throw new NotFoundError(`${this.def.name} ${String(id)} not found`);
+  }
+
+  // ---- Behaviors (D103) ----
+
+  /** The host the behaviors' core runs on: this repository's transaction, with the ORM's types. */
+  private rulesHost(): RulesHost {
+    if (!this.rules || !this.orm.rules) {
+      throw new Error(`orm: ${this.def.name} composes behaviors (D103), and the ORM was opened with no core for them; createOrm passes @superschematic/rules's (withRulesCore)`);
+    }
+    const queryable = this.runner.queryable;
+    return {
+      core: this.rules,
+      layout: this.orm.rules,
+      store: postgresRulesStore({ query: config => queryable.query({ ...config, types: ormTypes }) }),
+    };
+  }
+
+  /** The caller a behavior's command runs as: the acting user, holding no permissions. */
+  private caller(): CoreCaller {
+    return { subject: this.user ?? '', permissions: [] };
+  }
+
+  /** The column of the table a layout column names, by its unquoted name. */
+  private columnNamed(column: string): TableColumn | undefined {
+    return this.def.columns.find(c => columnKey(c.column) === column);
+  }
+
+  /** The columns the table's behaviors own, by unquoted name. */
+  private ownedColumns(): ReadonlySet<string> {
+    return new Set((this.behaviors?.uses ?? []).flatMap(use => use.fields.map(field => field.column)));
+  }
+
+  /**
+   * The own fields of input as the core reads them, by the layout's field
+   * names, as the adapter reads a row's: each own column's member, an
+   * encrypted one left out and a timestamp as epoch milliseconds, and each
+   * owned field input names, which the core refuses (rule owned).
+   */
+  private coreOwn(input: Values): Values {
+    const own: Values = {};
+    const behaviors = this.behaviors!;
+    const take = (column: RulesColumn): void => {
+      const member = this.columnNamed(column.column);
+      if (!member || member.encrypted) return;
+      const value = input[member.name];
+      if (value === undefined) return;
+      own[column.field] = column.convert === 'epochMillis' && value !== null ? (value instanceof Date ? value.getTime() : Date.parse(String(value))) : value;
+    };
+    for (const column of behaviors.own) take(column);
+    for (const use of behaviors.uses) for (const field of use.fields) take(field);
+    return own;
+  }
+
+  /** A create's own columns as the insert binds them, by unquoted column: every column createOne writes but the key, which the command names, and the owned columns, which the core sets. */
+  private createColumns(input: Values): Values {
+    const owned = this.ownedColumns();
+    const out: Values = {};
+    for (const column of this.def.columns) {
+      if (column.key || !this.insertable(column) || owned.has(columnKey(column.column))) continue;
+      const v = this.insertValue(input, column);
+      if (v.set) out[columnKey(column.column)] = v.value;
+    }
+    return out;
+  }
+
+  /** An update's own columns as its set binds them, by unquoted column, with updatedAt and updatedBy, as updateOne writes them; an owned column is left to the core, which refuses it. */
+  private updateColumns(update: Values): Values {
+    const owned = this.ownedColumns();
+    const out: Values = {};
+    for (const column of this.def.columns) {
+      if (column.key || column.audit || column.internal || owned.has(columnKey(column.column))) continue;
+      const value = update[column.name];
+      if (value === undefined) continue;
+      if (value === null && !jsonNull(column)) {
+        if (column.required) throw new Error(`orm: update ${this.def.name}: ${column.name} cannot be null`);
+        out[columnKey(column.column)] = null;
+        continue;
+      }
+      out[columnKey(column.column)] = this.encode(value, column, 'update');
+    }
+    const updatedAt = this.audit('updatedAt');
+    if (updatedAt) out[columnKey(updatedAt.column)] = new Date();
+    const updatedBy = this.audit('updatedBy');
+    if (updatedBy) {
+      const by = update[updatedBy.name] ?? this.user;
+      if (by !== undefined && by !== null) out[columnKey(updatedBy.column)] = this.encode(by, updatedBy, 'updatedBy');
+      else if (this.orm.requireUpdatedBy) throw new NoUserError();
+    }
+    return out;
+  }
+
+  /** The stamps an operation's write of the row sets: updatedAt, and updatedBy when the ORM acts as a user. */
+  private operationColumns(): Values {
+    const out: Values = {};
+    const updatedAt = this.audit('updatedAt');
+    if (updatedAt) out[columnKey(updatedAt.column)] = new Date();
+    const updatedBy = this.audit('updatedBy');
+    if (updatedBy && this.user !== undefined) out[columnKey(updatedBy.column)] = this.encode(this.user, updatedBy, 'updatedBy');
+    return out;
+  }
+
+  /** The key a command names, in its wire form. */
+  private wireKey(id: unknown): string {
+    return this.keyColumn().uuid ? uuidFromDb(id) : String(id);
+  }
+
+  /** createOne through the core, in a transaction (this repository's). */
+  private async createThroughCore(input: Values): Promise<Values> {
+    const stamped = this.sealed(this.stamped(input), 'create');
+    const keyed = stamped[this.def.key];
+    const id = keyed === undefined || keyed === null || keyed === '' ? undefined : this.wireKey(keyed);
+    const key = await runCreate(this.rulesHost(), this.def.name, this.coreOwn(stamped), this.caller(), { id, ownColumns: this.createColumns(stamped) });
+    return this.getOne(key);
+  }
+
+  /** updateOne through the core, in a transaction (this repository's). */
+  private async updateThroughCore(id: unknown, update: Values): Promise<Values> {
+    const sealed = this.sealedUpdate(update, id, 'update');
+    const patch = this.coreOwn(sealed);
+    const ownColumns = this.updateColumns(sealed);
+    if (Object.keys(patch).length === 0 && Object.keys(ownColumns).length === 0) throw new Error(`orm: update ${this.def.name}: no fields to update`);
+    try {
+      await runUpdate(this.rulesHost(), this.def.name, this.wireKey(id), patch, this.caller(), { ownColumns });
+    } catch (error) {
+      throw this.notFound(error, id);
+    }
+    return this.getOne(id);
+  }
+
+  /**
+   * deleteOne through the core, in a transaction (this repository's): a
+   * soft-deletable table's live row stamped deleted (deletedAt, deletedBy)
+   * in place of deleted, a @versioned table's with the history actor set
+   * for the transaction, as the repository's own deletes do. The core reads
+   * a soft-deletable table's live rows alone (the layout's live), so a row
+   * already deleted is not_found, and one another deletes under the command
+   * moves it, which then runs again to not_found.
+   */
+  private async deleteThroughCore(id: unknown): Promise<void> {
+    let softDelete: Values | undefined;
+    if (this.def.softDelete) {
+      const user = this.requireUser();
+      softDelete = {};
+      const deletedAt = this.audit('deletedAt');
+      if (deletedAt) softDelete[columnKey(deletedAt.column)] = new Date();
+      const deletedBy = this.audit('deletedBy');
+      if (deletedBy) softDelete[columnKey(deletedBy.column)] = this.encode(user, deletedBy, 'deletedBy');
+    } else if (this.def.historyActor) {
+      await run(this.runner, `${this.orm.historyActorCTE}SELECT _history_actor FROM history_actor`, [this.actor()]);
+    }
+    try {
+      await runDelete(this.rulesHost(), this.def.name, this.wireKey(id), this.caller(), { softDelete });
+    } catch (error) {
+      throw this.notFound(error, id);
+    }
+    if (!this.def.softDelete) await this.clearActor();
+  }
+
+  /** error as the repository throws it: the core's not_found of the row as NotFoundError, as the repository's own statements throw it. */
+  private notFound(error: unknown, id: unknown): unknown {
+    if (error instanceof RulesRefusal && error.refusal.code === 'not_found') {
+      return Object.assign(new NotFoundError(`${this.def.name} ${String(id)} not found`), { cause: error });
+    }
+    return error;
+  }
+
+  /** Runs an operation of one of the table's uses on a row, in a transaction, and resolves to its result; NotFoundError for a key no live row holds. */
+  private async operate(useId: string, operation: string, key: unknown, params: unknown, options: RulesCallOptions = {}): Promise<unknown> {
+    return this.atomically(async repo => {
+      const host = repo.rulesHost();
+      const action = { kind: 'operation' as const, key: repo.wireKey(key), useId, operation, params: params ?? {} };
+      const command = { caller: options.caller ?? repo.caller(), now: Date.now(), action };
+      try {
+        return (await execute(host, repo.def.name, command, { ownColumns: repo.operationColumns() })).result;
+      } catch (error) {
+        throw repo.notFound(error, key);
+      }
+    });
+  }
+
+  /**
+   * The members the table's field-anchored uses add (D103): under each
+   * use's id, its operations. A use whose id is a member the repository
+   * has throws, which the build refuses first.
+   */
+  bindUses(): void {
+    for (const use of this.behaviors?.uses ?? []) {
+      if (use.id in this) throw new Error(`orm: ${this.def.name}'s behavior ${use.behavior} on ${use.id} would be the repository's own member ${use.id}`);
+      const operations: Record<string, (key: unknown, params: unknown, options?: RulesCallOptions) => Promise<unknown>> = {};
+      for (const operation of use.operations) {
+        operations[operation.name] = (key, params, options) => this.operate(use.id, operation.name, key, params, options);
+      }
+      Object.defineProperty(this, use.id, { value: Object.freeze(operations), enumerable: true });
+    }
   }
 
   async reencrypt(options: { readonly batch?: number } = {}): Promise<number> {
@@ -2140,11 +2437,12 @@ function distinct(values: readonly unknown[]): unknown[] {
   return out;
 }
 
-function repositories(orm: OrmDefinition, runner: Runner, acting: Acting, keys: FieldKeyring | undefined): Record<string, TableRepository> {
+function repositories(orm: OrmDefinition, runner: Runner, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined): Record<string, TableRepository> {
   const out: Record<string, TableRepository> = {};
   for (const [member, def] of Object.entries(orm.tables)) {
     if (ORM_MEMBERS.includes(member)) throw new Error(`orm: the table ${def.name} would be the ORM's own member ${member}`);
-    out[member] = new TableRepository(orm, def, runner, acting, keys);
+    out[member] = new TableRepository(orm, def, runner, acting, keys, rules);
+    out[member].bindUses();
   }
   // An include and a filter through a relation read the target through
   // its repository on the same runner, acting as the same user (D90).
@@ -2193,18 +2491,18 @@ function queryOf(orm: OrmDefinition, runner: Runner, acting: Acting, keys: Field
  * (D89). A savepoint acts as the transaction it is nested in, the caller
  * (D87) among them.
  */
-function txOf<R>(orm: OrmDefinition, client: OrmQueryable, acting: Acting, keys: FieldKeyring | undefined, depth = 0): OrmTx<R> {
+function txOf<R>(orm: OrmDefinition, client: OrmQueryable, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined, depth = 0): OrmTx<R> {
   const runner: Runner = { queryable: client, inTransaction: true };
   const query = queryOf(orm, runner, acting, keys);
   return {
-    ...repositories(orm, runner, acting, keys),
+    ...repositories(orm, runner, acting, keys, rules),
     ...declaredQueries(orm, runner),
     get actingUser() {
       return actingUser(acting);
     },
-    withUser: (id: string | null | undefined) => txOf<R>(orm, client, userOf(id), keys, depth),
-    as: (principal: Actor | null | undefined) => txOf<R>(orm, client, userOf(principal?.subject), keys, depth),
-    asSystem: () => txOf<R>(orm, client, systemActorOf(orm).id, keys, depth),
+    withUser: (id: string | null | undefined) => txOf<R>(orm, client, userOf(id), keys, rules, depth),
+    as: (principal: Actor | null | undefined) => txOf<R>(orm, client, userOf(principal?.subject), keys, rules, depth),
+    asSystem: () => txOf<R>(orm, client, systemActorOf(orm).id, keys, rules, depth),
     query,
     exec: async (text: string, values?: readonly unknown[]) => (await query(text, values)).rowCount ?? 0,
     // A nested transaction is a savepoint, named for its depth, as
@@ -2215,7 +2513,7 @@ function txOf<R>(orm: OrmDefinition, client: OrmQueryable, acting: Acting, keys:
       await client.query({ text: `SAVEPOINT ${savepoint}`, values: [] });
       let out: T;
       try {
-        out = await fn(txOf<R>(orm, client, acting, keys, depth + 1));
+        out = await fn(txOf<R>(orm, client, acting, keys, rules, depth + 1));
       } catch (error) {
         await client.query({ text: `ROLLBACK TO SAVEPOINT ${savepoint}`, values: [] });
         await client.query({ text: `RELEASE SAVEPOINT ${savepoint}`, values: [] });
@@ -2240,23 +2538,23 @@ export function ormOf<R>(pool: OrmPool, orm: OrmDefinition, options?: string | n
   const keys = opts.fieldKeys === undefined ? undefined : parseFieldKeys(opts.fieldKeys);
   // A system actor that is no UUID throws here, not at a job's first write.
   systemActorOf(orm);
-  return ormWith<R>(pool, orm, opts.user === undefined ? CALLER : userOf(opts.user), keys);
+  return ormWith<R>(pool, orm, opts.user === undefined ? CALLER : userOf(opts.user), keys, opts.rules);
 }
 
-function ormWith<R>(pool: OrmPool, orm: OrmDefinition, acting: Acting, keys: FieldKeyring | undefined): Orm<R> {
+function ormWith<R>(pool: OrmPool, orm: OrmDefinition, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined): Orm<R> {
   const runner: Runner = { queryable: pool, inTransaction: false, pool };
   const query = queryOf(orm, runner, acting, keys);
   return {
-    ...repositories(orm, runner, acting, keys),
+    ...repositories(orm, runner, acting, keys, rules),
     ...declaredQueries(orm, runner),
     get actingUser() {
       return actingUser(acting);
     },
-    withUser: (id: string | null | undefined) => ormWith<R>(pool, orm, userOf(id), keys),
-    as: (principal: Actor | null | undefined) => ormWith<R>(pool, orm, userOf(principal?.subject ?? null), keys),
-    asSystem: () => ormWith<R>(pool, orm, systemActorOf(orm).id, keys),
+    withUser: (id: string | null | undefined) => ormWith<R>(pool, orm, userOf(id), keys, rules),
+    as: (principal: Actor | null | undefined) => ormWith<R>(pool, orm, userOf(principal?.subject ?? null), keys, rules),
+    asSystem: () => ormWith<R>(pool, orm, systemActorOf(orm).id, keys, rules),
     async transaction<T>(fn: (tx: OrmTx<R>) => Promise<T>, options?: TransactionOptions): Promise<T> {
-      return inTransaction(pool, beginStatement(options), client => fn(txOf<R>(orm, client, acting, keys)));
+      return inTransaction(pool, beginStatement(options), client => fn(txOf<R>(orm, client, acting, keys, rules)));
     },
     query,
     exec: async (text: string, values?: readonly unknown[]) => (await query(text, values)).rowCount ?? 0,

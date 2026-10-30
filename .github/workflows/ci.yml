@@ -161,8 +161,8 @@ jobs:
         # Builds the superscalar ffi archive from source, with this toolchain
         # rather than the one the checkout's rust-toolchain.toml pins, as the
         # version-graph archive is (tools.env says why). The wasm32 target
-        # builds the version-graph TypeScript package and superscalar's
-        # browser and workerd builds, and
+        # builds the version-graph and rules TypeScript packages and
+        # superscalar's browser and workerd builds, and
         # rustsdkgen compile tests run cargo clippy on the generated SDK
         # crates, so this toolchain carries clippy; the projectengine tests
         # hold the engine crates they write to rustfmt's layout, so it
@@ -199,6 +199,16 @@ jobs:
         # version graph depends on it, and tsgen's tests type-check that
         # facade and run it against Postgres over its dist/.
         working-directory: runtime/versiongraph/typescript
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
+      - name: Build the rules TypeScript package
+        # A generated TypeScript types package whose tables' fields are
+        # behaviors depends on it (D103): tsgen's tests type-check its
+        # orm.ts and run the generated repositories over its dist/, the
+        # behaviors' core built for wasm32, on bun:sqlite and Postgres.
+        working-directory: runtime/rules/typescript
         run: |
           bun install --frozen-lockfile
           bun run build
@@ -728,7 +738,7 @@ jobs:
       - name: Install Rust toolchain
         # Builds the engine's Node-API addon, the Rust engine (D58). The
         # wasm32 target builds superscalar's browser and workerd builds
-        # (D64).
+        # (D64), and the behaviors' core the rules package ships (D103).
         run: |
           rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown
           rustup default "$RUST_VERSION"
@@ -800,12 +810,25 @@ jobs:
           bun run build
           bun run test
 
+      - name: runtime/rules/typescript typecheck + build + test (wasm32 build, Bun and Node.js)
+        # The behaviors' core built for wasm32 (D103), which the http
+        # runtime's adapter tests below load from its dist/.
+        working-directory: runtime/rules/typescript
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun run test
+
       - name: runtime/http/typescript typecheck + build + test
         working-directory: runtime/http/typescript
         env:
           # src/redis.test.ts's tests against a real server, on the Valkey
           # above.
           SUPERSCHEMATIC_TEST_MEMORY_STORE: redis://127.0.0.1:6379/1
+          # The behaviors' adapter tests (src/rules*.test.ts, D103) on the
+          # Postgres above too, each in a schema of its own, and the core's
+          # transcript replayed there as on bun:sqlite.
+          SUPERSCHEMATIC_RULES_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: |
           bun install --frozen-lockfile
           bun run build

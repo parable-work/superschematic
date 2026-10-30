@@ -299,6 +299,7 @@ func (w WorkspaceRoot) Manifest() (string, error) {
 		{n.HTTPRuntimeNpmPackage, w.Paths.HTTPRuntimeTypeScript},
 		{n.VersionGraphNpmPackage, w.Paths.VersionGraphTypeScript},
 		{n.EngineNpmPackage, w.Paths.EngineTypeScript},
+		{n.RulesNpmPackage, w.Paths.RulesTypeScript},
 	} {
 		rel, err := naming.PhysicalRelPath(w.OutputRoot, local.dir)
 		if err != nil {

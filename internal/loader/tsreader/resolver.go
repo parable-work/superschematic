@@ -216,6 +216,9 @@ func (w *walker) resolveTypeReference(node *astNode) (*typeInfo, *SchemaError) {
 		return w.resolveArrayReference(node, id.name)
 	}
 
+	if behavior, ok := w.behaviorOfIdentity(id); ok {
+		return nil, errorAtNode(node, "%s<C> is behavior %s as a field's type, which is the field's whole type (status: %s<{ ... }>) on a DB table, never inside a wrapper, a list or a union, nor an argument's (D103)", id.name, behavior.Name, id.name)
+	}
 	if w.isAuthoring(id) && wrapperNames[id.name] {
 		return w.resolveWrapper(node, id)
 	}
