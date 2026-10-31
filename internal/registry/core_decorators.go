@@ -264,6 +264,20 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// (core_identity_routes.go).
 	specs = append(specs, identityRouteDecorators()...)
 
+	// A table's behavior operations (D103), on a class with no members
+	// (core_behavior_operations.go), and the set's user clause, which
+	// each operation the loader adds takes as its own. The verification
+	// pass refuses the clause on any other set. @requireOwnership has no
+	// class form: the routes run no implementation that could check what
+	// the caller owns.
+	specs = append(specs, behaviorOperationsDecorator())
+	flag(TargetOperationSet, "auth", []string{pkgAPI}, func(n Node) { n.OperationSet.Auth = true })
+	flag(TargetOperationSet, "publicRoute", []string{pkgAPI}, func(n Node) { n.OperationSet.Public = true })
+	specs = append(specs, DecoratorSpec{
+		Name: "requirePermission", Packages: []string{pkgAPI}, Target: TargetOperationSet,
+		Apply: func(n Node, args []any, _ Site) error { return applySetPermissions(args, n.OperationSet) },
+	})
+
 	// Operations.
 	opFlag := func(name string, set func(*ir.FieldDef)) {
 		flag(TargetOperation, name, []string{pkgAPI}, func(n Node) { set(n.Field) })
@@ -281,20 +295,11 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	specs = append(specs, DecoratorSpec{
 		Name: "requirePermission", Packages: []string{pkgAPI}, Target: TargetOperation,
 		Apply: func(n Node, args []any, _ Site) error {
-			if len(args) != 1 {
-				return fmt.Errorf("@requirePermission takes exactly one array argument")
+			perms, err := requirePermissionList(args)
+			if err != nil {
+				return err
 			}
-			list, ok := args[0].([]any)
-			if !ok || len(list) == 0 {
-				return fmt.Errorf("@requirePermission requires a non-empty array of permission strings")
-			}
-			for _, p := range list {
-				s, ok := p.(string)
-				if !ok {
-					return fmt.Errorf("@requirePermission entries must be string literals")
-				}
-				n.Field.Permissions = append(n.Field.Permissions, s)
-			}
+			n.Field.Permissions = append(n.Field.Permissions, perms...)
 			return nil
 		},
 	})

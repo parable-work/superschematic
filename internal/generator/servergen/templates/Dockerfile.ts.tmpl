@@ -55,6 +55,21 @@
 # stage emits the package's ./server entry, which the workspace's root
 # overrides the package with.
 {{- end }}
+{{- with .Docker.Rules }}
+#
+# The {{ $.Kind }} opens the repositories of a database whose fields are
+# behaviors (D103), which run them through the behaviors' core, the npm
+# package the naming file's [paths] rules_typescript names, whose
+# WebAssembly module no published package ships yet:
+#
+#   {{ .TypeScript }}
+#
+# The rules stage builds the module for wasm32-unknown-unknown from the
+# engine's Cargo workspace of the same checkout, with the crates it reaches
+# by path at their places in it, as the package's build does; the build
+# stage emits the package's dist/ with the module in it, which the
+# workspace's root overrides the package with.
+{{- end }}
 
 ARG RUST_VERSION={{ .RustVersion }}
 ARG BUN_VERSION={{ .BunVersion }}
@@ -102,6 +117,20 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     && cp {{ .Workspace }}/target/release/libsuperschematic_engine_addon.so "/native/superschematic-engine.$triple.node"
 {{- end }}
 {{- end }}
+{{- with .Docker.Rules }}
+
+FROM rust:${RUST_VERSION}-trixie AS rules
+WORKDIR /src
+COPY {{ .Workspace }} {{ .Workspace }}
+{{- range .Crates }}
+COPY {{ . }} {{ . }}
+{{- end }}
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    rustup target add wasm32-unknown-unknown \
+    && cargo build --locked --profile dist --target wasm32-unknown-unknown --manifest-path {{ .Workspace }}/Cargo.toml -p superschematic-rules-wasm \
+    && mkdir /wasm \
+    && cp {{ .Workspace }}/target/wasm32-unknown-unknown/dist/{{ .Module }} /wasm/
+{{- end }}
 
 FROM oven/bun:${BUN_VERSION} AS build
 WORKDIR /src
@@ -124,6 +153,13 @@ COPY --from=engine /native/ {{ .TypeScript }}/native/
 {{- end }}
 RUN cd {{ .TypeScript }} \
     && /src/{{ $.Docker.HTTPRuntime }}/node_modules/.bin/tsc -p tsconfig.server.json
+{{- end }}
+{{- with .Docker.Rules }}
+COPY --from=rules /wasm/{{ .Module }} {{ .TypeScript }}/dist/
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+    cd {{ .TypeScript }} \
+    && bun install --frozen-lockfile \
+    && bunx tsc -p tsconfig.json
 {{- end }}
 WORKDIR /src/{{ .Docker.Workspace }}
 RUN --mount=type=cache,target=/root/.bun/install/cache \

@@ -62,6 +62,10 @@ export interface ArgumentDef {
   validatePattern?: string;
 }
 
+export interface BehaviorOperationsConfig {
+  type: string;
+}
+
 export interface BehaviorRef {
   /**
    * The type's config of the behavior, which the registry holds to the
@@ -455,6 +459,8 @@ export interface OperationPage {
 }
 
 export interface OperationSet {
+  auth?: boolean;
+  behaviorOperations?: BehaviorOperationsConfig;
   comment?: string;
   description?: string;
   encrypted?: boolean;
@@ -462,12 +468,16 @@ export interface OperationSet {
   middleware?: MiddlewareConfig;
   name: string;
   operations: FieldDef[];
+  permissions?: string[];
+  public?: boolean;
   serviceCallers?: ServiceCallers;
   userAdministration?: UserAdministrationConfig;
   userSessions?: UserSessionsConfig;
 }
 
 export interface OperationSetFile {
+  auth?: boolean;
+  behaviorOperations?: BehaviorOperationsConfig;
   comment?: string;
   description?: string;
   encrypted?: boolean;
@@ -476,6 +486,8 @@ export interface OperationSetFile {
   middleware?: MiddlewareConfig;
   name: string;
   operations: FieldDef[];
+  permissions?: string[];
+  public?: boolean;
   serviceCallers?: ServiceCallers;
   userAdministration?: UserAdministrationConfig;
   userSessions?: UserSessionsConfig;

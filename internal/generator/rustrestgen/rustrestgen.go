@@ -94,6 +94,11 @@ type EndpointInfo struct {
 	// other. The identity runtime serves it: build_router mounts the
 	// runtime's handler, and no namespace trait has a method for it.
 	IdentityOperation string
+	// Behavior is the behavior operation the endpoint runs (D103), nil for
+	// every other: build_router mounts it as any operation, and its
+	// handler runs it through the behaviors' core (src/behaviors.rs), so
+	// no namespace trait has a method for it.
+	Behavior *BehaviorInfo
 }
 
 // PageInfo is a paged operation's @paginated (D60) as the crate renders it.
@@ -639,6 +644,18 @@ type Options struct {
 // operations, and the operations module declares each, so capabilities
 // answers for every route.
 //
+// An operation the loader adds for a @behaviorOperations set (D103) is
+// mounted as any other, behind its set's controls, its key and input
+// decoded into its Args struct, and its handler runs it through the
+// behaviors' core: src/behaviors.rs hands it to superschematic-rules-adapter
+// on a transaction of the API's database's pool, as the request's caller,
+// and answers a refusal as the problem of its status, code, message and
+// details. The namespace traits and the scaffold have no method for it, so
+// a namespace of behavior operations alone has no trait, and
+// Implementations holds the Behaviors its handlers run on. The crate's
+// Deps must name the database's layout and the adapter's and the
+// behaviors' crates (DepsBehaviors), or WriteAPI refuses it.
+//
 // The endpoints and the OpenAPI document come from api, the apigen output
 // generator.Run builds once for the Go and TypeScript servers and every
 // SDK, with the service's dependencies, naming, OpenAPI and tool hooks and
@@ -682,6 +699,7 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 
 	namespaceSet := make(map[string]struct{})
 	webhookProviders := make(map[string]struct{})
+	var err error
 	for _, endpoint := range implemented {
 		// The Go router decrypts an encrypted operation's body with the
 		// configured PayloadDecryptor before it parses it. The Rust router
@@ -717,7 +735,15 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 		if err := b.params(endpoint, &info); err != nil {
 			return nil, err
 		}
-		namespaceSet[info.Namespace] = struct{}{}
+		// A behavior operation's handler runs it through the behaviors'
+		// core (D103): its namespace has no method for it, and a namespace
+		// of behavior operations alone no trait.
+		if info.Behavior, err = behaviorInfo(endpoint, info); err != nil {
+			return nil, err
+		}
+		if info.Behavior == nil {
+			namespaceSet[info.Namespace] = struct{}{}
+		}
 		output.Endpoints = append(output.Endpoints, info)
 	}
 	// The runtime's handlers decode their own arguments, so a user model's
@@ -729,7 +755,6 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 		output.IdentityEndpoints = append(output.IdentityEndpoints, info)
 	}
 
-	var err error
 	if output.Identity, err = identityOf(opts, output.HasAuth, api.Registration); err != nil {
 		return nil, err
 	}
@@ -873,9 +898,15 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		{templateName: "operations.tmpl", outputName: filepath.Join("src", "operations.rs")},
 	}
 
-	// The user model's wiring (D50), the implementation's Deps (D57) and
-	// the apps' parts (D78); a crate written before with one keeps no stale
-	// module.
+	// The behaviors' core runs the behavior operations on the Deps' pool
+	// (D103), with the layout and the crates the Deps name.
+	if err := output.checkBehaviorDeps(output.Deps); err != nil {
+		return err
+	}
+
+	// The user model's wiring (D50), the implementation's Deps (D57), the
+	// apps' parts (D78) and the behavior operations' runner (D103); a crate
+	// written before with one keeps no stale module.
 	for _, module := range []struct {
 		template, file string
 		written        bool
@@ -883,6 +914,7 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		{"identity.tmpl", "identity.rs", output.Identity != nil},
 		{"deps.tmpl", "deps.rs", output.Deps != nil},
 		{"apps.tmpl", "apps.rs", output.HasApps()},
+		{"behaviors.tmpl", "behaviors.rs", output.HasBehaviorOperations()},
 	} {
 		path := filepath.Join("src", module.file)
 		if module.written {
@@ -945,7 +977,7 @@ func WriteScaffolds(output *APIOutput, scaffoldsDir string) (*codegen.ScaffoldRe
 			CrateIdent:        strings.ReplaceAll(output.CrateName, "-", "_"),
 			RuntimeCrateIdent: output.RuntimeCrateIdent,
 		}
-		for _, endpoint := range output.Endpoints {
+		for _, endpoint := range output.ImplementedEndpoints() {
 			if endpoint.Namespace == namespace {
 				data.Endpoints = append(data.Endpoints, endpoint)
 			}
@@ -956,7 +988,7 @@ func WriteScaffolds(output *APIOutput, scaffoldsDir string) (*codegen.ScaffoldRe
 		ScaffoldsDir: scaffoldsDir,
 		ReadmeData:   output,
 		Namespaces:   modules,
-		Endpoints:    output.Endpoints,
+		Endpoints:    output.ImplementedEndpoints(),
 		EndpointNamespace: func(endpoint EndpointInfo) string {
 			return moduleOf(endpoint.Namespace)
 		},
@@ -1020,6 +1052,9 @@ func templateFuncs() template.FuncMap {
 		"rustString":          rustString,
 		"tracingVersion":      func() string { return TracingVersion },
 		"databaseTypesModule": func() string { return DatabaseTypesModule },
+		"rulesAdapterCrate":   func() string { return RulesAdapterCrate },
+		"rulesBehaviorsCrate": func() string { return RulesBehaviorsCrate },
+		"rulesSerdeVersion":   func() string { return RulesSerdeVersion },
 	})
 }
 

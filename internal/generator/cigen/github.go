@@ -368,7 +368,11 @@ func (g github) header(w *yamlWriter, notes []string) {
 // the output root's Cargo lockfile up to date with it, refuses a lockfile
 // git does not track or the build changed, and checks each one's crate,
 // with the implementation it depends on, frozen to the lockfile (D57,
-// D65).
+// D65). For a Go or TypeScript one over a database whose tables' fields
+// are behaviors, in a checkout of the behaviors' core (D103), it stages
+// the core's static archive before the Go compiles, unless it installed a
+// release's archives, which hold it, and builds the checkout's
+// @superschematic/rules before it installs the workspace.
 func (g github) check() job {
 	st := g.req.Stack
 	goModules := g.deployables(registry.APILanguageGo)
@@ -388,7 +392,9 @@ func (g github) check() job {
 		})
 	}
 	engines := g.goEngines(goModules)
-	if len(rustCrates) > 0 || len(engines) > 0 {
+	rulesGo := g.req.Version == "" && linksRules(goModules, st.RulesGo)
+	rulesTypeScript := linksRules(tsPackages, st.RulesTypeScript)
+	if len(rustCrates) > 0 || len(engines) > 0 || rulesGo || rulesTypeScript {
 		steps = append(steps, setupRust())
 	}
 	packages := g.packages()
@@ -407,6 +413,9 @@ func (g github) check() job {
 	for _, db := range archives {
 		steps = append(steps, engineArchive(db, st.EngineArchives[db], st.EngineCheckout))
 	}
+	if rulesGo {
+		steps = append(steps, rulesArchive(st.RulesCheckout))
+	}
 	for _, m := range goModules {
 		compile := goBuild
 		if db, ok := engines[m.name]; ok {
@@ -422,6 +431,9 @@ func (g github) check() job {
 	}
 	if engineTypeScript {
 		steps = append(steps, engineTypeScriptPackages(st.EngineCheckout))
+	}
+	if rulesTypeScript {
+		steps = append(steps, rulesTypeScriptPackage(st.RulesCheckout))
 	}
 	if workspace {
 		steps = append(steps, g.typeScriptWorkspace())

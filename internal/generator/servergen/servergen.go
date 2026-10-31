@@ -213,9 +213,20 @@ type Input struct {
 	// archive of the crate's ffi member in the core's place.
 	EngineProject *EngineProject
 
+	// RulesGo is the directory of the rules module (D103), when a database
+	// the server connects to has a table whose fields are behaviors, whose
+	// ORM requires it: it links the behaviors' core's static archive, which
+	// a checkout's Dockerfile builds from the engine's Cargo workspace, the
+	// rules-wasm crate's staticlib, and a release's archives hold.
+	RulesGo string
+
 	// opensEngine is true when the entrypoint opens an engine (D58), whose
 	// archive its image must link.
 	opensEngine bool
+	// linksRules is true when an API's Deps holds the ORM of a database
+	// whose tables' fields are behaviors (D103), whose binary links the
+	// behaviors' core's archive.
+	linksRules bool
 	// Job, when set, plans the entrypoint of a job of the one API in APIs
 	// rather than a server's (D52): Server is then the job's deployable.
 	Job *JobInput
@@ -446,13 +457,16 @@ type API struct {
 	// service, built over its database's identity store, in place of an
 	// auth middleware; ManualRoutes when it takes the handlers of its
 	// @manualRouteRegistration operations, which the implementation's
-	// NewManualRoutes builds from Deps (D51).
+	// NewManualRoutes builds from Deps (D51); Behaviors when it serves a
+	// table's behavior operations, which run through the ORM of its
+	// database, so its Config takes the database too (D103).
 	Config       bool
 	Public       bool
 	Encrypted    bool
 	ServiceAuth  bool
 	Identity     bool
 	ManualRoutes bool
+	Behaviors    bool
 
 	// CORS is true when a site of the stack calls the API, whose server
 	// then answers CORS for the origins its CORS field lists, with
@@ -599,10 +613,21 @@ type Docker struct {
 	// archives (D58).
 	Engine *engineDocker
 
+	// Rules is where the rules stage builds the behaviors' core's archive
+	// from, nil when no database the entrypoint connects to has a table
+	// whose fields are behaviors, or it downloads the release's archives
+	// (D103).
+	Rules *rulesDocker
+
 	// Archives, when set, are the static archives of the release the
 	// build stage downloads, in place of the stages that build them from
 	// checkouts.
 	Archives *Archives
+
+	// LinksRules is true when the binary links the behaviors' core's
+	// archive (D103): the rules stage builds it, or the release's archives
+	// hold it.
+	LinksRules bool
 
 	// Include are the paths the build context holds.
 	Include []string
@@ -779,6 +804,7 @@ func Plan(in Input) (*Server, error) {
 			apis[i].ServiceAuth = o.HasServiceCallers
 			apis[i].Identity = o.Auth.Identity
 			apis[i].ManualRoutes = o.HasManualRoutes()
+			apis[i].Behaviors = o.HasBehaviorEndpoints()
 			if a.CORS {
 				apis[i].CORS = true
 				apis[i].CORSMethods = endpointMethods(o)
@@ -829,6 +855,14 @@ func Plan(in Input) (*Server, error) {
 				}
 			}
 			api.Database = d
+		}
+		if api.Behaviors && api.Database == nil {
+			return nil, fmt.Errorf("stack %s: server %s serves %s, whose behavior operations run through the ORM of its database (D103), and it has no database", in.Stack, in.Server, o.SchemaName)
+		}
+		if api.Behaviors {
+			if err := checkBehaviorCallers(in, o); err != nil {
+				return nil, err
+			}
 		}
 		if api.Identity {
 			d := api.Database
@@ -919,6 +953,7 @@ func Plan(in Input) (*Server, error) {
 		return nil, err
 	}
 	in.opensEngine = len(s.Engines) > 0
+	in.linksRules = slices.ContainsFunc(in.APIs, func(a APIInput) bool { return a.Output.Deps.Rules })
 	if s.EngineLink, err = engineLink(in.EngineProject, dir, projectengine.FFIDir); err != nil {
 		return nil, err
 	}
@@ -1042,7 +1077,7 @@ func planDocker(in Input, dir string) (*Docker, string, error) {
 		}
 		return filepath.ToSlash(r), true
 	}
-	d := &Docker{}
+	d := &Docker{LinksRules: in.linksRules}
 	var ok bool
 	if d.Context, ok = rel(dir); !ok {
 		return nil, fmt.Sprintf("the output root holding %s lies outside the repository root %s, the build context", dir, root), nil
@@ -1090,6 +1125,18 @@ func planDocker(in Input, dir string) (*Docker, string, error) {
 			include = append(include, engine.Project)
 			include = append(include, engine.ProjectCrates...)
 		}
+	}
+	if in.linksRules {
+		if in.RulesGo == "" {
+			return nil, "a database the entrypoint connects to has a table whose fields are behaviors, whose ORM links the behaviors' core (D103), and the naming file's [paths] rules_go, the rules module, whose engine workspace the image builds the core's archive from, is unset while [paths] scalar_go names a checkout to build superscalar's from; set rules_go to the same checkout's runtime/rules/go", nil
+		}
+		rules, why := planRulesDocker(in.RulesGo, root, rel)
+		if rules == nil {
+			return nil, why, nil
+		}
+		d.Rules = rules
+		include = append(include, rules.Go, rules.Workspace)
+		include = append(include, rules.Crates...)
 	}
 	return finish(d, in, root, include, rel)
 }

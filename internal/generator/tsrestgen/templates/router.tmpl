@@ -31,6 +31,15 @@
 // implementation returns to it.
 {{- end }}
 {{- end }}
+{{- if .HasBehaviors }}
+//
+// The operations of its @behaviorOperations sets (D103) are each the
+// operation of a behavior on a field of a table of {{ .Deps.Database }}: the route
+// runs it through options.orm, the database's repositories, which run it
+// through the behaviors' core in a transaction of its own, as the request's
+// caller, and answers a refusal of the core's as the problem of its status,
+// code and message.
+{{- end }}
 {{- if .Identity }}
 //
 // The API's authDb, {{ .Identity.AuthDB }}, has a User table (D50): the identity
@@ -45,13 +54,7 @@
 {{- end }}
 
 import { Hono, type Env } from 'hono';
-{{- if .HasPages }}
-import { {{ if .HasSortedPages }}bindPage, {{ end }}{{ if .DropsUndeclaredKeys }}declaredKeysOnly, {{ end }}readPage, type OperationSpec, type PageSpec } from '{{ .RuntimePackage }}';
-{{- else if .DropsUndeclaredKeys }}
-import { declaredKeysOnly, type OperationSpec } from '{{ .RuntimePackage }}';
-{{- else }}
-import type { OperationSpec } from '{{ .RuntimePackage }}';
-{{- end }}
+{{ .RuntimeImport }}
 import {
 {{- if .HasManualMounts }}
   mountManualOperation,
@@ -81,9 +84,9 @@ import {
 {{- end }}
 } from '{{ .RuntimePackage }}/identity';
 {{- end }}
-{{- if .ScalarImports }}
+{{- if .RouterScalarImports }}
 import type {
-{{- range .ScalarImports }}
+{{- range .RouterScalarImports }}
   {{ . }},
 {{- end }}
 } from '{{ .ScalarPackage }}';
@@ -102,6 +105,9 @@ import {
 {{- end }}
 } from '{{ .Package }}/validators';
 {{- end }}
+{{- if .HasBehaviors }}
+import type { {{ .Deps.ORM }} } from '{{ .Deps.DatabaseTypesPackage }}/orm';
+{{- end }}
 import type { Implementations } from './interfaces';
 {{- if .MCP }}
 import { mcpTools } from './mcp';
@@ -110,14 +116,14 @@ import { openAPIJSON } from './openapi';
 
 export type OperationName =
 {{- range .Endpoints }}
-  | '{{ .Name }}'
+  | '{{ .Key }}'
 {{- else }} never
 {{- end }};
 
 /** The operation table: what the schema declares about each route. */
 export const operationSpecs = {
 {{- range .Endpoints }}
-  {{ .Name }}: {
+  {{ .Key }}: {
     name: '{{ .Name }}',
     namespace: '{{ .Namespace }}',
     method: '{{ .Method }}',
@@ -181,6 +187,14 @@ export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions
   rateLimits?: Partial<Record<OperationName, number>>;
   /** Per-operation timeouts in seconds; overrides the schema's @timeout (0 disables). */
   timeouts?: Partial<Record<OperationName, number>>;
+{{- if .HasBehaviors }}
+  /**
+   * The repositories of {{ .Deps.Database }} (Deps.orm), which run the behavior
+   * operations (D103): each in a transaction of its own, through the
+   * behaviors' core, as the request's caller.
+   */
+  orm: {{ .Deps.ORM }};
+{{- end }}
 {{- if .MCP }}
   /**
    * The MCP endpoint (outputs.api.mcp, D81): its server info, this API's
@@ -203,7 +217,7 @@ export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions
   manualRoutes?: {
 {{- range .ManualEndpoints }}
     /** {{ .Method }} {{ .Path }} */
-    {{ .Name }}?: ManualRouteHandler<E>;
+    {{ .Key }}?: ManualRouteHandler<E>;
 {{- end }}
   };
 {{- end }}
@@ -243,6 +257,9 @@ export const identityRegistration: RegistrationOptions = {{ .Identity.Registrati
  * The user model's operations are mounted with the identity runtime's handlers.
 {{- end }}
  * Throws without options.identity, or with options.authenticate beside it.
+{{- if .HasBehaviors }}
+ * Throws without options.orm, the repositories the behavior operations run through (D103).
+{{- end }}
 {{- if .WebhookProviders }}
  * Throws when implementations.webhookVerifiers lacks the verifier of an @hmacVerified provider.
 {{- end }}
@@ -250,9 +267,12 @@ export const identityRegistration: RegistrationOptions = {{ .Identity.Registrati
  * Without options.authenticateService (serviceAuthenticator, say), every @requireService or @allowService operation answers 401 service_unauthorized.
 {{- end }}
  */
-{{ else if or .WebhookProviders .HasServiceCallers -}}
+{{ else if or .WebhookProviders .HasServiceCallers .HasBehaviors -}}
 /**
  * Mounts every operation of the schema on a new Hono router. Mount it at '/' of the application.
+{{- if .HasBehaviors }}
+ * Throws without options.orm, the repositories the behavior operations run through (D103).
+{{- end }}
 {{- if .WebhookProviders }}
  * Throws when implementations.webhookVerifiers lacks the verifier of an @hmacVerified provider.
 {{- end }}
@@ -268,8 +288,15 @@ export const identityRegistration: RegistrationOptions = {{ .Identity.Registrati
 {{ $runtime = "runtime" -}}
 export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E>): Hono<E> {
   const runtime = identityRouterOptions(options);
+{{- else if .HasBehaviors -}}
+export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E>): Hono<E> {
 {{- else -}}
 export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E> = {}): Hono<E> {
+{{- end }}
+{{- if .HasBehaviors }}
+  if (!options.orm) {
+    throw new Error({{ tsString (printf "RouterOptions.orm is required: it runs the behavior operations of %s (D103)" .SchemaName) }});
+  }
 {{- end }}
 {{- if .WebhookProviders }}
   for (const provider of [{{ range $i, $p := .WebhookProviders }}{{ if $i }}, {{ end }}{{ tsString $p }}{{ end }}] as const) {
@@ -293,27 +320,58 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
 {{- end }}
 {{- range .Endpoints }}
 {{- if .IdentityOperation }}
-  mountManualOperation(router, operationSpecs.{{ .Name }}, identityHandler(runtime.identity, {{ tsString .IdentityOperation }}), runtime, {
-    bodyLimitBytes: options.bodyLimits?.{{ .Name }},
-    rateLimitPerMinute: options.rateLimits?.{{ .Name }},
-    timeoutSeconds: options.timeouts?.{{ .Name }},
+  mountManualOperation(router, operationSpecs.{{ .Key }}, identityHandler(runtime.identity, {{ tsString .IdentityOperation }}), runtime, {
+    bodyLimitBytes: options.bodyLimits?.{{ .Key }},
+    rateLimitPerMinute: options.rateLimits?.{{ .Key }},
+    timeoutSeconds: options.timeouts?.{{ .Key }},
   });
 {{- else if .ManualRouteRegistration }}
-  mountManualOperation(router, operationSpecs.{{ .Name }}, options.manualRoutes?.{{ .Name }}, {{ $runtime }}, {
-    rateLimitPerMinute: options.rateLimits?.{{ .Name }},
-    timeoutSeconds: options.timeouts?.{{ .Name }},
+  mountManualOperation(router, operationSpecs.{{ .Key }}, options.manualRoutes?.{{ .Key }}, {{ $runtime }}, {
+    rateLimitPerMinute: options.rateLimits?.{{ .Key }},
+    timeoutSeconds: options.timeouts?.{{ .Key }},
 {{- if .WebhookProvider }}
     webhookVerifier: implementations.webhookVerifiers[{{ tsString .WebhookProvider }}],
 {{- end }}
   });
+{{- else if .Behavior }}
+  // {{ .Behavior.Type }}'s {{ .Behavior.Use }} {{ .Behavior.Operation }}, a {{ .Behavior.Behavior }} (D103): the
+  // repository runs it through the behaviors' core as the request's
+  // caller, and a refusal of the core's is the problem of its status,
+  // code and message.
+  mountOperation(
+    router,
+    operationSpecs.{{ .Key }},
+    (ctx, request) =>
+      behaviorOperation(() =>
+        options.orm.{{ .Behavior.Method }}(
+          request.path[{{ tsString .Behavior.Key.Name }}] as {{ .Behavior.Key.TSType }},
+{{- if .HasInput }}
+          // The repository's parameters: the wire values of {{ .InputType }}.
+          request.input as never,
+{{- else }}
+          {},
+{{- end }}
+          { caller: behaviorCaller(ctx) }
+        )
+      ) as Promise<{{ .OutputType }}>,
+    {{ $runtime }},
+    {
+      bodyLimitBytes: options.bodyLimits?.{{ .Key }},
+      rateLimitPerMinute: options.rateLimits?.{{ .Key }},
+      timeoutSeconds: options.timeouts?.{{ .Key }},
+{{- if .WebhookProvider }}
+      webhookVerifier: implementations.webhookVerifiers[{{ tsString .WebhookProvider }}],
+{{- end }}
+    }
+  );
 {{- else if and .Page .Page.Sort }}
   mountOperation(
     router,
-    operationSpecs.{{ .Name }},
+    operationSpecs.{{ .Key }},
     (ctx, request) => {
       // The page names the sort it was read in (D60, amended): readPage
       // unbinds the cursor, and bindPage binds the next.
-      const page = readPage(ctx.query, operationSpecs.{{ .Name }}.page);
+      const page = readPage(ctx.query, operationSpecs.{{ .Key }}.page);
       return implementations.{{ .NamespaceProperty }}
         .{{ .Name }}(
           {
@@ -337,9 +395,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     },
     {{ $runtime }},
     {
-      bodyLimitBytes: options.bodyLimits?.{{ .Name }},
-      rateLimitPerMinute: options.rateLimits?.{{ .Name }},
-      timeoutSeconds: options.timeouts?.{{ .Name }},
+      bodyLimitBytes: options.bodyLimits?.{{ .Key }},
+      rateLimitPerMinute: options.rateLimits?.{{ .Key }},
+      timeoutSeconds: options.timeouts?.{{ .Key }},
 {{- if .WebhookProvider }}
       webhookVerifier: implementations.webhookVerifiers[{{ tsString .WebhookProvider }}],
 {{- end }}
@@ -348,7 +406,7 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
 {{- else }}
   mountOperation(
     router,
-    operationSpecs.{{ .Name }},
+    operationSpecs.{{ .Key }},
     (ctx, request) =>
       implementations.{{ .NamespaceProperty }}.{{ .Name }}(
 {{- if not .HasArgs }}
@@ -371,7 +429,7 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
           files: request.files as {{ .FilesArgType }},
 {{- end }}
 {{- if .Page }}
-          page: readPage(ctx.query, operationSpecs.{{ .Name }}.page),
+          page: readPage(ctx.query, operationSpecs.{{ .Key }}.page),
 {{- end }}
         },
 {{- end }}
@@ -379,9 +437,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     {{ $runtime }},
     {
-      bodyLimitBytes: options.bodyLimits?.{{ .Name }},
-      rateLimitPerMinute: options.rateLimits?.{{ .Name }},
-      timeoutSeconds: options.timeouts?.{{ .Name }},
+      bodyLimitBytes: options.bodyLimits?.{{ .Key }},
+      rateLimitPerMinute: options.rateLimits?.{{ .Key }},
+      timeoutSeconds: options.timeouts?.{{ .Key }},
 {{- if .WebhookProvider }}
       webhookVerifier: implementations.webhookVerifiers[{{ tsString .WebhookProvider }}],
 {{- end }}

@@ -499,6 +499,17 @@ type PathsConfig struct {
 	// project's engine crate's napi member expands: the addon a TypeScript
 	// server loads in the core's place.
 	EngineNapiRust string `toml:"engine_napi_rust"`
+	// RulesAdapterRust holds the behaviors' adapter for a Rust server,
+	// superschematic-rules-adapter (D103), which a Rust API crate whose
+	// @behaviorOperations sets serve a table's behavior operations depends
+	// on, with its postgres feature, to run each through the core on a
+	// transaction of its database's pool. The crate is unpublished, so a
+	// Rust server with behavior operations builds only in a checkout.
+	RulesAdapterRust string `toml:"rules_adapter_rust"`
+	// RulesBehaviorsRust holds the behaviors ported onto the core,
+	// superschematic-rules-behaviors (D103), whose core() the same API
+	// crate builds its core with, beside RulesAdapterRust. Unpublished too.
+	RulesBehaviorsRust string `toml:"rules_behaviors_rust"`
 	// EngineGo holds the behavior engine's Go binding module (D58), which
 	// a Go server whose API's database holds engine types requires. A
 	// server's checkout Dockerfile builds the engine's static archive from
@@ -561,6 +572,8 @@ type LocalPaths struct {
 	EngineCommerceRust     string
 	EngineABIRust          string
 	EngineNapiRust         string
+	RulesAdapterRust       string
+	RulesBehaviorsRust     string
 	EngineGo               string
 	EngineTypeScript       string
 	VersionGraphPython     string
@@ -597,6 +610,8 @@ func (n Naming) LocalPaths(repoRoot string) LocalPaths {
 		EngineCommerceRust:     resolve(n.Paths.EngineCommerceRust),
 		EngineABIRust:          resolve(n.Paths.EngineABIRust),
 		EngineNapiRust:         resolve(n.Paths.EngineNapiRust),
+		RulesAdapterRust:       resolve(n.Paths.RulesAdapterRust),
+		RulesBehaviorsRust:     resolve(n.Paths.RulesBehaviorsRust),
 		EngineGo:               resolve(n.Paths.EngineGo),
 		EngineTypeScript:       resolve(n.Paths.EngineTypeScript),
 		VersionGraphPython:     resolve(n.Paths.VersionGraphPython),
@@ -639,6 +654,8 @@ func (p PathsConfig) checkRelative() error {
 		{"engine_commerce_rust", p.EngineCommerceRust},
 		{"engine_abi_rust", p.EngineABIRust},
 		{"engine_napi_rust", p.EngineNapiRust},
+		{"rules_adapter_rust", p.RulesAdapterRust},
+		{"rules_behaviors_rust", p.RulesBehaviorsRust},
 		{"engine_go", p.EngineGo},
 		{"engine_typescript", p.EngineTypeScript},
 		{"versiongraph_python", p.VersionGraphPython},

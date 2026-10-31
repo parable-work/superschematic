@@ -103,7 +103,11 @@ type (
 	// as a RustEndpoint with its Args struct, its arguments (RustParam),
 	// its input (RustInput), its page when it is @paginated (RustPage,
 	// D60), its result type and its auth rules. Identity is set when the
-	// crate authenticates with the identity runtime. RustAPIOf returns it.
+	// crate authenticates with the identity runtime. A mounted endpoint
+	// whose Behavior is set is a table's behavior operation (D103), which
+	// the crate's handler runs through the behaviors' core: no namespace
+	// trait has a method for it, so nothing calls it in-process.
+	// RustAPIOf returns it.
 	RustAPI      = rustrestgen.APIOutput
 	RustEndpoint = rustrestgen.EndpointInfo
 	RustParam    = rustrestgen.ParamInfo

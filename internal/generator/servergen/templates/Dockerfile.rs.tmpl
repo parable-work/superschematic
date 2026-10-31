@@ -15,7 +15,10 @@
 # of every generated crate a member of the workspace reaches by path, the
 # mirrors of the implementations under {{ .Docker.Workspace }}/impl, which the build
 # copies there (D65), and the checkouts of the HTTP runtime, the schema
-# runtime and superscalar the crates depend on: no implementation's own
+# runtime and superscalar the crates depend on{{ if .BehaviorOperations }}, and the Cargo workspace
+# of the behaviors' adapter and core, superschematic-rules-adapter and
+# superschematic-rules-behaviors, which the crate of an API with behavior
+# operations depends on by path (D103){{ end }}: no implementation's own
 # directory. BuildKit, Docker's default builder, reads it.
 #
 # The build stage builds the {{ .Kind }} with the Rust release tools.env pins,

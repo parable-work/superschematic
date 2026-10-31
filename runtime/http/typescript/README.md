@@ -35,6 +35,20 @@ Its entry points:
   `OperationResult` holding one, to it (`bindCursor`), the base64url of
   `{"sort":"-placedAt","key":K}`. A cursor sent with another sort is the
   400 `SORTED_CURSOR_DETAIL`.
+  `behaviorCaller` and `behaviorOperation` (`src/behavior-routes.ts`) are
+  the handlers of a generated router's behavior operations (D103), the
+  routes an API's `@behaviorOperations` sets add, which run each operation
+  through the database's repositories (`RouterOptions.orm`):
+  `behaviorCaller(ctx)` is the caller the behaviors' core checks a
+  behavior's own permissions against (`BehaviorCaller`, the shape of the
+  rules adapter's `CoreCaller`): the principal with its permissions, each
+  once, else a calling service standing in for one and holding none, else
+  an empty subject. `behaviorOperation(run)` throws the core's refusal, or
+  a repository's `NotFoundError` over one, as the `HttpProblem` of its
+  status, code, message and details, and a refusal of status 500 as a
+  plain error, so the route answers the server's own 500. It knows a
+  refusal by its shape and imports neither `pg` nor the adapter, so this
+  entry stays free of them.
   `decodeParam` reads a path or query value from its strings; a query
   list accepts repeated keys and comma-separated values.
   `decodeJsonParam` reads every body parameter from its JSON value, with

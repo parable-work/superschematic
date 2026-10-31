@@ -75,7 +75,7 @@ export const authenticate: AuthenticatorFactory = () => async () => null;
  */
 export const createManualRoutes: ManualRoutesConstructor = deps => ({
 {{- range .ManualEndpoints }}
-  async {{ .Name }}() {
+  async {{ .Key }}() {
     throw notImplemented('{{ .NamespaceProperty }}.{{ .Name }}');
   },
 {{- end }}

@@ -11,12 +11,58 @@ use crate::types;
 
 #[derive(Clone)]
 pub struct {{.Namespace.StructName}} {
+{{- if .Namespace.KeepsClient}}
     client: HttpClient,
+{{- end}}
 {{- if .Namespace.IsScopedNS}}
     {{.Namespace.ScopeFieldName}}: String,
 {{- end}}
+{{- range .Namespace.Members}}
+    /// {{behavior_member_doc .Type .Use .Behavior}}
+    pub {{.FieldName}}: {{.StructName}},
+{{- end}}
 }
+{{- template "structs" .}}
 
+impl {{.Namespace.StructName}} {
+    pub(crate) fn new(
+        client: HttpClient,
+{{- if .Namespace.IsScopedNS}}
+        {{.Namespace.ScopeFieldName}}: String,
+{{- end}}
+    ) -> Self {
+        Self {
+{{- range .Namespace.Members}}
+            {{.FieldName}}: {{.StructName}}::new({{.Client}}),
+{{- end}}
+{{- if .Namespace.KeepsClient}}
+            client,
+{{- end}}
+{{- if .Namespace.IsScopedNS}}
+            {{.Namespace.ScopeFieldName}},
+{{- end}}
+        }
+    }
+{{- template "methods" .}}
+}
+{{- range .Namespace.Members}}
+
+/// {{behavior_member_doc .Type .Use .Behavior}}
+#[derive(Clone)]
+pub struct {{.StructName}} {
+    client: HttpClient,
+}
+{{- template "structs" ($.MemberData .)}}
+
+impl {{.StructName}} {
+    pub(crate) fn new(client: HttpClient) -> Self {
+        Self { client }
+    }
+{{- template "methods" ($.MemberData .)}}
+}
+{{- end}}
+
+{{- define "structs"}}
 {{- range .Namespace.Endpoints}}
 {{- if .HasScalarArgs}}
 #[derive(Debug, Clone, Serialize)]
@@ -56,22 +102,9 @@ pub struct {{.FilesStructName}} {
 
 {{end}}
 {{- end}}
-
-impl {{.Namespace.StructName}} {
-    pub(crate) fn new(
-        client: HttpClient,
-{{- if .Namespace.IsScopedNS}}
-        {{.Namespace.ScopeFieldName}}: String,
 {{- end}}
-    ) -> Self {
-        Self {
-            client,
-{{- if .Namespace.IsScopedNS}}
-            {{.Namespace.ScopeFieldName}},
-{{- end}}
-        }
-    }
 
+{{- define "methods"}}
 {{- range .Namespace.Endpoints}}
     /// {{if .Description}}{{.Description | rustDoc}}{{else}}{{.MethodName}} endpoint.{{end}}
 {{- if .RequiresAuth}}
@@ -586,7 +619,7 @@ impl {{.Namespace.StructName}} {
 {{- end}}
 
 {{- end}}
-}
+{{- end}}
 {{- /* queryParam binds query_param_value to one query parameter, checks
 it and appends it to query_params. A list is sent as one
 comma-separated value (?name=a,b), which the route splits on commas,

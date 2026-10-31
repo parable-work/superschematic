@@ -328,6 +328,27 @@
       "error": "a route set's path that is not a string: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/userAdministration/path': got number, want string"
     },
     {
+      "name": "a table's behavior operations",
+      "registry": "core",
+      "input": "{\"kind\": \"API\", \"name\": \"orders-api\",\n\t\t\"imports\": [{\"package\": \"@schemas/orders-db\", \"types\": [\"Order\", \"Shipment\"]}],\n\t\t\"operationSets\": [\n\t\t{\"name\": \"OrderActions\", \"operations\": [], \"behaviorOperations\": {\"type\": \"Order\"}, \"permissions\": [\"orders.write\"]},\n\t\t{\"name\": \"ShipmentActions\", \"operations\": [], \"behaviorOperations\": {\"type\": \"Shipment\"}, \"auth\": true, \"public\": false}]}",
+      "accept": true,
+      "canonical": "{\"imports\":[{\"package\":\"@schemas/orders-db\",\"types\":[\"Order\",\"Shipment\"]}],\"kind\":\"API\",\"name\":\"orders-api\",\"operationSets\":[{\"behaviorOperations\":{\"type\":\"Order\"},\"name\":\"OrderActions\",\"operations\":[],\"permissions\":[\"orders.write\"]},{\"auth\":true,\"behaviorOperations\":{\"type\":\"Shipment\"},\"name\":\"ShipmentActions\",\"operations\":[]}]}"
+    },
+    {
+      "name": "behavior operations without the table",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"OrderActions\", \"operations\": [], \"behaviorOperations\": {}}",
+      "accept": false,
+      "error": "behavior operations without the table: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/behaviorOperations': missing property 'type'"
+    },
+    {
+      "name": "a behavior operation's marker",
+      "registry": "core",
+      "input": "{\"kind\": \"OperationSet\", \"name\": \"OrderActions\", \"operations\": [\n\t\t{\"name\": \"statusTransition\", \"typeRef\": {\"name\": \"OrderStatusTransitionResult\"}, \"httpMethod\": \"POST\", \"behaviorOperation\": {\"database\": \"orders-db\", \"type\": \"Order\", \"key\": \"id\", \"use\": \"status\", \"behavior\": \"Workflow\", \"operation\": \"transition\"}}],\n\t\t\"behaviorOperations\": {\"type\": \"Order\"}}",
+      "accept": false,
+      "error": "a behavior operation's marker: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/operations/0': additional properties 'behaviorOperation' not allowed"
+    },
+    {
       "name": "visible tool without a policy gets the default",
       "registry": "core",
       "input": "{\"kind\": \"OperationSet\", \"name\": \"Ops\", \"operations\": [\n\t\t{\"name\": \"deleteOrder\", \"typeRef\": {\"name\": \"Order\"}, \"httpMethod\": \"DELETE\", \"mcp\": {\"handle\": \"delete_order\", \"hidden\": false}}]}",

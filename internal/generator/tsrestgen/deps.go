@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/behaviortypes"
 	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -162,7 +163,31 @@ func (o *APIOutput) DepsPool() bool {
 // DepsORM reports whether Deps holds the database's repositories, orm
 // (D79): Deps.db is a pool, and the database's types write orm.ts.
 func (o *APIOutput) DepsORM() bool {
-	return o.DepsPool() && o.Deps.ORM != "" && o.Deps.DatabaseTypesPackage != ""
+	return depsORM(o.Deps)
+}
+
+// depsORM reports whether deps holds the database's repositories: a pool,
+// its database listing postgres first, and the type of orm.ts's
+// repositories.
+func depsORM(deps DepsInfo) bool {
+	return deps.Database != "" && deps.Dialect != SQLiteDialect && deps.ORM != "" && deps.DatabaseTypesPackage != ""
+}
+
+// checkBehaviorDeps refuses deps for an API that serves a table's behavior
+// operations (D103) when they hold no repositories: the router runs each
+// operation through RouterOptions.orm, which a server builds from Deps.orm,
+// the repositories the database's TypeScript types export for Postgres.
+func (o *APIOutput) checkBehaviorDeps(deps DepsInfo) error {
+	routes := o.BehaviorRoutes()
+	if len(routes) == 0 || depsORM(deps) {
+		return nil
+	}
+	route := routes[0]
+	why := fmt.Sprintf("enable outputs.types.typescript in %s's config", route.Database)
+	if deps.Dialect == SQLiteDialect {
+		why = fmt.Sprintf("%s lists sqlite first, and the repositories run on Postgres alone (D103)", route.Database)
+	}
+	return fmt.Errorf("tsrestgen: %s serves the behavior operations of %s's %s, %s (@behaviorOperations on %s), which run through Deps.orm, the repositories %s's TypeScript types export for Postgres; %s", o.SchemaName, route.Type, route.Use, behaviortypes.An(route.Behavior), route.Set, route.Database, why)
 }
 
 // DepsSQLite reports whether Deps.db is a SqlDatabase: the API has a
@@ -177,8 +202,13 @@ var depsFields = []string{"config", "db", "orm", "engine", "logger"}
 
 // SetDeps sets what Deps holds, refusing a client, a bucket or a memory
 // store whose member
-// would take the name of another of its members.
+// would take the name of another of its members, and, for an API that
+// serves a table's behavior operations (D103), Deps without the
+// repositories they run through.
 func (o *APIOutput) SetDeps(deps DepsInfo) error {
+	if err := o.checkBehaviorDeps(deps); err != nil {
+		return err
+	}
 	seen := map[string]string{}
 	for _, name := range depsFields {
 		seen[name] = "Deps." + name

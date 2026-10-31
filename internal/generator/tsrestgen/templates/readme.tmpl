@@ -37,6 +37,14 @@ Generated TypeScript API server for the `{{ .SchemaName }}` schema. Built on
   runtime's handlers, behind the same rate limit and body limit.
 {{- end }}
 {{- end }}
+{{- if .HasBehaviors }}
+  The operations of its `@behaviorOperations` sets (D103) have no
+  implementation method: each runs the operation of a behavior on a field of
+  a table of `{{ .Deps.Database }}` through `options.orm`, the database's
+  repositories (`Deps.orm`), in a transaction of its own and as the
+  request's caller, and answers a refusal of the behaviors' core as the
+  problem of its status, code and message.
+{{- end }}
 {{- if .HasServiceCallers }}
   A `@requireService` or `@allowService` operation also admits a calling
   service: `authenticateService` verifies its `Service-Authorization`
@@ -78,7 +86,7 @@ stack's build (or `build --scaffold`) writes once when it is missing. Its
 | Method | Path | Operation | Auth |
 | --- | --- | --- | --- |
 {{- range .Endpoints }}
-| `{{ .Method }}` | `{{ .Path }}` | `{{ .Namespace }}.{{ .Name }}`{{ if .IdentityOperation }} (identity){{ end }}{{ if .Page }} (paged){{ end }}{{ if .ManualRouteRegistration }} (manual){{ end }}{{ if .WebhookProvider }} (signed: {{ .WebhookProvider }}){{ end }} | {{ .AuthSummary }} |
+| `{{ .Method }}` | `{{ .Path }}` | `{{ .Namespace }}.{{ .Name }}`{{ if .IdentityOperation }} (identity){{ end }}{{ if .Behavior }} (behavior: {{ .Behavior.Type }}.{{ .Behavior.Use }}, a {{ .Behavior.Behavior }}){{ end }}{{ if .Page }} (paged){{ end }}{{ if .ManualRouteRegistration }} (manual){{ end }}{{ if .WebhookProvider }} (signed: {{ .WebhookProvider }}){{ end }} | {{ .AuthSummary }} |
 {{- end }}
 
 ## Usage
@@ -124,13 +132,16 @@ const implementations: Implementations = { /* one object per operation class */ 
 const app = new Hono();
 app.route('/', buildRouter(implementations, {
   identity,
+{{- if .HasBehaviors }}
+  orm: createOrm(pool), // the repositories of {{ .Deps.Database }} (D103), from {{ .Deps.DatabaseTypesPackage }}/orm
+{{- end }}
 {{- if .HasServiceCallers }}
   authenticateService: serviceAuthenticator(serviceAuthConfig), // the issuers and callers this server admits
 {{- end }}
 {{- if .HasManualRoutes }}
   manualRoutes: {
 {{- range .ManualEndpoints }}
-    {{ .Name }}: async (c, ctx) => new Response(/* the service's own handler */),
+    {{ .Key }}: async (c, ctx) => new Response(/* the service's own handler */),
 {{- end }}
   },
 {{- end }}
@@ -163,13 +174,16 @@ const implementations: Implementations = { /* one object per operation class */ 
 const app = new Hono();
 app.route('/', buildRouter(implementations, {
   authenticate: async ctx => /* the caller, or null */ null,
+{{- if .HasBehaviors }}
+  orm: createOrm(pool), // the repositories of {{ .Deps.Database }} (D103), from {{ .Deps.DatabaseTypesPackage }}/orm
+{{- end }}
 {{- if .HasServiceCallers }}
   authenticateService: serviceAuthenticator(serviceAuthConfig), // the issuers and callers this server admits
 {{- end }}
 {{- if .HasManualRoutes }}
   manualRoutes: {
 {{- range .ManualEndpoints }}
-    {{ .Name }}: async (c, ctx) => new Response(/* the service's own handler */),
+    {{ .Key }}: async (c, ctx) => new Response(/* the service's own handler */),
 {{- end }}
   },
 {{- end }}

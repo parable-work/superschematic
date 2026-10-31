@@ -5,7 +5,10 @@ export default defineConfig({
   kind: SchemaKind.DB,
   outputs: {
     types: {
-      [TargetLanguage.TypeScript]: { enabled: true }
+      [TargetLanguage.Go]: { enabled: true },
+      [TargetLanguage.TypeScript]: { enabled: true },
+      [TargetLanguage.Python]: { enabled: true },
+      [TargetLanguage.Rust]: { enabled: true }
     },
     sql: { dialects: ["postgres", "sqlite"] }
   }

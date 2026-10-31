@@ -73,7 +73,7 @@ pub struct {{ .ArgsName }} {
 pub trait {{ toPascalCase . }}Implementation: Send + Sync + 'static {
 {{- $namespace := . }}
 {{- range $.Endpoints }}
-{{- if eq .Namespace $namespace }}
+{{- if and (eq .Namespace $namespace) (not .Behavior) }}
     {{- if .Description }}
     /// {{ index (splitLines .Description) 0 }}
     {{- end }}
@@ -157,6 +157,12 @@ pub struct Implementations {
     /// The verifier of each @hmacVerified provider, keyed by provider.
     /// `build_router` panics without one for every provider.
     pub webhook_verifiers: HashMap<String, Arc<dyn WebhookVerifier>>,
+{{- end }}
+{{- if .HasBehaviorOperations }}
+    /// What the behavior operations run on (D103): a pool of {{ .BehaviorDatabase }},
+    /// on which the router's handler of each runs it through the behaviors'
+    /// core, so no namespace trait has a method for it.
+    pub behaviors: crate::behaviors::Behaviors,
 {{- end }}
 }
 {{- if .WebhookProviders }}

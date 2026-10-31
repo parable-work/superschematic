@@ -98,6 +98,18 @@
       ],
       "type": "object"
     },
+    "BehaviorOperationsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
     "BehaviorRef": {
       "additionalProperties": false,
       "allOf": [
@@ -4788,6 +4800,13 @@
     "OperationSet": {
       "additionalProperties": false,
       "properties": {
+        "auth": {
+          "default": false,
+          "type": "boolean"
+        },
+        "behaviorOperations": {
+          "$ref": "#/$defs/BehaviorOperationsConfig"
+        },
         "comment": {
           "default": "",
           "type": "string"
@@ -4817,6 +4836,17 @@
           },
           "type": "array"
         },
+        "permissions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "public": {
+          "default": false,
+          "type": "boolean"
+        },
         "serviceCallers": {
           "$ref": "#/$defs/ServiceCallers"
         },
@@ -4836,6 +4866,13 @@
     "OperationSetFile": {
       "additionalProperties": false,
       "properties": {
+        "auth": {
+          "default": false,
+          "type": "boolean"
+        },
+        "behaviorOperations": {
+          "$ref": "#/$defs/BehaviorOperationsConfig"
+        },
         "comment": {
           "default": "",
           "type": "string"
@@ -4867,6 +4904,17 @@
             "$ref": "#/$defs/FieldDef"
           },
           "type": "array"
+        },
+        "permissions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "public": {
+          "default": false,
+          "type": "boolean"
         },
         "serviceCallers": {
           "$ref": "#/$defs/ServiceCallers"

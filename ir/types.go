@@ -598,6 +598,13 @@ type FieldDef struct {
 	// authored operation. The data forms have no key for it.
 	IdentityOperation string `json:"identityOperation,omitempty" yaml:"identityOperation,omitempty" jsonschema:"-"`
 
+	// BehaviorOperation marks an operation the loader added for a
+	// @behaviorOperations set (D103): a server routes it to a generated
+	// handler that runs it through the behaviors' core. Nil for every
+	// authored operation. The data forms have no key for it. See
+	// [BehaviorOperation].
+	BehaviorOperation *BehaviorOperation `json:"behaviorOperation,omitempty" yaml:"behaviorOperation,omitempty" jsonschema:"-"`
+
 	// HTTPMethod is the explicit HTTP method for operation fields
 	// ("GET", "POST", "PUT", "PATCH", "DELETE"). There is no
 	// Queries-versus-Mutations default inference in v2: every operation

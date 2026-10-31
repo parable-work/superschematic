@@ -376,6 +376,12 @@ jobs:
           # The identity runtime's store and handler tests run on it in a
           # schema of their own, as well as on SQLite.
           SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
+          # The generated Go, TypeScript and Rust servers' behavior
+          # operations (D103) run on it, each in a schema of its own, through
+          # their SDKs: the Go one over the rules archive staged above, the
+          # TypeScript one over the rules package built above, and the Rust
+          # one over the engine workspace's rules-adapter crate.
+          SUPERSCHEMATIC_RULES_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
           # The tests of vector columns run on the pgvector container
           # (D84); the database is there, so a skip is a broken gate.
           SUPERSCHEMATIC_VECTOR_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5433/postgres?sslmode=disable

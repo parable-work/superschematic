@@ -12,6 +12,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
+	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -81,6 +82,14 @@ type apiFixture struct {
 	endpoints *apigen.APIOutput
 	// mcp is outputs.api.mcp: the router serves its MCP endpoint (D81).
 	mcp bool
+	// registry is the registry the schemas were loaded with, which
+	// declares the behaviors a database's tables compose (D103); nil for
+	// the core one. tsgen writes a database's orm.ts with it.
+	registry *registry.Registry
+	// depsInfo is what the API's Deps holds (SetDeps), set before the package
+	// is written; the zero value for an API whose generated code reads
+	// none of it.
+	depsInfo DepsInfo
 }
 
 // fixtureAPI is fixture-api with its fixture-db dependency.
@@ -133,6 +142,7 @@ func materializeAPI(t *testing.T, fixture apiFixture) *generatedTree {
 			SchemaName:         tc.name,
 			Dependencies:       tc.deps,
 			DependencyPackages: depPackages,
+			Registry:           fixture.registry,
 			Clock:              fixedClock,
 		})
 		if err != nil {
@@ -141,6 +151,12 @@ func materializeAPI(t *testing.T, fixture apiFixture) *generatedTree {
 		typesDir := filepath.Join(typesRoot, tc.name)
 		if err := tsgen.SetScalarLibSpec(tsOutput, paths, typesDir); err != nil {
 			t.Fatalf("set superscalar spec for %s: %v", tc.name, err)
+		}
+		if tsOutput.ORM != nil && tsOutput.ORM.Rules != nil {
+			// orm.ts of a table whose fields are behaviors imports the
+			// rules package's initSync, whose declarations and wasm module
+			// are its dist/ (D103).
+			testpaths.BuildRulesPackage(t, bunPath, paths)
 		}
 		if err := tsgen.WriteTypes(tsOutput, typesDir); err != nil {
 			t.Fatalf("write types %s: %v", tc.name, err)
@@ -166,6 +182,9 @@ func materializeAPI(t *testing.T, fixture apiFixture) *generatedTree {
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
+	if err := output.SetDeps(fixture.depsInfo); err != nil {
+		t.Fatalf("SetDeps: %v", err)
+	}
 	apiDir := filepath.Join(tempRoot, "api", fixture.name)
 	if err := WriteAPI(output, apiDir); err != nil {
 		t.Fatalf("WriteAPI: %v", err)
@@ -177,7 +196,12 @@ func materializeAPI(t *testing.T, fixture apiFixture) *generatedTree {
 	}
 	link(t, paths.ScalarTypeScript, filepath.Join(modules, names.ScalarNpmPackage))
 	link(t, runtimeDir, filepath.Join(modules, filepath.FromSlash(names.HTTPRuntimeNpmPackage)))
-	for _, dep := range []string{"hono", "typescript", filepath.Join("@types", "node")} {
+	runtimeDeps := []string{"hono", "typescript", filepath.Join("@types", "node")}
+	if output.DepsPool() {
+		// deps.ts types Deps.db as pg's Pool, which the package peers on.
+		runtimeDeps = append(runtimeDeps, "pg", filepath.Join("@types", "pg"))
+	}
+	for _, dep := range runtimeDeps {
 		link(t, filepath.Join(runtimeDir, "node_modules", dep), filepath.Join(modules, dep))
 	}
 	return &generatedTree{bun: bunPath, apiDir: apiDir, runtimeDir: runtimeDir, root: tempRoot, typesDirs: typesDirs}

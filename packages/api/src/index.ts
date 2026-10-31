@@ -3,6 +3,7 @@ export {
   allowService,
   app,
   auth,
+  behaviorOperations,
   bodyLimit,
   decrypted,
   deriver,

@@ -382,6 +382,11 @@ type RustAPI struct {
 	// Database is the pool Deps.db holds, nil without one.
 	Database *RustDatabase
 
+	// Behaviors is true when the API serves behavior operations (D103):
+	// Implementations::new then takes Database's pool too, on which the
+	// router's handlers run each through the behaviors' core.
+	Behaviors bool
+
 	// Engine is the engine Deps.engine holds, of the API's engine database
 	// (D58), nil without one.
 	Engine *RustEngine
@@ -795,6 +800,12 @@ func PlanRust(in RustInput) (*RustServer, error) {
 				s.Databases = append(s.Databases, d)
 			}
 			api.Database = d
+		}
+		if o.HasBehaviorOperations() {
+			if api.Database == nil || api.Database.Service != o.BehaviorDatabase() {
+				return nil, fmt.Errorf("stack %s: %s %s serves %s, whose behavior operations run on %s (D103), and opens no pool on it", in.Stack, s.Kind, in.Server, o.SchemaName, o.BehaviorDatabase())
+			}
+			api.Behaviors = true
 		}
 		if o.Identity != nil && !background {
 			d := api.Database
@@ -1231,6 +1242,11 @@ func planRustDocker(in RustInput, s *RustServer, dir string) (*RustDocker, strin
 		return nil, why, nil
 	}
 	d.Include = append(d.Include, engines...)
+	behaviors, why := behaviorDockerIncludes(in, rel)
+	if why != "" {
+		return nil, why, nil
+	}
+	d.Include = append(d.Include, behaviors...)
 	if s.App != nil {
 		crates, why, err := appDockerIncludes(in, s, d.Include, rel)
 		if err != nil || why != "" {
@@ -1599,8 +1615,8 @@ func (s *RustServer) CrateUses() []string {
 
 // ImplementationsArgs are the arguments main.rs builds the API's
 // Implementations with, beside its handlers: the identity runtime's
-// authenticator over its identity service, and its service
-// authenticator.
+// authenticator over its identity service, its service authenticator, and
+// the pool of its database, which its behavior operations run on (D103).
 func (a *RustAPI) ImplementationsArgs() []string {
 	args := []string{a.Handlers}
 	// An API that mounts its engine's routes holds its identity service
@@ -1618,6 +1634,9 @@ func (a *RustAPI) ImplementationsArgs() []string {
 			authenticator = "Arc::clone(&" + a.ServiceAuthenticator + ") as _"
 		}
 		args = append(args, authenticator)
+	}
+	if a.Behaviors {
+		args = append(args, a.Database.Var+".clone()")
 	}
 	return args
 }

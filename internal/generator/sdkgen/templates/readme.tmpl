@@ -169,16 +169,22 @@ const result = await scoped.{{$ep.Name}}();
 
 ```typescript
 {{- $nsName := .Name}}
-{{- range $i, $ep := .Endpoints}}
+{{- range $i, $ep := .AllEndpoints}}
 {{- if eq $i 0}}
-// Example: {{$ep.Name}}
+// Example: {{$ep.MethodPath}}
 {{- if $ep.HasInput}}
-const result = await sdk.{{toCamelCase $nsName}}.{{$ep.Name}}({
+const result = await sdk.{{toCamelCase $nsName}}.{{$ep.MethodPath}}({
   // Input data
 });
 {{- else}}
-const result = await sdk.{{toCamelCase $nsName}}.{{$ep.Name}}();
+const result = await sdk.{{toCamelCase $nsName}}.{{$ep.MethodPath}}();
 {{- end}}
+{{- end}}
+{{- end}}
+{{- range .Members}}
+// {{.Name}}: {{behavior_member_phrase .Type .Use .Behavior}}
+{{- range .Endpoints}}
+//   sdk.{{toCamelCase $nsName}}.{{.MethodPath}}
 {{- end}}
 {{- end}}
 ```

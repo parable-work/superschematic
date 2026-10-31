@@ -188,6 +188,18 @@ var parityInputs = []struct{ name, registry, input string }{
 		{"name": "AccountAdmin", "operations": [], "userAdministration": {}}]}`},
 	{"an unknown key on a route set's config", "core", `{"kind": "OperationSet", "name": "Account", "operations": [], "userSessions": {"login": false}}`},
 	{"a route set's path that is not a string", "core", `{"kind": "OperationSet", "name": "AccountAdmin", "operations": [], "userAdministration": {"path": 1}}`},
+	// A table's behavior operations (D103): the table, imported from the
+	// API's database, and the set's clause; a behavior operation's marker
+	// has no key in the data forms.
+	{"a table's behavior operations", "core", `{"kind": "API", "name": "orders-api",
+		"imports": [{"package": "@schemas/orders-db", "types": ["Order", "Shipment"]}],
+		"operationSets": [
+		{"name": "OrderActions", "operations": [], "behaviorOperations": {"type": "Order"}, "permissions": ["orders.write"]},
+		{"name": "ShipmentActions", "operations": [], "behaviorOperations": {"type": "Shipment"}, "auth": true, "public": false}]}`},
+	{"behavior operations without the table", "core", `{"kind": "OperationSet", "name": "OrderActions", "operations": [], "behaviorOperations": {}}`},
+	{"a behavior operation's marker", "core", `{"kind": "OperationSet", "name": "OrderActions", "operations": [
+		{"name": "statusTransition", "typeRef": {"name": "OrderStatusTransitionResult"}, "httpMethod": "POST", "behaviorOperation": {"database": "orders-db", "type": "Order", "key": "id", "use": "status", "behavior": "Workflow", "operation": "transition"}}],
+		"behaviorOperations": {"type": "Order"}}`},
 
 	// The invocation policy.
 	{"visible tool without a policy gets the default", "core", `{"kind": "OperationSet", "name": "Ops", "operations": [

@@ -28,6 +28,7 @@ route too, with a credential of its own beside the end user's
 | `@requirePermission([...])` on a method | a caller holding one of the permissions |
 | `@requireOwnership` on a method | a caller, as `@auth` does; whether the caller owns the resource is for your implementation to check |
 | `@publicRoute` on a method | nothing: anyone may call it, even in an `Authenticated` set or a set with a service clause |
+| `@auth`, `@requirePermission([...])` or `@publicRoute` on a `@behaviorOperations` class | as on a method, for every route the class serves; the behaviors' core then checks the permissions the behavior's config names against the caller's ([A table's behavior operations](/superschematic/guides/api-routes/#a-tables-behavior-operations)) |
 | `@requireService` or `@allowService` on the set or the method | a listed calling service, in place of or beside the end user ([Service callers](#service-callers)) |
 | none of these | nothing: anyone may call it |
 
@@ -107,8 +108,11 @@ another provider, as `examples/acme-schematic` does for API keys; see
 A Go API that is not `public` and whose `authDb` has no `User` table has no
 `AuthMiddleware`. Its `@auth` routes check nothing, and its
 `@requirePermission` routes answer 401 unless a middleware of your own puts
-the caller on the request context. The TypeScript and Rust servers enforce
-every route whatever `public` says.
+the caller on the request context. A stack's Go server of such an API is
+refused when a table's behavior operations it serves need a caller, since
+their handlers are generated
+([API routes](/superschematic/guides/api-routes/#a-tables-behavior-operations)).
+The TypeScript and Rust servers enforce every route whatever `public` says.
 
 ## Say who the caller is: Go
 

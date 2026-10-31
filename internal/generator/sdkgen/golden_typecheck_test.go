@@ -14,6 +14,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/sdkgen/sdktest"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/testpaths"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -106,6 +107,7 @@ var goldenSDKs = map[string]func(t *testing.T) goldenSDK{
 		schema, apiOutput, parseable := loadQueryListsAPI(t)
 		return goldenSDK{apiOutput: apiOutput, parseable: parseable, clock: nestedArraysClock, types: apiTypes(sdktest.QueryListsService, schema)}
 	},
+	workflowAPI: workflowAPIGolden,
 	sdktest.UnionListsService: func(t *testing.T) goldenSDK {
 		schema, apiOutput, parseable := loadUnionListsAPI(t)
 		return goldenSDK{apiOutput: apiOutput, parseable: parseable, clock: nestedArraysClock, types: apiTypes(sdktest.UnionListsService, schema)}
@@ -233,6 +235,9 @@ func TestEveryGoldenSDKTypeChecks(t *testing.T) {
 			Dependencies:       pkg.deps,
 			DependencyPackages: packages,
 			Clock:              nestedArraysClock,
+			// The behaviors a table's fields compose (D103), whose
+			// repositories the types package writes.
+			Registry: registry.New(naming.Default()),
 		})
 		if err != nil {
 			t.Fatalf("tsgen.Generate %s: %v", name, err)

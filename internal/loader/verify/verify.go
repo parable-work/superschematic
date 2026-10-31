@@ -6,7 +6,8 @@
 // full @source structural verification,
 // trait shape checks, version graph declarations, the one @envVars class
 // that is a service's config (D94),
-// the User and UserRole traits and the user model's route sets, projection view
+// the User and UserRole traits and the user model's route sets, a table's
+// behavior operations (D103), projection view
 // declarations, the fields Encrypted<T> stores and the names @table and
 // @column give tables and columns (D85), the contexts that
 // refuse an array of arrays, the arguments
@@ -137,6 +138,12 @@ type Input struct {
 	// it nil otherwise.
 	AuthDB *ir.Schema
 
+	// Database is the loaded schema of the API's database
+	// (ir.Schema.Database), which @behaviorOperations sets read their
+	// tables from (D103). The loader reads it for an API with such a set
+	// and leaves it nil otherwise.
+	Database *ir.Schema
+
 	// DependencySchemas holds the loaded schemas of the dependencies whose
 	// types a RefersTo names (D61), or a SortBy operation lists (D60,
 	// amended), or a MemoryStore schema's payloads and enum parts name
@@ -241,6 +248,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkVersionGraphs(schema, r)
 	checkIdentity(schema, r)
 	checkIdentityRoutes(schema, in, r)
+	checkBehaviorOperations(schema, in, r)
 	checkProjections(schema, r)
 	checkArraysOfArrays(schema, r)
 	checkEncryptedArguments(schema, r)

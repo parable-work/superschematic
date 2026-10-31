@@ -16,7 +16,7 @@ func TestNewRegistersCoreDecoratorsForEveryWalkerCase(t *testing.T) {
 	want := map[DecoratorTarget][]string{
 		TargetType:         {"trait", "source", "envVars", "jsonField", "denyUnknownFields", "strictJSON", "allowUnknownFields", "versioned", "optimistic", "versionGraph", "graphMember", "index", "rawSql", "table", "projection", "join", "behavior", "display", "stack", "server", "database", "environment", "job", "queue", "worker", "enqueueOnChange", "query", "seedRoles", "deriver", "channel", "key", "app"},
 		TargetField:        {"key", "unique", "searchField", "jsonField", "uiHidden", "internalMetadata", "temporalFormat", "conflictUnit", "virtual", "decrypted", "sourceMustProject", "docs", "purpose", "icon", "uiControl", "display", "column"},
-		TargetOperationSet: {"rateLimit", "bodyLimit", "timeout", "requireService", "allowService", "userSessions", "userAdministration"},
+		TargetOperationSet: {"rateLimit", "bodyLimit", "timeout", "requireService", "allowService", "userSessions", "userAdministration", "behaviorOperations", "auth", "publicRoute", "requirePermission"},
 		TargetOperation:    {"rest", "requirePermission", "requireOwnership", "auth", "encrypted", "publicRoute", "webhook", "hmacVerified", "manualRouteRegistration", "rateLimit", "bodyLimit", "timeout", "requireService", "allowService", "paginated", "docs", "mcp", "icon"},
 	}
 	total := 0
@@ -489,5 +489,93 @@ func TestIdentityRoutesApply(t *testing.T) {
 	}
 	if err := apply("userSessions", &ir.OperationSet{}, map[string]any{}, map[string]any{}); err == nil || err.Error() != "@userSessions takes at most one config object" {
 		t.Errorf("two configs: %v", err)
+	}
+}
+
+// TestBehaviorOperationsApply: @behaviorOperations(Type) records the table
+// a set serves (D103), once per class and not beside a user model's route
+// set; the set's @auth, @publicRoute and @requirePermission write its
+// clause, with the operation's checks; and @requireOwnership has no class
+// form.
+func TestBehaviorOperationsApply(t *testing.T) {
+	reg := New(naming.Naming{})
+	apply := func(name string, set *ir.OperationSet, args ...any) error {
+		spec, ok := reg.Decorator(name, TargetOperationSet)
+		if !ok {
+			t.Fatalf("no core decorator @%s for an operation set", name)
+		}
+		if spec.Args != nil || !spec.DeclaredIn("@superschematic/api") {
+			t.Errorf("@%s: Args must stay nil and the package be @superschematic/api: %+v", name, spec)
+		}
+		return spec.Apply(Node{OperationSet: set}, args, Site{})
+	}
+
+	set := &ir.OperationSet{}
+	if err := apply("behaviorOperations", set, map[string]any{"class": "Order"}); err != nil {
+		t.Fatal(err)
+	}
+	if want := (&ir.BehaviorOperationsConfig{Type: "Order"}); !reflect.DeepEqual(set.BehaviorOperations, want) || !set.IsBehaviorOperations() {
+		t.Errorf("behaviorOperations(Order) = %+v, want %+v", set.BehaviorOperations, want)
+	}
+	if err := apply("behaviorOperations", set, map[string]any{"class": "Shipment"}); err == nil || err.Error() != "@behaviorOperations appears twice on the class: a set serves one table" {
+		t.Errorf("twice on one class: %v", err)
+	}
+	if err := apply("userSessions", set); err == nil || err.Error() != "@userSessions contradicts @behaviorOperations on the same class: a class takes one of them" {
+		t.Errorf("@userSessions beside it: %v", err)
+	}
+	if err := apply("userAdministration", set); err == nil || err.Error() != "@userAdministration contradicts @behaviorOperations on the same class: a class takes one of them" {
+		t.Errorf("@userAdministration beside it: %v", err)
+	}
+	for _, other := range []string{"userSessions", "userAdministration"} {
+		routes := &ir.OperationSet{}
+		if err := apply(other, routes); err != nil {
+			t.Fatal(err)
+		}
+		want := "@behaviorOperations contradicts @" + other + " on the same class: a class takes one of them"
+		if err := apply("behaviorOperations", routes, map[string]any{"class": "Order"}); err == nil || err.Error() != want {
+			t.Errorf("after @%s: %v, want %q", other, err, want)
+		}
+	}
+
+	for _, args := range [][]any{nil, {map[string]any{"class": "Order"}, map[string]any{"class": "Shipment"}}} {
+		err := apply("behaviorOperations", &ir.OperationSet{}, args...)
+		if err == nil || err.Error() != "@behaviorOperations takes one argument, the table whose behaviors' operations the set serves, imported from the API's database: @behaviorOperations(Order)" {
+			t.Errorf("behaviorOperations(%v): %v", args, err)
+		}
+	}
+	err := apply("behaviorOperations", &ir.OperationSet{}, "Order")
+	var argErr *ArgError
+	if !errors.As(err, &argErr) || argErr.Index != 0 || !strings.HasPrefix(argErr.Msg, "@behaviorOperations takes the table as a class, imported from the API's database: want a class") {
+		t.Errorf("behaviorOperations(\"Order\") = %v, want the class error", err)
+	}
+
+	clause := &ir.OperationSet{}
+	if err := apply("auth", clause); err != nil {
+		t.Fatal(err)
+	}
+	if err := apply("publicRoute", clause); err != nil {
+		t.Fatal(err)
+	}
+	if err := apply("requirePermission", clause, []any{"orders.write", "orders.read"}); err != nil {
+		t.Fatal(err)
+	}
+	if !clause.Auth || !clause.Public || !reflect.DeepEqual(clause.Permissions, []string{"orders.write", "orders.read"}) {
+		t.Errorf("the set's clause = auth %v, public %v, permissions %v", clause.Auth, clause.Public, clause.Permissions)
+	}
+	for _, tc := range []struct {
+		args []any
+		want string
+	}{
+		{nil, "@requirePermission takes exactly one array argument"},
+		{[]any{[]any{}}, "@requirePermission requires a non-empty array of permission strings"},
+		{[]any{"orders.write"}, "@requirePermission requires a non-empty array of permission strings"},
+		{[]any{[]any{1.0}}, "@requirePermission entries must be string literals"},
+	} {
+		if err := apply("requirePermission", &ir.OperationSet{}, tc.args...); err == nil || err.Error() != tc.want {
+			t.Errorf("requirePermission(%v) on a set = %v, want %q", tc.args, err, tc.want)
+		}
+	}
+	if _, ok := reg.Decorator("requireOwnership", TargetOperationSet); ok {
+		t.Error("@requireOwnership is registered for an operation set; it has no class form (D103)")
 	}
 }

@@ -21,6 +21,7 @@ func generateOpenAPISpec(output *APIOutput, schema *ir.Schema, dependencies map[
 
 	components, built := buildOpenAPISchemas(output.Endpoints, scalarExamples, scalarDescriptions, scalarMap, schema, dependencies)
 	addOpenAPIFieldReferences(components, built.types, schema, dependencies)
+	markOwnedFieldsReadOnly(components, built.types, schema, dependencies)
 
 	// info.version and servers are placeholders: the generated server
 	// replaces both at startup (injectOpenAPIRuntimeValues in routes.tmpl).
@@ -530,6 +531,11 @@ func buildOpenAPIPaths(output *APIOutput, scalarExamples, scalarDescriptions, sc
 		// answers it with (D50), beside the 400 and 500 of every route.
 		if endpoint.IdentityOperation != "" {
 			addIdentityErrorResponses(operation["responses"].(map[string]interface{}), endpoint.IdentityOperation)
+		}
+		// A behavior operation declares the refusals the behaviors' core
+		// answers it with (D103).
+		if endpoint.BehaviorOperation() != nil {
+			addBehaviorErrorResponses(operation["responses"].(map[string]interface{}))
 		}
 		// Under approval register answers 202 with the same envelope when
 		// the user waits for approval and starts no session (D81).

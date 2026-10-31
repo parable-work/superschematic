@@ -11,7 +11,10 @@ Everything here is schema-agnostic. The generated package owns the operation
 table (paths, parameter specs, strict body parsers, auth requirements); this
 module owns how those specs are applied to one request, and the service
 caller's verifier and credential sources (D37), which import nothing from
-node: so they run on Workers too. It also holds what a generated server's
+node: so they run on Workers too, and the handlers' helpers of a generated
+router's behavior operations (behavior-routes.ts, D103), which build the
+behaviors' core's caller and answer its refusals, importing nothing of the
+repositories. It also holds what a generated server's
 entrypoint reads (D51): the readers of the config fields a stack derives
 (stackconfig.ts), which map a loaded credential onto those sources, the
 JSON-lines logger, and the provider-neutral Bucket an API's Deps holds per
@@ -139,6 +142,8 @@ export type {
   SignedTokenSourceOptions,
   TokenFileSourceOptions,
 } from './credentials.js';
+export { behaviorCaller, behaviorOperation } from './behavior-routes.js';
+export type { BehaviorCaller } from './behavior-routes.js';
 export { declaredKeysOnly } from './operation.js';
 export type {
   OperationAuth,

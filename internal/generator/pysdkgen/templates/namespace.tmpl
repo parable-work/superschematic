@@ -94,7 +94,7 @@ if TYPE_CHECKING:
     )
 {{- end}}
 
-{{- range .Namespace.Endpoints}}
+{{- range .Namespace.AllEndpoints}}
 {{- if .HasFileUpload}}
 class {{.FilesTypeName}}(TypedDict, total=False):
 {{- range .FileUploadFields}}
@@ -113,6 +113,26 @@ class {{.Namespace.ClassName}}:
 {{- if .Namespace.IsScopedNS}}
         self._{{.Namespace.ScopeParamName}} = {{.Namespace.ScopeParamName}}
 {{- end}}
+{{- range .Namespace.Members}}
+
+    @property
+    def {{.FieldName}}(self) -> {{.ClassName}}:
+        """{{.Doc}}"""
+        return {{.ClassName}}(self._client)
+{{- end}}
+{{- template "classBody" .}}
+{{- range .Namespace.Members}}
+
+
+class {{.ClassName}}:
+    """{{.Doc}}"""
+
+    def __init__(self, client: SyncHTTPClient) -> None:
+        self._client = client
+{{- template "classBody" ($.MemberData .)}}
+{{- end}}
+
+{{- define "classBody"}}
 
     def _resolve_validation_type(self, type_name: str) -> Any | None:
         builtin_type = _BUILTIN_VALIDATION_TYPES.get(type_name)
@@ -973,6 +993,7 @@ class {{.Namespace.ClassName}}:
             cursor = page.next
 {{- end}}
 
+{{- end}}
 {{- end}}
 {{- /*
 coerceResponse is the value a method returns from the response data: a

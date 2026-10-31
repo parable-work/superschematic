@@ -43,6 +43,7 @@ var templatesFS embed.FS
 //	├── config.go        # EnvConfig and its loader (settings or derived fields)
 //	├── constants.go     # SystemUserID (public schemas with a UUID scalar)
 //	├── caller.go        # The ORM acting as each request's caller (D87; with a Deps database only)
+//	├── behaviors.go     # The behavior operations' caller and refusals (D103; with a behavior operation only)
 //	└── fileupload.go    # Multipart upload helpers (only with file uploads)
 func WriteAPI(output *APIOutput, outputDir string) error {
 	return WriteAPIWithProfile(output, outputDir, nil, false)
@@ -52,7 +53,9 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 func WriteAPIWithProfile(output *APIOutput, outputDir string, prof *profile.Profiler, skipFormat bool, phasePrefixes ...string) error {
 	// The user model's operations are the identity runtime's (D50): the
 	// interfaces, the router and the Deps leave them out, and the router
-	// mounts the runtime's handlers at their routes.
+	// mounts the runtime's handlers at their routes. A table's behavior
+	// operations are the ORM's (D103): the router mounts generated handlers
+	// that call it.
 	output, err := ImplementedOutput(output)
 	if err != nil {
 		return err
@@ -126,6 +129,7 @@ func WriteAPIWithProfile(output *APIOutput, outputDir string, prof *profile.Prof
 		{Condition: output.HasConstants(), Template: "constants.tmpl", Filename: "constants.go"},
 		{Condition: output.HasFileUpload, Template: "fileupload.tmpl", Filename: "fileupload.go"},
 		{Condition: output.Deps.Database != "", Template: "caller.tmpl", Filename: "caller.go"},
+		{Condition: output.HasBehaviorEndpoints(), Template: "behaviors.tmpl", Filename: "behaviors.go"},
 	}
 	if err := codegen.WriteConditionalFilesParallel(conditionalFiles, outputDir, func(templateName, outputPath string) error {
 		return generateFile(generator, templatesFS, templateName, outputPath, output, funcs)
@@ -241,16 +245,22 @@ func SetReplacePaths(output *APIOutput, paths naming.LocalPaths, outputDir strin
 			return fmt.Errorf("engine binding replace path: %w", err)
 		}
 	}
+	if output.Deps.Rules {
+		if output.RulesReplacePath, err = naming.RelPath(outputDir, paths.RulesGo); err != nil {
+			return fmt.Errorf("rules module replace path: %w", err)
+		}
+	}
 	return nil
 }
 
 // SetReleasePins keeps the pins (naming.Naming.ReleasePins) of the runtime
 // modules the API module reaches: the HTTP runtime, the schema runtime it
 // builds on, the schema IR, the scalar library and, when the API reads a
-// version graph, the version-graph binding, and, when it has an engine
-// database, the engine's binding (D58). go.mod requires those it requires
-// at their pins and replaces every version of each pinned module with its
-// pin.
+// version graph, the version-graph binding, when it has an engine
+// database, the engine's binding (D58), and, when its database's tables'
+// fields are behaviors, the rules module (D103). go.mod requires those it
+// requires at their pins and replaces every version of each pinned module
+// with its pin.
 func SetReleasePins(output *APIOutput, pins naming.Pins) {
 	n := output.Naming
 	modules := []string{n.HTTPRuntimeGoModule, n.SchemaRuntimeGoModule, n.SchemaIRGoModule, n.ScalarGoModule}
@@ -259,6 +269,9 @@ func SetReleasePins(output *APIOutput, pins naming.Pins) {
 	}
 	if output.HasEngine() {
 		modules = append(modules, n.EngineGoModule)
+	}
+	if output.Deps.Rules {
+		modules = append(modules, n.RulesGoModule)
 	}
 	output.Pins = pins.Of(modules...)
 }
@@ -286,6 +299,7 @@ func templateFuncs(provider AuthProvider) (template.FuncMap, error) {
 		"isPlainImage":            isPlainImage,
 		"isImageWithTransparency": isImageWithTransparency,
 		"route":                   newRouteData,
+		"behaviorArticle":         behaviorArticle,
 	}
 	for name, fn := range provider.Funcs() {
 		funcs[name] = fn

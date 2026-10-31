@@ -123,6 +123,29 @@ type CIStack struct {
 	// output root's workspace takes the checkout's packages: only then does
 	// a check job build their dist/.
 	EngineCheckoutTypeScript bool
+
+	// RulesCheckout is the superschematic checkout the naming file's
+	// [paths] rules_go or rules_typescript names (D103), relative to the
+	// repository root, when a deployable of the stack connects to a
+	// database a table of which has a field that is a behavior, whose ORM
+	// or repositories link the behaviors' core, and the checkout lies in
+	// the repository; empty otherwise.
+	RulesCheckout string
+
+	// RulesGo are the Go servers, jobs and workers of the stack that
+	// connect to such a database, sorted, when [paths] rules_go names the
+	// rules module of RulesCheckout: a check job stages the core's static
+	// archive there (its scripts/rules-archive.sh) before it compiles them,
+	// unless it installs a release's archives, which hold it.
+	RulesGo []string
+
+	// RulesTypeScript are the TypeScript servers, jobs and workers that
+	// connect to such a database, sorted, when [paths] rules_typescript
+	// names the @superschematic/rules package of RulesCheckout, which the
+	// output root's workspace takes in place of the published one: a check
+	// job builds its dist/, the core's WebAssembly module with it, before
+	// it installs the workspace.
+	RulesTypeScript []string
 }
 
 // CISite is a static site a CI job builds: its package's directory,

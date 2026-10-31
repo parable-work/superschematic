@@ -142,7 +142,7 @@ export type AuthenticatorFactory = (deps: Deps) => Authenticator | Promise<Authe
 export interface ManualRoutes {
 {{- range .ManualEndpoints }}
   /** {{ .Method }} {{ .Path }} */
-  {{ .Name }}: ManualRouteHandler;
+  {{ .Key }}: ManualRouteHandler;
 {{- end }}
 }
 
