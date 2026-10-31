@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"text/template"
@@ -78,7 +80,14 @@ type ParamInfo struct {
 
 // EndpointInfo is one generated route.
 type EndpointInfo struct {
-	Name              string // operation name (camelCase, the schema's)
+	Name string // operation name (camelCase, the schema's)
+	// Key is the endpoint's key in the router's flat tables
+	// (operationSpecs, RouterOptions' bodyLimits, rateLimits, timeouts and
+	// manualRoutes, and the MCP tools' operation): its name, or, when an
+	// operation of another namespace has the same name, its namespace's
+	// camelCase name and its own in PascalCase (orderStatusTransition), so
+	// two namespaces' operations of one name keep a key each.
+	Key               string
 	Namespace         string // kebab-case namespace
 	NamespaceProperty string // camelCase key in Implementations
 	ArgsTypeName      string // <Op>Args
@@ -165,6 +174,42 @@ type EndpointInfo struct {
 	// it has no implementation method, and its table entry declares no
 	// input: the runtime decodes the body itself.
 	IdentityOperation string
+
+	// Behavior is the behavior operation the endpoint runs (D103), nil for
+	// every other: the router mounts it with a handler that runs it
+	// through the table's repository in RouterOptions.orm, so it has no
+	// implementation method.
+	Behavior *BehaviorRoute
+}
+
+// BehaviorRoute is a behavior operation (D103) as the router mounts it:
+// the operation of a use on a table of the API's database, which the
+// loader added for a @behaviorOperations set, run through the table's
+// repository in RouterOptions.orm (Deps.orm), as the request's caller.
+type BehaviorRoute struct {
+	// Set is the @behaviorOperations set that serves the operation.
+	Set string
+	// Database, Type, Use, Behavior and Operation are the loader's marker:
+	// the API's database, the table, the use's id (its field), the
+	// behavior and the operation's name in the behavior's declaration.
+	Database  string
+	Type      string
+	Use       string
+	Behavior  string
+	Operation string
+	// Repository is the ORM's member that holds the table's repository, as
+	// tsgen names it: the table's name with its first letter lower-cased.
+	Repository string
+	// Key is the path parameter that holds the row's key, which the
+	// repository's method takes first.
+	Key ParamInfo
+}
+
+// Method is the repository's method the route calls, under RouterOptions.orm:
+// order.status.transition, the operation under its use under the table's
+// repository, as orm.ts declares them.
+func (r *BehaviorRoute) Method() string {
+	return r.Repository + "." + r.Use + "." + r.Operation
 }
 
 // UploadInfo is one file part of a multipart input (D81).
@@ -229,7 +274,9 @@ func (e EndpointInfo) FilesArgType() string {
 
 // Manual reports whether the router mounts the endpoint with a handler of
 // its own rather than an implementation method: a
-// @manualRouteRegistration operation, or one of the user model's.
+// @manualRouteRegistration operation, or one of the user model's. A
+// behavior operation (D103) is not manual: its route decodes the request
+// as an implemented one's does.
 func (e EndpointInfo) Manual() bool {
 	return e.ManualRouteRegistration || e.IdentityOperation != ""
 }
@@ -373,16 +420,29 @@ type APIOutput struct {
 	// User table.
 	Identity *IdentityInfo
 
+	// FieldBehaviors reports whether the API's database, found in
+	// Options.Dependencies or Options.AuthDB, has a table whose fields are
+	// behaviors (D103): its repositories, orm.ts, then import the
+	// behaviors' core's package (Naming.RulesNpmPackage), which a server
+	// that opens Deps.orm resolves and whose wasm module its image builds.
+	// Set whether or not the API serves the table's behavior operations.
+	FieldBehaviors bool
+
 	// TypeImports are the type-only imports of interfaces.ts from
 	// `<package>/types` (inputs, outputs, enum parameters);
 	// RouterTypeImports the subset router.ts references (inputs and enum
-	// parameters, the casts around the decoded request);
+	// parameters, the casts around the decoded request, and a behavior
+	// operation's result);
 	// ValidatorImports are value imports from `<package>/validators`;
-	// ScalarImports are type-only imports from ScalarPackage.
-	TypeImports       []PackageImport
-	RouterTypeImports []PackageImport
-	ValidatorImports  []PackageImport
-	ScalarImports     []string
+	// ScalarImports are type-only imports from ScalarPackage, and
+	// RouterScalarImports the ones router.ts takes: ScalarImports and the
+	// scalars of the behavior operations' keys (D103), which
+	// interfaces.ts does not declare.
+	TypeImports         []PackageImport
+	RouterTypeImports   []PackageImport
+	ValidatorImports    []PackageImport
+	ScalarImports       []string
+	RouterScalarImports []string
 	// PeerPackages lists every generated types package the generated
 	// code imports from, for package.json peerDependencies.
 	PeerPackages []string
@@ -461,6 +521,56 @@ func (o *APIOutput) HasManualRoutes() bool {
 	return len(o.ManualEndpoints) > 0
 }
 
+// BehaviorRoutes are the behavior operations the router mounts (D103), in
+// the order of Endpoints.
+func (o *APIOutput) BehaviorRoutes() []*BehaviorRoute {
+	var out []*BehaviorRoute
+	for _, endpoint := range o.Endpoints {
+		if endpoint.Behavior != nil {
+			out = append(out, endpoint.Behavior)
+		}
+	}
+	return out
+}
+
+// HasBehaviors reports whether the API serves a table's behavior
+// operations (D103): RouterOptions then takes orm, the repositories of the
+// API's database, which run them.
+func (o *APIOutput) HasBehaviors() bool {
+	return len(o.BehaviorRoutes()) > 0
+}
+
+// RuntimeImport is router.ts's import from the runtime's main entry: the
+// helpers of the behavior operations' handlers (D103), the page helpers
+// (D60) and the dropper of undeclared keys (D87) the router calls, and the
+// operation table's types.
+func (o *APIOutput) RuntimeImport() string {
+	var values []string
+	if o.HasBehaviors() {
+		values = append(values, "behaviorCaller", "behaviorOperation")
+	}
+	if o.HasPages && o.HasSortedPages {
+		values = append(values, "bindPage")
+	}
+	if o.DropsUndeclaredKeys() {
+		values = append(values, "declaredKeysOnly")
+	}
+	if o.HasPages {
+		values = append(values, "readPage")
+	}
+	types := []string{"OperationSpec"}
+	if o.HasPages {
+		types = append(types, "PageSpec")
+	}
+	if len(values) == 0 {
+		return "import type { " + strings.Join(types, ", ") + " } from " + tsString(o.RuntimePackage) + ";"
+	}
+	for _, name := range types {
+		values = append(values, "type "+name)
+	}
+	return "import { " + strings.Join(values, ", ") + " } from " + tsString(o.RuntimePackage) + ";"
+}
+
 // HasManualMounts reports whether the router mounts any endpoint with
 // mountManualOperation: a @manualRouteRegistration operation or one of the
 // user model's.
@@ -533,6 +643,12 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 		}
 	}
 
+	output.FieldBehaviors = databaseHasFieldBehaviors(schema, opts)
+
+	keyOf, err := operationKeys(apiOutput.Endpoints)
+	if err != nil {
+		return nil, err
+	}
 	byNamespace := map[string]*NamespaceInfo{}
 	webhookProviders := map[string]struct{}{}
 	for _, ep := range apiOutput.Endpoints {
@@ -543,14 +659,32 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 			if output.Identity == nil {
 				return nil, fmt.Errorf("tsrestgen: operation %s.%s is the user model's %s, which the identity runtime serves from the User table of the API's authDb (%s); Options.AuthDB holds none", ep.Namespace, ep.Name, ep.IdentityOperation, authDBName(schema))
 			}
-			output.Endpoints = append(output.Endpoints, b.identityEndpoint(ep))
+			endpoint := b.identityEndpoint(ep)
+			endpoint.Key = keyOf(ep)
+			output.Endpoints = append(output.Endpoints, endpoint)
 			output.Identity.Routes++
+			continue
+		}
+		// A behavior operation runs through the database's repositories
+		// (D103): the implementation interfaces leave it out too, and the
+		// router mounts it with a handler that calls the repository.
+		if op := ep.BehaviorOperation(); op != nil {
+			endpoint, err := b.behaviorEndpoint(ep, op)
+			if err != nil {
+				return nil, err
+			}
+			endpoint.Key = keyOf(ep)
+			output.Endpoints = append(output.Endpoints, endpoint)
+			if endpoint.WebhookProvider != "" {
+				webhookProviders[endpoint.WebhookProvider] = struct{}{}
+			}
 			continue
 		}
 		endpoint, err := b.endpoint(ep)
 		if err != nil {
 			return nil, err
 		}
+		endpoint.Key = keyOf(ep)
 		output.Endpoints = append(output.Endpoints, endpoint)
 		output.HasPages = output.HasPages || endpoint.Page != nil
 		output.HasSortedPages = output.HasSortedPages || (endpoint.Page != nil && endpoint.Page.Sort != nil)
@@ -582,6 +716,10 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 	output.RouterTypeImports = b.packageImports(b.routerTypeImports)
 	output.ValidatorImports = b.packageImports(b.validatorImports)
 	output.ScalarImports = sortedKeys(b.scalarImports)
+	for symbol := range b.scalarImports {
+		b.routerScalarImports[symbol] = struct{}{}
+	}
+	output.RouterScalarImports = sortedKeys(b.routerScalarImports)
 	peers := map[string]struct{}{}
 	for pkg := range b.typeImports {
 		peers[pkg] = struct{}{}
@@ -611,6 +749,9 @@ type builder struct {
 	routerTypeImports map[string]map[string]struct{}
 	validatorImports  map[string]map[string]struct{}
 	scalarImports     map[string]struct{}
+	// routerScalarImports are the scalars router.ts imports beside
+	// scalarImports: the behavior operations' keys (D103).
+	routerScalarImports map[string]struct{}
 }
 
 func newBuilder(schema *ir.Schema, opts Options) *builder {
@@ -620,14 +761,145 @@ func newBuilder(schema *ir.Schema, opts Options) *builder {
 	}
 	sort.Strings(depNames)
 	return &builder{
-		schema:            schema,
-		opts:              opts,
-		depNames:          depNames,
-		typeImports:       map[string]map[string]struct{}{},
-		routerTypeImports: map[string]map[string]struct{}{},
-		validatorImports:  map[string]map[string]struct{}{},
-		scalarImports:     map[string]struct{}{},
+		schema:              schema,
+		opts:                opts,
+		depNames:            depNames,
+		typeImports:         map[string]map[string]struct{}{},
+		routerTypeImports:   map[string]map[string]struct{}{},
+		validatorImports:    map[string]map[string]struct{}{},
+		scalarImports:       map[string]struct{}{},
+		routerScalarImports: map[string]struct{}{},
 	}
+}
+
+// operationKeys returns each endpoint's key in the router's flat tables
+// (EndpointInfo.Key): its name, unless an endpoint of another namespace
+// has the same name, when it is the namespace's camelCase name and the
+// name in PascalCase (statusTransition in order and in shipment, the
+// behavior operations of two tables (D103), are orderStatusTransition and
+// shipmentStatusTransition). It refuses two endpoints that would take one
+// key.
+func operationKeys(endpoints []apigen.EndpointInfo) (func(apigen.EndpointInfo) string, error) {
+	namespaces := map[string]map[string]struct{}{}
+	for _, ep := range endpoints {
+		name := tsutil.ToCamelCase(ep.Name)
+		if namespaces[name] == nil {
+			namespaces[name] = map[string]struct{}{}
+		}
+		namespaces[name][ep.Namespace] = struct{}{}
+	}
+	keyOf := func(ep apigen.EndpointInfo) string {
+		name := tsutil.ToCamelCase(ep.Name)
+		if len(namespaces[name]) < 2 {
+			return name
+		}
+		return codegen.ToCamelCase(ep.Namespace) + codegen.ToPascalCase(name)
+	}
+	taken := map[string]apigen.EndpointInfo{}
+	for _, ep := range endpoints {
+		key := keyOf(ep)
+		if prev, clash := taken[key]; clash {
+			return nil, fmt.Errorf("tsrestgen: operations %s.%s and %s.%s both key the router's operation table as %s, since operations of several namespaces are named %s; rename one", prev.Namespace, prev.Name, ep.Namespace, ep.Name, key, tsutil.ToCamelCase(prev.Name))
+		}
+		taken[key] = ep
+	}
+	return keyOf, nil
+}
+
+// databaseHasFieldBehaviors reports whether the API's database (its authDb,
+// or its one DB dependency), as opts holds it loaded, has a table whose
+// fields are behaviors (D103).
+func databaseHasFieldBehaviors(schema *ir.Schema, opts Options) bool {
+	db, _, ok := schema.Database()
+	if !ok {
+		return false
+	}
+	dbSchema := opts.Dependencies[db]
+	if opts.AuthDB != nil && opts.AuthDB.Name == db {
+		dbSchema = opts.AuthDB
+	}
+	_, _, _, found := dbSchema.FindFieldBehavior()
+	return found
+}
+
+// identifierPattern matches a TypeScript identifier a member access can
+// name after a dot.
+var identifierPattern = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$]*$`)
+
+// behaviorEndpoint is a behavior operation (D103) as the router mounts it:
+// its route, its key parameter, its input and its result, decoded as an
+// implemented endpoint's, and the repository method it runs through. Its
+// types are rendered by a builder of their own, so they add no import to
+// interfaces.ts, which has no method for it: its input's validators, its
+// result (the handler's cast) and its key's scalar go to router.ts alone.
+func (b *builder) behaviorEndpoint(ep apigen.EndpointInfo, op *ir.BehaviorOperation) (EndpointInfo, error) {
+	own := newBuilder(b.schema, b.opts)
+	endpoint, err := own.endpoint(ep)
+	if err != nil {
+		return endpoint, err
+	}
+	route := &BehaviorRoute{
+		Set:        behaviorSet(b.schema, ep.Operation),
+		Database:   op.Database,
+		Type:       op.Type,
+		Use:        op.Use,
+		Behavior:   op.Behavior,
+		Operation:  op.Operation,
+		Repository: lowerFirst(op.Type),
+	}
+	for _, member := range []string{route.Repository, route.Use, route.Operation} {
+		if !identifierPattern.MatchString(member) {
+			return endpoint, fmt.Errorf("tsrestgen: behavior operation %s.%s runs %s's %s %s, and the repository's member %q is no identifier the router can call it by", ep.Namespace, ep.Name, op.Type, op.Use, op.Operation, member)
+		}
+	}
+	key := slices.IndexFunc(endpoint.PathParams, func(p ParamInfo) bool { return p.Name == op.Key })
+	if key < 0 {
+		return endpoint, fmt.Errorf("tsrestgen: behavior operation %s.%s is routed at %s %s, which has no path parameter %s, the key of %s", ep.Namespace, ep.Name, endpoint.Method, endpoint.Path, op.Key, op.Type)
+	}
+	route.Key = endpoint.PathParams[key]
+	endpoint.Behavior = route
+
+	// The handler hands the repository the decoded input as its
+	// parameters, which take the input's wire values, with no cast to the
+	// input's type: the router imports the input's validators alone.
+	merge := func(into, from map[string]map[string]struct{}, skip string) {
+		for pkg, symbols := range from {
+			for symbol := range symbols {
+				if symbol != skip {
+					b.addImport(into, pkg, symbol)
+				}
+			}
+		}
+	}
+	merge(b.routerTypeImports, own.routerTypeImports, ep.InputType)
+	merge(b.validatorImports, own.validatorImports, "")
+	for symbol := range own.scalarImports {
+		b.routerScalarImports[symbol] = struct{}{}
+	}
+	if pkg, ok := own.ownerPackage(ep.OutputType); ok {
+		b.addImport(b.routerTypeImports, pkg, ep.OutputType)
+	}
+	return endpoint, nil
+}
+
+// behaviorSet names the operation set that holds op: the
+// @behaviorOperations set the loader added it to (D103).
+func behaviorSet(schema *ir.Schema, op *ir.FieldDef) string {
+	for _, set := range schema.OperationSets {
+		if set != nil && slices.Contains(set.Operations, op) {
+			return set.Name
+		}
+	}
+	return ""
+}
+
+// lowerFirst lower-cases the first letter of s, as tsgen names a table's
+// repository in its ORM (order for Order).
+func lowerFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToLower(s[:1]) + s[1:]
 }
 
 // authDBName names the API's authDb for an error: its name, or that it
@@ -1254,8 +1526,13 @@ func tsStringList(values []string) string {
 	return "[" + strings.Join(quoted, ", ") + "]"
 }
 
-// WriteAPI writes the generated package into outputDir.
+// WriteAPI writes the generated package into outputDir. It refuses an API
+// that serves a table's behavior operations (D103) whose Deps (SetDeps)
+// holds no repositories, which router.ts types RouterOptions.orm by.
 func WriteAPI(output *APIOutput, outputDir string) error {
+	if err := output.checkBehaviorDeps(output.Deps); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return fmt.Errorf("create output dir %s: %w", outputDir, err)
 	}

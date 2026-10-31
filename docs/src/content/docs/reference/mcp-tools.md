@@ -124,6 +124,30 @@ src/orders.schema.ts:24:9: invalid @mcp config: invocationPolicy "always" is not
 The data forms' JSON Schema lists the key with its values as an enum, and
 a policy on a hidden operation fails the load in every form.
 
+## A table's behavior operations
+
+An operation the build adds for a `@behaviorOperations` set
+([A table's behavior operations](/superschematic/guides/api-routes/#a-tables-behavior-operations))
+is a visible tool, with no `@mcp` or `@docs` of yours, unless the set's
+`@requireService` admits only calling services: no end user's agent can
+call it then, so its `@mcp` is hidden, with the reason `Only the services
+that @requireService on OrderActions admits call it (D37).`, and the tool
+documents leave it out (D37):
+
+| | `Order`'s `status`, `transition` |
+| --- | --- |
+| Handle | `order_status_transition`: the table, the field and the operation in snake case, at most 48 characters, or the build refuses it |
+| `@docs` | title `Order status: transition`, capability `order.status.transition`, the behavior's description of the operation, replay mode `read_only` for an operation that does not write |
+| Invocation policy | the behavior's declaration's for the operation, as the engine's tools carry it, else the default |
+| Tool name, `methodName` | `order.status.transition`, `status.transition`: the TypeScript SDK's method path |
+| Parameters | the row's key (`id`) and the operation's parameters (`to`, an enum of the config's states), each required as the operation takes it |
+
+A TypeScript API's endpoint lists the tool and runs it through its route,
+so the set's `@requirePermission` and the core's own permission checks
+apply to a call as to a request, and a tool whose policy is `"ask"` asks
+first. An API's own policy or hiding of a behavior's tool, and a handle of
+its own, are not available yet.
+
 ## `@icon` on an operation
 
 `@icon(name)` from `@superschematic/api` names the glyph of the

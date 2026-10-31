@@ -41,6 +41,10 @@ type {{.Namespace.StructName}} struct {
 	{{- if .Namespace.IsScopedNS}}
 	{{.Namespace.ScopeFieldName}} string
 	{{- end}}
+	{{- range .Namespace.Members}}
+	// {{.FieldName}} holds {{behavior_member_phrase .Type .Use .Behavior}}.
+	{{.FieldName}} *{{.StructName}}
+	{{- end}}
 }
 
 // New{{.Namespace.StructName}} creates a {{.Namespace.StructName}}.
@@ -58,9 +62,29 @@ func New{{.Namespace.StructName}}(
 		{{- if .Namespace.IsScopedNS}}
 		{{.Namespace.ScopeFieldName}}: {{.Namespace.ScopeFieldName}},
 		{{- end}}
+		{{- range .Namespace.Members}}
+		{{.FieldName}}: &{{.StructName}}{client: client},
+		{{- end}}
 	}
 }
+{{- template "endpoints" .}}
+{{- range .Namespace.Members}}
 
+// {{.StructName}} holds {{behavior_member_phrase .Type .Use .Behavior}}.
+{{- if .Endpoints}}
+//
+// Endpoints:
+{{- range .Endpoints}}
+// - {{.MethodName}}: {{docLine .Description (printf "%s endpoint." .MethodName)}}{{if .RequiresAuth}} Requires authentication.{{end}}
+{{- end}}
+{{- end}}
+type {{.StructName}} struct {
+	client jsonClient
+}
+{{- template "endpoints" ($.MemberData .)}}
+{{- end}}
+
+{{- define "endpoints"}}
 {{- range .Namespace.Endpoints}}
 {{- if .HasScalarArgs}}
 type {{.ScalarInputStructName}} struct {
@@ -662,6 +686,7 @@ func (n *{{$.Namespace.StructName}}) {{.AllMethodName}}(
 }
 {{- end}}
 
+{{- end}}
 {{- end}}
 
 {{- define "parameters"}}

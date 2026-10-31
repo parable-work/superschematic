@@ -355,6 +355,13 @@ type APIOutput struct {
 	// whose Endpoints hold every operation.
 	IdentityEndpoints []EndpointInfo
 
+	// BehaviorEndpoints are a table's behavior operations (D103), which the
+	// generated handlers run through the ORM of the API's database:
+	// ImplementedOutput moves them here from Endpoints, so the Go server
+	// mounts them on those handlers and implements none of them. Nil in the
+	// output Generate returns, whose Endpoints hold every operation.
+	BehaviorEndpoints []EndpointInfo
+
 	// Registration is the API's @userSessions when its register admits
 	// users otherwise than open registration with no roles does (D81), and
 	// nil otherwise: the identity wiring passes it to the runtime.
@@ -452,6 +459,10 @@ type APIOutput struct {
 	// EngineReplacePath replaces the engine's Go binding, which Deps holds
 	// an engine of when the API has an engine database (D58).
 	EngineReplacePath string
+	// RulesReplacePath replaces the rules module, which the ORM of a
+	// database whose tables' fields are behaviors requires, and which
+	// behaviors.go imports (D103; Deps.Rules).
+	RulesReplacePath string
 
 	// Pins are the runtime modules go.mod takes from the module proxy, at
 	// the release that generates it (SetReleasePins).
@@ -473,20 +484,14 @@ func (o *APIOutput) TypesModuleReplaces() []string {
 }
 
 // RoutedEndpoints are the endpoints RegisterRoutes mounts and the identity
-// route table lists: Endpoints and IdentityEndpoints, in Generate's order
-// (by path, then method). Without IdentityEndpoints they are Endpoints.
+// route table lists: Endpoints, IdentityEndpoints and BehaviorEndpoints, in
+// Generate's order (by path, then method). Without IdentityEndpoints and
+// BehaviorEndpoints they are Endpoints.
 func (o *APIOutput) RoutedEndpoints() []EndpointInfo {
-	if len(o.IdentityEndpoints) == 0 {
+	if len(o.IdentityEndpoints) == 0 && len(o.BehaviorEndpoints) == 0 {
 		return o.Endpoints
 	}
-	routed := append(append([]EndpointInfo{}, o.Endpoints...), o.IdentityEndpoints...)
-	sort.SliceStable(routed, func(i, j int) bool {
-		if routed[i].Path != routed[j].Path {
-			return routed[i].Path < routed[j].Path
-		}
-		return routed[i].Method < routed[j].Method
-	})
-	return routed
+	return sortedEndpoints(o.Endpoints, o.IdentityEndpoints, o.BehaviorEndpoints)
 }
 
 // ManualEndpoints are the @manualRouteRegistration endpoints among
@@ -561,7 +566,7 @@ func (o *APIOutput) HasConstants() bool {
 // argument of a GET operation or an input type, so routes.go imports the
 // HTTP runtime's bodyargs package.
 func (o *APIOutput) HasBodyArgs() bool {
-	for _, endpoint := range o.Endpoints {
+	for _, endpoint := range o.HandlerEndpoints() {
 		if len(endpoint.BodyArgs) > 0 || len(endpoint.QueryListArgs) > 0 || endpoint.HasInput {
 			return true
 		}
@@ -573,7 +578,7 @@ func (o *APIOutput) HasBodyArgs() bool {
 // scalars: a body argument or a query-string list of a JSON-object scalar
 // is built with superscalar's check of the scalar (BodyArg.ChecksJSON).
 func (o *APIOutput) RoutesNeedScalars() bool {
-	for _, endpoint := range o.Endpoints {
+	for _, endpoint := range o.HandlerEndpoints() {
 		for _, args := range [][]BodyArg{endpoint.BodyArgs, endpoint.QueryListArgs} {
 			for _, arg := range args {
 				if arg.ChecksJSON() {
@@ -586,10 +591,11 @@ func (o *APIOutput) RoutesNeedScalars() bool {
 }
 
 // RoutesNeedTypes gates the types import in routes.go: only a handler
-// factory (written for every endpoint, mounted or not) references the
-// generated types module, as handlerUsesTypes lists.
+// factory (written for every endpoint, mounted or not, a behavior
+// operation's included) references the generated types module, as
+// handlerUsesTypes lists.
 func (o *APIOutput) RoutesNeedTypes() bool {
-	for _, endpoint := range o.Endpoints {
+	for _, endpoint := range o.HandlerEndpoints() {
 		if endpoint.handlerUsesTypes() {
 			return true
 		}
@@ -616,6 +622,10 @@ func (e EndpointInfo) handlerUsesTypes() bool {
 	}
 	// A nil inner list of a list-of-lists response is sent as []<Output>{}.
 	if e.OutputType != "" && e.OutputIsArrayOfArrays && strings.HasPrefix(e.OutputGoType, "types.") {
+		return true
+	}
+	// A behavior operation's result is decoded into its output type.
+	if e.BehaviorOperation() != nil && strings.Contains(e.BehaviorResultGoType(), "types.") {
 		return true
 	}
 	// A path parameter of a generated type is parsed (a UUID or a
@@ -835,7 +845,7 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 	if opts.IsPublic && opts.UpstreamSchema != "" {
 		// The upstream auth schema is the API's database (resolveUpstreamAuth
 		// reads authDb, or the one DB-kind dependency, as Deps does).
-		output.Deps = DepsInfo{Database: opts.UpstreamSchema, ORMModule: ormModule, VersionGraph: output.UpstreamVersionGraph}
+		output.Deps = DepsInfo{Database: opts.UpstreamSchema, ORMModule: ormModule, VersionGraph: output.UpstreamVersionGraph, Rules: DeclaresFieldBehaviors(opts.UpstreamIR)}
 	}
 	auth, err := opts.Provider.Analyze(schema, opts.UpstreamIR)
 	if err != nil {
@@ -864,6 +874,12 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 
 	if len(output.Endpoints) == 0 {
 		return nil, nil
+	}
+	// The behavior operations run through the ORM of the API's database
+	// (D103), which Deps holds; the dispatch layer sets Deps again with
+	// SetDeps, from the database it loads.
+	if db := behaviorDatabase(output.Endpoints); db != "" && output.Deps.Database == "" {
+		output.Deps = DepsInfo{Database: db, ORMModule: opts.Naming.GoORMModule(db), Rules: true}
 	}
 
 	if err := output.summarizeEndpoints(); err != nil {
@@ -913,15 +929,16 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 }
 
 // permissionCatalog is the API's permissions.json, from every endpoint, the
-// user model's included, and from the engine its server mounts, whose
-// permission policy asks <Type>.<action> of each engine type (D58), or ""
-// when neither names a permission.
+// user model's included, a behavior operation's with the permissions its
+// behavior's config names, which the core checks (D103), and from the
+// engine its server mounts, whose permission policy asks <Type>.<action> of
+// each engine type (D58), or "" when none names a permission.
 func permissionCatalog(output *APIOutput, schema *ir.Schema) (string, error) {
 	operations := make([]permcatalog.Operation, len(output.Endpoints))
 	for i, endpoint := range output.Endpoints {
 		operations[i] = permcatalog.Operation{
 			ID:          endpoint.HandlerName,
-			Permissions: endpoint.RequiredPerms,
+			Permissions: endpoint.catalogPermissions(),
 			Identity:    endpoint.IdentityOperation != "",
 		}
 	}
@@ -1005,7 +1022,8 @@ func (o *APIOutput) summarizeEndpoints() error {
 // mounts: whether it needs a caller or a permission, whether its
 // middlewares call time, and whether it has a service clause.
 // summarizeEndpoints calls it on every endpoint, and ImplementedOutput on
-// the identity runtime's too, since the router mounts them.
+// the identity runtime's and the behavior operations' too, since the router
+// mounts them.
 func (o *APIOutput) summarizeRoute(endpoint EndpointInfo) {
 	if endpoint.RequiresAuth {
 		o.HasAuth = true

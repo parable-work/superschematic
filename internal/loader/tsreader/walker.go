@@ -661,9 +661,12 @@ func (w *walker) walkClass(node *astNode) {
 	name := node.Name().Text()
 	decorators := w.decoratorsOf(node)
 
-	// A user model route set (D50) is a class with no methods that the
-	// loader fills.
+	// A user model route set (D50) and a table's behavior operations
+	// (D103) are each a class with no methods that the loader fills.
 	routes := identityRoutesDecorator(decorators)
+	if routes == nil {
+		routes = behaviorOperationsDecorator(decorators)
+	}
 	if classHasMethods(node) || routes != nil {
 		if !w.kindSpec().AllowsOperationSets {
 			if routes != nil {
@@ -1521,6 +1524,17 @@ func (w *walker) walkOperationSet(node *astNode, name string, decorators []decor
 	for _, d := range decorators {
 		w.addErr(w.applyDecorator(d, registry.TargetOperationSet, registry.Node{Schema: w.schema, OperationSet: set}))
 	}
+
+	if set.IsBehaviorOperations() {
+		w.checkBehaviorOperationsClass(node, set, bases)
+		// No operations, as the data forms write it; the loader adds them.
+		set.Operations = []*ir.FieldDef{}
+		w.schema.OperationSets = append(w.schema.OperationSets, set)
+		return
+	}
+	// The class-level @auth, @requirePermission and @publicRoute are a
+	// @behaviorOperations set's alone (D103).
+	w.checkSetClause(set, decorators)
 
 	if set.IsIdentityRoutes() {
 		w.checkIdentityRoutesClass(node, set, decorators, bases)

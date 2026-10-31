@@ -51,11 +51,59 @@ type NamespaceInfo struct {
 	// PageType is the name the namespace gives the SDK's Page: Page, or
 	// SDKPage when the namespace imports a schema type named Page.
 	PageType string
+	// Members are the namespace's members that hold the operations of a
+	// table's behavior uses (D103), one per use, in first-seen order:
+	// sdk.order.status.transition. Their endpoints are not in Endpoints.
+	Members []BehaviorMemberInfo
+}
+
+// BehaviorMemberInfo is a namespace's member holding the operations of one
+// behavior use (D103), a class of its own in the namespace's file.
+type BehaviorMemberInfo struct {
+	// Name is the member's name, the use's in camelCase (paymentStatus).
+	Name string
+	// Use, Type and Behavior are the use's id, its table and its
+	// behavior.
+	Use, Type, Behavior string
+	// ClassName is the member's class (ShipmentPaymentStatusOperations).
+	ClassName string
+	// Endpoints are the use's operations, each method named for its
+	// operation (transition).
+	Endpoints []EndpointInfo
+}
+
+// AllEndpoints returns the namespace's own endpoints and then each
+// member's.
+func (n NamespaceInfo) AllEndpoints() []EndpointInfo {
+	out := append([]EndpointInfo(nil), n.Endpoints...)
+	for _, member := range n.Members {
+		out = append(out, member.Endpoints...)
+	}
+	return out
+}
+
+// MemberData is the namespace template's data for a member's class: the
+// namespace with the member's endpoints as its own, unscoped, since a
+// member takes no scope.
+func (d NamespaceTemplateData) MemberData(member BehaviorMemberInfo) NamespaceTemplateData {
+	ns := d.Namespace
+	ns.Endpoints = member.Endpoints
+	ns.Members = nil
+	ns.IsScopedNS, ns.ScopeParamName = false, ""
+	return NamespaceTemplateData{SDK: d.SDK, Namespace: ns}
+}
+
+// NamespaceTemplateData is the data namespace.tmpl renders a namespace's
+// file from.
+type NamespaceTemplateData struct {
+	SDK       *SDKOutput
+	Namespace NamespaceInfo
 }
 
 // EndpointInfo represents a single API endpoint for the SDK
 type EndpointInfo struct {
 	Name           string            // Method name (e.g., "sendMagicLink")
+	Member         string            // the behavior use's member holding the method (D103), e.g. "status"; "" for a namespace's own
 	ToolName       string            // Tool name (apigen.ToolName, e.g., "auth.sendMagicLink")
 	OperationID    string            // OpenAPI operation id (the handler name)
 	Title          string            // @docs title; "" without it
@@ -303,6 +351,10 @@ func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock
 	// Group endpoints by namespace
 	namespaceMap := make(map[string]*NamespaceInfo)
 	importsMap := make(map[string]map[string]bool) // Track unique imports per namespace
+	// Each namespace's API endpoints, and the SDK endpoints of its behavior
+	// operations by operation id, which its members hold (D103).
+	apiEndpoints := make(map[string][]apigen.EndpointInfo)
+	behaviorEndpoints := make(map[string]EndpointInfo)
 
 	for _, endpoint := range apiOutput.Endpoints {
 		if endpoint.IsWebhook {
@@ -330,9 +382,18 @@ func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock
 			}
 		}
 
-		// Convert endpoint to SDK format
+		// Convert endpoint to SDK format. A behavior operation is a method
+		// of its use's member, named for the operation (D103).
 		sdkEndpoint := convertEndpoint(endpoint, parseableTypes, apiOutput.TypeUnions)
-		namespaceMap[ns].Endpoints = append(namespaceMap[ns].Endpoints, sdkEndpoint)
+		apiEndpoints[ns] = append(apiEndpoints[ns], endpoint)
+		if marker := endpoint.BehaviorOperation(); marker != nil {
+			sdkEndpoint.Name = tsutil.ToCamelCase(marker.Operation)
+			sdkEndpoint.Member = tsutil.ToCamelCase(marker.Use)
+			sdkEndpoint.ToolName = toolsutil.BehaviorToolName(ns, marker.Use, marker.Operation)
+			behaviorEndpoints[sdkEndpoint.OperationID] = sdkEndpoint
+		} else {
+			namespaceMap[ns].Endpoints = append(namespaceMap[ns].Endpoints, sdkEndpoint)
+		}
 
 		// The types the namespace names, from the types package.
 		if endpoint.InputType != "" {
@@ -399,6 +460,25 @@ func Generate(apiOutput *apigen.APIOutput, parseableTypes map[string]bool, clock
 			namespaceMap[ns].HasPagedEndpoints = true
 			output.HasPagedEndpoints = true
 			output.HasSortedEndpoints = output.HasSortedEndpoints || sdkEndpoint.Page.Sort != nil
+		}
+	}
+
+	// Each namespace's behavior uses become its members (D103), checked
+	// against its own operations.
+	for ns, endpoints := range apiEndpoints {
+		members, err := toolsutil.BehaviorMembers(ns, endpoints)
+		if err != nil {
+			return nil, err
+		}
+		for _, member := range members {
+			info := BehaviorMemberInfo{
+				Name: tsutil.ToCamelCase(member.Use), Use: member.Use, Type: member.Type, Behavior: member.Behavior,
+				ClassName: tsutil.ToClassName(ns) + codegen.ToPascalCase(member.Use) + "Operations",
+			}
+			for _, ep := range member.Endpoints {
+				info.Endpoints = append(info.Endpoints, behaviorEndpoints[ep.HandlerName])
+			}
+			namespaceMap[ns].Members = append(namespaceMap[ns].Members, info)
 		}
 	}
 
@@ -641,7 +721,7 @@ func (e EndpointInfo) typesValues() []string {
 // values here.
 func (n NamespaceInfo) typesValues() []string {
 	var values []string
-	for _, endpoint := range n.Endpoints {
+	for _, endpoint := range n.AllEndpoints() {
 		values = append(values, endpoint.typesValues()...)
 	}
 	if n.HasMapArgs || n.HasUnionArgs || n.HasObjectMapArgs {
@@ -663,6 +743,15 @@ func (e EndpointInfo) HasQuery() bool {
 // (D60), which its <name>All yields.
 func (e EndpointInfo) TSItemType() string {
 	return normalizeTSTypeIdentifier(e.OutputType)
+}
+
+// MethodPath is the endpoint's method below its namespace: its name, or a
+// behavior operation's member and name (status.transition, D103).
+func (e EndpointInfo) MethodPath() string {
+	if e.Member != "" {
+		return e.Member + "." + e.Name
+	}
+	return e.Name
 }
 
 // AllName is the name of a paged endpoint's iterator, <name>All (D60).
@@ -795,10 +884,7 @@ func WriteSDKWithToolsProfiled(output *SDKOutput, apiOutput *apigen.APIOutput, o
 
 	// Generate namespace files
 	for _, ns := range output.Namespaces {
-		namespaceOutput := struct {
-			SDK       *SDKOutput
-			Namespace NamespaceInfo
-		}{
+		namespaceOutput := NamespaceTemplateData{
 			SDK:       output,
 			Namespace: ns,
 		}
@@ -940,6 +1026,8 @@ func customTemplateFuncs() template.FuncMap {
 			}
 			return typeImports
 		},
+		"behavior_member_doc":    toolsutil.BehaviorMemberDoc,
+		"behavior_member_phrase": toolsutil.BehaviorMemberPhrase,
 		"value_imports": func(imports []string) []string {
 			var valueImports []string
 			for _, imp := range imports {

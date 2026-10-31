@@ -1049,7 +1049,7 @@ func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL
 		in.Worker = &servergen.WorkerInput{Name: s.Worker.Name, GraceSeconds: s.Worker.GraceSeconds}
 	}
 	var scaffolds []scaffold
-	var versionGraph bool
+	var versionGraph, rules bool
 	var modules []servergen.Module
 	for _, ref := range s.Services {
 		output, err := r.servedAPI(stackName, s.Name, ref.Name)
@@ -1078,6 +1078,7 @@ func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL
 		if (output.IsPublic && output.UpstreamVersionGraph) || output.Deps.VersionGraph {
 			versionGraph = true
 		}
+		rules = rules || output.Deps.Rules
 		if output.Engine != nil {
 			in.EngineGo = r.Options.Paths.EngineGo
 			if s.Kind == ir.DeployableServer && output.IsPublic && !output.Auth.Identity {
@@ -1101,6 +1102,9 @@ func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL
 	in.Modules = modules
 	if versionGraph {
 		in.VersionGraphGo = r.Options.Paths.VersionGraphGo
+	}
+	if rules {
+		in.RulesGo = r.Options.Paths.RulesGo
 	}
 	server, err := servergen.Plan(in)
 	if err != nil {
@@ -1528,7 +1532,8 @@ func (r run) implementation(service string) (impl servergen.Implementation, newM
 // goServerModules lists the modules a Go API server's build reads, each
 // with its directory: its own module, the types modules it reaches, the
 // ORM of its database, the SDK of each API it calls, and the runtime
-// modules. The API module and the packages its Deps imports are direct,
+// modules, the rules module among them when its database's tables' fields
+// are behaviors (D103). The API module and the packages its Deps imports are direct,
 // and so are its database's Go types when it authenticates with the
 // identity runtime, whose store a server's main.go builds from their
 // descriptor; a job's, which builds none, reaches them through the ORM.
@@ -1597,6 +1602,11 @@ func (r run) goServerModules(o *apigen.APIOutput, job bool) []servergen.Module {
 	)
 	if (o.IsPublic && o.UpstreamVersionGraph) || o.Deps.VersionGraph {
 		modules = append(modules, runtimeModule(n.VersionGraphGoModule, paths.VersionGraphGo, false))
+	}
+	if o.Deps.Rules {
+		// The ORM of a database whose tables' fields are behaviors requires
+		// the rules module, which links the behaviors' core (D103).
+		modules = append(modules, runtimeModule(n.RulesGoModule, paths.RulesGo, false))
 	}
 	return modules
 }

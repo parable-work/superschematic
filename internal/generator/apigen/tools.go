@@ -133,6 +133,15 @@ func ToolName(namespace, operation string) string {
 	return namespace + "." + tsutil.ToCamelCase(operation)
 }
 
+// BehaviorOperation is the behavior operation the endpoint runs (D103):
+// the loader's marker on its operation, nil for every authored endpoint.
+func (e EndpointInfo) BehaviorOperation() *ir.BehaviorOperation {
+	if e.Operation == nil {
+		return nil
+	}
+	return e.Operation.BehaviorOperation
+}
+
 // reservedToolParameterKeys are the argument-schema keys the core writes;
 // ToolKeys.Parameters cannot reuse them.
 var reservedToolParameterKeys = []string{"type", "additionalProperties", "properties", "required"}

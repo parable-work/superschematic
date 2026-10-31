@@ -19,6 +19,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/rustapigen"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
+	"github.com/parable-work/superschematic/internal/generator/toolsutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -71,6 +72,66 @@ type NamespaceInfo struct {
 	ScopeParamName string
 	ScopeFieldName string
 	Endpoints      []EndpointInfo
+	// Members are the namespace's fields that hold the operations of a
+	// table's behavior uses (D103), one per use: order.status. Their
+	// endpoints are not in Endpoints.
+	Members []MemberInfo
+}
+
+// MemberInfo is a namespace's field holding the operations of one
+// behavior use (D103), a struct of its own in the namespace's module.
+type MemberInfo struct {
+	// FieldName is the field, the use's name in snake_case
+	// (payment_status).
+	FieldName string
+	// StructName is the field's struct (ShipmentPaymentStatusOperations).
+	StructName string
+	// Use, Type and Behavior are the use's id, its table and its
+	// behavior.
+	Use, Type, Behavior string
+	// Endpoints are the use's operations, each method named for its
+	// operation (transition).
+	Endpoints []EndpointInfo
+	// Client is the namespace constructor's argument to the member's:
+	// client.clone(), or client itself for the last member of a namespace
+	// that keeps no client of its own (KeepsClient).
+	Client string
+}
+
+// KeepsClient reports whether the namespace's struct holds the client: it
+// has methods of its own. One whose every operation is a behavior's hands
+// the client to its members alone.
+func (ns NamespaceInfo) KeepsClient() bool {
+	return len(ns.Endpoints) > 0 || ns.IsScopedNS
+}
+
+// AllEndpoints returns the namespace's own endpoints and then each
+// member's.
+func (ns NamespaceInfo) AllEndpoints() []EndpointInfo {
+	out := append([]EndpointInfo(nil), ns.Endpoints...)
+	for _, member := range ns.Members {
+		out = append(out, member.Endpoints...)
+	}
+	return out
+}
+
+// namespaceTemplateData is the data namespace.tmpl renders a namespace's
+// module from.
+type namespaceTemplateData struct {
+	SDK       *SDKOutput
+	Namespace NamespaceInfo
+}
+
+// MemberData is the template's data for a member's struct: the namespace
+// with the member's struct and endpoints as its own, unscoped, since a
+// member takes no scope.
+func (d namespaceTemplateData) MemberData(member MemberInfo) namespaceTemplateData {
+	ns := d.Namespace
+	ns.StructName = member.StructName
+	ns.Endpoints = member.Endpoints
+	ns.Members = nil
+	ns.IsScopedNS, ns.ScopeParamName, ns.ScopeFieldName = false, "", ""
+	return namespaceTemplateData{SDK: d.SDK, Namespace: ns}
 }
 
 // EndpointInfo represents a single API endpoint for the Rust SDK.
@@ -239,7 +300,7 @@ type InputUnionField struct {
 
 // NeedsRegex reports whether this namespace emits Regex-based validation.
 func (ns NamespaceInfo) NeedsRegex() bool {
-	for _, endpoint := range ns.Endpoints {
+	for _, endpoint := range ns.AllEndpoints() {
 		if endpoint.NeedsRegex() {
 			return true
 		}
@@ -343,6 +404,10 @@ func Generate(apiOutput *apigen.APIOutput, crateName, typesCrate string, clock c
 	output.InputSchemasJSON = inputSchemasJSON
 
 	namespaceMap := make(map[string]*NamespaceInfo)
+	// Each namespace's API endpoints, and the converted endpoints of its
+	// behavior operations by handler, which its members hold (D103).
+	apiEndpoints := make(map[string][]apigen.EndpointInfo)
+	behaviorEndpoints := make(map[string]EndpointInfo)
 	for _, endpoint := range apiOutput.Endpoints {
 		if endpoint.IsWebhook {
 			continue
@@ -373,6 +438,13 @@ func Generate(apiOutput *apigen.APIOutput, crateName, typesCrate string, clock c
 		}
 
 		converted := convertEndpoint(endpoint, ns.IsScopedNS, ns.ScopeParamName, mapValueSchemas)
+		apiEndpoints[nsName] = append(apiEndpoints[nsName], endpoint)
+		marker := endpoint.BehaviorOperation()
+		if marker != nil {
+			// A behavior operation is a method of its use's member, named
+			// for the operation (D103).
+			converted.MethodName = toRustMethodName(codegen.ToSnakeCase(marker.Operation))
+		}
 		for _, param := range converted.QueryParams {
 			if param.ItemIsText {
 				output.ChecksQueryListItems = true
@@ -387,7 +459,39 @@ func Generate(apiOutput *apigen.APIOutput, crateName, typesCrate string, clock c
 		if converted.Page != nil {
 			output.HasPagedEndpoints = true
 		}
+		if marker != nil {
+			behaviorEndpoints[endpoint.HandlerName] = converted
+			continue
+		}
 		ns.Endpoints = append(ns.Endpoints, converted)
+	}
+
+	// Each namespace's behavior uses become its members (D103), checked
+	// against its own operations.
+	for nsName, endpoints := range apiEndpoints {
+		members, err := toolsutil.BehaviorMembers(nsName, endpoints)
+		if err != nil {
+			return nil, err
+		}
+		for _, member := range members {
+			info := MemberInfo{
+				FieldName:  toRustFieldName(codegen.ToSnakeCase(member.Use)),
+				StructName: toRustTypeName(nsName) + codegen.ToPascalCase(member.Use) + "Operations",
+				Use:        member.Use, Type: member.Type, Behavior: member.Behavior,
+			}
+			for _, ep := range member.Endpoints {
+				info.Endpoints = append(info.Endpoints, behaviorEndpoints[ep.HandlerName])
+			}
+			namespaceMap[nsName].Members = append(namespaceMap[nsName].Members, info)
+		}
+	}
+	for _, ns := range namespaceMap {
+		for i := range ns.Members {
+			ns.Members[i].Client = "client.clone()"
+			if i == len(ns.Members)-1 && !ns.KeepsClient() {
+				ns.Members[i].Client = "client"
+			}
+		}
 	}
 
 	namespaces := make([]NamespaceInfo, 0, len(namespaceMap))
@@ -395,7 +499,7 @@ func Generate(apiOutput *apigen.APIOutput, crateName, typesCrate string, clock c
 		sort.Slice(ns.Endpoints, func(i, j int) bool {
 			return ns.Endpoints[i].MethodName < ns.Endpoints[j].MethodName
 		})
-		for _, ep := range ns.Endpoints {
+		for _, ep := range ns.AllEndpoints() {
 			if ep.Filterable {
 				output.HasFilterableEndpoints = true
 				break
@@ -968,10 +1072,7 @@ func WriteSDKWithTools(output *SDKOutput, apiOutput *apigen.APIOutput, outputDir
 	}
 
 	for _, ns := range output.Namespaces {
-		namespaceOutput := struct {
-			SDK       *SDKOutput
-			Namespace NamespaceInfo
-		}{
+		namespaceOutput := namespaceTemplateData{
 			SDK:       output,
 			Namespace: ns,
 		}
@@ -1058,7 +1159,8 @@ func runtimeListMinimum(value *int) *int {
 
 func templateFuncs() template.FuncMap {
 	return template.FuncMap{
-		"join": strings.Join,
+		"join":                strings.Join,
+		"behavior_member_doc": toolsutil.BehaviorMemberDoc,
 		"rustDoc": func(s string) string {
 			return strings.ReplaceAll(s, "\n", "\n    /// ")
 		},
@@ -1231,21 +1333,31 @@ func annotateUnionValidators(output *SDKOutput, apiOutput *apigen.APIOutput, typ
 		}
 		return ""
 	}
+	// Every endpoint, the members' included.
+	var endpoints []*EndpointInfo
 	for n := range output.Namespaces {
-		for e := range output.Namespaces[n].Endpoints {
-			endpoint := &output.Namespaces[n].Endpoints[e]
-			for a := range endpoint.ScalarArgs {
-				arg := &endpoint.ScalarArgs[a]
-				if arg.UnionValidator = validatorOf(arg.typeName); arg.UnionValidator != "" {
-					output.ChecksUnions = true
-				}
+		ns := &output.Namespaces[n]
+		for e := range ns.Endpoints {
+			endpoints = append(endpoints, &ns.Endpoints[e])
+		}
+		for m := range ns.Members {
+			for e := range ns.Members[m].Endpoints {
+				endpoints = append(endpoints, &ns.Members[m].Endpoints[e])
 			}
-			endpoint.InputUnionFields = nil
-			for _, field := range endpoint.inputFields {
-				if fn := validatorOf(field.Type); fn != "" {
-					endpoint.InputUnionFields = append(endpoint.InputUnionFields, InputUnionField{Name: field.Name, Validator: fn, ArrayDepth: field.ArrayDepth(), IsMap: field.IsMap})
-					output.ChecksUnions = true
-				}
+		}
+	}
+	for _, endpoint := range endpoints {
+		for a := range endpoint.ScalarArgs {
+			arg := &endpoint.ScalarArgs[a]
+			if arg.UnionValidator = validatorOf(arg.typeName); arg.UnionValidator != "" {
+				output.ChecksUnions = true
+			}
+		}
+		endpoint.InputUnionFields = nil
+		for _, field := range endpoint.inputFields {
+			if fn := validatorOf(field.Type); fn != "" {
+				endpoint.InputUnionFields = append(endpoint.InputUnionFields, InputUnionField{Name: field.Name, Validator: fn, ArrayDepth: field.ArrayDepth(), IsMap: field.IsMap})
+				output.ChecksUnions = true
 			}
 		}
 	}

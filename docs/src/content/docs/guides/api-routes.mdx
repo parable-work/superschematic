@@ -1,6 +1,6 @@
 ---
 title: API routes
-description: Operation sets, paths, parameters, bodies, views, errors and traffic controls in an API schema, and what the generated Go server does with them.
+description: Operation sets, paths, parameters, bodies, views, errors, traffic controls and a table's behavior operations in an API schema, and what the generated Go server does with them.
 sidebar:
   order: 3
 ---
@@ -675,6 +675,130 @@ plaidVerifier, err := webhook.JWTBodyHashVerifier(webhook.JWTBodyHashOptions{
 
 The three runtimes run the same vectors
 (`runtime/http/testdata/webhook_jwt_parity.json`).
+
+## A table's behavior operations
+
+A DB table may type a field as a behavior, `status: Workflow<{ ... }>`
+(D103). The table stays a table: the behavior's fields are its columns
+(`status`, `status_entered_at`), the generated repositories read them and
+leave them out of their create, update and upsert inputs, and only the
+behavior's operations change them.
+
+```ts
+// shop-db
+export abstract class Order {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  status: Workflow<{
+    states: ["draft", "paid", "shipped"];
+    initial: "draft";
+    transitions: [{ from: "draft"; to: "paid" }, { from: "paid"; to: "shipped"; permission: "orders.ship" }];
+  }>;
+}
+```
+
+An API serves those operations with no code of yours: a class with no
+members, marked `@behaviorOperations` with the table, which it imports from
+its database, its `authDb` or its one DB dependency.
+
+```ts
+// shop-orders
+import { behaviorOperations, requirePermission } from "@superschematic/api";
+import { Order } from "@acme/shop-db";
+
+@behaviorOperations(Order)
+@requirePermission(["orders.write"])
+export abstract class OrderActions {}
+```
+
+The build adds to the set one operation for each operation of each
+behavior on the table's fields, in field order:
+
+| | `Order`'s `status`, `transition` |
+| --- | --- |
+| Route | `POST /api/order/{id}/status/transition`: the row's key in the path, the operation's parameters as the body, `{ "to": "paid" }` |
+| Types | `OrderStatusTransitionInput` (`to`) and `OrderStatusTransitionResult` (`from`, `to`), typed by the enum of the config's states, `OrderStatusState` |
+| SDK | `sdk.order.status.transition(id, { to: OrderStatusState.Paid })` ([Client SDKs](/superschematic/guides/client-sdks/#a-tables-behavior-operations)) |
+| MCP tool | `order_status_transition`, with the behavior's invocation policy ([MCP tools](/superschematic/reference/mcp-tools/#a-tables-behavior-operations)) |
+| Handler | generated: it runs the operation through the database's repositories and the behaviors' core, in one transaction |
+
+The route and the tool follow the table, the field and the operation, in
+kebab and snake case (`shipment/{id}/payment-status/transition`,
+`shipment_payment_status_transition`). The SDK methods sit in the set's
+namespace, as every set's do ([Operation sets](#operation-sets)), under a
+member named for the field: name the set `<Table>Actions` to put them
+under the table's name. The OpenAPI document, the permission catalog and
+the tool documents list the operations as any other, and the document
+marks the fields a behavior owns `readOnly`, in the table's own component
+and in a `@source` view's that projects one.
+
+The class's decorators guard every route it serves, as a method's guard
+its route: `@auth`, `@requirePermission([...])` and `@publicRoute`, which
+go on a class only here, `@requireService` and `@allowService`, and
+`@rateLimit`, `@bodyLimit` and `@timeout`. `@requireOwnership` does not
+go on it, since no implementation of yours runs to check what the caller
+owns. A permission the behavior's config names, `orders.ship` on the move
+to `shipped`, is the core's to check, against the permissions the caller
+holds: a caller with `orders.write` alone moves an order to `paid`, and is
+refused the move to `shipped` with a 403 whose detail is the core's. The
+core matches by the default rule, a held permission covering itself and
+those nested under it (`orders` covers `orders.ship`), and not by a matcher
+your server gives its routes (`permissionMatcher`, `identity.WithMatcher`):
+a caller such a matcher admits by another rule is refused there. A calling
+service with no end user holds no permission there. The permission catalog
+lists `orders.ship` under the operation, and `@seedRoles`' coverage counts
+it.
+
+A stack's Go server authenticates a caller only for an API that is
+`public` or whose `authDb` holds the user model (see
+[Auth and permissions](/superschematic/guides/auth-and-permissions/)), so
+one whose set needs a caller (`@auth`, `@requirePermission`) is refused
+for any other API: the handlers are generated, and would run for anyone.
+A Go server you write mounts `RegisterRoutes` behind a middleware of your
+own that puts the caller on the request. A set that only services call
+(`@requireService`) publishes no tool: its operations' `@mcp` is hidden,
+since no end user's agent can call them (D37).
+
+A refusal of the core is the problem every route answers
+([Errors](#errors)), with its `code` and, where it has them, `details`:
+
+| Status | `code` | When |
+| --- | --- | --- |
+| 403 | `forbidden` | the caller lacks a permission the config names: `sam may not move Order <id>'s status from paid to shipped: the transition needs permission orders.ship` |
+| 404 | `not_found` | no row holds the key: `Order <id> does not exist` |
+| 409 | `vetoed` | the behavior refuses the change, a move no transition leads to, say; `details.vetoCode` names the rule (`transition_not_allowed`) |
+| 409 | `conflict` | a row the operation would write collides with one that exists |
+| 422 | `invalid_instance` | the behavior's validation refuses the fields the operation would store |
+| 503 | `busy` | the row kept changing while the operation ran again, and it gave up; try again |
+
+A malformed key or body is the 400 any route answers, before the core
+runs, and any other failure is the server's own 500.
+
+Each server takes the database's repositories and has no method for the
+operations in its implementation, nor a scaffold of one; a namespace
+whose every operation is a behavior's has no implementation at all:
+
+| Server | What it takes |
+| --- | --- |
+| Go | `Config.DB`, the ORM of the database, which `Validate` requires |
+| TypeScript | `RouterOptions.orm`, the database's `orm.ts` repositories over Postgres, which `buildRouter` requires |
+| Rust | the database's pool, the last argument of `Implementations::new`; the handlers call `superschematic-rules-adapter` on it |
+
+A stack's server passes each. The behaviors' core comes with them: the Go
+module links the rules module's archive (`[paths] rules_go` in a
+checkout), the TypeScript package depends on `@superschematic/rules`, and
+the Rust crate depends on `superschematic-rules-adapter` and
+`superschematic-rules-behaviors`, which are unpublished, so a Rust server
+with behavior operations builds only in a checkout that sets `[paths]
+rules_adapter_rust` and `rules_behaviors_rust`
+([Naming](/superschematic/reference/naming/#pathsrules_adapter_rust)). The
+TypeScript repositories run on Postgres alone, so a database that lists
+`sqlite` first has no behavior operations on a TypeScript server yet.
+
+A raw SQL write of an owned column is never refused, so an operator can
+repair a row, but it skips the behavior's rules: move a state through its
+operation.
 
 ## OpenAPI
 

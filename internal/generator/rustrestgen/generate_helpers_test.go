@@ -23,13 +23,15 @@ type apiSource struct {
 }
 
 // apiOutputOf runs apigen on schema with the core session provider, as
-// generator.Run builds the APIOutput every server and SDK shares.
+// generator.Run builds the APIOutput every server and SDK shares, with the
+// dependency schemas opts names, which declare the types it imports.
 func apiOutputOf(schema *ir.Schema, src apiSource, opts Options) (*apigen.APIOutput, error) {
 	return apigen.Generate(schema, apigen.Options{
 		SchemaName:     opts.SchemaName,
 		IsPublic:       src.public,
 		UpstreamSchema: src.upstream,
 		UpstreamIR:     src.upstreamIR,
+		Dependencies:   opts.Dependencies,
 		Naming:         opts.Naming,
 		Provider:       sessionauth.Provider{},
 		Clock:          opts.Clock,

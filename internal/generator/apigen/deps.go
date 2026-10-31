@@ -39,6 +39,12 @@ type DepsInfo struct {
 	// replaces.
 	VersionGraph bool
 
+	// Rules reports whether a table of Database has a field that is a
+	// behavior (D103): its ORM then requires the rules module, which
+	// links the behaviors' core, and go.mod requires and replaces it,
+	// since Go takes no replace from the ORM's go.mod.
+	Rules bool
+
 	// Calls are the API's calls entries, in order.
 	Calls []DepsCall
 

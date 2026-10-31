@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -33,6 +34,13 @@ func (e *emitter) emitOperationSet(set *ir.OperationSet) {
 	if set.IsIdentityRoutes() {
 		e.emitIdentityRoutesSet(set, owner)
 		return
+	}
+	if set.IsBehaviorOperations() {
+		e.emitBehaviorOperationsSet(set, owner)
+		return
+	}
+	if set.Auth || len(set.Permissions) > 0 || set.Public {
+		e.failf("%s: a class-level @auth, @requirePermission or @publicRoute applies only to a @behaviorOperations set", owner)
 	}
 
 	auth := false
@@ -117,6 +125,48 @@ func (e *emitter) emitIdentityRoutesSet(set *ir.OperationSet, owner string) {
 	}
 	e.emitMiddlewareDecorators("", set.Middleware)
 	fmt.Fprintf(&e.body, "export class %s {}\n", e.ident(set.Name, "operation set"))
+}
+
+// emitBehaviorOperationsSet renders a table's behavior operations (D103):
+// @behaviorOperations with the table, which the document's imports name,
+// and the set's clause, service clause and middleware, on an abstract class
+// with no members. Its operations are the loader's, which the writer
+// leaves out (withoutExpansion), so the reader expands it again.
+func (e *emitter) emitBehaviorOperationsSet(set *ir.OperationSet, owner string) {
+	if len(set.Operations) > 0 {
+		e.failf("%s: a @behaviorOperations class has no members; write the set the loader has not filled", owner)
+	}
+	if set.Encrypted {
+		e.failf("%s: a @behaviorOperations class is not Encrypted", owner)
+	}
+	table := set.BehaviorOperations.Type
+	imported := false
+	for _, imp := range e.doc.Imports {
+		if slices.Contains(imp.Types, table) {
+			e.importSymbol(imp.Package, table)
+			imported = true
+			break
+		}
+	}
+	if !imported {
+		e.failf("%s: the table %s is not covered by the document's imports", owner, table)
+	}
+
+	e.body.WriteString("\n")
+	e.comment("", set.Comment)
+	fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("behaviorOperations"), e.ident(table, "table"))
+	if set.Auth {
+		fmt.Fprintf(&e.body, "@%s\n", e.use("auth"))
+	}
+	if len(set.Permissions) > 0 {
+		fmt.Fprintf(&e.body, "@%s([%s])\n", e.use("requirePermission"), quotedList(set.Permissions))
+	}
+	if set.Public {
+		fmt.Fprintf(&e.body, "@%s\n", e.use("publicRoute"))
+	}
+	e.emitServiceCallersDecorator("", set.ServiceCallers)
+	e.emitMiddlewareDecorators("", set.Middleware)
+	fmt.Fprintf(&e.body, "export abstract class %s {}\n", e.ident(set.Name, "operation set"))
 }
 
 // optionalObjectLiteral renders keys, each "key: value", as an object

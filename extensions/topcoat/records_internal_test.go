@@ -1,8 +1,10 @@
 package topcoat
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/parable-work/superschematic/internal/generator/rustrestgen"
 	ir "github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/registry"
 )
@@ -39,6 +41,12 @@ func TestRecordsLeaveOutWhatThePageMustNotHold(t *testing.T) {
 	}
 	if reason := noCall(registry.RustEndpoint{}, account); reason != "" {
 		t.Fatalf("getAccount has no in-process call: %s", reason)
+	}
+	// A behavior operation's handler runs it through the behaviors' core,
+	// and no namespace trait has a method a call could reach (D103).
+	transition := &ir.FieldDef{Name: "statusTransition", TypeRef: ir.TypeRef{Name: "OrderStatusTransitionResult"}}
+	if reason := noCall(registry.RustEndpoint{Behavior: &rustrestgen.BehaviorInfo{}}, transition); !strings.Contains(reason, "behaviors' core") {
+		t.Fatalf("statusTransition's reason for no in-process call: %q, want the behaviors' core's", reason)
 	}
 	b := newRecordBuilder(schemaSet{schema})
 	if err := b.addResults([]declared{{op: account}}); err != nil {

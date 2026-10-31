@@ -238,7 +238,29 @@ Most are load errors; knowing them saves a build round-trip:
   with the use's operations, `orm.order.status.transition(id, { to })` in
   TypeScript and `db.Order.Status().Transition(ctx, id, ...)` in Go. A raw
   SQL write of one is not refused, so an operator can repair a row, but
-  it skips the behavior's rules: do not write one to move a state. A Go API over a database with such a table is refused for now.
+  it skips the behavior's rules: do not write one to move a state, in a
+  migration, a seed or a handler.
+- To serve a table's behavior operations from an API, write a class with
+  no members that names the table, imported from the API's database (its
+  authDb or its one DB dependency), and guard it as a method:
+  `@behaviorOperations(Order) @requirePermission(["orders.write"])
+  export abstract class OrderActions {}`. The build adds a route per
+  field and operation (`POST /api/order/{id}/status/transition`, body
+  `{ to }`), an SDK method under the field
+  (`sdk.order.status.transition(id, { to: OrderStatusState.Paid })`) and
+  an MCP tool (`order_status_transition`), and every server runs it with
+  a generated handler: write no implementation method for it, and do not
+  hand-write a route that updates the owned column instead. Name the class
+  `<Table>Actions`, give it no `@requireOwnership`, and leave a
+  permission the behavior's config names (a transition's) to the core,
+  which checks it against the caller. Go servers need `Config.DB`,
+  TypeScript `RouterOptions.orm`, Rust the pool in
+  `Implementations::new`; a Rust one builds only in a checkout (`[paths]
+  rules_adapter_rust`, `rules_behaviors_rust`). A stack's Go server
+  authenticates a caller only for a `public` API or one over the user
+  model, so for any other API it refuses a set that needs a caller: make
+  the API public, give it an authDb with a `User` table, or mount its
+  `RegisterRoutes` behind your own authentication in a server you write.
 - A service's config is the `@envVars` class no other `@envVars` class
   extends; it holds the fields of each class it extends. Two `@envVars`
   classes that do not extend one another fail the load: make the

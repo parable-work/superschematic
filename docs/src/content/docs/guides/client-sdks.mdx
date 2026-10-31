@@ -222,6 +222,31 @@ not decode. The one value that cannot be sent is `.` or `..` through the
 TypeScript or Rust SDK, whose URL parsers remove a dot segment; the Go and
 Python SDKs send it as it is.
 
+## A table's behavior operations
+
+An API that serves a table's behavior operations
+([A table's behavior operations](/superschematic/guides/api-routes/#a-tables-behavior-operations))
+puts each field's operations under a member of the namespace named for the
+field, an operations class of its own (`OrderStatusOperations`), with one
+method per operation; no SDK has a flat method for them:
+
+| Language | Call |
+| --- | --- |
+| Go | `sdk.OrderNamespace.Status.Transition(ctx, id, types.OrderStatusTransitionInput{To: types.OrderStatusState_Paid})` |
+| TypeScript | `await sdk.order.status.transition(id, { to: OrderStatusState.Paid })` |
+| Python | `sdk.order.status.transition(id, OrderStatusTransitionInput(to=OrderStatusState.Paid))` |
+| Rust | `sdk.order.status.transition(id, OrderStatusTransitionInput { to: OrderStatusState::Paid }, None).await` |
+
+The member is the field's name in each language's case (`paymentStatus`
+in TypeScript, `payment_status` in Python and Rust, `PaymentStatus` in
+Go). A state is the API's enum of the config's states, so a state the
+config lacks is refused before the request, as any enum is. The fields a
+behavior owns (`status`, `statusEnteredAt`) come back on the table's type
+for reading; only the operations change them. A refusal of the core
+reaches the SDK as any error does ([Errors](#errors)), with the core's
+status, `code` and message: a 409 `vetoed` for a move no transition
+allows, a 403 `forbidden` for one the caller lacks a permission for.
+
 ## Timeouts, retries and hooks
 
 | | Go | TypeScript | Python | Rust |

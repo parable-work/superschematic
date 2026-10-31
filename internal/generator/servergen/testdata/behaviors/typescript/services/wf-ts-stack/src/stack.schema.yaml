@@ -1,0 +1,18 @@
+# fixture-workflow-api in TypeScript on the local target: its default
+# server serves the operations of fixture-workflow-db's Workflows (D103),
+# which its router runs through the database's repositories.
+kind: Stack
+types:
+  Workflows:
+    name: Workflows
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: fixture-workflow-api, kind: API }
+      expose:
+        - service: { name: fixture-workflow-api, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

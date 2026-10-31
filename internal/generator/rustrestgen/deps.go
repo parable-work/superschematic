@@ -66,6 +66,12 @@ type DepsInfo struct {
 	// Engine is the engine of the API's engine database (D58), which Deps
 	// holds when the database's types compose behaviors; nil otherwise.
 	Engine *DepsEngine
+
+	// Behaviors is what the crate runs its behavior operations with
+	// (D103), when its @behaviorOperations sets serve tables of Database
+	// whose fields are behaviors: the layout of Database's tables and the
+	// paths of the adapter's and the behaviors' crates. Nil otherwise.
+	Behaviors *DepsBehaviors
 }
 
 // DepsEngine is the engine Deps holds: the engine database's, opened in
@@ -376,6 +382,9 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 	if len(o.Derivers) > 0 && (deps.DatabaseTypesCrate == "" || deps.Engine == nil) {
 		return fmt.Errorf("rustrestgen: %s declares derivers, whose methods its database's Rust types type and whose engine its Deps holds, and its Deps names neither", o.SchemaName)
 	}
+	if err := o.checkBehaviorDeps(&deps); err != nil {
+		return err
+	}
 	o.Deps = &deps
 	return nil
 }
@@ -484,8 +493,9 @@ func (o *APIOutput) DepsUses() []string {
 
 // NewSignature is the signature of Implementations::new, indented as a
 // method of an impl: the handlers, the identity runtime's authenticator for
-// an API over the user model (D50) and the service authenticator for an
-// API with a service clause (D37), on one line when it fits.
+// an API over the user model (D50), the service authenticator for an API
+// with a service clause (D37) and the pool of its database for an API with
+// behavior operations (D103), on one line when it fits.
 func (o *APIOutput) NewSignature() string {
 	params := []string{"handlers: Handlers"}
 	if o.Identity != nil {
@@ -493,6 +503,9 @@ func (o *APIOutput) NewSignature() string {
 	}
 	if o.HasServiceCallers {
 		params = append(params, "service_authenticator: Arc<dyn ServiceAuthenticator>")
+	}
+	if o.HasBehaviorOperations() {
+		params = append(params, "db: Pool")
 	}
 	return rustFn("    ", "pub fn new", params, "Self")
 }
@@ -543,6 +556,8 @@ func (o *APIOutput) RuntimeFeatures() []string {
 	if o.Deps == nil {
 		return features
 	}
+	// Deps.db's pool is the one the behavior operations run on (D103), so
+	// a crate with them has a database.
 	if o.Deps.Database != "" {
 		features = append(features, "postgres")
 		if o.Identity != nil {
@@ -631,7 +646,7 @@ func (s ImplementationScaffold) CrateIdent() string {
 // UsesTypes reports whether a method signature of the implementation names
 // the types crate.
 func (s ImplementationScaffold) UsesTypes() bool {
-	for _, endpoint := range s.Endpoints {
+	for _, endpoint := range s.ImplementedEndpoints() {
 		if endpoint.UsesTypes() {
 			return true
 		}
@@ -647,7 +662,7 @@ func (s ImplementationScaffold) APIUse() string {
 	for _, ns := range s.Namespaces {
 		names = append(names, rustutil.ToPascalCase(ns)+"Implementation")
 	}
-	for _, endpoint := range s.Endpoints {
+	for _, endpoint := range s.ImplementedEndpoints() {
 		if endpoint.HasArgs() {
 			names = append(names, endpoint.ArgsName)
 		}

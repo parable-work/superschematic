@@ -18,6 +18,11 @@ mod implementations;
   and checked by the router, and returns the operation's result type.
 - An operation declared `@manualRouteRegistration` has no file: the
   service mounts its route itself (see `build_router`).
+{{- if .HasBehaviorOperations }}
+- An operation of a `@behaviorOperations` set has no file either: the
+  router runs it through the behaviors' core (`src/behaviors.rs` of the
+  generated crate, D103).
+{{- end }}
 - Existing files are never overwritten. An operation added to the schema
   later needs its method in `implementation.rs`, a line in `mod.rs` and a
   file of its own, which the compiler points at.

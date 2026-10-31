@@ -8,7 +8,7 @@
 //   func main() {
 //       r := chi.NewRouter()
 //       api.RegisterRoutes(r, api.Config{
-{{- if .IsPublic }}
+{{- if or .IsPublic .HasBehaviorEndpoints }}
 //           DB:     db,
 {{- end }}
 //           Logger: logger,
@@ -42,6 +42,9 @@ require (
 	{{ $.Naming.ScalarGoModule }} {{ .Pins.Version $.Naming.ScalarGoModule "v1.0.0" }}
 {{- if .Engine }}
 	{{ $.Naming.EngineGoModule }} {{ .Pins.Version $.Naming.EngineGoModule "v0.0.0-00010101000000-000000000000" }}
+{{- end }}
+{{- if .Deps.Rules }}
+	{{ $.Naming.RulesGoModule }} {{ .Pins.Version $.Naming.RulesGoModule "v0.0.0-00010101000000-000000000000" }}
 {{- end }}
 	go.uber.org/zap v1.28.0
 {{- if .HasFileUpload }}
@@ -87,6 +90,9 @@ replace {{ $.Naming.VersionGraphGoModule }} => {{ .VersionGraphReplacePath }}
 {{- end }}
 {{- if .EngineReplacePath }}
 replace {{ $.Naming.EngineGoModule }} => {{ .EngineReplacePath }}
+{{- end }}
+{{- if .RulesReplacePath }}
+replace {{ $.Naming.RulesGoModule }} => {{ .RulesReplacePath }}
 {{- end }}
 {{- if .Pins }}
 

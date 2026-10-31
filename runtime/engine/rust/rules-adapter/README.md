@@ -143,7 +143,15 @@ Only `runtime/schema/rust` and `runtime/http/rust` publish to crates.io, and
 `cargo publish` refuses a path dependency without a version, so the HTTP
 runtime cannot offer this crate until the core's crates publish (D103,
 "Left for later steps"). A hand-written server depends on it by path, with
-the engine's workspace and its lock file.
+the engine's workspace and its lock file. So does a generated Rust API
+crate that serves a table's behavior operations (an API's
+`@behaviorOperations` sets), its first consumer in the tree: its
+`src/behaviors.rs` embeds the database's layout, builds the core of
+`superschematic-rules-behaviors` once per process, and runs each
+operation with `postgres::run_operation` on a transaction of the
+database's deadpool, which it commits on success. The naming file's
+`[paths] rules_adapter_rust` and `rules_behaviors_rust` name the two
+crates, and the build refuses such an API while either is unset.
 
 ## Tests
 

@@ -16,6 +16,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/toolsutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -124,6 +125,59 @@ type NamespaceInfo struct {
 	// is read as the member the union picks, as a union response is, and
 	// checked by the member's rules.
 	UnionArgumentTypes []string
+	// Members are the namespace's properties that hold the operations of
+	// a table's behavior uses (D103), one per use: sdk.order.status.
+	// Their endpoints are not in Endpoints.
+	Members []MemberInfo
+}
+
+// MemberInfo is a namespace's property holding the operations of one
+// behavior use (D103), a class of its own in the namespace's module.
+type MemberInfo struct {
+	// FieldName is the property, the use's name in snake_case
+	// (payment_status).
+	FieldName string
+	// ClassName is the property's class (ShipmentPaymentStatusOperations).
+	ClassName string
+	// Use, Type and Behavior are the use's id, its table and its
+	// behavior.
+	Use, Type, Behavior string
+	// Doc is the class's and the property's docstring: "The operations
+	// of Order's status, a Workflow (D103)."
+	Doc string
+	// Endpoints are the use's operations, each method named for its
+	// operation (transition).
+	Endpoints []EndpointInfo
+}
+
+// AllEndpoints returns the namespace's own endpoints and then each
+// member's.
+func (n NamespaceInfo) AllEndpoints() []EndpointInfo {
+	out := append([]EndpointInfo(nil), n.Endpoints...)
+	for _, member := range n.Members {
+		out = append(out, member.Endpoints...)
+	}
+	return out
+}
+
+// namespaceTemplateData is the data namespace.tmpl renders a namespace's
+// module from.
+type namespaceTemplateData struct {
+	SDK       *SDKOutput
+	Namespace NamespaceInfo
+}
+
+// MemberData is the template's data for a member's class: the namespace
+// with the member's class and endpoints as its own, unscoped, since a
+// member takes no scope. It keeps the namespace's helpers, which its
+// methods call.
+func (d namespaceTemplateData) MemberData(member MemberInfo) namespaceTemplateData {
+	ns := d.Namespace
+	ns.ClassName = member.ClassName
+	ns.Endpoints = member.Endpoints
+	ns.Members = nil
+	ns.IsScopedNS, ns.ScopeParamName, ns.ScopeParamType = false, "", ""
+	return namespaceTemplateData{SDK: d.SDK, Namespace: ns}
 }
 
 // EndpointInfo represents a single API endpoint for the Python SDK.
@@ -343,6 +397,10 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 	jsonTypesByNamespace := make(map[string]map[string]struct{})
 	unionsByNamespace := make(map[string]map[string]struct{})
 	unionArgsByNamespace := make(map[string]map[string]struct{})
+	// Each namespace's API endpoints, and the converted endpoints of its
+	// behavior operations by handler, which its members hold (D103).
+	apiEndpoints := make(map[string][]apigen.EndpointInfo)
+	behaviorEndpoints := make(map[string]EndpointInfo)
 
 	for _, endpoint := range apiOutput.Endpoints {
 		if endpoint.IsWebhook {
@@ -389,7 +447,15 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 			converted.OutputIsUnion = true
 			unionsByNamespace[namespaceName][converted.OutputModelName] = struct{}{}
 		}
-		namespace.Endpoints = append(namespace.Endpoints, converted)
+		apiEndpoints[namespaceName] = append(apiEndpoints[namespaceName], endpoint)
+		if marker := endpoint.BehaviorOperation(); marker != nil {
+			// A behavior operation is a method of its use's member, named
+			// for the operation (D103).
+			converted.MethodName = toPythonIdentifier(codegen.ToSnakeCase(marker.Operation))
+			behaviorEndpoints[endpoint.HandlerName] = converted
+		} else {
+			namespace.Endpoints = append(namespace.Endpoints, converted)
+		}
 
 		if endpoint.RequiresAuth {
 			namespace.HasAuth = true
@@ -444,6 +510,27 @@ func Generate(apiOutput *apigen.APIOutput, packageName, typesPackage string, clo
 		}
 
 		collectNamespaceImports(importsByNamespace[namespaceName], endpoint)
+	}
+
+	// Each namespace's behavior uses become its members (D103), checked
+	// against its own operations.
+	for name, endpoints := range apiEndpoints {
+		members, err := toolsutil.BehaviorMembers(name, endpoints)
+		if err != nil {
+			return nil, err
+		}
+		for _, member := range members {
+			info := MemberInfo{
+				FieldName: toPythonIdentifier(codegen.ToSnakeCase(member.Use)),
+				ClassName: toPythonClassName(name) + codegen.ToPascalCase(member.Use) + "Operations",
+				Use:       member.Use, Type: member.Type, Behavior: member.Behavior,
+				Doc: toolsutil.BehaviorMemberDoc(member.Type, member.Use, member.Behavior),
+			}
+			for _, ep := range member.Endpoints {
+				info.Endpoints = append(info.Endpoints, behaviorEndpoints[ep.HandlerName])
+			}
+			namespaceMap[name].Members = append(namespaceMap[name].Members, info)
+		}
 	}
 
 	for name, importSet := range importsByNamespace {
@@ -1141,10 +1228,7 @@ func WriteSDK(output *SDKOutput, outputDir string) error {
 	}
 
 	for _, namespace := range output.Namespaces {
-		namespaceOutput := struct {
-			SDK       *SDKOutput
-			Namespace NamespaceInfo
-		}{
+		namespaceOutput := namespaceTemplateData{
 			SDK:       output,
 			Namespace: namespace,
 		}

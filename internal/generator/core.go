@@ -146,6 +146,12 @@ func RegisterCore(reg *registry.Registry) error {
 			Name:       "api",
 			OutputKey:  "api",
 			ReadsCalls: true,
+			// A table whose fields are behaviors (D103) is rendered: the
+			// API's types carry its owned fields, and its
+			// @behaviorOperations sets' operations are generated handlers
+			// that run them through the core. An engine type is not
+			// served yet (D58).
+			RendersFieldBehaviors: true,
 			Dirs: func(c registry.GenerateContext) []string {
 				return []string{APIDir(c.Options.OutputRoot, c.Config.Name)}
 			},
@@ -160,6 +166,11 @@ func RegisterCore(reg *registry.Registry) error {
 		{
 			Name:      "sdks",
 			OutputKey: "sdk",
+			// A table whose fields are behaviors (D103) is rendered: the
+			// SDKs' types read its owned fields, which no generated input
+			// carries, and each @behaviorOperations set's operations sit
+			// under their field (sdk.order.status.transition).
+			RendersFieldBehaviors: true,
 			Dirs: func(c registry.GenerateContext) []string {
 				var dirs []string
 				for _, lang := range c.Outputs.EnabledSDKLanguages() {

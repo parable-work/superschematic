@@ -185,6 +185,14 @@ func endpointToTool(
 	keys apigen.ToolKeys,
 ) ToolDefinition {
 	toolName := apigen.ToolName(ns.Name, endpoint.Name)
+	methodName := toRustMethodName(endpoint.Name)
+	if marker := endpoint.BehaviorOperation(); marker != nil {
+		// A behavior operation's tool is named for its member's method,
+		// order.status.transition, and its Rust method is the member's
+		// (D103).
+		toolName = toolsutil.BehaviorToolName(ns.Name, marker.Use, marker.Operation)
+		methodName = toRustFieldName(codegen.ToSnakeCase(marker.Use)) + "." + toRustMethodName(codegen.ToSnakeCase(marker.Operation))
+	}
 	description := endpoint.Description
 	if endpoint.Docs != nil {
 		description = endpoint.Docs.Description
@@ -263,7 +271,7 @@ func endpointToTool(
 		IdempotencyKeyPointers:   toolsutil.IdempotencyKeyPointers(endpoint.Docs),
 		ExpectedRevisionPointers: toolsutil.ExpectedRevisionPointers(endpoint.Docs),
 		RequiredPerms:            append([]string(nil), endpoint.RequiredPerms...),
-		MethodName:               toRustMethodName(endpoint.Name),
+		MethodName:               methodName,
 		HTTPMethod:               strings.ToUpper(endpoint.Method),
 		HTTPPath:                 endpoint.Path,
 		Description:              description,

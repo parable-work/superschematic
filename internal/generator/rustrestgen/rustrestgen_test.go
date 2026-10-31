@@ -119,6 +119,12 @@ func writeGoldenAPI(t *testing.T, name string, output *APIOutput) map[string]str
 	if output.Identity != nil {
 		files = append(files, filepath.Join("src", "identity.rs"))
 	}
+	if output.Deps != nil {
+		files = append(files, filepath.Join("src", "deps.rs"))
+	}
+	if output.HasBehaviorOperations() {
+		files = append(files, filepath.Join("src", "behaviors.rs"))
+	}
 
 	generated := make(map[string]string, len(files))
 	goldenDir := filepath.Join("testdata", "golden", name)

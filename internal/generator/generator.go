@@ -315,11 +315,12 @@ func (r run) refuseEngineTypes() error {
 // enabled generator does not render it: an engine type, which composes
 // one on the type, for a generator without RendersBehaviors, since the API
 // generators do not serve an engine type yet (D58); a table whose fields
-// are behaviors, for a generator without RendersFieldBehaviors, which
-// would write the fields the behaviors own as any field (D103). A type is
-// used when the schema imports it or a type of the schema projects it
-// (@source). The error names the first such generator. A dependency the
-// build cannot load is left to the generators, which report it.
+// are behaviors, for a generator without RendersFieldBehaviors (an
+// extension's: api and sdks render it, D103), which would write the fields
+// the behaviors own as any field. A type is used when the schema imports
+// it or a type of the schema projects it (@source). The error names the
+// first such generator. A dependency the build cannot load is left to the
+// generators, which report it.
 func (r run) refuseImportedEngineTypes(enabled []registry.GeneratorSpec) error {
 	engine := slices.IndexFunc(enabled, func(gen registry.GeneratorSpec) bool { return !gen.RendersBehaviors })
 	fields := slices.IndexFunc(enabled, func(gen registry.GeneratorSpec) bool { return !gen.RendersFieldBehaviors })

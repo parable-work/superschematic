@@ -13673,10 +13673,10 @@ change's to settle.
 7. The conversion, and engine types removed from the servers and from
    acme-shop's `shop-db`.
 
-Status: step 1 built, and step 2's adapters, TypeScript's, Go's and
-Rust's, with the TypeScript and Go repositories over them; what remains of
-step 2 is the API generators' operations, and steps 3 to 7 are not built.
-The names and rules are reversible until the first release.
+Status: steps 1 and 2 built: the core, its adapters, TypeScript's, Go's
+and Rust's, the TypeScript and Go repositories over them, and the API
+generators' operations of a table whose fields are behaviors. Steps 3 to 7
+are not built. The names and rules are reversible until the first release.
 - **The core.** `runtime/engine/rust/rules` (`superschematic-rules`)
   depends on serde and serde_json alone and builds for
   wasm32-unknown-unknown. `Core::run(type, command, answers)` returns
@@ -13817,14 +13817,150 @@ The names and rules are reversible until the first release.
   core's crates directly, with no C ABI, an async store over
   tokio-postgres (feature `postgres`) and a synchronous one
   over rusqlite (feature `sqlite`), both off by default, with `rules.ts`'s
-  statements, refusals and messages. The Rust types have no ORM over it.
-- **Other generators.** The API generators and the SDKs refuse a table
-  whose fields are behaviors, naming the generator, the table, the field
-  and the behavior, and a Go API whose `go.mod` would require the ORM of a
-  database with such a table is refused, naming the API, the database,
-  the table, the field and the behavior: neither its `go.mod` nor a Go
-  server's image reaches the rules module yet. A database with such a
-  table builds with its types, sql and the Go ORM.
+  statements, refusals and messages. The Rust types have no ORM over it,
+  so a generated Rust API crate's behavior operations call it directly
+  (below).
+- **The API's operations (step 2, the API generators).** An API serves a
+  table's behavior operations from a class with no members that names
+  the table, imported from the API's database (its authDb, or its one DB
+  dependency):
+
+  ```ts
+  @behaviorOperations(Order)
+  @requirePermission(["orders.write"])
+  export abstract class OrderActions {}
+  ```
+
+  The class's `@auth`, `@requirePermission` and `@publicRoute`, its
+  service clause, rate limit, body limit and timeout apply to every route
+  it serves, and those three decorators go on a class only here.
+  `@requireOwnership` does not, since no implementation runs that could
+  check what the caller owns. The loader reads the database and fills the
+  set (`internal/loader/behaviorops`) with one operation for each
+  operation of each behavior on the table's fields, in field order: for
+  Order's status, `POST /api/order/{id}/status/transition` with the body
+  `{ to }`, the types `OrderStatusTransitionInput` and
+  `OrderStatusTransitionResult` and the enum `OrderStatusState` the
+  config narrows the states to, generated `@docs`, and an MCP tool,
+  `order_status_transition`, whose invocation policy is the
+  declaration's (D11, D70); a set whose `@requireService` admits only
+  calling services has its tools hidden instead, with a reason, since no
+  end user's agent can call them (D37). Each carries the origin
+  `behavior` and a marker (`ir.FieldDef.BehaviorOperation`), so
+  `format --to=ts` and the data forms write the decorator in their
+  place, and passes every check an authored operation does. The
+  verification pass refuses, naming the set: a member; a set outside an API; `@auth`, `@requirePermission` or
+  `@publicRoute` on any other class; `@publicRoute` beside either, or
+  beside the class's service clause, which no public route takes; an API
+  with no database, or several DB dependencies and no authDb; a type the
+  database does not declare, or the API imports from elsewhere; one that
+  is no table, an engine type, or a table with no field behavior or no
+  single `@key`; an operation that runs on a schema or a namespace; a
+  second set of one table; a name the expansion adds that the API holds;
+  an operation it adds whose name another operation of its namespace
+  takes (apigen's, from the set's name), whose handler, SDK method and
+  tool would collide; and an MCP handle over 48 characters, or one
+  another tool takes.
+- **What reads them.** The OpenAPI document, the permission catalog, the
+  tool documents and the four SDKs read them as any operation. The
+  document declares the problems the core answers (403 `forbidden`, 404
+  `not_found`, 409 `vetoed` and `conflict`, 422 `invalid_instance`, 503
+  `busy`) and marks the owned fields `readOnly`, in a table's component
+  and in a `@source` view's that projects one; a view of another
+  service's table may project them (`behaviorfields.ExpandExternal`). The
+  catalog lists each permission a use's config names (every string under
+  a key `permission`) under each of the use's operations, and `@seedRoles`'
+  coverage counts it. Every SDK nests a use's operations under a member
+  named for its field, and none has the flat method:
+  `sdk.order.status.transition(id, { to: OrderStatusState.Paid })` in
+  TypeScript, `sdk.OrderNamespace.Status.Transition(ctx, id, input)` in
+  Go, `sdk.order.status.transition(id, input, None)` in Rust and
+  `sdk.order.status.transition(id, input)` in Python, each member an
+  operations class (`OrderStatusOperations`). A member that would collide
+  with an operation of the namespace, or a name an SDK reserves, is
+  refused (`toolsutil.BehaviorMembers`). The tool is named for that path
+  (`order.status.transition`). The SDK namespace is the set's, as every
+  set's is, so a set named `<Table>Actions` puts the operations under the
+  table's name, while the route and the tool follow the table.
+- **The handlers.** Each server routes a behavior operation to a
+  generated handler, and no implementation interface, trait or scaffold
+  has a method for it: a namespace whose every operation is a behavior's,
+  as `shipment` is in the fixture, has no implementation at all. The
+  route runs every step an authored route runs, from the set's clause, so
+  a route permission the caller lacks is refused by the API's auth before
+  the core. The handler builds the core's caller from the request (the
+  principal with its permissions, each once; else a calling service by
+  its deployable, standing in and holding none (D37); else an empty
+  subject), runs the operation in one transaction, answers its result in
+  the envelope, and answers a refusal as the problem of its status, code,
+  message and details. A refusal of status 500 or of no error status,
+  and any other error, a pool's or a database's among them, is logged and
+  answered as the server's own internal error, with none of its text; an
+  operation whose parameters declare no property is sent the empty
+  object. Go's handler calls the ORM's operation
+  (`db.GetOrderRepository().Status().Transition`) through a generic
+  `runBehaviorOperation` in the generated `behaviors.go`, which converts
+  the API's input and result and the ORM's through `encoding/json`, since
+  the ORM types an operation's parameters as a struct only when they are
+  an object; `Config.DB`, the ORM, is required. TypeScript's calls
+  `options.orm.order.status.transition(key, input, { caller })` through
+  the HTTP runtime's `behaviorOperation` and `behaviorCaller`, which know
+  a refusal by its shape; `RouterOptions.orm` is required, and the
+  router's tables (`operationSpecs`, `bodyLimits`, `rateLimits`,
+  `timeouts`, `manualRoutes`) key an operation whose name another
+  namespace shares by its namespace too (`orderStatusTransition`,
+  `shipmentStatusTransition`). Rust, which has no ORM, calls
+  `superschematic-rules-adapter`'s `postgres::run_operation` on a
+  transaction of the pool, in the generated `src/behaviors.rs`, which
+  embeds the layout and builds the core of `superschematic-rules-behaviors`
+  once per process; `Implementations::new` takes the pool. The TypeScript
+  server's MCP endpoint lists and runs the tools through their routes; the
+  Go and Rust servers serve no MCP endpoint (D81).
+- **The builds.** A Go API's `go.mod`, and the `go.mod` of a server, job
+  or worker that serves it, require the rules module and replace it with
+  `[paths] rules_go` in a checkout, or take its pin. A checkout's image
+  builds the core's archive in a `rules` stage from the engine's Cargo
+  workspace; a release's links the one its archives tarball holds. A
+  TypeScript server whose database has such a table depends on
+  `@superschematic/rules`, and a checkout's image builds the core's wasm
+  module in a `rules` stage and emits the package's `dist/` with it. A
+  Rust API crate depends on `superschematic-rules-adapter` (feature
+  `postgres`) and `superschematic-rules-behaviors` by the paths `[paths]
+  rules_adapter_rust` and `rules_behaviors_rust` name, and the build
+  refuses one when either is unset; its image's context holds the
+  adapter's Cargo workspace. Generated CI stages the rules archive before
+  a checkout's Go deployables over such a database are built, and builds
+  `@superschematic/rules` before a TypeScript one is checked; a server
+  whose image cannot be planned (a `[paths]` key unset) gets no
+  Dockerfile and the plan says why. A stack's Go server authenticates a
+  caller only for an API that is `public` or over a user model
+  (`AuthWired`, D50), so the Go server of any other API whose behavior
+  operations' set needs a caller (`@auth`, `@requirePermission`) is
+  refused, naming the route, the table, the field and the behavior: an
+  authored route of such an API runs code of the project's, which may
+  check its caller, and a generated handler would run for anyone.
+- **The servers' end-to-end tests.** `fixture-workflow-api` serves
+  `OrderActions` behind `orders.write` and `ShipmentActions` for any
+  signed-in caller over `fixture-workflow-db`. Each server's test builds
+  both, runs the generated server on Postgres through its generated SDK
+  with a test authenticator (Go's mounts `RegisterRoutes` behind it, as
+  a Go server the project writes does, since the fixture is neither
+  public nor over a user model), and holds it to six cases and the core's
+  words: a transition and its result; a move with no transition, 409
+  `vetoed` with its `vetoCode`; a caller without the route's permission,
+  refused by the API's auth and not the core; a caller without the
+  config's permission, 403 `forbidden`, and one who holds it; a key no
+  row holds, 404 `not_found`; and a table's two Workflows moving apart.
+  The TypeScript one also lists the MCP tool, with its input schema, and
+  calls it, and the Go one runs the caller's three forms
+  (`behaviorCaller`), which TypeScript's unit test runs too
+  (`TestBehaviorOperationsGoServerServesTheSDK`,
+  `TestGeneratedBehaviorOperationsEndToEnd`,
+  `TestRustSDKCallsTheBehaviorOperations`).
+- **Other generators.** An extension's generator that does not declare
+  it renders a table whose fields are behaviors (`RendersFieldBehaviors`)
+  refuses one, naming the generator, the table, the field and the
+  behavior.
 - **The transcript.** `rules-testkit` writes `core-workflow.json` out as a
   transcript (`runtime/engine/testdata/rules/core-workflow.transcript.json`)
   and a test fails when it is stale. The adapter replays it on bun:sqlite
@@ -13866,13 +14002,10 @@ The names and rules are reversible until the first release.
     store's own tests alone.
   - The Rust adapter is unpublished, as the core's crates are, so the
     HTTP runtime's crate (`runtime/http/rust`) does not offer it until
-    they publish.
-  - A generated Go API and its server over a database with a table whose
-    fields are behaviors, refused today: its `go.mod`'s require and
-    replace of the rules module, the server's image staging the rules
-    archive (a checkout's built from the engine's workspace, a release's
-    from the archives tarball, which holds it) and its CI's, with the API
-    generators' operations.
+    they publish, and a Rust server with behavior operations builds only
+    in a checkout (`[paths] rules_adapter_rust` and
+    `rules_behaviors_rust`): the build refuses one otherwise, and release
+    mode has no Rust path.
   - The Go ORM stays Postgres-only, so Go's SQLite store has no ORM over
     it, and its end-to-end test runs on Postgres alone.
   - A Go row's owned value field is its declared type (`string`), not the
@@ -13902,3 +14035,66 @@ The names and rules are reversible until the first release.
     rather than add to them, in every adapter: an operation's audit stamps
     would drop an own field a behavior's operation wrote, which no ported
     behavior does.
+  - `@requireOwnership` on a `@behaviorOperations` set: its routes run no
+    implementation that could check what the caller owns, so it is a type
+    error on the class and the data forms have no key for it.
+  - An API's own invocation policy and hiding of a behavior operation's
+    tool: the declaration's policy carries over, and an engine database's
+    `outputs.engine.tools.invocation` and `.hidden` have no counterpart.
+    Only a set whose `@requireService` admits only services hides its
+    tools, by the reason the expansion gives them.
+  - A stack's Go server of an API neither `public` nor over a user model
+    authenticates no caller, so it is refused when a behavior operation's
+    set needs one. Giving such an API's `Config` an `AuthMiddleware`, from
+    an `AuthMiddleware` of its implementation as a public API's has, would
+    lift the refusal, and put its authored `@auth` routes behind it too.
+  - The core checks a config's permissions by its own dotted rule
+    (`orders` covers `orders.ship`), not by a matcher the project gives
+    its routes (TypeScript's `permissionMatcher`, Go's
+    `identity.WithMatcher`), so a caller such a matcher admits by another
+    rule is refused by the core. The handlers are to hand the core the
+    matcher, or the caller's permissions as it expands them.
+  - The Rust handler's caller is tested through the principal alone: its
+    calling service and its empty caller run in no test, which the Go and
+    TypeScript callers' tests cover.
+  - The SDKs' types read the owned fields and mark none read-only (no
+    `readonly` in TypeScript): read-only in the SDKs means that no
+    generated input carries one.
+  - A path, handle or namespace option on the decorator. The route and
+    the MCP handle follow the table, field and operation, and one whose
+    handle passes 48 characters is refused; the SDK namespace follows the
+    set's name.
+  - A behavior operation whose scope is the schema or a namespace, not a
+    row, and a table keyed by several fields.
+  - A non-writing behavior operation is a `POST` like the rest; a read
+    that is a query, as a declared query (D86) and a `GET`, comes with the
+    first behavior that declares one.
+  - A config's permissions are attributed to every operation of its use:
+    the catalog lists each string under a key `permission` under each,
+    until step 5 derives which operation checks which from the class
+    declaration.
+  - The TypeScript SDK's typed states are the API's enum
+    (`OrderStatusState.Paid`), not the literals the repository takes, and
+    the TypeScript handler passes the decoded input to the repository
+    `as never`: the ORM's parameter type is not checked against the API's
+    input type, so a future behavior whose parameters hold a date-time
+    would reach the core as the `Date` the API's parser made, serialized
+    as ISO text.
+  - Behavior operations on a TypeScript server whose database lists
+    `sqlite` first (D1, Workers): the TypeScript repositories run on
+    Postgres alone, and the build refuses such an API. Nothing bundles the
+    core's wasm module into a Worker either.
+  - The Rust handlers run on Postgres alone, though the adapter has a
+    `sqlite` feature, and stamp no audit field (an `Auditable` table's
+    `updatedAt` and `updatedBy`), which the Go and TypeScript ORMs do.
+  - The identity routes and behavior operations on one API (an authDb
+    with a `User` table whose tables' fields are behaviors) are generated
+    together but no fixture or test covers the pair.
+  - The Python SDK's operations classes repeat the namespace class's
+    private validation and coercion helpers, since a Python namespace
+    keeps them as methods.
+  - `readOnly` on a `@source` view's field matches the source's owned
+    field by name, and does not follow a projection's `@column` alias.
+    OpenAPI 3.0.3 ignores `readOnly` beside a `$ref`, so an owned field
+    typed by an enum or another component would carry none; Workflow's
+    are a string and a date-time.

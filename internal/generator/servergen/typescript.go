@@ -325,6 +325,15 @@ type TypeScriptServer struct {
 	Dependencies    []NpmDependency
 	DevDependencies []NpmDependency
 
+	// Rules is true when the entrypoint opens the repositories of a
+	// database one of whose tables' fields are behaviors (D103), whose
+	// orm.ts runs them through the behaviors' core's package
+	// (Naming.RulesNpmPackage): the package depends on it, which the
+	// workspace's root overrides with the checkout the naming file's
+	// [paths] rules_typescript names, and a checkout's image builds its
+	// WebAssembly module and emits its dist/.
+	Rules bool
+
 	// Docker is the Dockerfile's plan, nil when none is written, and
 	// NoDocker says why.
 	Docker   *TypeScriptDocker
@@ -444,6 +453,12 @@ type TypeScriptAPI struct {
 	// keys of Database's Encrypted<T> fields, which the repositories open
 	// with (D85); empty for a database without one.
 	ORMFieldKeys string
+
+	// Behaviors is true when the API serves a table's behavior operations
+	// (D103), which its router runs through Deps.orm: main.ts hands the
+	// router the repositories as RouterOptions.orm. False for a job's, a
+	// worker's and a deriver's API, which mount no routes.
+	Behaviors bool
 
 	// Calls are Deps' clients.
 	Calls []TypeScriptCall
@@ -612,6 +627,11 @@ type TypeScriptDocker struct {
 	// from, nil when the entrypoint opens no engine (D58).
 	Engine *tsEngineDocker
 
+	// Rules is where the rules stage builds the behaviors' core's
+	// WebAssembly module from, nil when the entrypoint opens the
+	// repositories of no database whose fields are behaviors (D103).
+	Rules *tsRulesDocker
+
 	// Runtime are the directories the image copies from the build stage:
 	// the workspace's root, then every package the server reaches outside
 	// it, each with the node_modules the install linked into it.
@@ -623,6 +643,23 @@ type TypeScriptDocker struct {
 	Include []string
 	Exclude []string
 }
+
+// tsRulesDocker is the behaviors' core's npm package (D103), TypeScript,
+// whose dist/ the build stage emits with the WebAssembly module the rules
+// stage builds in it, from the engine's Cargo workspace, Workspace, which
+// holds the core's crates, and the crates it reaches by path, Crates.
+type tsRulesDocker struct {
+	TypeScript string
+	Workspace  string
+	Crates     []string
+}
+
+// RulesModule is the WebAssembly module of the behaviors' core, which the
+// package's index.js loads from its dist/.
+const RulesModule = "superschematic_rules_wasm.wasm"
+
+// Module is RulesModule, for the template.
+func (d *tsRulesDocker) Module() string { return RulesModule }
 
 // tsReserved are the names main.ts declares or imports beside the served
 // APIs' own: an API, database or client never takes one.
@@ -875,6 +912,9 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			api.Database = d
 			if o.DepsORM() && !d.SQLite {
 				api.ORM = true
+				// orm.ts of a database whose fields are behaviors imports
+				// the behaviors' core (D103).
+				s.Rules = s.Rules || o.FieldBehaviors
 				if key := o.Deps.ORMFieldKeys; key != "" && api.Config != "" {
 					api.ORMFieldKeys = api.Config + "." + key
 				}
@@ -885,6 +925,14 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 					d.ORMPackage = o.Deps.DatabaseTypesPackage
 				}
 			}
+		}
+		if o.HasBehaviors() && !background {
+			// The router runs the behavior operations through the
+			// repositories (D103).
+			if !api.ORM {
+				return nil, fmt.Errorf("stack %s: %s %s serves %s, whose behavior operations (D103) run through Deps.orm, the repositories of %s, and the %s opens none", in.Stack, s.Kind, in.Server, o.SchemaName, o.Deps.Database, s.Kind)
+			}
+			api.Behaviors = true
 		}
 		if a.Routes != nil && a.Routes.Engine != nil {
 			if err := s.planTypeScriptEngine(in, api, a.Routes.Engine, o.SchemaName, taken, mounts); err != nil {
@@ -1087,6 +1135,11 @@ func (a *TypeScriptAPI) RouterOptions() []string {
 	if a.MCPConfirmationKey != "" {
 		// Its MCP endpoint signs confirmations with the secret (D93).
 		out = append(out, "mcp: { confirmationKey: "+a.MCPConfirmationKey+" }")
+	}
+	if a.Behaviors {
+		// Its behavior operations run through the repositories Deps holds
+		// (D103).
+		out = append(out, "orm: "+a.Deps+".orm")
 	}
 	return out
 }
@@ -1352,6 +1405,10 @@ func (s *TypeScriptServer) planPackage() {
 			deps[d.ORMPackage] = "workspace:*"
 		}
 	}
+	if s.Rules {
+		// Which run a behavior through the behaviors' core (D103).
+		deps[s.Naming.RulesNpmPackage] = "*"
+	}
 	for _, e := range s.Engines {
 		// main.ts opens the engine through the engine's ./server entry, with
 		// the engine document of the database's types (D58).
@@ -1494,15 +1551,28 @@ func planTypeScriptDocker(in TypeScriptInput, s *TypeScriptServer, dir string) (
 		}
 		d.Include = append(d.Include, vg+"/package.json")
 	}
-	if rules := in.Paths.RulesTypeScript; rules != "" {
-		// And the behaviors' core (D103), whose package no server's
-		// database reaches until the API serves a table whose fields are
-		// behaviors.
+	if rules := in.Paths.RulesTypeScript; rules != "" && !s.Rules {
+		// And the behaviors' core (D103), whose package the server does
+		// not reach: it opens the repositories of no database whose
+		// fields are behaviors.
 		r, ok := rel(rules)
 		if !ok {
 			return nil, outside("the behaviors' core's TypeScript package", rules), nil
 		}
 		d.Include = append(d.Include, r+"/package.json")
+	}
+	if s.Rules {
+		// The rules stage builds the core's WebAssembly module from the
+		// engine's Cargo workspace, and the build stage emits the
+		// package's dist/ with it, which the workspace's root overrides
+		// the package with (D103).
+		rules, why := planTSRulesDocker(in.Paths.RulesTypeScript, s.Kind, root, rel)
+		if rules == nil {
+			return nil, why, nil
+		}
+		d.Rules = rules
+		d.Include = append(d.Include, rules.TypeScript, rules.Workspace)
+		d.Include = append(d.Include, rules.Crates...)
 	}
 	if len(s.Engines) > 0 {
 		// The engine stage builds the engine's Node-API addon from the Cargo
@@ -1536,7 +1606,31 @@ func planTypeScriptDocker(in TypeScriptInput, s *TypeScriptServer, dir string) (
 	if d.Engine != nil {
 		d.Exclude = append(d.Exclude, d.Engine.TypeScript+"/dist", d.Engine.TypeScript+"/native")
 	}
+	if d.Rules != nil {
+		d.Exclude = append(d.Exclude, d.Rules.TypeScript+"/dist")
+	}
 	return d, "", nil
+}
+
+// planTSRulesDocker plans the rules stage of a checkout's Dockerfile from
+// the behaviors' core's npm package at rulesTS (D103), or says why it cannot:
+// the package, the engine's Cargo workspace of the checkout it lies in,
+// runtime/engine/rust, which builds the core's WebAssembly module
+// (superschematic-rules-wasm), and the crates that workspace reaches by
+// path must be under the build context, root.
+func planTSRulesDocker(rulesTS, kind, root string, rel func(string) (string, bool)) (*tsRulesDocker, string) {
+	if rulesTS == "" {
+		return nil, fmt.Sprintf("the %s opens the repositories of a database whose fields are behaviors (D103), which run them through the behaviors' core, and the naming file's [paths] rules_typescript, the core's npm package, whose WebAssembly module the image builds from the checkout it lies in, is unset; set it to a superschematic checkout's runtime/rules/typescript", kind)
+	}
+	pkg, ok := rel(rulesTS)
+	if !ok {
+		return nil, fmt.Sprintf("the behaviors' core's TypeScript package %s lies outside the repository root %s, the build context", rulesTS, root)
+	}
+	workspace, crates, why := rulesWorkspace(rulesTS, "the behaviors' core's package", root, rel)
+	if why != "" {
+		return nil, why
+	}
+	return &tsRulesDocker{TypeScript: pkg, Workspace: workspace, Crates: crates}, ""
 }
 
 // manifestName reads the name of the manifest at dir.

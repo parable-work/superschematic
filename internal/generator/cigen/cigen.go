@@ -344,6 +344,7 @@ func stackOf(c registry.GenerateContext, name string, envs []*ir.ResolvedEnviron
 			}
 		}
 	}
+	rulesOf(c, name, &out, envs, rel)
 	if runsEngine {
 		if checkout := engineCheckout(c.Options.Paths); checkout != "" {
 			if dir, err := rel("the engine's checkout", checkout); err == nil {

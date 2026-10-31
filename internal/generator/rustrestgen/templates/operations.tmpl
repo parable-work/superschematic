@@ -15,7 +15,8 @@ use {{ .RuntimeCrateIdent }}::{ServiceClause, ServiceMode};
 
 /// {{ .Namespace }}.{{ .Name }} (`{{ toUpper .Method }} {{ .Path }}`){{ if .Manual }}, which the service mounts
 /// (@manualRouteRegistration){{ end }}{{ if .IdentityOperation }}, which the identity
-/// runtime serves (D50){{ end }}.
+/// runtime serves (D50){{ end }}{{ with .Behavior }}, which the behaviors'
+/// core runs: {{ .Type }}'s {{ .Use }} {{ .Operation }}, a {{ .Behavior }} (D103){{ end }}.
 pub const {{ .ConstName }}: OperationInfo = OperationInfo {
     namespace: {{ rustString .Namespace }},
     name: {{ rustString .Name }},

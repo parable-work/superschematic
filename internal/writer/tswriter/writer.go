@@ -136,6 +136,7 @@ var symbolPackages = map[string]string{
 	"User": "@superschematic/db", "UserRole": "@superschematic/db",
 	// @superschematic/api
 	"Authenticated": "@superschematic/api", "Encrypted": "@superschematic/api",
+	"auth": "@superschematic/api", "publicRoute": "@superschematic/api",
 	"bodyLimit": "@superschematic/api", "manualRouteRegistration": "@superschematic/api",
 	"rateLimit": "@superschematic/api", "requireOwnership": "@superschematic/api",
 	"requirePermission": "@superschematic/api", "rest": "@superschematic/api",
@@ -144,7 +145,7 @@ var symbolPackages = map[string]string{
 	"HttpMethod": "@superschematic/api", "EncryptedField": "@superschematic/api", "QueryParam": "@superschematic/api",
 	"RefersTo": "@superschematic/api", "SearchQuery": "@superschematic/api", "SortBy": "@superschematic/api",
 	"FileUpload": "@superschematic/api", "FileDownload": "@superschematic/api",
-	"mcp": "@superschematic/api", "userSessions": "@superschematic/api", "userAdministration": "@superschematic/api",
+	"mcp": "@superschematic/api", "userSessions": "@superschematic/api", "userAdministration": "@superschematic/api", "behaviorOperations": "@superschematic/api",
 	"job": "@superschematic/api", "worker": "@superschematic/api", "deriver": "@superschematic/api", "app": "@superschematic/api",
 	"paginated": "@superschematic/api",
 	// @superschematic/schema-config

@@ -165,22 +165,30 @@ export function icon(_name: string): MethodDecorator {
   return noopMethodDecorator;
 }
 
-/** The route needs a caller holding one of the permissions. */
-export function requirePermission(_perms: readonly string[]): MethodDecorator {
-  return noopMethodDecorator;
+/**
+ * The route needs a caller holding one of the permissions. On a
+ * @behaviorOperations class, every route the set serves.
+ */
+export function requirePermission(_perms: readonly string[]): ClassDecorator & MethodDecorator {
+  return noopClassOrMethodDecorator;
 }
 
-/** The route needs a caller; the implementation checks that the caller owns what it touches. */
+/**
+ * The route needs a caller; the implementation checks that the caller owns
+ * what it touches. A @behaviorOperations class takes none: its routes run no
+ * implementation that could check it.
+ */
 export const requireOwnership: MethodDecorator = noopMethodDecorator;
-/** The route needs a caller. */
-export const auth: MethodDecorator = noopMethodDecorator;
+/** The route needs a caller. On a @behaviorOperations class, every route the set serves. */
+export const auth: ClassDecorator & MethodDecorator = noopClassOrMethodDecorator;
 /** The route's request body travels as an encrypted envelope. */
 export const encrypted: MethodDecorator = noopMethodDecorator;
 /**
  * Anyone may call the route, in an `Authenticated` set too. Refused with
- * `@auth`, `@requirePermission` or `@requireOwnership`.
+ * `@auth`, `@requirePermission` or `@requireOwnership`. On a
+ * @behaviorOperations class, every route the set serves.
  */
-export const publicRoute: MethodDecorator = noopMethodDecorator;
+export const publicRoute: ClassDecorator & MethodDecorator = noopClassOrMethodDecorator;
 /** An operation a third party calls: no SDK has a method or a tool for it. */
 export const webhook: MethodDecorator = noopMethodDecorator;
 
@@ -329,6 +337,32 @@ export function userSessions(_cfg?: UserSessionsConfig): ClassDecorator {
  * clause.
  */
 export function userAdministration(_cfg?: UserAdministrationConfig): ClassDecorator {
+  return noopClassDecorator;
+}
+
+/**
+ * Serves the operations of a table's behaviors (D103), on a class with no
+ * members: superschematic adds, for each field of the table whose type is a
+ * behavior and each operation that behavior declares, a route
+ * (POST /api/<table>/{<key>}/<field>/<operation>), an SDK method
+ * (sdk.<namespace>.<field>.<operation>) and an MCP tool
+ * (<table>_<field>_<operation>), each run through the behaviors' core by the
+ * generated server, so the implementation has no method for them. The table
+ * is a class of the API's database, its authDb or its one DB dependency,
+ * imported from that service's package, and an API serves a table from one
+ * such class. The class's @auth, @requirePermission and @publicRoute, its
+ * service clause, rate limit, body limit and timeout apply to every route it
+ * serves; a permission the behavior's config names (a Workflow transition's)
+ * is the core's to check. Name the class <Table>Actions to put the SDK
+ * methods under the table's name.
+ *
+ * ```ts
+ * @behaviorOperations(Order)
+ * @requirePermission(["orders.write"])
+ * export abstract class OrderActions {}
+ * ```
+ */
+export function behaviorOperations(_table: abstract new (...args: never[]) => unknown): ClassDecorator {
   return noopClassDecorator;
 }
 

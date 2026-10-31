@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/behaviortypes/behaviortypestest"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
@@ -351,9 +350,10 @@ func fieldBehaviorsDB(t *testing.T) *ir.Schema {
 // the Go ORM render what its behaviors add
 // (GeneratorSpec.RendersFieldBehaviors), so the DB pipeline runs: the ORM
 // writes rules.go and each repository's operations. The API generators
-// and the SDKs, which no DB pipeline enables, are refused before any
-// generator runs, in today's words for a behavior they do not render. A
-// decorator's engine type is refused and served as it was.
+// and the SDKs render it too, and a generator that does not, an
+// extension's, is refused before any generator runs, in today's words for
+// a behavior it does not render. A decorator's engine type is refused and
+// served as it was.
 func TestCoreGeneratorsOnATableWhoseFieldsAreBehaviors(t *testing.T) {
 	schema := fieldBehaviorsDB(t)
 	if engine := codegen.EngineTypes(schema); len(engine) != 0 {
@@ -377,7 +377,7 @@ func TestCoreGeneratorsOnATableWhoseFieldsAreBehaviors(t *testing.T) {
 	}
 
 	var rendering []registry.GeneratorSpec
-	for _, name := range []string{typesGenerator, "sql", ormGenerator, "envConfig", enginedocGenerator, projectengineGenerator} {
+	for _, name := range []string{typesGenerator, "sql", ormGenerator, "api", "sdks", "envConfig", enginedocGenerator, projectengineGenerator} {
 		spec, ok := reg.Generator(name)
 		if !ok || !spec.RendersFieldBehaviors {
 			t.Fatalf("generator %s: registered %v, renders field behaviors %v", name, ok, spec.RendersFieldBehaviors)
@@ -387,18 +387,21 @@ func TestCoreGeneratorsOnATableWhoseFieldsAreBehaviors(t *testing.T) {
 	if err := refuseBehaviors(schema, rendering); err != nil {
 		t.Fatalf("refuseBehaviors with the generators that render field behaviors: %v", err)
 	}
-	for _, name := range []string{"api", "sdks"} {
-		spec, _ := reg.Generator(name)
-		if err := refuseBehaviors(schema, append(rendering, spec)); err == nil || !strings.Contains(err.Error(), "generator: "+name+" does not render behaviors yet") {
-			t.Errorf("refuseBehaviors with %s: %v", name, err)
-		}
+	extension := registry.GeneratorSpec{Name: "acme-docs"}
+	want := "generator: acme-docs does not render behaviors yet: type Order composes behavior Workflow on its field status (D103)"
+	if err := refuseBehaviors(schema, append(rendering, extension)); err == nil || err.Error() != want {
+		t.Errorf("refuseBehaviors with an extension's generator: %v, want %q", err, want)
 	}
 }
 
 // An API that imports a table of its DB service whose fields are
-// behaviors, or projects one, is refused before any generator runs (D103):
-// its operations would write the owned fields as any field.
-func TestAPIGeneratorsRefuseAnImportedFieldBehaviorTable(t *testing.T) {
+// behaviors, or projects one, is rendered by the API generators and the
+// SDKs (D103): its types carry the owned fields, and its
+// @behaviorOperations sets' operations are generated. A generator that
+// does not render such a table, an extension's, is still refused before
+// any generator runs, naming the generator, the table, the field and the
+// behavior.
+func TestAPIGeneratorsRenderAnImportedFieldBehaviorTable(t *testing.T) {
 	deps := map[string]*ir.Schema{"fixture-workflow-fields-db": fieldBehaviorsDB(t)}
 	load := func(name string) (*ir.Schema, error) {
 		if dep := deps[name]; dep != nil {
@@ -409,11 +412,24 @@ func TestAPIGeneratorsRefuseAnImportedFieldBehaviorTable(t *testing.T) {
 	schema := ir.NewSchema("orders-api", ir.SchemaKindAPI)
 	schema.Imports = []ir.Import{{Package: "@schemas/fixture-workflow-fields-db", Types: []string{"Order"}}}
 	cfg := &schemaconfig.SchemaConfig{Name: "orders-api", Kind: ir.SchemaKindAPI,
-		Outputs:      map[string]any{"types": map[string]any{LangGo: map[string]any{"enabled": true}}, "api": map[string]any{"enabled": true}},
 		Dependencies: []schemaconfig.ServiceDependency{{Name: "fixture-workflow-fields-db", Kind: ir.SchemaKindDB}}}
-	_, err := Run(schema, cfg, Options{OutputRoot: t.TempDir(), Registry: CoreRegistry(naming.Default()), LoadDependency: load})
-	if want := "generator: api does not render behaviors yet: orders-api imports fixture-workflow-fields-db.Order, which composes behavior Workflow on its field status (D103)"; err == nil || err.Error() != want {
-		t.Fatalf("Run: err = %v, want %q", err, want)
+	reg := CoreRegistry(naming.Default())
+	r := run{registry.GenerateContext{Schema: schema, Config: cfg, Registry: reg, LoadDependency: load, Options: registry.Options{LoadDependency: load}}}
+	var enabled []registry.GeneratorSpec
+	for _, name := range []string{typesGenerator, "api", "sdks"} {
+		spec, ok := reg.Generator(name)
+		if !ok || !spec.RendersFieldBehaviors {
+			t.Fatalf("generator %s: registered %v, renders field behaviors %v", name, ok, spec.RendersFieldBehaviors)
+		}
+		enabled = append(enabled, spec)
+	}
+	if err := r.refuseImportedEngineTypes(enabled); err != nil {
+		t.Fatalf("refuseImportedEngineTypes with types, api and sdks: %v", err)
+	}
+	extension := registry.GeneratorSpec{Name: "acme-docs"}
+	want := "generator: acme-docs does not render behaviors yet: orders-api imports fixture-workflow-fields-db.Order, which composes behavior Workflow on its field status (D103)"
+	if err := r.refuseImportedEngineTypes(append(enabled, extension)); err == nil || err.Error() != want {
+		t.Fatalf("refuseImportedEngineTypes with an extension's generator: %v, want %q", err, want)
 	}
 }
 
@@ -457,46 +473,6 @@ func TestMigrationPlansTheColumnsOfFieldBehaviors(t *testing.T) {
 		}
 		if dialect == sqlmigrate.Postgres && !strings.Contains(statements, "order_bump_version") {
 			t.Errorf("postgres: the plan adds no version trigger:\n%s", statements)
-		}
-	}
-}
-
-// A Go API whose database has a table whose fields are behaviors is
-// refused, naming the API, the database, the table, the field and the
-// behavior: its go.mod would require an ORM that links the behaviors'
-// core, which a generated Go API and its server do not build with yet
-// (D103). An API over a database with no such table builds its Deps.
-func TestAGoAPIOverATableWhoseFieldsAreBehaviorsIsRefused(t *testing.T) {
-	db := fieldBehaviorsDB(t)
-	plain := ir.NewSchema("plain-db", ir.SchemaKindDB)
-	load := func(name string) (*ir.Schema, error) {
-		switch name {
-		case "fixture-workflow-fields-db":
-			return db, nil
-		case "plain-db":
-			return plain, nil
-		}
-		return nil, errors.New("no such service")
-	}
-	reg := CoreRegistry(naming.Default())
-	for dbName, want := range map[string]string{
-		"fixture-workflow-fields-db": "generator: the Go API desk-api requires the ORM of fixture-workflow-fields-db, whose type Order composes behavior Workflow on its field status: that ORM links the behaviors' core, and a generated Go API and its server do not build with it yet (D103)",
-		"plain-db":                   "",
-	} {
-		api := ir.NewSchema("desk-api", ir.SchemaKindAPI)
-		api.AuthDB = dbName
-		cfg := &schemaconfig.SchemaConfig{Name: "desk-api", Kind: ir.SchemaKindAPI}
-		r, _ := newRun(api, cfg, &registry.Outputs{}, Options{OutputRoot: t.TempDir(), Registry: reg, LoadDependency: load}, reg)
-		deps, _, err := r.goDeps(&apigen.APIOutput{})
-		got := ""
-		if err != nil {
-			got = err.Error()
-		}
-		if got != want {
-			t.Errorf("%s: err = %v, want %q", dbName, err, want)
-		}
-		if want == "" && deps.Database != dbName {
-			t.Errorf("%s: Deps' database = %q", dbName, deps.Database)
 		}
 	}
 }

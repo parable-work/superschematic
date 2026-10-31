@@ -4,6 +4,9 @@
 {{ if .HasApps -}}
 pub mod apps;
 {{ end -}}
+{{ if .HasBehaviorOperations -}}
+pub mod behaviors;
+{{ end -}}
 {{ if .HasEnvConfig -}}
 pub mod config;
 {{ end -}}

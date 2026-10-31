@@ -84,6 +84,34 @@ func Expand(schema *ir.Schema, reg *registry.Registry) ([]string, error) {
 	return scalars, nil
 }
 
+// ExpandExternal adds, to each type of types that composes field-anchored
+// behaviors, the fields those behaviors own, as Expand adds them to the
+// database's tables. types are the flattened source types the TypeScript
+// reader resolves for a @source view of another service's table
+// (verify.Input.ExternalTypes), which hold the table's own fields and its
+// uses but none of the fields a use owns, so the verification pass checks
+// a view that projects one (status, statusEnteredAt) against the table as
+// its database's load holds it (D103). A use the database's own load
+// refuses (an unregistered behavior, a field the table already has) is
+// left as it is.
+func ExpandExternal(types map[string]*ir.TypeDef, reg *registry.Registry) {
+	names := make([]string, 0, len(types))
+	for name := range types {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		td := types[name]
+		if td == nil || len(td.FieldBehaviors()) == 0 {
+			continue
+		}
+		fields := td.Fields
+		if _, err := expandType(td, reg); err != nil {
+			td.Fields = fields
+		}
+	}
+}
+
 // expandType adds td's owned fields and returns the scalars they name.
 func expandType(td *ir.TypeDef, reg *registry.Registry) ([]string, error) {
 	var scalars []string
