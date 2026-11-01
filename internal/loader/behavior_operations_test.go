@@ -361,7 +361,7 @@ func TestBehaviorOperationsRefusals(t *testing.T) {
 			set := actionsOf("OrderActions", "Order")
 			set.Operations = []*ir.FieldDef{{Name: "ship", TypeRef: ir.TypeRef{Name: "boolean"}, Required: true, HTTPMethod: "POST"}}
 			return ordersAPI(set)
-		}, ordersDB, "OrderActions: a @behaviorOperations class has no members: the loader adds one operation for each operation of each behavior on Order's fields, and the generated server runs it"},
+		}, ordersDB, "OrderActions: a @behaviorOperations class has no members: the loader adds one operation for each operation of each behavior Order composes, and the generated server runs it"},
 		{"encrypted", func() *ir.Schema {
 			set := actionsOf("OrderActions", "Order")
 			set.Encrypted = true
@@ -445,7 +445,7 @@ func TestBehaviorOperationsRefusals(t *testing.T) {
 			db := ordersDB()
 			db.Types["Order"].Behaviors = nil
 			return db
-		}, "OrderActions: @behaviorOperations names Order, a table of orders-db none of whose fields is a behavior; a set serves a table one of whose fields is, such as status: Workflow<{ ... }> (D103)"},
+		}, "OrderActions: @behaviorOperations names Order, a table of orders-db that composes no behavior; a set serves a table that does, such as status: Workflow<{ ... }> or implements Timers<Order, { ... }> (D103)"},
 		{"no key", func() *ir.Schema {
 			return ordersAPI(actionsOf("OrderActions", "Order"))
 		}, func() *ir.Schema {

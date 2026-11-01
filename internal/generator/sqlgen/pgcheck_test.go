@@ -146,3 +146,31 @@ func TestWorkflowFieldsCreateSQLOnPostgres(t *testing.T) {
 		"PGCHECK_SQL_DIR="+sqlDir,
 	)
 }
+
+// TestTimersTablesCreateSQLOnPostgres applies the create.sql and drop.sql
+// generated for fixture-timers-db, whose tables implement Timers (D103), to
+// a real Postgres; testdata/pgcheck's TestTimersTablesOnPostgres holds the
+// checks. Set SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL as for
+// TestProjectionMigrationsOnPostgres.
+func TestTimersTablesCreateSQLOnPostgres(t *testing.T) {
+	dsn := os.Getenv("SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL to apply fixture-timers-db's create.sql and drop.sql against Postgres")
+	}
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-timers-db"))
+	if err != nil {
+		t.Fatalf("load fixture-timers-db: %v", err)
+	}
+	output, err := Generate(schema, Options{SchemaName: "fixture-timers-db"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDir := t.TempDir()
+	if err := WriteDDL(output, sqlDir); err != nil {
+		t.Fatal(err)
+	}
+	runPGCheck(t, "TestTimersTablesOnPostgres",
+		"PGCHECK_DATABASE_URL="+dsn,
+		"PGCHECK_SQL_DIR="+sqlDir,
+	)
+}

@@ -93,3 +93,37 @@ func TestBehaviorMembers(t *testing.T) {
 		t.Errorf("BehaviorMemberPhrase = %q", got)
 	}
 }
+
+// TestBehaviorMembersOfAnImplementedUse: the operations of a behavior a
+// table implements (D103) sit under a member named for the use's id, the
+// behavior's name, which each SDK spells in its case (timers in the
+// TypeScript SDK's methods and tools); its doc names the table that
+// implements it, and a refusal of the member asks for another operation.
+func TestBehaviorMembersOfAnImplementedUse(t *testing.T) {
+	fire := apigen.EndpointInfo{
+		Name: "timersFireTimer", Namespace: "ticket", HandlerName: "TicketTimersFireTimer",
+		Operation: &ir.FieldDef{BehaviorOperation: &ir.BehaviorOperation{Type: "Ticket", Use: "Timers", Behavior: "Timers", Operation: "fireTimer"}},
+	}
+	members, err := BehaviorMembers("ticket", []apigen.EndpointInfo{fire})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(members) != 1 || members[0].Use != "Timers" || !members[0].Implemented() {
+		t.Fatalf("members = %+v", members)
+	}
+	if got := EndpointToolName(fire); got != "ticket.timers.fireTimer" {
+		t.Errorf("EndpointToolName = %q", got)
+	}
+	if got := EndpointMethodName(fire); got != "timers.fireTimer" {
+		t.Errorf("EndpointMethodName = %q", got)
+	}
+	if got := BehaviorMemberDoc("Ticket", "Timers", "Timers"); got != "The operations of the Timers Ticket implements (D103)." {
+		t.Errorf("BehaviorMemberDoc = %q", got)
+	}
+	reserved := fire
+	reserved.Operation = &ir.FieldDef{BehaviorOperation: &ir.BehaviorOperation{Type: "Ticket", Use: "Client", Behavior: "Client", Operation: "fireTimer"}}
+	want := "toolsutil: namespace ticket holds the operations of Ticket's Client, which every SDK puts under ticket.Client, which the SDKs reserve; rename the operation"
+	if _, err := BehaviorMembers("ticket", []apigen.EndpointInfo{reserved}); err == nil || err.Error() != want {
+		t.Errorf("BehaviorMembers = %v, want %q", err, want)
+	}
+}

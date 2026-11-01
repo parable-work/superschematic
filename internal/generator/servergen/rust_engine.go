@@ -395,20 +395,20 @@ func (s *RustServer) BehaviorOperations() bool {
 }
 
 // behaviorDockerIncludes are the paths, relative to the build context, of
-// the crates a Rust image builds for an API with behavior operations
-// (D103): the Cargo workspace of superschematic-rules-adapter and of
-// superschematic-rules-behaviors ([paths] rules_adapter_rust and
-// rules_behaviors_rust, the engine's workspace in a checkout), which holds
-// the core they reach by path and the manifest they inherit their package
-// fields from, and the crates outside it the workspace names. Like the
-// engine's, a workspace is taken in whenever it is on disk, since any
-// member of the output root's workspace may reach it, and the entrypoint
-// whose APIs have behavior operations needs it; the crates outside it are
-// taken in when they are on disk. It says why there is no image when a
-// crate lies outside the build context.
+// the crates a Rust image builds for an API with behavior operations or a
+// behavior worker (D103): the Cargo workspace of
+// superschematic-rules-adapter and of superschematic-rules-behaviors
+// ([paths] rules_adapter_rust and rules_behaviors_rust, the engine's
+// workspace in a checkout), which holds the core they reach by path and
+// the manifest they inherit their package fields from, and the crates
+// outside it the workspace names. Like the engine's, a workspace is taken
+// in whenever it is on disk, since any member of the output root's
+// workspace may reach it, and the entrypoint whose APIs run behaviors
+// needs it; the crates outside it are taken in when they are on disk. It
+// says why there is no image when a crate lies outside the build context.
 func behaviorDockerIncludes(in RustInput, rel func(string) (string, bool)) ([]string, string) {
 	needed := slices.ContainsFunc(in.APIs, func(a RustAPIInput) bool {
-		return a.Output != nil && a.Output.HasBehaviorOperations()
+		return a.Output != nil && a.Output.HasBehaviors()
 	})
 	var include []string
 	for _, crate := range []struct{ what, dir string }{

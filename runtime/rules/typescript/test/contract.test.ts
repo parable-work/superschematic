@@ -142,7 +142,7 @@ test('a delete is held to the version read', () => {
 
 test('declarations are the registered files, each field typed and the value field named', () => {
   const declarations: BehaviorDeclaration[] = core.declarations();
-  expect(declarations.map(d => d.name)).toEqual(['Workflow']);
+  expect(declarations.map(d => d.name)).toEqual(['Workflow', 'Timers']);
   const workflow = declarations[0]!;
   expect(workflow.value).toBe('status');
   expect(workflow.fields?.map(f => ({ name: f.name, type: f.type }))).toEqual([
@@ -150,6 +150,18 @@ test('declarations are the registered files, each field typed and the value fiel
     { name: 'enteredAt', type: 'Temporal.DateTime' },
   ]);
   expect(workflow.operations?.find(o => o.name === 'transition')?.writes).toBe(true);
+  expect(workflow.tables).toBeUndefined();
+  // Timers keeps its deadlines in a sub-table of the row and arms each (D103).
+  const timers = declarations[1]!;
+  expect(timers.armsDeadlines).toBe(true);
+  expect(timers.tables?.map(t => ({ name: t.name, key: t.key, fields: t.fields.map(f => `${f.name}: ${f.type}`) }))).toEqual([
+    {
+      name: 'deadlines',
+      key: 'name',
+      fields: ['name: string', 'baseAt: Temporal.DateTime', 'armedFrom: string', 'dueAt: Temporal.DateTime', 'fired: boolean', 'firedAt: Temporal.DateTime', 'outcome: string'],
+    },
+  ]);
+  expect(timers.operations?.map(o => o.name)).toEqual(['fireTimer', 'resetTimer', 'snoozeTimer']);
 });
 
 test('check is each spec define check: null for one the core takes, its refusal for one it refuses', () => {

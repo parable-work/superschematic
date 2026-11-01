@@ -1,0 +1,111 @@
+{
+  "dialect": "sqlite",
+  "from": "d9697f8b128d88e9877145068feef31d9bdfa8a6c367bd3cdbd76a76318119f0",
+  "hash": "ea14a813aaeec62e5be1c2a4d68db77e90d72830cf76b58d4dea9240f6e251f5",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE \"product_deadline_queue\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"row_key\" TEXT NOT NULL,\n  \"use_id\" TEXT NOT NULL,\n  \"name\" TEXT NOT NULL,\n  \"at\" INTEGER NOT NULL,\n  \"payload\" TEXT,\n  \"state\" TEXT DEFAULT 'ready' NOT NULL,\n  \"attempts\" INTEGER DEFAULT 0 NOT NULL,\n  \"due_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  \"claim_expires_at\" TEXT,\n  \"claim_token\" TEXT,\n  \"last_error\" TEXT,\n  \"created_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  \"updated_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  PRIMARY KEY (\"id\")\n)"
+      ],
+      "subject": "table/product_deadline_queue",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE \"product_timers_deadlines\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"product_id\" TEXT NOT NULL,\n  \"name\" TEXT NOT NULL,\n  \"base_at\" TEXT,\n  \"armed_from\" TEXT,\n  \"due_at\" TEXT,\n  \"fired\" INTEGER,\n  \"fired_at\" TEXT,\n  \"outcome\" TEXT,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"product_id\") REFERENCES \"product\" (\"id\") ON DELETE CASCADE\n)"
+      ],
+      "subject": "table/product_timers_deadlines",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"product\" ADD COLUMN \"_version\" INTEGER DEFAULT 1 NOT NULL"
+      ],
+      "subject": "table/product/column/_version",
+      "transactional": true
+    },
+    {
+      "index": 4,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX \"idx_product_deadline_queue_claim_expires_at\" ON \"product_deadline_queue\" (\"claim_expires_at\") WHERE state = 'claimed'"
+      ],
+      "subject": "table/product_deadline_queue/index/idx_product_deadline_queue_claim_expires_at",
+      "transactional": true
+    },
+    {
+      "index": 5,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX \"idx_product_deadline_queue_due_at\" ON \"product_deadline_queue\" (\"due_at\") WHERE state = 'ready'"
+      ],
+      "subject": "table/product_deadline_queue/index/idx_product_deadline_queue_due_at",
+      "transactional": true
+    },
+    {
+      "index": 6,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX \"idx_product_deadline_queue_row_key\" ON \"product_deadline_queue\" (\"row_key\")"
+      ],
+      "subject": "table/product_deadline_queue/index/idx_product_deadline_queue_row_key",
+      "transactional": true
+    },
+    {
+      "index": 7,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE UNIQUE INDEX \"idx_product_deadline_queue_row_key_use_id_name\" ON \"product_deadline_queue\" (\"row_key\", \"use_id\", \"name\") WHERE state IN ('ready', 'claimed')"
+      ],
+      "subject": "table/product_deadline_queue/index/idx_product_deadline_queue_row_key_use_id_name",
+      "transactional": true
+    },
+    {
+      "index": 8,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX \"idx_product_deadline_queue_updated_at\" ON \"product_deadline_queue\" (\"updated_at\") WHERE state = 'done'"
+      ],
+      "subject": "table/product_deadline_queue/index/idx_product_deadline_queue_updated_at",
+      "transactional": true
+    },
+    {
+      "index": 9,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE UNIQUE INDEX \"idx_product_timers_deadlines_product_name\" ON \"product_timers_deadlines\" (\"product_id\", \"name\")"
+      ],
+      "subject": "table/product_timers_deadlines/index/idx_product_timers_deadlines_product_name",
+      "transactional": true
+    },
+    {
+      "index": 10,
+      "op": "createTrigger",
+      "phase": "expand",
+      "statements": [
+        "CREATE TRIGGER \"trg_product_bump_version\" AFTER UPDATE ON \"product\" FOR EACH ROW WHEN NEW._version = OLD._version BEGIN UPDATE \"product\" SET _version = OLD._version + 1 WHERE rowid = NEW.rowid; END"
+      ],
+      "subject": "trigger/product/trg_product_bump_version",
+      "transactional": true
+    }
+  ],
+  "to": "59c5633cb60c1b8ef9b88ed8040f9ef0fc03c748614e776b395994fecc538a43",
+  "toModel": null,
+  "version": 1
+}

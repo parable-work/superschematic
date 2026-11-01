@@ -29,16 +29,21 @@ decodeRow, so a raw query of its columns reads back as its row type:
 query(text, values, { decode: <table>Table }) reads them so (D89).
 {{- if .ORM.Rules}}
 
-A table whose fields are behaviors (D103), status: Workflow<{ ... }>, stays
-a table: each field a behavior owns is a column its row holds, which the
-inputs of a create, an update and an upsert leave out, since only the
-behavior's operations change it. Its repository holds each such field's
-operations under the field, orm.order.status.transition(key, { to: 'paid'
-}), and creates, updates and deletes its rows through the behaviors' core,
-which the runtime's adapter runs in the ORM's transaction over the layout
+A table that composes behaviors (D103), status: Workflow<{ ... }> or
+implements Timers<Ticket, { ... }>, stays a table: each field a behavior
+owns is a column its row holds, which the inputs of a create, an update and
+an upsert leave out, since only the behavior's operations change it. Its
+repository holds each use's operations under the use's member, the field
+or the behavior, orm.order.status.transition(key, { to: 'paid' }), and
+creates, updates and deletes its rows through the behaviors' core, which
+the runtime's adapter runs in the ORM's transaction over the layout
 {{.ORM.RulesConst}} records. An upsert inserts a new row with the owned
 fields the core's create gives it, and updates a row the key holds by its
-own fields alone. A raw SQL write of an owned column is never refused.
+own fields alone; a table whose behaviors keep sub-tables or arm deadlines
+has no upserts, and its repository runs a due deadline, as a behavior
+worker claimed it (runDeadline). A behavior's sub-table has no repository:
+only its operations write it. A raw SQL write of an owned column or a
+sub-table row is never refused, and arms or clears no deadline.
 {{- end}}
 */
 
@@ -139,11 +144,11 @@ export type {{.Type}}VectorField = {{tsUnion .VectorFields}};
 
 {{- if .Uses}}
 
-/** The behaviors on fields of {{.Type}} (D103): each field's operations, under the field, each run through the behaviors' core on the row whose key it takes. */
+/** The behaviors of {{.Type}} (D103): each use's operations, under its member, each run through the behaviors' core on the row whose key it takes. */
 export interface {{.Type}}Uses {
 {{- range .Uses}}
-  /** The operations of {{.ID}}, a {{.Behavior}}. */
-  readonly {{.ID}}: UseOperations<{
+  /** The operations of {{if eq .ID .Member}}{{.ID}}, a {{.Behavior}}{{else}}{{.Behavior}}, which {{$t.Type}} implements{{end}}. */
+  readonly {{.Member}}: UseOperations<{
 {{- range .Operations}}
 {{- if .Doc}}
     /** {{tsDoc .Doc "     * "}} */
@@ -158,8 +163,8 @@ export interface {{.Type}}Uses {
 }
 {{- end}}
 
-/** The repository of {{.Type}}. */
-export type {{.Type}}Repository = {{if .SoftDelete}}SoftDeleteRepository{{else}}Repository{{end}}<
+/** The repository of {{.Type}}{{if .NoUpserts}}, with no upserts: its behaviors keep sub-tables or arm deadlines, which an upsert's insert would leave unwritten (D103){{end}}. */
+export type {{.Type}}Repository = {{if .NoUpserts}}WithoutUpserts<{{end}}{{if .SoftDelete}}SoftDeleteRepository{{else}}Repository{{end}}<
   {{.Type}}Row,
   {{.Type}}Create,
   {{.Type}}Update,
@@ -170,8 +175,8 @@ export type {{.Type}}Repository = {{if .SoftDelete}}SoftDeleteRepository{{else}}
   {{.KeyType}},
   {{.Type}}PageKey,
   {{.Type}}Relations
->{{if .Encrypted}} & EncryptedRepository{{end}}{{if .VectorFields}} &
-  VectorRepository<{{.Type}}Row, {{.Type}}Filter, {{.Type}}VectorField, {{.KeyType}}>{{end}}{{if .Uses}} & {{.Type}}Uses{{end}};
+>{{if .NoUpserts}}>{{end}}{{if .Encrypted}} & EncryptedRepository{{end}}{{if .VectorFields}} &
+  VectorRepository<{{.Type}}Row, {{.Type}}Filter, {{.Type}}VectorField, {{.KeyType}}>{{end}}{{if .Uses}} & {{.Type}}Uses{{end}}{{if .Deadlines}} & BehaviorDeadlines<{{.KeyType}}>{{end}};
 
 /** The {{.Table}} table, as the runtime reads and writes it. */
 export const {{.Const}}: TableDefinition = {

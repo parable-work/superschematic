@@ -22,17 +22,25 @@ import (
 // first.
 func rustBehaviorRun(t *testing.T, paths naming.LocalPaths, edit func(*ir.Schema)) run {
 	t.Helper()
+	return rustBehaviorRunOf(t, "fixture-workflow-db", "fixture-workflow-api", paths, edit)
+}
+
+// rustBehaviorRunOf is a run of the fixture API apiName, served in Rust,
+// over the fixture database dbName, as rustBehaviorRun is of
+// fixture-workflow-api.
+func rustBehaviorRunOf(t *testing.T, dbName, apiName string, paths naming.LocalPaths, edit func(*ir.Schema)) run {
+	t.Helper()
 	reg := CoreRegistry(naming.Default())
 	schemas := map[string]*ir.Schema{}
 	configs := map[string]*schemaconfig.SchemaConfig{}
-	for _, name := range []string{"fixture-workflow-db", "fixture-workflow-api"} {
+	for _, name := range []string{dbName, apiName} {
 		schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(tsFixtures, name), loader.WithRegistry(reg))
 		if err != nil {
 			t.Fatalf("load %s: %v", name, err)
 		}
 		schemas[name], configs[name] = schema, cfg
 	}
-	api, cfg := schemas["fixture-workflow-api"], configs["fixture-workflow-api"]
+	api, cfg := schemas[apiName], configs[apiName]
 	if edit != nil {
 		edit(api)
 	}
@@ -128,5 +136,43 @@ func TestRustBehaviorDeps(t *testing.T) {
 	}
 	if output.Deps.Behaviors != nil || output.HasBehaviorOperations() {
 		t.Errorf("an API without behavior operations has behaviors %+v", output.Deps.Behaviors)
+	}
+}
+
+// TestRustBehaviorDepsOfABehaviorWorker: the Rust crate of
+// fixture-timers-api (D103), whose @behaviorWorker TicketTimers runs
+// Ticket's deadlines beside its @behaviorOperations set, takes its
+// database's layout, Ticket's deadline queue in it, and its database's
+// Rust types, which declare the queue's message; a refusal of a crate that
+// runs a behavior worker alone names the table and the worker.
+func TestRustBehaviorDepsOfABehaviorWorker(t *testing.T) {
+	output, _, err := rustBehaviorRunOf(t, "fixture-timers-db", "fixture-timers-api", rustBehaviorPaths(), nil).rustAPI()
+	if err != nil {
+		t.Fatalf("rust api: %v", err)
+	}
+	if len(output.BehaviorWorkers) != 1 || len(output.Workers) != 0 {
+		t.Fatalf("workers %+v and behavior workers %+v, want TicketTimers a behavior worker alone", output.Workers, output.BehaviorWorkers)
+	}
+	b := output.Deps.Behaviors
+	if b == nil || !strings.Contains(b.Layout, `"ticket_deadline_queue"`) {
+		t.Fatalf("the crate's Deps name no layout of Ticket's deadline queue: %+v", b)
+	}
+	if output.Deps.DatabaseTypesCrate != "schemas-fixture-timers-db-types" {
+		t.Errorf("the crate re-exports %q, want fixture-timers-db's Rust types", output.Deps.DatabaseTypesCrate)
+	}
+	schema := &ir.Schema{Workers: []*ir.Worker{{Name: "Plain", Queue: "Q"}, {Name: "TicketTimers", BehaviorWorker: &ir.BehaviorWorkerConfig{Type: "Ticket"}}}}
+	if got, want := behaviorWorkerUse(schema, nil, nil), "Ticket's deadlines by its @behaviorWorker TicketTimers"; got != want {
+		t.Errorf("behaviorWorkerUse: %q, want %q", got, want)
+	}
+	reg := CoreRegistry(naming.Default())
+	db, err := loader.LoadService(filepath.Join(tsFixtures, "fixture-timers-db"), loader.WithRegistry(reg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := behaviorWorkerUse(schema, db, reg), "Ticket's deadlines, which Timers arms, by its @behaviorWorker TicketTimers"; got != want {
+		t.Errorf("behaviorWorkerUse with the database: %q, want %q", got, want)
+	}
+	if got := behaviorWorkerUse(&ir.Schema{}, db, reg); got != "" {
+		t.Errorf("behaviorWorkerUse of a schema with no behavior worker: %q", got)
 	}
 }

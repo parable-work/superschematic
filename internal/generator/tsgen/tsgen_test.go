@@ -62,6 +62,10 @@ func TestWriteTypesGolden(t *testing.T) {
 		// Tables whose fields are behaviors (D103): orm.ts's owned
 		// columns, the layout document and each field's operations.
 		{service: "fixture-workflow-db", behaviors: true},
+		// Tables that implement Timers (D103): its operations under
+		// timers, runDeadline, no upserts, no repository of its sub-table,
+		// and the deadline queue in queues.ts.
+		{service: "fixture-timers-db", behaviors: true},
 	}
 
 	for _, tc := range cases {

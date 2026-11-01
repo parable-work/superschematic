@@ -548,7 +548,9 @@ func (e *emitter) heritageClause(def *ir.TypeDef) string {
 			implements = def.RawHeritage.Implements
 		}
 	}
-	implements = append(e.identityTraits(def), implements...)
+	// A behavior the table implements (D103) comes after extends and
+	// before the traits.
+	implements = append(append(e.implementedBehaviors(def), e.identityTraits(def)...), implements...)
 	// Resolved names drive the imports; the raw text is what renders.
 	e.recordHeritageImports(def.Extends)
 	for _, tr := range def.Implements {
@@ -563,6 +565,39 @@ func (e *emitter) heritageClause(def *ir.TypeDef) string {
 		b.WriteString(" implements " + strings.Join(implements, ", "))
 	}
 	return b.String()
+}
+
+// implementedBehaviors renders the behaviors a table implements (D103),
+// `Timers<Ticket, { deadlines: { ... } }>`: the behavior's carrier from
+// @superschematic/db, the table itself and its config as a type literal,
+// which the reader reads back to the same config.
+func (e *emitter) implementedBehaviors(def *ir.TypeDef) []string {
+	var out []string
+	for _, ref := range def.ImplementsBehaviors() {
+		owner := fmt.Sprintf("type %s implements %s", def.Name, ref.Name)
+		if !identifierPattern.MatchString(ref.Name) {
+			e.failf("%s: behavior %s has no carrier in %s, so the use has no TypeScript authoring form", owner, ref.Name, behaviorFieldPackage)
+			continue
+		}
+		carrier := ref.Name
+		if e.declares(carrier) {
+			alias := carrier + "Behavior"
+			for i := 2; e.declares(alias); i++ {
+				alias = fmt.Sprintf("%sBehavior%d", carrier, i)
+			}
+			carrier = e.useAs(behaviorFieldPackage, ref.Name, alias)
+		} else {
+			e.importSymbol(naming.Active().Specifier(behaviorFieldPackage), carrier)
+		}
+		config := any(map[string]any{})
+		if len(ref.Config) > 0 {
+			if err := json.Unmarshal(ref.Config, &config); err != nil {
+				e.failf("%s: config: %v", owner, err)
+			}
+		}
+		out = append(out, fmt.Sprintf("%s<%s, %s>", carrier, e.ident(def.Name, "type"), literalType(config)))
+	}
+	return out
 }
 
 // identityTraits renders the user model's traits a table carries (D50):

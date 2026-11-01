@@ -27,7 +27,9 @@ exactly as a server does.
 	"go.uber.org/zap"
 {{ range .APIs }}
 	{{ .Package }} "{{ .Module }}"
+{{- if not $.BehaviorWorker }}
 	{{ .Impl }} "{{ .Import }}"
+{{- end }}
 {{- end }}
 {{- range .Databases }}
 	{{ .Package }} "{{ .Module }}"

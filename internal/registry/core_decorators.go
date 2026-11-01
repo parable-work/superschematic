@@ -265,12 +265,14 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	specs = append(specs, identityRouteDecorators()...)
 
 	// A table's behavior operations (D103), on a class with no members
-	// (core_behavior_operations.go), and the set's user clause, which
+	// (core_behavior_operations.go), and the worker that runs its
+	// behaviors' queues (core_behavior_workers.go), and the set's user
+	// clause, which
 	// each operation the loader adds takes as its own. The verification
 	// pass refuses the clause on any other set. @requireOwnership has no
 	// class form: the routes run no implementation that could check what
 	// the caller owns.
-	specs = append(specs, behaviorOperationsDecorator())
+	specs = append(specs, behaviorOperationsDecorator(), behaviorWorkerDecorator())
 	flag(TargetOperationSet, "auth", []string{pkgAPI}, func(n Node) { n.OperationSet.Auth = true })
 	flag(TargetOperationSet, "publicRoute", []string{pkgAPI}, func(n Node) { n.OperationSet.Public = true })
 	specs = append(specs, DecoratorSpec{

@@ -1,10 +1,10 @@
 //! The layout document (D103): where the core's logical names of a
 //! build-time project's rows live, as `internal/generator/behaviorlayout`
 //! writes it and a generated ORM embeds it. Each table that composes
-//! field-anchored behaviors, by its type's name: the table, its key column
-//! and IR type, the version column, a soft-deletable table's `deletedAt`
-//! column, its own fields' columns, each use's owned columns and
-//! operations, and the type as the core runs it.
+//! behaviors, by its type's name: the table, its key column and IR type,
+//! the version column, a soft-deletable table's `deletedAt` column, its own
+//! fields' columns, each use's owned columns, operations and sub-tables, the
+//! queue its deadlines are armed in, and the type as the core runs it.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -137,11 +137,41 @@ pub struct Table {
     /// column order.
     #[serde(default)]
     pub own: Vec<Column>,
-    /// The field-anchored uses, in the type's list order.
+    /// The uses on the table, field-anchored and implemented, in the
+    /// type's list order.
     #[serde(default)]
     pub uses: Vec<Use>,
+    /// The queue the table's deadlines are armed in, one message per row,
+    /// use and deadline; `None` for a table whose behaviors arm none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deadlines: Option<Deadlines>,
     /// The type as the core runs it.
     pub spec: TypeSpec,
+}
+
+/// The deadline queue of a table whose behaviors arm deadlines (D103): a
+/// queue of its database the loader adds (`<Type>Deadline`), whose live
+/// message of a row, a use and a name is the deadline's arming, due when
+/// it falls due. Each member is a column, unquoted, beside the queue's own
+/// (`id`, `state`, `due_at`, `claim_token`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Deadlines {
+    /// The queue's name in the IR (`TicketDeadline`).
+    pub queue: String,
+    /// The queue's table.
+    pub table: String,
+    /// The row's key, bound as the row table's key binds.
+    pub row_key: String,
+    /// The use's id.
+    #[serde(rename = "use")]
+    pub use_id: String,
+    /// The deadline's name.
+    pub name: String,
+    /// The time it was armed to fall due at, in epoch milliseconds.
+    pub at: String,
+    /// The payload it was armed with, as JSON.
+    pub payload: String,
 }
 
 /// What a live row of a soft-deletable table holds: NULL in its
@@ -223,12 +253,20 @@ fn is_false(flag: &bool) -> bool {
     !*flag
 }
 
-/// One field-anchored use of a behavior on a table.
+/// One use of a behavior on a table: anchored on a field, or implemented
+/// by the type (`implements Timers<Ticket, { ... }>`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Use {
-    /// The use's id, its anchor field's name.
+    /// The use's id: its anchor field's name, or the behavior's for a use
+    /// the type implements.
     pub id: String,
     pub behavior: String,
+    /// The member a repository and an SDK give the use's operations: its
+    /// field, or the behavior's storage key in camel case (`timers`).
+    /// Empty in a document written before it was, which then reads as the
+    /// use's id.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub member: String,
     /// The anchor field; `None` for a type anchor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anchor: Option<String>,
@@ -236,12 +274,58 @@ pub struct Use {
     pub fields: Vec<OwnedField>,
     #[serde(default)]
     pub operations: Vec<Operation>,
+    /// The sub-tables the behavior keeps per row, in its declaration's
+    /// order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tables: Vec<SubTable>,
 }
 
 impl Use {
     /// The anchor field, when the use is anchored on one.
     pub fn anchor(&self) -> Option<&str> {
         self.anchor.as_deref().filter(|anchor| !anchor.is_empty())
+    }
+
+    /// The member its operations sit under: `member`, or the id when the
+    /// document names none.
+    pub fn member(&self) -> &str {
+        if self.member.is_empty() {
+            &self.id
+        } else {
+            &self.member
+        }
+    }
+
+    /// One of its sub-tables, by its declared name.
+    pub fn table(&self, name: &str) -> Option<&SubTable> {
+        self.tables.iter().find(|table| table.name == name)
+    }
+}
+
+/// A sub-table a use keeps per row (D103): a child table of the row, with
+/// a foreign key to it, each of its rows keyed within the row by its key
+/// field, which only the behavior's operations write.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubTable {
+    /// The declared name, as the core names the table (`deadlines`).
+    pub name: String,
+    /// The table, unquoted.
+    pub table: String,
+    /// The column holding the row's key, bound as the row table's key
+    /// binds.
+    pub row: String,
+    /// The declared key field and its column.
+    pub key: OwnedField,
+    /// The other declared fields, in the declaration's order, the key left
+    /// out.
+    #[serde(default)]
+    pub fields: Vec<OwnedField>,
+}
+
+impl SubTable {
+    /// A declared field other than the key, by its name.
+    pub fn field(&self, name: &str) -> Option<&OwnedField> {
+        self.fields.iter().find(|field| field.name == name)
     }
 }
 
@@ -273,6 +357,7 @@ mod tests {
                     "uses": [{
                         "id": "status",
                         "behavior": "Workflow",
+                        "member": "status",
                         "anchor": "status",
                         "fields": [
                             {"name": "status", "field": "status", "column": "status", "type": "string", "value": true},
@@ -299,6 +384,8 @@ mod tests {
         );
         assert_eq!(serde_json::to_value(&layout).expect("it writes"), document);
         assert!(Layout::new([order.clone()]).table("Order").is_some());
+        assert_eq!(order.uses[0].member(), "status");
+        assert!(order.deadlines.is_none() && order.uses[0].tables.is_empty());
 
         // A conversion this adapter does not know loads as none.
         let mut newer = document;
@@ -310,5 +397,111 @@ mod tests {
                 .convert,
             Some(Convert::Unknown)
         );
+    }
+
+    /// A table that implements Timers (D103): its use's member and
+    /// sub-table, and the queue its deadlines are armed in, as the
+    /// generator writes them.
+    #[test]
+    fn a_use_s_sub_tables_and_the_tables_deadline_queue_read_as_the_generator_writes_them() {
+        let document = json!({
+            "types": {
+                "Ticket": {
+                    "type": "Ticket",
+                    "table": "ticket",
+                    "key": {"field": "id", "column": "id", "type": "Identity.UUID"},
+                    "version": "_version",
+                    "own": [{"field": "title", "column": "title", "type": "string"}],
+                    "uses": [{
+                        "id": "Timers",
+                        "behavior": "Timers",
+                        "member": "timers",
+                        "fields": [],
+                        "operations": [
+                            {"name": "fireTimer", "writes": true},
+                            {"name": "resetTimer", "writes": true},
+                            {"name": "snoozeTimer", "writes": true}
+                        ],
+                        "tables": [{
+                            "name": "deadlines",
+                            "table": "ticket_timers_deadlines",
+                            "row": "ticket_id",
+                            "key": {"name": "name", "field": "name", "column": "name", "type": "string"},
+                            "fields": [
+                                {"name": "baseAt", "field": "baseAt", "column": "base_at", "type": "Temporal.DateTime", "convert": "epochMillis"},
+                                {"name": "armedFrom", "field": "armedFrom", "column": "armed_from", "type": "string"},
+                                {"name": "dueAt", "field": "dueAt", "column": "due_at", "type": "Temporal.DateTime", "convert": "epochMillis"},
+                                {"name": "fired", "field": "fired", "column": "fired", "type": "boolean"},
+                                {"name": "firedAt", "field": "firedAt", "column": "fired_at", "type": "Temporal.DateTime", "convert": "epochMillis"},
+                                {"name": "outcome", "field": "outcome", "column": "outcome", "type": "string"}
+                            ]
+                        }]
+                    }],
+                    "deadlines": {
+                        "queue": "TicketDeadline",
+                        "table": "ticket_deadline_queue",
+                        "rowKey": "row_key",
+                        "use": "use_id",
+                        "name": "name",
+                        "at": "at",
+                        "payload": "payload"
+                    },
+                    "spec": {"name": "Ticket", "uses": [{"behavior": "Timers", "config": {"deadlines": {}}, "anchor": "type"}]}
+                }
+            }
+        });
+        let layout = Layout::from_json(&document.to_string()).expect("it reads");
+        let ticket = layout.table("Ticket").expect("Ticket");
+        let timers = &ticket.uses[0];
+        assert_eq!((timers.member(), timers.anchor()), ("timers", None));
+        let deadlines = timers.table("deadlines").expect("deadlines");
+        assert_eq!(
+            (deadlines.row.as_str(), deadlines.key.column.column.as_str()),
+            ("ticket_id", "name")
+        );
+        assert_eq!(
+            deadlines.field("dueAt").map(|field| field.column.convert),
+            Some(Some(Convert::EpochMillis))
+        );
+        assert!(deadlines.field("name").is_none());
+        let queue = ticket.deadlines.as_ref().expect("its queue");
+        assert_eq!(
+            (
+                queue.table.as_str(),
+                queue.row_key.as_str(),
+                queue.use_id.as_str()
+            ),
+            ("ticket_deadline_queue", "row_key", "use_id")
+        );
+        assert_eq!(serde_json::to_value(&layout).expect("it writes"), document);
+    }
+
+    /// The document behaviorlayout writes for fixture-timers-db, as its
+    /// test holds it, reads: each table's Timers sub-table and its queue
+    /// (D103).
+    #[test]
+    fn the_generators_document_of_a_timers_database_reads() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../../../internal/generator/behaviorlayout/testdata/fixture-timers-db.layout.json",
+        );
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        let layout = Layout::from_json(&text).expect("it reads");
+        for (type_name, table) in [("Ticket", "ticket"), ("Invoice", "invoice")] {
+            let row = layout.table(type_name).expect("the table");
+            let timers = row
+                .uses
+                .iter()
+                .find(|used| used.behavior == "Timers")
+                .expect("its Timers");
+            assert_eq!((timers.member(), timers.anchor()), ("timers", None));
+            let deadlines = timers.table("deadlines").expect("its deadlines");
+            assert_eq!(deadlines.table, format!("{table}_timers_deadlines"));
+            assert_eq!(deadlines.row, format!("{table}_id"));
+            assert_eq!(
+                row.deadlines.as_ref().map(|queue| queue.table.as_str()),
+                Some(format!("{table}_deadline_queue").as_str())
+            );
+        }
     }
 }

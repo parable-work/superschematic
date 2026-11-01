@@ -1034,8 +1034,18 @@ Three reference pages cover what a DB schema can add on top of this guide:
   type-checked SQL with `@query`, verified on Postgres into a lock and run
   by both ORMs as typed functions.
 
-A type of a DB schema that composes a behavior, `@behavior("Workflow",
-...)` say, is no table: it is an engine type, whose instances the engine
-keeps, so the build writes it no table, no repository and no migration,
-and writes the schema's engine document instead
-([Engine types](/superschematic/guides/engine-behaviors/#engine-types)).
+A type of a DB schema that composes a behavior with `@behavior`,
+`@behavior("Workflow", ...)` say, is no table: it is an engine type, whose
+instances the engine keeps, so the build writes it no table, no
+repository and no migration, and writes the schema's engine document
+instead
+([Engine types](/superschematic/guides/engine-behaviors/#engine-types)). A
+table that types a field as a behavior, `status: Workflow<{ ... }>`, or
+implements one, `implements Timers<Ticket, { ... }>`, stays a table: the
+behavior's fields are its columns, its sub-tables and its deadline queue
+are tables beside it, and its operations change them through the
+behaviors' core
+([A table's behavior operations](/superschematic/guides/api-routes/#a-tables-behavior-operations),
+[A table's deadlines](/superschematic/guides/api-routes/#a-tables-deadlines-timers-and-its-worker)).
+Such a table has no upserts when its behaviors keep sub-tables or arm
+deadlines.

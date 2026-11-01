@@ -8,15 +8,20 @@
 //!
 //! It runs the host loop the core's README describes: it gives each
 //! command a request id, calls the core, answers its reads from memory (a
-//! row, whether a type has rows, a type's live version), grants its lock
-//! keys (nothing to take in memory, where one writer holds), and applies
-//! the change set all or nothing. It holds every row the change set writes
-//! to the version it expects; when one has moved, it runs the command again
-//! from fresh state, at most [`MAX_ATTEMPTS`] times, then refuses it as
-//! `busy`. A deadline runs only while it is still armed at the time it
-//! fell due for, so one cleared or moved since does not fall due. It is
-//! generic: it knows no behavior, and maps logical names onto memory the
-//! way a database adapter maps them onto its layout.
+//! row, whether a type has rows, a type's live version, a row's sub-table
+//! rows), grants its lock keys (nothing to take in memory, where one writer
+//! holds), and applies the change set all or nothing. It holds every row
+//! the change set writes to the version it expects; when one has moved, it
+//! runs the command again from fresh state, at most [`MAX_ATTEMPTS`] times,
+//! then refuses it as `busy`. Whether a deadline is still armed is the
+//! host's to check, never the core's (D103): a deadline command runs only
+//! while its deadline is armed at the time it fell due for, checked before
+//! each run, and its apply spends that arming right after the command's
+//! row writes and before the change set's own deadline changes, so one
+//! cleared or moved since does not fall due on its old arming, and one the
+//! command arms again outlives it. It is generic: it knows no behavior, and
+//! maps logical names onto memory the way a database adapter maps them
+//! onto its layout.
 
 use std::collections::BTreeMap;
 
@@ -24,8 +29,8 @@ use serde_json::{Map, Value};
 
 use superschematic_rules::{
     merge_patch, Action, Answer, Answers, Caller, ChangeSet, Code, Command, Core, DeadlineChange,
-    LockKey, OutboxEvent, Outcome, ReadRequest, Refusal, Row, RowRef, RowWrite, Step, SubRowChange,
-    TypeSpec, MAX_ROUNDS,
+    LockKey, OutboxEvent, Outcome, ReadRequest, Refusal, Row, RowRef, RowWrite, Step, SubRow,
+    SubRowChange, TypeSpec, MAX_ROUNDS,
 };
 
 /// How many times the host runs a command whose row moved before it
@@ -115,6 +120,9 @@ pub struct Logged {
     pub command: Command,
     /// The row's write, its key filled in.
     pub write: RowWrite,
+    /// The owned fields the row held before the write, by use id; empty
+    /// for a create.
+    pub before: BTreeMap<String, Map<String, Value>>,
 }
 
 impl Logged {
@@ -147,6 +155,30 @@ impl Logged {
             RowWrite::Create { owned, .. } | RowWrite::Update { owned, .. } => owned.clone(),
             _ => BTreeMap::new(),
         }
+    }
+
+    /// The owned fields the write changed, by use id: each it set to a
+    /// value other than the one the row held before, as the engine's event
+    /// recorded a change; a use whose fields it left as they were left
+    /// out. A create's are every one it set.
+    pub fn changed(&self) -> BTreeMap<String, Map<String, Value>> {
+        self.owned()
+            .into_iter()
+            .map(|(use_id, fields)| {
+                let held = self.before.get(&use_id);
+                let fields: Map<String, Value> = fields
+                    .into_iter()
+                    .filter(|(field, value)| {
+                        let was = held
+                            .and_then(|held| held.get(field))
+                            .unwrap_or(&Value::Null);
+                        was != value
+                    })
+                    .collect();
+                (use_id, fields)
+            })
+            .filter(|(_, fields)| !fields.is_empty())
+            .collect()
     }
 }
 
@@ -295,6 +327,40 @@ impl Store {
             .collect()
     }
 
+    /// The rows of one sub-table of one use on a row, as the core reads
+    /// them, in key order.
+    pub fn sub_table(&self, type_name: &str, key: &str, use_id: &str, table: &str) -> Vec<SubRow> {
+        self.sub_rows
+            .iter()
+            .filter(|(at, _)| {
+                at.type_name == type_name
+                    && at.key == key
+                    && at.use_id == use_id
+                    && at.table == table
+            })
+            .map(|(at, values)| SubRow::new(at.sub_key.clone(), values.clone()))
+            .collect()
+    }
+
+    /// A row's sub-table rows as the core reads them, by use id, then by
+    /// table, each table's rows in key order.
+    pub fn sub_tables(
+        &self,
+        type_name: &str,
+        key: &str,
+    ) -> BTreeMap<String, BTreeMap<String, Vec<SubRow>>> {
+        let mut tables: BTreeMap<String, BTreeMap<String, Vec<SubRow>>> = BTreeMap::new();
+        for (at, values) in self.sub_rows(type_name, key) {
+            tables
+                .entry(at.use_id.clone())
+                .or_default()
+                .entry(at.table.clone())
+                .or_default()
+                .push(SubRow::new(at.sub_key.clone(), values.clone()));
+        }
+        tables
+    }
+
     /// The outbox, in the order the events were written.
     pub fn outbox(&self) -> &[Outboxed] {
         &self.outbox
@@ -346,6 +412,14 @@ impl Store {
             }
             ReadRequest::HasRows { type_name } => Some(Answer::HasRows(self.has_rows(type_name))),
             ReadRequest::Spec { type_name } => Some(Answer::Spec(self.live(type_name).cloned())),
+            ReadRequest::SubRows {
+                type_name,
+                key,
+                use_id,
+                table,
+            } => Some(Answer::SubRows(
+                self.sub_table(type_name, key, use_id, table),
+            )),
             _ => None,
         }
     }
@@ -353,13 +427,14 @@ impl Store {
     // ---- applying ----
 
     /// Applies a command's change set, all or nothing: every row it writes,
-    /// each held to the version it expects, then its sub-table rows, its
-    /// events, its deadlines and a change log entry for each row written.
-    /// The command runs on a row of `type_name`; a deadline command applies
-    /// only while its deadline is still armed at the time it names, and
-    /// spends it. Returns the version of the command's own row after the
-    /// write; `None` when the change set does not write that row, or
-    /// deletes it.
+    /// each held to the version it expects, with a change log entry for
+    /// each; for a deadline command, the spend of its arming, which applies
+    /// only while the deadline is still armed at the time the command
+    /// names; then its sub-table rows, its events and its deadlines, those
+    /// of a row it deletes left out, since the row's go with it. The
+    /// command runs on a row of `type_name`. Returns the version of the
+    /// command's own row after the write; `None` when the change set does
+    /// not write that row, or deletes it.
     pub fn apply(
         &mut self,
         type_name: &str,
@@ -383,6 +458,11 @@ impl Store {
         let mut deleted: Vec<(String, String)> = Vec::new();
         for write in &changes.rows {
             let key = keyed(&write.row())?;
+            let before = self
+                .row(write.type_name(), &key)
+                .filter(|_| !matches!(write, RowWrite::Create { .. }))
+                .map(|row| row.owned.clone())
+                .unwrap_or_default();
             let after = self.write(write.type_name(), &key, write)?;
             if write.type_name() == type_name && Some(key.as_str()) == own_key {
                 version = after;
@@ -399,7 +479,32 @@ impl Store {
                 key,
                 command: command.clone(),
                 write: logged,
+                before,
             });
+        }
+        if let Action::Deadline {
+            key,
+            use_id,
+            name,
+            at,
+            ..
+        } = &command.action
+        {
+            // The deadline fell due: it is spent, right after the row's
+            // writes and before the change set's own deadline changes, so
+            // an arming the command makes again outlives the spend. One
+            // cleared or moved since the run read it is not this arming's,
+            // and the command runs again to find so.
+            let armed = DeadlineKey {
+                type_name: type_name.to_owned(),
+                key: key.clone(),
+                use_id: use_id.clone(),
+                name: name.clone(),
+            };
+            if self.armed_at(&armed) != Some(*at) {
+                return Err(ApplyError::Moved);
+            }
+            self.deadlines.remove(&armed);
         }
         // A delete takes the row's sub-table rows and deadlines with it, so
         // the change set's own for it go nowhere.
@@ -429,28 +534,6 @@ impl Store {
                 key: keyed(&event.row)?,
                 event: event.clone(),
             });
-        }
-        if let Action::Deadline {
-            key,
-            use_id,
-            name,
-            at,
-            ..
-        } = &command.action
-        {
-            // The deadline fell due: it is spent unless its handler arms it
-            // again. One cleared or moved since the run read it is not this
-            // arming's, and the command runs again to find so.
-            let armed = DeadlineKey {
-                type_name: type_name.to_owned(),
-                key: key.clone(),
-                use_id: use_id.clone(),
-                name: name.clone(),
-            };
-            if self.armed_at(&armed) != Some(*at) {
-                return Err(ApplyError::Moved);
-            }
-            self.deadlines.remove(&armed);
         }
         for change in &changes.deadlines {
             let key = keyed(change.row())?;
@@ -539,7 +622,12 @@ impl Store {
                         format!("sub-table row {} already exists", named(&at)),
                     )));
                 }
-                self.sub_rows.insert(at, values.clone());
+                let values = values
+                    .iter()
+                    .filter(|(_, value)| !value.is_null())
+                    .map(|(column, value)| (column.clone(), value.clone()))
+                    .collect();
+                self.sub_rows.insert(at, values);
             }
             SubRowChange::Update { values } => {
                 let Some(row) = self.sub_rows.get_mut(&at) else {
@@ -548,8 +636,13 @@ impl Store {
                         named(&at)
                     ))));
                 };
+                // A null is no value, as a NULL column reads.
                 for (column, value) in values {
-                    row.insert(column.clone(), value.clone());
+                    if value.is_null() {
+                        row.remove(column);
+                    } else {
+                        row.insert(column.clone(), value.clone());
+                    }
                 }
             }
             SubRowChange::Delete => {
@@ -883,8 +976,9 @@ impl MemoryHost {
     }
 
     /// Runs every deadline due at a time, earliest first, as the caller,
-    /// each a command of its own: what a worker of the project runs (D103).
-    /// A deadline that one run before it cleared or moved is not run.
+    /// each a command of its own at that time: what a worker of the
+    /// project runs (D103). A deadline that one run before it cleared or
+    /// moved is not run.
     pub fn run_due(
         &mut self,
         now: i64,

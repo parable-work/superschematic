@@ -147,7 +147,12 @@ pub enum Action {
     /// A deadline a use armed that fell due: the time it was armed to fall
     /// due at and the payload it was armed with. The host runs it only
     /// while the deadline is still armed at that time, so a deadline
-    /// cleared or moved since cannot fall due on its old arming.
+    /// cleared or moved since cannot fall due on its old arming: a worker's
+    /// claim of the deadline's message, which the unit that applies the
+    /// change set completes, or the host's read of the arming before each
+    /// run and its spend in that unit. The core does not check it (D103):
+    /// the host's record of an arming is the only one. A host runs it at
+    /// its clock's time, and never before `at`.
     Deadline {
         key: String,
         use_id: String,

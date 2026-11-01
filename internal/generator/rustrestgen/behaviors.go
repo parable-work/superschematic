@@ -12,15 +12,23 @@ import (
 
 // The behavior operations of a Rust API (D103): the operations the loader
 // adds for its @behaviorOperations sets, one per operation of each behavior
-// on a field of a table of its database. The router mounts each as it
-// mounts an authored operation, behind its route's controls and with its
-// arguments decoded into its Args struct, and its handler runs it through
-// the behaviors' core: src/behaviors.rs hands it to
+// a table of its database composes, on a field or by implements. The
+// router mounts each as it mounts an authored operation, behind its route's
+// controls and with its arguments decoded into its Args struct, and its
+// handler runs it through the behaviors' core: src/behaviors.rs hands it to
 // superschematic-rules-adapter, with the core of
 // superschematic-rules-behaviors and the database's layout document, in a
 // transaction of the database's pool. The namespace traits have no method
 // for it, and the scaffold none. Rust has no ORM: the crate calls the
 // adapter itself.
+//
+// Its behavior workers (@behaviorWorker, D103) run a table's behavior
+// queues the same way: src/behaviors.rs opens each queue on a pool of the
+// database, as a queue that its handler completes itself, and its handler
+// runs each claimed deadline through the adapter's run_deadline on a
+// transaction of the pool, as the worker, with the claim spent in the same
+// commit. The worker's main hands both to the HTTP runtime's claim loop;
+// the Workers trait and the scaffold have no method for it.
 
 // The crates src/behaviors.rs runs the operations with, which the API
 // crate depends on by path: they are unpublished, so a Rust server with
@@ -120,6 +128,14 @@ func (o *APIOutput) HasBehaviorOperations() bool {
 	return false
 }
 
+// HasBehaviors reports whether the crate runs anything through the
+// behaviors' core (D103), a behavior operation or a behavior worker: it
+// then has src/behaviors.rs and depends on the adapter and the behaviors'
+// crate.
+func (o *APIOutput) HasBehaviors() bool {
+	return o.HasBehaviorOperations() || len(o.BehaviorWorkers) > 0
+}
+
 // ImplementedEndpoints are the mounted operations an implementation
 // serves: every one but the behavior operations, which the router hands to
 // the behaviors' core (D103).
@@ -138,13 +154,16 @@ func implemented(endpoints []EndpointInfo) []EndpointInfo {
 	return out
 }
 
-// BehaviorDatabase is the DB service the behavior operations run on, the
-// API's database; empty without one.
+// BehaviorDatabase is the DB service the behavior operations and the
+// behavior workers run on, the API's database; empty without one.
 func (o *APIOutput) BehaviorDatabase() string {
 	for _, endpoint := range o.Endpoints {
 		if endpoint.Behavior != nil {
 			return endpoint.Behavior.Database
 		}
+	}
+	if len(o.BehaviorWorkers) > 0 && o.Deps != nil {
+		return o.Deps.Database
 	}
 	return ""
 }
@@ -162,8 +181,10 @@ func (o *APIOutput) BehaviorTypes() []string {
 }
 
 // behaviorUse names the first use whose operations the router mounts, as
-// a refusal names it: the table, the field and the behavior (Order's
-// status, a Workflow, among others when there are more).
+// a refusal names it: the table, the field or the behavior it implements,
+// and the behavior (Order's status, a Workflow; Ticket's Timers, which it
+// implements), among others when there are more. Without operations it
+// names the first behavior worker and its table.
 func (o *APIOutput) behaviorUse() string {
 	var first *BehaviorInfo
 	more := false
@@ -178,13 +199,31 @@ func (o *APIOutput) behaviorUse() string {
 		}
 	}
 	if first == nil {
-		return ""
+		if len(o.BehaviorWorkers) == 0 {
+			return ""
+		}
+		w := o.BehaviorWorkers[0]
+		return w.Behavior.Table + "'s behaviors, which its @behaviorWorker " + w.Name + " runs"
 	}
 	use := first.Type + "'s " + first.Use + ", " + behaviortypes.An(first.Behavior)
+	if first.Use == first.Behavior {
+		// A use the table implements is the behavior's own (D103).
+		use = first.Type + "'s " + first.Behavior + ", which it implements"
+	}
 	if more {
 		use += ", among others"
 	}
 	return use
+}
+
+// behaviorWork says what the crate runs through the behaviors' core, as a
+// refusal says it: the behavior operations of a use, or a behavior
+// worker's table.
+func (o *APIOutput) behaviorWork() string {
+	if o.HasBehaviorOperations() {
+		return "serves the behavior operations of " + o.behaviorUse()
+	}
+	return "runs " + o.behaviorUse()
 }
 
 // RulesLayout is the layout document as the Rust raw string literal
@@ -197,15 +236,117 @@ func (o *APIOutput) RulesLayout() string {
 }
 
 // BehaviorUses are src/behaviors.rs's use declarations of the adapter's
-// items and the HTTP runtime's, in the order rustfmt sorts them.
+// items, the HTTP runtime's and, for its behavior workers, the database's
+// Rust types', in the order rustfmt sorts them: what its behavior
+// operations name, and what its behavior workers name.
 func (o *APIOutput) BehaviorUses() []string {
+	adapter := []string{"postgres", "Caller", "Core", "Host", "Layout"}
+	var runtime, types []string
+	if o.HasBehaviorOperations() {
+		adapter = append(adapter, "Error", "Refusal")
+		runtime = append(runtime, "ApiError", "RequestContext")
+	}
+	if len(o.BehaviorWorkers) > 0 {
+		adapter = append(adapter, "Claim", "Deadline", "DeadlineRun")
+		runtime = append(runtime, "BoxError")
+		for _, w := range o.BehaviorWorkers {
+			for _, q := range w.BehaviorQueues {
+				types = append(types, q.Queue, q.Const)
+			}
+		}
+	}
 	uses := []string{
-		"use " + strings.ReplaceAll(RulesAdapterCrate, "-", "_") + "::{postgres, Caller, Core, Error, Host, Layout, Refusal};",
+		rustutil.UseLine(strings.ReplaceAll(RulesAdapterCrate, "-", "_"), adapter),
 		"use " + o.RuntimeCrateIdent + "::postgres::Pool;",
-		"use " + o.RuntimeCrateIdent + "::{ApiError, RequestContext};",
+	}
+	if len(o.BehaviorWorkers) > 0 {
+		uses = append(uses,
+			"use "+o.RuntimeCrateIdent+"::queue::{PostgresQueue, QueueDefinition};",
+			"use "+o.RuntimeCrateIdent+"::worker::{Claimed, SelfCompleting};",
+		)
+	}
+	if len(runtime) > 0 {
+		uses = append(uses, rustutil.UseLine(o.RuntimeCrateIdent, runtime))
 	}
 	slices.Sort(uses)
+	if len(types) > 0 {
+		// The crate's own, in a group of their own after the crates', the
+		// types before the constants, as rustfmt orders them.
+		slices.SortFunc(types, func(a, b string) int {
+			if ca, cb := a == strings.ToUpper(a), b == strings.ToUpper(b); ca != cb {
+				if ca {
+					return 1
+				}
+				return -1
+			}
+			return strings.Compare(a, b)
+		})
+		line := "use crate::" + DatabaseTypesModule + "::" + types[0] + ";"
+		if len(types) > 1 {
+			line = "use crate::" + DatabaseTypesModule + "::{" + strings.Join(types, ", ") + "};"
+		}
+		uses = append(uses, "\n"+line)
+	}
 	return uses
+}
+
+// BehaviorWorkerCaller is the body of a behavior worker's caller function:
+// the worker's subject and the permissions its decorator grants (D103).
+func (w WorkerInfo) BehaviorWorkerCaller() string {
+	permissions := "Vec::<String>::new()"
+	if len(w.Behavior.Permissions) > 0 {
+		quoted := make([]string, len(w.Behavior.Permissions))
+		for i, p := range w.Behavior.Permissions {
+			quoted[i] = rustString(p)
+		}
+		permissions = "[" + strings.Join(quoted, ", ") + "]"
+	}
+	return rustCall("    ", "Caller::new", []string{rustString(w.Behavior.Subject), permissions}, "")
+}
+
+// RunDeadlineCall is the handler's call of the adapter's run_deadline for
+// the worker's table, as rustfmt lays it out.
+func (w WorkerInfo) RunDeadlineCall() string {
+	args := []string{"&host", "&*tx", rustString(w.Behavior.Table), "&deadline", w.CallerFunc() + "()", "Some(&claim)"}
+	return rustCall("    ", "let run = postgres::run_deadline", args, ".await?;")
+}
+
+// FuncSignature is the signature of the function that opens the queue,
+// through its opening brace.
+func (q BehaviorQueue) FuncSignature() string {
+	return rustFn("", "pub fn "+q.Func, []string{"pool: &Pool"}, "Result<SelfCompleting<PostgresQueue<"+q.Queue+">>, BoxError>")
+}
+
+// HandlerSignature is the signature of the function that runs a message
+// claimed from the queue, through its opening brace.
+func (q BehaviorQueue) HandlerSignature() string {
+	return rustFn("", "pub async fn "+q.Handler, []string{"pool: &Pool", "claimed: Claimed<" + q.Queue + ">"}, "Result<(), BoxError>")
+}
+
+// rustCall is a call of fn with args, indented by indent, as rustfmt lays
+// it out: on one line when its arguments take 60 columns at most
+// (fn_call_width) and the line 100, each argument on a line of its own
+// otherwise. A tail that is a method call (".await?;") follows on a line
+// of its own after a call laid out so, and on the call's line after one
+// that fits; any other tail follows the call.
+func rustCall(indent, fn string, args []string, tail string) string {
+	joined := strings.Join(args, ", ")
+	line := indent + fn + "(" + joined + ")" + tail
+	if len(joined) <= 60 && len(line) <= 100 {
+		return line
+	}
+	var b strings.Builder
+	b.WriteString(indent + fn + "(\n")
+	for _, arg := range args {
+		b.WriteString(indent + "    " + arg + ",\n")
+	}
+	b.WriteString(indent + ")")
+	if strings.HasPrefix(tail, ".") {
+		b.WriteString("\n" + indent + tail)
+	} else {
+		b.WriteString(tail)
+	}
+	return b.String()
 }
 
 // BehaviorCall is the handler's call of the behavior operation the
@@ -235,20 +376,24 @@ func (e EndpointInfo) BehaviorCall() string {
 }
 
 // checkBehaviorDeps refuses Deps that cannot run the crate's behavior
-// operations: none, or none naming the database's layout and the crates.
+// operations or its behavior workers: none, or none naming the database's
+// layout and the crates.
 func (o *APIOutput) checkBehaviorDeps(deps *DepsInfo) error {
-	if !o.HasBehaviorOperations() {
+	if !o.HasBehaviors() {
 		return nil
 	}
 	db := o.BehaviorDatabase()
+	if db == "" && deps != nil {
+		db = deps.Database
+	}
 	if deps == nil || deps.Behaviors == nil {
-		return fmt.Errorf("rustrestgen: %s serves the behavior operations of %s (D103), which run through %s and %s on the layout of %s's tables, and its Deps names neither", o.SchemaName, o.behaviorUse(), RulesAdapterCrate, RulesBehaviorsCrate, db)
+		return fmt.Errorf("rustrestgen: %s %s (D103), which run through %s and %s on the layout of %s's tables, and its Deps names neither", o.SchemaName, o.behaviorWork(), RulesAdapterCrate, RulesBehaviorsCrate, db)
 	}
 	if deps.Database != db {
-		return fmt.Errorf("rustrestgen: %s serves the behavior operations of %s (D103), on tables of %s, which run on its Deps' pool, and its Deps holds a pool of %q", o.SchemaName, o.behaviorUse(), db, deps.Database)
+		return fmt.Errorf("rustrestgen: %s %s (D103), on tables of %s, which run on its Deps' pool, and its Deps holds a pool of %q", o.SchemaName, o.behaviorWork(), db, deps.Database)
 	}
 	if deps.Behaviors.Layout == "" || deps.Behaviors.AdapterPath == "" || deps.Behaviors.BehaviorsPath == "" {
-		return fmt.Errorf("rustrestgen: %s serves the behavior operations of %s (D103), and its Deps lacks the layout of %s's tables or the paths of %s and %s", o.SchemaName, o.behaviorUse(), db, RulesAdapterCrate, RulesBehaviorsCrate)
+		return fmt.Errorf("rustrestgen: %s %s (D103), and its Deps lacks the layout of %s's tables or the paths of %s and %s", o.SchemaName, o.behaviorWork(), db, RulesAdapterCrate, RulesBehaviorsCrate)
 	}
 	return nil
 }

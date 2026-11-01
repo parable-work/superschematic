@@ -515,6 +515,7 @@ mod tests {
             live: None,
             own: Vec::new(),
             uses: Vec::new(),
+            deadlines: None,
             spec: superschematic_rules::TypeSpec::new("Order"),
         }
     }

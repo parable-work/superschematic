@@ -169,6 +169,12 @@ func (d *declarations) writeDef(name string, schema any) error {
 			return err
 		}
 	}
+	if name == "Worker" {
+		// A worker requires its queue unless it is a behavior worker
+		// (D103), whose queue the build adds: the types leave queue
+		// optional, as the reader's check of the pair is the pass's.
+		keys = append(keys, "if", "then")
+	}
 	if err := onlyKeys(node, at, keys...); err != nil {
 		return err
 	}
@@ -238,6 +244,12 @@ func (d *declarations) writeDef(name string, schema any) error {
 				return err
 			}
 			d.writeComment("  ", "The anchor field of a field-anchored use (D103): the field whose type is the behavior, which holds its value and names its columns and operations. Absent for a use on the whole type.")
+		case name == "BehaviorRef" && key == "implements":
+			typ, err = d.typeOf(props[key], propAt)
+			if err != nil {
+				return err
+			}
+			d.writeComment("  ", "True for a use a DB table implements (D103), `implements Timers<Ticket, Config>`: anchored on the type, on a table that stays a table. A use on the whole type without it is @behavior's, which makes the type an engine type.")
 		case name == "BehaviorRef" && key == "config":
 			if err := d.behaviorConfig(props[key], propAt); err != nil {
 				return err

@@ -850,10 +850,12 @@ var timersOutcomes = []string{"moved", "skipped", "vetoed", "forbidden"}
 // Timers: the deadlines field holds, by deadline of the config, the ones
 // that have started, so none is required; each has its due time and
 // whether it fired, and once fired when, and with a then its outcome. The
-// operations name a deadline of the config.
-func narrowTimers(n *Narrowing, config map[string]any, _ Target) error {
+// operations name a deadline of the config, the enum <Base>Deadline.
+func narrowTimers(n *Narrowing, config map[string]any, target Target) error {
 	deadlines, _ := config["deadlines"].(map[string]any)
 	names := SortedKeys(deadlines)
+	deadline := target.Base + "Deadline"
+	n.Aliases = append(n.Aliases, Alias{Name: deadline, Doc: fmt.Sprintf("A deadline of %s's Timers.", An(target.Base)), Schema: EnumOf(names)})
 	properties := map[string]any{}
 	for _, name := range names {
 		properties[name] = map[string]any{
@@ -867,7 +869,7 @@ func narrowTimers(n *Narrowing, config map[string]any, _ Target) error {
 		}
 	}
 	for _, op := range []string{"fireTimer", "resetTimer", "snoozeTimer"} {
-		if err := setOperationProperty(n.Params, op, nil, "deadline", EnumOf(names)); err != nil {
+		if err := setOperationProperty(n.Params, op, nil, "deadline", ref(deadline, "")); err != nil {
 			return err
 		}
 	}

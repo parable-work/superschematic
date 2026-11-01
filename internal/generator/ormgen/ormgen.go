@@ -357,20 +357,35 @@ type Repository struct {
 	// collects the distance Nearest selects.
 	VectorFields []Field
 
-	// HasBehaviors is a table whose fields are behaviors (D103): its
-	// repository reads the owned fields, leaves them out of <Type>Create,
-	// its create and upsert input, and of <Type>Update, and runs its
-	// creates, updates, deletes and each use's operations through the core
-	// in a transaction. Uses are its field-anchored uses, in the type's list
-	// order, each of whose operations hang under a method named for its
-	// field; OwnedFields the fields they own, which an upsert fills from
-	// the core's create; and CoreOwn its own columns as the core reads them,
+	// HasBehaviors is a table that composes behaviors as a table, on its
+	// fields or by implements (D103): its repository reads the owned
+	// fields, leaves them out of <Type>Create, its create and upsert input,
+	// and of <Type>Update, and runs its creates, updates, deletes and each
+	// use's operations through the core in a transaction. Uses are its
+	// uses, in the type's list order, each of whose operations hang under
+	// a method named for its member, its field or its behavior;
+	// OwnedFields the fields they own, which an upsert fills from the
+	// core's create; and CoreOwn its own columns as the core reads them,
 	// in the layout's order, an encrypted one left out. All are empty for
 	// any other table.
 	HasBehaviors bool
 	Uses         []RepositoryUse
 	OwnedFields  []RepositoryOwnedField
 	CoreOwn      []CoreOwnColumn
+
+	// DeadlineQueue is the deadline queue of a table whose behaviors arm
+	// deadlines (D103), its message's type (TicketDeadline), whose
+	// RunDeadline runs one; "" for any other table. NoUpsert is a table
+	// whose behaviors keep sub-tables or arm deadlines, which has no
+	// upsert: an upsert inserts the row the core's create gives it and
+	// applies no change set, and such a create writes sub-table rows or
+	// arms a deadline (D103, Left for later).
+	DeadlineQueue string
+	NoUpsert      bool
+
+	// Deadline is how RunDeadline reads a message of DeadlineQueue; nil
+	// for a table without one.
+	Deadline *DeadlineMessage
 
 	// Import requirements computed from the field/relationship shapes so the
 	// repository template emits exactly the imports it uses.
@@ -952,6 +967,11 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 
 	repositories := make([]Repository, 0, len(tableTypes))
 	for i, typeDef := range tableTypes {
+		if typeDef.BehaviorTable != nil {
+			// A behavior's sub-table has no repository: only its behavior's
+			// operations write it, through the core (D103).
+			continue
+		}
 		repo, err := extractRepository(typeDef, schema, scalarMap, unionNames, enumNames, uuidGoType)
 		if err != nil {
 			return nil, fmt.Errorf("failed to extract table from type %s: %w", typeDef.Name, err)
@@ -975,6 +995,9 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	}
 	queues, err := queuesOf(schema, scalarMap, unionNames, enumNames, opts.SQLite)
 	if err != nil {
+		return nil, err
+	}
+	if err := attachDeadlines(repositories, queues); err != nil {
 		return nil, err
 	}
 	queries, err := queriesOf(schema, scalarMap, unionNames, opts.Dependencies)

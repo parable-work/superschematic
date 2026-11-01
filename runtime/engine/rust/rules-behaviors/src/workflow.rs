@@ -98,9 +98,11 @@ pub const TRANSITION: &str = "transition";
 pub const DECLARATION: &str = include_str!("../../behaviors/declarations/Workflow.behavior.json");
 
 // What the configSchema holds a state's name to, in its states and in the
-// keys of its outcomes.
-const STATE_PATTERN: &str = "^[A-Za-z][A-Za-z0-9_-]*$";
-const STATE_MAX_LENGTH: usize = 64;
+// keys of its outcomes: the rule every declared name follows.
+#[cfg(test)]
+const STATE_PATTERN: &str = schema::NAME_PATTERN;
+#[cfg(test)]
+const STATE_MAX_LENGTH: usize = schema::NAME_MAX_LENGTH;
 
 // The members the configSchema's closed objects take.
 const CONFIG_KEYS: [&str; 4] = ["initial", "outcomes", "states", "transitions"];
@@ -709,27 +711,14 @@ fn outcome_issues(outcomes: &Value, issues: &mut Issues) {
 // name_issues lists what a state's name breaks of the configSchema: its
 // length and its pattern, each a keyword of its own.
 fn name_issues(name: &str) -> Vec<(&'static str, String)> {
-    let mut broken = Vec::new();
-    if schema::length(name) > STATE_MAX_LENGTH {
-        broken.push((
-            "maxLength",
-            format!("must NOT have more than {STATE_MAX_LENGTH} characters"),
-        ));
-    }
-    if !is_state_name(name) {
-        broken.push(("pattern", format!("must match pattern \"{STATE_PATTERN}\"")));
-    }
-    broken
+    schema::name_issues(name)
 }
 
 // is_state_name matches STATE_PATTERN: a letter, then letters, digits,
 // underscores and hyphens, ASCII alone.
+#[cfg(test)]
 fn is_state_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    chars
-        .next()
-        .is_some_and(|first| first.is_ascii_alphabetic())
-        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    schema::is_name(name)
 }
 
 // transition_issues lists what transition's parameters break of its

@@ -413,6 +413,11 @@ type APIOutput struct {
 	// Workers trait deps.rs declares, which handles one message of the
 	// worker's queue (D53, D65).
 	Workers []WorkerInfo
+	// BehaviorWorkers are the API's behavior workers, sorted by name
+	// (D103): each runs its table's behavior queues through the behaviors'
+	// core, by functions src/behaviors.rs holds, and has no method of the
+	// Workers trait nor of the scaffold.
+	BehaviorWorkers []WorkerInfo
 	// Derivers are the API's derivers, sorted by name: a trait each in
 	// deps.rs, which the implementation's create_derivers builds with the
 	// API's Deps (D74). The dispatch layer sets them with SetDerivers.
@@ -775,7 +780,7 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 	if output.Jobs, err = jobsOf(schema); err != nil {
 		return nil, err
 	}
-	if output.Workers, err = workersOf(schema); err != nil {
+	if output.Workers, output.BehaviorWorkers, err = workersOf(schema, opts.Dependencies); err != nil {
 		return nil, err
 	}
 	output.Apps = appsOf(schema)
@@ -914,7 +919,7 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		{"identity.tmpl", "identity.rs", output.Identity != nil},
 		{"deps.tmpl", "deps.rs", output.Deps != nil},
 		{"apps.tmpl", "apps.rs", output.HasApps()},
-		{"behaviors.tmpl", "behaviors.rs", output.HasBehaviorOperations()},
+		{"behaviors.tmpl", "behaviors.rs", output.HasBehaviors()},
 	} {
 		path := filepath.Join("src", module.file)
 		if module.written {

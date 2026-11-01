@@ -1,0 +1,133 @@
+{
+  "dialect": "postgres",
+  "from": "c6787cdef058267033f38e38e6c4e788b8fc54fcc00776b78d8b4db345c93d96",
+  "hash": "4afe64f988ac7604c173e905a291379f2e49d18aadec0298cdf7b9a6919d2df4",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE product_deadline_queue (\n  id UUID DEFAULT gen_random_uuid() NOT NULL,\n  row_key UUID NOT NULL,\n  use_id TEXT NOT NULL,\n  \"name\" TEXT NOT NULL,\n  at BIGINT NOT NULL,\n  payload JSONB,\n  state TEXT DEFAULT 'ready' NOT NULL,\n  attempts INTEGER DEFAULT 0 NOT NULL,\n  due_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,\n  claim_expires_at TIMESTAMPTZ,\n  claim_token UUID,\n  last_error TEXT,\n  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,\n  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,\n  CONSTRAINT product_deadline_queue_pkey PRIMARY KEY (id)\n)",
+        "COMMENT ON TABLE product_deadline_queue IS 'The deadlines Product''s behaviors arm, one message per row, use and deadline, due when it falls due (D103).'"
+      ],
+      "subject": "table/product_deadline_queue",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE product_timers_deadlines (\n  id UUID DEFAULT gen_random_uuid() NOT NULL,\n  product_id UUID NOT NULL,\n  \"name\" TEXT NOT NULL,\n  base_at TIMESTAMPTZ,\n  armed_from TEXT,\n  due_at TIMESTAMPTZ,\n  fired BOOLEAN,\n  fired_at TIMESTAMPTZ,\n  outcome TEXT,\n  CONSTRAINT product_timers_deadlines_pkey PRIMARY KEY (id)\n)",
+        "COMMENT ON TABLE product_timers_deadlines IS 'One row per deadline started on the row, keyed by the deadline''s name: the time it starts from, the fact it started from, when it is due (null once until cancelled it), whether and when it fired, and what its then met.'"
+      ],
+      "subject": "table/product_timers_deadlines",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE product ADD COLUMN _version BIGINT DEFAULT 1 NOT NULL"
+      ],
+      "subject": "table/product/column/_version",
+      "transactional": true
+    },
+    {
+      "index": 4,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX idx_product_deadline_queue_claim_expires_at ON product_deadline_queue USING BTREE (claim_expires_at) WHERE state = 'claimed'"
+      ],
+      "subject": "table/product_deadline_queue/index/idx_product_deadline_queue_claim_expires_at",
+      "transactional": true
+    },
+    {
+      "index": 5,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX idx_product_deadline_queue_due_at ON product_deadline_queue USING BTREE (due_at) WHERE state = 'ready'"
+      ],
+      "subject": "table/product_deadline_queue/index/idx_product_deadline_queue_due_at",
+      "transactional": true
+    },
+    {
+      "index": 6,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX idx_product_deadline_queue_row_key ON product_deadline_queue USING BTREE (row_key)"
+      ],
+      "subject": "table/product_deadline_queue/index/idx_product_deadline_queue_row_key",
+      "transactional": true
+    },
+    {
+      "index": 7,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE UNIQUE INDEX idx_product_deadline_queue_row_key_use_id_name ON product_deadline_queue USING BTREE (row_key, use_id, \"name\") WHERE state IN ('ready', 'claimed')"
+      ],
+      "subject": "table/product_deadline_queue/index/idx_product_deadline_queue_row_key_use_id_name",
+      "transactional": true
+    },
+    {
+      "index": 8,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX idx_product_deadline_queue_updated_at ON product_deadline_queue USING BTREE (updated_at) WHERE state = 'done'"
+      ],
+      "subject": "table/product_deadline_queue/index/idx_product_deadline_queue_updated_at",
+      "transactional": true
+    },
+    {
+      "index": 9,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE UNIQUE INDEX idx_product_timers_deadlines_product_name ON product_timers_deadlines USING BTREE (product_id, \"name\")"
+      ],
+      "subject": "table/product_timers_deadlines/index/idx_product_timers_deadlines_product_name",
+      "transactional": true
+    },
+    {
+      "index": 10,
+      "op": "addForeignKey",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE product_timers_deadlines ADD CONSTRAINT fk_product_timers_deadlines_product_id FOREIGN KEY (product_id) REFERENCES product (id) ON DELETE CASCADE"
+      ],
+      "subject": "table/product_timers_deadlines/constraint/fk_product_timers_deadlines_product_id",
+      "transactional": true
+    },
+    {
+      "index": 11,
+      "op": "createFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION product_bump_version() RETURNS trigger AS $$\nBEGIN\n  -- BEFORE UPDATE: the stored row takes the next version.\n  NEW._version := OLD._version + 1;\n  RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/product_bump_version",
+      "transactional": true
+    },
+    {
+      "index": 12,
+      "op": "createTrigger",
+      "phase": "expand",
+      "statements": [
+        "CREATE TRIGGER trg_product_bump_version\n  BEFORE UPDATE ON product\n  FOR EACH ROW EXECUTE FUNCTION product_bump_version()"
+      ],
+      "subject": "trigger/product/trg_product_bump_version",
+      "transactional": true
+    }
+  ],
+  "to": "cbc0d3531077faedc836fbeda4a12d49e35af51792fa50f51e656d822ffa42aa",
+  "toModel": null,
+  "version": 1
+}

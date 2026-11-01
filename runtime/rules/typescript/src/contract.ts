@@ -23,10 +23,20 @@ export interface UseSpec {
   readonly anchor?: Anchor;
 }
 
-/** A type the core runs: its name and its uses in list order (superschematic_rules::TypeSpec). */
+/** One of a type's own fields (superschematic_rules::FieldSpec): what a config that names a field, a Timers field start, is held to. */
+export interface FieldSpec {
+  readonly name: string;
+  /** Its IR type's name (string, Temporal.DateTime). */
+  readonly type: string;
+  /** Whether its values are instants: epoch milliseconds from a table's adapter, or the ISO 8601 text an engine schema's date-time holds. */
+  readonly dateTime?: boolean;
+}
+
+/** A type the core runs: its name, its uses in list order, and its own fields, none when the host gives none (superschematic_rules::TypeSpec). */
 export interface TypeSpec {
   readonly name: string;
   readonly uses?: readonly UseSpec[];
+  readonly fields?: readonly FieldSpec[];
 }
 
 /** Who makes the call: a subject and the permissions it holds; standsIn for a service standing in for an end user, which holds none (D37). */
@@ -66,7 +76,9 @@ export interface Command {
 export type ReadRequest =
   | { readonly kind: 'row'; readonly type: string; readonly key: string }
   | { readonly kind: 'hasRows'; readonly type: string }
-  | { readonly kind: 'spec'; readonly type: string };
+  | { readonly kind: 'spec'; readonly type: string }
+  /** The rows of one sub-table of one use on one row (Answer subRows), each by its key, in key order by code point. */
+  | { readonly kind: 'subRows'; readonly type: string; readonly key: string; readonly useId: string; readonly table: string };
 
 /** One row as the host read it: its own fields, each use's owned fields by use id then declared name, and its version. */
 export interface Row {
@@ -75,8 +87,14 @@ export interface Row {
   readonly version: number;
 }
 
+/** One sub-table row as the host read it (superschematic_rules::SubRow): its key, and its values by the declared field's name, the key's field left out and a NULL column absent. */
+export interface SubRow {
+  readonly key: string;
+  readonly values?: Readonly<Record<string, unknown>>;
+}
+
 /** The host's answer to one request, of the variant it asks for. */
-export type Answer = { readonly row: Row | null } | { readonly hasRows: boolean } | { readonly spec: TypeSpec | null };
+export type Answer = { readonly row: Row | null } | { readonly hasRows: boolean } | { readonly spec: TypeSpec | null } | { readonly subRows: readonly SubRow[] };
 
 /** A key the host locks before it answers the reads a rule across rows decides on. */
 export type LockKey = string;
@@ -196,6 +214,14 @@ export interface DeclaredField {
   readonly perReader?: boolean;
 }
 
+/** A sub-table a behavior declares, as its declaration file has it: its name, the field whose value keys a row within its row, and its typed fields, the key among them. */
+export interface DeclaredTable {
+  readonly name: string;
+  readonly description?: string;
+  readonly key: string;
+  readonly fields: readonly DeclaredField[];
+}
+
 /** An operation a behavior declares, as its declaration file has it. */
 export interface DeclaredOperation {
   readonly name: string;
@@ -222,6 +248,10 @@ export interface BehaviorDeclaration {
   readonly fields?: readonly DeclaredField[];
   /** The field that holds the value when a type carries the behavior on a field (D103). */
   readonly value?: string;
+  /** The sub-tables the behavior keeps per row (D103): each a child table of the row, deleted with it, which only its operations write. */
+  readonly tables?: readonly DeclaredTable[];
+  /** Whether the behavior arms deadlines, which a table that composes it keeps in a deadline queue (D103). */
+  readonly armsDeadlines?: boolean;
   readonly operations?: readonly DeclaredOperation[];
   readonly vetoes?: readonly { readonly code: string; readonly description?: string }[];
   readonly [member: string]: unknown;

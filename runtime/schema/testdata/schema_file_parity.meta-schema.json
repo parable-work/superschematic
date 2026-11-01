@@ -3173,6 +3173,11 @@
                     "minLength": 1,
                     "type": "string"
                   },
+                  "status": {
+                    "description": "The field of the type whose Workflow the deadlines read and move: their enters starts, then and until. Implied when the type has one Workflow; needed when it has several. A type anchored Workflow is named Workflow.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
                   "sweepMs": {
                     "description": "How often the engine's runner fires the due deadlines, in milliseconds; 5000 when absent.",
                     "minimum": 1000,
@@ -3382,6 +3387,10 @@
           "default": "",
           "type": "string"
         },
+        "implements": {
+          "default": false,
+          "type": "boolean"
+        },
         "name": {
           "enum": [
             "Approvals",
@@ -3420,6 +3429,25 @@
       },
       "required": [
         "name"
+      ],
+      "type": "object"
+    },
+    "BehaviorWorkerConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "permissions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
       ],
       "type": "object"
     },
@@ -6441,7 +6469,17 @@
     },
     "Worker": {
       "additionalProperties": false,
+      "if": {
+        "not": {
+          "required": [
+            "behaviorWorker"
+          ]
+        }
+      },
       "properties": {
+        "behaviorWorker": {
+          "$ref": "#/$defs/BehaviorWorkerConfig"
+        },
         "comment": {
           "default": "",
           "type": "string"
@@ -6458,13 +6496,18 @@
           "type": "string"
         },
         "queue": {
+          "default": "",
           "type": "string"
         }
       },
       "required": [
-        "name",
-        "queue"
+        "name"
       ],
+      "then": {
+        "required": [
+          "queue"
+        ]
+      },
       "type": "object"
     }
   },

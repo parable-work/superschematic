@@ -39,7 +39,8 @@ it already holds and no other:
 Each module has the same functions: `execute` (a command the caller built),
 `run_operation`, `run_create`, `run_update`, `run_delete`, `prepare_create`
 (a create run to its change set and applied nowhere, for an upsert's
-insert) and `read_row`.
+insert), `read_row`, `read_sub_rows` (a use's sub-table rows of a row, in
+key order) and `run_deadline` (a due deadline, below).
 
 ```rust
 use axum::{extract::{Path, State}, Json};
@@ -108,8 +109,44 @@ brief:
    that moved or a check that failed rolls the unit back, and the command
    runs again from fresh state, up to `MAX_ATTEMPTS` (8) runs, then is
    refused as `busy`. A run still asking after `MAX_ROUNDS` (256) is
-   `internal`, and so are sub-table rows, outbox events and deadlines until
-   step 3 of D103's order of the work gives each a table.
+   `internal`. The unit runs in this order: the lock checks, the fenced row
+   writes, a deadline command's spend of its arming, the sub-table rows
+   (an insert `ON CONFLICT (row, key) DO NOTHING`, an update of the values
+   present and a delete, each held to one row; an update that sets no
+   values writes nothing; a value the layout's table does not hold, or the
+   key among the values, is `internal`), the deadline changes (an arm
+   deletes the key's messages of the table's deadline queue, a dead one
+   among them, and inserts one due at its time, `to_timestamp` on Postgres and
+   `strftime` on SQLite, its payload as JSON; a clear deletes them), then
+   for a row the change set deletes, hard or soft, every message of the
+   row, and on a hard delete its sub-table rows. A `subRows` read is
+   answered from the layout's columns in key order (`COLLATE "C"` on
+   Postgres); on SQLite one made while the command holds a lock is refused
+   as `internal`, since the unit has no check of it yet. An outbox event is
+   `internal` until the outbox has a table of its own (D103's order of the
+   work, step 3).
+
+## Deadlines
+
+`run_deadline(host, client | conn, type, &Deadline, caller, Option<&Claim>)`
+runs a due deadline (`Deadline { key, use_id, name, at, payload }`, the key
+in the core's form) at the later of the host's clock and `at`, and returns
+a `DeadlineRun`: `Ran(Executed)`, `ClaimLost` or `Gone(Refusal)`, whose
+`why()` is `""`, `claim lost` or `gone` as every adapter words it. With a
+worker's claim (`Claim { id, token }`), the unit deletes the claimed message
+by its id and token, held to one row, right after the command's own row
+write and before the change set's deadline changes; when the unit does not
+apply the adapter reads the claim, and one no longer held is `ClaimLost`,
+nothing applied, while one still held runs again. Without a claim, the
+arming is read before each run (none at `at` is `not_found`, `at` after the
+command's time `invalid_argument`, in the reference host's words) and the
+unit spends the live message armed at `at`; `execute` of a deadline command
+takes this path, as the transcript does. A core `not_found` (the row or the
+use is gone) spends the arming in a unit of its own and is `Gone`. Whether
+a deadline is still armed is the adapter's check, never the core's (the
+core's README, "The adapter"). A generated Rust API crate's behavior worker
+runs each claimed message so on a transaction of the pool, which it commits
+with the message's completion.
 
 `ExecuteOptions::own_columns` binds a server's own encoding of the command's
 own row (its audit stamps among them) in place of the change set's own
@@ -149,7 +186,8 @@ crate that serves a table's behavior operations (an API's
 `src/behaviors.rs` embeds the database's layout, builds the core of
 `superschematic-rules-behaviors` once per process, and runs each
 operation with `postgres::run_operation` on a transaction of the
-database's deadpool, which it commits on success. The naming file's
+database's deadpool, which it commits on success, and each due deadline of
+a `@behaviorWorker` with `postgres::run_deadline`. The naming file's
 `[paths] rules_adapter_rust` and `rules_behaviors_rust` name the two
 crates, and the build refuses such an API while either is unset.
 
@@ -170,12 +208,14 @@ value as `rules.test.ts` holds TypeScript's; `src/sqlite.rs` and
 `src/postgres.rs` hold each store's unit, its lock, and a command over a
 store that moves the row under it through the same transaction (a moved
 row, a moved read made under a lock, a soft delete made under a command).
-`tests/store.rs` runs the public functions on both databases, and
-`tests/transcript.rs` replays the transcript
-`runtime/engine/testdata/rules/core-workflow.transcript.json` on rusqlite
-and on Postgres: 16 scenarios, 96 steps (34 commands, 61 checks, 1 raw
-write), 0 mismatches, held to a floor of 96, with the 62 steps the
-transcript leaves out for its own reasons.
+`tests/store.rs` runs the public functions on both databases, a deadline's
+claim and its arming among them, and `tests/transcript.rs` replays the
+transcripts in `runtime/engine/testdata/rules` on rusqlite and on Postgres:
+`core-workflow.transcript.json`, 16 scenarios, 96 steps (34 commands, 61
+checks, 1 raw write), held to a floor of 96, with the 62 steps it leaves
+out for its own reasons; and `core-timers.transcript.json`, 18 scenarios,
+101 steps (51 commands, 11 of them deadlines, and 50 checks), held to a
+floor of 101, with 322 left out; 0 mismatches each.
 
 The Postgres cases read `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL`, each in a
 schema of its own (`rules_rs_<pid>_<nanos>_<n>`, dropped after), and are

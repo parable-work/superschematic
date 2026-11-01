@@ -362,6 +362,14 @@ type TypeScriptWorker struct {
 	Definition string
 	Module     string
 	Package    string
+
+	// Behavior is set for a @behaviorWorker (D103), whose entrypoint
+	// (behavior_worker.ts.tmpl) runs each of the table's behavior queues
+	// that QueuesFunc, the API package's export, builds over the
+	// database's repositories, and builds no Deps or Workers. Method is
+	// empty then.
+	Behavior   *apigen.BehaviorWorkerInfo
+	QueuesFunc string
 }
 
 // TypeScriptDeriver is the deriver a TypeScript deriver's entrypoint runs
@@ -756,6 +764,15 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			Module:       o.Deps.DatabaseTypesPackage + tsgen.QueuesEntry,
 			Package:      o.Deps.DatabaseTypesPackage,
 		}
+		if w.Behavior != nil {
+			// A behavior worker runs its table's deadlines through the
+			// repositories, on Postgres alone (D103).
+			if !o.DepsORM() {
+				return nil, fmt.Errorf("stack %s: worker %s runs %s of %s, a behavior worker (D103), which runs %s's deadlines through the repositories %s's TypeScript types export for Postgres, and %s has none", in.Stack, in.Server, w.Name, o.SchemaName, w.Behavior.Table, o.Deps.Database, o.SchemaName)
+			}
+			s.Worker.Behavior = w.Behavior
+			s.Worker.QueuesFunc = w.QueuesFunc()
+		}
 	case in.Deriver != nil:
 		if len(in.APIs) != 1 {
 			return nil, fmt.Errorf("stack %s: deriver %s runs a deriver of %d APIs; a deriver belongs to one", in.Stack, in.Server, len(in.APIs))
@@ -792,6 +809,9 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 		// over the engine, a native addon no Worker loads (D74).
 		if s.Deriver != nil {
 			return nil, fmt.Errorf("stack %s: %s %s runs on a platform whose artifact is a bundle, and a Workers entrypoint is built for a server, a job or a worker alone (D64, D92)", in.Stack, s.Kind, in.Server)
+		}
+		if s.Worker != nil && s.Worker.Behavior != nil {
+			return nil, fmt.Errorf("servergen: stack %s: worker %s runs %s, the behavior worker %s (D103), and an environment places it on Cloudflare Workers, whose drain.ts runs a @worker's handler alone; place the worker on a platform that builds an image", in.Stack, in.Server, s.Worker.Behavior.Deadlines(), s.Worker.Name)
 		}
 		s.Workers = true
 	}
@@ -914,7 +934,7 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 				api.ORM = true
 				// orm.ts of a database whose fields are behaviors imports
 				// the behaviors' core (D103).
-				s.Rules = s.Rules || o.FieldBehaviors
+				s.Rules = s.Rules || o.TableBehaviors
 				if key := o.Deps.ORMFieldKeys; key != "" && api.Config != "" {
 					api.ORMFieldKeys = api.Config + "." + key
 				}
@@ -1669,7 +1689,9 @@ func ImplementationPackage(n naming.Naming, service, dir string) (string, error)
 // WriteTypeScript writes the entrypoint package into dir: main.ts,
 // package.json and tsconfig.json, and the Dockerfile with its ignore file
 // when s.Docker is planned. A job's main.ts runs the job
-// (job.ts.tmpl), and a worker's its claim loop (worker.ts.tmpl); every
+// (job.ts.tmpl), a worker's its claim loop (worker.ts.tmpl), and a
+// behavior worker's its table's behavior queues (behavior_worker.ts.tmpl,
+// D103); every
 // main.ts template takes the wiring they share from wiring.ts.tmpl. A
 // server some environment places on Workers also gets fetch.ts, its
 // Workers entrypoint, bundle.ts, which bundles it, and workers.d.ts,
@@ -1685,6 +1707,8 @@ func WriteTypeScript(s *TypeScriptServer, dir string) error {
 	switch {
 	case s.Job != nil:
 		main = "job.ts.tmpl"
+	case s.Worker != nil && s.Worker.Behavior != nil:
+		main = "behavior_worker.ts.tmpl"
 	case s.Worker != nil:
 		main = "worker.ts.tmpl"
 	case s.Runner != nil:

@@ -3,7 +3,7 @@ import { currentCaller } from './caller.js';
 import { FieldEncryptionError, newRowKey, parseFieldKeys, type FieldCell, type FieldKeyring, type FieldKeys } from './fieldcrypt.js';
 import { columnKey, decodeRow, decodeValue, encodeParam, postgresTypeParsers, withTypeParsers, type RowField } from './pgcodec.js';
 import { queriesOf, type QueryDefinition } from './queries.js';
-import { execute, postgresRulesStore, prepareCreate, runCreate, runDelete, runUpdate, RulesRefusal, type CoreCaller, type RulesCallOptions, type RulesCore, type RulesColumn, type RulesHost, type RulesLayout, type RulesTable } from './rules.js';
+import { execute, postgresRulesStore, prepareCreate, runCreate, runDeadline, runDelete, runUpdate, RulesRefusal, type CoreCaller, type DeadlineRun, type RulesCallOptions, type RulesCore, type RulesColumn, type RulesHost, type RulesLayout, type RulesTable, type RunDeadlineOptions } from './rules.js';
 import { parseArray } from './queue.js';
 import { likePattern, searchTerms } from './search.js';
 import { SecretValue, revealed } from './secret.js';
@@ -105,11 +105,18 @@ without applying it (prepareCreate), and insert the row with the owned
 fields it gives, so an inserted row holds what createOne would have
 written; the update of a row the key already holds sets the update's own
 fields alone, as updateMany does, and refuses an owned one. updateMany and
-deleteMany do not go through the core. Each field-anchored use's
-operations are members under the use's id (orm.order.status.transition(key,
-{ to: 'paid' })), run as the acting user with no permissions unless the
-call names its caller, each stamping updatedAt and updatedBy on the row it
-writes. A raw SQL write of an owned column is never refused (D103).
+deleteMany do not go through the core. Each use's operations are members
+under the use's member, its field or, for a use the table implements, the
+behavior (orm.order.status.transition(key, { to: 'paid' }),
+orm.ticket.timers.fireTimer(key, { deadline: 'respond' })), run as the
+acting user with no permissions unless the call names its caller, each
+stamping updatedAt and updatedBy on the row it writes. A table whose
+behaviors keep sub-tables or arm deadlines has no upserts: an upsert's
+insert applies no change set, and the core's create of such a row writes
+its sub-table rows and arms its deadlines. Its repository's runDeadline
+runs a due deadline, as a behavior worker claimed it, through the core in
+a transaction (./rules, runDeadline). A raw SQL write of an owned column
+or a sub-table row is never refused, and arms or clears nothing (D103).
 
 The @versioned history readers are the Go ORM's alone for now.
 */
@@ -1880,6 +1887,7 @@ class TableRepository {
   }
 
   async upsertOneResult(input: Values, on: readonly string[], update: Values, options: UpsertOptions = {}): Promise<UpsertResult<Values>> {
+    this.refuseUpsert('upsertOne');
     const name = on.join(',');
     const key = this.uniqueKey(name);
     const onlyIfChanged = options.onlyIfChanged === true;
@@ -1900,6 +1908,7 @@ class TableRepository {
   }
 
   async upsertMany(inputs: readonly Values[], on: readonly string[], update: readonly string[], options: UpsertManyOptions = {}): Promise<UpsertResult<Values>[]> {
+    this.refuseUpsert('upsertMany');
     const name = on.join(',');
     const key = this.uniqueKey(name);
     if (!key.rows) throw this.expressionKey('upsertMany', name);
@@ -1924,6 +1933,22 @@ class TableRepository {
     const onlyIfChanged = options.onlyIfChanged === true;
     const write = async (repo: TableRepository): Promise<UpsertResult<Values>[]> => repo.upsertBatches(await repo.upsertInputs(inputs), name, key, fields, batch, onlyIfChanged);
     return this.behaviors || inputs.length > batch || onlyIfChanged || fields.some(c => c.encrypted) ? this.atomically(write) : write(this);
+  }
+
+  /**
+   * Throws for an upsert of a table whose behaviors keep sub-tables or arm
+   * deadlines (D103), which the generated repository types leave out: its
+   * insert would apply no change set, and the core's create of the row
+   * writes its sub-table rows and arms its deadlines.
+   */
+  private refuseUpsert(method: string): void {
+    const behaviors = this.behaviors;
+    if (!behaviors) return;
+    const keeping = behaviors.uses.filter(use => (use.tables ?? []).length > 0).map(use => use.behavior);
+    if (keeping.length === 0 && behaviors.deadlines === undefined) return;
+    throw new Error(
+      `orm: ${method} of ${this.def.name}: the table's behaviors keep sub-tables or arm deadlines${keeping.length > 0 ? ` (${keeping.join(', ')})` : ''}, which an upsert's insert would leave unwritten, so the table has no upserts (D103); create the row with createOne`
+    );
   }
 
   /**
@@ -2370,18 +2395,35 @@ class TableRepository {
   }
 
   /**
-   * The members the table's field-anchored uses add (D103): under each
-   * use's id, its operations. A use whose id is a member the repository
-   * has throws, which the build refuses first.
+   * Runs a due deadline of one of the table's uses through the core, in a
+   * transaction (this repository's, or one it opens), as options.caller or
+   * the acting user, at max(now, at), stamping updatedAt and updatedBy on
+   * the row it writes: a behavior worker's handler, with its claim, which
+   * the unit that applies the change set completes (D103).
+   */
+  async runDeadline(deadline: { readonly rowKey: unknown; readonly useId: string; readonly name: string; readonly at: number; readonly payload?: unknown }, options: RunDeadlineOptions = {}): Promise<DeadlineRun> {
+    return this.atomically(async repo => {
+      const key = repo.wireKey(deadline.rowKey);
+      const due = { key, useId: deadline.useId, name: deadline.name, at: Number(deadline.at), payload: deadline.payload ?? null };
+      return runDeadline(repo.rulesHost(), repo.def.name, due, options.caller ?? repo.caller(), { claim: options.claim, ownColumns: repo.operationColumns() });
+    });
+  }
+
+  /**
+   * The members the table's uses add (D103): under each use's member, its
+   * field or the behavior's for a use the table implements, its
+   * operations. A use whose member is one the repository has throws, which
+   * the build refuses first.
    */
   bindUses(): void {
     for (const use of this.behaviors?.uses ?? []) {
-      if (use.id in this) throw new Error(`orm: ${this.def.name}'s behavior ${use.behavior} on ${use.id} would be the repository's own member ${use.id}`);
+      const member = use.member ?? use.id;
+      if (member in this) throw new Error(`orm: ${this.def.name}'s behavior ${use.behavior} on ${member} would be the repository's own member ${member}`);
       const operations: Record<string, (key: unknown, params: unknown, options?: RulesCallOptions) => Promise<unknown>> = {};
       for (const operation of use.operations) {
         operations[operation.name] = (key, params, options) => this.operate(use.id, operation.name, key, params, options);
       }
-      Object.defineProperty(this, use.id, { value: Object.freeze(operations), enumerable: true });
+      Object.defineProperty(this, member, { value: Object.freeze(operations), enumerable: true });
     }
   }
 

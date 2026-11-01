@@ -85,10 +85,31 @@ type Table struct {
 	// Own are the own fields the core reads (a row's own) and a create and
 	// an update write, in column order.
 	Own []Column `json:"own"`
-	// Uses are the field-anchored uses, in the type's list order.
+	// Uses are the table's uses, each implements use and each field use,
+	// in the type's list order.
 	Uses []Use `json:"uses"`
 	// Spec is the type as the core runs it.
 	Spec TypeSpec `json:"spec"`
+	// Deadlines is the queue the deadlines its uses arm are messages of;
+	// nil for a table whose behaviors arm none.
+	Deadlines *Deadlines `json:"deadlines,omitempty"`
+}
+
+// Deadlines is a table's deadline queue (D103): one live message per row,
+// use and deadline name, due when the deadline falls due, which a behavior
+// worker claims and runs. Each member but Queue is a column, unquoted.
+type Deadlines struct {
+	// Queue is the queue's type (TicketDeadline), Table its table.
+	Queue string `json:"queue"`
+	Table string `json:"table"`
+	// RowKey holds the row's key, bound as the row table's key binds; Use
+	// the use id; Name the deadline's name; At the epoch milliseconds it
+	// was armed to fall due at; Payload the arming's payload, JSON.
+	RowKey  string `json:"rowKey"`
+	Use     string `json:"use"`
+	Name    string `json:"name"`
+	At      string `json:"at"`
+	Payload string `json:"payload"`
 }
 
 // Live is what a live row of a soft-deletable table holds: NULL in its
@@ -122,15 +143,37 @@ type OwnedField struct {
 	Value bool `json:"value,omitempty"`
 }
 
-// Use is one field-anchored use of a behavior on a table.
+// Use is one use of a behavior on a table: on a field, or implemented by
+// the type.
 type Use struct {
-	// ID is the use's id, its anchor field's name.
+	// ID is the use's id: its anchor field's name, or the behavior's name
+	// for a type anchor.
 	ID       string `json:"id"`
 	Behavior string `json:"behavior"`
+	// Member is the name a repository puts its operations under: the
+	// anchor field, or the behavior's storage key in camel case (timers).
+	Member string `json:"member"`
 	// Anchor is the anchor field; "" for a type anchor.
 	Anchor     string       `json:"anchor,omitempty"`
 	Fields     []OwnedField `json:"fields"`
 	Operations []Operation  `json:"operations"`
+	// Tables are the sub-tables the use's behavior keeps per row.
+	Tables []SubTable `json:"tables,omitempty"`
+}
+
+// SubTable is a sub-table a use keeps per row (D103): a child table of the
+// row, keyed within it, which only the behavior's operations write.
+type SubTable struct {
+	// Name is the declared name (deadlines), Table the table, unquoted, and
+	// Row the column holding the row's key, bound as the row table's key
+	// binds.
+	Name  string `json:"name"`
+	Table string `json:"table"`
+	Row   string `json:"row"`
+	// Key is the declared key field and its column; Fields are the other
+	// declared fields, in the declaration's order.
+	Key    OwnedField   `json:"key"`
+	Fields []OwnedField `json:"fields"`
 }
 
 // Operation is an operation a behavior declares on a row.

@@ -229,14 +229,15 @@ func (r run) runPipeline(pipeline []registry.GeneratorSpec) error {
 // types never compose one, or an enabled generator does not render what
 // it adds: a behavior on the type (GeneratorSpec.RendersBehaviors), whose
 // generator would write the type without the fields and operations it
-// adds, or one on a field of a table that stays a table
+// adds, or one a table that stays a table implements or carries on a field
 // (GeneratorSpec.RendersFieldBehaviors, D103), whose generator would write
-// the fields it owns as any field and drop its operations. The error names
-// the first such generator, the type and the behavior; types, which
-// renders behaviors' fields, and the generators of a DB schema, whose
-// engine types the engine keeps (D58), are never it for a behavior on the
-// type, and sql, orm and types never for one on a field. build --emit-ir,
-// format and json-schema run no generator and accept the schema (D16).
+// the fields it owns as any field and drop its operations, sub-tables and
+// deadlines. The error names the first such generator, the type, the
+// field or the implements use and the behavior; types, which renders
+// behaviors' fields, and the generators of a DB schema, whose engine types
+// the engine keeps (D58), are never it for a behavior on the type, and
+// sql, orm and types never for a table's. build --emit-ir, format and
+// json-schema run no generator and accept the schema (D16).
 func refuseBehaviors(schema *ir.Schema, enabled []registry.GeneratorSpec) error {
 	typeName, behavior, found := schema.FindBehavior()
 	if !found {
@@ -252,14 +253,23 @@ func refuseBehaviors(schema *ir.Schema, enabled []registry.GeneratorSpec) error 
 			}
 		}
 	}
-	if typeName, field, behavior, found := schema.FindFieldBehavior(); found {
+	if typeName, use, found := schema.FindTableBehavior(); found {
 		for _, gen := range enabled {
 			if !gen.RendersFieldBehaviors {
-				return fmt.Errorf("generator: %s does not render behaviors yet: type %s composes behavior %s on its field %s (D103)", gen.Name, typeName, behavior, field)
+				return fmt.Errorf("generator: %s does not render behaviors yet: type %s %s (D103)", gen.Name, typeName, tableUse(use))
 			}
 		}
 	}
 	return nil
+}
+
+// tableUse says how a table composes the use, for a refusal: "composes
+// behavior Workflow on its field status", "implements behavior Timers".
+func tableUse(use ir.BehaviorRef) string {
+	if use.FieldAnchored() {
+		return fmt.Sprintf("composes behavior %s on its field %s", use.Name, use.Field)
+	}
+	return "implements behavior " + use.Name
 }
 
 // findTypeBehavior returns the first type, in name order over Types and
@@ -342,6 +352,9 @@ func (r run) refuseImportedEngineTypes(enabled []registry.GeneratorSpec) error {
 	}
 	if fields >= 0 {
 		if use, found := findFieldBehaviorType(used, deps); found {
+			if use.field == "" {
+				return fmt.Errorf("generator: %s does not render behaviors yet: %s %s, which implements behavior %s (D103)", enabled[fields].Name, use.how, use.qualified(), use.behavior)
+			}
 			return fmt.Errorf("generator: %s does not render behaviors yet: %s %s, which composes behavior %s on its field %s (D103)", enabled[fields].Name, use.how, use.qualified(), use.behavior, use.field)
 		}
 	}
@@ -412,14 +425,15 @@ func findEngineType(used []dependencyTypeUse, deps map[string]*ir.Schema) (depen
 }
 
 // findFieldBehaviorType returns the first of used that is a table of a DB
-// service among deps whose fields are behaviors (D103).
+// service among deps that composes behaviors as a table, by implements or
+// on its fields (D103).
 func findFieldBehaviorType(used []dependencyTypeUse, deps map[string]*ir.Schema) (dependencyTypeUse, bool) {
 	for _, use := range used {
 		dep := deps[use.service]
 		if dep == nil || dep.Kind != ir.SchemaKindDB {
 			continue
 		}
-		if uses := dep.Types[use.typeName].FieldBehaviors(); len(uses) > 0 {
+		if uses := dep.Types[use.typeName].TableBehaviors(); len(uses) > 0 {
 			use.behavior, use.field = uses[0].Name, uses[0].Field
 			return use, true
 		}

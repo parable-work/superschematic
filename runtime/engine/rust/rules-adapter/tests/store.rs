@@ -16,7 +16,8 @@ mod common;
 use serde_json::{json, Map, Value};
 use superschematic_rules::Code;
 use superschematic_rules_adapter::{
-    Caller, CreateOptions, Error, ExecuteOptions, Host, Owned, Refusal, Row,
+    Caller, Claim, CreateOptions, Deadline, DeadlineRun, Error, ExecuteOptions, Host, Owned,
+    Refusal, Row,
 };
 
 use common::{iso, p, Param};
@@ -338,6 +339,95 @@ impl Db {
             )
             .await
         )
+    }
+
+    /// Runs a due deadline in a transaction of its own, with a claim or
+    /// none.
+    async fn run_deadline(
+        &mut self,
+        host: &Host<'_>,
+        type_name: &str,
+        deadline: &Deadline,
+        claim: Option<&Claim>,
+    ) -> Result<DeadlineRun, Error> {
+        let worker = || Caller::new("stock-api/Expiry", Vec::<String>::new());
+        in_transaction!(
+            self,
+            |tx| superschematic_rules_adapter::sqlite::run_deadline(
+                host,
+                &tx,
+                type_name,
+                deadline,
+                worker(),
+                claim
+            ),
+            superschematic_rules_adapter::postgres::run_deadline(
+                host,
+                &tx,
+                type_name,
+                deadline,
+                worker(),
+                claim
+            )
+            .await
+        )
+    }
+
+    /// Claims a row's messages of a queue as a worker's claim does, and
+    /// answers the claim of the first.
+    async fn claim(&mut self, queue: &str, row_key: &str) -> Claim {
+        let postgres = self.postgres();
+        let (token, cast) = if postgres {
+            ("gen_random_uuid()", "::text")
+        } else {
+            ("lower(hex(randomblob(16)))", "")
+        };
+        let text = format!(
+            "UPDATE \"{queue}\" SET state = 'claimed', attempts = attempts + 1, claim_token = {token} WHERE row_key = {} AND state = 'ready' RETURNING id{cast}, claim_token{cast}",
+            p(postgres, 1)
+        );
+        let (id, token): (String, String) = match self {
+            #[cfg(feature = "sqlite")]
+            Db::Sqlite(conn) => conn
+                .query_row(&text, [row_key], |row| Ok((row.get(0)?, row.get(1)?)))
+                .expect("a message is claimed"),
+            #[cfg(feature = "postgres")]
+            Db::Postgres(client) => {
+                let row = client
+                    .query_one(&text, &[&row_key])
+                    .await
+                    .expect("a message is claimed");
+                (row.get(0), row.get(1))
+            }
+        };
+        Claim { id, token }
+    }
+
+    /// A row's messages of a queue: each its name, its time and its state,
+    /// by time.
+    async fn messages(&mut self, queue: &str, row_key: &str) -> Vec<(String, i64, String)> {
+        let text = format!(
+            "SELECT name, at, state FROM \"{queue}\" WHERE row_key = {} ORDER BY at",
+            p(self.postgres(), 1)
+        );
+        match self {
+            #[cfg(feature = "sqlite")]
+            Db::Sqlite(conn) => {
+                let mut statement = conn.prepare(&text).expect("the read prepares");
+                let rows = statement
+                    .query_map([row_key], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                    .expect("the read runs");
+                rows.collect::<Result<_, _>>().expect("the messages read")
+            }
+            #[cfg(feature = "postgres")]
+            Db::Postgres(client) => client
+                .query(&text, &[&row_key])
+                .await
+                .expect("the read runs")
+                .iter()
+                .map(|row| (row.get(0), row.get(1), row.get(2)))
+                .collect(),
+        }
     }
 
     /// A transition the core vetoes, then one it takes, in one transaction:
@@ -796,8 +886,8 @@ async fn soft_deletable_rows(mut db: Db) {
 
 /// A rule across rows decides under its lock, and of two creates that each
 /// take one room the second is refused; a create whose change set holds an
-/// outbox event or a deadline is refused as internal with nothing written;
-/// a prepared create applies nothing.
+/// outbox event is refused as internal with nothing written; one that arms
+/// a deadline writes its message; a prepared create applies nothing.
 async fn rules_across_rows_and_writes_taken_later(mut db: Db) {
     let core = common::core();
     let layout = common::store_layout();
@@ -826,16 +916,16 @@ async fn rules_across_rows_and_writes_taken_later(mut db: Db) {
     let loud = refusal(db.create(&host, "Loud", json!({}), Some("l1")).await);
     assert_eq!(
         loud,
-        Refusal::internal("rules: create of Loud writes outbox events, which the adapter takes once each has a table of its own (D103's order of the work, step 3)")
+        Refusal::internal("rules: create of Loud writes outbox events, which the adapter takes once the outbox has a table of its own (D103's order of the work, step 3)")
     );
     assert!(db.ids("loud").await.is_empty());
-    let timed = refusal(db.create(&host, "Timed", json!({}), Some("d1")).await);
-    assert!(
-        timed.message.contains("create of Timed writes deadlines"),
-        "{}",
-        timed.message
+    db.create(&host, "Timed", json!({}), Some("d1"))
+        .await
+        .expect("created");
+    assert_eq!(
+        db.messages("timed_deadline_queue", "d1").await,
+        [("expire".to_owned(), 3_001_000, "ready".to_owned())]
     );
-    assert!(db.ids("timed").await.is_empty());
 
     let owned = db
         .prepare(&host, "Order", json!({"title": "Desk"}))
@@ -847,6 +937,131 @@ async fn rules_across_rows_and_writes_taken_later(mut db: Db) {
     );
     assert!(db.ids("order").await.is_empty());
 }
+
+/// Timed's deadline `expire` of a row, armed at 3_001_000 with `payload`.
+fn expire(key: &str, payload: Value) -> Deadline {
+    Deadline {
+        key: key.into(),
+        use_id: "OneRoom".into(),
+        name: "expire".into(),
+        at: 3_001_000,
+        payload,
+    }
+}
+
+/// The queue Timed's deadlines are armed in.
+const TIMED_QUEUE: &str = "timed_deadline_queue";
+
+/// A deadline (D103): a create arms its message; a run with a claim whose
+/// token is not the message's runs nothing and leaves it claimed; one with
+/// the message's claim runs it and spends the message in its commit, and
+/// the same claim again finds it spent.
+async fn a_deadline_runs_on_its_claim_and_a_lost_claim_runs_nothing(mut db: Db) {
+    let core = common::core();
+    let layout = common::store_layout();
+    let host = Host::new(&core, &layout).with_clock(|| 3_000_000);
+    db.create(&host, "Timed", json!({}), Some("d1"))
+        .await
+        .expect("created");
+    let claim = db.claim(TIMED_QUEUE, "d1").await;
+    let stranger = Claim {
+        token: if db.postgres() {
+            "00000000-0000-4000-8000-000000000000".into()
+        } else {
+            "0".into()
+        },
+        ..claim.clone()
+    };
+    let lost = db
+        .run_deadline(&host, "Timed", &expire("d1", Value::Null), Some(&stranger))
+        .await
+        .expect("ran nothing");
+    assert!(matches!(lost, DeadlineRun::ClaimLost), "{lost:?}");
+    assert_eq!(
+        db.messages(TIMED_QUEUE, "d1").await,
+        [("expire".to_owned(), 3_001_000, "claimed".to_owned())]
+    );
+    let ran = db
+        .run_deadline(&host, "Timed", &expire("d1", Value::Null), Some(&claim))
+        .await
+        .expect("ran");
+    let DeadlineRun::Ran(executed) = ran else {
+        panic!("not run: {ran:?}");
+    };
+    assert_eq!(executed.attempts, 1);
+    assert!(db.messages(TIMED_QUEUE, "d1").await.is_empty());
+    let again = db
+        .run_deadline(&host, "Timed", &expire("d1", Value::Null), Some(&claim))
+        .await
+        .expect("ran nothing");
+    assert!(matches!(again, DeadlineRun::ClaimLost), "{again:?}");
+}
+
+/// A deadline that arms itself again survives the spend of the one it ran,
+/// armed a second after the time it ran at, not the host's lagging clock's;
+/// without a claim a deadline runs only while it is armed at its time; a
+/// row a raw SQL delete removed leaves its message, which a run spends and
+/// reports gone; and a delete through the core deletes the row's messages
+/// (D103).
+async fn a_deadline_armed_again_survives_its_spend_and_a_rows_go_with_it(mut db: Db) {
+    let core = common::core();
+    let layout = common::store_layout();
+    let host = Host::new(&core, &layout).with_clock(|| 3_000_000);
+    db.create(&host, "Timed", json!({}), Some("d2"))
+        .await
+        .expect("created");
+    let claim = db.claim(TIMED_QUEUE, "d2").await;
+    db.run_deadline(
+        &host,
+        "Timed",
+        &expire("d2", json!({"again": true})),
+        Some(&claim),
+    )
+    .await
+    .expect("ran");
+    assert_eq!(
+        db.messages(TIMED_QUEUE, "d2").await,
+        [("expire".to_owned(), 3_002_000, "ready".to_owned())]
+    );
+    let refused = refusal(
+        db.run_deadline(&host, "Timed", &expire("d2", Value::Null), None)
+            .await,
+    );
+    assert_eq!(
+        (refused.code, refused.message.as_str()),
+        (
+            Code::NotFound,
+            "Timed d2 has no deadline OneRoom.expire armed at 3001000"
+        )
+    );
+
+    db.exec("DELETE FROM timed WHERE id = 'd2'", &[]).await;
+    let claim = db.claim(TIMED_QUEUE, "d2").await;
+    let rearmed = Deadline {
+        at: 3_002_000,
+        ..expire("d2", Value::Null)
+    };
+    let gone = db
+        .run_deadline(&host, "Timed", &rearmed, Some(&claim))
+        .await
+        .expect("ran nothing");
+    assert!(
+        matches!(&gone, DeadlineRun::Gone(refusal) if refusal.code == Code::NotFound),
+        "{gone:?}"
+    );
+    assert!(db.messages(TIMED_QUEUE, "d2").await.is_empty());
+
+    db.create(&host, "Timed", json!({}), Some("d3"))
+        .await
+        .expect("created");
+    db.delete(&host, "Timed", "d3", None)
+        .await
+        .expect("deleted");
+    assert!(db.messages(TIMED_QUEUE, "d3").await.is_empty());
+}
+
+on_each_dialect!(a_deadline_runs_on_its_claim_and_a_lost_claim_runs_nothing);
+on_each_dialect!(a_deadline_armed_again_survives_its_spend_and_a_rows_go_with_it);
 
 /// Of two creates that each take one room, in transactions of their own on
 /// two connections to one SQLite file, the second waits for the first and

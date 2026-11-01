@@ -113,13 +113,13 @@ func behaviorDatabase(endpoints []EndpointInfo) string {
 	return ""
 }
 
-// DeclaresFieldBehaviors reports whether a table of schema (nil for none)
-// has a field that is a behavior (D103): its Go ORM then requires the rules
-// module, which links the behaviors' core, and a module that requires the
-// ORM requires and replaces the rules module too, since Go takes no
-// replace from a dependency's go.mod.
-func DeclaresFieldBehaviors(schema *ir.Schema) bool {
-	_, _, _, found := schema.FindFieldBehavior()
+// DeclaresTableBehaviors reports whether a table of schema (nil for none)
+// composes a behavior, on a field or by implements (D103): its Go ORM then
+// requires the rules module, which links the behaviors' core, and a module
+// that requires the ORM requires and replaces the rules module too, since
+// Go takes no replace from a dependency's go.mod.
+func DeclaresTableBehaviors(schema *ir.Schema) bool {
+	_, _, found := schema.FindTableBehavior()
 	return found
 }
 

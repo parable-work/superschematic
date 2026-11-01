@@ -10,11 +10,29 @@ import (
 )
 
 // BehaviorMember is a namespace's member holding the operations of one
-// behavior use (D103): Use is its id, Type its table, Endpoints its
+// behavior use (D103): Use is its id, the anchor field or, for a use the
+// table implements, the behavior's name, which each SDK spells in its
+// case (status, Status; timers, Timers); Type its table, Endpoints its
 // operations in order.
 type BehaviorMember struct {
 	Use, Type, Behavior string
 	Endpoints           []apigen.EndpointInfo
+}
+
+// Implemented reports whether the member holds a use its table implements
+// (D103), whose id is the behavior's name, not a field's.
+func (m BehaviorMember) Implemented() bool {
+	return m.Use == m.Behavior
+}
+
+// rename is what a refusal of the member asks for: another field for a
+// field use, another operation for one the table implements, whose name
+// is the behavior's.
+func (m BehaviorMember) rename() string {
+	if m.Implemented() {
+		return "rename the operation"
+	}
+	return "rename the field"
 }
 
 // reservedBehaviorMembers are the members every SDK's namespace holds
@@ -48,7 +66,7 @@ func BehaviorMembers(namespace string, endpoints []apigen.EndpointInfo) ([]Behav
 		folded := foldName(member.Use)
 		for _, reserved := range reservedBehaviorMembers {
 			if folded == foldName(reserved) {
-				return nil, fmt.Errorf("toolsutil: namespace %s holds the operations of %s's %s, which every SDK puts under %s.%s, which the SDKs reserve; rename the field", namespace, member.Type, member.Use, namespace, member.Use)
+				return nil, fmt.Errorf("toolsutil: namespace %s holds the operations of %s's %s, which every SDK puts under %s.%s, which the SDKs reserve; %s", namespace, member.Type, member.Use, namespace, member.Use, member.rename())
 			}
 		}
 		for _, ep := range endpoints {
@@ -109,8 +127,13 @@ func EndpointMethodName(ep apigen.EndpointInfo) string {
 }
 
 // BehaviorMemberPhrase describes a behavior use's member, for a doc
-// comment: "the operations of Order's status, a Workflow (D103)".
+// comment: "the operations of Order's status, a Workflow (D103)", or, for a
+// use the table implements, whose id is the behavior's name, "the
+// operations of the Timers Ticket implements (D103)".
 func BehaviorMemberPhrase(typeName, use, behavior string) string {
+	if use == behavior {
+		return "the operations of the " + behavior + " " + typeName + " implements (D103)"
+	}
 	article := "a "
 	if behavior != "" && strings.ContainsRune("AEIOUaeiou", rune(behavior[0])) {
 		article = "an "

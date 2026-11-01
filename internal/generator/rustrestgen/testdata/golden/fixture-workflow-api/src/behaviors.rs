@@ -2,7 +2,7 @@
 //!
 //! The behavior operations of fixture-workflow-api (D103): the routes the loader
 //! adds for its @behaviorOperations sets, one per operation of each behavior
-//! on a field of Order, Shipment, each run through the behaviors' core by
+//! of Order, Shipment, each run through the behaviors' core by
 //! superschematic-rules-adapter on a transaction of fixture-workflow-db's
 //! pool, as the request's caller. No implementation method serves them: the
 //! router's handler of each calls `run_operation`.
@@ -17,10 +17,11 @@ use superschematic_http_runtime::postgres::Pool;
 use superschematic_http_runtime::{ApiError, RequestContext};
 use superschematic_rules_adapter::{postgres, Caller, Core, Error, Host, Layout, Refusal};
 
-/// The layout document of fixture-workflow-db's tables whose fields are
-/// behaviors (internal/generator/behaviorlayout), as the Go ORM's
-/// RulesLayout and the TypeScript repositories hold it: the table, key,
-/// version and columns of each, where the core's names live.
+/// The layout document of fixture-workflow-db's tables that compose
+/// behaviors (internal/generator/behaviorlayout), as the Go ORM's RulesLayout
+/// and the TypeScript repositories hold it: the table, key, version and
+/// columns of each, its uses' sub-tables and its deadline queue, where the
+/// core's names live.
 pub const RULES_LAYOUT: &str = r#"{
   "types": {
     "Order": {
@@ -50,6 +51,7 @@ pub const RULES_LAYOUT: &str = r#"{
           "id": "status",
           "behavior": "Workflow",
           "anchor": "status",
+          "member": "status",
           "fields": [
             {
               "name": "status",
@@ -102,6 +104,17 @@ pub const RULES_LAYOUT: &str = r#"{
               "field": "status"
             }
           }
+        ],
+        "fields": [
+          {
+            "name": "title",
+            "type": "string"
+          },
+          {
+            "name": "placedAt",
+            "type": "Temporal.DateTime",
+            "dateTime": true
+          }
         ]
       }
     },
@@ -126,6 +139,7 @@ pub const RULES_LAYOUT: &str = r#"{
           "id": "status",
           "behavior": "Workflow",
           "anchor": "status",
+          "member": "status",
           "fields": [
             {
               "name": "status",
@@ -153,6 +167,7 @@ pub const RULES_LAYOUT: &str = r#"{
           "id": "paymentStatus",
           "behavior": "Workflow",
           "anchor": "paymentStatus",
+          "member": "paymentStatus",
           "fields": [
             {
               "name": "status",
@@ -229,6 +244,12 @@ pub const RULES_LAYOUT: &str = r#"{
             "anchor": {
               "field": "paymentStatus"
             }
+          }
+        ],
+        "fields": [
+          {
+            "name": "reference",
+            "type": "string"
           }
         ]
       }

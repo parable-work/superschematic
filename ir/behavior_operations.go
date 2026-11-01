@@ -11,8 +11,9 @@ package ir
 // the class's @auth, @requirePermission and @publicRoute as the set's Auth,
 // Permissions and Public. The loader reads the API's database
 // (Schema.Database), and fills the set with one operation for each operation
-// of each behavior on a field of the table, in field order and then
-// declaration order, each with Origin OriginBehavior and
+// of each behavior the table composes, implemented by it or on a field, in
+// its list order and then declaration order, each with Origin
+// OriginBehavior and
 // FieldDef.BehaviorOperation set, and adds the types and enums they take and
 // return, with the same Origin. The OpenAPI document, the SDKs, the
 // permission catalog and the tool documents read them as any other

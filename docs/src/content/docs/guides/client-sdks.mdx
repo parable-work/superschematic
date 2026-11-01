@@ -247,6 +247,22 @@ reaches the SDK as any error does ([Errors](#errors)), with the core's
 status, `code` and message: a 409 `vetoed` for a move no transition
 allows, a 403 `forbidden` for one the caller lacks a permission for.
 
+A behavior the table implements, rather than one on a field, puts its
+operations under a member named for the behavior, in each language's case
+(`timers`, `Timers`), an operations class of its own
+(`TicketTimersOperations`):
+
+| Language | Call |
+| --- | --- |
+| Go | `sdk.TicketNamespace.Timers.FireTimer(ctx, id, types.TicketTimersFireTimerInput{Deadline: types.TicketTimersDeadline_Respond})` |
+| TypeScript | `await sdk.ticket.timers.fireTimer(id, { deadline: TicketTimersDeadline.Respond })` |
+| Python | `sdk.ticket.timers.fire_timer(id, TicketTimersFireTimerInput(deadline=TicketTimersDeadline.Respond))` |
+| Rust | `sdk.ticket.timers.fire_timer(id, TicketTimersFireTimerInput { deadline: TicketTimersDeadline::Respond }, None).await` |
+
+A deadline is the API's enum of the config's deadlines, and the `dueAt`
+that `resetTimer` answers and `snoozeTimer` takes is epoch milliseconds, an
+integer, as Timers declares it.
+
 ## Timeouts, retries and hooks
 
 | | Go | TypeScript | Python | Rust |

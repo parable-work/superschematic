@@ -627,8 +627,21 @@ func (r run) checkJobs(stackName string, jobs []*ir.ResolvedDeployable, services
 // create_workers (D65), as checkJobs refuses one without its jobs: the
 // implementation is the engineer's, and the build writes into it no more.
 // It refuses a Rust worker of a queue the Rust types of its database leave
-// out of src/queues.rs too (checkRustQueue).
+// out of src/queues.rs too (checkRustQueue). A behavior worker's handler is
+// generated (D103): it needs no method of the implementation, the methods
+// these refusals list leave it out, and an API whose workers are all
+// behavior workers needs no constructor of them.
 func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, services []stack.Service, scaffolding, tsScaffolding, rustScaffolding map[string]bool) error {
+	// implemented are the workers of each API whose implementation runs
+	// them, @worker classes: every one but a behavior worker.
+	implemented := map[string][]ir.Worker{}
+	for _, svc := range services {
+		for _, worker := range svc.Workers {
+			if worker.BehaviorWorker == nil {
+				implemented[svc.Name] = append(implemented[svc.Name], worker)
+			}
+		}
+	}
 	checked := map[string]bool{}
 	for _, w := range workers {
 		if w.Language == APILanguageRust {
@@ -637,7 +650,7 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 			}
 		}
 		api := w.Worker.API
-		if checked[api] {
+		if checked[api] || len(implemented[api]) == 0 {
 			continue
 		}
 		checked[api] = true
@@ -646,12 +659,8 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 				continue
 			}
 			var methods []string
-			for _, svc := range services {
-				if svc.Name == api {
-					for _, worker := range svc.Workers {
-						methods = append(methods, fmt.Sprintf("      async fn %s(&self, message: %s::%s) -> Result<(), BoxError> {\n          // handle a message of %s\n      }", rustutil.Identifier(worker.Name, "handle"), rustrestgen.DatabaseTypesModule, worker.Queue, worker.Queue))
-					}
-				}
+			for _, worker := range implemented[api] {
+				methods = append(methods, fmt.Sprintf("      async fn %s(&self, message: %s::%s) -> Result<(), BoxError> {\n          // handle a message of %s\n      }", rustutil.Identifier(worker.Name, "handle"), rustrestgen.DatabaseTypesModule, worker.Queue, worker.Queue))
 			}
 			if err := r.checkRustFunc(stackName, api, "workers", rustrestgen.WorkersFunc, "Workers", methods, "Deps, Workers, BoxError and "+rustrestgen.DatabaseTypesModule+", the Rust types of the database that declares each queue, are %s's", "8.8"); err != nil {
 				return err
@@ -663,12 +672,8 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 				continue
 			}
 			var methods []string
-			for _, svc := range services {
-				if svc.Name == api {
-					for _, worker := range svc.Workers {
-						methods = append(methods, fmt.Sprintf("    async %s(message, signal) {\n      // handle a message of %s\n    },", tsutil.ToCamelCase(worker.Name), worker.Queue))
-					}
-				}
+			for _, worker := range implemented[api] {
+				methods = append(methods, fmt.Sprintf("    async %s(message, signal) {\n      // handle a message of %s\n    },", tsutil.ToCamelCase(worker.Name), worker.Queue))
 			}
 			if err := r.checkTypeScriptExport(stackName, api, "workers", tsrestgen.WorkersFunc, "WorkersConstructor", methods, "8.8"); err != nil {
 				return err
@@ -704,9 +709,9 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 					db = dep.Name
 				}
 			}
-			for _, worker := range svc.Workers {
-				methods = append(methods, fmt.Sprintf("\t%s(ctx context.Context, msg %s.%s) error", goutil.GoPublicIdentifier(worker.Name), toGoPackageName(db), worker.Queue))
-			}
+		}
+		for _, worker := range implemented[api] {
+			methods = append(methods, fmt.Sprintf("\t%s(ctx context.Context, msg %s.%s) error", goutil.GoPublicIdentifier(worker.Name), toGoPackageName(db), worker.Queue))
 		}
 		return fmt.Errorf("stack %s: %s declares workers, and its implementation at %s, which the build no longer writes into, declares no %s; add\n\n"+
 			"\tfunc %s(deps api.Deps) (api.Workers, error)\n\n"+

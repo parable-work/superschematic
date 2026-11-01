@@ -114,8 +114,8 @@ func TestWriteAPIGoldenBehaviorOperations(t *testing.T) {
 // the MCP endpoint serves its tool through its route.
 func TestGenerateBehaviorOperations(t *testing.T) {
 	output := generateBehaviorFixture(t)
-	if !output.FieldBehaviors || !output.HasBehaviors() {
-		t.Errorf("FieldBehaviors %t, HasBehaviors %t", output.FieldBehaviors, output.HasBehaviors())
+	if !output.TableBehaviors || !output.HasBehaviors() {
+		t.Errorf("TableBehaviors %t, HasBehaviors %t", output.TableBehaviors, output.HasBehaviors())
 	}
 	keys := map[string]EndpointInfo{}
 	for _, ep := range output.Endpoints {
@@ -125,9 +125,9 @@ func TestGenerateBehaviorOperations(t *testing.T) {
 		namespace, name, method string
 		route                   *BehaviorRoute
 	}{
-		"orderStatusTransition":    {"order", "statusTransition", "order.status.transition", &BehaviorRoute{Set: "OrderActions", Database: behaviorDB, Type: "Order", Use: "status", Behavior: "Workflow", Operation: "transition", Repository: "order"}},
-		"shipmentStatusTransition": {"shipment", "statusTransition", "shipment.status.transition", &BehaviorRoute{Set: "ShipmentActions", Database: behaviorDB, Type: "Shipment", Use: "status", Behavior: "Workflow", Operation: "transition", Repository: "shipment"}},
-		"paymentStatusTransition":  {"shipment", "paymentStatusTransition", "shipment.paymentStatus.transition", &BehaviorRoute{Set: "ShipmentActions", Database: behaviorDB, Type: "Shipment", Use: "paymentStatus", Behavior: "Workflow", Operation: "transition", Repository: "shipment"}},
+		"orderStatusTransition":    {"order", "statusTransition", "order.status.transition", &BehaviorRoute{Set: "OrderActions", Database: behaviorDB, Type: "Order", Use: "status", Behavior: "Workflow", Operation: "transition", Repository: "order", Member: "status"}},
+		"shipmentStatusTransition": {"shipment", "statusTransition", "shipment.status.transition", &BehaviorRoute{Set: "ShipmentActions", Database: behaviorDB, Type: "Shipment", Use: "status", Behavior: "Workflow", Operation: "transition", Repository: "shipment", Member: "status"}},
+		"paymentStatusTransition":  {"shipment", "paymentStatusTransition", "shipment.paymentStatus.transition", &BehaviorRoute{Set: "ShipmentActions", Database: behaviorDB, Type: "Shipment", Use: "paymentStatus", Behavior: "Workflow", Operation: "transition", Repository: "shipment", Member: "paymentStatus"}},
 		"getOrder":                 {"order", "getOrder", "", nil},
 	} {
 		ep, ok := keys[key]

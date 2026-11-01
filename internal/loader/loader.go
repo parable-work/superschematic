@@ -408,21 +408,29 @@ func (o *loadOptions) authDBFor(servicePath string, schema *ir.Schema, reg *regi
 }
 
 // databaseFor reads the API's database (ir.Schema.Database), whose tables
-// its @behaviorOperations sets name (D103): authDB when the database is
-// the authDb and it is read already, else through the dependency loader
-// (WithDependencyLoader) or as the service of that name beside this one.
-// It reads nothing for a schema with no such set, one that is not an API,
-// one that connects to no one database, or the load of a database itself;
-// the verification pass refuses the ones that need it.
+// its @behaviorOperations sets and @behaviorWorker classes name (D103):
+// authDB when the database is the authDb and it is read already, else
+// through the dependency loader (WithDependencyLoader) or as the service
+// of that name beside this one. It reads nothing for a schema with no such
+// set or worker, one that is not an API, one that connects to no one
+// database, or the load of a database itself; the verification pass
+// refuses the ones that need it.
 func (o *loadOptions) databaseFor(servicePath string, schema, authDB *ir.Schema, reg *registry.Registry) (*ir.Schema, error) {
 	if o.authDBRead || schema.Kind != ir.SchemaKindAPI {
 		return nil, nil
 	}
-	declared := false
-	for _, set := range schema.OperationSets {
-		declared = declared || set.IsBehaviorOperations()
+	why := ""
+	for _, worker := range schema.Workers {
+		if worker != nil && worker.BehaviorWorker != nil {
+			why = "whose tables its @behaviorWorker classes name"
+		}
 	}
-	if !declared {
+	for _, set := range schema.OperationSets {
+		if set.IsBehaviorOperations() {
+			why = "whose tables its @behaviorOperations sets name"
+		}
+	}
+	if why == "" {
 		return nil, nil
 	}
 	db, _, ok := schema.Database()
@@ -443,7 +451,7 @@ func (o *loadOptions) databaseFor(servicePath string, schema, authDB *ir.Schema,
 	}
 	database, err := load(db)
 	if err != nil {
-		return nil, fmt.Errorf("%s: reading the database %s, whose tables its @behaviorOperations sets name: %w", schema.Name, db, err)
+		return nil, fmt.Errorf("%s: reading the database %s, %s: %w", schema.Name, db, why, err)
 	}
 	return database, nil
 }
@@ -555,7 +563,9 @@ func (o *loadOptions) referenceDependenciesFor(servicePath string, schema *ir.Sc
 // schema as written and reports them among its findings. The API's
 // @behaviorOperations sets are filled from its database the same way
 // (D103, behaviorops.Expand), once their checks pass
-// (verify.CheckBehaviorOperations). A schema that
+// (verify.CheckBehaviorOperations), and its @behaviorWorker classes are
+// given their table's deadline queue (behaviorops.ExpandWorkers), once
+// theirs do (verify.CheckBehaviorWorkers). A schema that
 // verifies has its version graphs expanded into ordinary types, the tables
 // its User and UserRole traits own added and its user model route sets
 // filled from its authDb (D50), any scalar only the generated fields use
@@ -596,6 +606,12 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 				return nil, err
 			}
 		}
+	}
+	// A @behaviorWorker runs its table's deadline queue, which the
+	// database's load added (D103): it becomes an ordinary worker of that
+	// queue before the pass, once its checks hold that the queue is there.
+	if verify.CheckBehaviorWorkers(schema, vin).Err() == nil {
+		behaviorops.ExpandWorkers(schema, vin.Database)
 	}
 	res := verify.Run(schema, vin)
 	for _, warning := range res.Warnings {

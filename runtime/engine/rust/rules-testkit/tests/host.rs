@@ -37,6 +37,7 @@ impl Behavior for Tally {
         Declaration::new("Tally")
             .field("count")
             .table("entries")
+            .arms_deadlines()
             .operation("add", true)
             .operation("peek", false)
             .operation("note", true)

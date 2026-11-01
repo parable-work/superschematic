@@ -1,0 +1,543 @@
+{
+  "name": "fixture-timers-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-timers-db",
+      "types": [
+        "Ticket"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-timers-db",
+      "kind": "DB"
+    }
+  ],
+  "scalars": {
+    "Generic.Int64": {
+      "name": "Generic.Int64",
+      "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+      "languagePrimitive": "number",
+      "primitive": "Int",
+      "typeMappings": {
+        "go": "GenericInt64",
+        "json_schema": "integer",
+        "python": "int",
+        "rust": "i64",
+        "sql": "BIGINT",
+        "typescript": "number"
+      },
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991,
+      "hasCustomParse": true
+    },
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "IdentityUUID",
+        "json_schema": "string",
+        "python": "uuid.UUID",
+        "rust": "uuid::Uuid",
+        "sql": "UUID",
+        "typescript": "string"
+      },
+      "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+      "hasCustomParse": true
+    }
+  },
+  "types": {
+    "TicketStatusTransitionInput": {
+      "name": "TicketStatusTransitionInput",
+      "owner": "fixture-timers-api",
+      "comment": "The parameters of Ticket's status transition.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "to",
+          "comment": "The state to move to.",
+          "typeRef": {
+            "name": "TicketStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketStatusTransitionResult": {
+      "name": "TicketStatusTransitionResult",
+      "owner": "fixture-timers-api",
+      "comment": "What Ticket's status transition returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the instance was in.",
+          "typeRef": {
+            "name": "TicketStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state it is in now.",
+          "typeRef": {
+            "name": "TicketStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketTimersFireTimerInput": {
+      "name": "TicketTimersFireTimerInput",
+      "owner": "fixture-timers-api",
+      "comment": "The parameters of Ticket's timers fireTimer.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "deadline",
+          "comment": "The deadline's name.",
+          "typeRef": {
+            "name": "TicketTimersDeadline"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketTimersFireTimerResult": {
+      "name": "TicketTimersFireTimerResult",
+      "owner": "fixture-timers-api",
+      "comment": "What Ticket's timers fireTimer returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "fired",
+          "comment": "Whether this call fired the deadline.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "outcome",
+          "comment": "When it fired a deadline with then: what the move met.",
+          "typeRef": {
+            "name": "TicketTimersFireTimerResultOutcome"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketTimersResetTimerInput": {
+      "name": "TicketTimersResetTimerInput",
+      "owner": "fixture-timers-api",
+      "comment": "The parameters of Ticket's timers resetTimer.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "deadline",
+          "comment": "The deadline's name.",
+          "typeRef": {
+            "name": "TicketTimersDeadline"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketTimersResetTimerResult": {
+      "name": "TicketTimersResetTimerResult",
+      "owner": "fixture-timers-api",
+      "comment": "What Ticket's timers resetTimer returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "dueAt",
+          "comment": "When it is due, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketTimersSnoozeTimerInput": {
+      "name": "TicketTimersSnoozeTimerInput",
+      "owner": "fixture-timers-api",
+      "comment": "The parameters of Ticket's timers snoozeTimer.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "deadline",
+          "comment": "The deadline's name.",
+          "typeRef": {
+            "name": "TicketTimersDeadline"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "dueAt",
+          "comment": "When it is due, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 0,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketTimersSnoozeTimerResult": {
+      "name": "TicketTimersSnoozeTimerResult",
+      "owner": "fixture-timers-api",
+      "comment": "What Ticket's timers snoozeTimer returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "dueAt",
+          "comment": "When it is due, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    }
+  },
+  "enums": {
+    "TicketStatusState": {
+      "name": "TicketStatusState",
+      "owner": "fixture-timers-api",
+      "comment": "A state of Ticket's status Workflow.",
+      "values": [
+        {
+          "name": "Open",
+          "serializedAs": "open"
+        },
+        {
+          "name": "Waiting",
+          "serializedAs": "waiting"
+        },
+        {
+          "name": "Escalated",
+          "serializedAs": "escalated"
+        },
+        {
+          "name": "Closed",
+          "serializedAs": "closed"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketTimersDeadline": {
+      "name": "TicketTimersDeadline",
+      "owner": "fixture-timers-api",
+      "comment": "A deadline of Ticket's Timers.",
+      "values": [
+        {
+          "name": "Idle",
+          "serializedAs": "idle"
+        },
+        {
+          "name": "Remind",
+          "serializedAs": "remind"
+        },
+        {
+          "name": "Respond",
+          "serializedAs": "respond"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketTimersFireTimerResultOutcome": {
+      "name": "TicketTimersFireTimerResultOutcome",
+      "owner": "fixture-timers-api",
+      "comment": "When it fired a deadline with then: what the move met.",
+      "values": [
+        {
+          "name": "Moved",
+          "serializedAs": "moved"
+        },
+        {
+          "name": "Skipped",
+          "serializedAs": "skipped"
+        },
+        {
+          "name": "Vetoed",
+          "serializedAs": "vetoed"
+        },
+        {
+          "name": "Forbidden",
+          "serializedAs": "forbidden"
+        }
+      ],
+      "origin": "behavior"
+    }
+  },
+  "operationSets": [
+    {
+      "name": "TicketActions",
+      "comment": "A ticket's status and timers operations (D103), for callers who hold\ntickets.write; a reset or a snooze needs tickets.timers too, which the\ncore checks.",
+      "operations": [
+        {
+          "name": "timersFireTimer",
+          "comment": "Fires a deadline that is due and has not fired: marks it fired and moves the status by its then, recording the outcome; a veto or a missing permission the move meets leaves the status as it is and the deadline fired. A deadline whose until holds is cancelled instead. On a deadline not due, fired already or not started it changes nothing. Any principal who may write the instance may call it; the engine's runner calls it on every due deadline, every sweepMs.",
+          "docs": {
+            "title": "Ticket timers: fire timer",
+            "description": "Fires a deadline that is due and has not fired: marks it fired and moves the status by its then, recording the outcome; a veto or a missing permission the move meets leaves the status as it is and the deadline fired. A deadline whose until holds is cancelled instead. On a deadline not due, fired already or not started it changes nothing. Any principal who may write the instance may call it; the engine's runner calls it on every due deadline, every sweepMs.",
+            "capability": "ticket.timers.fire-timer",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "ticket_timers_fire_timer",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketTimersFireTimerResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketTimersFireTimerInput"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "tickets.write"
+          ],
+          "behaviorOperation": {
+            "database": "fixture-timers-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Timers",
+            "behavior": "Timers",
+            "operation": "fireTimer",
+            "writes": true,
+            "permissions": [
+              "tickets.timers"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/timers/fire-timer",
+          "origin": "behavior"
+        },
+        {
+          "name": "timersResetTimer",
+          "comment": "Starts a deadline again from what it starts from now, the create, the status's entry into its state or its field's value, so it is due afterMs after it and not fired: a snooze or a fire is undone. Needs the config's permission; refused for a deadline with nothing to start from now, or whose until holds.",
+          "docs": {
+            "title": "Ticket timers: reset timer",
+            "description": "Starts a deadline again from what it starts from now, the create, the status's entry into its state or its field's value, so it is due afterMs after it and not fired: a snooze or a fire is undone. Needs the config's permission; refused for a deadline with nothing to start from now, or whose until holds.",
+            "capability": "ticket.timers.reset-timer",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "ticket_timers_reset_timer",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketTimersResetTimerResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketTimersResetTimerInput"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "tickets.write"
+          ],
+          "behaviorOperation": {
+            "database": "fixture-timers-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Timers",
+            "behavior": "Timers",
+            "operation": "resetTimer",
+            "writes": true,
+            "permissions": [
+              "tickets.timers"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/timers/reset-timer",
+          "origin": "behavior"
+        },
+        {
+          "name": "timersSnoozeTimer",
+          "comment": "Moves a started deadline's due time to dueAt, and a fired one fires again then. A later write keeps it, until what the deadline starts from changes. Needs the config's permission; refused for a deadline not started, cancelled, or whose until holds.",
+          "docs": {
+            "title": "Ticket timers: snooze timer",
+            "description": "Moves a started deadline's due time to dueAt, and a fired one fires again then. A later write keeps it, until what the deadline starts from changes. Needs the config's permission; refused for a deadline not started, cancelled, or whose until holds.",
+            "capability": "ticket.timers.snooze-timer",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "ticket_timers_snooze_timer",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketTimersSnoozeTimerResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketTimersSnoozeTimerInput"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "tickets.write"
+          ],
+          "behaviorOperation": {
+            "database": "fixture-timers-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Timers",
+            "behavior": "Timers",
+            "operation": "snoozeTimer",
+            "writes": true,
+            "permissions": [
+              "tickets.timers"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/timers/snooze-timer",
+          "origin": "behavior"
+        },
+        {
+          "name": "statusTransition",
+          "comment": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "docs": {
+            "title": "Ticket status: transition",
+            "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+            "capability": "ticket.status.transition",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "ticket_status_transition",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketStatusTransitionResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketStatusTransitionInput"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "tickets.write"
+          ],
+          "behaviorOperation": {
+            "database": "fixture-timers-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "status",
+            "behavior": "Workflow",
+            "operation": "transition",
+            "writes": true
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/status/transition",
+          "origin": "behavior"
+        }
+      ],
+      "behaviorOperations": {
+        "type": "Ticket"
+      },
+      "permissions": [
+        "tickets.write"
+      ]
+    }
+  ],
+  "workers": [
+    {
+      "name": "TicketTimers",
+      "comment": "Runs Ticket's deadlines as they fall due (D103): the worker\nfixture-timers-api-ticket-timers.",
+      "queue": "TicketDeadline",
+      "concurrency": 2,
+      "behaviorWorker": {
+        "type": "Ticket"
+      },
+      "origin": "behavior"
+    }
+  ]
+}

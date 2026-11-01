@@ -65,7 +65,7 @@ func TestWorkflowTablesOnPostgres(t *testing.T) {
 		t.Skipf("the behaviors' core's archive is not staged at %s: run scripts/rules-archive.sh (make rules-archive)", archive)
 	}
 
-	ormDir := generateWorkflowORMModule(t, paths)
+	ormDir := generateBehaviorORMModule(t, paths, workflowFixture)
 	for typeName, owned := range map[string][]string{
 		"OrderCreate":    {"Status", "StatusEnteredAt", "Version"},
 		"OrderUpdate":    {"Status", "StatusEnteredAt"},
@@ -93,24 +93,24 @@ func TestWorkflowTablesOnPostgres(t *testing.T) {
 	}
 }
 
-// generateWorkflowORMModule writes fixture-workflow-db's Go types module,
-// its ORM module and its Postgres DDL (under the ORM's testdata) into a
-// temporary tree, loaded and generated with the core's registry, and
-// returns the ORM module's directory.
-func generateWorkflowORMModule(t *testing.T, paths naming.LocalPaths) string {
+// generateBehaviorORMModule writes fixture's Go types module, its ORM
+// module and its Postgres DDL (under the ORM's testdata) into a temporary
+// tree, loaded and generated with the core's registry, and returns the ORM
+// module's directory: fixture-workflow-db's or fixture-timers-db's.
+func generateBehaviorORMModule(t *testing.T, paths naming.LocalPaths, fixture string) string {
 	t.Helper()
 	reg := registry.New(naming.Default())
-	schema, err := loader.LoadService(filepath.Join(fixturesDir, workflowFixture), loader.WithRegistry(reg))
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, fixture), loader.WithRegistry(reg))
 	if err != nil {
-		t.Fatalf("load %s: %v", workflowFixture, err)
+		t.Fatalf("load %s: %v", fixture, err)
 	}
 	clock := codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
-	typesModule := "example.com/schemas/types/go/" + workflowFixture
+	typesModule := "example.com/schemas/types/go/" + fixture
 	root := t.TempDir()
-	typesDir := filepath.Join(root, "types", "go", workflowFixture)
-	ormDir := filepath.Join(root, "orm", workflowFixture)
+	typesDir := filepath.Join(root, "types", "go", fixture)
+	ormDir := filepath.Join(root, "orm", fixture)
 
-	typesOutput, err := typegen.Generate(schema, typegen.Options{SchemaName: workflowFixture, ModulePath: typesModule, Registry: reg, Clock: clock})
+	typesOutput, err := typegen.Generate(schema, typegen.Options{SchemaName: fixture, ModulePath: typesModule, Registry: reg, Clock: clock})
 	if err != nil {
 		t.Fatalf("generate types: %v", err)
 	}
@@ -122,8 +122,8 @@ func generateWorkflowORMModule(t *testing.T, paths naming.LocalPaths) string {
 	}
 
 	ormOutput, err := Generate(schema, Options{
-		SchemaName:  workflowFixture,
-		ModulePath:  "example.com/schemas/orm/" + workflowFixture,
+		SchemaName:  fixture,
+		ModulePath:  "example.com/schemas/orm/" + fixture,
 		TypesModule: typesModule,
 		Registry:    reg,
 		Clock:       clock,
@@ -141,7 +141,7 @@ func generateWorkflowORMModule(t *testing.T, paths naming.LocalPaths) string {
 		t.Fatalf("write orm: %v", err)
 	}
 
-	ddl, err := sqlgen.Generate(schema, sqlgen.Options{SchemaName: workflowFixture})
+	ddl, err := sqlgen.Generate(schema, sqlgen.Options{SchemaName: fixture})
 	if err != nil {
 		t.Fatalf("generate ddl: %v", err)
 	}

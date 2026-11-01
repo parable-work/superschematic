@@ -9,7 +9,9 @@
 //! own fields (every use's issues together), then the guards (the first
 //! veto wins), then the initializers or the operation's handler, then the
 //! after-change hooks. Every effect lands in one change set; the first
-//! refusal ends the run.
+//! refusal ends the run. The command's own operation may say it writes
+//! nothing (`Cx::unchanged`): its change set then holds no write and no
+//! after-change hook runs.
 //!
 //! A hook runs in a frame: a type, its bound uses and one row. The
 //! command's frame is its own type on its own row; a use reaches another
@@ -29,13 +31,15 @@ use crate::behavior::{
     Change, ConfigError, ConfigTarget, Declaration, GuardRequest, Hook, OperationDecl, Stop,
     ValidationRequest,
 };
-use crate::changes::{ChangeSet, DeadlineChange, OutboxEvent, RowRef, RowWrite, SubRowWrite};
+use crate::changes::{
+    ChangeSet, DeadlineChange, OutboxEvent, RowRef, RowWrite, SubRowChange, SubRowWrite,
+};
 use crate::command::{Action, Command};
 use crate::context::{listed, ConfigCx};
 use crate::core::{Core, Outcome, Registered, Step};
 use crate::erased::{AnyConfig, Scope};
 use crate::patch::merge_patch;
-use crate::reads::{Answer, Answers, LockKey, ReadRequest, Row};
+use crate::reads::{Answer, Answers, LockKey, ReadRequest, Row, SubRow};
 use crate::refusal::{
     Code, ConfigIssue, ConfigIssueKind, Refusal, SchemaChange, SchemaIssue, ValidationIssue, Veto,
 };
@@ -187,6 +191,8 @@ pub(crate) struct Run<'a> {
     /// How many keys each use has made, by type, use and label.
     keys: RefCell<BTreeMap<(String, String, String), u64>>,
     depth: Cell<usize>,
+    /// Set once the command's own operation said it writes nothing.
+    pub unchanged: Cell<bool>,
 }
 
 impl<'a> Run<'a> {
@@ -334,6 +340,7 @@ impl<'a> Run<'a> {
             missing: RefCell::new(Missing::default()),
             keys: RefCell::new(BTreeMap::new()),
             depth: Cell::new(0),
+            unchanged: Cell::new(false),
         }
     }
 
@@ -397,6 +404,114 @@ impl<'a> Run<'a> {
         match self.read(request)? {
             Answer::Row(row) => Ok(row.as_ref()),
             _ => Err(mismatched(request)),
+        }
+    }
+
+    pub fn read_sub_rows(&self, request: &ReadRequest) -> Hook<&'a [SubRow]> {
+        match self.read(request)? {
+            Answer::SubRows(rows) => Ok(rows.as_slice()),
+            _ => Err(mismatched(request)),
+        }
+    }
+
+    /// The rows of one of a use's sub-tables on its frame's row: the
+    /// host's, with the run's writes of them so far applied in order, in
+    /// key order. A row the run creates reads no host.
+    pub fn sub_rows(&self, frame: Frame<'_>, index: usize, table: &str) -> Hook<Vec<SubRow>> {
+        let declaration = self.declaration(frame, index);
+        if !declaration.has_table(table) {
+            return Err(self.defect_of(
+                frame,
+                index,
+                format!(
+                    "sub_rows: {table} is not a sub-table it declares ({})",
+                    listed(&declaration.table_names())
+                ),
+            ));
+        }
+        let use_id = frame.uses[index].spec.id();
+        let created = self.rows.borrow()[frame.row].version.is_none();
+        let mut rows: BTreeMap<String, Map<String, Value>> = BTreeMap::new();
+        if let (false, Some(key)) = (created, frame.key) {
+            let request = ReadRequest::sub_rows(&frame.spec.name, key, use_id, table);
+            for row in self.read_sub_rows(&request)? {
+                rows.insert(row.key.clone(), present(&row.values));
+            }
+        }
+        let at = frame.row_ref();
+        for write in self
+            .pending
+            .borrow()
+            .sub_rows
+            .iter()
+            .filter(|write| write.row == at && write.use_id == use_id && write.table == table)
+        {
+            match &write.change {
+                SubRowChange::Insert { values } => {
+                    rows.insert(write.key.clone(), present(values));
+                }
+                SubRowChange::Update { values } => {
+                    if let Some(row) = rows.get_mut(&write.key) {
+                        for (name, value) in values {
+                            if value.is_null() {
+                                row.remove(name);
+                            } else {
+                                row.insert(name.clone(), value.clone());
+                            }
+                        }
+                    }
+                }
+                SubRowChange::Delete => {
+                    rows.remove(&write.key);
+                }
+            }
+        }
+        Ok(rows
+            .into_iter()
+            .map(|(key, values)| SubRow { key, values })
+            .collect())
+    }
+
+    /// The first write the run has made, named for a defect's message;
+    /// `None` when it has made none.
+    pub fn written(&self) -> Option<String> {
+        for row in self.rows.borrow().iter() {
+            if let Some(field) = row.set.values().flat_map(|fields| fields.keys()).next() {
+                return Some(format!("set({field})"));
+            }
+            if row.write != Write::Read {
+                return Some(format!(
+                    "a write of {} {}",
+                    row.type_name,
+                    row.key.as_deref().unwrap_or_default()
+                ));
+            }
+        }
+        let pending = self.pending.borrow();
+        if let Some(write) = pending.sub_rows.first() {
+            return Some(format!("a write of sub-table {}", write.table));
+        }
+        if let Some(event) = pending.events.first() {
+            return Some(format!("emit({})", event.kind));
+        }
+        pending.deadlines.first().map(|change| match change {
+            DeadlineChange::Arm { name, .. } => format!("arm({name})"),
+            DeadlineChange::Clear { name, .. } => format!("clear({name})"),
+        })
+    }
+
+    // unchanged_write refuses a write the core makes for a hook (a writing
+    // call on another row, a create) after the command's operation said it
+    // writes nothing.
+    fn unchanged_write(&self, frame: Frame<'_>, index: usize, what: &str) -> Hook<()> {
+        if self.unchanged.get() {
+            Err(self.defect_of(
+                frame,
+                index,
+                format!("unchanged() and a write in one run: {what}"),
+            ))
+        } else {
+            Ok(())
         }
     }
 
@@ -661,6 +776,11 @@ impl<'a> Run<'a> {
                     writable,
                 )?;
                 if declared.writes {
+                    self.unchanged_write(
+                        from,
+                        from_index,
+                        &format!("{use_id}.{operation} of {type_name} {key}"),
+                    )?;
                     self.mark_updated(row);
                     self.after_change(
                         frame,
@@ -705,6 +825,7 @@ impl<'a> Run<'a> {
                 "create_row takes a type's name and a row's key: non-empty strings",
             ));
         }
+        self.unchanged_write(from, from_index, &format!("create_row({type_name} {key})"))?;
         if self.find_row(type_name, key).is_some() {
             return Err(
                 Refusal::new(Code::Conflict, format!("{type_name} {key} already exists")).into(),
@@ -895,7 +1016,9 @@ impl<'a> Run<'a> {
         self.load(key)?;
         let (index, declared) = self.find_operation(self.top, use_id, operation)?;
         let result = self.invoke(self.top, index, declared, params, None, None, true)?;
-        if declared.writes {
+        // An operation that said it writes nothing writes no row and runs
+        // no after-change hook.
+        if declared.writes && !self.unchanged.get() {
             self.mark_updated(self.top.row);
             self.after_change(
                 self.top,
@@ -1088,6 +1211,7 @@ impl<'a> Run<'a> {
             index,
             action,
             writable,
+            own: false,
         }
     }
 
@@ -1293,11 +1417,16 @@ impl<'a> Run<'a> {
                         caller_type,
                     },
                 )?;
-                bound.registered.behavior.operation(
-                    self.scope(frame, index, &declared.name, declared.writes && writable),
-                    &declared.name,
-                    params,
-                )
+                // The handler of a caller's operation, not a call's, is the
+                // command's own, whose unchanged() the core honors.
+                let scope = Scope {
+                    own: caller.is_none(),
+                    ..self.scope(frame, index, &declared.name, declared.writes && writable)
+                };
+                bound
+                    .registered
+                    .behavior
+                    .operation(scope, &declared.name, params)
             },
         )
     }
@@ -1325,6 +1454,16 @@ fn anchored_writes(frame: Frame<'_>, fields: &Map<String, Value>) -> Vec<Validat
         .collect()
 }
 
+// present is a sub-table row's values with each null left out: a NULL
+// column is no value.
+fn present(values: &Map<String, Value>) -> Map<String, Value> {
+    values
+        .iter()
+        .filter(|(_, value)| !value.is_null())
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect()
+}
+
 const EMPTY_REASON: &str =
     "config_change returns a reason (a non-empty string) to refuse, or None to allow";
 
@@ -1334,7 +1473,8 @@ const MISSING_CONFIG: &str = "must have required property 'config'";
 
 /// A parameter check handed a config its behavior did not parse: a defect
 /// of the core's, refused as the behavior's, as every other hook does.
-const CONFIG_OF_ANOTHER_TYPE: &str = "the core holds a config of another type for this use";
+pub(crate) const CONFIG_OF_ANOTHER_TYPE: &str =
+    "the core holds a config of another type for this use";
 
 /// What a use's config came to.
 pub(crate) enum Parsed {

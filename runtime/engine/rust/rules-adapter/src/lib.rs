@@ -20,15 +20,20 @@
 //! reads through the transaction: a row by its key, its own and owned
 //! columns converted to the core's JSON (a timestamp to epoch
 //! milliseconds, a UUID to base62), a NULL column absent; whether a table
-//! has rows; a type's spec from the layout. A soft-deletable table's reads
-//! and writes see its live rows alone. A lock is a transaction's advisory
-//! lock on Postgres; SQLite takes none, and the unit that writes begins
-//! with a check of each read made under one. A refusal is returned whole
+//! has rows; a type's spec from the layout; a row's rows of a use's
+//! sub-table, in key order. A soft-deletable table's reads and writes see
+//! its live rows alone. A lock is a transaction's advisory lock on
+//! Postgres; SQLite takes none, and the unit that writes begins with a
+//! check of each read made under one. A refusal is returned whole
 //! ([`Error::Refused`]); a change set is applied as one unit in a
-//! savepoint, every row fenced on the version it was read at, and a row
-//! that moved runs the command again from fresh state, up to
-//! [`MAX_ATTEMPTS`] runs, before it is refused as `busy`. A raw SQL write
-//! of an owned column is never refused: the core reads what it wrote.
+//! savepoint, every row fenced on the version it was read at, its
+//! sub-table rows written and its deadlines armed and cleared as messages
+//! of the table's deadline queue, and a row that moved runs the command
+//! again from fresh state, up to [`MAX_ATTEMPTS`] runs, before it is
+//! refused as `busy`. A due deadline runs through `run_deadline`, which
+//! spends its arming (a worker's claim of its message) in the same unit
+//! (D103). A raw SQL write of an owned column or a sub-table row is never
+//! refused: the core reads what was written.
 //!
 //! ```ignore
 //! use superschematic_rules_adapter::{postgres, Caller, Host, Layout};
@@ -64,9 +69,11 @@ use std::collections::BTreeMap;
 use serde_json::{Map, Value};
 
 pub use host::Host;
-pub use layout::{Column, Convert, Layout, Live, Operation, OwnedField, Table, Use};
+pub use layout::{
+    Column, Convert, Deadlines, Layout, Live, Operation, OwnedField, SubTable, Table, Use,
+};
 pub use superschematic_rules::{
-    Action, Caller, ChangeSet, Code, Command, Core, Refusal, Row, TypeSpec,
+    Action, Caller, ChangeSet, Code, Command, Core, Refusal, Row, SubRow, TypeSpec,
 };
 
 /// How many times a command whose row moved runs before it is refused as
@@ -125,6 +132,58 @@ pub struct Executed {
 /// A row's owned fields, by use id and then declared name, as the core
 /// gives them.
 pub type Owned = BTreeMap<String, Map<String, Value>>;
+
+/// A due deadline a host runs (D103): its row's key in the core's form (a
+/// UUID's base62 wire form), the use, the deadline's name, the time it was
+/// armed to fall due at, in epoch milliseconds, and its payload: what its
+/// message in the table's deadline queue holds.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Deadline {
+    pub key: String,
+    pub use_id: String,
+    pub name: String,
+    pub at: i64,
+    pub payload: Value,
+}
+
+/// A worker's claim of a deadline's message: the message's id and the
+/// claim's token, as the queue gave them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Claim {
+    pub id: String,
+    pub token: String,
+}
+
+/// What running a due deadline came to (D103).
+#[derive(Debug)]
+pub enum DeadlineRun {
+    /// The deadline ran, its change set applied with its arming spent.
+    Ran(Box<Executed>),
+    /// Nothing ran: the claim's message was gone before the unit could
+    /// spend it, the deadline armed or cleared since the claim, or claimed
+    /// again after its lease.
+    ClaimLost,
+    /// Nothing ran: the row or the use is gone (the core's `not_found`,
+    /// carried here), and the arming was spent.
+    Gone(Box<Refusal>),
+}
+
+impl DeadlineRun {
+    /// Whether the deadline ran.
+    pub fn ran(&self) -> bool {
+        matches!(self, DeadlineRun::Ran(_))
+    }
+
+    /// Why nothing ran, as every adapter words it: `claim lost` or `gone`;
+    /// empty for a deadline that ran.
+    pub fn why(&self) -> &'static str {
+        match self {
+            DeadlineRun::Ran(_) => "",
+            DeadlineRun::ClaimLost => "claim lost",
+            DeadlineRun::Gone(_) => "gone",
+        }
+    }
+}
 
 /// Why a command did not apply.
 #[derive(Debug)]

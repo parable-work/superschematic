@@ -1,4 +1,4 @@
-import type { BehaviorConfigs } from "@superschematic/schema";
+import type { BehaviorConfigs, TimersDeadline } from "@superschematic/schema";
 
 // FK ON DELETE actions expressible on a relation. SET NULL clears the
 // reference instead of deleting the row, so it needs a nullable foreign key
@@ -41,3 +41,36 @@ export type WorkflowConfig = BehaviorConfigs["Workflow"];
 // inputs. The field's type is the union of the config's states. A table
 // carries Workflow on any number of fields, and never beside @behavior.
 export type Workflow<C extends WorkflowConfig> = C["states"][number];
+
+/**
+ * Timers' config on a table (D103): @superschematic/schema's TimersConfig,
+ * its field starts and its status named by the table's own fields. sweepMs
+ * is the engine's: a table's deadlines fall due one by one through the
+ * API's @behaviorWorker, which reads none.
+ */
+export interface TimersOn<T> {
+  readonly deadlines: Readonly<Record<string, TimersDeadlineOn<T>>>;
+  /** The permission a caller needs to reset or snooze a deadline; nobody may when absent. */
+  readonly permission?: string;
+  /** The field whose Workflow the deadlines read and move (enters starts, then, until); implied when the table has one Workflow, needed when it has several. */
+  readonly status?: Extract<keyof T, string>;
+}
+
+/** One deadline of TimersOn<T>: a field start names a field of T. */
+export interface TimersDeadlineOn<T> extends Omit<TimersDeadline, "start"> {
+  readonly start: { readonly create: true } | { readonly enters: string } | { readonly field: Extract<keyof T, string> };
+}
+
+/**
+ * Named deadlines on a table's rows (D103):
+ * `export abstract class Ticket implements Timers<Ticket, { deadlines: { ... } }>`.
+ * The type stays a table. Timers keeps its state in a sub-table of the
+ * row (ticket_timers_deadlines), arms each deadline as a message of the
+ * table's deadline queue (ticket_deadline_queue), and fires it when the
+ * API's @behaviorWorker(Ticket) claims it. Its operations
+ * (timers.fireTimer, resetTimer, snoozeTimer) change it; the generated
+ * repository has no write path for its sub-table. Like Trait<T> and
+ * User<Config>, Timers resolves to the empty object type, so the compiler
+ * imposes no members. The first type argument is the table itself.
+ */
+export type Timers<T, C extends TimersOn<T>> = NonNullable<unknown>;

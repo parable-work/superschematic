@@ -406,6 +406,48 @@ func TestRunRefusesAnIncompleteQueue(t *testing.T) {
 	}
 }
 
+// TestRunAllRunsEveryQueue: RunAll runs each queue's loop at once, each
+// handling its own messages, and returns once all stopped; a queue it
+// cannot run stops the others and is its error.
+func TestRunAllRunsEveryQueue(t *testing.T) {
+	deadlines, outbox := newFake(), newFake()
+	deadlines.add("d1", func(context.Context) error { return nil })
+	outbox.add("o1", func(context.Context) error { return nil })
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan error, 1)
+	go func() {
+		stopped <- RunAll(ctx, []Queue{deadlines.queue(time.Minute), outbox.queue(time.Minute)}, Options{Idle: 10 * time.Millisecond})
+	}()
+	waitFor(t, "each queue's message", func() bool {
+		deadlines.mu.Lock()
+		defer deadlines.mu.Unlock()
+		outbox.mu.Lock()
+		defer outbox.mu.Unlock()
+		return len(deadlines.completed) == 1 && len(outbox.completed) == 1
+	})
+	cancel()
+	if err := <-stopped; err != nil {
+		t.Fatalf("RunAll = %v", err)
+	}
+
+	broken := newFake().queue(0)
+	done := make(chan error, 1)
+	go func() {
+		done <- RunAll(context.Background(), []Queue{newFake().queue(time.Minute), broken}, Options{Idle: 10 * time.Millisecond})
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("RunAll ran a queue without a lease")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a queue RunAll could not run did not stop the others")
+	}
+	if err := RunAll(context.Background(), nil, Options{}); err == nil {
+		t.Fatal("RunAll ran no queue")
+	}
+}
+
 // TestEachMessageIsASpan: each message's handling is a consumer span of the
 // global tracer, the root of a trace of its own, which the handler's
 // context carries and whose status records its error (D67).

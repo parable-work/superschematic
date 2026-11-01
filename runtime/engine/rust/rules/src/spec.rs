@@ -9,6 +9,12 @@
 //! sub-tables, its operations and its create parameters: the behavior's
 //! name for a type anchor, the field's name for a field anchor. The ids of
 //! a type's uses are distinct; the core refuses a type whose ids repeat.
+//!
+//! A type also lists its own fields, each by name with its IR type and
+//! whether its values are instants ([`FieldSpec`]): what a config that
+//! names a field is held to (a Timers deadline that starts from a field's
+//! time), since a config that names a field is typed by the type it sits
+//! on (D103). A host that gives none gives a type with no own fields.
 
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
@@ -99,22 +105,66 @@ impl UseSpec {
     }
 }
 
-/// A type the core runs: its name and its uses in list order. Guards,
-/// validation, initializers and after-change hooks run in this order.
+/// One own field of a type: its name, its IR type's name and whether its
+/// values are instants.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldSpec {
+    pub name: String,
+    /// Its IR type's name (`string`, `Temporal.DateTime`).
+    #[serde(rename = "type")]
+    pub type_name: String,
+    /// Whether its values are instants: epoch milliseconds from a table's
+    /// adapter, or the ISO 8601 text an engine schema's date-time holds.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub date_time: bool,
+}
+
+fn is_false(flag: &bool) -> bool {
+    !*flag
+}
+
+impl FieldSpec {
+    /// A field that holds no instant.
+    pub fn new(name: impl Into<String>, type_name: impl Into<String>) -> Self {
+        FieldSpec {
+            name: name.into(),
+            type_name: type_name.into(),
+            date_time: false,
+        }
+    }
+
+    /// A field whose values are instants.
+    pub fn date_time(name: impl Into<String>, type_name: impl Into<String>) -> Self {
+        FieldSpec {
+            date_time: true,
+            ..FieldSpec::new(name, type_name)
+        }
+    }
+}
+
+/// A type the core runs: its name, its uses in list order and its own
+/// fields. Guards, validation, initializers and after-change hooks run in
+/// the uses' order.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TypeSpec {
     pub name: String,
     #[serde(default)]
     pub uses: Vec<UseSpec>,
+    /// The type's own fields, by name: what a config that names a field is
+    /// held to (a Timers field start). Empty when the host gives none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<FieldSpec>,
 }
 
 impl TypeSpec {
-    /// A type with no uses yet.
+    /// A type with no uses and no own fields yet.
     pub fn new(name: impl Into<String>) -> Self {
         TypeSpec {
             name: name.into(),
             uses: Vec::new(),
+            fields: Vec::new(),
         }
     }
 
@@ -122,6 +172,17 @@ impl TypeSpec {
     pub fn with(mut self, entry: UseSpec) -> Self {
         self.uses.push(entry);
         self
+    }
+
+    /// The type with an own field added after the ones before it.
+    pub fn with_field(mut self, field: FieldSpec) -> Self {
+        self.fields.push(field);
+        self
+    }
+
+    /// The own field with a name.
+    pub fn field(&self, name: &str) -> Option<&FieldSpec> {
+        self.fields.iter().find(|field| field.name == name)
     }
 
     /// The use with an id, and its position in the list.
@@ -176,5 +237,36 @@ mod tests {
             json!({"field": "status"})
         );
         assert_eq!(serde_json::to_value(Anchor::Type).unwrap(), json!("type"));
+        assert!(spec.fields.is_empty());
+    }
+
+    #[test]
+    fn a_specs_own_fields_read_and_write_as_json() {
+        let spec = TypeSpec::new("Ticket")
+            .with_field(FieldSpec::new("title", "string"))
+            .with_field(FieldSpec::date_time("visitAt", "Temporal.DateTime"));
+        let written = serde_json::to_value(&spec).unwrap();
+        assert_eq!(
+            written,
+            json!({
+                "name": "Ticket",
+                "uses": [],
+                "fields": [
+                    {"name": "title", "type": "string"},
+                    {"name": "visitAt", "type": "Temporal.DateTime", "dateTime": true}
+                ]
+            })
+        );
+        assert_eq!(serde_json::from_value::<TypeSpec>(written).unwrap(), spec);
+        assert_eq!(
+            spec.field("visitAt").map(|field| field.date_time),
+            Some(true)
+        );
+        assert!(spec.field("when").is_none());
+        // A spec with no own fields writes none.
+        assert_eq!(
+            serde_json::to_value(TypeSpec::new("Note")).unwrap(),
+            json!({"name": "Note", "uses": []})
+        );
     }
 }

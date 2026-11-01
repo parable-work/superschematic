@@ -151,9 +151,10 @@ build it.
 Default: `github.com/parable-work/superschematic/runtime/rules/go`
 
 Go module path of the behaviors' core's Go binding and adapter (D103). A
-generated Go ORM requires it when its schema has a table whose fields are
-behaviors: its repositories run their creates, updates, deletes and each
-use's operations through the core. The module links the core's static
+generated Go ORM requires it when its schema has a table that composes
+behaviors, on its fields or by `implements`: its repositories run their
+creates, updates, deletes, each use's operations and each due deadline
+through the core. The module links the core's static
 archive through cgo: a release's archives tarball holds it and its header
 (`CGO_LDFLAGS=-L<dir>/lib`), and in a checkout `scripts/rules-archive.sh`
 builds it where cargo is (D82).
@@ -203,8 +204,9 @@ dependency ([Use the engine from TypeScript](/superschematic/reference/version-g
 Default: `@superschematic/rules`
 
 npm package name of the behaviors' core built for WebAssembly (D103). A
-generated TypeScript types package whose database has a table whose
-fields are behaviors (`status: Workflow<{ ... }>`) imports its `initSync`
+generated TypeScript types package whose database has a table that
+composes behaviors (`status: Workflow<{ ... }>`, `implements Timers<Ticket,
+{ ... }>`) imports its `initSync`
 in `orm.ts`, which passes the core to the HTTP runtime's adapter, and
 lists the package as a dependency.
 
@@ -491,12 +493,13 @@ Directory of the version-graph core's Go binding module.
 Default: unset. This repository's own file sets `runtime/rules/go`.
 
 Directory of the behaviors' core's Go module (D103). With this key set, a
-generated Go ORM whose schema has a table whose fields are behaviors
+generated Go ORM whose schema has a table that composes behaviors
 replaces the module with the checkout, where the module links the archive
 `scripts/rules-archive.sh` stages under its `lib/<goos>_<goarch>`, and so
 do a Go API over such a database and the server, job or worker that
-serves it. A Go server's image then builds the archive in a `rules`
-stage, from the engine's Cargo workspace of the checkout the module lies
+serves it, a `@behaviorWorker` that runs its deadlines among them. A Go
+server's image then builds the archive in a `rules` stage, from the
+engine's Cargo workspace of the checkout the module lies
 in (its `runtime/engine/rust`), and generated CI stages it with the
 checkout's `scripts/rules-archive.sh` before it builds the server.
 Unset, each requires the module's pinned version, as a release's build
@@ -597,9 +600,12 @@ Directory of the behaviors' adapter for a Rust server,
 `superschematic-rules-adapter` (D103). A generated Rust API crate that
 serves a table's behavior operations
 ([A table's behavior operations](/superschematic/guides/api-routes/#a-tables-behavior-operations))
-depends on it by path, with its `postgres` feature, and its server's
-image holds the adapter's Cargo workspace. The crate is unpublished, so
-the build refuses such an API while this key is unset.
+or runs a table's deadlines from a `@behaviorWorker`
+([The worker](/superschematic/guides/api-routes/#the-worker))
+depends on it by path, with its `postgres` feature, and the image of its
+server and of the worker holds the adapter's Cargo workspace. The crate
+is unpublished, so the build refuses such an API while this key is
+unset.
 
 ### `paths.rules_behaviors_rust`
 
@@ -689,13 +695,14 @@ Default: unset. This repository's own file sets
 `runtime/rules/typescript`.
 
 Directory of the behaviors' core's npm package (`package.json`, D103). A
-generated TypeScript types package whose database has a table whose
-fields are behaviors depends on `@superschematic/rules` with `*`; with this
+generated TypeScript types package whose database has a table that
+composes behaviors depends on `@superschematic/rules` with `*`; with this
 key set, the output root's Bun workspace overrides that with a `file:`
 path to the checkout, which the install copies from its `dist/`, so build
 it first (`bun install && bun run build` in `runtime/rules/typescript`,
-which builds the core's wasm module with cargo). A TypeScript server that
-opens such a database's repositories needs it for its image, which builds
+which builds the core's wasm module with cargo). A TypeScript server or
+worker that opens such a database's repositories, a `@behaviorWorker`
+among them, needs it for its image, which builds
 the wasm module in a `rules` stage from the engine's Cargo workspace of
 the checkout the package lies in and emits the package's `dist/`;
 unset, the build writes the server no Dockerfile and says why. Generated

@@ -14,19 +14,24 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// The behaviors of a table whose fields are behaviors, in orm.ts (D103): a
-// DB type that writes `status: Workflow<{ ... }>` stays a table, and the
-// fields the behavior owns are columns of it that its row holds and the
-// inputs of its create, update and upsert leave out. orm.ts embeds the database's layout
-// document (behaviorlayout.Of), which the HTTP runtime's adapter
-// (runtime/http/typescript/src/rules.ts) reads to run the behaviors' core
-// inside the ORM's transaction, imports the core from the rules package
-// (naming.RulesNpmPackage) and passes it to ormOf (withRulesCore), and
-// types each use's operations as members of the table's repository under
-// the use's id, orm.order.status.transition(key, { to: 'paid' }). Nothing
-// here names a behavior: the operations, their parameters and results, and
-// the owned fields' types come from each behavior's declaration, narrowed
-// by its config where behaviortypes narrows one.
+// The behaviors of a table that composes them, in orm.ts (D103): a DB type
+// that writes `status: Workflow<{ ... }>` or `implements Timers<Ticket, {
+// ... }>` stays a table, and the fields the behavior owns are columns of it
+// that its row holds and the inputs of its create, update and upsert leave
+// out. orm.ts embeds the database's layout document (behaviorlayout.Of),
+// which the HTTP runtime's adapter (runtime/http/typescript/src/rules.ts)
+// reads to run the behaviors' core inside the ORM's transaction, imports
+// the core from the rules package (naming.RulesNpmPackage) and passes it
+// to ormOf (withRulesCore), and types each use's operations as members of
+// the table's repository under the use's member,
+// orm.order.status.transition(key, { to: 'paid' }) and
+// orm.ticket.timers.fireTimer(key, { deadline: 'respond' }). A table whose
+// behaviors arm deadlines has runDeadline, which a behavior worker's
+// handler calls, and one whose behaviors keep sub-tables or arm deadlines
+// has no upserts. Nothing here names a behavior: the operations, their
+// parameters and results, and the owned fields' types come from each
+// behavior's declaration, narrowed by its config where behaviortypes
+// narrows one.
 
 // repositoryMembers are the members of a table's repository in the HTTP
 // runtime (runtime/http/typescript/src/orm.ts's TableRepository), which a
@@ -49,14 +54,18 @@ var repositoryMembers = []string{
 	"keyColumns", "upsertWhere", "upsertRow", "upsertBatches", "rowsOfKeys", "resealed", "rulesHost",
 	"caller", "columnNamed", "ownedColumns", "coreOwn", "createColumns", "updateColumns",
 	"operationColumns", "wireKey", "createThroughCore", "updateThroughCore", "deleteThroughCore",
-	"notFound", "operate", "bindUses", "refuseOwnedUpdate", "upsertInputs", "actor", "clearActor",
+	"notFound", "operate", "bindUses", "refuseOwnedUpdate", "refuseUpsert", "upsertInputs", "actor",
+	"clearActor", "runDeadline",
 }
 
-// ORMUse is a field-anchored use of a behavior as orm.ts writes it: ID,
-// the repository's member its operations sit under, the anchor field;
-// Behavior, its registered name; and its operations on a row.
+// ORMUse is a use of a behavior on a table as orm.ts writes it: ID, the
+// use's id, the anchor field or the behavior's name; Member, the
+// repository's member its operations sit under (behaviorlayout.UseMember:
+// the anchor field, or timers for implements Timers); Behavior, its
+// registered name; and its operations on a row.
 type ORMUse struct {
 	ID         string
+	Member     string
 	Behavior   string
 	Operations []ORMOperation
 }
@@ -94,22 +103,40 @@ func typeScriptRules(schema *ir.Schema, reg *registry.Registry) (*ormRules, erro
 		td := schema.Types[name]
 		out.types[name] = map[string]string{}
 		for _, use := range table.Uses {
-			if slices.Contains(repositoryMembers, use.ID) {
-				return nil, fmt.Errorf("tsgen: table %s: the behavior %s on field %s would put its operations under the repository's member %s, which the repository holds itself; rename the field", name, use.Behavior, use.ID, use.ID)
+			member := use.Member
+			if member == "" {
+				member = use.ID
 			}
-			ref, _ := td.FieldBehavior(use.ID)
+			// A field use is named by its field, a use the table implements
+			// by the behavior.
+			where := "field " + use.ID
+			if use.Anchor == "" {
+				where = "implements " + use.Behavior
+			}
+			if slices.Contains(repositoryMembers, member) {
+				if use.Anchor == "" {
+					return nil, fmt.Errorf("tsgen: table %s: implements %s would put its operations under the repository's member %s, which the repository holds itself", name, use.Behavior, member)
+				}
+				return nil, fmt.Errorf("tsgen: table %s: the behavior %s on field %s would put its operations under the repository's member %s, which the repository holds itself; rename the field", name, use.Behavior, use.ID, member)
+			}
+			var ref ir.BehaviorRef
+			for _, each := range td.TableBehaviors() {
+				if each.UseID() == use.ID {
+					ref = each
+				}
+			}
 			declaration, ok := reg.Behavior(use.Behavior)
 			if !ok {
-				return nil, fmt.Errorf("tsgen: table %s: field %s: behavior %s is not registered", name, use.ID, use.Behavior)
+				return nil, fmt.Errorf("tsgen: table %s: %s: behavior %s is not registered", name, where, use.Behavior)
 			}
 			narrowed, err := behaviortypes.Narrow(declaration, ref.Config, behaviortypes.Target{
 				Schema:   schema.Name,
-				Base:     td.Name + codegen.ToPascalCase(use.ID),
+				Base:     td.Name + codegen.ToPascalCase(member),
 				Document: schema,
 				Instance: td,
 			})
 			if err != nil {
-				return nil, fmt.Errorf("tsgen: table %s: field %s: behavior %s: %w", name, use.ID, use.Behavior, err)
+				return nil, fmt.Errorf("tsgen: table %s: %s: behavior %s: %w", name, where, use.Behavior, err)
 			}
 			aliases := map[string]any{}
 			for _, alias := range narrowed.Aliases {
@@ -125,7 +152,7 @@ func typeScriptRules(schema *ir.Schema, reg *registry.Registry) (*ormRules, erro
 					}
 				}
 			}
-			ormUse := ORMUse{ID: use.ID, Behavior: use.Behavior}
+			ormUse := ORMUse{ID: use.ID, Member: member, Behavior: use.Behavior}
 			for _, op := range use.Operations {
 				var doc string
 				for _, declared := range declaration.Operations {

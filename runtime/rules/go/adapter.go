@@ -30,17 +30,31 @@ import (
 // runs the command again from fresh state with the same request id, up to
 // MaxAttempts runs, and then refuses it as busy. A kind of read, step or
 // write it does not know (the core's enums are open) refuses the command as
-// internal, and so do sub-table rows, outbox events and deadlines until
-// each has a table (D103's order of the work, step 3).
+// internal, and so do outbox events until the outbox has a table (D103's
+// order of the work, step 3).
 //
-// A generated repository calls it: each field-anchored use's operations
-// run RunOperation, and a table that composes behaviors creates, updates
-// and deletes its rows through the core (RunCreate, RunUpdate, RunDelete)
-// so its uses' initializers, guards and validation run, and binds in an
+// A change set's sub-table rows are rows of the tables the layout names
+// for each use's declared tables, and its deadlines messages of the
+// table's deadline queue (D103): an arm replaces the live message of its
+// row, use and name, a clear deletes it, and a row's delete deletes all of
+// its messages and, hard, its sub-table rows. A deadline command spends
+// the arming it runs in the unit that applies its change set, right after
+// the row writes and before the deadline changes, so a deadline the fired
+// command arms again survives it: a worker's run (RunDeadline with a
+// claim) by completing its claimed message, any other run by deleting the
+// message armed at the time it names, which it reads before each run. The
+// queue message is the only record of an arming, so the host, not the
+// core, checks that a deadline is still armed.
+//
+// A generated repository calls it: each use's operations run
+// RunOperation, and a table that composes behaviors creates, updates and
+// deletes its rows through the core (RunCreate, RunUpdate, RunDelete) so
+// its uses' initializers, guards and validation run, and binds in an
 // upsert's insert the owned fields the core's create of each row gives it
-// (PrepareCreate). A hand-written server runs Execute on a store of its
-// own transaction. The owned columns are read-only in a repository's
-// inputs; a raw SQL write of one is never refused (D103).
+// (PrepareCreate). A behavior worker's handler runs each due deadline with
+// RunDeadline. A hand-written server runs Execute on a store of its own
+// transaction. The owned columns and the sub-tables are read-only in a
+// repository's inputs; a raw SQL write of one is never refused (D103).
 
 const (
 	// MaxAttempts is how many times Execute runs a command whose row moved
@@ -157,7 +171,23 @@ type Result struct {
 // and is refused otherwise, since the change set names every row it writes
 // by its key. A create of a key the table holds is refused as conflict, as
 // the reference host refuses it.
+//
+// A deadline command runs only while its deadline is armed at the time it
+// names: before each run the adapter reads the arming, refusing the
+// command as not_found when none is armed at that time and as
+// invalid_argument when it falls due after the command's time, and the
+// unit spends the arming it read.
 func Execute(ctx context.Context, host Host, typeName string, command Command, opts *ExecuteOptions) (*Result, error) {
+	return execute(ctx, host, typeName, command, opts, nil)
+}
+
+// errClaimLost is what execute returns for a deadline command run for a
+// claim the worker no longer holds: nothing applied.
+var errClaimLost = errors.New("rules: the claim of the deadline's message is lost")
+
+// execute is Execute, a deadline command spending claim's message in its
+// unit when claim is set, in place of the arming at the time it names.
+func execute(ctx context.Context, host Host, typeName string, command Command, opts *ExecuteOptions, claim *Claim) (*Result, error) {
 	if err := host.check(); err != nil {
 		return nil, err
 	}
@@ -183,7 +213,16 @@ func Execute(ctx context.Context, host Host, typeName string, command Command, o
 	if err := refuseOwnedWrites(table, run); err != nil {
 		return nil, err
 	}
+	deadline := run.Action.Kind == ActionDeadline
+	if deadline && table.Deadlines == nil {
+		return nil, Internal("a deadline %s.%s of %s ran, and the behaviors' layout gives %s no deadline queue", run.Action.UseID, run.Action.Name, typeName, typeName)
+	}
 	for attempt := 1; attempt <= MaxAttempts; attempt++ {
+		if deadline && claim == nil {
+			if err := stillArmed(ctx, host.Store, table, run); err != nil {
+				return nil, busyOr(err, typeName, run, attempt)
+			}
+		}
 		changes, reads, err := settle(ctx, host, core, table.Spec, run)
 		if err != nil {
 			return nil, busyOr(err, typeName, run, attempt)
@@ -192,7 +231,7 @@ func Execute(ctx context.Context, host Host, typeName string, command Command, o
 		if err != nil {
 			return nil, err
 		}
-		statements, err := statementsOf(ctx, host, typeName, run, changes, opts)
+		statements, err := statementsOf(ctx, host, typeName, run, changes, opts, claim)
 		if err != nil {
 			return nil, busyOr(err, typeName, run, attempt)
 		}
@@ -206,6 +245,19 @@ func Execute(ctx context.Context, host Host, typeName string, command Command, o
 				result = json.RawMessage(`null`)
 			}
 			return &Result{Changes: *changes, Result: result, Key: keyOfCommand(run), Attempts: attempt}, nil
+		}
+		if deadline && claim != nil {
+			// The unit moved: a fenced row, or the claim's completion found
+			// its message gone. A claim the worker no longer holds is a
+			// deadline another command moved, cleared or ran: nothing of it
+			// runs.
+			held, err := claimHeld(ctx, host.Store, table, claim)
+			if err != nil {
+				return nil, busyOr(err, typeName, run, attempt)
+			}
+			if !held {
+				return nil, errClaimLost
+			}
 		}
 	}
 	return nil, BusyRefusal(typeName, run, MaxAttempts)
@@ -605,7 +657,7 @@ func settle(ctx context.Context, host Host, core Core, spec TypeSpec, command Co
 			}
 		case step.Read != nil:
 			for _, request := range step.Read {
-				answer, err := answerOf(ctx, host, request)
+				answer, err := answerOf(ctx, host, request, len(locks))
 				if err != nil {
 					return nil, nil, err
 				}
@@ -657,9 +709,12 @@ func contains(list []string, item string) bool {
 	return false
 }
 
-// answerOf is the answer to one of the core's reads, through the store; a
-// kind of read the adapter does not take refuses the command as internal.
-func answerOf(ctx context.Context, host Host, request ReadRequest) (Answer, error) {
+// answerOf is the answer to one of the core's reads, through the store,
+// made while the command holds held locks; a kind of read the adapter does
+// not take refuses the command as internal, and so does a read of
+// sub-table rows under a lock on a store whose locks are fenced, which its
+// unit has no check of yet.
+func answerOf(ctx context.Context, host Host, request ReadRequest, held int) (Answer, error) {
 	switch request.Kind {
 	case ReadKindRow:
 		table := host.Layout.Types[request.Type]
@@ -692,6 +747,19 @@ func answerOf(ctx context.Context, host Host, request ReadRequest) (Answer, erro
 		}
 		spec := table.Spec
 		return Answer{Kind: ReadKindSpec, Spec: &spec}, nil
+	case ReadKindSubRows:
+		if held > 0 && host.Store.Locks() == LocksFenced {
+			return Answer{}, Internal("a read of sub-table rows under a lock has no check on SQLite or D1 yet (D103)")
+		}
+		table := host.Layout.Types[request.Type]
+		if table == nil {
+			return Answer{Kind: ReadKindSubRows, SubRows: []SubRow{}}, nil
+		}
+		rows, err := readSubRows(ctx, host.Store, table, request.Key, request.UseID, request.Table)
+		if err != nil {
+			return Answer{}, err
+		}
+		return Answer{Kind: ReadKindSubRows, SubRows: rows}, nil
 	default:
 		return Answer{}, Internal("the adapter answers no read of this kind: %s", jsonText(request))
 	}
@@ -756,31 +824,30 @@ func live(table *Table) string {
 	return fmt.Sprintf(" AND %s IS NULL", quote(table.Live.Column))
 }
 
-// statementsOf is the statements of a change set, in its order: a create's
-// insert of its key, own fields and owned columns, an update's set of the
-// patch's own columns, its owned columns and the next version where the
-// row is live and at the version expected, a delete where the row is live
-// and at the version expected (a soft delete's set of opts.SoftDelete for
-// the command's own row), each fenced to change one row. The command's own
+// statementsOf is the statements of a change set, in the unit's order
+// (D103). First its row writes: a create's insert of its key, own fields
+// and owned columns, an update's set of the patch's own columns, its owned
+// columns and the next version where the row is live and at the version
+// expected, a delete where the row is live and at the version expected (a
+// soft delete's set of opts.SoftDelete for the command's own row), each
+// fenced to change one row. Then a deadline command's spend of its arming
+// (claim's message, or the message armed at the time it names); the
+// sub-table row writes; the deadline changes; and for each row deleted its
+// deadline messages and, hard, its sub-table rows. A sub-table row write
+// or a deadline change of a row the change set deletes is left out, and
+// each sub-table row write is held to change one row. The command's own
 // row binds its own columns from opts.OwnColumns when the caller encoded
-// them. A create of a key the table holds is refused as conflict;
-// sub-table rows, outbox events and deadlines, and a kind of write the
-// adapter does not know, refuse the command as internal.
-func statementsOf(ctx context.Context, host Host, typeName string, command Command, changes *ChangeSet, opts *ExecuteOptions) ([]Statement, error) {
-	notYet := func(what string) error {
-		return Internal("%s of %s writes %s, which the adapter takes once each has a table of its own (D103's order of the work, step 3)", command.Action.name(), typeName, what)
-	}
-	switch {
-	case len(changes.SubRows) > 0:
-		return nil, notYet("sub-table rows")
-	case len(changes.Events) > 0:
-		return nil, notYet("outbox events")
-	case len(changes.Deadlines) > 0:
-		return nil, notYet("deadlines")
+// them. A create of a key the table holds is refused as conflict; outbox
+// events, and a kind of write the adapter does not know, refuse the
+// command as internal.
+func statementsOf(ctx context.Context, host Host, typeName string, command Command, changes *ChangeSet, opts *ExecuteOptions, claim *Claim) ([]Statement, error) {
+	if len(changes.Events) > 0 {
+		return nil, Internal("%s of %s writes outbox events, which the adapter takes once the outbox has a table (D103's order of the work, step 3)", command.Action.name(), typeName)
 	}
 	dialect := host.Store.Dialect()
 	commandKey := keyOfCommand(command)
 	var statements []Statement
+	var deleted []deletedRow
 	for _, write := range changes.Rows {
 		table, err := host.Layout.table(write.Type)
 		if err != nil {
@@ -880,6 +947,7 @@ func statementsOf(ctx context.Context, host Host, typeName string, command Comma
 					Values: values,
 					Expect: 1,
 				})
+				deleted = append(deleted, deletedRow{table: table, key: *write.Key})
 				continue
 			}
 			where, err := fencedWhere(table, *write.Key, write.ExpectedVersion, bind)
@@ -891,11 +959,94 @@ func statementsOf(ctx context.Context, host Host, typeName string, command Comma
 				Values: values,
 				Expect: 1,
 			})
+			deleted = append(deleted, deletedRow{table: table, key: *write.Key, hard: true})
 		default:
 			return nil, Internal("the adapter takes no row write of this kind: %s", rawOrJSON(write))
 		}
 	}
+	gone := func(row RowRef) bool {
+		for _, d := range deleted {
+			if row.is(d.table.Type, d.key) {
+				return true
+			}
+		}
+		return false
+	}
+
+	if command.Action.Kind == ActionDeadline {
+		table, err := host.Layout.table(typeName)
+		if err != nil {
+			return nil, err
+		}
+		spend, err := spendOf(dialect, table, command.Action, claim)
+		if err != nil {
+			return nil, err
+		}
+		statements = append(statements, spend)
+	}
+
+	for _, write := range changes.SubRows {
+		if gone(write.Row) {
+			continue
+		}
+		statement, err := subRowStatement(host.Layout, dialect, write)
+		if err != nil {
+			return nil, err
+		}
+		if statement != nil {
+			statements = append(statements, *statement)
+		}
+	}
+
+	for _, change := range changes.Deadlines {
+		if gone(change.Row) {
+			continue
+		}
+		more, err := deadlineStatements(host.Layout, dialect, change)
+		if err != nil {
+			return nil, err
+		}
+		statements = append(statements, more...)
+	}
+
+	for _, d := range deleted {
+		key, err := keyValue(d.table, d.key)
+		if err != nil {
+			return nil, err
+		}
+		if queue := d.table.Deadlines; queue != nil {
+			statements = append(statements, Statement{
+				Text:   fmt.Sprintf("DELETE FROM %s WHERE %s = %s", quote(queue.Table), quote(queue.RowKey), placeholder(dialect, 1)),
+				Values: []any{key},
+				Expect: AnyRows,
+			})
+		}
+		if !d.hard {
+			// A soft-deleted row keeps its sub-table rows, its state for a
+			// restore, which no command reads while it is not live.
+			continue
+		}
+		// Deleted explicitly, since SQLite enforces no foreign key unless
+		// the connection turned it on.
+		for _, use := range d.table.Uses {
+			for _, sub := range use.Tables {
+				statements = append(statements, Statement{
+					Text:   fmt.Sprintf("DELETE FROM %s WHERE %s = %s", quote(sub.Table), quote(sub.Row), placeholder(dialect, 1)),
+					Values: []any{key},
+					Expect: AnyRows,
+				})
+			}
+		}
+	}
 	return statements, nil
+}
+
+// deletedRow is a row a change set deletes: its table, its key, and
+// whether the delete is hard (not a soft delete's stamp).
+type deletedRow struct {
+	table *Table
+	key   string
+	hard  bool
 }
 
 // fencedWhere is the condition an update or a delete holds its row to: its

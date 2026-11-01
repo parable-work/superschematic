@@ -164,6 +164,38 @@ func Concurrency(def int) (int, error) {
 	return n, nil
 }
 
+// RunAll runs each of queues with Run, all at once, with the same options,
+// and returns once every one stopped: the claim loops of a behavior
+// worker (D103), one per behavior queue of its table, each up to the
+// options' concurrency. It returns the first error of a queue it could
+// not run, after the others stopped, which a queue it cannot run makes
+// them do at once.
+func RunAll(ctx context.Context, queues []Queue, opts Options) error {
+	if len(queues) == 0 {
+		return errors.New("worker: no queue to run")
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	errs := make([]error, len(queues))
+	var wg sync.WaitGroup
+	for i, q := range queues {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if errs[i] = Run(ctx, q, opts); errs[i] != nil {
+				cancel()
+			}
+		}()
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Run claims and handles q's messages until ctx ends, then stops as the
 // package says: it claims no more, lets the running handlers finish within
 // the grace, and releases the messages of those that do not. It returns

@@ -11,9 +11,11 @@
 //! parameters to the declaration's schemas in its own code, in the words
 //! the engine gave, which its tests hold to the file.
 //!
-//! Ported so far, in step 1 of D103's order of the work: [`Workflow`]. The
-//! engine's behaviors (`superschematic-engine-behaviors`) stay beside these
-//! until each is ported and the engine goes.
+//! Ported so far: [`Workflow`], in step 1 of D103's order of the work, and
+//! [`Timers`], in step 3, whose deadlines a table keeps in a sub-table and
+//! arms through the core. The engine's behaviors
+//! (`superschematic-engine-behaviors`) stay beside these until each is
+//! ported and the engine goes.
 //!
 //! A host builds its core with [`core`], as it passed the engine's
 //! `behaviors::core()`, and adds its own behaviors:
@@ -37,8 +39,13 @@
 
 mod declared;
 mod schema;
+pub mod timers;
 pub mod workflow;
 
+pub use timers::{
+    deadlines_field, parse_date_time, Timers, TimersConfig, TimersDeadline, TimersStart,
+    TimersThen, TimersUntil,
+};
 pub use workflow::{
     entered_at_of, is_terminal_state, state_outcome, status_of, Workflow, WorkflowConfig,
     WorkflowOutcome, WorkflowTransition,
@@ -48,19 +55,20 @@ use superschematic_rules::Core;
 
 /// The behaviors [`core`] registers, in its order: the engine's order
 /// (`behaviors::NAMES`) of the ones ported so far.
-pub const NAMES: [&str; 1] = [workflow::NAME];
+pub const NAMES: [&str; 2] = [workflow::NAME, timers::NAME];
 
 /// The declaration file of each behavior [`core`] registers, in its order:
 /// the text the compiler registers and each behavior reads in place, which
-/// a binding hands its host whole (D103), each field's column type and the
-/// value field with the rest.
-pub const DECLARATIONS: [&str; 1] = [workflow::DECLARATION];
+/// a binding hands its host whole (D103), each field's column type, the
+/// value field, the sub-tables and whether it arms deadlines with the
+/// rest.
+pub const DECLARATIONS: [&str; 2] = [workflow::DECLARATION, timers::DECLARATION];
 
 /// A core with every behavior ported so far, in the engine's order, and
 /// the default permission matcher: what a host runs, extended with its own
 /// behaviors (`.with(..)`) and a deployment's matcher (`.with_matcher(..)`).
 pub fn core() -> Core {
-    Core::new().with(Workflow)
+    Core::new().with(Workflow).with(Timers)
 }
 
 #[cfg(test)]

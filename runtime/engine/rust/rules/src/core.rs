@@ -12,19 +12,22 @@
 //! its own. A host whose reads are asynchronous writes the loop itself, the
 //! same way.
 
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 use crate::behavior::{Behavior, Declaration};
 use crate::changes::ChangeSet;
 use crate::command::Command;
+use crate::context::listed;
 use crate::erased::{Erased, Typed};
 use crate::permissions::{DottedPermissions, PermissionMatcher};
-use crate::reads::{Answer, Answers, LockKey, ReadRequest};
+use crate::reads::{Answer, Answers, LockKey, ReadRequest, Row, SubRow};
 use crate::refusal::Refusal;
-use crate::run::Run;
+use crate::run::{Run, CONFIG_OF_ANOTHER_TYPE};
 use crate::spec::TypeSpec;
 
 /// How many times [`Core::drive`] runs a command before it gives up on a
@@ -153,6 +156,36 @@ impl Core {
         let run = Run::new(self, spec, command, answers, &uses);
         let result = run.execute();
         run.finish(result)
+    }
+
+    /// The fields a read of a row shows for one use beyond its owned
+    /// columns ([`Behavior::read_fields`]): computed from the row as the
+    /// host read it and the use's sub-tables' rows, by table name, each in
+    /// key order. A type whose configs the define check refuses is refused
+    /// so, and a use the type does not have is `not_found`. A read of a row
+    /// runs no command, so this asks the host for nothing: the host reads
+    /// the row and the sub-tables first.
+    pub fn read_fields(
+        &self,
+        spec: &TypeSpec,
+        use_id: &str,
+        row: &Row,
+        tables: &BTreeMap<String, Vec<SubRow>>,
+    ) -> Result<Map<String, Value>, Refusal> {
+        let uses = Run::bind(self, spec)?;
+        let Some(bound) = uses.iter().find(|bound| bound.spec.id() == use_id) else {
+            let ids: Vec<String> = spec.uses.iter().map(|u| u.id().to_owned()).collect();
+            return Err(Refusal::not_found(format!(
+                "{} has no behavior use {use_id} (its uses: {})",
+                spec.name,
+                listed(&ids)
+            )));
+        };
+        bound
+            .registered
+            .behavior
+            .read_fields(&*bound.config, row, tables)
+            .ok_or_else(|| Refusal::defect(&bound.spec.behavior, CONFIG_OF_ANOTHER_TYPE))
     }
 
     /// Runs a command to its outcome, asking a source for every read and

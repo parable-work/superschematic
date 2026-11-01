@@ -89,7 +89,7 @@ fn recording() -> ScenarioFile {
                     {"call": "events.read", "principal": alice, "args": [{"schema": "Note", "instanceId": "{{id:1}}"}], "expect": {"events": [
                         {"cursor": 3, "kind": "create", "change": {"data": {"title": "a"}, "behaviors": flag(false, 1000)}},
                         {"cursor": 4, "kind": "operation", "change": {"behavior": "Flag", "operation": "toggle", "params": {}, "patch": {"behaviors": flag(true, 2000)}}},
-                        {"cursor": 5, "kind": "update", "change": {"patch": {"data": {"locked": true}}}}
+                        {"cursor": 5, "kind": "update", "change": {"data": {"locked": true}}}
                     ], "next": 5, "more": false}},
                     {"call": "instances.invoke", "principal": alice, "args": ["Note", "{{id:1}}", "ring"], "error": {"class": "EngineError", "code": "not_found", "message": "Note has no operation ring"}},
                     // 14: a write past the host stops the scenario.

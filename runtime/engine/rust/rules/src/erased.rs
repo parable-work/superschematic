@@ -4,13 +4,15 @@
 //! type and hands the hook the typed context it expects.
 
 use std::any::Any;
+use std::collections::BTreeMap;
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::behavior::{
     Behavior, Change, ConfigError, ConfigTarget, Declaration, GuardRequest, Hook, ValidationRequest,
 };
 use crate::context::{ConfigCx, Cx, View};
+use crate::reads::{Row, SubRow};
 use crate::refusal::{SchemaIssue, ValidationIssue, Veto};
 use crate::run::{Frame, Run};
 
@@ -18,8 +20,9 @@ use crate::run::{Frame, Run};
 pub(crate) type AnyConfig = Box<dyn Any + Send + Sync>;
 
 /// Where a hook runs: the run, the frame (a type, its uses and a row), the
-/// use's position in the type's list, the action a veto refuses, and
-/// whether the hook may write.
+/// use's position in the type's list, the action a veto refuses, whether
+/// the hook may write, and whether it is the command's own operation's
+/// handler.
 #[derive(Clone, Copy)]
 pub(crate) struct Scope<'s> {
     pub run: &'s Run<'s>,
@@ -27,6 +30,7 @@ pub(crate) struct Scope<'s> {
     pub index: usize,
     pub action: &'s str,
     pub writable: bool,
+    pub own: bool,
 }
 
 pub(crate) trait Erased: Send + Sync {
@@ -59,6 +63,12 @@ pub(crate) trait Erased: Send + Sync {
     fn operation(&self, scope: Scope<'_>, name: &str, params: &Value) -> Hook<Value>;
     fn deadline(&self, scope: Scope<'_>, name: &str, payload: &Value) -> Hook<()>;
     fn after_change(&self, scope: Scope<'_>, change: &Change<'_>) -> Hook<()>;
+    fn read_fields(
+        &self,
+        config: &(dyn Any + Send + Sync),
+        row: &Row,
+        tables: &BTreeMap<String, Vec<SubRow>>,
+    ) -> Option<Map<String, Value>>;
 }
 
 /// A typed behavior behind [`Erased`].
@@ -105,6 +115,7 @@ impl<B: Behavior> Typed<B> {
         Ok(Cx {
             view: self.view(scope)?,
             writable: scope.writable,
+            own: scope.own,
         })
     }
 }
@@ -178,5 +189,15 @@ impl<B: Behavior> Erased for Typed<B> {
 
     fn after_change(&self, scope: Scope<'_>, change: &Change<'_>) -> Hook<()> {
         self.0.after_change(&self.cx(scope)?, change)
+    }
+
+    fn read_fields(
+        &self,
+        config: &(dyn Any + Send + Sync),
+        row: &Row,
+        tables: &BTreeMap<String, Vec<SubRow>>,
+    ) -> Option<Map<String, Value>> {
+        let config = config.downcast_ref::<B::Config>()?;
+        Some(self.0.read_fields(config, row, tables))
     }
 }

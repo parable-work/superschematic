@@ -39,7 +39,10 @@ use serde_json::{Map, Value};
 
 use crate::convert::{internal, Bind, Cell};
 use crate::run::{self, Dialect, Statement, Store};
-use crate::{Caller, Command, CreateOptions, Error, ExecuteOptions, Executed, Host, Owned, Row};
+use crate::{
+    Caller, Claim, Command, CreateOptions, Deadline, DeadlineRun, Error, ExecuteOptions, Executed,
+    Host, Owned, Row, SubRow,
+};
 
 /// The savepoint a change set applies in.
 const APPLY_SAVEPOINT: &str = "rules_apply";
@@ -188,6 +191,52 @@ pub fn read_row(
     key: &str,
 ) -> Result<Option<Row>, Error> {
     finish(run::read_row(host, &SqliteStore { conn }, type_name, key))
+}
+
+/// Reads the rows of one sub-table of a use on a row, as the core reads
+/// them (D103): each by its key, in key order, its values by the declared
+/// field's name, a column with no value absent. A row of a type the layout
+/// lacks has none.
+pub fn read_sub_rows(
+    host: &Host<'_>,
+    conn: &Connection,
+    type_name: &str,
+    key: &str,
+    use_id: &str,
+    table: &str,
+) -> Result<Vec<SubRow>, Error> {
+    finish(run::read_sub_rows_of(
+        host,
+        &SqliteStore { conn },
+        type_name,
+        key,
+        use_id,
+        table,
+    ))
+}
+
+/// Runs a due deadline of a row of a type on `conn` (D103), at the later
+/// of the host's time and the time it was armed to fall due at, as
+/// `caller`, its arming spent in the unit that applies its change set: a
+/// claim of its message by its id and token, or, without one, the message
+/// armed at its `at`, which is read before each run. A claim lost and a row
+/// or a use gone run nothing, as Postgres's `run_deadline` says.
+pub fn run_deadline(
+    host: &Host<'_>,
+    conn: &Connection,
+    type_name: &str,
+    deadline: &Deadline,
+    caller: Caller,
+    claim: Option<&Claim>,
+) -> Result<DeadlineRun, Error> {
+    finish(run::run_deadline(
+        host,
+        &SqliteStore { conn },
+        type_name,
+        deadline,
+        caller,
+        claim,
+    ))
 }
 
 /// Runs the host loop to its end. A SQLite store's every step returns at

@@ -1,7 +1,7 @@
 // Package behaviorops adds a table's behavior operations to an API (D103 in
 // docs/DECISIONS.md). An API marks a class with no members
 // @behaviorOperations(Type), from @superschematic/api, naming a table of its
-// database one of whose fields is a behavior:
+// database that composes a behavior, by implements or on a field:
 //
 //	@behaviorOperations(Order)
 //	@requirePermission(["orders.write"])
@@ -9,14 +9,18 @@
 //
 // Once the set passes its checks (verify.CheckBehaviorOperations), and
 // before the rest of the verification pass, the loader fills it here with
-// one operation for each operation of each behavior on a field of the
-// table, in field order and then declaration order: POST
-// order/{id}/status/transition, named statusTransition, taking the row's
-// key and an input of the operation's parameters and returning its result,
-// with generated @docs and an @mcp handle (order_status_transition), or a
-// hidden @mcp when the set's @requireService admits only calling services
-// (D37), the set's clause as its own, and the marker
-// ir.FieldDef.BehaviorOperation.
+// one operation for each operation of each behavior the table composes, in
+// the table's list order (the behaviors it implements, then those on its
+// fields) and then declaration order, each named by the use's member
+// (behaviorlayout.UseMember: the field, or the behavior's storage key in
+// camel case): POST order/{id}/status/transition, named statusTransition,
+// or POST ticket/{id}/timers/fire-timer, named timersFireTimer, taking the
+// row's key and an input of the operation's parameters and returning its
+// result, with generated @docs and an @mcp handle (order_status_transition,
+// ticket_timers_fire_timer), or a hidden @mcp when the set's
+// @requireService admits only calling services (D37), the set's clause as
+// its own, and the marker ir.FieldDef.BehaviorOperation, whose Use is the
+// use's id (status, Timers).
 // The input and result types, and the enums they name, are the
 // declaration's schemas as the config narrows them (behaviortypes.Narrow),
 // as the repositories type them. So every check the pass makes of an
@@ -32,6 +36,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/behaviorlayout"
 	"github.com/parable-work/superschematic/internal/generator/behaviortypes"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/registry"
@@ -46,14 +51,15 @@ const (
 )
 
 // OperationName is the name of the operation the expansion adds for op of
-// the use on the field use: the field's name and the operation's
-// (statusTransition).
+// the use whose member is use (behaviorlayout.UseMember): the member and
+// the operation's (statusTransition, timersFireTimer).
 func OperationName(use, op string) string {
 	return use + codegen.ToPascalCase(op)
 }
 
-// Base is the name the narrowing of the use on typeName's field use names
-// its types by (OrderStatus), as the repositories name theirs.
+// Base is the name the narrowing of the use whose member is use on
+// typeName names its types by (OrderStatus, TicketTimers), as the
+// repositories name theirs.
 func Base(typeName, use string) string {
 	return typeName + codegen.ToPascalCase(use)
 }
@@ -185,12 +191,12 @@ func PlanSet(set *ir.OperationSet, db *ir.Schema, reg *registry.Registry) (*Plan
 	p := &Plan{}
 	b := &builder{plan: p, named: map[string]bool{}}
 	b.useScalar(key.TypeRef.Name)
-	for _, ref := range td.FieldBehaviors() {
+	for _, ref := range td.TableBehaviors() {
 		declaration, ok := reg.Behavior(ref.Name)
 		if !ok {
 			return nil, fmt.Errorf("behaviorops: %s: %s's %s is the behavior %s, which is not registered", set.Name, td.Name, ref.UseID(), ref.Name)
 		}
-		use := ref.UseID()
+		use := behaviorlayout.UseMember(ref)
 		base := Base(td.Name, use)
 		narrowed, err := behaviortypes.Narrow(declaration, ref.Config, behaviortypes.Target{
 			Schema: db.Name, Base: base, Document: db, Instance: td,
@@ -199,12 +205,17 @@ func PlanSet(set *ir.OperationSet, db *ir.Schema, reg *registry.Registry) (*Plan
 			return nil, fmt.Errorf("behaviorops: %s: %s's %s, %s: %w", set.Name, td.Name, use, behaviortypes.An(ref.Name), err)
 		}
 		// A narrowing's doc names the type it narrows by its base, which
-		// for a use on a field is the type's name and the field's (an
-		// OrderStatus's): its docs name the field instead (Order's status),
-		// as the repositories' do.
+		// is the type's name and the use's member (an OrderStatus's, a
+		// TicketTimers's): its docs name the field instead (Order's
+		// status), as the repositories' do, and the table for a use it
+		// implements (Ticket's).
+		owner := td.Name + "'s " + use
+		if !ref.FieldAnchored() {
+			owner = td.Name + "'s"
+		}
 		b.aliases = map[string]behaviortypes.Alias{}
 		for _, alias := range narrowed.Aliases {
-			alias.Doc = strings.ReplaceAll(alias.Doc, behaviortypes.An(base)+"'s", td.Name+"'s "+use)
+			alias.Doc = strings.ReplaceAll(alias.Doc, behaviortypes.An(base)+"'s", owner)
 			b.aliases[alias.Name] = alias
 		}
 		permissions := ConfigPermissions(ref.Config)
@@ -216,9 +227,10 @@ func PlanSet(set *ir.OperationSet, db *ir.Schema, reg *registry.Registry) (*Plan
 	return p, nil
 }
 
-// operationOf is the operation the expansion adds for op of the use ref.
+// operationOf is the operation the expansion adds for op of the use ref,
+// named by its member and marked with its id.
 func (b *builder) operationOf(set *ir.OperationSet, db *ir.Schema, td *ir.TypeDef, key *ir.FieldDef, ref ir.BehaviorRef, op registry.BehaviorOperation, narrowed behaviortypes.Narrowing, permissions []string, policy registry.ToolInvocationPolicy) *ir.FieldDef {
-	use := ref.UseID()
+	use := behaviorlayout.UseMember(ref)
 	out := &ir.FieldDef{
 		Name:       OperationName(use, op.Name),
 		Comment:    op.Description,
@@ -251,7 +263,7 @@ func (b *builder) operationOf(set *ir.OperationSet, db *ir.Schema, td *ir.TypeDe
 			Database:    db.Name,
 			Type:        td.Name,
 			Key:         key.Name,
-			Use:         use,
+			Use:         ref.UseID(),
 			Behavior:    ref.Name,
 			Operation:   op.Name,
 			Writes:      op.Writes,
@@ -420,8 +432,10 @@ func (b *builder) typeOf(node any, name string, role ir.Role) (ir.TypeRef, bool)
 		}
 	}
 	if enum, ok := s["enum"].([]any); ok {
+		// An enum of strings is a string enum whether or not its schema
+		// says type string (Timers' outcome does not).
 		values, isStrings := stringValues(enum)
-		if !isStrings || len(kinds) != 1 || kinds[0] != "string" {
+		if !isStrings || len(kinds) > 1 || (len(kinds) == 1 && kinds[0] != "string") {
 			return b.json(), nullable
 		}
 		b.enum(name, behaviortypes.DescriptionOf(s), values)

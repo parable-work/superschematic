@@ -79,11 +79,23 @@ export interface BehaviorRef {
    */
   field?: string;
   /**
+   * True for a use a DB table implements (D103), `implements Timers<Ticket,
+   * Config>`: anchored on the type, on a table that stays a table. A use on
+   * the whole type without it is @behavior's, which makes the type an engine
+   * type.
+   */
+  implements?: boolean;
+  /**
    * The behavior's registered name: bare for a core behavior,
    * <extension>.<Name> for an extension's. A registry admits the behaviors it
    * registers.
    */
   name: string;
+}
+
+export interface BehaviorWorkerConfig {
+  permissions?: string[];
+  type: string;
 }
 
 export interface DNSPlacement {
@@ -842,9 +854,10 @@ export interface VersionedConfig {
 }
 
 export interface Worker {
+  behaviorWorker?: BehaviorWorkerConfig;
   comment?: string;
   concurrency?: number;
   grace?: string;
   name: string;
-  queue: string;
+  queue?: string;
 }

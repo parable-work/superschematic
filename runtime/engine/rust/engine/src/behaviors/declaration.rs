@@ -61,7 +61,7 @@ pub const BUILTIN_OPERATIONS: [&str; 6] = ["create", "get", "list", "update", "d
 /// characters.
 pub const VETO_CODE: &str = "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$";
 
-const DECLARATION_KEYS: [&str; 12] = [
+const DECLARATION_KEYS: [&str; 14] = [
     "name",
     "description",
     "configSchema",
@@ -70,6 +70,8 @@ const DECLARATION_KEYS: [&str; 12] = [
     "conflicts",
     "fields",
     "value",
+    "tables",
+    "armsDeadlines",
     "operations",
     "signals",
     "preconditionSchema",
@@ -77,6 +79,7 @@ const DECLARATION_KEYS: [&str; 12] = [
 ];
 const SIGNAL_KEYS: [&str; 4] = ["name", "description", "paramsSchema", "access"];
 const FIELD_KEYS: [&str; 5] = ["name", "description", "volatile", "perReader", "type"];
+const TABLE_KEYS: [&str; 4] = ["name", "description", "key", "fields"];
 const VETO_KEYS: [&str; 2] = ["code", "description"];
 const OPERATION_KEYS: [&str; 10] = [
     "name",
@@ -413,12 +416,15 @@ impl BehaviorDeclaration {
 }
 
 /// A declaration without the members only a table's layout reads (D103):
-/// its `value` and each field's `type`, which the engine, keeping no
-/// table, never answers with. It shifts them out, so the members after
-/// them keep the order the declaration writes them in.
+/// its `value`, its `tables` and `armsDeadlines`, and each field's `type`,
+/// which the engine, keeping no table, never answers with. It shifts them
+/// out, so the members after them keep the order the declaration writes
+/// them in.
 fn without_layout_members(mut value: Value) -> Value {
     if let Value::Object(members) = &mut value {
         members.shift_remove("value");
+        members.shift_remove("tables");
+        members.shift_remove("armsDeadlines");
         if let Some(Value::Array(fields)) = members.get_mut("fields") {
             for field in fields {
                 if let Value::Object(field) = field {
@@ -483,6 +489,13 @@ pub fn check_declaration(value: &Value) -> Vec<String> {
     }
     check_fields(members.get("fields"), &mut problems);
     check_value(members, &mut problems);
+    check_tables(members.get("tables"), &mut problems);
+    if members
+        .get("armsDeadlines")
+        .is_some_and(|arms| !arms.is_boolean())
+    {
+        problems.push("armsDeadlines is a boolean".to_owned());
+    }
     check_operations(members.get("operations"), &mut problems);
     check_beside_fields(members, &mut problems);
     check_signals(members.get("signals"), &mut problems);
@@ -583,17 +596,62 @@ fn check_value(members: &Map<String, Value>, problems: &mut Vec<String>) {
     }
 }
 
+/// The sub-tables a behavior keeps per row on a table (D103), which the
+/// engine checks for their shape alone and answers with none of: each an
+/// object of a name, a description, a key and its fields, each field as a
+/// behavior's field is.
+fn check_tables(tables: Option<&Value>, problems: &mut Vec<String>) {
+    let Some(tables) = tables else {
+        return;
+    };
+    let Value::Array(tables) = tables else {
+        problems.push("tables is a list".to_owned());
+        return;
+    };
+    for (index, table) in tables.iter().enumerate() {
+        let at = format!("tables[{index}]");
+        let Value::Object(members) = table else {
+            problems.push(format!("{at} is an object"));
+            continue;
+        };
+        unknown_keys(members, &TABLE_KEYS, &at, problems);
+        if !members
+            .get("name")
+            .and_then(Value::as_str)
+            .is_some_and(is_field_name)
+        {
+            problems.push(format!(
+                "{at}.name {} is not an identifier",
+                shown(members.get("name"))
+            ));
+        }
+        optional_string(
+            members.get("description"),
+            &format!("{at}.description"),
+            problems,
+        );
+        if !members.get("key").is_some_and(Value::is_string) {
+            problems.push(format!("{at}.key is a string"));
+        }
+        check_field_list(members.get("fields"), &format!("{at}.fields"), problems);
+    }
+}
+
 fn check_fields(fields: Option<&Value>, problems: &mut Vec<String>) {
+    check_field_list(fields, "fields", problems);
+}
+
+fn check_field_list(fields: Option<&Value>, list: &str, problems: &mut Vec<String>) {
     let Some(fields) = fields else {
         return;
     };
     let Value::Array(fields) = fields else {
-        problems.push("fields is a list".to_owned());
+        problems.push(format!("{list} is a list"));
         return;
     };
     let mut seen: Vec<&str> = Vec::new();
     for (index, field) in fields.iter().enumerate() {
-        let at = format!("fields[{index}]");
+        let at = format!("{list}[{index}]");
         let Value::Object(members) = field else {
             problems.push(format!("{at} is an object"));
             continue;
@@ -1004,6 +1062,60 @@ mod tests {
             .map(String::as_str)
             .collect();
         assert_eq!(field, ["name", "description"]);
+    }
+
+    /// A declaration may declare the sub-tables a table's row keeps and
+    /// whether it arms deadlines (D103): the engine checks their shape and
+    /// answers with neither, so its Timers answers as it did.
+    #[test]
+    fn the_sub_tables_and_deadlines_are_checked_and_left_out_of_its_json() {
+        assert_eq!(
+            check_declaration(&json!({
+                "name": "test.Clock",
+                "tables": [
+                    {"name": "ticks", "key": "at", "fields": [{"name": "at", "type": "string"}]},
+                    {"name": "1x", "key": 2, "fields": [{"name": "a", "x": 1}], "y": true},
+                    "z"
+                ],
+                "armsDeadlines": "yes"
+            })),
+            [
+                "tables[1] has the unknown key \"y\"",
+                "tables[1].name \"1x\" is not an identifier",
+                "tables[1].key is a string",
+                "tables[1].fields[0] has the unknown key \"x\"",
+                "tables[2] is an object",
+                "armsDeadlines is a boolean"
+            ]
+        );
+        assert_eq!(
+            check_declaration(&json!({"name": "test.Clock", "tables": {}})),
+            ["tables is a list"]
+        );
+        let timers = BehaviorDeclaration::parse(include_str!(
+            "../../../behaviors/declarations/Timers.behavior.json"
+        ))
+        .expect("Timers' declaration is sound");
+        assert!(timers.json.get("tables").is_none());
+        assert!(timers.json.get("armsDeadlines").is_none());
+        let members: Vec<&str> = timers
+            .json
+            .as_object()
+            .expect("an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            members,
+            [
+                "name",
+                "description",
+                "configSchema",
+                "fields",
+                "operations",
+                "vetoes"
+            ]
+        );
     }
 
     #[test]

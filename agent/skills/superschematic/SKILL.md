@@ -230,7 +230,8 @@ Most are load errors; knowing them saves a build round-trip:
 - Every plain class in a DB schema is a table; give each one a `@key`.
   A `@jsonField` class, a `@queue` message, a `@projection`, a `@query`
   class and the params and row types it names, and a type that composes
-  a behavior are not tables.
+  a behavior with `@behavior` (an engine type) are not tables; one that
+  implements a behavior or types a field as one stays a table.
 - A field typed as a behavior (`status: Workflow<{ ... }>`) keeps its
   table a table (D103): the behavior's fields are columns
   (`status`, `status_entered_at`) that the generated repositories read
@@ -261,6 +262,35 @@ Most are load errors; knowing them saves a build round-trip:
   model, so for any other API it refuses a set that needs a caller: make
   the API public, give it an authDb with a `User` table, or mount its
   `RegisterRoutes` behind your own authentication in a server you write.
+- For deadlines on a table's rows (an SLA, an expiring hold, a reminder),
+  implement Timers on the table, its first type argument the table itself:
+  `export abstract class Ticket implements Timers<Ticket, { deadlines: {
+  respond: { start: { create: true }; afterMs: 14400000; then: {
+  transition: "escalated" }; until: { leaves: "open" } } }; permission:
+  "tickets.timers" }> { ... status: Workflow<{ ... }> }` (D103). A start
+  is `{ create: true }`, `{ enters: "<state>" }` or `{ field: "<date-time
+  field>" }`; `then` and `until` read the table's Workflow field, and a
+  table with several names it with `status: "<field>"`. The build adds the
+  sub-table `ticket_timers_deadlines`, the deadline queue
+  `ticket_deadline_queue` and the operations `timers.fireTimer`,
+  `resetTimer` and `snoozeTimer`; a `@behaviorOperations(Ticket)` set
+  serves them (`POST /api/ticket/{id}/timers/fire-timer`). Run the
+  deadlines with a worker of the API, a class with no members:
+  `@behaviorWorker(Ticket, { concurrency: 2 }) export abstract class
+  TicketTimers {}`, with `permissions: [...]` when a `then`'s transition
+  needs one. Write no handler or `Workers` method for it. Without such a
+  worker on some API over the database the deadlines fall due and nothing
+  runs them; the build only warns. Create, update and delete rows one at a
+  time through the repositories (`createOne`, `updateOne`, `deleteOne`;
+  `CreateOne`, `UpdateOne`, `DeleteOne` in Go) or the operations: those
+  arm and clear the deadlines. A raw SQL write arms and clears nothing yet,
+  and nor do the bulk and hard writes, TypeScript's `updateMany`,
+  `deleteMany` and `hardDeleteOne` and Go's `UpdateMany`, `DeleteMany` and
+  `HardDeleteOne`: a moved date-time leaves its deadline armed at the old
+  time. Never write the sub-table or the queue's rows by hand, nor enqueue
+  a `<Table>Deadline` message yourself. A deadline whose fire keeps being
+  refused goes dead after its sixth attempt and is not armed again: retry
+  it with `stack queue retry`.
 - A service's config is the `@envVars` class no other `@envVars` class
   extends; it holds the fields of each class it extends. Two `@envVars`
   classes that do not extend one another fail the load: make the

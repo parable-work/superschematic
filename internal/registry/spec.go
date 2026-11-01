@@ -439,11 +439,13 @@ type GeneratorSpec struct {
 	// DB types.
 	RendersBehaviors bool
 	// RendersFieldBehaviors marks a generator whose output covers what a
-	// field-anchored behavior adds to a table that stays a table (D103,
-	// ir.TypeDef.FieldBehaviors): the columns of the fields it owns,
-	// which the loader adds as fields (ir.FieldDef.Behavior), read-only in
-	// a repository's inputs, and its operations, or nothing of the table
-	// at all. Run refuses to run a generator without it on a schema one of
+	// behavior adds to a table that stays a table, implemented by it or
+	// anchored on a field (D103, ir.TypeDef.TableBehaviors): the columns
+	// of the fields it owns, which the loader adds as fields
+	// (ir.FieldDef.Behavior), read-only in a repository's inputs, its
+	// sub-tables and deadline queue, which the loader adds as types
+	// (ir.TypeDef.BehaviorTable and BehaviorQueue), and its operations,
+	// or nothing of the table at all. Run refuses to run a generator without it on a schema one of
 	// whose tables composes one, or that imports a DB service's table
 	// that does, rather than render the owned columns as writable or drop
 	// the operations. Of the core's generators, sql sets it, which writes

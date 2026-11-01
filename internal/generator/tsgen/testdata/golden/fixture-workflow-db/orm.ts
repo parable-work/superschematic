@@ -28,16 +28,21 @@ Each table's definition also describes its rows for the runtime's
 decodeRow, so a raw query of its columns reads back as its row type:
 query(text, values, { decode: <table>Table }) reads them so (D89).
 
-A table whose fields are behaviors (D103), status: Workflow<{ ... }>, stays
-a table: each field a behavior owns is a column its row holds, which the
-inputs of a create, an update and an upsert leave out, since only the
-behavior's operations change it. Its repository holds each such field's
-operations under the field, orm.order.status.transition(key, { to: 'paid'
-}), and creates, updates and deletes its rows through the behaviors' core,
-which the runtime's adapter runs in the ORM's transaction over the layout
+A table that composes behaviors (D103), status: Workflow<{ ... }> or
+implements Timers<Ticket, { ... }>, stays a table: each field a behavior
+owns is a column its row holds, which the inputs of a create, an update and
+an upsert leave out, since only the behavior's operations change it. Its
+repository holds each use's operations under the use's member, the field
+or the behavior, orm.order.status.transition(key, { to: 'paid' }), and
+creates, updates and deletes its rows through the behaviors' core, which
+the runtime's adapter runs in the ORM's transaction over the layout
 fixtureWorkflowDbRules records. An upsert inserts a new row with the owned
 fields the core's create gives it, and updates a row the key holds by its
-own fields alone. A raw SQL write of an owned column is never refused.
+own fields alone; a table whose behaviors keep sub-tables or arm deadlines
+has no upserts, and its repository runs a due deadline, as a behavior
+worker claimed it (runDeadline). A behavior's sub-table has no repository:
+only its operations write it. A raw SQL write of an owned column or a
+sub-table row is never refused, and arms or clears no deadline.
 */
 import { initSync } from '@superschematic/rules';
 import { ormOf, withRulesCore } from '@superschematic/http-runtime/postgres';
@@ -103,7 +108,7 @@ export interface OrderPageKey {
 export interface OrderRelations {
 }
 
-/** The behaviors on fields of Order (D103): each field's operations, under the field, each run through the behaviors' core on the row whose key it takes. */
+/** The behaviors of Order (D103): each use's operations, under its member, each run through the behaviors' core on the row whose key it takes. */
 export interface OrderUses {
   /** The operations of status, a Workflow. */
   readonly status: UseOperations<{
@@ -237,7 +242,7 @@ export interface ShipmentPageKey {
 export interface ShipmentRelations {
 }
 
-/** The behaviors on fields of Shipment (D103): each field's operations, under the field, each run through the behaviors' core on the row whose key it takes. */
+/** The behaviors of Shipment (D103): each use's operations, under its member, each run through the behaviors' core on the row whose key it takes. */
 export interface ShipmentUses {
   /** The operations of status, a Workflow. */
   readonly status: UseOperations<{
@@ -371,6 +376,7 @@ export const fixtureWorkflowDbRules: RulesLayout = {
           "id": "status",
           "behavior": "Workflow",
           "anchor": "status",
+          "member": "status",
           "fields": [
             {
               "name": "status",
@@ -423,6 +429,17 @@ export const fixtureWorkflowDbRules: RulesLayout = {
               "field": "status"
             }
           }
+        ],
+        "fields": [
+          {
+            "name": "title",
+            "type": "string"
+          },
+          {
+            "name": "placedAt",
+            "type": "Temporal.DateTime",
+            "dateTime": true
+          }
         ]
       }
     },
@@ -447,6 +464,7 @@ export const fixtureWorkflowDbRules: RulesLayout = {
           "id": "status",
           "behavior": "Workflow",
           "anchor": "status",
+          "member": "status",
           "fields": [
             {
               "name": "status",
@@ -474,6 +492,7 @@ export const fixtureWorkflowDbRules: RulesLayout = {
           "id": "paymentStatus",
           "behavior": "Workflow",
           "anchor": "paymentStatus",
+          "member": "paymentStatus",
           "fields": [
             {
               "name": "status",
@@ -550,6 +569,12 @@ export const fixtureWorkflowDbRules: RulesLayout = {
             "anchor": {
               "field": "paymentStatus"
             }
+          }
+        ],
+        "fields": [
+          {
+            "name": "reference",
+            "type": "string"
           }
         ]
       }

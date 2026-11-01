@@ -200,6 +200,16 @@ var parityInputs = []struct{ name, registry, input string }{
 	{"a behavior operation's marker", "core", `{"kind": "OperationSet", "name": "OrderActions", "operations": [
 		{"name": "statusTransition", "typeRef": {"name": "OrderStatusTransitionResult"}, "httpMethod": "POST", "behaviorOperation": {"database": "orders-db", "type": "Order", "key": "id", "use": "status", "behavior": "Workflow", "operation": "transition"}}],
 		"behaviorOperations": {"type": "Order"}}`},
+	// A behavior a table implements, and a worker that runs a table's
+	// behaviors (D103): the worker names its table and no queue, which the
+	// build adds; a worker that names neither is refused.
+	{"a behavior a table implements", "core", `{"name": "Ticket", "role": "DBTable", "behaviors": [
+		{"name": "Timers", "implements": true, "config": {"deadlines": {"respond": {"start": {"create": true}, "afterMs": 1500}}}},
+		{"name": "Workflow", "field": "status", "config": {"states": ["open", "closed"], "transitions": [{"from": "open", "to": "closed"}]}}]}`},
+	{"implements that is not a boolean", "core", `{"name": "Ticket", "role": "DBTable", "behaviors": [{"name": "Timers", "implements": "yes", "config": {"deadlines": {"respond": {"start": {"create": true}}}}}]}`},
+	{"a behavior worker", "core", `{"kind": "API", "name": "tickets-api", "imports": [{"package": "@schemas/tickets-db", "types": ["Ticket"]}],
+		"workers": [{"name": "TicketTimers", "behaviorWorker": {"type": "Ticket", "permissions": ["tickets.escalate"]}, "concurrency": 2}]}`},
+	{"a worker with neither a queue nor a table", "core", `{"kind": "API", "name": "tickets-api", "workers": [{"name": "TicketTimers"}]}`},
 
 	// The invocation policy.
 	{"visible tool without a policy gets the default", "core", `{"kind": "OperationSet", "name": "Ops", "operations": [

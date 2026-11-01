@@ -16,11 +16,25 @@
 //!   live version, its config-change check; `schemas.publish` runs the
 //!   change check again and publishes.
 //! - `instances.create`, `update`, `delete` and `invoke` run the core's
-//!   commands; `get`, `list` and `events.read` read the host. A record is
-//!   compared by its id, its own fields (`data`) and its `behaviors`, the
-//!   fields each behavior owns; an operation by its result; an event by
-//!   its kind and its change: a create's fields, an operation's behavior,
-//!   name and parameters, and the own and owned fields a write set.
+//!   commands; `get`, `list` and `events.read` read the host. A write's
+//!   own date-time fields are stored in their canonical form, as the
+//!   engine's parse of the scalar stores them. A record is compared by its
+//!   id, its own fields (`data`) and its `behaviors`, the fields each
+//!   behavior owns and those it computes on a read
+//!   ([`superschematic_rules::Core::read_fields`], Timers' `deadlines`); an
+//!   operation by its result; an event by its kind and its change: a
+//!   create's fields, an operation's behavior, name and parameters, and the
+//!   own and owned fields a write set, the fields a behavior computes on a
+//!   read left out of the recorded change, since an outbox carries none.
+//! - `runner.runDue` runs each deadline armed and due at the step's time,
+//!   earliest first, as the engine's runner (the `open` step's
+//!   `runner.principal`), each a deadline command of its own, as the
+//!   API's worker runs one (D103); the engine's counters are the store's
+//!   and are not compared, but a deadline the core refuses for anything
+//!   but a veto, which the engine's sweep passes over, is a mismatch. A
+//!   deadline command's change-log entry is compared as the engine's
+//!   sweep event of the operation the deadline's handler calls on its own
+//!   use ([`SWEEP_OPERATIONS`]).
 //! - `schemas.list`, `schemas.live` and `schemas.behaviors` are compared
 //!   by the types defined, the live version's behavior configs, and each
 //!   behavior's declared fields, operations and veto codes.
@@ -32,7 +46,13 @@
 //!
 //! What belongs to the engine's store is not compared: sequence numbers,
 //! versions and timestamps, the schema document define echoes back,
-//! describe and tools documents. A write the store refuses for its own
+//! describe and tools documents, the runner's status. A step that names a
+//! namespace other than the corpus's own stops the scenario there: the
+//! host keeps one, as a build-time project's tables are its database's. A
+//! publish that changes a config in a way the engine's afterConfigChange
+//! rewrote rows for, on a type with rows, stops it too
+//! ([`PUBLISH_REWRITES`]): the core writes no row at a publish, and a row's
+//! state reconciles at its next write (D103). A write the store refuses for its own
 //! fields is not run: own-field validation is the table's. A test's raw
 //! SQL write of behaviors' columns in the one form [`shape::raw_owned_write`]
 //! reads is applied to the row past the adapter, and the step, whose result
@@ -53,10 +73,12 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Map, Value};
 
 use superschematic_engine_testkit::{load, ScenarioFile};
-use superschematic_rules::{Action, Caller, Code, Command, Core, Declaration, Refusal, TypeSpec};
+use superschematic_rules::{
+    Action, Caller, Code, Command, Core, Declaration, Refusal, Row, TypeSpec,
+};
 
 use crate::fixtures;
-use crate::host::{Applied, MemoryHost};
+use crate::host::{Applied, Logged, MemoryHost, Store};
 use crate::shape::{self, FieldDef};
 use crate::symbols::Symbols;
 use crate::transcript::{Recorded, TranscriptClock};
@@ -64,6 +86,29 @@ use crate::transcript::{Recorded, TranscriptClock};
 /// Where the wall clock of a replay starts: an instant of the recording's
 /// span (thirteen digits), far from any fixed clock's.
 const WALL_START: i64 = 1_767_225_600_000;
+
+/// The parameters a deadline's handler calls its operation with, from the
+/// deadline's name.
+pub type SweepParams = fn(&str) -> Value;
+
+/// The operation a deadline's handler calls on its own use when it falls
+/// due, by its behavior, and the parameters it calls it with from the
+/// deadline's name: the engine's sweep invoked it, so its log holds the
+/// deadline's change as that operation's event.
+pub const SWEEP_OPERATIONS: [(&str, &str, SweepParams); 1] =
+    [("Timers", "fireTimer", |name| json!({ "deadline": name }))];
+
+/// Whether a config change, from the published config to the new one,
+/// either absent, is one a behavior's engine afterConfigChange rewrote
+/// rows for.
+pub type Rewrites = fn(Option<&Value>, Option<&Value>) -> bool;
+
+/// The behaviors whose engine's afterConfigChange rewrote every row's
+/// state at a publish, each with its [`Rewrites`].
+pub const PUBLISH_REWRITES: [(&str, Rewrites); 1] = [("Timers", timers_rewrites)];
+
+/// Why a scenario stops at a publish that [`PUBLISH_REWRITES`] names.
+const REWRITE_REASON: &str = "the engine's afterConfigChange rewrites every row's deadlines at the publish, and the core writes no row at a publish (a build-time project's config change is a build, and each row's deadlines reconcile at its next write through the core, D103), so the steps after it read state the core does not make";
 
 /// What replaying one file did.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -354,6 +399,8 @@ struct Engine {
     drafts: BTreeMap<String, Vec<FieldDef>>,
     /// The own fields of each type's live version.
     fields: BTreeMap<String, Vec<FieldDef>>,
+    /// The principal its runner runs the due deadlines as.
+    runner: Caller,
 }
 
 // What a step expects.
@@ -541,6 +588,16 @@ impl<'r> Run<'r> {
         if args.iter().any(holds_unjsonable) {
             return Done::Skipped("an argument JSON cannot hold".to_owned());
         }
+        if let Some(namespace) = args.iter().find_map(|arg| {
+            arg.get("namespace")
+                .and_then(Value::as_str)
+                .filter(|namespace| *namespace != shape::NAMESPACE)
+        }) {
+            return Done::Halted(format!(
+                "it names namespace {namespace}, and the reference host keeps the corpus's one ({}): a build-time project's tables are its database's, which has no namespaces (D103), and the steps after it read what the ones before it wrote there",
+                shape::NAMESPACE
+            ));
+        }
         let now = self.now(at, step);
         if let Some(ids) = step.get("ids").and_then(Value::as_array) {
             let ids: Vec<String> = ids
@@ -571,6 +628,7 @@ impl<'r> Run<'r> {
             "instances.delete" => self.delete(&cx),
             "instances.invoke" => self.invoke(&cx),
             "events.read" => self.events(&cx),
+            "runner.runDue" => self.run_due(&cx),
             "storage.run" => self.raw_write(&cx),
             "storage.exec" | "storage.transaction" => Done::Halted(format!(
                 "it writes with SQL of its own ({call}), which the reference host has no notion of, and the steps after it read what it wrote"
@@ -623,6 +681,8 @@ impl<'r> Run<'r> {
                 });
             }
         }
+        // A test behavior the engine registers is the file's fixture, whether
+        // or not the scenario composes it.
         for behavior in options
             .get("behaviors")
             .and_then(Value::as_array)
@@ -630,11 +690,8 @@ impl<'r> Run<'r> {
             .flatten()
             .filter_map(Value::as_str)
         {
-            let known = if self.test_behaviors.iter().any(|test| test == behavior) {
-                fixtures::register(self.file, behavior, &mut core)
-            } else {
-                core.declaration(behavior).is_some()
-            };
+            let known = fixtures::register(self.file, behavior, &mut core)
+                || core.declaration(behavior).is_some();
             if !known {
                 off.get_or_insert_with(|| {
                     format!("it registers {behavior}, which the core does not run")
@@ -645,6 +702,26 @@ impl<'r> Run<'r> {
             Some("fixed") => Clock::Fixed(step.get("now").and_then(Value::as_i64).unwrap_or(0)),
             _ => Clock::Wall,
         };
+        let runner = options
+            .get("runner")
+            .and_then(|runner| runner.get("principal"))
+            .map_or_else(
+                || Caller::new("runner", Vec::<String>::new()),
+                |principal| {
+                    Caller::new(
+                        principal
+                            .get("subject")
+                            .and_then(Value::as_str)
+                            .unwrap_or("runner"),
+                        principal
+                            .get("permissions")
+                            .and_then(Value::as_array)
+                            .into_iter()
+                            .flatten()
+                            .filter_map(Value::as_str),
+                    )
+                },
+            );
         if let Some(recorded) = &mut self.recorded {
             recorded.opened(match clock {
                 Clock::Fixed(reading) => TranscriptClock::Fixed(reading),
@@ -673,6 +750,7 @@ impl<'r> Run<'r> {
             off,
             drafts: BTreeMap::new(),
             fields: BTreeMap::new(),
+            runner,
         });
         Done::Checked(Vec::new())
     }
@@ -860,6 +938,9 @@ impl<'r> Run<'r> {
         let Some(type_name) = cx.args.first().and_then(Value::as_str) else {
             return Done::Skipped("a publish that names no schema".to_owned());
         };
+        if rewrites_rows(self.engines[cx.at].host.store(), type_name) {
+            return Done::Halted(REWRITE_REASON.to_owned());
+        }
         let engine = &mut self.engines[cx.at];
         let live_version = engine.host.store().live_version(type_name);
         let pending = engine.host.publish_command(type_name, cx.caller, cx.now);
@@ -998,7 +1079,7 @@ impl<'r> Run<'r> {
         }
         let action = Action::Create {
             id: options.get("id").and_then(Value::as_str).map(str::to_owned),
-            own: data.clone(),
+            own: self.stored(cx.at, type_name, data),
             params: options
                 .get("behaviors")
                 .and_then(Value::as_object)
@@ -1030,9 +1111,19 @@ impl<'r> Run<'r> {
         }
         let action = Action::Update {
             key: key.to_owned(),
-            patch: patch.clone(),
+            patch: self.stored(cx.at, type_name, patch),
         };
         self.write(cx, type_name, action)
+    }
+
+    // stored is a write's own fields as the store keeps them: its date-time
+    // fields' instants in their canonical form, as the engine's parse
+    // stores them, before any behavior sees them.
+    fn stored(&self, at: usize, type_name: &str, data: &Map<String, Value>) -> Map<String, Value> {
+        match self.engines[at].fields.get(type_name) {
+            Some(fields) => shape::normalize_own(fields, data),
+            None => data.clone(),
+        }
     }
 
     // store_refuses skips a create or an update the store refuses for its
@@ -1081,10 +1172,6 @@ impl<'r> Run<'r> {
         let live = engine.host.store().live(type_name).cloned();
         let outcome = engine.host.execute(type_name, command.clone());
         if let Some(recorded) = &mut self.recorded {
-            let row = command
-                .action
-                .key()
-                .and_then(|key| engine.host.store().row(type_name, key));
             recorded.command(
                 &self.current,
                 &engine.path,
@@ -1092,7 +1179,7 @@ impl<'r> Run<'r> {
                 live.as_ref(),
                 command.clone(),
                 &outcome,
-                row,
+                engine.host.store(),
             );
         }
         outcome
@@ -1264,8 +1351,15 @@ impl<'r> Run<'r> {
                 })
             })
             .filter_map(|(key, _)| {
-                spec.zip(store.row(type_name, key))
-                    .map(|(spec, row)| shape::record(host.core(), spec, key, row))
+                spec.zip(store.row(type_name, key)).map(|(spec, row)| {
+                    shape::record(
+                        host.core(),
+                        spec,
+                        key,
+                        row,
+                        &store.sub_tables(type_name, key),
+                    )
+                })
             })
             .collect();
         self.judge(
@@ -1303,7 +1397,8 @@ impl<'r> Run<'r> {
         }
         let schema = options.get("schema").and_then(Value::as_str);
         let instance = options.get("instanceId").and_then(Value::as_str);
-        let store = self.engines[cx.at].host.store();
+        let host = &self.engines[cx.at].host;
+        let store = host.store();
         let events: Vec<Value> = store
             .log()
             .iter()
@@ -1311,15 +1406,79 @@ impl<'r> Run<'r> {
                 schema.is_none_or(|schema| logged.type_name == schema)
                     && instance.is_none_or(|key| logged.key == key)
             })
-            .map(|logged| shape::event(store.live(&logged.type_name), logged))
+            .map(|logged| {
+                let spec = store.live(&logged.type_name);
+                sweep_event(spec, logged, shape::event(spec, logged))
+            })
+            .collect();
+        // The fields each use computes on a read, by type and use id, which
+        // the recorded changes carry and an outbox does not.
+        let computed: BTreeMap<String, BTreeMap<String, Vec<String>>> = store
+            .type_names()
+            .into_iter()
+            .filter_map(|name| {
+                let spec = store.live(&name)?;
+                Some((name, computed_fields(host.core(), spec)))
+            })
             .collect();
         self.judge(
             cx,
             schema.unwrap_or_default(),
             0,
             Ok(json!({ "events": events })),
-            compare_events,
+            move |checks, expected, actual| {
+                compare_events(checks, &without_computed(expected, &computed), actual);
+            },
         )
+    }
+
+    // run_due runs each deadline armed and due at the step's time, earliest
+    // first, as the engine's runner, each a deadline command at that time
+    // (never before the time it was armed for, as a worker whose clock lags
+    // runs it, D103). A deadline one run before it cleared or moved is not
+    // run. A refusal other than a veto, which the engine's sweep passes
+    // over, is a mismatch unless the recording's run failed.
+    fn run_due(&mut self, cx: &Cx<'_>) -> Done {
+        let runner = self.engines[cx.at].runner.clone();
+        let due = self.engines[cx.at].host.store().due(cx.now);
+        let mut found = Vec::new();
+        for (at, armed) in due {
+            if self.engines[cx.at].host.store().armed_at(&at) != Some(armed.at) {
+                continue;
+            }
+            let command = Command::new(
+                runner.clone(),
+                cx.now.max(armed.at),
+                Action::Deadline {
+                    key: at.key.clone(),
+                    use_id: at.use_id.clone(),
+                    name: at.name.clone(),
+                    at: armed.at,
+                    payload: armed.payload.clone(),
+                },
+            );
+            let outcome = self.execute(cx.at, &at.type_name, command);
+            let failed = match cx.expected {
+                Expected::Value(counters) => {
+                    counters.get("failed").and_then(Value::as_u64).unwrap_or(0) > 0
+                }
+                _ => false,
+            };
+            if let Err(refusal) = outcome {
+                if refusal.code != Code::Vetoed && !failed {
+                    let live = self.engines[cx.at].host.store().live_version(&at.type_name);
+                    found.push(Found {
+                        what: format!(
+                            "deadline {}.{} of {} {}",
+                            at.use_id, at.name, at.type_name, at.key
+                        ),
+                        expected: json!("fired, or vetoed"),
+                        actual: shape::engine_error(&refusal, &at.type_name, live),
+                    });
+                }
+            }
+        }
+        Done::Checked(found)
     }
 }
 
@@ -1490,9 +1649,9 @@ fn items_of(list: &Value) -> Vec<Value> {
 }
 
 // compare_events compares a row's events by kind and their changes: a
-// create's own and owned fields, an operation's behavior, name and
-// parameters, and the own (`data`) and owned (`behaviors`) fields a patch
-// set, each where the recording holds the change.
+// create's and an update's own (`data`) and owned (`behaviors`) fields, an
+// operation's behavior, name and parameters and the own and owned fields
+// its patch set, each where the recording holds the change.
 fn compare_events(checks: &mut Checks<'_>, expected: &Value, actual: &Value) {
     let events = |page: &Value| {
         page.get("events")
@@ -1515,7 +1674,7 @@ fn compare_events(checks: &mut Checks<'_>, expected: &Value, actual: &Value) {
             continue;
         }
         let parts: &[&str] = match recorded["kind"].as_str() {
-            Some("create") => &["data", "behaviors"],
+            Some("create" | "update") => &["data", "behaviors"],
             Some("operation") => &["behavior", "operation", "params"],
             _ => &[],
         };
@@ -1526,7 +1685,7 @@ fn compare_events(checks: &mut Checks<'_>, expected: &Value, actual: &Value) {
                 mine.get(*part).unwrap_or(&empty),
             );
         }
-        if matches!(recorded["kind"].as_str(), Some("operation" | "update")) {
+        if recorded["kind"].as_str() == Some("operation") {
             for part in ["data", "behaviors"] {
                 checks.eq(
                     &at(&format!("change.patch.{part}")),
@@ -1542,8 +1701,185 @@ fn compare_events(checks: &mut Checks<'_>, expected: &Value, actual: &Value) {
 fn record_of(host: &MemoryHost, type_name: &str, key: &str) -> Value {
     let store = host.store();
     match (store.live(type_name), store.row(type_name, key)) {
-        (Some(spec), Some(row)) => shape::record(host.core(), spec, key, row),
+        (Some(spec), Some(row)) => shape::record(
+            host.core(),
+            spec,
+            key,
+            row,
+            &store.sub_tables(type_name, key),
+        ),
         _ => Value::Null,
+    }
+}
+
+// sweep_event writes a deadline command's change-log entry as the engine's
+// sweep event of the operation its handler calls on its own use
+// (SWEEP_OPERATIONS): kind `operation`, with that operation's behavior,
+// name and parameters and the patch the command wrote. Any other entry
+// stays as it is.
+fn sweep_event(spec: Option<&TypeSpec>, logged: &Logged, event: Value) -> Value {
+    let Action::Deadline { use_id, name, .. } = &logged.command.action else {
+        return event;
+    };
+    if logged.kind() != "deadline" {
+        return event;
+    }
+    let behavior = spec
+        .and_then(|spec| spec.use_of(use_id))
+        .map_or(use_id.as_str(), |(_, entry)| entry.behavior.as_str());
+    let Some((_, operation, params)) = SWEEP_OPERATIONS
+        .iter()
+        .find(|(known, _, _)| *known == behavior)
+    else {
+        return event;
+    };
+    let mut event = event;
+    event["kind"] = json!("operation");
+    let patch = event["change"]["patch"].clone();
+    event["change"] = json!({
+        "behavior": behavior,
+        "operation": operation,
+        "params": params(name),
+        "patch": patch,
+    });
+    event
+}
+
+// computed_fields lists, by use id, the fields each use of a type computes
+// on a read: the members its read_fields gives for a row with nothing in
+// it.
+fn computed_fields(core: &Core, spec: &TypeSpec) -> BTreeMap<String, Vec<String>> {
+    spec.uses
+        .iter()
+        .filter_map(|entry| {
+            let fields = core
+                .read_fields(spec, entry.id(), &Row::default(), &BTreeMap::new())
+                .ok()?;
+            (!fields.is_empty()).then(|| (entry.id().to_owned(), fields.keys().cloned().collect()))
+        })
+        .collect()
+}
+
+// without_computed is a recorded page of events with the fields each use
+// computes on a read left out of each change's owned fields (a create's
+// and an update's `behaviors`, a patch's), a use left with none left out,
+// and `behaviors` left out when it holds none.
+fn without_computed(
+    page: &Value,
+    computed: &BTreeMap<String, BTreeMap<String, Vec<String>>>,
+) -> Value {
+    let mut page = page.clone();
+    let Some(events) = page.get_mut("events").and_then(Value::as_array_mut) else {
+        return page;
+    };
+    for event in events {
+        let Some(fields) = event
+            .get("schema")
+            .and_then(Value::as_str)
+            .and_then(|schema| computed.get(schema))
+            .cloned()
+        else {
+            continue;
+        };
+        let Some(change) = event.get_mut("change").and_then(Value::as_object_mut) else {
+            continue;
+        };
+        strip(change, &fields);
+        if let Some(patch) = change.get_mut("patch").and_then(Value::as_object_mut) {
+            strip(patch, &fields);
+        }
+    }
+    page
+}
+
+// strip leaves the computed fields out of an object's `behaviors`.
+fn strip(holder: &mut Map<String, Value>, fields: &BTreeMap<String, Vec<String>>) {
+    let Some(behaviors) = holder.get_mut("behaviors").and_then(Value::as_object_mut) else {
+        return;
+    };
+    for (use_id, names) in fields {
+        if let Some(owned) = behaviors.get_mut(use_id).and_then(Value::as_object_mut) {
+            owned.retain(|name, _| !names.contains(name));
+            if owned.is_empty() {
+                behaviors.remove(use_id);
+            }
+        }
+    }
+    if behaviors.is_empty() {
+        holder.remove("behaviors");
+    }
+}
+
+// rewrites_rows says whether publishing a type's draft changes a config in
+// a way the engine's afterConfigChange rewrote rows for, on a type with
+// rows (PUBLISH_REWRITES): each listed behavior's use, by id, before and
+// after.
+fn rewrites_rows(store: &Store, type_name: &str) -> bool {
+    let Some(draft) = store.draft(type_name) else {
+        return false;
+    };
+    if !store.has_rows(type_name) {
+        return false;
+    }
+    let live = store.live(type_name);
+    PUBLISH_REWRITES.iter().any(|(behavior, rewrites)| {
+        let config_of = |spec: Option<&TypeSpec>| -> Vec<(String, Value)> {
+            spec.into_iter()
+                .flat_map(|spec| &spec.uses)
+                .filter(|entry| entry.behavior == *behavior)
+                .map(|entry| (entry.id().to_owned(), entry.config_or_empty()))
+                .collect()
+        };
+        let (before, after) = (config_of(live), config_of(Some(draft)));
+        let mut ids: Vec<&String> = before.iter().chain(&after).map(|(id, _)| id).collect();
+        ids.sort();
+        ids.dedup();
+        ids.into_iter().any(|id| {
+            let find = |configs: &[(String, Value)]| {
+                configs
+                    .iter()
+                    .find(|(known, _)| known == id)
+                    .map(|(_, config)| config.clone())
+            };
+            rewrites(find(&before).as_ref(), find(&after).as_ref())
+        })
+    })
+}
+
+/// Whether the engine's Timers afterConfigChange rewrote rows for a change
+/// of a Timers use's config: removed from the type, which deleted every
+/// row's deadlines; a deadline removed, or its start changed, whose rows it
+/// deleted; a new afterMs, which moved the pending deadlines from their
+/// start; and a new field deadline, which it armed on every row from its
+/// field. A deadline added that starts at the create or at an entry, a
+/// then, an until, a permission or a sweepMs it rewrote nothing for.
+pub fn timers_rewrites(before: Option<&Value>, after: Option<&Value>) -> bool {
+    let deadlines = |config: Option<&Value>| -> Map<String, Value> {
+        config
+            .and_then(|config| config.get("deadlines"))
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default()
+    };
+    let after_ms = |deadline: &Value| deadline.get("afterMs").and_then(Value::as_i64).unwrap_or(0);
+    match (before, after) {
+        (None, None) => false,
+        (Some(_), None) => true,
+        (before, Some(_)) => {
+            let (old, new) = (deadlines(before), deadlines(after));
+            let changed = new.iter().any(|(name, deadline)| match old.get(name) {
+                Some(was) if was.get("start") == deadline.get("start") => {
+                    after_ms(was) != after_ms(deadline)
+                }
+                was => {
+                    was.is_some()
+                        || deadline
+                            .get("start")
+                            .is_some_and(|start| start.get("field").is_some())
+                }
+            });
+            changed || old.keys().any(|name| !new.contains_key(name))
+        }
     }
 }
 

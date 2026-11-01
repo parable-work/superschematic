@@ -610,7 +610,9 @@ func tableTypeDefs(schema *ir.Schema) ([]*ir.TypeDef, error) {
 	var tables []*ir.TypeDef
 	for _, typeDef := range defs {
 		if typeDef.Role != ir.RoleDBTable || typeDef.JsonField || baseTypes[typeDef.Name] {
-			if len(typeDef.Indexes) > 0 {
+			// The deadline queue a table's behaviors keep (D103) gets its
+			// queue's table, with the indexes the loader gave it.
+			if len(typeDef.Indexes) > 0 && typeDef.BehaviorQueue == nil {
 				return nil, fmt.Errorf("type %s declares an @index but gets no table", typeDef.Name)
 			}
 			continue

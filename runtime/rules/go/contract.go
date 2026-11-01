@@ -65,10 +65,23 @@ type UseSpec struct {
 	Anchor Anchor          `json:"anchor"`
 }
 
-// TypeSpec is a type the core runs: its name and its uses in list order.
+// TypeSpec is a type the core runs: its name, its uses in list order, and
+// its own fields, which a config that names a field is held to (a Timers
+// field start).
 type TypeSpec struct {
-	Name string    `json:"name"`
-	Uses []UseSpec `json:"uses,omitempty"`
+	Name   string      `json:"name"`
+	Uses   []UseSpec   `json:"uses,omitempty"`
+	Fields []FieldSpec `json:"fields,omitempty"`
+}
+
+// FieldSpec is one own field of a type: superschematic_rules::FieldSpec.
+type FieldSpec struct {
+	Name string `json:"name"`
+	// Type is its IR type's name (string, Temporal.DateTime).
+	Type string `json:"type"`
+	// DateTime is true for a field whose values are instants: epoch
+	// milliseconds from a table's adapter.
+	DateTime bool `json:"dateTime,omitempty"`
 }
 
 // Caller is who makes a call: a subject and the permissions it holds;
@@ -273,14 +286,18 @@ const (
 	ReadKindRow     ReadKind = "row"
 	ReadKindHasRows ReadKind = "hasRows"
 	ReadKindSpec    ReadKind = "spec"
+	ReadKindSubRows ReadKind = "subRows"
 )
 
 // ReadRequest is what the core asks the host to read: a row of a type by
-// its key, whether a type has rows, or a type's spec.
+// its key, whether a type has rows, a type's spec, or the rows of one
+// sub-table of one use on one row (UseID and Table name it).
 type ReadRequest struct {
-	Kind ReadKind `json:"kind"`
-	Type string   `json:"type"`
-	Key  string   `json:"key,omitempty"`
+	Kind  ReadKind `json:"kind"`
+	Type  string   `json:"type"`
+	Key   string   `json:"key,omitempty"`
+	UseID string   `json:"useId,omitempty"`
+	Table string   `json:"table,omitempty"`
 }
 
 // Row is one row as the host read it: its own fields, its owned fields by
@@ -291,13 +308,31 @@ type Row struct {
 	Version int64                                 `json:"version"`
 }
 
+// SubRow is one sub-table row as the host read it: its key, and its values
+// by the declared field's name, the key's field left out and a NULL column
+// absent.
+type SubRow struct {
+	Key    string                     `json:"key"`
+	Values map[string]json.RawMessage `json:"values"`
+}
+
+// MarshalJSON writes the row with its values, {} when nil.
+func (r SubRow) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Key    string                     `json:"key"`
+		Values map[string]json.RawMessage `json:"values"`
+	}{r.Key, objectOf(r.Values)})
+}
+
 // Answer is the host's answer to one request, of its kind:
-// {"row": Row|null}, {"hasRows": bool} or {"spec": TypeSpec|null}.
+// {"row": Row|null}, {"hasRows": bool}, {"spec": TypeSpec|null} or
+// {"subRows": [SubRow]}.
 type Answer struct {
 	Kind    ReadKind
 	Row     *Row
 	HasRows bool
 	Spec    *TypeSpec
+	SubRows []SubRow
 }
 
 // MarshalJSON writes the answer as the variant its kind names.
@@ -315,6 +350,14 @@ func (a Answer) MarshalJSON() ([]byte, error) {
 		return json.Marshal(struct {
 			Spec *TypeSpec `json:"spec"`
 		}{a.Spec})
+	case ReadKindSubRows:
+		rows := a.SubRows
+		if rows == nil {
+			rows = []SubRow{}
+		}
+		return json.Marshal(struct {
+			SubRows []SubRow `json:"subRows"`
+		}{rows})
 	default:
 		return nil, fmt.Errorf("rules: no answer of kind %q", a.Kind)
 	}
@@ -340,6 +383,8 @@ func (a *Answer) UnmarshalJSON(data []byte) error {
 			err = json.Unmarshal(value, &out.HasRows)
 		case ReadKindSpec:
 			err = json.Unmarshal(value, &out.Spec)
+		case ReadKindSubRows:
+			err = json.Unmarshal(value, &out.SubRows)
 		default:
 			err = fmt.Errorf("rules: no answer of kind %q", variant)
 		}
@@ -534,13 +579,158 @@ func (w *RowWrite) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// ChangeSet is everything one command changes. Sub-table rows, outbox
-// events and deadlines stay raw until step 3 gives each a table; the
-// adapter refuses a change set holding any.
+// RowRef is a row a change set names: its type and its key, nil only for
+// the row a create without an id makes.
+type RowRef struct {
+	Type string  `json:"type"`
+	Key  *string `json:"key"`
+}
+
+// is reports whether ref names the row of a type by its key.
+func (ref RowRef) is(typeName, key string) bool {
+	return ref.Type == typeName && ref.Key != nil && *ref.Key == key
+}
+
+// SubRowChangeKind is what a SubRowChange does. The list is open: a kind
+// the adapter does not know refuses the command as internal.
+type SubRowChangeKind string
+
+// The kinds of SubRowChange the adapter applies.
+const (
+	SubRowInsert SubRowChangeKind = "insert"
+	SubRowUpdate SubRowChangeKind = "update"
+	SubRowDelete SubRowChangeKind = "delete"
+)
+
+// SubRowChange is what happens to a sub-table row: an insert of its values,
+// an update of the values it sets, or a delete. Values are by the declared
+// field's name.
+type SubRowChange struct {
+	Kind   SubRowChangeKind           `json:"kind"`
+	Values map[string]json.RawMessage `json:"values,omitempty"`
+	// Raw is the change as the core wrote it, for an unknown kind's
+	// message.
+	Raw json.RawMessage `json:"-"`
+}
+
+// MarshalJSON writes the change as serde writes the core's: an insert's or
+// an update's kind and values, a delete's kind, another kind's Raw.
+func (c SubRowChange) MarshalJSON() ([]byte, error) {
+	switch c.Kind {
+	case SubRowInsert, SubRowUpdate:
+		return json.Marshal(struct {
+			Kind   SubRowChangeKind           `json:"kind"`
+			Values map[string]json.RawMessage `json:"values"`
+		}{c.Kind, objectOf(c.Values)})
+	case SubRowDelete:
+		return json.Marshal(struct {
+			Kind SubRowChangeKind `json:"kind"`
+		}{c.Kind})
+	}
+	if len(c.Raw) > 0 {
+		return c.Raw, nil
+	}
+	return nil, fmt.Errorf("rules: no sub-row change of kind %q", c.Kind)
+}
+
+// UnmarshalJSON reads a sub-row change of any kind, keeping its JSON in
+// Raw.
+func (c *SubRowChange) UnmarshalJSON(data []byte) error {
+	type plain SubRowChange
+	var out plain
+	if err := json.Unmarshal(data, &out); err != nil {
+		return err
+	}
+	out.Raw = append(json.RawMessage(nil), data...)
+	*c = SubRowChange(out)
+	return nil
+}
+
+// SubRowWrite is one write of a sub-table row: the row that owns it, the
+// use that owns the sub-table, the sub-table's declared name, the row's key
+// in it, and the change.
+type SubRowWrite struct {
+	Row    RowRef       `json:"row"`
+	UseID  string       `json:"useId"`
+	Table  string       `json:"table"`
+	Key    string       `json:"key"`
+	Change SubRowChange `json:"change"`
+}
+
+// DeadlineChangeKind is what a DeadlineChange does. The list is open: a
+// kind the adapter does not know refuses the command as internal.
+type DeadlineChangeKind string
+
+// The kinds of DeadlineChange the adapter applies.
+const (
+	DeadlineArm   DeadlineChangeKind = "arm"
+	DeadlineClear DeadlineChangeKind = "clear"
+)
+
+// DeadlineChange is a deadline of a row a use arms or clears, named by its
+// row, its use and its name: an arm falls due at At (epoch milliseconds),
+// when the host runs the deadline command with the time and the payload.
+type DeadlineChange struct {
+	Kind    DeadlineChangeKind `json:"kind"`
+	Row     RowRef             `json:"row"`
+	UseID   string             `json:"useId"`
+	Name    string             `json:"name"`
+	At      int64              `json:"at"`
+	Payload json.RawMessage    `json:"payload"`
+	// Raw is the change as the core wrote it, for an unknown kind's
+	// message.
+	Raw json.RawMessage `json:"-"`
+}
+
+// MarshalJSON writes the change as serde writes the core's: an arm's kind,
+// row, use, name, time and payload (null when nil), a clear's kind, row,
+// use and name, another kind's Raw.
+func (c DeadlineChange) MarshalJSON() ([]byte, error) {
+	switch c.Kind {
+	case DeadlineArm:
+		return json.Marshal(struct {
+			Kind    DeadlineChangeKind `json:"kind"`
+			Row     RowRef             `json:"row"`
+			UseID   string             `json:"useId"`
+			Name    string             `json:"name"`
+			At      int64              `json:"at"`
+			Payload json.RawMessage    `json:"payload"`
+		}{c.Kind, c.Row, c.UseID, c.Name, c.At, rawOr(c.Payload, json.RawMessage(`null`))})
+	case DeadlineClear:
+		return json.Marshal(struct {
+			Kind  DeadlineChangeKind `json:"kind"`
+			Row   RowRef             `json:"row"`
+			UseID string             `json:"useId"`
+			Name  string             `json:"name"`
+		}{c.Kind, c.Row, c.UseID, c.Name})
+	}
+	if len(c.Raw) > 0 {
+		return c.Raw, nil
+	}
+	return nil, fmt.Errorf("rules: no deadline change of kind %q", c.Kind)
+}
+
+// UnmarshalJSON reads a deadline change of any kind, keeping its JSON in
+// Raw.
+func (c *DeadlineChange) UnmarshalJSON(data []byte) error {
+	type plain DeadlineChange
+	var out plain
+	if err := json.Unmarshal(data, &out); err != nil {
+		return err
+	}
+	out.Raw = append(json.RawMessage(nil), data...)
+	*c = DeadlineChange(out)
+	return nil
+}
+
+// ChangeSet is everything one command changes: its row writes, its
+// sub-table rows and deadlines, which the adapter applies by the layout,
+// and its outbox events, which stay raw until batch 6 gives the outbox a
+// table; the adapter refuses a change set holding any.
 type ChangeSet struct {
 	Rows      []RowWrite        `json:"rows"`
-	SubRows   []json.RawMessage `json:"subRows"`
+	SubRows   []SubRowWrite     `json:"subRows"`
 	Events    []json.RawMessage `json:"events"`
-	Deadlines []json.RawMessage `json:"deadlines"`
+	Deadlines []DeadlineChange  `json:"deadlines"`
 	Result    json.RawMessage   `json:"result"`
 }

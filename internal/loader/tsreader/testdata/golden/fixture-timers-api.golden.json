@@ -1,0 +1,41 @@
+{
+  "name": "fixture-timers-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-timers-db",
+      "types": [
+        "Ticket"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-timers-db",
+      "kind": "DB"
+    }
+  ],
+  "operationSets": [
+    {
+      "name": "TicketActions",
+      "comment": "A ticket's status and timers operations (D103), for callers who hold\ntickets.write; a reset or a snooze needs tickets.timers too, which the\ncore checks.",
+      "operations": [],
+      "behaviorOperations": {
+        "type": "Ticket"
+      },
+      "permissions": [
+        "tickets.write"
+      ]
+    }
+  ],
+  "workers": [
+    {
+      "name": "TicketTimers",
+      "comment": "Runs Ticket's deadlines as they fall due (D103): the worker\nfixture-timers-api-ticket-timers.",
+      "concurrency": 2,
+      "behaviorWorker": {
+        "type": "Ticket"
+      }
+    }
+  ]
+}

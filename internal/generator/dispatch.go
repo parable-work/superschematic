@@ -1223,8 +1223,9 @@ func (r run) goServerOutput() (*apigen.APIOutput, error) {
 // reaches through the ORM and the SDKs. A dependency whose config the
 // build has must generate what Deps imports: the database its Go types,
 // and so its ORM, and each callee its Go SDK. A database a table of which
-// has a field that is a behavior (D103) has an ORM that requires the rules
-// module, which go.mod then requires and replaces too (DepsInfo.Rules).
+// composes a behavior, by implements or on a field (D103), has an ORM that
+// requires the rules module, which go.mod then requires and replaces too
+// (DepsInfo.Rules).
 func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, error) {
 	var deps apigen.DepsInfo
 	var roots []*ir.Schema
@@ -1259,7 +1260,7 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 		deps.Database = db
 		deps.ORMModule = r.Options.Naming.GoORMModule(db)
 		deps.VersionGraph = apigen.DeclaresVersionGraph(schema)
-		deps.Rules = apigen.DeclaresFieldBehaviors(schema)
+		deps.Rules = apigen.DeclaresTableBehaviors(schema)
 		// The ORM opens with the keys of the database's Encrypted<T>
 		// fields, which the API's config holds (D85).
 		keys, err := r.fieldKeysField(db, schema)

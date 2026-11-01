@@ -3,11 +3,14 @@ package generator
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/behaviorlayout"
 	"github.com/parable-work/superschematic/internal/generator/behaviortypes"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/rustrestgen"
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -43,25 +46,38 @@ var rustBehaviorCrates = []struct {
 }
 
 // rustBehaviorDeps sets in deps what the Rust API crate at apiDir runs its
-// behavior operations with (D103), when the run's schema has any: the
-// layout document of deps.Database, the API's database, indented as the
-// Go ORM's RulesLayout holds it, and the paths, relative to apiDir, of the
-// adapter's and the behaviors' crates. It refuses an API with behavior
-// operations whose database is unset, or whose naming file leaves either
-// path unset. An API without behavior operations is left as it is.
+// behavior operations and its behavior workers with (D103), when the run's
+// schema has any: the layout document of deps.Database, the API's
+// database, indented as the Go ORM's RulesLayout holds it, and the paths,
+// relative to apiDir, of the adapter's and the behaviors' crates. It
+// refuses an API with either whose database is unset, or whose naming file
+// leaves either path unset. An API with neither is left as it is.
 func (r run) rustBehaviorDeps(apiDir string, deps *rustrestgen.DepsInfo) error {
 	served := behaviorOperationUse(r.Schema)
+	worker := served == ""
+	if worker {
+		served = behaviorWorkerUse(r.Schema, nil, nil)
+	} else {
+		served = "the behavior operations of " + served
+	}
 	if served == "" {
 		return nil
 	}
 	if deps.Database == "" {
-		return fmt.Errorf("generator: the Rust server of %s runs the behavior operations of %s (D103) on its database, and it connects to none; set its authDb, or give it one DB dependency", r.Config.Name, served)
+		return fmt.Errorf("generator: the Rust server of %s runs %s (D103) on its database, and it connects to none; set its authDb, or give it one DB dependency", r.Config.Name, served)
+	}
+	db, err := r.LoadDependency(deps.Database)
+	if err != nil {
+		return fmt.Errorf("generator: load %s, the database whose tables' behaviors %s runs (D103): %w", deps.Database, r.Config.Name, err)
+	}
+	if worker {
+		served = behaviorWorkerUse(r.Schema, db, r.Registry)
 	}
 	behaviors := &rustrestgen.DepsBehaviors{}
 	for _, c := range rustBehaviorCrates {
 		dir := c.path(r.Options.Paths)
 		if dir == "" {
-			return fmt.Errorf("generator: the Rust server of %s runs the behavior operations of %s (D103) through %s, an unpublished crate the naming file's [paths] %s names, and it is unset; set it to a superschematic checkout's %s", r.Config.Name, served, c.crate, c.key, c.checkout)
+			return fmt.Errorf("generator: the Rust server of %s runs %s (D103) through %s, an unpublished crate the naming file's [paths] %s names, and it is unset; set it to a superschematic checkout's %s", r.Config.Name, served, c.crate, c.key, c.checkout)
 		}
 		rel, err := naming.RelPath(apiDir, dir)
 		if err != nil {
@@ -69,16 +85,12 @@ func (r run) rustBehaviorDeps(apiDir string, deps *rustrestgen.DepsInfo) error {
 		}
 		*c.field(behaviors) = rel
 	}
-	db, err := r.LoadDependency(deps.Database)
-	if err != nil {
-		return fmt.Errorf("generator: load %s, the database whose tables' behavior operations %s serves (D103): %w", deps.Database, r.Config.Name, err)
-	}
 	layout, err := behaviorlayout.Of(db, r.Registry)
 	if err != nil {
 		return fmt.Errorf("generator: the behaviors' layout of %s, for %s: %w", deps.Database, r.Config.Name, err)
 	}
 	if layout == nil {
-		return fmt.Errorf("generator: %s serves the behavior operations of %s (D103), and %s, its database, has no table whose fields are behaviors", r.Config.Name, served, deps.Database)
+		return fmt.Errorf("generator: %s runs %s (D103), and %s, its database, has no table that composes behaviors", r.Config.Name, served, deps.Database)
 	}
 	encoded, err := json.MarshalIndent(layout, "", "  ")
 	if err != nil {
@@ -118,4 +130,33 @@ func behaviorOperationUse(schema *ir.Schema) string {
 		use += ", among others"
 	}
 	return use
+}
+
+// behaviorWorkerUse names the first @behaviorWorker of the schema (D103),
+// as a refusal names what runs through the behaviors' core: the table whose
+// behaviors it runs, the behaviors of it that arm deadlines when db, the
+// table's database, and reg say, and the worker (Ticket's deadlines, which
+// Timers arms, by its @behaviorWorker TicketTimers); "" for a schema
+// without one.
+func behaviorWorkerUse(schema *ir.Schema, db *ir.Schema, reg *registry.Registry) string {
+	for _, w := range schema.Workers {
+		if w == nil || w.BehaviorWorker == nil {
+			continue
+		}
+		table := w.BehaviorWorker.Type
+		var arming []string
+		if db != nil && reg != nil {
+			td := db.Types[table]
+			for _, ref := range td.TableBehaviors() {
+				if b, ok := reg.Behavior(ref.Name); ok && b.ArmsDeadlines && !slices.Contains(arming, ref.Name) {
+					arming = append(arming, ref.Name)
+				}
+			}
+		}
+		if len(arming) == 0 {
+			return fmt.Sprintf("%s's deadlines by its @behaviorWorker %s", table, w.Name)
+		}
+		return fmt.Sprintf("%s's deadlines, which %s arms, by its @behaviorWorker %s", table, strings.Join(arming, " and "), w.Name)
+	}
+	return ""
 }

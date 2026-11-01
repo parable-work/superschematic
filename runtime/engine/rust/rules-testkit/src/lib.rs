@@ -63,8 +63,9 @@ pub use host::{
 };
 pub use replay::{replay, replay_path, scenario_path, Mismatch, Report, ScenarioReport, Skipped};
 pub use transcript::{
-    transcript, transcript_path, Transcript, TranscriptClock, TranscriptExpect, TranscriptField,
-    TranscriptRow, TranscriptScenario, TranscriptSkip, TranscriptStep, TranscriptType,
+    transcript, transcript_path, Transcript, TranscriptClock, TranscriptDeadline, TranscriptExpect,
+    TranscriptField, TranscriptRow, TranscriptScenario, TranscriptSkip, TranscriptStep,
+    TranscriptType,
 };
 
 use superschematic_rules::Core;

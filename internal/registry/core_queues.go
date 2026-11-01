@@ -303,14 +303,18 @@ func workerOf(td *ir.TypeDef, args []any) (*ir.Worker, error) {
 
 // CheckWorker checks a worker's declaration in every form: a name and a
 // queue, a concurrency of one or more when set, and a grace of whole
-// seconds. Whether the queue is a queue of the API's database is checked
-// where that database's schema is read: the API's build and the stack's
-// resolution.
+// seconds. A behavior worker (D103) names a table and no queue until the
+// loader fills it, so its queue may be empty; one that names a table
+// names it, and permissions that are non-empty strings. Whether the queue
+// is a queue of the API's database is checked where that database's schema
+// is read: the API's build and the stack's resolution.
 func CheckWorker(worker *ir.Worker) error {
 	switch {
 	case worker.Name == "":
 		return fmt.Errorf("a worker has no name")
-	case worker.Queue == "":
+	case worker.BehaviorWorker != nil && worker.BehaviorWorker.Type == "":
+		return fmt.Errorf("names no table")
+	case worker.Queue == "" && worker.BehaviorWorker == nil:
 		return fmt.Errorf("names no queue")
 	case worker.Concurrency < 0:
 		return fmt.Errorf("concurrency is %d; it is one or more", worker.Concurrency)
@@ -318,6 +322,13 @@ func CheckWorker(worker *ir.Worker) error {
 	if worker.Grace != "" {
 		if _, err := TimeoutSeconds(worker.Grace); err != nil {
 			return fmt.Errorf("grace: %w", err)
+		}
+	}
+	if worker.BehaviorWorker != nil {
+		for _, permission := range worker.BehaviorWorker.Permissions {
+			if permission == "" {
+				return fmt.Errorf("permissions is a list of permissions, each a non-empty string")
+			}
 		}
 	}
 	return nil

@@ -74,7 +74,7 @@ mod spec;
 
 pub use behavior::{
     Behavior, Change, ConfigError, ConfigTarget, Declaration, GuardRequest, Hook, OperationDecl,
-    Stop, ValidationRequest,
+    Stop, TableDecl, ValidationRequest,
 };
 pub use changes::{
     ChangeSet, DeadlineChange, OutboxEvent, RowRef, RowWrite, SubRowChange, SubRowWrite,
@@ -84,9 +84,9 @@ pub use context::{ConfigCx, Cx, View};
 pub use core::{Core, Outcome, Source, Step, MAX_ROUNDS};
 pub use patch::merge_patch;
 pub use permissions::{covers, has_any_permission, DottedPermissions, PermissionMatcher};
-pub use reads::{Answer, Answered, Answers, LockKey, ReadRequest, Row};
+pub use reads::{Answer, Answered, Answers, LockKey, ReadRequest, Row, SubRow};
 pub use refusal::{
     Code, ConfigIssue, ConfigIssueKind, Refusal, SchemaChange, SchemaIssue, ValidationIssue, Veto,
 };
 pub use run::MAX_CALL_DEPTH;
-pub use spec::{Anchor, TypeSpec, UseSpec};
+pub use spec::{Anchor, FieldSpec, TypeSpec, UseSpec};
