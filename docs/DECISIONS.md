@@ -14777,3 +14777,266 @@ release.
     OpenAPI 3.0.3 ignores `readOnly` beside a `$ref`, so an owned field
     typed by an enum or another component would carry none; Workflow's
     are a string and a date-time.
+
+## D104. A transition may name who makes it and may repeat as no change, a sign-off pins what was read, Retries waits, Budget keeps periods, Presence times by state, Lease and Retries stay behaviors on tables, and Pool, Schedules, Seats and Reconcile join the core (D16, D56, D103 amended)
+
+D103 holds each behavior to a test when it is ported: state of its own,
+rules over how that state changes, and recurrence across applications.
+Its step 4 ports the rest in waves, and step 5 defines bundles and
+declarative rules. This entry holds the catalog to one application
+before those waves start: an app that runs coding agents for the people
+of a workspace, a Rust server over one SQLite database and the agent
+harness it ships. Its agents record each piece of work as a record with
+a plan and a proof, ask its people questions that block until answered,
+take the messages a person queued for them, run in supervised processes
+on accounts that run out, and wake on schedules they set.
+
+About 14,000 lines of the server's Rust, and some 3,500 of the
+harness's TypeScript, are rules of that shape, beside an exhaustive
+explorer of the record's states. Roughly a third of them map onto the
+behaviors that exist: a session a device claims is a Lease, a request
+is a Workflow with one open row per kind, a wait for every agent to be
+ready is a Rollup with a deadline. The rest fell to a few gaps in
+existing behaviors, each of which recurs, and to four patterns no
+behavior has. The app also leases and retries rows that are no queue's
+messages, which D103's fold of `Lease` and `Retries` into `@queue`
+would leave with nothing.
+
+This entry records the design before any of it is built. The names and
+configs are reversible until the first release, as D103's are.
+
+### Lease and Retries stay behaviors on tables
+
+D103 folds `Queue`, `Lease` and `Retries` into `@queue` (D53, D68,
+D80). A queue's message has a claim with a lease, and a backoff between
+its attempts; a row has neither. The app leases rows: the session a
+member's device claims with its first poll and keeps with each poll,
+ended after two minutes of quiet; the conversation one harness process
+owns, which another takes over when its holder dies; the message an
+agent takes, which goes back when the agent stops syncing. It retries
+rows: a sandbox tried again once per version, and only for a failure an
+update may fix; an agent start retried with a doubling wait for half an
+hour; a record that resumes itself at most three times in thirty
+minutes.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Lease` stays a behavior a table implements (`implements Lease<Session, { ttlMs, onExpiry, ... }>`): its holder, token and times are the table's owned columns, its directives a sub-table, with the config, guards and fencing token D16's amendments gave it. A `@queue`'s claim keeps its own lease (D53), which is a message's. | The fold D103 records, which leaves a row no lease; a queue message per leased row, whose claim is a worker's and not the caller's who holds the row |
+| `Retries` stays a behavior a table implements, counting the row's attempts, with the time the section below gives it. D68's backoff stays the queue's, for its messages. | Counting a row's attempts as messages of a queue that no worker drains |
+| `Queue` folds as D103 has it. A claim of the next row is a declared read (D86) of the rows that may be claimed, in the order the app wants, and Lease's `acquire` on the one it picks; a claimer that loses the race meets `held_by_another` and reads again. | Keeping `Queue`'s `claimNext` as a behavior: its one transaction saves a retry under contention, which the app's claims, a handful a minute, never meet |
+
+### Who may move a row
+
+Most of the app's rules name a principal by the row, not by a
+permission. Only the person a question was sent to answers it, and only
+its sender withdraws it. Only a message's sender edits, cancels or
+retries it while it waits. Only the device that claimed a session
+reports on it. Only the agent that claimed a handle releases it. A
+transition is `{ from, to, permission? }`, and the behaviors that name a
+principal each keep a field of their own for it: `Lease`'s `holder`,
+`Assignment`'s `assignee`, `Presence`'s `principalField`. The core
+already has the caller's subject and permissions on every command
+(`Caller`).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A Workflow transition may list `by`: own fields that hold a subject, `createdBy` (D87) among them, and seats of `Seats` as `seat:<name>`. The caller must be a subject one of them holds, and hold the transition's `permission` too when it names one. Any other caller is `vetoed` (`not_principal`, Presence's code), details `{ from, to, by }`. | A permission per row, which a policy outside the schema would grant and revoke; a guard written per app |
+| Workflow's config may name an `overridePermission`, which moves a row past `by`, as Lease's moves a caller past a lease's guard. Raw SQL stays the repair it is under D103. | No way past `by` but raw SQL, which runs no other rule |
+| `StateRules` takes the same `by` per state: a frozen field changes for a subject `by` names, as it does for a caller with `permission`. | A frozen field that only a permission unfreezes, so a sender's edit of their own waiting message needs a permission every sender holds |
+| The declarative vocabulary (D103, step 5) gains a `caller` operand in its conditions, compared with a field that holds a subject. | Conditions over the row alone, which cannot say whose row it is |
+
+### A repeated move that changes nothing (D16 amended)
+
+D16's amendment on writes that change nothing kept Workflow's
+`already_in_state` a veto, so a caller learns that its read was stale or
+that its retry landed, and so another behavior's gate cannot refuse a
+move that is no move. An agent that calls a tool and loses the answer
+calls it again, and under the veto its retry fails: every agent's
+instructions have to explain a refusal that means success. The app
+makes a repeated move change nothing for that reason, and its explorer
+checks every state with it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| Workflow's config may set `repeat: "unchanged"`. A transition into the state the row is in then answers `{ from, to, unchanged: true }` and writes nothing (`Cx::unchanged()`), before any other use's guard runs: the core reads the status before it asks a guard, so no gate can refuse a move that is no move. Without it the veto stays. | Unchanged success for every type, which D16 turned down for the stale read it hides; a veto each app's handlers catch and answer as success, in every language |
+| `transition` takes an optional `from`, the state the caller read. One that is not the row's state is `vetoed` (`stale`, details `{ from, status }`), so a caller that wants the stale read the veto gave asks for it. | Reading a stale read off `already_in_state`, which only a repeat of the same move shows |
+
+### A sign-off pins what was read (D56 amended)
+
+The app's records carry two approvals with different lives. A person
+approves a plan, and the approval survives later edits; a person
+approves a proof, and any write to the proof or its screenshots clears
+it. Each approval names the revision the person saw, and one made
+against a revision that has since moved is refused. `Approvals`
+consumes every gate's sign-offs on any change of the own fields, or
+none with `resetOnChange: false`, and a sign-off names no revision.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A gate may list `resetOn`: the own fields whose change consumes its sign-offs, `[]` for none. A gate without it follows `resetOnChange`, as now. | One switch for every gate, which cannot keep a plan's approval while it clears a proof's |
+| A gate may set `pinned: true`. `signOff` then takes `version`, the row's version the signer read (the `@optimistic` column D103's writes are held by), and one that is not the row's version is `vetoed` (`stale`, details `{ version, current }`). | A sign-off checked against nothing, which approves what the signer did not see; a precondition only HTTP carries, which MCP and the SDKs' calls would lose |
+
+### Retries that wait
+
+`Retries` counts attempts per failure class and keeps no time: work
+that may run again may be claimed at once. The app's retries wait
+between attempts, give up after a while, cap how many fall in a window,
+and count per version.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A class may set `backoff: { firstMs, maxMs, factor? }` (`factor` 2 when absent). An attempt that fails in it sets the owned `retryAt`, and until then a Workflow transition into a state of `retryInto`, or Lease's `acquire`, is `vetoed` (`backing_off`, details `{ retryAt }`). With `then`, a deadline (D103, step 3) armed at `retryAt` moves the row. | Backoff in each caller, which every caller of the row has to agree on; D68's backoff, which is a message's |
+| `giveUpAfterMs` exhausts the row at its first failed attempt that long after the first failure since its last success. | A count alone, which cannot say "for half an hour" of a wait that doubles |
+| `window: { attempts, ms }` caps the attempts in any `ms`: one more is `vetoed` (`throttled`, details `{ until }`) until the oldest leaves the window. The attempts' times are a sub-table. | Exhausting at the cap, which ends a record that may run again in half an hour |
+| `keyField` names an own field whose value keys every class's count: a new value starts them again. `{ attempts: 1 }` with `keyField: "version"` is once per version. | A class per version, which a config cannot list ahead |
+
+### Budget keeps periods, and usage reported from outside
+
+`Budget` resets a meter daily or never. The app caps an agent on
+another device at forty questions and five records an hour, and the
+device at sixty and ten, charged in the transaction that writes them,
+which Budget's scopes already roll up. Its harness reads each account's
+usage from the provider every few minutes, and stops a paid key at its
+cap until its period rolls over.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A meter's `reset` is `hourly`, `daily`, `weekly` or `monthly`, in UTC, or `{ everyMs }`. | Daily alone |
+| `window: "rolling"` counts the last period rather than the current one, from usage kept in buckets of a sub-table, a sixtieth of the period each. | Fixed windows alone, which let twice the cap through across a boundary |
+| `observe({ meter, used, limit?, resetsAt? })` records usage a provider reports, which replaces what the meter counts until `resetsAt`; a caller needs `observePermission`. | Recording the provider's figure as usage, which adds it to what the app counted itself; `@rateLimit`, which counts a route's calls per client, outside the write's transaction |
+
+### Presence times by state, and Constants moves one way
+
+A session is live for three minutes after its last call, and for
+fifteen while its agent is in a turn. An agent may turn a record's
+requirements on and never off; its person may do both.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Presence` may set `ttlByState: { <state>: ms }`, read against the Workflow its `status` names, or the table's one, as Timers' config reads it, with `ttlMs` for the states it does not list. A beat arms the deadline its row's state gives, and a transition arms it again. | Two Presence uses, which one use of a behavior per type rules out (D16), and whose two deadlines would both miss |
+| `Constants` may list `oneWay: { <field>: "up" }` or `"down"`: a boolean that only turns true (or false), a number or a date-time that only grows (or shrinks), unless the caller holds `permission`. | A guard per app, or a field per direction |
+
+### Pool
+
+The harness runs each turn on one of its person's accounts at two
+vendors, or on paid keys. An account is open, near its limit, or out
+until the time its provider names, thirty minutes when it names none. A
+turn tries the same vendor's open accounts, then its near ones, then the
+other vendor's, then a key, each once. An out account comes back only
+when a check of its usage made after its reset finds room, never by the
+clock alone. With every account out the turn waits for the soonest
+return, looking at least every two minutes, and gives up after eight
+days. The harness keeps this in files, about 1,900 lines with the
+polling, and the server mirrors the choice to show it. A pool of
+payment processors, SMS gateways or API credentials repeats it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Pool` is a capability of the members' table: `implements Pool<Account, { order, outForMs, recheckAfterMs, permission }>`. Its owned fields are `availability` (`open`, `near` or `out`), `outUntil`, `outReason` and `checkedAt`. | A selector each app writes over its own columns |
+| `markOut({ until?, reason })` puts a member out until `until`, or `outForMs` from now. `reportRoom({ room, near?, resetsAt? })` records a check. An out member opens only through a check with room made after its `outUntil`: a breaker whose half-open probe is that check. | Opening at `outUntil` by the clock, which sends work to an account its provider still refuses |
+| `pick({ match?, prefer?, exclude? })`, a read across the table, takes the members `match` keeps, leaves out `exclude` (the keys the caller tried in this attempt), and answers the first by `order` of the open ones `prefer` keeps, then of its near ones, then of the other open and near ones. With none it answers `{ member: null, until }`, the soonest `outUntil` among the members `match` keeps, so a caller waits on a deadline of its own. | A pick that waits inside the core, which reads no clock and holds no connection |
+| A member out past its `outUntil` with no later check arms a deadline (D103, step 3) `recheckAfterMs` on, whose fire writes an outbox event the app's worker answers through `reportRoom` with the provider's figure. The core calls no provider. | Polling in each app, which is most of the code this behavior replaces |
+| A member whose table also implements `Budget` is read through a contract, `Capacity` (`hasRoom`), which `Budget` implements, as D70's `Supply` joins `Holds` to `Stock`: a member with no room in a meter counts as out until the meter's period rolls over. | Pool reading Budget's columns, which D103 rules out between behaviors |
+
+### Schedules
+
+An agent sets wake-ups on its record: after a delay, at every interval,
+or on a cron line, from a minute to thirty days, at most ten a record,
+one live name each. An overdue one wakes once, not once per missed run.
+Each wake records its outcome (told, resumed, held, or missed, which
+tries again in five minutes) with the next run, in one transaction.
+Pausing keeps the next run, and a finished record finishes its
+schedules. That is about 1,200 lines, 400 of them cron. `Timers` keeps
+the deadlines its config declares, and fires each once. Reminders,
+recurring invoices and digests repeat the pattern.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Schedules` is a capability a table implements: `implements Schedules<Problem, { max, minMs, maxMs, kinds, timeZone?, outcomes, retry?, endOn?, permission? }>`. Its sub-table holds a row per schedule, keyed by name: its kind and spec, its time zone, its state (`active`, `paused` or `finished`), `nextAt`, `lastAt`, `lastOutcome` and its count of runs. | Timers, whose deadlines are the config's and not the row's; a `@job` per schedule, which is a deployable and not a row |
+| Its operations are `setSchedule({ name, after?, every?, cron?, timeZone? })`, `pauseSchedule`, `resumeSchedule`, `cancelSchedule` and `reportRun({ name, run, outcome })`, which `max`, `minMs` and `maxMs` bound. | |
+| Each active schedule arms a deadline at its `nextAt` (D103, step 3). Its fire records a run, writes an outbox event the app handles, and arms the next run from the time it fired, so a schedule overdue by many runs fires once; a resumed one past its `nextAt` fires at once, once. | Firing every missed run, which wakes a record ten times after a laptop slept |
+| `reportRun` records an outcome of `outcomes`, and `retry: { outcome, afterMs }` arms that run again. `endOn: { enters }` finishes every schedule of a row whose Workflow enters a listed state. | |
+| Cron lines and time zones are the core's, in Rust, as `Calendar`'s zones are (D103). | A cron parser in each adapter |
+
+### Seats
+
+A record has one accountable person, whom the next to take the seat
+displaces, and any number of responsible agents, the record's own agent
+always among them; agents sit only as responsible. A record has at most
+five handles, each released only by the agent that claimed it or by a
+person. `Assignment` has one assignee.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Seats` is a capability a table implements: `implements Seats<Problem, { seats: { <name>: { max?, onFull?, take?, assign?, fromField? } } }>`. Its sub-table holds a row per subject in a seat: the seat, the subject, and when and by whom it was seated. | One assignee (`Assignment`), or a column per seat, which caps every seat at one |
+| `max` caps a seat (no cap when absent), and `onFull` is `refuse` (`seat_full`) or `displace` (the longest seated leaves). `take` is the permission a caller needs to seat itself, `assign` the one it needs to seat or unseat another; a caller leaves a seat it holds without either. `fromField` seats the subject an own field holds, who cannot leave while the field holds it. | |
+| Its operations are `takeSeat({ seat, subject? })`, `leaveSeat({ seat, subject? })` and the read `listSeats`; `by` names a seat as `seat:<name>`. | |
+| `Assignment` becomes a bundle of one seat with `max: 1` and `onFull: refuse` (step 5), and its guard on another principal's `acquire` reads that seat. | Two behaviors that say who a row is for |
+
+### Reconcile
+
+The app records the state of each sandbox and moves it to the state its
+provider reports, through `unreachable` when the provider stops
+answering, each step one its state machine allows. Its process
+supervisor does the same for agent processes when the server starts.
+Deployments, devices and a payment's status at its processor repeat it.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `Reconcile` is a field behavior beside a Workflow field: `observed: Reconcile<{ status, unreachable?, staleAfterMs?, observePermission }>`. Its owned fields are `observed`, `observedAt`, `drift` and `reconciledAt`. | Derived (D73), whose model fills own fields and moves no status; a Reactions rule per observed state |
+| `observe({ state, at })` records an observation newer than `observedAt`, and changes nothing for an older one. It then moves the Workflow to the observed state along the fewest transitions the config allows, each through Workflow's `transition` as the observer, so every guard and permission runs. A step a guard vetoes stops there and records `drift` (`{ status, observed, code }`). | Setting the status to the observed one, which skips the transitions' guards |
+| `staleAfterMs` arms a deadline from each observation, whose fire moves the row to `unreachable`. The define check refuses an `unreachable` that a state other than a terminal one cannot reach, or from which some state cannot be reached. | |
+
+### Two bundles
+
+Two of the app's patterns need no rules of their own, and wait for step
+5's bundles.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| *Barrier* is Workflow (`waiting`, `released`, `cancelled`), Rollups' `all` over the rows that relate to it, gating `released`, a Timers deadline whose `then` releases it, and a `release` transition behind a permission, a person's go-ahead: an update that waits for every running agent to say it is ready, for five minutes when a person started it, or for a person's go-ahead. It needs Rollups ported over a `HasMany` relation (step 4). | A behavior of its own |
+| *Mailbox* is Workflow (`queued`, `urgent`, `taken`, `sent`, `canceled`, `failed`), StateRules freezing a taken message, `by: ["createdBy"]` on the sender's moves, and Lease on a taken message, whose expiry moves it back to `queued`. A take is the declared read of a conversation's oldest waiting message and Lease's `acquire`, as above. | Comments, whose deliveries tell a subject of a message and are no work an agent takes in turn |
+
+### What stays the app's
+
+| Pattern | Why it is no behavior |
+|---------|-----------------------|
+| The harness's durable log of a conversation, replayed after a crash | A client's log in its own process; D16's event log and D103's outbox are a server's |
+| Supervising agent processes, watchdogs, and a port that comes to listen | Work on processes, which a core that does no I/O cannot do |
+| An operation's idempotency key, answered the same within a time | A route's feature over stored answers, not a row's state; left for an entry of its own |
+| Who has a page of the workspace open | No state that outlives a process: a memory store's channel (D75) |
+| Moving a record between two databases | Replication; a version graph merges inside one database (D17) |
+| Signing in to a provider | Identity, which D50 owns |
+
+### What it amends
+
+D103: `Lease` and `Retries` do not fold into `@queue`, and stay
+behaviors a table implements; `Queue` folds, its claim a declared read
+and Lease's `acquire`. Step 4 ports each upgrade below with the behavior
+it amends, and step 5's bundles include Barrier, Mailbox and
+Assignment. D16, its amendment on writes that change nothing:
+`already_in_state` stays the default, and a type opts into
+`repeat: "unchanged"`, with `from` for the stale read. D56: Approvals'
+gates take `resetOn` and `pinned`, and StateRules takes `by`. D16, its
+work-queue amendments: Retries waits (`backoff`, `giveUpAfterMs`,
+`window`, `keyField`), Budget takes periods, rolling windows and
+`observe`, Presence takes `ttlByState`, and Assignment becomes a bundle
+of Seats. D16, its amendment on the fields a write stores: Constants
+takes `oneWay`.
+
+### The order of the work
+
+1. `by`, `overridePermission`, `repeat` and `from` on the Workflow the
+   core runs now, with cases of their own in a transcript beside
+   `core-workflow.json`, since the engine's recordings hold none.
+2. In step 4's waves, each amended behavior with its upgrade: Lease,
+   Retries, Presence, Approvals, StateRules, Budget and Constants.
+3. Seats, Schedules (on step 3's deadlines), Reconcile and Pool, in that
+   order: Seats first, since `by` names its seats, and Pool last, since
+   it reads Budget's contract. Each has its scenarios written first in
+   the recorded format: D103 makes the recordings the specification, and
+   the engine recorded none of these.
+4. Barrier, Mailbox and Assignment as bundles with step 5, and the
+   `caller` operand of its declarative conditions.
+
+Status: not built.
