@@ -34,6 +34,11 @@ type walker struct {
 	// declaration composes on its own fields (D103), in field order.
 	classUses map[*astNode][]fieldUse
 
+	// classImplements holds, beside classFields, the behaviors each class
+	// declaration implements (D103), in the order of its implements
+	// clause.
+	classImplements map[*astNode][]fieldUse
+
 	// imports accumulates cross-service named imports: package -> symbols.
 	imports map[string]map[string]bool
 
@@ -85,19 +90,20 @@ type walker struct {
 
 func newWalker(sp *serviceProgram, cfg *SchemaConfig, schema *ir.Schema, packages *packageIndex, reg *registry.Registry) *walker {
 	return &walker{
-		checker:       sp.checker(),
-		packages:      packages,
-		schema:        schema,
-		cfg:           cfg,
-		sp:            sp,
-		servicePath:   sp.servicePath,
-		reg:           reg,
-		classFields:   make(map[*astNode][]*ir.FieldDef),
-		classUses:     make(map[*astNode][]fieldUse),
-		imports:       make(map[string]map[string]bool),
-		externals:     make(map[string]bool),
-		externalTypes: make(map[string]*ir.TypeDef),
-		externalEnums: make(map[string]*ir.EnumDef),
+		checker:         sp.checker(),
+		packages:        packages,
+		schema:          schema,
+		cfg:             cfg,
+		sp:              sp,
+		servicePath:     sp.servicePath,
+		reg:             reg,
+		classFields:     make(map[*astNode][]*ir.FieldDef),
+		classUses:       make(map[*astNode][]fieldUse),
+		classImplements: make(map[*astNode][]fieldUse),
+		imports:         make(map[string]map[string]bool),
+		externals:       make(map[string]bool),
+		externalTypes:   make(map[string]*ir.TypeDef),
+		externalEnums:   make(map[string]*ir.EnumDef),
 
 		relationTargets: make(map[*ir.FieldDef]*astNode),
 
@@ -800,12 +806,13 @@ func (w *walker) walkStructClass(node *astNode, name string, decorators []decora
 
 	// A @job class declares a job of the API, which @job's Apply recorded
 	// in Schema.Jobs: it is no type (D52). A @worker class is no type
-	// either: @worker's Apply recorded it in Schema.Workers (D53), nor is
+	// either: @worker's Apply recorded it in Schema.Workers (D53), as
+	// @behaviorWorker's recorded its own (D103), nor is
 	// a @deriver class: @deriver's Apply recorded it in Schema.Derivers
 	// (D74), nor an @app class: @app's Apply recorded it in Schema.Apps
 	// (D78). Nor is an @channel or @key class of a MemoryStore schema,
 	// which their Apply recorded in Schema.MemoryStoreDeclarations (D75).
-	if findDecorator(decorators, "job") != nil || findDecorator(decorators, "worker") != nil || findDecorator(decorators, "deriver") != nil || findDecorator(decorators, "app") != nil || hasMemoryStoreDecorator(decorators) {
+	if findDecorator(decorators, "job") != nil || findDecorator(decorators, "worker") != nil || findDecorator(decorators, "behaviorWorker") != nil || findDecorator(decorators, "deriver") != nil || findDecorator(decorators, "app") != nil || hasMemoryStoreDecorator(decorators) {
 		return
 	}
 
@@ -835,6 +842,12 @@ func (w *walker) applyHeritage(node *astNode, td *ir.TypeDef) {
 				}
 				td.Extends = id.name
 			} else {
+				// A behavior a table implements is a use, read with the
+				// class's fields (resolveClassFieldDefs), not a TraitRef,
+				// and RawHeritage leaves it out (D103).
+				if _, _, carrier := w.implementsCarrier(t); carrier {
+					continue
+				}
 				// The user model's traits are core IR, not TraitRefs, and
 				// RawHeritage leaves them out (users.go).
 				if trait, core := w.identityTraitEntry(t); core {
@@ -1051,6 +1064,7 @@ func (w *walker) resolveClassFieldDefs(node *astNode) ([]*ir.FieldDef, bool) {
 	w.classFields[node] = nil
 
 	var fields []*ir.FieldDef
+	var implemented []fieldUse
 	ok := true
 
 	for _, clause := range heritageClauses(node) {
@@ -1061,6 +1075,18 @@ func (w *walker) resolveClassFieldDefs(node *astNode) ([]*ir.FieldDef, bool) {
 			if hc.Token == kindExtendsKeyword {
 				id, idOK = w.identityOf(t.AsExpressionWithTypeArguments().Expression)
 			} else {
+				// A behavior the table implements carries no fields: its
+				// use is the class's (D103).
+				if behavior, carrierID, carrier := w.implementsCarrier(t); carrier {
+					use, serr := w.behaviorImplementsOf(node, t, behavior, carrierID)
+					if serr != nil {
+						w.addErr(serr)
+						ok = false
+						continue
+					}
+					implemented = append(implemented, use)
+					continue
+				}
 				// The user model's traits carry no fields.
 				if _, core := w.identityTraitEntry(t); core {
 					continue
@@ -1096,6 +1122,11 @@ func (w *walker) resolveClassFieldDefs(node *astNode) ([]*ir.FieldDef, bool) {
 				continue
 			}
 			if serr := w.inheritedBehaviorField(className(node), t, id.decl, id.name); serr != nil {
+				w.addErr(serr)
+				ok = false
+				continue
+			}
+			if serr := w.inheritedBehaviorImplements(className(node), t, id.decl, id.name); serr != nil {
 				w.addErr(serr)
 				ok = false
 				continue
@@ -1140,6 +1171,7 @@ func (w *walker) resolveClassFieldDefs(node *astNode) ([]*ir.FieldDef, bool) {
 
 	w.classFields[node] = fields
 	w.classUses[node] = uses
+	w.classImplements[node] = implemented
 	return fields, ok
 }
 
@@ -1294,6 +1326,9 @@ func (w *walker) applySource(td *ir.TypeDef, src *decoratorRef) {
 	target := targetService + "." + id.name
 	if external {
 		var uses []ir.BehaviorRef
+		for _, use := range w.classImplements[id.decl] {
+			uses = append(uses, use.ref)
+		}
 		for _, use := range w.classUses[id.decl] {
 			uses = append(uses, use.ref)
 		}
@@ -1379,6 +1414,7 @@ func (w *walker) resolveDetached(decl *astNode) []*ir.FieldDef {
 		if !classes[node] {
 			delete(w.classFields, node)
 			delete(w.classUses, node)
+			delete(w.classImplements, node)
 		}
 	}
 	for name := range w.schema.Scalars {

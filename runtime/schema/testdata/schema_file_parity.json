@@ -349,6 +349,34 @@
       "error": "a behavior operation's marker: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/OperationSetFile'\n- at '/operations/0': additional properties 'behaviorOperation' not allowed"
     },
     {
+      "name": "a behavior a table implements",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"DBTable\", \"behaviors\": [\n\t\t{\"name\": \"Timers\", \"implements\": true, \"config\": {\"deadlines\": {\"respond\": {\"start\": {\"create\": true}, \"afterMs\": 1500}}}},\n\t\t{\"name\": \"Workflow\", \"field\": \"status\", \"config\": {\"states\": [\"open\", \"closed\"], \"transitions\": [{\"from\": \"open\", \"to\": \"closed\"}]}}]}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Ticket\":{\"behaviors\":[{\"config\":{\"deadlines\":{\"respond\":{\"afterMs\":1500,\"start\":{\"create\":true}}}},\"implements\":true,\"name\":\"Timers\"},{\"config\":{\"states\":[\"open\",\"closed\"],\"transitions\":[{\"from\":\"open\",\"to\":\"closed\"}]},\"field\":\"status\",\"name\":\"Workflow\"}],\"name\":\"Ticket\",\"role\":\"DBTable\"}}}"
+    },
+    {
+      "name": "implements that is not a boolean",
+      "registry": "core",
+      "input": "{\"name\": \"Ticket\", \"role\": \"DBTable\", \"behaviors\": [{\"name\": \"Timers\", \"implements\": \"yes\", \"config\": {\"deadlines\": {\"respond\": {\"start\": {\"create\": true}}}}}]}",
+      "accept": false,
+      "error": "implements that is not a boolean: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/behaviors/0/implements': got string, want boolean"
+    },
+    {
+      "name": "a behavior worker",
+      "registry": "core",
+      "input": "{\"kind\": \"API\", \"name\": \"tickets-api\", \"imports\": [{\"package\": \"@schemas/tickets-db\", \"types\": [\"Ticket\"]}],\n\t\t\"workers\": [{\"name\": \"TicketTimers\", \"behaviorWorker\": {\"type\": \"Ticket\", \"permissions\": [\"tickets.escalate\"]}, \"concurrency\": 2}]}",
+      "accept": true,
+      "canonical": "{\"imports\":[{\"package\":\"@schemas/tickets-db\",\"types\":[\"Ticket\"]}],\"kind\":\"API\",\"name\":\"tickets-api\",\"workers\":[{\"behaviorWorker\":{\"permissions\":[\"tickets.escalate\"],\"type\":\"Ticket\"},\"concurrency\":2,\"name\":\"TicketTimers\"}]}"
+    },
+    {
+      "name": "a worker with neither a queue nor a table",
+      "registry": "core",
+      "input": "{\"kind\": \"API\", \"name\": \"tickets-api\", \"workers\": [{\"name\": \"TicketTimers\"}]}",
+      "accept": false,
+      "error": "a worker with neither a queue nor a table: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/Document'\n- at '/workers/0': missing property 'queue'"
+    },
+    {
       "name": "visible tool without a policy gets the default",
       "registry": "core",
       "input": "{\"kind\": \"OperationSet\", \"name\": \"Ops\", \"operations\": [\n\t\t{\"name\": \"deleteOrder\", \"typeRef\": {\"name\": \"Order\"}, \"httpMethod\": \"DELETE\", \"mcp\": {\"handle\": \"delete_order\", \"hidden\": false}}]}",

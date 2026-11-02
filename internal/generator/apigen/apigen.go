@@ -838,14 +838,14 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		return nil, fmt.Errorf("apigen: upstream schema %s declared but no upstream IR provided", opts.UpstreamSchema)
 	}
 	output.Jobs = jobsOf(schema)
-	output.Workers = workersOf(schema)
+	output.Workers = workersOf(schema, opts.Dependencies)
 	output.Registration = IdentityRegistration(schema)
 	output.IndirectModules = goutil.UniqueModules([]string{output.TypesModule}, []string{upstreamTypesModule})
 	output.UpstreamVersionGraph = declaresVersionGraph(opts.UpstreamIR)
 	if opts.IsPublic && opts.UpstreamSchema != "" {
 		// The upstream auth schema is the API's database (resolveUpstreamAuth
 		// reads authDb, or the one DB-kind dependency, as Deps does).
-		output.Deps = DepsInfo{Database: opts.UpstreamSchema, ORMModule: ormModule, VersionGraph: output.UpstreamVersionGraph, Rules: DeclaresFieldBehaviors(opts.UpstreamIR)}
+		output.Deps = DepsInfo{Database: opts.UpstreamSchema, ORMModule: ormModule, VersionGraph: output.UpstreamVersionGraph, Rules: DeclaresTableBehaviors(opts.UpstreamIR)}
 	}
 	auth, err := opts.Provider.Analyze(schema, opts.UpstreamIR)
 	if err != nil {

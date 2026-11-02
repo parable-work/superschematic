@@ -159,10 +159,18 @@ type ORMTable struct {
 	View     bool
 	Relation string
 
-	// Uses are the table's fields that are behaviors (D103), each one's
-	// operations a member of its repository under its id; none for a
-	// table with none.
+	// Uses are the table's behaviors (D103), each one it implements and
+	// each field that is one, each one's operations a member of its
+	// repository under its member; none for a table with none.
 	Uses []ORMUse
+
+	// Deadlines is a table whose behaviors arm deadlines (D103), whose
+	// repository runs a due one (runDeadline). NoUpserts is a table whose
+	// behaviors keep sub-tables or arm deadlines, whose repository has no
+	// upserts: an upsert's insert applies no change set, and the core's
+	// create of such a row writes more than the row.
+	Deadlines bool
+	NoUpserts bool
 }
 
 // ORMRelation is a to-one relation as orm.ts writes it: Field, the
@@ -348,8 +356,20 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 	if opts.Actor.SystemSet {
 		out.SystemActor = &ORMSystemActor{ID: opts.Actor.SystemID, Name: opts.Actor.SystemName}
 	}
+	// A behavior's sub-table has no definition or repository (D103): only
+	// the behavior's operations write it, and no read of its rows is
+	// generated, so no relation reaches it either.
+	owned := map[string]bool{}
+	for _, t := range tables {
+		if td := schema.Types[t.Type]; td != nil && td.BehaviorTable != nil {
+			owned[t.Type] = true
+		}
+	}
 	for i := range tables {
 		t := &tables[i]
+		if owned[t.Type] {
+			continue
+		}
 		info := types[t.Type]
 		member := lowerFirst(t.Type)
 		if slices.Contains(ormMembers, member) {
@@ -386,6 +406,15 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 		}
 		if rules != nil {
 			table.Uses = rules.uses[t.Type]
+			if layout := rules.layout.Types[t.Type]; layout != nil {
+				table.Deadlines = layout.Deadlines != nil
+				table.NoUpserts = table.Deadlines
+				for _, use := range layout.Uses {
+					if len(use.Tables) > 0 {
+						table.NoUpserts = true
+					}
+				}
+			}
 		}
 		if statements["nearest"] != "" {
 			table.Statements = append(table.Statements, sqlutil.NamedStatement{Name: "nearest", SQL: statements["nearest"]})
@@ -416,10 +445,13 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 		for _, k := range t.UniqueKeys {
 			table.UniqueKeys = append(table.UniqueKeys, ORMUniqueKey{Name: k.Name, Fields: k.Fields, Conflict: k.Conflict, Keep: k.Keep, Rows: k.Rows, Expression: k.Expression})
 		}
-		if err := ormRelations(&table, t); err != nil {
+		if err := ormRelations(&table, t, owned); err != nil {
 			return nil, err
 		}
 		for _, ref := range t.ReferencedBy {
+			if owned[ref.Source] {
+				continue
+			}
 			probe := sqlutil.ReferenceProbeOf(t, ref)
 			table.ReferencedBy = append(table.ReferencedBy, ORMReference{
 				Member: lowerFirst(ref.Filter),
@@ -513,10 +545,11 @@ func ormViews(schema *ir.Schema, opts Options, out *ORMInfo, projections []TypeI
 }
 
 // ormRelations gives table, as orm.ts writes it, the relations t, as
-// sqlutil models it, includes and filters through (D90). An include's
-// member is a member of the row it loads into, so one that a column
-// already holds is refused.
-func ormRelations(table *ORMTable, t *sqlutil.TableModel) error {
+// sqlutil models it, includes and filters through (D90), but those to a
+// behavior's sub-table, owned, which orm.ts does not define (D103). An
+// include's member is a member of the row it loads into, so one that a
+// column already holds is refused.
+func ormRelations(table *ORMTable, t *sqlutil.TableModel, owned map[string]bool) error {
 	members := map[string]bool{}
 	for _, c := range table.Columns {
 		members[c.Member] = true
@@ -541,6 +574,9 @@ func ormRelations(table *ORMTable, t *sqlutil.TableModel) error {
 		})
 	}
 	for _, many := range t.ToMany {
+		if owned[many.Source] {
+			continue
+		}
 		if members[many.Name] {
 			return fmt.Errorf("tsgen: table %s: the relation %s would include its rows as the member %s, which a column holds", t.Type, many.Name, many.Name)
 		}
@@ -779,6 +815,12 @@ func (o *ORMInfo) RuntimeTypes() []string {
 		}
 		if len(t.Uses) > 0 {
 			used["UseOperations"] = true
+		}
+		if t.Deadlines {
+			used["BehaviorDeadlines"] = true
+		}
+		if t.NoUpserts {
+			used["WithoutUpserts"] = true
 		}
 		for _, c := range t.Columns {
 			if c.FilterType == "" {

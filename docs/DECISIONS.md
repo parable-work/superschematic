@@ -13619,8 +13619,8 @@ This entry records the design before any of it is built.
 |----------|------------------------|
 | A behavior's fields are columns of the type's table (`status`, `status_entered_at`); its collections are sub-tables with a foreign key to the row; its indexes and constraints are DDL (D83). sqlgen writes them, D27 plans them, both ORMs read them, and reports and projections may read them. | Storage the engine creates when a schema is published (D16, D58), outside the migration plan |
 | A behavior's operations are the API's operations: routes, SDK methods and MCP tools the API generators write from the declaration, each handler a call to the adapter. They are authorized as the API's other operations are (D37, D50), and a permission a behavior's config names is one the API's permissions list. D11's invocation policy and D70's confirmed operations carry over. A read that is a query is a declared query (D86); one that applies rules, as `findAvailability` does, is a call of the core that only reads. | The engine's routes mounted beside the API's, with a policy of their own |
-| A trigger the build writes on each table that composes a behavior writes an outbox row per change, whoever makes it, as D80's `@enqueueOnChange` writes a message. Reactions, Rollups, the arming of deadlines and the event stream read the outbox after the commit, so a raw write is heard, not refused. | Events only from the core's own writes, which an ORM write or a raw one would skip |
-| Deadlines and expiring holds are rows of a sub-table that a worker or a job of the API runs (D52, D53). | `<db>-engine-runner`, a deployable that exists only for the engine |
+| A trigger the build writes on each table that composes a behavior writes an outbox row per change, whoever makes it, as D80's `@enqueueOnChange` writes a message. Reactions, Rollups and the event stream read the outbox after the commit, and so does the arming of the deadlines a raw write moves, so a raw write is heard, not refused. Since step 3, a write through the core arms and clears its deadlines in the writer's own transaction, from its change set. | Events only from the core's own writes, which an ORM write or a raw one would skip |
+| Deadlines and expiring holds are messages of the table's deadline queue, one per row, use and deadline, which a worker of the API runs (D53); a behavior keeps its state of them in a sub-table of its own (Timers' `deadlines`). Since step 3 the queue, not a sub-table, holds the deadlines: a claim and its completion are a queue's. | `<db>-engine-runner`, a deployable that exists only for the engine; deadlines as rows of a sub-table a worker or a job sweeps (D52), which needs a claim of its own |
 
 ### A runtime project
 
@@ -13675,8 +13675,12 @@ change's to settle.
 
 Status: steps 1 and 2 built: the core, its adapters, TypeScript's, Go's
 and Rust's, the TypeScript and Go repositories over them, and the API
-generators' operations of a table whose fields are behaviors. Steps 3 to 7
-are not built. The names and rules are reversible until the first release.
+generators' operations of a table whose fields are behaviors. Step 3's
+first half built: deadlines on a table, run by a worker of the API, with
+Timers, and the `implements` form pulled forward from step 5 for the
+core's behaviors alone. Step 3's second half (the outbox trigger, the
+outbox command and Reactions) and steps 4 to 7 are not built. The names
+and rules are reversible until the first release.
 - **The core.** `runtime/engine/rust/rules` (`superschematic-rules`)
   depends on serde and serde_json alone and builds for
   wasm32-unknown-unknown. `Core::run(type, command, answers)` returns
@@ -13854,8 +13858,9 @@ are not built. The names and rules are reversible until the first release.
   beside the class's service clause, which no public route takes; an API
   with no database, or several DB dependencies and no authDb; a type the
   database does not declare, or the API imports from elsewhere; one that
-  is no table, an engine type, or a table with no field behavior or no
-  single `@key`; an operation that runs on a schema or a namespace; a
+  is no table, an engine type, or a table that composes no behavior (by
+  `implements` or on a field, since step 3) or has no single `@key`; an
+  operation that runs on a schema or a namespace; a
   second set of one table; a name the expansion adds that the API holds;
   an operation it adds whose name another operation of its namespace
   takes (apigen's, from the set's name), whose handler, SDK method and
@@ -13960,7 +13965,8 @@ are not built. The names and rules are reversible until the first release.
 - **Other generators.** An extension's generator that does not declare
   it renders a table whose fields are behaviors (`RendersFieldBehaviors`)
   refuses one, naming the generator, the table, the field and the
-  behavior.
+  behavior, and one that implements a behavior alike (`type Ticket
+  implements behavior Timers`).
 - **The transcript.** `rules-testkit` writes `core-workflow.json` out as a
   transcript (`runtime/engine/testdata/rules/core-workflow.transcript.json`)
   and a test fails when it is stale. The adapter replays it on bun:sqlite
@@ -13973,27 +13979,383 @@ are not built. The names and rules are reversible until the first release.
   `.schema.ts`: an order with a permission on a transition, and a
   shipment with two Workflows. tsgen's `TestWorkflowTablesEndToEnd` holds
   the generated layout and DDL to the adapter on both dialects.
+- **Step 3, first half: the implements form.** A DB table says
+  `implements Timers<Ticket, { ... }>`, the carrier `@superschematic/db`
+  exports, which resolves to the empty object type as `Trait<T>` and
+  `User<Config>` do. Its first type argument is the table itself and its
+  second the config, which the TypeScript reader reads through the
+  checker as it reads the field form's (nested tuples and object types,
+  literals, `typeof` a constant declared `as const`), into a use anchored
+  on the type of a table that stays a table: `ir.BehaviorRef` with no
+  `Field` and `Implements` set. Only a behavior the core runs and that
+  names no value field may be implemented, Timers today; Workflow, which
+  names one, is anchored on a field. A type takes `@behavior` or the
+  table's forms, never both, and a table does not inherit a behavior a
+  base or a trait implements. The data forms write the use `{ name,
+  implements: true, config }`, and `format --to=ts` writes the clause
+  back after `extends`. `implements` is how the data forms tell a table's
+  use from an engine type's, apart from the anchor: a use on the type
+  without it is `@behavior`'s, which makes an engine type (D58), and
+  `TypeBehaviors()` and `IsEngineType()` count those alone. One key keeps
+  every existing document meaning what it meant, a table with Timers alone
+  has no field use to tell a table by, and at step 7, when `@behavior`
+  goes, the key stays as the record that the use is a table's.
+  `TableBehaviors()` lists a table's uses, those it implements before those
+  on its fields. The build holds Timers' config to the table in the core's
+  words (`verify/behaviors_timers.go`): the Workflow its `enters`, `then`
+  and `until` read, the table's one or the one `status` names, and a field
+  start's date-time field; its other rules are the core's define check's.
+  `status` is a table's alone: the build refuses it on an engine type's
+  `@behavior("Timers", ...)`, whose engine reads its one Workflow and would
+  ignore it, and `@superschematic/schema`'s `TimersConfig` has none, where
+  `@superschematic/db`'s `Timers<T, C>` takes it.
+- **Sub-tables.** A declaration declares its sub-tables (`tables`: a name,
+  a key field of type string, typed fields) and whether it arms deadlines
+  (`armsDeadlines`), which the engine's parser takes and shifts out, as it
+  does `value`. The loader adds each use's sub-table as a DB table
+  (`TypeDef.BehaviorTable`, the origin `behavior`): `<Type><member><Table>`
+  (`TicketTimersDeadlines`, `ticket_timers_deadlines`), the member being a
+  field use's field and an implements use's storage key in camel case
+  (`timers`), with a required relation to the row, ON DELETE CASCADE, the
+  declared fields, a surrogate `id` and a unique index of the row and the
+  key. The relation is named for the row (`ticket`, `ticket_id`), with
+  `Row` after it while that name or its column is a declared field's or
+  the surrogate `id`'s, so a table named after a field its sub-table
+  declares keeps both (`outcomeRow` on an `Outcome`, beside Timers'
+  `outcome`). sqlgen writes it and D27 plans it as any table (the plan case
+  `add-behavior-tables`, in both dialects). No repository is generated for
+  it, so it has no write path but the behavior's operations; SQL, reports
+  and projections may read it. The layout maps it from its logical name
+  (the row's type, the use, the table) to its table and columns
+  (`uses[].tables`), names each use's member (`uses[].member`) and lists the
+  table's own fields (`spec.fields`), and `TypeSpec` carries them, so a
+  config that names a field is held to the type's (a Timers field start).
+  Every adapter applies a change set's sub-table rows: an insert `ON
+  CONFLICT (row, key) DO NOTHING`, an update of the values given and a
+  delete, each held to one row, so one a raw write moved runs the command
+  again; a hard delete deletes the row's sub-table rows too, since SQLite
+  enforces no foreign key unless the connection turns it on, and a soft
+  delete keeps them. The core reads one row's rows of one sub-table
+  (`ReadRequest::SubRows`; `ctx.sub_rows(table)` gives the use's own with
+  the run's writes applied), which the reference host and the three
+  adapters on SQLite and on Postgres answer in key order.
+- **Deadlines as a queue.** A table whose behaviors arm deadlines gets a
+  queue in its database (`TypeDef.BehaviorQueue`, `<Type>Deadline`,
+  `ticket_deadline_queue`), with no D80 key and a done message kept no time
+  (`retain: "0s"`): its message's fields are `rowKey`, `useId`, `name`,
+  `at` (epoch milliseconds) and `payload`, with a partial unique index of
+  the live (ready or claimed) messages by row, use and name, and an index
+  by row.
+  D80's key is one field and would need a composite text whose spelling,
+  base62 or a hyphenated UUID, could differ between languages; typed
+  columns cannot. A fire's record is the behavior's sub-table, not the
+  queue. The adapters write the change set's deadline changes in the
+  caller's transaction, from the layout's `deadlines`: an arm deletes the
+  key's messages, ready, claimed or dead, and inserts one due at its time,
+  a clear deletes them, and a row's delete deletes every message of the
+  row. A dead arming goes with the newer arming or clear that supersedes
+  it, so a deadline holds one message at most and an operator's retry of
+  the queue's dead messages (`stack queue retry --all`, whose statements
+  guard a D80 key alone) never meets a live message of the same deadline
+  under the partial unique index. A
+  unit runs the checks of reads made under locks, the fenced row writes, a
+  deadline command's spend of its arming, the sub-table rows and then the
+  deadline changes. That closes the three ways a deadline could misfire.
+  One re-armed or cleared while a worker holds its claim never fires on
+  its old arming: the arm or clear deleted the claimed message, so the
+  worker's spend of its claim, by id and token and held to one row, finds
+  none, and the unit applies nothing (`claim lost`). One the fired command
+  arms again (a snooze of a fired deadline, a `then` that re-enters a
+  state) survives the worker's completion: the spend comes before the
+  change set's deadline changes. And a delete through the core takes every
+  message of its row. A deadline command runs at the later of the host's
+  clock and its time, so a worker whose clock lags the database's runs none
+  before it falls due in the core. Neither ORM enqueues a message itself:
+  the queue's `Enqueue<Type>Deadline` is a raw write like any other.
+- **Whether a deadline is still armed** is the claim's to check, or the
+  host's without one, never the core's. The queue message is the only
+  record of an arming and the core holds no deadline state. A read the
+  core asked for would read the message the claim already holds, before
+  the unit, where the spend happens inside it, under the row's version
+  fence and the message's lock, and cannot race. The core stays free of
+  queue semantics, so a runtime layout may keep its deadlines elsewhere.
+  Without a claim (the reference host, a transcript), the adapter reads
+  the arming before each run, refusing one no longer armed at its time as
+  `not_found` and one not due as `invalid_argument` in the reference
+  host's words, and spends it in the unit.
+- **The worker.** An API runs a table's deadlines from a class with no
+  members that names the table, as `@behaviorOperations` does, its
+  database the API's authDb or its one DB dependency:
+
+  ```ts
+  @behaviorWorker(Ticket, { concurrency: 2 })
+  export abstract class TicketTimers {}
+  ```
+
+  The data forms write it as a worker with `behaviorWorker: { type,
+  permissions }` and no `queue`, which the meta-schema requires of any
+  other worker. The loader expands it into an ordinary `ir.Worker` over the
+  table's deadline queue, marked with the origin `behavior`
+  (`behaviorops.ExpandWorkers`), so it is a deployable of kind worker named
+  after the API and the class (`fixture-timers-api-ticket-timers`), with
+  D53's settings, `stack dev` process, image and gcp worker pool. Its
+  handler is generated into the API's package (Go's `TicketTimersQueues`,
+  TypeScript's `ticketTimersQueues`, Rust's `run_ticket_timers_deadline`),
+  and is never in `Workers`, a constructor of them or the scaffold, so an
+  API whose workers are all behavior workers needs none. It claims a due
+  message and runs the core's deadline command through the adapter in one
+  transaction with the message's completion; the loop's own completion
+  does nothing (Go's `worker.RunAll` over the queues, Rust's
+  `SelfCompleting`), so a crash between the commit and a completion cannot
+  run it twice. A deadline runs as the system, not a user: its caller is
+  the subject `<API>/<class>` (`fixture-timers-api/TicketTimers`), never
+  standing in, holding the permissions the decorator lists, none unless
+  set; a `then` whose transition needs one it lacks records `forbidden`,
+  as the engine's runner without it did. `concurrency` (one unless set,
+  and an environment's settings change it) applies to each of the table's
+  behavior queues, and the main runs one claim loop per queue, so the
+  outbox joins the same worker as a second queue with no new decorator. A
+  core `not_found` whose row or use is gone, which the adapter confirms in
+  the same transaction (the table holds no live row of the key, or the
+  layout no such use), spends the arming in a unit of its own, and the
+  handler logs `deadline ran nothing` with why, `gone`, as it logs a lost
+  claim; any other refusal or failure fails the message, due again after
+  D68's backoff, a `not_found` of something else a rule reached among
+  them. The verification pass refuses a
+  worker outside an API, over no database or a table the API's database
+  does not declare or the API imports from elsewhere, of an engine type,
+  of a table that arms no deadlines, a second of one table, and `queue`
+  beside it. A table whose deadlines no worker runs is not refused: an API
+  that serves `@behaviorOperations(T)` of a table that arms deadlines and
+  declares no `@behaviorWorker(T)` is warned, and the documentation and the
+  agent skill say why it matters. A worker's image takes the core as its
+  API's server does (the rules archive in Go, `@superschematic/rules` in
+  TypeScript, the Rust crates by `[paths]`, through the API crate), and
+  generated CI stages the archive and builds the package before a
+  checkout's deployables over such a database, workers included.
+- **Timers on the core.** `rules-behaviors/src/timers.rs` ports Timers
+  with the engine's wording, its config checks hand-written and held to the
+  declaration's configSchema by a test, as Workflow's are, and its module
+  doc holds it to D103's test of a behavior: its state is its `deadlines`
+  sub-table and the deadlines it arms; it has rules over how they change
+  (start, arm, cancel, fire, reset, snooze); and it recurs, as an SLA, an
+  expiring hold and a reminder. A deadline is armed in the core
+  (`Cx::arm`) exactly while its sub-table row is pending, at its `dueAt`.
+  One that falls due calls the use's own `fireTimer` (`Cx::call`), so
+  every use's guards run as they ran for the engine's sweep, which the
+  worker replaces (`sweepMs` is parsed and not read); `then` moves the
+  Workflow through its transition (`Cx::call`); `enters`, `then` and
+  `until` read the Workflow the config's `status` names, or the table's
+  one; a field start reads a date-time own field, as epoch milliseconds or
+  ISO text. It takes a config's deadlines in name order, as the engine's
+  canonical document did, so the build's check and the core's name the same
+  first deadline that breaks a rule. Deadlines arm in the core's hooks, for every write through the
+  core: the repositories' creates and their updates and deletes of one row
+  by its key, the operations and the deadlines. Their bulk and hard writes
+  go around the core and arm nothing (`updateMany`, `deleteMany` and
+  `hardDeleteOne` in TypeScript, `UpdateMany`, `DeleteMany` and
+  `HardDeleteOne` in Go). A config change writes no row, since a build-time
+  project's change is a build and the core has no publish hook that writes
+  rows: each row's deadlines reconcile at its next write through the core.
+  `fireTimer`, `resetTimer` and `snoozeTimer` stay operations.
+  `Cx::unchanged()` is built, for an operation that writes nothing
+  (`fireTimer` of a deadline not due), and `Behavior::read_fields` computes
+  the engine's `Timers.deadlines` from the sub-table rows. The core refuses
+  as defects an arm or clear by a behavior that declares no deadlines, a
+  sub-table value its declaration lacks and the key among a write's values.
+  `tests/timers.rs` has 14 cases; `tests/core.rs` 36.
+- **The Timers replay.** `core-timers.json` replays on Workflow and Timers
+  through the reference host: 18 scenarios, 324 steps checked, 96 skipped
+  and 0 mismatches, each refusal compared in full, and the floor is 324. A
+  runner's sweep (`runner.runDue`) runs each due deadline as the runner,
+  at the later of the step's time and the deadline's. It stops at a
+  publish whose Timers change the engine's `afterConfigChange` rewrote rows
+  for on a type with rows (Timers removed, a deadline removed, a start or
+  `afterMs` changed, a field deadline added), since the core writes no row
+  at a publish, and at a second namespace, since the reference host keeps
+  one; the scenarios composing StateRules or Reactions, or an access
+  policy of the test's own, are skipped, each with its reason. It is
+  written out as `core-timers.transcript.json`, 101 steps (51 commands, 11
+  of them deadlines a runner ran, and 50 checks) in 12 scenarios, floor
+  101, whose `expect` holds the row's sub-table rows (`subRows`) and armed
+  deadlines (`deadlines`); `core-workflow.transcript.json` was written
+  again with the specs' fields and keeps its 96. TypeScript replays both on
+  bun:sqlite and on Postgres, Go on SQLite and on Postgres, and Rust on
+  rusqlite and on Postgres, 0 mismatches each.
+- **The repositories and the API.** A use the table implements puts its
+  operations under its member, the behavior's name in camel case:
+  `orm.ticket.timers.fireTimer(key, { deadline: 'respond' })` in
+  TypeScript and `db.Ticket.Timers().FireTimer(ctx, id,
+  orm.TicketTimersFireTimerParams{Deadline: orm.TicketTimersDeadlineRespond})`
+  in Go, typed from the declaration as the config narrows it (the config's
+  deadlines as a union, a constant each in Go). A table with a deadline
+  queue's repository runs a due deadline in its transaction, the worker's
+  entry point (`runDeadline(message, { claim, caller })`,
+  `RunDeadline(ctx, message, claim)`); Rust, with no ORM, calls the
+  adapter's `postgres::run_deadline`. A table whose behaviors keep
+  sub-tables or arm deadlines has no upserts, since an upsert applies no
+  change set and Timers' create writes a sub-table row and arms a deadline.
+  `@behaviorOperations(Ticket)` serves Timers' operations as it serves a
+  field's: `POST /api/ticket/{id}/timers/fire-timer` (and `reset-timer`,
+  `snooze-timer`), the types `TicketTimersFireTimerInput` and
+  `TicketTimersFireTimerResult` and the enums `TicketTimersDeadline` (an
+  alias `<Type>Deadline` in `behaviortypes.Narrow`) and
+  `TicketTimersFireTimerResultOutcome`,
+  `sdk.ticket.timers.fireTimer(id, { deadline })` in TypeScript,
+  `sdk.TicketNamespace.Timers.FireTimer(ctx, id, input)` in Go and
+  `sdk.ticket.timers.fire_timer` in Rust and Python, and the MCP tool
+  `ticket_timers_fire_timer`; the OpenAPI document and the permission
+  catalog (`tickets.timers` under each Timers operation) follow from the
+  IR. A row's deadlines are read at the least scope: the operations'
+  results (`fired`, `outcome`, `dueAt`) and the core's `read_fields`, which
+  the replayer compares; no repository, route, SDK or tool reads them yet.
+- **Timers' end-to-end tests.** `fixture-timers-db` holds a `Ticket` whose
+  `status` is a Workflow and whose Timers starts a deadline from the
+  create, one from an entry and one from a date-time field, and an
+  `Invoice` with two Workflows whose Timers names the one it reads.
+  `fixture-timers-api` serves `TicketActions` behind `tickets.write` and
+  runs `TicketTimers`. Each language's test builds both and runs, on
+  Postgres, the generated server through its SDK and the generated
+  worker's queues in process, through seven cases in one wording: a create
+  arms the deadline, its sub-table row and its queue message with its due
+  time; a due deadline the worker runs moves the status and records the
+  outcome; a status that leaves the state cancels the deadline by until; a
+  re-armed deadline does not fire on its old arming; resetTimer and
+  snoozeTimer are refused without the config's permission and run with
+  it; fireTimer through the SDK fires a due deadline and spends its
+  message; and deleting the row removes its deadlines
+  (`TestTimersGoServerAndWorkerOnPostgres`, `TestGeneratedTimersEndToEnd`,
+  which lists and calls the MCP tool too, and
+  `TestRustTimersOperationsAndWorkerOnPostgres`). `TestTimersTablesOnPostgres`
+  holds the Go ORM alone, `RunDeadline` with and without a claim, on a
+  lost claim and on a row a raw delete removed among its cases, and
+  `TestTimersTablesEndToEnd` the TypeScript layout and DDL on bun:sqlite
+  and the repository on Postgres. Each language's servergen test plans
+  `TicketTimers`' main, holds it to a golden and compiles it.
 - **Left for later steps.**
-  - `Cx::unchanged()` for an idempotent operation that writes nothing.
   - Refusing writes made in a delete's after-change hooks, which are
     dropped today.
   - `requires` in a declaration.
-  - Outbox events of a behavior's own, which come with `Reactions`.
-  - The core checking a deadline is still armed, which today each
-    adapter must do.
+  - The outbox trigger, the outbox command, outbox events of a behavior's
+    own and `Reactions` (step 3's second half). Until then a raw SQL
+    write, and the repositories' bulk and hard writes (TypeScript's
+    `updateMany`, `deleteMany` and `hardDeleteOne`, Go's `UpdateMany`,
+    `DeleteMany` and `HardDeleteOne`), arm and clear no deadline: a
+    deadline whose fact such an update moved stays armed at its old time,
+    and a delete of that kind leaves its rows' messages, each of which
+    falls due into `not_found` and is spent as `gone`.
   - A read under a lock of a kind other than a row or whether a table has
-    rows (a sub-table's rows by a condition, a count). Its check in a
-    SQLite or D1 batch comes with it.
+    rows (a sub-table's rows by a condition, a count). A `subRows` read made
+    under a lock is refused as `internal` on SQLite and D1, whose batch has
+    no check of it yet; its check comes with the reads above.
   - A prebuilt rules module and archive under D82. Until then
     `@superschematic/rules` builds only where cargo is, and the Go module
     links in a checkout only where cargo is (`scripts/rules-archive.sh`
     stages the archive); a release's archives tarball holds it.
-  - The layout holds only tables that compose a field behavior, so
+  - The layout holds only tables that compose a behavior, so
     `Cx::create_row` and `Cx::call_on` reach those tables alone.
-  - Typed operations (`behaviortypes.Narrow`) and the field types in
-    `@superschematic/db` are per-behavior code, as D58's are, until step 5
-    derives both from a behavior's class declaration. Until then an
-    extension's field behavior has the data forms alone.
+  - Typed operations (`behaviortypes.Narrow`), the field types and
+    carriers in `@superschematic/db` (`Workflow<C>`, `Timers<T, C>`) and the
+    build's check of Timers' config against the table
+    (`verify/behaviors_timers.go`) are per-behavior code, as D58's are,
+    until step 5 derives them from a behavior's class declaration. Until
+    then an extension's field behavior has the data forms alone, and the
+    build checks Timers' rules that read the IR alone: its other rules
+    (states, transitions) and Workflow's are the core's define check's, at
+    the first command on the table.
+  - The implements form for behaviors other than the core's, bundles and
+    the declarative vocabulary (step 5).
+  - A read of a row's deadlines (`Timers.deadlines`) in the repositories,
+    the API, the SDKs and MCP, through `Core::read_fields` or a declared
+    read (D86), and a read of a use's sub-table rows in the repositories:
+    neither ORM generates a definition, a repository or a relation for a
+    sub-table.
+  - Upserts on a table whose behaviors keep sub-tables or arm deadlines.
+    The Go ORM leaves out the exported upserts alone, and still writes
+    their unexported helpers.
+  - A check across a stack that some deployed worker runs each placed
+    table's deadlines: only the API's warning exists.
+  - Behavior workers over a database that lists `sqlite` first: a
+    TypeScript one is refused, and Go's and Rust's claim on Postgres
+    alone (D53). A TypeScript behavior worker an environment places on
+    Cloudflare Workers is refused too, since `drain.ts` runs a `@worker`'s
+    handler alone.
+  - A Timers config change rewrites no row: each row's deadlines reconcile
+    at its next write through the core, and a pending one keeps the due
+    time it was armed with until then, though a new `afterMs` would move
+    it. The engine's `afterConfigChange` rewrote them at the publish, so
+    the replay stops at such a publish, and the lazy reconciliation's
+    answers are held by `rules-behaviors`' unit tests alone. The scenario
+    that sweeps per namespace stops at its first define, and those of the
+    test behaviors `test.Bounce` and `test.Hold` replay on the reference
+    host alone, not in a transcript.
+  - A deadline's audit stamps on an `Auditable` table, whose worker's
+    subject is no user: the TypeScript and Go repositories stamp a
+    deadline's row write as an operation's, `updatedAt`, and `updatedBy`
+    only when the ORM or the context has a user, which a worker's has not;
+    Rust's stamps none, as its handlers stamp none.
+  - A fire that keeps being refused (a guard's veto, `busy`, a failure of
+    the database) fails its message, which falls due again after D68's
+    backoff and is dead after its last attempt, about fifteen minutes in
+    all. Nothing arms it again: its sub-table row stays pending, so
+    `Timers.deadlines` reports it armed and the core's invariant that a
+    deadline is armed exactly while its row is pending no longer holds,
+    until an operator retries the message (`stack queue retry`) or a
+    caller with the config's permission resets or snoozes it, or its fact
+    moves. The engine's sweep tried a refused fire again at every run. A
+    veto is no failure, and a release of the message with a delay that
+    counts no attempt would keep it armed.
+  - `snoozeTimer`'s `dueAt` is held to an integer of 0 or more, as
+    Timers' paramsSchema declares it, with no maximum: one past what an
+    adapter stores (JavaScript's 8.64e15 milliseconds, Postgres's
+    timestamp range) fails in the adapter as an `internal` refusal or a
+    database error, a 500, where the core's `invalid_argument` would be a
+    400. Bounding it changes the declaration the engine's recorded HTTP
+    and MCP corpora hold, and the API's goldens.
+  - The layout's `deadlines` names the queue message's columns (`rowKey`,
+    `use`, `name`, `at`, `payload`); the adapters write its lifecycle
+    columns and states (`id`, `state`, `claim_token`, `due_at`, ready,
+    claimed) as every D53 queue's, as the queue clients do. A layout that
+    keeps deadlines elsewhere than in a D53 queue, a runtime project's
+    among them, would name those too.
+  - The engine's own check of a config takes Timers' `status` and ignores
+    it, since the declaration it parses declares it for tables: only the
+    build refuses it on an engine type, so a type the engine defines at run
+    time keeps it unread, until step 7 removes engine types.
+  - The permission catalog lists a use's config permission under each of
+    its operations (`tickets.timers` under `fireTimer` too), though only
+    `resetTimer` and `snoozeTimer` check it, as the item on the catalog
+    below says.
+  - A `dueAt` in the API is epoch milliseconds, an integer, as Timers
+    declares it, not a date-time.
+  - Timers' declaration lists `deadlines`, its computed read, as a field
+    with no type, which takes no column; the core would let a use `set`
+    it, which Timers never does.
+  - The reference host refuses a sub-table insert of a key it holds as
+    `conflict`, and an update or a delete of one it lacks as `not_found`,
+    where an adapter runs the command again; no transcript step reaches
+    either.
+  - A TypeScript deadline message's `rowKey` is the queue client's text, a
+    hyphenated UUID on Postgres, where its type says base62; `runDeadline`
+    takes either.
+  - A Rust API with a behavior worker and no operation gets no API crate,
+    and so no worker main, as an API with an ordinary `@worker` alone; a
+    Rust behavior worker's crate reaches the rules crates through the API
+    crate's path dependencies, not its own. A behavior worker's `go.mod`
+    and `package.json` list its API's implementation, which its main does
+    not import.
+  - No test runs the generators' whole build of a stack whose Go or Rust
+    worker runs a table's deadlines: each one's main is planned from the
+    API's output, as the Go and Rust servers of behavior operations are,
+    and `fixture-timers-api`'s Go server would be refused by the rule on
+    callers below. TypeScript's `timers-ts-stack` is built whole.
+  - The Go ORM's `fireTimer` outcome is a string, since an enum the
+    declaration gives no type stays one there, where the API's types name
+    it `TicketTimersFireTimerResultOutcome`.
+  - Timers' declaration still describes `fireTimer` and the config as the
+    engine's runner sweeps them (`sweepMs`), which a table's worker
+    replaces; its text is unchanged so the engine's recorded declarations
+    change by the new members alone.
   - A concurrent create of one key: the loser gets the database's unique
     violation, not the `conflict` refusal.
   - The replay's floor is one total. A floor per kind of step would catch

@@ -898,6 +898,8 @@ shape is `BehaviorDeclaration`:
 | `requires`, `conflicts` | behaviors a type that lists this one must also list, or may not |
 | `fields` | the fields it adds: `name`, `description`, `volatile`, true for a field that can move without an event of its own instance, `perReader`, true for a volatile one whose value is the caller's, and `type`, the column it takes on a table (below) |
 | `value` | the field that holds the behavior's value when a type carries it on a field (D103): one of `fields`, which takes the anchor field's name and column; absent, the behavior cannot be anchored on a field |
+| `tables` | the sub-tables it keeps per row on a table that composes it (D103): each `name` (camelCase, unique among its tables), `description`, `key`, the field whose value keys a row within its row, of type `string`, and `fields`, each typed, the key among them and none named `id`; the loader adds each as a child table of the row, deleted with it, which only the behavior's operations write |
+| `armsDeadlines` | true for a behavior that arms deadlines: a table that composes it gets a deadline queue, `<Type>Deadline`, which an API's `@behaviorWorker` runs (D103) |
 | `operations` | the operations it adds: `name` (camelCase), `description`, `paramsSchema` (an object schema with `"additionalProperties": false`), `resultSchema`, `writes`, `scope` (`instance`, the default, `schema` or `namespace`), `beside`, `log` and `asks` (below), and `invocationPolicy`, a value of the registry's policy (section 3.15) or absent for its default |
 | `signals` | the messages about an instance an engine delivers to the event streams open on it and keeps nowhere (D77): `name` (camelCase, unique among its signals), `description`, `paramsSchema` (the JSON Schema of its data) and `access`, who may send it: `read` or `write`, a caller the policy lets read or write the schema, or `operation`, the behavior's own operations alone |
 | `preconditionSchema` | the JSON Schema of the entry a caller sends for the behavior in the preconditions of an update, a delete or an operation, which an engine checks and hands to the behavior's guard: an object schema with `"additionalProperties": false`; absent, the behavior takes none |
@@ -1059,6 +1061,25 @@ verify refuses a type that composes behaviors both ways. `format --to=ts`
 writes each field-anchored use back as its field's type, after the class's
 own fields, and leaves out the fields the loader added and the
 `@optimistic` they imply.
+
+A behavior the behaviors' core runs and whose declaration names no `value`
+(Timers) is implemented by a DB table as a whole (D103): `export abstract
+class Ticket implements Timers<Ticket, { ... }>`, where `@superschematic/db`
+exports the carrier, which resolves to the empty object type as `User`
+does. Its first type argument is the table itself, and the walker reads
+its second, the config, as it reads a field type's. The use's entry is
+`{ name, implements: true, config }`, anchored on the type and marked
+apart from a `@behavior` use, which makes an engine type; a type's uses
+list its implements uses before its field types. The loader adds a typed
+declared field of the use as a column, `<storage key>_<field>`, each of
+its `tables` as a child table `<Type><Behavior><Table>`, and, when it
+`armsDeadlines`, the table's deadline queue. The walker refuses it on a
+type that is not a DB table, with a first type argument that is not the
+table, with a config it cannot read, and inherited from a base class or a
+trait; verify refuses it for a behavior the core does not run or one that
+names a `value`. `format --to=ts` writes it
+back in the class's heading, after `extends`, and leaves out the tables
+and the queue the loader added.
 
 The loader checks every type's list in every frontend (verify, after the
 core checks and before the kind's `Verify`), and each failure names the

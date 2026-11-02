@@ -678,7 +678,9 @@ The three runtimes run the same vectors
 
 ## A table's behavior operations
 
-A DB table may type a field as a behavior, `status: Workflow<{ ... }>`
+A DB table may type a field as a behavior, `status: Workflow<{ ... }>`, or
+implement a behavior of the whole table, `implements Timers<Ticket, { ...
+}>` ([A table's deadlines](#a-tables-deadlines-timers-and-its-worker))
 (D103). The table stays a table: the behavior's fields are its columns
 (`status`, `status_entered_at`), the generated repositories read them and
 leave them out of their create, update and upsert inputs, and only the
@@ -713,7 +715,8 @@ export abstract class OrderActions {}
 ```
 
 The build adds to the set one operation for each operation of each
-behavior on the table's fields, in field order:
+behavior the table composes, those it implements first and then those on
+its fields, in field order:
 
 | | `Order`'s `status`, `transition` |
 | --- | --- |
@@ -725,11 +728,14 @@ behavior on the table's fields, in field order:
 
 The route and the tool follow the table, the field and the operation, in
 kebab and snake case (`shipment/{id}/payment-status/transition`,
-`shipment_payment_status_transition`). The SDK methods sit in the set's
-namespace, as every set's do ([Operation sets](#operation-sets)), under a
-member named for the field: name the set `<Table>Actions` to put them
-under the table's name. The OpenAPI document, the permission catalog and
-the tool documents list the operations as any other, and the document
+`shipment_payment_status_transition`); a behavior the table implements
+takes the field's place with its name (`ticket/{id}/timers/fire-timer`,
+`ticket_timers_fire_timer`). The SDK methods sit in the set's namespace,
+as every set's do ([Operation sets](#operation-sets)), under a member
+named for the field, or for the behavior the table implements (`timers`):
+name the set `<Table>Actions` to put them under the table's name. The
+OpenAPI document, the permission catalog and the tool documents list the
+operations as any other, and the document
 marks the fields a behavior owns `readOnly`, in the table's own component
 and in a `@source` view's that projects one.
 
@@ -799,6 +805,182 @@ TypeScript repositories run on Postgres alone, so a database that lists
 A raw SQL write of an owned column is never refused, so an operator can
 repair a row, but it skips the behavior's rules: move a state through its
 operation.
+
+## A table's deadlines: Timers and its worker
+
+A table implements `Timers` to hold its rows to named deadlines: a first
+answer due four hours after a ticket opens, an invoice overdue after
+thirty days, a reminder a day before a visit (D103). The first type
+argument is the table itself, the second its config, a type literal or
+`typeof` a constant declared `as const`; `Timers` comes from
+`@superschematic/db` and, like `User`, adds no members to the class.
+
+```ts
+// support-db
+import { Identity, Temporal } from "superscalar";
+import { AutoGenerate, Timers, Workflow, key } from "@superschematic/db";
+
+export abstract class Ticket implements Timers<Ticket, {
+  deadlines: {
+    respond: { start: { create: true }; afterMs: 14400000; then: { transition: "escalated" }; until: { leaves: "open" } };
+    idle: { start: { enters: "waiting" }; afterMs: 86400000; then: { transition: "closed" } };
+    remind: { start: { field: "visitAt" }; afterMs: -86400000 };
+  };
+  permission: "tickets.timers";
+}> {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  visitAt?: Temporal.DateTime;
+  status: Workflow<{
+    states: ["open", "waiting", "escalated", "closed"];
+    transitions: [
+      { from: "open"; to: "waiting" },
+      { from: "waiting"; to: "open" },
+      { from: "open"; to: "escalated" },
+      { from: "open"; to: "closed" },
+      { from: "waiting"; to: "closed" },
+      { from: "escalated"; to: "closed" }
+    ];
+  }>;
+}
+```
+
+Each deadline starts from the row's create (`{ create: true }`), from the
+time its status enters a state (`{ enters: "waiting" }`, again at each
+entry) or from a date-time field (`{ field: "visitAt" }`, again whenever
+the field moves; a field left empty starts nothing), and falls due
+`afterMs` milliseconds after it, or before it when negative. When it falls
+due it fires, once, and its `then` moves the status to the state its
+`transition` names while the status is still in the state the deadline
+started in (`from` names others): the outcome is `moved`, or `skipped` for
+a row that moved on, and a guard's veto of the move or a permission the
+caller lacks records `vetoed` or `forbidden`, the deadline fired all the
+same. `until` cancels it while it is pending, when the status leaves a
+state (`{ leaves: "open" }`) or enters one of a list (`{ enters: ["closed"]
+}`). `enters`, `then` and `until` read a `Workflow`
+field: the table's one, or, when it has several, the one `status` names
+(`status: "payment"`). `permission` is the permission a caller needs to
+reset or snooze a deadline; with none, nobody may. The build checks that
+the Workflow and a field start's field are there, and that the field holds
+date-times; the rest of the config (a state the Workflow lacks, a
+transition that does not lead there) is the core's to refuse, at the
+first command on the table.
+
+The build adds, beside the table:
+
+| | For `Ticket` |
+| --- | --- |
+| A sub-table | `ticket_timers_deadlines` (`TicketTimersDeadlines`), one row per deadline started on a ticket: `base_at` (what it starts from), `armed_from`, `due_at` (empty once cancelled), `fired`, `fired_at` and `outcome` (`moved`, `skipped`, `vetoed` or `forbidden`), with a foreign key to the ticket, deleted with it |
+| A deadline queue | `ticket_deadline_queue` (`TicketDeadline`), one waiting message per ticket and deadline, due when the deadline falls due |
+| Operations | `timers.fireTimer`, `timers.resetTimer` and `timers.snoozeTimer`, which a `@behaviorOperations` set serves as it serves a field's |
+| A column | `_version`, the version every write through the behaviors' core holds the row to |
+
+Migrations plan both tables as any other. The repositories have no table
+or write path of their own for the sub-table: SQL, reports and projections
+may read it. A table whose behaviors keep sub-tables or arm deadlines has
+no upserts in its repositories, since an upsert applies none of a
+behavior's rules.
+
+A create, an update and a delete through the repositories, and each
+behavior operation, arm and clear the row's deadlines in the same
+transaction: a ticket's create arms `respond`, a move to `waiting` cancels
+it by its `until` and arms `idle`, and a delete removes every message of
+the row. A raw SQL write arms and clears nothing yet, and nor do the
+repositories' bulk and hard writes, which bypass the core: TypeScript's
+`updateMany`, `deleteMany` and `hardDeleteOne` and Go's `UpdateMany`,
+`DeleteMany` and `HardDeleteOne`. D103's outbox trigger will hear them.
+Until then a ticket whose `visitAt` an `updateMany` moved keeps `remind`
+armed at its old time, and a deadline whose row such a delete removed
+falls due, finds nothing and is dropped. Write a Timers table's rows one
+at a time, through `updateOne` and `deleteOne`.
+
+### The worker
+
+An API runs a table's deadlines with a class with no members, marked
+`@behaviorWorker` with the table, imported from its database as
+`@behaviorOperations` imports it:
+
+```ts
+// support-api
+import { behaviorOperations, behaviorWorker, requirePermission } from "@superschematic/api";
+import { Ticket } from "@acme/support-db";
+
+@behaviorOperations(Ticket)
+@requirePermission(["tickets.write"])
+export abstract class TicketActions {}
+
+@behaviorWorker(Ticket, { concurrency: 2 })
+export abstract class TicketTimers {}
+```
+
+The class is a worker of the API, as a `@worker` class is
+([Queues and workers](/superschematic/guides/queues/#write-a-worker)): a
+deployable of kind worker named after the API and the class,
+`support-api-ticket-timers`, with a worker's settings, `stack dev`
+process, image and gcp worker pool. Its handler is generated, so your
+implementation has no method for it and the API's `Workers` lists none: it
+claims each message of the table's deadline queue as it falls due and runs
+the deadline through the behaviors' core in one transaction with the
+message's completion. It runs as the worker, the subject
+`support-api/TicketTimers`, not as a user, holding the permissions the
+decorator gives it:
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `concurrency` | 1 | how many messages of each of the table's behavior queues an instance handles at a time; an environment's settings change it |
+| `grace` | `"8s"` | how long a stopping worker lets its running handlers finish before it gives their messages back |
+| `permissions` | none | the permissions the worker's commands hold: a `then` whose transition names a permission the worker lacks still fires, and records `forbidden` |
+
+A deadline re-armed or cancelled while the worker holds its message never
+fires on its old arming: the worker finds its claim gone, runs nothing and
+logs `deadline ran nothing` with why, `claim lost`. A deadline the fired
+command arms again, a status that re-enters `waiting`, survives the
+message's completion. A fire that a guard of the table's behaviors
+refuses, or that fails otherwise, fails the message: it is due again
+after the queue's backoff (30 seconds, doubling to an hour) and dead after
+its sixth attempt, for `stack queue dead|retry|drop <env>
+support-db.TicketDeadline`. Nothing arms a dead deadline again: its
+sub-table row stays pending, unfired, until you retry the message, a
+caller with the config's `permission` resets or snoozes it, or what it
+starts from moves. A newer arming or a cancel of the same deadline deletes
+its dead message, so a retry of every dead message never meets a waiting
+one of the same deadline.
+
+One class runs a table's deadlines per API. Nothing refuses a table whose
+deadlines no worker runs: they fall due and wait for one. An API that
+serves `@behaviorOperations(Ticket)` and declares no `@behaviorWorker(Ticket)`
+gets a warning; declare one on that API or on another over the same
+database. The worker claims on Postgres, as every worker does. A
+TypeScript one over a database that lists `sqlite` first is refused, as
+the TypeScript repositories run behaviors on Postgres alone, and so is
+one an environment places on Cloudflare Workers. A Rust one builds in a
+checkout that sets `[paths] rules_adapter_rust` and `rules_behaviors_rust`,
+as a Rust server with behavior operations does.
+
+### Its operations
+
+| | `Ticket`'s Timers, `fireTimer` |
+| --- | --- |
+| Route | `POST /api/ticket/{id}/timers/fire-timer`, the body `{ "deadline": "respond" }` |
+| Types | `TicketTimersFireTimerInput` (`deadline`, the enum `TicketTimersDeadline` of the config's deadlines) and `TicketTimersFireTimerResult` (`fired`, `outcome`) |
+| SDK | `sdk.ticket.timers.fireTimer(id, { deadline: TicketTimersDeadline.Respond })` |
+| MCP tool | `ticket_timers_fire_timer` |
+
+`fireTimer` fires a due deadline now, before the worker does, and spends
+its message; one not due, fired already or not started writes nothing and
+answers `{ "fired": false }`. `resetTimer` starts a deadline again from
+what it starts from and answers its new `dueAt`; `snoozeTimer` moves a
+started one to the `dueAt` it is given, and one that fired fires again
+then. Both are refused a deadline with no due time to give (`not_armed`),
+and both need the
+config's `permission` (`tickets.timers`), which the core checks after the
+set's own guard: a caller with `tickets.write` alone is refused with a 403
+`forbidden`. The permission catalog lists `tickets.timers` under each of
+the three, `fireTimer` too, though `fireTimer` never checks it: a caller
+needs it only to reset or snooze. A `dueAt` is epoch milliseconds, as the declaration has it,
+not a date-time. No route, SDK method or tool reads a row's deadlines yet;
+the operations' results and the sub-table are what there is.
 
 ## OpenAPI
 

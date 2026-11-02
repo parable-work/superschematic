@@ -41,9 +41,17 @@ const step = core.run(order, { caller: { subject: 'sam' }, now: Date.now(), requ
   repository first runs a behavior's command.
 - `run(spec, command, answers?)` returns one step: `{ read }`, `{ lock }`
   or `{ done: { refused } | { changed } }`. A refusal is a step, not an
-  error.
+  error. A read is a row (`row`), whether a table has rows (`hasRows`), a
+  type's spec (`spec`) or a use's sub-table rows of a row (`subRows`:
+  `{ kind: 'subRows', type, key, useId, table }`, answered `{ subRows:
+  SubRow[] }`, each `{ key, values }` in key order, the key's field left
+  out and a NULL column absent). A spec may list the type's own fields
+  (`TypeSpec.fields`, each a `FieldSpec`: `name`, `type` and `dateTime`),
+  which a config that names a field is held to.
 - `declarations()` returns each registered behavior's declaration file,
-  each field's column type and the value field among them.
+  each field's column type and the value field among them, its sub-tables
+  (`tables`: each its name, key and typed fields) and whether it arms
+  deadlines (`armsDeadlines`).
 - `check(specs, { caller, now }?)` returns each spec's define check: null,
   or its refusal.
 - An input the module cannot read throws `RulesError` (`invalid_json`,

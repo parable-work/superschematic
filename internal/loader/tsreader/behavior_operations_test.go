@@ -81,7 +81,7 @@ export abstract class OrderActions {
   }
 }
 `,
-			want: []string{`a.schema.ts:5:3: OrderActions: a @behaviorOperations class has no members: the loader adds one operation for each operation of each behavior on Order's fields, and the generated server runs it`},
+			want: []string{`a.schema.ts:5:3: OrderActions: a @behaviorOperations class has no members: the loader adds one operation for each operation of each behavior Order composes, and the generated server runs it`},
 		},
 		{
 			name: "a property",
@@ -91,7 +91,7 @@ export abstract class OrderActions {
   note: string;
 }
 `,
-			want: []string{`a.schema.ts:5:3: OrderActions: a @behaviorOperations class has no members: the loader adds one operation for each operation of each behavior on Order's fields, and the generated server runs it`},
+			want: []string{`a.schema.ts:5:3: OrderActions: a @behaviorOperations class has no members: the loader adds one operation for each operation of each behavior Order composes, and the generated server runs it`},
 		},
 		{
 			name: "an Authenticated base",

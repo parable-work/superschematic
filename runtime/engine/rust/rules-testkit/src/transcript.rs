@@ -59,21 +59,59 @@
 //! }
 //! ```
 //!
+//! A type's `versions` and a check's `spec` are `TypeSpec`s with their own
+//! `fields` (each one's name, IR type and `dateTime`), which a config that
+//! names a field is held to. A deadline that fell due is a `command` step
+//! whose action is `deadline`, with the `step` and `call` of the
+//! `runner.runDue` that ran it, so several steps may share one step number;
+//! its command carries the runner's caller, its `now` and its `request`.
+//! A command's `expect` holds, beside the row, the row's sub-table rows
+//! after the step and its armed deadlines:
+//!
+//! ```json
+//! "subRows": {"Timers": {"deadlines": [{"key": "respond", "values": {"armedFrom": "1791536400000", "baseAt": 1791536400000, "dueAt": 1791550800000, "fired": false}}]}},
+//! "deadlines": [{"useId": "Timers", "name": "respond", "at": 1791550800000, "payload": null}]
+//! ```
+//!
+//! the sub-table rows by use id and table, each table's rows in key order
+//! and absent when it has none (an absent `subRows` holds none at all), each
+//! row's values by declared field, a null one absent; and the deadlines by
+//! use id and then name, absent when none. Both are absent after a delete,
+//! and a refused command's are as they were.
+//!
 //! How an adapter replays a scenario:
 //!
 //! 1. For each type, create its table in a database of the scenario's own:
 //!    a TEXT key column, a column for each own field (`fields`, by its JSON
 //!    type), each owned column the layout rule gives each use of any of its
 //!    versions (the uses are type-anchored in the corpus, so Workflow's are
-//!    `workflow_status` and `workflow_entered_at`), and `_version`.
+//!    `workflow_status` and `workflow_entered_at`), and `_version`. For
+//!    each use of any version whose behavior declares sub-tables (the
+//!    core's `declarations`, `tables`), create a sub-table `<the type's
+//!    table>_<member in snake case>_<table in snake case>`, the member being
+//!    the use's field, or its behavior's storage key for a type anchor
+//!    (`s3_d0_ticket_timers_deadlines`): `<type in snake case>_id` TEXT
+//!    referencing the type's table ON DELETE CASCADE, the key's column
+//!    (TEXT) and each other declared field's column by its declared type,
+//!    with the primary key (row column, key column) and no `id`. When any
+//!    use's behavior arms deadlines (`armsDeadlines`), create
+//!    `<the type's table>_deadline_queue`, the deadline queue's columns
+//!    (D103), its `row_key` TEXT and its `id` with the dialect's UUID
+//!    default (Postgres `gen_random_uuid()`, SQLite the expression of
+//!    `internal/sqlmigrate/sqlite_types.go`'s `sqliteUUIDDefault`), since an
+//!    arm's insert names no `id`.
 //! 2. Run each step in order. A `command` runs its command, as written
 //!    (its `now` and `request` too), through the host loop on the table,
 //!    with the type's `versions[version]` as the spec, and compares: the
 //!    refusal whole (code, status, class, message, details), or the
 //!    result, a create's key, and the row the command named, read back from
 //!    the table after the step (its own and owned fields; absent after a
-//!    delete). A field with no value is absent in `row`, and an adapter
-//!    reads a NULL column as absent. A `check` runs its command on the core
+//!    delete), and its sub-table rows and armed deadlines. A field with no
+//!    value is absent in `row`, and an adapter reads a NULL column as
+//!    absent. A `deadline` command runs only while its deadline is armed at
+//!    its `at`, which the adapter reads before each run, and its unit
+//!    spends that arming by key and `at` right after the row's write. A
+//!    `check` runs its command on the core
 //!    with no table (the define and publish checks read no row, though a
 //!    publish asks whether the type has rows, which the adapter answers
 //!    from the step's database's table) and compares the refusal, or no
@@ -96,9 +134,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use superschematic_engine_testkit::ScenarioFile;
-use superschematic_rules::{Action, Command, Core, Refusal, TypeSpec};
+use superschematic_rules::{Action, Command, Core, Refusal, SubRow, TypeSpec};
 
-use crate::host::{Applied, StoredRow};
+use crate::host::{Applied, Store, StoredRow};
 use crate::replay::replay_recording;
 use crate::shape::{FieldDef, RawWrite};
 
@@ -250,6 +288,27 @@ pub struct TranscriptExpect {
     /// command on a row.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub row: Option<TranscriptRow>,
+    /// The command's row's sub-table rows after the step, by use id and
+    /// table, each table's rows in key order; a table with none is absent,
+    /// and so is the whole when the row has none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub sub_rows: BTreeMap<String, BTreeMap<String, Vec<SubRow>>>,
+    /// The command's row's armed deadlines after the step, by use id and
+    /// then name; absent when it has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deadlines: Vec<TranscriptDeadline>,
+}
+
+/// A deadline armed on a row: its use, its name, the time it falls due,
+/// in epoch milliseconds, and the payload it was armed with.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptDeadline {
+    pub use_id: String,
+    pub name: String,
+    pub at: i64,
+    #[serde(default)]
+    pub payload: Value,
 }
 
 /// A row as an adapter reads it back: its own fields and its owned fields
@@ -452,6 +511,7 @@ fn left_out_reason(call: &str) -> &'static str {
             "a read of the change log, which the outbox the build-time trigger writes holds once it comes (D103's order of the work, step 3)"
         }
         "schemas.publish" => "nothing waited to be published, which the host answers without the core",
+        "runner.runDue" => "no deadline was armed and due, so the runner ran no command",
         _ => "the replayer checked it on the reference host, and no step of an adapter's maps it",
     }
 }
@@ -526,7 +586,8 @@ impl Recorded {
     }
 
     /// A command on a type's rows, as the host ran it, what it came to and
-    /// the row it names after it.
+    /// the row it names after it, with the row's sub-table rows and armed
+    /// deadlines, from the store the host left.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn command(
         &mut self,
@@ -536,8 +597,22 @@ impl Recorded {
         live: Option<&TypeSpec>,
         command: Command,
         outcome: &Result<Applied, Refusal>,
-        row: Option<&StoredRow>,
+        store: &Store,
     ) {
+        let key = command.action.key().unwrap_or_default();
+        let row = store.row(type_name, key);
+        let sub_rows = store.sub_tables(type_name, key);
+        let deadlines: Vec<TranscriptDeadline> = store
+            .deadlines()
+            .iter()
+            .filter(|(at, _)| at.type_name == type_name && at.key == key)
+            .map(|(at, armed)| TranscriptDeadline {
+                use_id: at.use_id.clone(),
+                name: at.name.clone(),
+                at: armed.at,
+                payload: armed.payload.clone(),
+            })
+            .collect();
         let version = live.and_then(|live| {
             self.types
                 .iter()
@@ -558,6 +633,8 @@ impl Recorded {
             Err(refusal) => TranscriptExpect {
                 refused: Some(refusal.clone()),
                 row: row.map(row_of),
+                sub_rows,
+                deadlines,
                 ..TranscriptExpect::default()
             },
             Ok(applied) => TranscriptExpect {
@@ -565,6 +642,8 @@ impl Recorded {
                 result: applied.result().clone(),
                 key: matches!(command.action, Action::Create { .. }).then(|| applied.key.clone()),
                 row: row.map(row_of),
+                sub_rows,
+                deadlines,
             },
         };
         self.steps.push(TranscriptStep::Command {

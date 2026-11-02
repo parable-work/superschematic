@@ -1,35 +1,40 @@
-//! The recorded scenarios are the specification (D103): the transcript
-//! `superschematic-rules-testkit` writes from `core-workflow.json`
-//! (`runtime/engine/testdata/rules/core-workflow.transcript.json`, whose
-//! format its `transcript` module states) replayed through this adapter on
-//! rusqlite and on Postgres, as the HTTP runtime's
-//! `src/rules-transcript.test.ts` replays it through TypeScript's. Each
+//! The recorded scenarios are the specification (D103): the transcripts
+//! `superschematic-rules-testkit` writes from `core-workflow.json` and
+//! `core-timers.json` (`runtime/engine/testdata/rules/<name>.transcript.json`,
+//! whose format its `transcript` module states) replayed through this
+//! adapter on rusqlite and on Postgres, as the HTTP runtime's
+//! `src/rules-transcript.test.ts` replays them through TypeScript's. Each
 //! scenario gets a table per type and database, its own fields' columns
 //! beside the owned columns the layout rule gives each use of any version
-//! and `_version` with sqlgen's trigger; each check runs on the core alone,
-//! answering whether the type has rows from its table; each command runs
-//! through `execute` in a transaction of its own with the version live at
-//! it, its refusal compared whole and the row it names read back after it
-//! and compared; and each raw step writes owned columns with SQL past the
-//! adapter. The Postgres replay is skipped without
+//! and `_version` with sqlgen's trigger, a sub-table per table a use's
+//! behavior declares, and a deadline queue when a use's behavior arms
+//! deadlines; each check runs on the core alone, answering whether the
+//! type has rows from its table; each command runs through `execute` in a
+//! transaction of its own with the version live at it (a deadline the
+//! runner ran among them, run only while it is armed at its time and its
+//! message spent with it), its refusal compared whole and the row it names
+//! read back after it and compared, with that row's sub-table rows and its
+//! armed deadlines; and each raw step writes owned columns with SQL past
+//! the adapter. The Postgres replay is skipped without
 //! `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL`.
 //!
 //! The tables here follow the layout rule as the core's README states it,
 //! restated by this test (the corpus's uses are type-anchored: Workflow's
-//! `workflow_status` and `workflow_entered_at`). The layout the generator
-//! writes is held by the generated packages' own end-to-end tests.
+//! `workflow_status` and `workflow_entered_at`, Timers' sub-table
+//! `<table>_timers_deadlines`). The layout the generator writes is held by
+//! the generated packages' own end-to-end tests.
 
 #![cfg(any(feature = "sqlite", feature = "postgres"))]
 
 mod common;
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use superschematic_rules::{Answer, Answers, Core, ReadRequest, Refusal, Step};
 use superschematic_rules_adapter::{
-    Action, Column, Command, Convert, Error, ExecuteOptions, Executed, Host, Layout, Operation,
-    OwnedField, Row, Table, TypeSpec, Use,
+    Action, Column, Command, Convert, Deadlines, Error, ExecuteOptions, Executed, Host, Layout,
+    Operation, OwnedField, Row, SubRow, SubTable, Table, TypeSpec, Use,
 };
 use superschematic_rules_testkit::{
     transcript_path, Transcript, TranscriptScenario, TranscriptStep, TranscriptType,
@@ -37,16 +42,20 @@ use superschematic_rules_testkit::{
 
 use common::{camel, column_types, p, snake, storage_key, Param};
 
-/// The steps the transcript holds, the testkit's floor
-/// (`tests/transcript.rs`): each dialect replays every one, so a
-/// regression cannot pass by skipping.
-const FLOOR: usize = 96;
+/// The transcripts every dialect replays, each with the steps it holds,
+/// the testkit's floor (`tests/transcript.rs`): each dialect replays every
+/// one, so a regression cannot pass by skipping.
+const TRANSCRIPTS: [(&str, usize); 2] = [("core-workflow", 96), ("core-timers", TIMERS_FLOOR)];
+
+/// core-timers' floor, as the core's milestone states it: 101 steps, 51
+/// commands (11 of them deadlines the runner ran) and 50 checks.
+const TIMERS_FLOOR: usize = 101;
 
 /// How many runs a check makes before the test calls it unsettled.
 const CHECK_ROUNDS: usize = 16;
 
-fn transcript() -> Transcript {
-    let path = transcript_path("core-workflow");
+fn transcript(name: &str) -> Transcript {
+    let path = transcript_path(name);
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
     serde_json::from_str(&text).expect("the transcript reads")
@@ -59,6 +68,18 @@ struct Declared {
     /// Each declared field with a column type: its name and type.
     fields: Vec<(String, String)>,
     operations: Vec<Operation>,
+    /// Each sub-table it keeps per row: its name, its key field, and its
+    /// other fields with their types.
+    tables: Vec<DeclaredTable>,
+    /// Whether it arms deadlines, which its table's queue holds.
+    arms_deadlines: bool,
+}
+
+/// A sub-table a declaration declares.
+struct DeclaredTable {
+    name: String,
+    key: String,
+    fields: Vec<(String, String)>,
 }
 
 /// The declaration files of the core's behaviors.
@@ -73,10 +94,8 @@ fn declarations() -> Vec<Declared> {
                     .cloned()
                     .unwrap_or_default()
             };
-            Declared {
-                name: file["name"].as_str().unwrap_or_default().to_owned(),
-                value: file.get("value").and_then(Value::as_str).map(str::to_owned),
-                fields: list("fields")
+            let typed = |fields: &[Value]| -> Vec<(String, String)> {
+                fields
                     .iter()
                     .filter_map(|field| {
                         Some((
@@ -84,7 +103,12 @@ fn declarations() -> Vec<Declared> {
                             field.get("type")?.as_str()?.to_owned(),
                         ))
                     })
-                    .collect(),
+                    .collect()
+            };
+            Declared {
+                name: file["name"].as_str().unwrap_or_default().to_owned(),
+                value: file.get("value").and_then(Value::as_str).map(str::to_owned),
+                fields: typed(&list("fields")),
                 operations: list("operations")
                     .iter()
                     .map(|operation| Operation {
@@ -92,14 +116,42 @@ fn declarations() -> Vec<Declared> {
                         writes: operation.get("writes") == Some(&Value::Bool(true)),
                     })
                     .collect(),
+                tables: list("tables")
+                    .iter()
+                    .map(|table| {
+                        let key = table["key"].as_str().unwrap_or_default().to_owned();
+                        let fields = table["fields"].as_array().cloned().unwrap_or_default();
+                        DeclaredTable {
+                            name: table["name"].as_str().unwrap_or_default().to_owned(),
+                            fields: typed(&fields)
+                                .into_iter()
+                                .filter(|(name, _)| *name != key)
+                                .collect(),
+                            key,
+                        }
+                    })
+                    .collect(),
+                arms_deadlines: file.get("armsDeadlines") == Some(&Value::Bool(true)),
             }
         })
         .collect()
 }
 
+/// A declared field's column by its declared name and IR type, a
+/// date-time held as epoch milliseconds.
+fn column_of(name: &str, column: String, type_name: &str) -> Column {
+    let column = Column::new(name, column, type_name);
+    if type_name == "Temporal.DateTime" {
+        return column.converted(Convert::EpochMillis);
+    }
+    column
+}
+
 /// The uses of a type across its versions, each with the owned columns the
-/// layout rule gives it and its declared operations.
-fn uses_of(declared: &[Declared], type_def: &TranscriptType) -> Vec<Use> {
+/// layout rule gives it, its declared operations and its sub-tables, each
+/// `<table>_<member>_<declared name>` in snake case with a column of the
+/// row's key, `<type>_id`.
+fn uses_of(declared: &[Declared], type_def: &TranscriptType, table: &str) -> Vec<Use> {
     let mut uses: Vec<Use> = Vec::new();
     for version in &type_def.versions {
         for entry in &version.uses {
@@ -122,23 +174,48 @@ fn uses_of(declared: &[Declared], type_def: &TranscriptType) -> Vec<Use> {
                         Some(anchor) if value => snake(anchor),
                         Some(anchor) => format!("{}_{}", snake(anchor), snake(name)),
                     };
-                    let mut column = Column::new(camel(&column), column, type_name.clone());
-                    if type_name == "Temporal.DateTime" {
-                        column = column.converted(Convert::EpochMillis);
-                    }
                     OwnedField {
                         name: name.clone(),
-                        column,
+                        column: column_of(&camel(&column), column, type_name),
                         value,
                     }
+                })
+                .collect();
+            let member = match anchor {
+                Some(anchor) => anchor.to_owned(),
+                None => camel(&storage_key(&entry.behavior)),
+            };
+            let tables = declaration
+                .tables
+                .iter()
+                .map(|declared| SubTable {
+                    name: declared.name.clone(),
+                    table: format!("{table}_{}_{}", snake(&member), snake(&declared.name)),
+                    row: format!("{}_id", snake(&type_def.name)),
+                    key: OwnedField {
+                        name: declared.key.clone(),
+                        column: Column::new(&declared.key, snake(&declared.key), "string"),
+                        value: false,
+                    },
+                    fields: declared
+                        .fields
+                        .iter()
+                        .map(|(name, type_name)| OwnedField {
+                            name: name.clone(),
+                            column: column_of(name, snake(name), type_name),
+                            value: false,
+                        })
+                        .collect(),
                 })
                 .collect();
             uses.push(Use {
                 id: id.to_owned(),
                 behavior: entry.behavior.clone(),
+                member,
                 anchor: anchor.map(str::to_owned),
                 fields,
                 operations: declaration.operations.clone(),
+                tables,
             });
         }
     }
@@ -167,6 +244,15 @@ fn sql_type(postgres: bool, column: &Column) -> &'static str {
         "boolean" => t.boolean,
         _ => t.json,
     }
+}
+
+/// Whether a declaration of a behavior any of the uses run arms deadlines.
+fn arms_deadlines(declared: &[Declared], uses: &[Use]) -> bool {
+    uses.iter().any(|used| {
+        declared
+            .iter()
+            .any(|declaration| declaration.name == used.behavior && declaration.arms_deadlines)
+    })
 }
 
 /// A database of a dialect the replay runs on.
@@ -265,6 +351,78 @@ impl Db {
         }
     }
 
+    /// Reads a row's rows of a use's sub-table back in a fresh transaction.
+    async fn read_sub_rows(
+        &mut self,
+        host: &Host<'_>,
+        type_name: &str,
+        key: &str,
+        use_id: &str,
+        table: &str,
+    ) -> Vec<SubRow> {
+        match self {
+            #[cfg(feature = "sqlite")]
+            Db::Sqlite(conn) => {
+                let tx = conn.transaction().expect("a transaction");
+                superschematic_rules_adapter::sqlite::read_sub_rows(
+                    host, &tx, type_name, key, use_id, table,
+                )
+                .expect("the sub-table rows read")
+            }
+            #[cfg(feature = "postgres")]
+            Db::Postgres(client) => {
+                let tx = client.transaction().await.expect("a transaction");
+                superschematic_rules_adapter::postgres::read_sub_rows(
+                    host, &tx, type_name, key, use_id, table,
+                )
+                .await
+                .expect("the sub-table rows read")
+            }
+        }
+    }
+
+    /// A row's armed deadlines, its live messages in the queue, by use id
+    /// then name: each its use id, name, time and payload.
+    async fn armed(&mut self, queue: &str, key: &str) -> Vec<Value> {
+        let order = if self.postgres() {
+            " COLLATE \"C\""
+        } else {
+            ""
+        };
+        let text = format!(
+            "SELECT use_id, name, at, CAST(payload AS TEXT) FROM \"{queue}\" WHERE row_key = {} AND state IN ('ready', 'claimed') ORDER BY use_id{order}, name{order}",
+            p(self.postgres(), 1)
+        );
+        let rows: Vec<(String, String, i64, Option<String>)> = match self {
+            #[cfg(feature = "sqlite")]
+            Db::Sqlite(conn) => {
+                let mut statement = conn.prepare(&text).expect("the read prepares");
+                let rows = statement
+                    .query_map([key], |row| {
+                        Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                    })
+                    .expect("the read runs");
+                rows.collect::<Result<_, _>>().expect("the messages read")
+            }
+            #[cfg(feature = "postgres")]
+            Db::Postgres(client) => client
+                .query(&text, &[&key])
+                .await
+                .expect("the read runs")
+                .iter()
+                .map(|row| (row.get(0), row.get(1), row.get(2), row.get(3)))
+                .collect(),
+        };
+        rows.into_iter()
+            .map(|(use_id, name, at, payload)| {
+                let payload = payload
+                    .map(|text| serde_json::from_str(&text).expect("a payload of JSON"))
+                    .unwrap_or(Value::Null);
+                json!({"useId": use_id, "name": name, "at": at, "payload": payload})
+            })
+            .collect()
+    }
+
     /// Reads a row back in a fresh transaction.
     async fn read_row(&mut self, host: &Host<'_>, type_name: &str, key: &str) -> Option<Row> {
         match self {
@@ -295,8 +453,9 @@ struct Counts {
     skipped: usize,
 }
 
-/// One scenario's replay.
+/// One scenario's replay, its tables named `<prefix>_s<index>_d<database>_..`.
 struct Scenario<'s> {
+    prefix: &'s str,
     index: usize,
     scenario: &'s TranscriptScenario,
     databases: Vec<&'s str>,
@@ -306,7 +465,12 @@ struct Scenario<'s> {
 }
 
 impl<'s> Scenario<'s> {
-    fn new(index: usize, scenario: &'s TranscriptScenario, declared: &'s [Declared]) -> Self {
+    fn new(
+        prefix: &'s str,
+        index: usize,
+        scenario: &'s TranscriptScenario,
+        declared: &'s [Declared],
+    ) -> Self {
         let mut databases: Vec<&str> = Vec::new();
         for step in &scenario.steps {
             let database = database_of(step);
@@ -315,6 +479,7 @@ impl<'s> Scenario<'s> {
             }
         }
         Scenario {
+            prefix,
             index,
             scenario,
             databases,
@@ -337,9 +502,22 @@ impl<'s> Scenario<'s> {
             .iter()
             .position(|known| *known == database)
             .unwrap_or(0);
+        let table = format!("{}_s{}_d{at}_{}", self.prefix, self.index, snake(type_name));
+        let uses = type_def
+            .map(|known| uses_of(self.declared, known, &table))
+            .unwrap_or_default();
+        let deadlines = arms_deadlines(self.declared, &uses).then(|| Deadlines {
+            queue: format!("{type_name}Deadline"),
+            table: format!("{table}_deadline_queue"),
+            row_key: "row_key".into(),
+            use_id: "use_id".into(),
+            name: "name".into(),
+            at: "at".into(),
+            payload: "payload".into(),
+        });
         Table {
             type_name: type_name.to_owned(),
-            table: format!("s{}_d{at}_{}", self.index, snake(type_name)),
+            table,
             key: Column::new("id", "id", "string"),
             version: "_version".into(),
             live: None,
@@ -354,9 +532,8 @@ impl<'s> Scenario<'s> {
                         .collect()
                 })
                 .unwrap_or_default(),
-            uses: type_def
-                .map(|known| uses_of(self.declared, known))
-                .unwrap_or_default(),
+            uses,
+            deadlines,
             spec: spec
                 .cloned()
                 .or_else(|| type_def.and_then(|known| known.versions.first().cloned()))
@@ -396,6 +573,38 @@ impl<'s> Scenario<'s> {
             }
         } else {
             db.exec(&common::sqlite_bump(&table.table), &[]).await;
+        }
+        // Each sub-table, its rows deleted with the row's, and keyed by the
+        // row and their key.
+        for sub in table.uses.iter().flat_map(|used| &used.tables) {
+            let mut columns = vec![
+                format!(
+                    "\"{}\" TEXT NOT NULL REFERENCES \"{}\" (id) ON DELETE CASCADE",
+                    sub.row, table.table
+                ),
+                format!("\"{}\" TEXT NOT NULL", sub.key.column.column),
+            ];
+            for field in &sub.fields {
+                columns.push(format!(
+                    "\"{}\" {}",
+                    field.column.column,
+                    sql_type(postgres, &field.column)
+                ));
+            }
+            columns.push(format!(
+                "PRIMARY KEY (\"{}\", \"{}\")",
+                sub.row, sub.key.column.column
+            ));
+            db.exec(
+                &format!("CREATE TABLE \"{}\" ({})", sub.table, columns.join(", ")),
+                &[],
+            )
+            .await;
+        }
+        if let Some(queue) = &table.deadlines {
+            for ddl in common::deadline_queue_ddl(postgres, &queue.table, "TEXT") {
+                db.exec(&ddl, &[]).await;
+            }
         }
     }
 
@@ -568,6 +777,45 @@ impl<'s> Scenario<'s> {
             let row = db.read_row(&host, type_name, &row_key).await;
             let actual = row.map(|row| json!({"own": row.own, "owned": row.owned}));
             self.compare(*at, call, "row", json!(expect.row), json!(actual));
+            // The row's sub-table rows and its armed deadlines, each absent
+            // when it has none.
+            let expected = serde_json::to_value(expect).expect("an expectation of JSON");
+            let table = layout.table(type_name).expect("the step's table");
+            let mut sub_rows = Map::new();
+            for used in &table.uses {
+                let mut tables = BTreeMap::new();
+                for sub in &used.tables {
+                    let rows = db
+                        .read_sub_rows(&host, type_name, &row_key, &used.id, &sub.name)
+                        .await;
+                    if !rows.is_empty() {
+                        tables.insert(sub.name.clone(), rows);
+                    }
+                }
+                if !tables.is_empty() {
+                    sub_rows.insert(used.id.clone(), json!(tables));
+                }
+            }
+            let actual = (!sub_rows.is_empty()).then_some(Value::Object(sub_rows));
+            self.compare(
+                *at,
+                call,
+                "subRows",
+                json!(expected.get("subRows")),
+                json!(actual),
+            );
+            let armed = match &table.deadlines {
+                Some(queue) => db.armed(&queue.table, &row_key).await,
+                None => Vec::new(),
+            };
+            let actual = (!armed.is_empty()).then_some(Value::Array(armed));
+            self.compare(
+                *at,
+                call,
+                "deadlines",
+                json!(expected.get("deadlines")),
+                json!(actual),
+            );
         }
     }
 }
@@ -580,18 +828,26 @@ fn database_of(step: &TranscriptStep) -> &str {
     }
 }
 
-/// Replays every scenario on db, failing on any mismatch, listed in full by
-/// scenario, or on fewer steps replayed than the floor.
+/// Replays every transcript on db, each in a namespace of tables of its
+/// own.
 async fn replay(mut db: Db, dialect: &str) {
-    let transcript = transcript();
+    for (index, (name, floor)) in TRANSCRIPTS.into_iter().enumerate() {
+        replay_one(&mut db, dialect, &format!("t{index}"), name, floor).await;
+    }
+}
+
+/// Replays every scenario of a transcript on db, failing on any mismatch,
+/// listed in full by scenario, or on fewer steps replayed than its floor.
+async fn replay_one(db: &mut Db, dialect: &str, prefix: &str, name: &str, floor: usize) {
+    let transcript = transcript(name);
     let declared = declarations();
     let core = superschematic_rules_behaviors::core();
     let mut counts = Counts::default();
     let mut failed = Vec::new();
     for (index, scenario) in transcript.scenarios.iter().enumerate() {
         counts.skipped += scenario.skipped.len();
-        let mut replaying = Scenario::new(index, scenario, &declared);
-        replaying.replay(&mut db, &core, &mut counts).await;
+        let mut replaying = Scenario::new(prefix, index, scenario, &declared);
+        replaying.replay(db, &core, &mut counts).await;
         if !replaying.mismatches.is_empty() {
             failed.push(format!(
                 "{}:\n  {}",
@@ -617,8 +873,8 @@ async fn replay(mut db: Db, dialect: &str) {
         failed.join("\n")
     );
     assert!(
-        replayed >= FLOOR,
-        "{replayed} steps replayed, under the floor of {FLOOR}"
+        replayed >= floor,
+        "{replayed} steps of {name} replayed, under the floor of {floor}"
     );
     assert_eq!(
         replayed,

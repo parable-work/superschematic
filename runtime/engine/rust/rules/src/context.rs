@@ -12,12 +12,14 @@
 //! request (`ctx.read(...)?`): the host reads, adds the answer and runs the
 //! command again, and the same hooks reach the same read and get the
 //! answer. A read returns the state the host read; the hook's own row as
-//! the run changes it is the context's own and owned fields.
+//! the run changes it is the context's own and owned fields, and its own
+//! sub-tables as the run changes them are [`View::sub_rows`].
 //!
 //! A use writes only its own state: its owned fields and sub-tables, by
 //! their declared names, and its deadlines, on the row it runs on. It
 //! reaches another use's state, on its row or another, through that use's
-//! operations ([`Cx::call`], [`Cx::call_on`]).
+//! operations ([`Cx::call`], [`Cx::call_on`]). The command's own operation
+//! may write nothing at all ([`Cx::unchanged`]), as an idempotent one does.
 
 use std::ops::Deref;
 
@@ -26,7 +28,7 @@ use serde_json::{Map, Value};
 use crate::behavior::{Hook, Stop};
 use crate::changes::{DeadlineChange, OutboxEvent, SubRowChange, SubRowWrite};
 use crate::command::Caller;
-use crate::reads::{Answer, LockKey, ReadRequest, Row};
+use crate::reads::{Answer, LockKey, ReadRequest, Row, SubRow};
 use crate::refusal::{Refusal, Veto};
 use crate::run::{Frame, Run};
 use crate::spec::{Anchor, TypeSpec};
@@ -161,6 +163,30 @@ impl<'r, C> View<'r, C> {
         self.run.has_rows(type_name)
     }
 
+    /// A sub-table's rows of any row, as the host read them, in key order:
+    /// by the row's type and key, the use's id and the sub-table's
+    /// declared name.
+    pub fn read_sub_rows(
+        &self,
+        type_name: &str,
+        key: &str,
+        use_id: &str,
+        table: &str,
+    ) -> Hook<&'r [SubRow]> {
+        self.run
+            .read_sub_rows(&ReadRequest::sub_rows(type_name, key, use_id, table))
+    }
+
+    /// The rows of one of the use's own sub-tables on its row, in key order
+    /// (by code point): the host's answer with the run's own writes so far
+    /// applied in order (an insert adds, an update merges, a delete
+    /// removes; a null value is no value). A row the run creates has none
+    /// and reads no host. A table the declaration does not declare is a
+    /// defect.
+    pub fn sub_rows(&self, table: &str) -> Hook<Vec<SubRow>> {
+        self.run.sub_rows(self.frame, self.index, table)
+    }
+
     /// A type's live version, its uses and their configs; `None` when no
     /// type has the name. The command's own type is the version the command
     /// runs on, read from no host.
@@ -211,6 +237,9 @@ impl<'r, C> View<'r, C> {
 pub struct Cx<'r, C> {
     pub(crate) view: View<'r, C>,
     pub(crate) writable: bool,
+    /// Whether this is the handler of the command's own operation, the one
+    /// whose [`Cx::unchanged`] the core honors.
+    pub(crate) own: bool,
 }
 
 impl<'r, C> Deref for Cx<'r, C> {
@@ -232,14 +261,34 @@ impl<'r, C> Cx<'r, C> {
         self.writable
     }
 
-    // writing refuses a write from a read-only context, and one that names
-    // what the declaration does not.
+    // writing refuses a write from a read-only context, and one after the
+    // command's operation said it writes nothing.
     fn writing(&self, what: &str) -> Hook<()> {
-        if self.writable {
-            Ok(())
-        } else {
-            Err(self.defect(format!("{what}: a read-only operation writes nothing")))
+        if !self.writable {
+            return Err(self.defect(format!("{what}: a read-only operation writes nothing")));
         }
+        if self.view.run.unchanged.get() {
+            return Err(self.defect(format!("unchanged() and a write in one run: {what}")));
+        }
+        Ok(())
+    }
+
+    /// The command's operation writes nothing: its change set holds no
+    /// write, the row's version stays where it is and no after-change hook
+    /// runs, as the engine's `unchanged()` left an idempotent operation's
+    /// call out of the log. Honored for the command's own operation; in a
+    /// call, a deadline, an initializer or an after-change hook it does
+    /// nothing, since the command writes what the rest of its run writes.
+    /// A write in the same run, before it or after it, is a defect.
+    pub fn unchanged(&self) -> Hook<()> {
+        if !self.own {
+            return Ok(());
+        }
+        if let Some(what) = self.view.run.written() {
+            return Err(self.defect(format!("unchanged() and a write in one run: {what}")));
+        }
+        self.view.run.unchanged.set(true);
+        Ok(())
     }
 
     /// Sets one of the use's owned fields, by its declared name; null
@@ -260,30 +309,50 @@ impl<'r, C> Cx<'r, C> {
     }
 
     /// Inserts a row of one of the use's sub-tables, by a key it makes
-    /// ([`Cx::new_key`]) or one the row's data gives.
+    /// ([`Cx::new_key`]) or one the row's data gives, with its values by
+    /// declared field. A sub-table declared with fields takes none other,
+    /// and not its key's field, which the write names.
     pub fn insert_row(&self, table: &str, key: &str, values: Map<String, Value>) -> Hook<()> {
-        self.sub_row(table, key, SubRowChange::Insert { values })
+        self.sub_row("insert_row", table, key, SubRowChange::Insert { values })
     }
 
-    /// Sets values of a row of one of the use's sub-tables.
+    /// Sets values of a row of one of the use's sub-tables; null clears
+    /// one.
     pub fn update_row(&self, table: &str, key: &str, values: Map<String, Value>) -> Hook<()> {
-        self.sub_row(table, key, SubRowChange::Update { values })
+        self.sub_row("update_row", table, key, SubRowChange::Update { values })
     }
 
     /// Deletes a row of one of the use's sub-tables.
     pub fn delete_row(&self, table: &str, key: &str) -> Hook<()> {
-        self.sub_row(table, key, SubRowChange::Delete)
+        self.sub_row("delete_row", table, key, SubRowChange::Delete)
     }
 
-    fn sub_row(&self, table: &str, key: &str, change: SubRowChange) -> Hook<()> {
+    fn sub_row(&self, call: &str, table: &str, key: &str, change: SubRowChange) -> Hook<()> {
         self.writing(&format!("a write of sub-table {table}"))?;
         let view = &self.view;
         let declaration = view.run.declaration(view.frame, view.index);
-        if !declaration.has_table(table) {
+        let Some(declared) = declaration.find_table(table) else {
             return Err(self.defect(format!(
                 "{table} is not a sub-table it declares ({})",
-                listed(&declaration.tables)
+                listed(&declaration.table_names())
             )));
+        };
+        if let (true, SubRowChange::Insert { values } | SubRowChange::Update { values }) =
+            (declared.is_checked(), &change)
+        {
+            for name in values.keys() {
+                if declared.key.as_deref() == Some(name.as_str()) {
+                    return Err(self.defect(format!(
+                        "{call}: {name} is the row's key, which the write names"
+                    )));
+                }
+                if !declared.fields.contains(name) {
+                    return Err(self.defect(format!(
+                        "{call}: {table} has no field {name} (its fields: {})",
+                        listed(&declared.values())
+                    )));
+                }
+            }
         }
         view.run.pending.borrow_mut().sub_rows.push(SubRowWrite {
             row: view.frame.row_ref(),
@@ -313,11 +382,14 @@ impl<'r, C> Cx<'r, C> {
 
     /// Arms one of the use's deadlines on the row, at a time in epoch
     /// milliseconds, with a payload the deadline's command carries back.
+    /// Arming one that is armed moves it. A behavior whose declaration
+    /// arms no deadlines arms none.
     pub fn arm(&self, name: &str, at: i64, payload: Value) -> Hook<()> {
         self.writing(&format!("arm({name})"))?;
         if name.is_empty() {
             return Err(self.defect("arm takes a deadline's name: a non-empty string"));
         }
+        self.arming(&format!("arm({name})"))?;
         let view = &self.view;
         view.run
             .pending
@@ -333,9 +405,11 @@ impl<'r, C> Cx<'r, C> {
         Ok(())
     }
 
-    /// Clears one of the use's deadlines on the row.
+    /// Clears one of the use's deadlines on the row; one not armed stays
+    /// so.
     pub fn clear(&self, name: &str) -> Hook<()> {
         self.writing(&format!("clear({name})"))?;
+        self.arming(&format!("clear({name})"))?;
         let view = &self.view;
         view.run
             .pending
@@ -347,6 +421,17 @@ impl<'r, C> Cx<'r, C> {
                 name: name.to_owned(),
             });
         Ok(())
+    }
+
+    // arming refuses a deadline's arm or clear by a behavior whose
+    // declaration arms none, whose table has no deadline queue.
+    fn arming(&self, what: &str) -> Hook<()> {
+        let view = &self.view;
+        if view.run.declaration(view.frame, view.index).arms_deadlines {
+            Ok(())
+        } else {
+            Err(self.defect(format!("{what}: it declares no deadlines (armsDeadlines)")))
+        }
     }
 
     /// A new key for a row the use makes (a sub-table row, a row of another

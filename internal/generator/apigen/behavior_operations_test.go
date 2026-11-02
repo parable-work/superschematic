@@ -28,17 +28,34 @@ const (
 	behaviorDB  = "fixture-workflow-db"
 )
 
+// behaviorFixtures are an API that serves a table's behaviors and its one
+// DB dependency (D103): fixture-workflow-api over fixture-workflow-db, or
+// fixture-timers-api over fixture-timers-db.
+type behaviorFixtures struct{ api, db string }
+
+var (
+	workflowFixtures = behaviorFixtures{behaviorAPI, behaviorDB}
+	timersFixtures   = behaviorFixtures{"fixture-timers-api", "fixture-timers-db"}
+)
+
 // loadBehaviorFixtures loads fixture-workflow-api, with its behavior
 // operations added, and fixture-workflow-db, its one DB dependency.
 func loadBehaviorFixtures(t *testing.T) (api, db *ir.Schema) {
 	t.Helper()
-	api, err := loader.LoadService(filepath.Join(fixturesDir, behaviorAPI))
+	return loadFixturePair(t, workflowFixtures)
+}
+
+// loadFixturePair loads an API, with its behavior operations and workers
+// expanded, and its DB dependency.
+func loadFixturePair(t *testing.T, f behaviorFixtures) (api, db *ir.Schema) {
+	t.Helper()
+	api, err := loader.LoadService(filepath.Join(fixturesDir, f.api))
 	if err != nil {
-		t.Fatalf("load %s: %v", behaviorAPI, err)
+		t.Fatalf("load %s: %v", f.api, err)
 	}
-	db, err = loader.LoadService(filepath.Join(fixturesDir, behaviorDB))
+	db, err = loader.LoadService(filepath.Join(fixturesDir, f.db))
 	if err != nil {
-		t.Fatalf("load %s: %v", behaviorDB, err)
+		t.Fatalf("load %s: %v", f.db, err)
 	}
 	return api, db
 }
@@ -48,22 +65,29 @@ func loadBehaviorFixtures(t *testing.T) (api, db *ir.Schema) {
 // generates it before it sets Deps.
 func generateBehaviorAPI(t *testing.T, api, db *ir.Schema) *apigen.APIOutput {
 	t.Helper()
+	return generatePairAPI(t, workflowFixtures, api, db)
+}
+
+// generatePairAPI is the API output of f's API over its database, as the
+// dispatch layer generates it before it sets Deps.
+func generatePairAPI(t *testing.T, f behaviorFixtures, api, db *ir.Schema) *apigen.APIOutput {
+	t.Helper()
 	output, err := apigen.Generate(api, apigen.Options{
 		Provider:     sessionauth.Provider{},
-		SchemaName:   behaviorAPI,
-		ModulePath:   "example.com/schemas/api/" + behaviorAPI,
-		TypesModule:  "example.com/schemas/types/go/" + behaviorAPI,
-		Dependencies: map[string]*ir.Schema{behaviorDB: db},
+		SchemaName:   f.api,
+		ModulePath:   "example.com/schemas/api/" + f.api,
+		TypesModule:  "example.com/schemas/types/go/" + f.api,
+		Dependencies: map[string]*ir.Schema{f.db: db},
 		ModuleDependencies: []string{
-			"example.com/schemas/types/go/" + behaviorDB,
+			"example.com/schemas/types/go/" + f.db,
 		},
 		Clock: goModuleClock,
 	})
 	if err != nil {
-		t.Fatalf("generate %s: %v", behaviorAPI, err)
+		t.Fatalf("generate %s: %v", f.api, err)
 	}
 	if output == nil {
-		t.Fatalf("no API output for %s", behaviorAPI)
+		t.Fatalf("no API output for %s", f.api)
 	}
 	return output
 }
@@ -202,6 +226,16 @@ func TestBehaviorOperationsAPICompiles(t *testing.T) {
 // builds and returns the API module's directory.
 func writeBehaviorModules(t *testing.T, api, db *ir.Schema) string {
 	t.Helper()
+	return writeFixtureModules(t, workflowFixtures, api, db)
+}
+
+// writeFixtureModules writes f's database's Go types and ORM and its API's
+// Go types and API module into a temporary tree shaped as the dist, wired
+// to the checkout's runtime modules, and returns the API module's
+// directory.
+func writeFixtureModules(t *testing.T, f behaviorFixtures, api, db *ir.Schema) string {
+	t.Helper()
+	behaviorDB, behaviorAPI := f.db, f.api
 	paths := testpaths.Local(t)
 	root := t.TempDir()
 	dbTypesModule := "example.com/schemas/types/go/" + behaviorDB
@@ -258,7 +292,7 @@ func writeBehaviorModules(t *testing.T, api, db *ir.Schema) string {
 		t.Fatalf("write %s orm: %v", behaviorDB, err)
 	}
 
-	output := generateBehaviorAPI(t, api, db)
+	output := generatePairAPI(t, f, api, db)
 	output.AddIndirectModules([]string{dbTypesModule})
 	if err := apigen.SetReplacePaths(output, paths, apiDir); err != nil {
 		t.Fatal(err)

@@ -4,8 +4,9 @@
 //! their fields refuse, the config change that reads whether rows exist,
 //! the define check, each command's change set, locks and the answers made
 //! before them, deadlines, a call on another type's row and a create of
-//! one, the keys a behavior makes, and the defects the core holds a
-//! behavior to.
+//! one, the keys a behavior makes, a use's sub-table rows as the run reads
+//! them, an operation that writes nothing, the fields a read of a row
+//! computes, and the defects the core holds a behavior to.
 
 use std::collections::BTreeMap;
 
@@ -15,7 +16,8 @@ use superschematic_rules::{
     Action, Answer, Answers, Behavior, Caller, Change, Code, Command, ConfigCx, ConfigError,
     ConfigIssueKind, ConfigTarget, Cx, DeadlineChange, Declaration, GuardRequest, Hook, LockKey,
     Outcome, PermissionMatcher, ReadRequest, Refusal, Row, RowRef, RowWrite, SchemaIssue, Source,
-    Step, Stop, SubRowChange, TypeSpec, UseSpec, ValidationIssue, ValidationRequest, Veto, View,
+    Step, Stop, SubRow, SubRowChange, TableDecl, TypeSpec, UseSpec, ValidationIssue,
+    ValidationRequest, Veto, View,
 };
 
 const NOW: i64 = 1_000_000;
@@ -335,6 +337,7 @@ impl Behavior for Stock {
     fn declaration(&self) -> Declaration {
         Declaration::new("Stock")
             .field("held")
+            .arms_deadlines()
             .operation("reserve", true)
             .operation("release", true)
             .veto("sold_out")
@@ -393,6 +396,143 @@ impl Behavior for Loop {
             return Err(cx.veto(Veto::new("no").with_code("not_listed")));
         }
         cx.call(cx.use_id(), name, params)
+    }
+}
+
+// Ledger: entries kept in a sub-table keyed by name, each an amount and a
+// note. put inserts or updates each entry it names by what the run reads
+// of the sub-table, its own writes so far included, and arms a deadline
+// per entry; drop deletes one. A create writes an opening entry from what
+// its new row has, which is nothing. noop writes nothing, as an idempotent
+// operation does, and the rest break that or the table's declaration. Its
+// after-change hook emits, so a test sees whether it ran, and a read of a
+// row shows the entries' total.
+struct Ledger;
+
+impl Behavior for Ledger {
+    type Config = Value;
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Ledger")
+            .sub_table(TableDecl::new("entries", "name", ["amount", "note"]))
+            .arms_deadlines()
+            .operation("put", true)
+            .operation("drop", true)
+            .operation("rows", false)
+            .operation("noop", true)
+            .operation("writeThenNoop", true)
+            .operation("noopThenWrite", true)
+            .operation("callNoop", true)
+            .operation("undeclared", true)
+            .operation("keyed", true)
+    }
+
+    fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<Value, ConfigError> {
+        Ok(raw.clone())
+    }
+
+    fn operation(&self, cx: &Cx<'_, Value>, name: &str, params: &Value) -> Hook<Value> {
+        let rows = |cx: &Cx<'_, Value>| -> Hook<Value> {
+            Ok(serde_json::to_value(cx.sub_rows("entries")?).unwrap_or_default())
+        };
+        match name {
+            "put" => {
+                let amount = params.get("amount").cloned().unwrap_or(Value::Null);
+                for entry in params["names"].as_array().into_iter().flatten() {
+                    let entry = entry.as_str().unwrap_or_default();
+                    let mut values = Map::new();
+                    values.insert("amount".into(), amount.clone());
+                    if cx.sub_rows("entries")?.iter().any(|row| row.key == entry) {
+                        cx.update_row("entries", entry, values)?;
+                    } else {
+                        cx.insert_row("entries", entry, values)?;
+                    }
+                    cx.arm(entry, cx.now() + 1_000, Value::Null)?;
+                }
+                rows(cx)
+            }
+            "drop" => {
+                let entry = params["name"].as_str().unwrap_or_default();
+                cx.delete_row("entries", entry)?;
+                cx.clear(entry)?;
+                rows(cx)
+            }
+            "rows" => rows(cx),
+            "noop" => {
+                cx.unchanged()?;
+                Ok(json!({ "changed": false }))
+            }
+            "writeThenNoop" => {
+                cx.delete_row("entries", "a")?;
+                cx.unchanged()?;
+                Ok(Value::Null)
+            }
+            "noopThenWrite" => {
+                cx.unchanged()?;
+                cx.delete_row("entries", "a")?;
+                Ok(Value::Null)
+            }
+            "callNoop" => cx.call(cx.use_id(), "noop", &json!({})),
+            "undeclared" => cx
+                .insert_row("entries", "a", object(json!({"colour": "red"})))
+                .map(|()| Value::Null),
+            _ => cx
+                .update_row("entries", "a", object(json!({"name": "b"})))
+                .map(|()| Value::Null),
+        }
+    }
+
+    fn after_change(&self, cx: &Cx<'_, Value>, change: &Change<'_>) -> Hook<()> {
+        match change {
+            Change::Create => {
+                let held = cx.sub_rows("entries")?.len();
+                cx.insert_row("entries", "opening", object(json!({"amount": held})))
+            }
+            Change::Operation { .. } => cx.emit("changed", Value::Null),
+            _ => Ok(()),
+        }
+    }
+
+    fn read_fields(
+        &self,
+        _config: &Value,
+        row: &Row,
+        tables: &BTreeMap<String, Vec<SubRow>>,
+    ) -> Map<String, Value> {
+        let total: i64 = tables
+            .get("entries")
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| entry.value("amount").and_then(Value::as_i64))
+            .sum();
+        object(json!({"total": total, "title": row.own.get("title")}))
+    }
+}
+
+// Bell: arms and clears a deadline, which its declaration does not say it
+// does.
+struct Bell;
+
+impl Behavior for Bell {
+    type Config = Value;
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Bell")
+            .operation("ring", true)
+            .operation("hush", true)
+    }
+
+    fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<Value, ConfigError> {
+        Ok(raw.clone())
+    }
+
+    fn operation(&self, cx: &Cx<'_, Value>, name: &str, _params: &Value) -> Hook<Value> {
+        if name == "ring" {
+            cx.arm("ring", cx.now(), Value::Null)?;
+        } else {
+            cx.clear("ring")?;
+        }
+        Ok(Value::Null)
     }
 }
 
@@ -585,6 +725,8 @@ fn core() -> superschematic_rules::Core {
         .with(Loop)
         .with(Bin)
         .with(Picker)
+        .with(Ledger)
+        .with(Bell)
 }
 
 fn alice() -> Caller {
@@ -624,16 +766,24 @@ fn row(own: Value, owned: Value, version: i64) -> Row {
     }
 }
 
-// Rows and types in memory, and every read and lock the core asked for,
-// in order.
+// Rows, their sub-table rows and types in memory, and every read and lock
+// the core asked for, in order.
 #[derive(Default)]
 struct Memory {
     rows: BTreeMap<(String, String), Row>,
+    sub_rows: BTreeMap<(String, String, String, String), Vec<SubRow>>,
     specs: BTreeMap<String, TypeSpec>,
     log: Vec<String>,
 }
 
 impl Memory {
+    fn with_sub_rows(mut self, at: [&str; 4], rows: Value) -> Self {
+        let rows = serde_json::from_value(rows).expect("sub-table rows");
+        let [type_name, key, use_id, table] = at.map(str::to_owned);
+        self.sub_rows.insert((type_name, key, use_id, table), rows);
+        self
+    }
+
     fn with(mut self, type_name: &str, key: &str, row: Row) -> Self {
         self.rows.insert((type_name.into(), key.into()), row);
         self
@@ -663,6 +813,24 @@ impl Source for Memory {
             ReadRequest::Spec { type_name } => {
                 self.log.push(format!("spec {type_name}"));
                 Ok(Answer::Spec(self.specs.get(type_name).cloned()))
+            }
+            ReadRequest::SubRows {
+                type_name,
+                key,
+                use_id,
+                table,
+            } => {
+                self.log
+                    .push(format!("subRows {type_name} {key} {use_id} {table}"));
+                let at = (
+                    type_name.clone(),
+                    key.clone(),
+                    use_id.clone(),
+                    table.clone(),
+                );
+                Ok(Answer::SubRows(
+                    self.sub_rows.get(&at).cloned().unwrap_or_default(),
+                ))
             }
             other => Err(Refusal::internal(format!("an unexpected read: {other:?}"))),
         }
@@ -1730,13 +1898,13 @@ fn define_refuses_an_unknown_behavior_a_repeated_id_and_a_config_it_cannot_parse
         refusal.details.as_deref().map(|d| d["issues"].clone()),
         Some(json!([
             {"use": "Counter", "index": 1, "behavior": "Counter", "kind": "use", "path": "", "message": "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one"},
-            {"use": "likes", "index": 2, "behavior": "Nope", "kind": "use", "path": "", "message": "type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker)"},
+            {"use": "likes", "index": 2, "behavior": "Nope", "kind": "use", "path": "", "message": "type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell)"},
             {"use": "views", "index": 3, "behavior": "Counter", "kind": "schema", "path": "/config/max", "message": "must be integer"}
         ]))
     );
     assert_eq!(
         refusal.message,
-        "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one; type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker); type Order: field views: behavior Counter config: /max: must be integer"
+        "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one; type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell); type Order: field views: behavior Counter config: /max: must be integer"
     );
     // With every shape sound, the rules.
     let rules = TypeSpec::new("Order")
@@ -1996,6 +2164,216 @@ fn a_read_only_operation_writes_no_row() {
     assert_eq!(
         refused(core.drive(&spec, &sneak, &mut memory)).message,
         "behavior Counter: set(count): a read-only operation writes nothing"
+    );
+}
+
+// ---- sub-tables, unchanged and computed fields ----
+
+fn ledger() -> (TypeSpec, Memory) {
+    let spec = TypeSpec::new("Order").with(UseSpec::on_type("Ledger", json!({})));
+    let memory = Memory::default()
+        .with("Order", "o1", row(json!({"title": "Desk"}), json!({}), 3))
+        .with_sub_rows(
+            ["Order", "o1", "Ledger", "entries"],
+            json!([{"key": "a", "values": {"amount": 1, "note": "first"}}]),
+        );
+    (spec, memory)
+}
+
+/// A use reads its own sub-table's rows of its row as the host read them,
+/// with the run's own writes so far applied in order and in key order; a
+/// row the run creates has none and reads no host; and a read of any row's
+/// rows answers as the host read them.
+#[test]
+fn a_use_reads_its_sub_tables_rows_with_the_runs_writes() {
+    let core = core();
+    let (spec, mut memory) = ledger();
+    // a exists and is updated; b is inserted, then updated, since the run
+    // reads its own insert.
+    let put = command(
+        alice(),
+        invoke(
+            "o1",
+            "Ledger",
+            "put",
+            json!({"names": ["b", "a", "b"], "amount": 5}),
+        ),
+    );
+    let changes = changed(core.drive(&spec, &put, &mut memory));
+    assert_eq!(
+        changes.result,
+        json!([
+            {"key": "a", "values": {"amount": 5, "note": "first"}},
+            {"key": "b", "values": {"amount": 5}}
+        ])
+    );
+    let kinds: Vec<(&str, &str)> = changes
+        .sub_rows
+        .iter()
+        .map(|write| {
+            let kind = match write.change {
+                SubRowChange::Insert { .. } => "insert",
+                SubRowChange::Update { .. } => "update",
+                _ => "other",
+            };
+            (write.key.as_str(), kind)
+        })
+        .collect();
+    assert_eq!(kinds, [("b", "insert"), ("a", "update"), ("b", "update")]);
+    assert_eq!(changes.deadlines.len(), 3);
+    assert!(memory
+        .log
+        .contains(&"subRows Order o1 Ledger entries".to_owned()));
+
+    // A delete removes, and a null value is no value.
+    let drop = command(
+        alice(),
+        invoke("o1", "Ledger", "drop", json!({"name": "a"})),
+    );
+    assert_eq!(
+        changed(core.drive(&spec, &drop, &mut memory)).result,
+        json!([])
+    );
+
+    // A create's after-change hook reads its new row's rows, which are
+    // none, from no host.
+    memory.log.clear();
+    let create = command(
+        alice(),
+        Action::Create {
+            id: Some("o2".into()),
+            own: Map::new(),
+            params: Map::new(),
+        },
+    );
+    let changes = changed(core.drive(&spec, &create, &mut memory));
+    assert_eq!(
+        changes.sub_rows[0].change,
+        SubRowChange::Insert {
+            values: object(json!({"amount": 0}))
+        }
+    );
+    assert!(memory.log.is_empty(), "{:?}", memory.log);
+
+    // A read-only operation reads them too.
+    let rows = command(alice(), invoke("o1", "Ledger", "rows", json!({})));
+    let changes = changed(core.drive(&spec, &rows, &mut memory));
+    assert!(changes.rows.is_empty());
+    assert_eq!(
+        changes.result,
+        json!([{"key": "a", "values": {"amount": 1, "note": "first"}}])
+    );
+    assert_eq!(
+        serde_json::to_value(ReadRequest::sub_rows("Order", "o1", "Ledger", "entries")).unwrap(),
+        json!({"kind": "subRows", "type": "Order", "key": "o1", "useId": "Ledger", "table": "entries"})
+    );
+}
+
+/// The command's operation that says it writes nothing writes no row and
+/// runs no after-change hook; a write beside it, before or after, is a
+/// defect; and in a call it does nothing, so the command writes its row.
+#[test]
+fn unchanged_writes_nothing_and_runs_no_after_change_hook() {
+    let core = core();
+    let (spec, mut memory) = ledger();
+    let run = |memory: &mut Memory, operation: &str| {
+        let noop = command(alice(), invoke("o1", "Ledger", operation, json!({})));
+        core.drive(&spec, &noop, memory)
+    };
+    let changes = changed(run(&mut memory, "noop"));
+    assert!(changes.rows.is_empty());
+    assert!(changes.events.is_empty() && changes.sub_rows.is_empty());
+    assert_eq!(changes.result, json!({"changed": false}));
+    assert_eq!(
+        refused(run(&mut memory, "writeThenNoop")).message,
+        "behavior Ledger: unchanged() and a write in one run: a write of sub-table entries"
+    );
+    assert_eq!(
+        refused(run(&mut memory, "noopThenWrite")).message,
+        "behavior Ledger: unchanged() and a write in one run: a write of sub-table entries"
+    );
+    // In a call it does nothing: the command writes its row, and its
+    // after-change hook runs.
+    let changes = changed(run(&mut memory, "callNoop"));
+    assert!(matches!(
+        changes.rows.as_slice(),
+        [RowWrite::Update {
+            expected_version: 3,
+            ..
+        }]
+    ));
+    assert_eq!(changes.events[0].kind, "changed");
+}
+
+/// A behavior whose declaration arms no deadlines arms and clears none.
+#[test]
+fn a_behavior_that_declares_no_deadlines_arms_none() {
+    let core = core();
+    let spec = TypeSpec::new("Order").with(UseSpec::on_type("Bell", json!({})));
+    let mut memory = Memory::default().with("Order", "o1", row(json!({}), json!({}), 1));
+    for (operation, call) in [("ring", "arm(ring)"), ("hush", "clear(ring)")] {
+        let ring = command(alice(), invoke("o1", "Bell", operation, json!({})));
+        assert_eq!(
+            refused(core.drive(&spec, &ring, &mut memory)).error_json(),
+            json!({"class": "BehaviorError", "message": format!("behavior Bell: {call}: it declares no deadlines (armsDeadlines)"), "details": {"behavior": "Bell"}})
+        );
+    }
+}
+
+/// A write of a row of a sub-table declared with fields names only its
+/// fields, and not its key's, which the write names.
+#[test]
+fn a_sub_row_value_or_key_the_table_does_not_declare_is_a_defect() {
+    let core = core();
+    let (spec, mut memory) = ledger();
+    let undeclared = command(alice(), invoke("o1", "Ledger", "undeclared", json!({})));
+    assert_eq!(
+        refused(core.drive(&spec, &undeclared, &mut memory)).message,
+        "behavior Ledger: insert_row: entries has no field colour (its fields: amount, note)"
+    );
+    let keyed = command(alice(), invoke("o1", "Ledger", "keyed", json!({})));
+    assert_eq!(
+        refused(core.drive(&spec, &keyed, &mut memory)).message,
+        "behavior Ledger: update_row: name is the row's key, which the write names"
+    );
+}
+
+/// The fields a read of a row computes for a use come from its row and its
+/// sub-tables' rows; a use the type does not have is not found, and a type
+/// whose configs the core refuses is refused so.
+#[test]
+fn read_fields_computes_from_the_row_and_its_sub_tables() {
+    let core = core();
+    let (spec, _) = ledger();
+    let mut tables = BTreeMap::new();
+    tables.insert(
+        "entries".to_owned(),
+        serde_json::from_value::<Vec<SubRow>>(json!([
+            {"key": "a", "values": {"amount": 1}},
+            {"key": "b", "values": {"amount": 4}}
+        ]))
+        .unwrap(),
+    );
+    let desk = row(json!({"title": "Desk"}), json!({}), 1);
+    assert_eq!(
+        core.read_fields(&spec, "Ledger", &desk, &tables),
+        Ok(object(json!({"total": 5, "title": "Desk"})))
+    );
+    // A behavior that computes nothing gives nothing.
+    let counted = counter_spec(json!({"max": 9}));
+    assert_eq!(
+        core.read_fields(&counted, "Counter", &desk, &BTreeMap::new()),
+        Ok(Map::new())
+    );
+    assert_eq!(
+        core.read_fields(&spec, "Counter", &desk, &tables)
+            .map_err(|refusal| refusal.message),
+        Err("Order has no behavior use Counter (its uses: Ledger)".to_owned())
+    );
+    assert_eq!(
+        core.read_fields(&counter_spec(json!({})), "Counter", &desk, &tables)
+            .map_err(|refusal| refusal.code),
+        Err(Code::InvalidSchema)
     );
 }
 

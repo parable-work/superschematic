@@ -15,17 +15,21 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// The behaviors of a table whose fields are behaviors, in the Go ORM
-// (D103): a DB type that writes `status: Workflow<{ ... }>` stays a table,
-// and the fields the behavior owns are columns of it that its row holds and
-// the inputs of its create, update and upsert leave out. rules.go embeds
-// the database's layout document (behaviorlayout.Of), which the rules Go
-// module's adapter (naming.RulesGoModule) reads to run the behaviors' core
-// inside the repository's transaction, and each use's operations hang
-// under a method of the table's repository named for the use's field,
-// db.Order.Status().Transition(ctx, id, params). Nothing here names a
-// behavior: the operations, their parameters and results, and the owned
-// fields come from each behavior's declaration, narrowed by its config
+// The behaviors of a table that composes them as a table, in the Go ORM
+// (D103): a DB type that writes `status: Workflow<{ ... }>` or `implements
+// Timers<Ticket, { ... }>` stays a table, and the fields the behavior owns
+// are columns of it that its row holds and the inputs of its create, update
+// and upsert leave out. rules.go embeds the database's layout document
+// (behaviorlayout.Of), which the rules Go module's adapter
+// (naming.RulesGoModule) reads to run the behaviors' core inside the
+// repository's transaction, and each use's operations hang under a method
+// of the table's repository named for the use's member, its field or the
+// behavior (db.Order.Status().Transition(ctx, id, params),
+// db.Ticket.Timers().FireTimer(ctx, id, params)). A use's sub-tables get no
+// repository, and a table whose behaviors arm deadlines gets RunDeadline,
+// which its behavior worker's handler calls. Nothing here names a behavior:
+// the operations, their parameters and results, the owned fields and the
+// sub-tables come from each behavior's declaration, narrowed by its config
 // where behaviortypes narrows one.
 
 // Rules is what the ORM writes of the schema's tables whose fields are
@@ -36,16 +40,20 @@ type Rules struct {
 	LayoutJSON string
 }
 
-// RepositoryUse is a field-anchored use of a behavior on a table, as the
-// repository writes its operations: under a method named for its field,
-// which returns a value of an interface of its own (OrderStatusOperations).
+// RepositoryUse is a use of a behavior on a table, as the repository
+// writes its operations: under a method named for its member, which
+// returns a value of an interface of its own (OrderStatusOperations,
+// TicketTimersOperations).
 type RepositoryUse struct {
-	// ID is the use's id, its anchor field's name (status), and Behavior
-	// its registered name (Workflow).
+	// ID is the use's id, its anchor field's name (status) or the
+	// behavior's for an implements use (Timers), and Behavior its
+	// registered name (Workflow). Member is the name its operations sit
+	// under (status, timers).
 	ID       string
 	Behavior string
+	Member   string
 	// GoName is the repository's method its operations hang under, the
-	// use's id in Pascal case (Status).
+	// use's member in Pascal case (Status, Timers).
 	GoName string
 	// Interface is the operations' interface (OrderStatusOperations), Value
 	// the repository's implementation of it (orderStatusOperations) and
@@ -326,6 +334,13 @@ func (r Repository) PrimaryKey() Field {
 	return Field{}
 }
 
+// HasDeadlines reports whether a table's behaviors arm deadlines, whose
+// repository's RunDeadline interfaces.go declares with the rules module's
+// types (D103).
+func (o *ORMOutput) HasDeadlines() bool {
+	return slices.ContainsFunc(o.Repositories, func(r Repository) bool { return r.DeadlineQueue != "" })
+}
+
 // OperationsUseRawJSON reports whether an operation of a use of any
 // table's takes or returns json.RawMessage, which interfaces.go's no-op
 // operations name.
@@ -363,7 +378,7 @@ var repositoryMethods = []string{
 	"CreateOne", "CreateMany", "UpsertOne", "UpsertOneResult", "UpsertMany",
 	"UpdateOne", "UpdateOneIfVersion", "UpdateMany", "DeleteOne", "DeleteOneIfVersion",
 	"DeleteMany", "HardDeleteOne", "GetVersion", "ListVersions", "GetAsOf",
-	"PruneHistory", "PruneHistoryFunctionName", "Nearest", "Reencrypt",
+	"PruneHistory", "PruneHistoryFunctionName", "Nearest", "Reencrypt", "RunDeadline",
 }
 
 // repositoryTypeSuffixes are the suffixes of the names the ORM declares for
@@ -390,16 +405,16 @@ var packageNames = []string{
 	"Connect", "ConnectWithPool",
 }
 
-// attachRules gives the repositories of the schema's tables whose fields
-// are behaviors what they write of them (D103), and returns the layout
-// document rules.go embeds; nil for a schema with no such table. It fails
-// for a table whose behaviors no registry declares, and for a use whose
-// method or a type its operations name would take a name the package
-// already holds.
+// attachRules gives the repositories of the schema's tables that compose
+// behaviors as tables what they write of them (D103), and returns the
+// layout document rules.go embeds; nil for a schema with no such table. It
+// fails for a table whose behaviors no registry declares, and for a use
+// whose method or a type its operations name would take a name the
+// package already holds.
 func attachRules(schema *ir.Schema, repositories []Repository, reg *registry.Registry) (*Rules, error) {
 	var tables []*ir.TypeDef
 	for _, repo := range repositories {
-		if td := schema.Types[repo.TypeName]; td != nil && len(td.FieldBehaviors()) > 0 {
+		if td := schema.Types[repo.TypeName]; td != nil && len(td.TableBehaviors()) > 0 {
 			tables = append(tables, td)
 		}
 	}
@@ -425,7 +440,7 @@ func attachRules(schema *ir.Schema, repositories []Repository, reg *registry.Reg
 	}
 	for _, repo := range repositories {
 		for _, suffix := range repositoryTypeSuffixes {
-			if suffix == "Create" && schema.Types[repo.TypeName] != nil && len(schema.Types[repo.TypeName].FieldBehaviors()) == 0 {
+			if suffix == "Create" && schema.Types[repo.TypeName] != nil && len(schema.Types[repo.TypeName].TableBehaviors()) == 0 {
 				continue
 			}
 			names[repo.TypeName+suffix] = "the repository of " + repo.TypeName
@@ -458,14 +473,18 @@ func attachRules(schema *ir.Schema, repositories []Repository, reg *registry.Reg
 	return &Rules{LayoutJSON: string(encoded)}, nil
 }
 
-// attachTableRules gives repo, a table whose fields are behaviors, its
-// uses, its owned fields and its own columns as the core reads them.
-// names holds the names the package declares, which each name a use adds
-// joins.
+// attachTableRules gives repo, a table that composes behaviors as a table,
+// its uses, its owned fields, its own columns as the core reads them, and
+// its deadline queue. names holds the names the package declares, which
+// each name a use adds joins.
 func attachTableRules(schema *ir.Schema, repo *Repository, table *behaviorlayout.Table, reg *registry.Registry, names map[string]string) error {
 	td := schema.Types[repo.TypeName]
 	repo.HasBehaviors = true
 	repo.NeedsTime = true
+	if table.Deadlines != nil {
+		repo.DeadlineQueue = table.Deadlines.Queue
+		repo.NoUpsert = true
+	}
 
 	for _, column := range table.Own {
 		own := CoreOwnColumn{Field: column.Field}
@@ -497,9 +516,23 @@ func attachTableRules(schema *ir.Schema, repo *Repository, table *behaviorlayout
 	}
 
 	for _, use := range table.Uses {
-		goName := codegen.ToPascalCase(use.ID)
+		member := use.Member
+		if member == "" {
+			member = use.ID
+		}
+		// where names the use in a refusal, and rename what its author
+		// renames to move its names: the field, or for an implements use,
+		// whose member is the behavior's, the field or type that takes it.
+		where, rename := "on field "+use.ID, "rename the field"
+		if use.Anchor == "" {
+			where, rename = "the table implements", "rename the field or type whose name it takes"
+		}
+		if len(use.Tables) > 0 {
+			repo.NoUpsert = true
+		}
+		goName := codegen.ToPascalCase(member)
 		if slices.Contains(repositoryMethods, goName) || strings.HasPrefix(goName, "ListAsOfBy") {
-			return fmt.Errorf("ormgen: table %s: the behavior %s on field %s would put its operations under the repository's method %s, which the repository holds itself; rename the field", repo.TypeName, use.Behavior, use.ID, goName)
+			return fmt.Errorf("ormgen: table %s: the behavior %s %s would put its operations under the repository's method %s, which the repository holds itself; %s", repo.TypeName, use.Behavior, where, goName, rename)
 		}
 		for _, field := range use.Fields {
 			var fd *Field
@@ -509,11 +542,11 @@ func attachTableRules(schema *ir.Schema, repo *Repository, table *behaviorlayout
 				}
 			}
 			if fd == nil {
-				return fmt.Errorf("ormgen: table %s: field %s: behavior %s's field %s is the column %s, which the repository does not hold", repo.TypeName, use.ID, use.Behavior, field.Name, field.Column.Column)
+				return fmt.Errorf("ormgen: table %s: use %s: behavior %s's field %s is the column %s, which the repository does not hold", repo.TypeName, use.ID, use.Behavior, field.Name, field.Column.Column)
 			}
 			dateTime := field.Convert == behaviorlayout.ConvertEpochMillis
 			if dateTime != fd.IsDateTimeScalar {
-				return fmt.Errorf("ormgen: table %s: field %s: the behaviors' layout converts %s as %q, and the repository holds it as a date-time %t", repo.TypeName, use.ID, field.Field, field.Convert, fd.IsDateTimeScalar)
+				return fmt.Errorf("ormgen: table %s: use %s: the behaviors' layout converts %s as %q, and the repository holds it as a date-time %t", repo.TypeName, use.ID, field.Field, field.Convert, fd.IsDateTimeScalar)
 			}
 			repo.OwnedFields = append(repo.OwnedFields, RepositoryOwnedField{
 				Use:      use.ID,
@@ -528,9 +561,16 @@ func attachTableRules(schema *ir.Schema, repo *Repository, table *behaviorlayout
 		}
 
 		ref, _ := td.FieldBehavior(use.ID)
+		if use.Anchor == "" {
+			for _, implemented := range td.ImplementsBehaviors() {
+				if implemented.Name == use.Behavior {
+					ref = implemented
+				}
+			}
+		}
 		declaration, ok := reg.Behavior(use.Behavior)
 		if !ok {
-			return fmt.Errorf("ormgen: table %s: field %s: behavior %s is not registered", repo.TypeName, use.ID, use.Behavior)
+			return fmt.Errorf("ormgen: table %s: use %s: behavior %s is not registered", repo.TypeName, use.ID, use.Behavior)
 		}
 		base := repo.TypeName + goName
 		narrowed, err := behaviortypes.Narrow(declaration, ref.Config, behaviortypes.Target{
@@ -540,26 +580,33 @@ func attachTableRules(schema *ir.Schema, repo *Repository, table *behaviorlayout
 			Instance: td,
 		})
 		if err != nil {
-			return fmt.Errorf("ormgen: table %s: field %s: behavior %s: %w", repo.TypeName, use.ID, use.Behavior, err)
+			return fmt.Errorf("ormgen: table %s: use %s: behavior %s: %w", repo.TypeName, use.ID, use.Behavior, err)
 		}
 		// A narrowing's doc names the type it narrows by its base, which for
-		// a use on a field is the type's name and the field's (an
-		// OrderStatus's): its docs name the field instead (Order's status).
+		// a use on a table is the type's name and the use's member (an
+		// OrderStatus's, a TicketTimers's): its docs name the field instead
+		// (Order's status), or the table for a use it implements, whose
+		// behavior the doc names after it (Ticket's Timers).
+		named := repo.TypeName + "'s " + member
+		if use.Anchor == "" {
+			named = repo.TypeName + "'s"
+		}
 		aliases := make([]behaviortypes.Alias, len(narrowed.Aliases))
 		for i, alias := range narrowed.Aliases {
-			alias.Doc = strings.ReplaceAll(alias.Doc, behaviortypes.An(base)+"'s", repo.TypeName+"'s "+use.ID)
+			alias.Doc = strings.ReplaceAll(alias.Doc, behaviortypes.An(base)+"'s", named)
 			aliases[i] = alias
 		}
 		b := newGoTypeBuilder(aliases)
 		ru := RepositoryUse{
 			ID:        use.ID,
 			Behavior:  use.Behavior,
+			Member:    member,
 			GoName:    goName,
 			Interface: base + "Operations",
 			Value:     lowerFirstRune(base) + "Operations",
 			NoOp:      "noOp" + base + "Operations",
 			Doc: fmt.Sprintf("%sOperations are the operations of %s's %s, %s (D103), each run through the behaviors' core on the row whose key it takes, in a transaction.",
-				base, repo.TypeName, use.ID, behaviortypes.An(use.Behavior)),
+				base, repo.TypeName, member, behaviortypes.An(use.Behavior)),
 		}
 		for _, op := range use.Operations {
 			var doc string
@@ -570,14 +617,14 @@ func attachTableRules(schema *ir.Schema, repo *Repository, table *behaviorlayout
 			}
 			opGo := codegen.ToPascalCase(op.Name)
 			params, _, err := b.typeOf(narrowed.Params[op.Name], base+opGo+"Params",
-				fmt.Sprintf("%s are the parameters of %s's %s.", base+opGo+"Params", use.ID, op.Name))
+				fmt.Sprintf("%s are the parameters of %s's %s.", base+opGo+"Params", member, op.Name))
 			if err != nil {
-				return fmt.Errorf("ormgen: table %s: field %s: operation %s's parameters: %w", repo.TypeName, use.ID, op.Name, err)
+				return fmt.Errorf("ormgen: table %s: use %s: operation %s's parameters: %w", repo.TypeName, use.ID, op.Name, err)
 			}
 			result, isStruct, err := b.typeOf(narrowed.Results[op.Name], base+opGo+"Result",
-				fmt.Sprintf("%s is what %s's %s returns.", base+opGo+"Result", use.ID, op.Name))
+				fmt.Sprintf("%s is what %s's %s returns.", base+opGo+"Result", member, op.Name))
 			if err != nil {
-				return fmt.Errorf("ormgen: table %s: field %s: operation %s's result: %w", repo.TypeName, use.ID, op.Name, err)
+				return fmt.Errorf("ormgen: table %s: use %s: operation %s's result: %w", repo.TypeName, use.ID, op.Name, err)
 			}
 			ru.Operations = append(ru.Operations, RepositoryOperation{
 				Name:           op.Name,
@@ -602,9 +649,9 @@ func attachTableRules(schema *ir.Schema, repo *Repository, table *behaviorlayout
 		}
 		for _, name := range added {
 			if owner, taken := names[name]; taken {
-				return fmt.Errorf("ormgen: table %s: the behavior %s on field %s would name %s, which %s already names; rename the field", repo.TypeName, use.Behavior, use.ID, name, owner)
+				return fmt.Errorf("ormgen: table %s: the behavior %s %s would name %s, which %s already names; %s", repo.TypeName, use.Behavior, where, name, owner, rename)
 			}
-			names[name] = fmt.Sprintf("the behavior %s on %s.%s", use.Behavior, repo.TypeName, use.ID)
+			names[name] = fmt.Sprintf("the behavior %s on %s.%s", use.Behavior, repo.TypeName, member)
 		}
 		repo.Uses = append(repo.Uses, ru)
 	}
@@ -662,6 +709,11 @@ func (b *goTypeBuilder) typeOf(schema any, name, doc string) (goType string, isS
 		}
 	}
 	nullable, kinds := schemaKinds(s)
+	if values, ok := s["enum"].([]any); ok && len(kinds) == 0 && len(values) > 0 && !slices.ContainsFunc(values, func(v any) bool { _, text := v.(string); return !text }) {
+		// An enum of strings that names no type is a string, as one of type
+		// string is (Timers' fireTimer's outcome).
+		kinds = []string{"string"}
+	}
 	if _, ok := s["enum"]; ok {
 		if len(kinds) != 1 || kinds[0] != "string" {
 			return "json.RawMessage", false, nil
@@ -884,4 +936,77 @@ func docComment(indent, text string) string {
 	}
 	lines = append(lines, line)
 	return strings.Join(lines, "\n")
+}
+
+// DeadlineMessage is how a repository's RunDeadline reads a message of its
+// table's deadline queue (D103): the Go expressions, of deadline, a
+// types.<Queue>, of the row's key in the core's form, the use's id, the
+// deadline's name, the time it was armed to fall due at as an int64, and
+// the payload, which encoding/json writes.
+type DeadlineMessage struct {
+	RowKey, UseID, Name, At, Payload string
+}
+
+// attachDeadlines gives each repository whose table's behaviors arm
+// deadlines how its RunDeadline reads a message of the deadline queue,
+// from the queue's fields as the loader added them (D103). It fails for a
+// table whose queue the schema lacks or whose message lacks a field, which
+// the loader makes impossible.
+func attachDeadlines(repositories []Repository, queues []Queue) error {
+	for i := range repositories {
+		repo := &repositories[i]
+		if repo.DeadlineQueue == "" {
+			continue
+		}
+		var queue *Queue
+		for j := range queues {
+			if queues[j].Name == repo.DeadlineQueue {
+				queue = &queues[j]
+			}
+		}
+		if queue == nil {
+			return fmt.Errorf("ormgen: table %s: its behaviors arm deadlines on the queue %s, which the schema does not declare", repo.TypeName, repo.DeadlineQueue)
+		}
+		fields := map[string]Field{}
+		for _, f := range queue.Fields {
+			fields[f.Name] = f
+		}
+		member := func(name string) (string, Field, error) {
+			f, ok := fields[name]
+			if !ok {
+				return "", Field{}, fmt.Errorf("ormgen: table %s: its deadline queue %s has no field %s", repo.TypeName, queue.Name, name)
+			}
+			return "deadline." + codegen.ToPascalCase(name), f, nil
+		}
+		message := &DeadlineMessage{}
+		rowKey, f, err := member(behaviorlayout.DeadlineRowKeyField)
+		if err != nil {
+			return err
+		}
+		message.RowKey = "fmt.Sprint(" + rowKey + ")"
+		if f.IsUUIDScalar {
+			message.RowKey = rowKey + ".String()"
+		}
+		for _, each := range []struct {
+			name string
+			expr *string
+			wrap string
+		}{
+			{behaviorlayout.DeadlineUseField, &message.UseID, "string"},
+			{behaviorlayout.DeadlineNameField, &message.Name, "string"},
+			{behaviorlayout.DeadlineAtField, &message.At, "int64"},
+			{behaviorlayout.DeadlinePayloadField, &message.Payload, ""},
+		} {
+			expr, _, err := member(each.name)
+			if err != nil {
+				return err
+			}
+			if each.wrap != "" {
+				expr = each.wrap + "(" + expr + ")"
+			}
+			*each.expr = expr
+		}
+		repo.Deadline = message
+	}
+	return nil
 }

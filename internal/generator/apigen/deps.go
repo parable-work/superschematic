@@ -146,7 +146,8 @@ func jobsOf(schema *ir.Schema) []JobInfo {
 func (o *APIOutput) HasJobs() bool { return len(o.Jobs) > 0 }
 
 // WorkerInfo is a worker of the API (D53): a method of the generated
-// Workers interface, which handles one message of its queue.
+// Workers interface, which handles one message of its queue; or a behavior
+// worker (D103), whose handler behaviors.go holds.
 type WorkerInfo struct {
 	// Name is the worker's `@worker` class.
 	Name string
@@ -162,10 +163,71 @@ type WorkerInfo struct {
 	// comment: how many messages an instance handles at a time unless an
 	// environment changes it.
 	Concurrency int
+
+	// Behavior is set for a @behaviorWorker (D103): a worker whose handler
+	// the generator writes, which the Workers interface has no method for.
+	// Method is empty then.
+	Behavior *BehaviorWorkerInfo
 }
 
-// workersOf reads the API's workers, sorted by name.
-func workersOf(schema *ir.Schema) []WorkerInfo {
+// BehaviorWorkerInfo is what a @behaviorWorker runs (D103): a table's
+// behavior queues, each claimed as its messages fall due and run through
+// the behaviors' core as the worker.
+type BehaviorWorkerInfo struct {
+	// Table is the table whose behaviors the worker runs: Ticket.
+	Table string
+
+	// Queues are the table's behavior queues, deadlines first: in batch 5
+	// the deadline queue alone (TicketDeadline).
+	Queues []string
+
+	// Subject is the subject the worker's commands run as,
+	// ir.BehaviorWorkerSubject(api, worker).
+	Subject string
+
+	// Permissions are the permissions the worker's commands hold.
+	Permissions []string
+
+	// Behaviors are the behaviors whose queues it runs, those of the
+	// table's uses that arm deadlines (Timers), which a generator's
+	// refusal of the worker names; empty when the API's database is not
+	// among the generator's dependencies.
+	Behaviors []string
+}
+
+// Deadlines names the deadlines the worker runs for a generator's
+// refusal: the table's, and the behaviors that arm them when known
+// ("Ticket's deadlines, which Timers arms").
+func (b *BehaviorWorkerInfo) Deadlines() string {
+	switch len(b.Behaviors) {
+	case 0:
+		return b.Table + "'s deadlines"
+	case 1:
+		return fmt.Sprintf("%s's deadlines, which %s arms", b.Table, b.Behaviors[0])
+	}
+	return fmt.Sprintf("%s's deadlines, which %s and %s arm", b.Table, strings.Join(b.Behaviors[:len(b.Behaviors)-1], ", "), b.Behaviors[len(b.Behaviors)-1])
+}
+
+// ArmingBehaviors are the behaviors of table's uses that arm the deadlines
+// a behavior worker of the API schema runs, as the loader marked its
+// database's deadline queue (ir.BehaviorQueue.Behaviors), or none when
+// deps holds no such queue of the API's database.
+func ArmingBehaviors(schema *ir.Schema, deps map[string]*ir.Schema, table string) []string {
+	db, _, ok := schema.Database()
+	if !ok {
+		return nil
+	}
+	if queue := deps[db].BehaviorQueueOf(table, ir.BehaviorQueueDeadlines); queue != nil {
+		return slices.Clone(queue.BehaviorQueue.Behaviors)
+	}
+	return nil
+}
+
+// workersOf reads the API's workers, sorted by name: a behavior worker
+// with its table, its queues (the deadline queue the loader filled), the
+// subject its commands run as and their permissions, the behaviors that
+// arm its deadlines, and no method.
+func workersOf(schema *ir.Schema, deps map[string]*ir.Schema) []WorkerInfo {
 	var workers []WorkerInfo
 	for _, worker := range schema.Workers {
 		if worker == nil {
@@ -175,15 +237,81 @@ func workersOf(schema *ir.Schema) []WorkerInfo {
 		if concurrency <= 0 {
 			concurrency = ir.DefaultWorkerConcurrency
 		}
-		workers = append(workers, WorkerInfo{Name: worker.Name, Method: goutil.GoPublicIdentifier(worker.Name), Queue: worker.Queue, Concurrency: concurrency})
+		info := WorkerInfo{Name: worker.Name, Method: goutil.GoPublicIdentifier(worker.Name), Queue: worker.Queue, Concurrency: concurrency}
+		if bw := worker.BehaviorWorker; bw != nil {
+			info.Method = ""
+			info.Behavior = &BehaviorWorkerInfo{
+				Table:       bw.Type,
+				Queues:      []string{worker.Queue},
+				Subject:     ir.BehaviorWorkerSubject(schema.Name, worker.Name),
+				Permissions: slices.Clone(bw.Permissions),
+				Behaviors:   ArmingBehaviors(schema, deps, bw.Type),
+			}
+		}
+		workers = append(workers, info)
 	}
 	slices.SortFunc(workers, func(a, b WorkerInfo) int { return strings.Compare(a.Name, b.Name) })
 	return workers
 }
 
-// HasWorkers reports whether the API declares a worker, for which deps.go
-// declares Workers and WorkersConstructor.
-func (o *APIOutput) HasWorkers() bool { return len(o.Workers) > 0 }
+// QueuesFunc is the function of the API package that returns a behavior
+// worker's queues (D103): TicketTimersQueues.
+func (w WorkerInfo) QueuesFunc() string {
+	return goutil.GoPublicIdentifier(w.Name) + "Queues"
+}
+
+// QueuesDoc is the doc comment of a behavior worker's QueuesFunc, the
+// worker's queues over the tables of database, wrapped as gofmt keeps it.
+func (w WorkerInfo) QueuesDoc(database string) string {
+	if w.Behavior == nil {
+		return ""
+	}
+	text := fmt.Sprintf("%s are the queues of the behavior worker %s (D103): %s's %s's deadlines, each claimed as it falls due and run through the behaviors' core as the worker, %s, in one transaction with its message's completion. Its main runs them with worker.RunAll; logger, nil for none, logs a message spent with nothing run, its claim lost or its row gone.",
+		w.QueuesFunc(), w.Name, database, w.Behavior.Table, w.Behavior.Subject)
+	var lines []string
+	line := "//"
+	for _, word := range strings.Fields(text) {
+		if len(line)+1+len(word) > 78 && line != "//" {
+			lines = append(lines, line)
+			line = "//"
+		}
+		line += " " + word
+	}
+	return strings.Join(append(lines, line), "\n")
+}
+
+// OrdinaryWorkers are the API's @worker workers, each a method of the
+// generated Workers interface; a behavior worker is none (D103).
+func (o *APIOutput) OrdinaryWorkers() []WorkerInfo {
+	var out []WorkerInfo
+	for _, w := range o.Workers {
+		if w.Behavior == nil {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// BehaviorWorkers are the API's @behaviorWorker workers (D103), whose
+// handlers behaviors.go holds.
+func (o *APIOutput) BehaviorWorkers() []WorkerInfo {
+	var out []WorkerInfo
+	for _, w := range o.Workers {
+		if w.Behavior != nil {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// HasWorkers reports whether the API declares a @worker, for which deps.go
+// declares Workers and WorkersConstructor. A behavior worker is not one:
+// its handler is generated (D103).
+func (o *APIOutput) HasWorkers() bool { return len(o.OrdinaryWorkers()) > 0 }
+
+// HasBehaviorWorkers reports whether the API declares a @behaviorWorker
+// (D103), whose queues behaviors.go writes.
+func (o *APIOutput) HasBehaviorWorkers() bool { return len(o.BehaviorWorkers()) > 0 }
 
 // HasBackgroundWork reports whether deps.go declares Jobs or Workers, which
 // take a context.

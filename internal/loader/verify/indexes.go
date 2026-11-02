@@ -20,7 +20,9 @@ func checkIndexTables(schema *ir.Schema, r *Result) {
 	bases := codegen.BaseTypeNames(schema)
 	for _, name := range sortedTypeNames(schema.Types) {
 		td := schema.Types[name]
-		if len(td.Indexes) == 0 || hasTable(td, bases) || td.Role == ir.RoleProjection {
+		// The deadline queue a table's behaviors keep (D103) is a queue,
+		// whose table sqlgen writes with the indexes the loader gave it.
+		if len(td.Indexes) == 0 || hasTable(td, bases) || td.Role == ir.RoleProjection || td.BehaviorQueue != nil {
 			continue
 		}
 		var on string

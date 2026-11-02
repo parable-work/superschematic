@@ -48,7 +48,9 @@ type repositoryCase struct {
 // operation being run and the system actor (D87); and fixture-vectors-db's
 // decimals, vectors and nearest (D84), on the Postgres with pgvector.
 // fixture-workflow-db's tables whose fields are behaviors (D103) have a
-// test of their own, on bun:sqlite and Postgres: TestWorkflowTablesEndToEnd.
+// test of their own, on bun:sqlite and Postgres: TestWorkflowTablesEndToEnd;
+// and so do fixture-timers-db's, which implement Timers:
+// TestTimersTablesEndToEnd.
 var repositoryCases = []repositoryCase{
 	{fixture: "fixture-ledger-db", files: []string{"ledger.test.ts"}, tests: []string{
 		"createOne and getOne read a row as the types hold it, its key base62 and its user stamped",

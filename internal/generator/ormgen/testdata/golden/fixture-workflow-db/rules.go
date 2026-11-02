@@ -12,17 +12,20 @@ import (
 )
 
 /*
-The tables whose fields are behaviors (D103) stay tables: each field a
-behavior owns is a column its row holds, which <Type>Create and <Type>Update
-leave out, and creates, updates, deletes and each use's operations run
-through the behaviors' core, the rules module's adapter answering its reads
-and applying its change sets in the repository's transaction. A raw SQL write
-of an owned column (Tx.Exec) is never refused.
+The tables that compose behaviors, on their fields or by implements (D103),
+stay tables: each field a behavior owns is a column its row holds, which
+<Type>Create and <Type>Update leave out, and creates, updates, deletes and
+each use's operations run through the behaviors' core, the rules module's
+adapter answering its reads and applying its change sets in the repository's
+transaction: the rows of a behavior's sub-tables, which no repository writes,
+and the deadlines it arms, messages of the table's deadline queue, which
+RunDeadline runs as they fall due. A raw SQL write of an owned column or a
+sub-table (Tx.Exec) is never refused.
 */
 
-// rulesLayoutJSON is the layout document of the tables whose fields are
+// rulesLayoutJSON is the layout document of the tables that compose
 // behaviors (D103, internal/generator/behaviorlayout): where the core's
-// logical names of their rows live.
+// logical names of their rows, sub-tables and deadlines live.
 const rulesLayoutJSON = `{
   "types": {
     "Order": {
@@ -52,6 +55,7 @@ const rulesLayoutJSON = `{
           "id": "status",
           "behavior": "Workflow",
           "anchor": "status",
+          "member": "status",
           "fields": [
             {
               "name": "status",
@@ -104,6 +108,17 @@ const rulesLayoutJSON = `{
               "field": "status"
             }
           }
+        ],
+        "fields": [
+          {
+            "name": "title",
+            "type": "string"
+          },
+          {
+            "name": "placedAt",
+            "type": "Temporal.DateTime",
+            "dateTime": true
+          }
         ]
       }
     },
@@ -128,6 +143,7 @@ const rulesLayoutJSON = `{
           "id": "status",
           "behavior": "Workflow",
           "anchor": "status",
+          "member": "status",
           "fields": [
             {
               "name": "status",
@@ -155,6 +171,7 @@ const rulesLayoutJSON = `{
           "id": "paymentStatus",
           "behavior": "Workflow",
           "anchor": "paymentStatus",
+          "member": "paymentStatus",
           "fields": [
             {
               "name": "status",
@@ -231,6 +248,12 @@ const rulesLayoutJSON = `{
             "anchor": {
               "field": "paymentStatus"
             }
+          }
+        ],
+        "fields": [
+          {
+            "name": "reference",
+            "type": "string"
           }
         ]
       }

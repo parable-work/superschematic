@@ -34,19 +34,36 @@ const (
 	behaviorDB  = "fixture-workflow-db"
 )
 
+// behaviorFixture is an API whose behavior operations or workers run on
+// the tables of its database, a fixture of the TypeScript reader's.
+type behaviorFixture struct {
+	api, db string
+}
+
+// workflowFixture is fixture-workflow-api over fixture-workflow-db.
+var workflowFixture = behaviorFixture{api: behaviorAPI, db: behaviorDB}
+
 // loadBehaviorFixture loads fixture-workflow-api, its @behaviorOperations
 // sets filled by the loader, and fixture-workflow-db, with the core's
 // registry, which declares Workflow.
 func loadBehaviorFixture(t *testing.T) (api, db *ir.Schema, reg *registry.Registry) {
 	t.Helper()
+	return workflowFixture.load(t)
+}
+
+// load loads the fixture's API, its @behaviorOperations sets and
+// @behaviorWorker classes filled by the loader, and its database, with the
+// core's registry, which declares Workflow and Timers.
+func (f behaviorFixture) load(t *testing.T) (api, db *ir.Schema, reg *registry.Registry) {
+	t.Helper()
 	reg = registry.New(naming.Default())
-	db, err := loader.LoadService(filepath.Join(fixturesDir, behaviorDB), loader.WithRegistry(reg))
+	db, err := loader.LoadService(filepath.Join(fixturesDir, f.db), loader.WithRegistry(reg))
 	if err != nil {
-		t.Fatalf("load %s: %v", behaviorDB, err)
+		t.Fatalf("load %s: %v", f.db, err)
 	}
-	api, err = loader.LoadService(filepath.Join(fixturesDir, behaviorAPI), loader.WithRegistry(reg))
+	api, err = loader.LoadService(filepath.Join(fixturesDir, f.api), loader.WithRegistry(reg))
 	if err != nil {
-		t.Fatalf("load %s: %v", behaviorAPI, err)
+		t.Fatalf("load %s: %v", f.api, err)
 	}
 	return api, db, reg
 }
@@ -56,21 +73,28 @@ func loadBehaviorFixture(t *testing.T) (api, db *ir.Schema, reg *registry.Regist
 // the OpenAPI document declares the Order that getOrder returns.
 func generateBehaviorAPI(t *testing.T, db *ir.Schema) *APIOutput {
 	t.Helper()
-	api, err := loader.LoadService(filepath.Join(fixturesDir, behaviorAPI))
+	return workflowFixture.generate(t, db)
+}
+
+// generate generates the fixture's API crate as the dispatch layer does,
+// with its database among its Dependencies.
+func (f behaviorFixture) generate(t *testing.T, db *ir.Schema) *APIOutput {
+	t.Helper()
+	api, err := loader.LoadService(filepath.Join(fixturesDir, f.api))
 	if err != nil {
-		t.Fatalf("load %s: %v", behaviorAPI, err)
+		t.Fatalf("load %s: %v", f.api, err)
 	}
 	outDir := t.TempDir()
-	output, err := generateFrom(api, apiSource{upstream: behaviorDB, upstreamIR: db, authDB: authDBOf(t, api)}, Options{
-		SchemaName:   behaviorAPI,
-		Dependencies: map[string]*ir.Schema{behaviorDB: db},
-		TypesCrate:   "schemas-" + behaviorAPI + "-types",
-		TypesDir:     filepath.Join(outDir, "types", "rust", behaviorAPI),
-		OutputDir:    filepath.Join(outDir, "api", behaviorAPI),
+	output, err := generateFrom(api, apiSource{upstream: f.db, upstreamIR: db, authDB: authDBOf(t, api)}, Options{
+		SchemaName:   f.api,
+		Dependencies: map[string]*ir.Schema{f.db: db},
+		TypesCrate:   "schemas-" + f.api + "-types",
+		TypesDir:     filepath.Join(outDir, "types", "rust", f.api),
+		OutputDir:    filepath.Join(outDir, "api", f.api),
 		Clock:        codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 	})
 	if err != nil || output == nil {
-		t.Fatalf("generate %s: %v, %v", behaviorAPI, output, err)
+		t.Fatalf("generate %s: %v, %v", f.api, output, err)
 	}
 	return output
 }
@@ -239,8 +263,17 @@ type behaviorCrate struct {
 // and the patch of the runtime crates a test of it needs.
 func buildBehaviorCrate(t *testing.T, sdk bool) behaviorCrate {
 	t.Helper()
+	return workflowFixture.build(t, sdk)
+}
+
+// build writes the fixture's API crate as buildBehaviorCrate writes
+// fixture-workflow-api's. An API with a behavior worker re-exports its
+// database's Rust types, which its Deps name, as a build's do.
+func (f behaviorFixture) build(t *testing.T, sdk bool) behaviorCrate {
+	t.Helper()
+	behaviorAPI, behaviorDB := f.api, f.db
 	paths := testpaths.Local(t)
-	api, db, reg := loadBehaviorFixture(t)
+	api, db, reg := f.load(t)
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -283,6 +316,13 @@ func buildBehaviorCrate(t *testing.T, sdk bool) behaviorCrate {
 		t.Fatalf("generate: %v", err)
 	}
 	deps := behaviorDeps(behaviorLayout(t, db, reg))
+	deps.Database = behaviorDB
+	if len(output.BehaviorWorkers) > 0 {
+		deps.DatabaseTypesCrate = names.RustTypesCrate(behaviorDB)
+		if deps.DatabaseTypesPath, err = naming.RelPath(apiDir, filepath.Join(typesRoot, behaviorDB)); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if deps.Behaviors.AdapterPath, err = naming.RelPath(apiDir, paths.RulesAdapterRust); err != nil {
 		t.Fatal(err)
 	}
@@ -361,9 +401,11 @@ func cargoInBehaviorCrate(t *testing.T, cargo string, crate behaviorCrate, args 
 	cmd := exec.Command(cargo, args...)
 	cmd.Dir = crate.dir
 	cmd.Env = append(os.Environ(), "CARGO_TARGET_DIR="+targetDir)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		t.Fatalf("cargo %s on the generated API crate: %v\n%s", strings.Join(args, " "), err, out)
 	}
+	t.Logf("cargo %s:\n%s", strings.Join(args, " "), out)
 }
 
 // TestBehaviorOperationsAPICrateBuilds lints fixture-workflow-api's crate

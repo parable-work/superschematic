@@ -15,8 +15,9 @@
 //! JSON writes `held` with each.
 //!
 //! A request names logical targets only: a type by its name, a row by its
-//! key, a behavior's fields by use id. The host maps them onto its layout,
-//! as it maps a change set.
+//! key, a behavior's fields by use id, a sub-table by its row, its use's id
+//! and its declared name. The host maps them onto its layout, as it maps a
+//! change set.
 
 use std::collections::BTreeMap;
 
@@ -56,6 +57,17 @@ pub enum ReadRequest {
         #[serde(rename = "type")]
         type_name: String,
     },
+    /// The rows of one sub-table of one use on one row
+    /// ([`Answer::SubRows`]), each by its key, in key order (by code
+    /// point): what a behavior that keeps state in a sub-table reads of
+    /// its row ([`crate::View::sub_rows`]).
+    SubRows {
+        #[serde(rename = "type")]
+        type_name: String,
+        key: String,
+        use_id: String,
+        table: String,
+    },
 }
 
 impl ReadRequest {
@@ -78,6 +90,21 @@ impl ReadRequest {
     pub fn spec(type_name: impl Into<String>) -> Self {
         ReadRequest::Spec {
             type_name: type_name.into(),
+        }
+    }
+
+    /// The rows of one sub-table of one use on a row of a type.
+    pub fn sub_rows(
+        type_name: impl Into<String>,
+        key: impl Into<String>,
+        use_id: impl Into<String>,
+        table: impl Into<String>,
+    ) -> Self {
+        ReadRequest::SubRows {
+            type_name: type_name.into(),
+            key: key.into(),
+            use_id: use_id.into(),
+            table: table.into(),
         }
     }
 }
@@ -108,6 +135,34 @@ impl Row {
     }
 }
 
+/// One sub-table row as the host read it: its key and its values by the
+/// declared field's name, the key's field left out, a NULL column absent.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubRow {
+    pub key: String,
+    #[serde(default)]
+    pub values: Map<String, Value>,
+}
+
+impl SubRow {
+    /// A row by its key with its values, a null among them left out.
+    pub fn new(key: impl Into<String>, values: Map<String, Value>) -> Self {
+        SubRow {
+            key: key.into(),
+            values: values
+                .into_iter()
+                .filter(|(_, value)| !value.is_null())
+                .collect(),
+        }
+    }
+
+    /// A value; `None` when it has none.
+    pub fn value(&self, field: &str) -> Option<&Value> {
+        self.values.get(field).filter(|value| !value.is_null())
+    }
+}
+
 /// The host's answer to one request, of the variant the request asks for.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -118,6 +173,9 @@ pub enum Answer {
     HasRows(bool),
     /// The type's live version, or `None` when no type has the name.
     Spec(Option<TypeSpec>),
+    /// The sub-table's rows of the row, in key order; none for a row that
+    /// has none, or that does not exist.
+    SubRows(Vec<SubRow>),
 }
 
 /// A key the host locks before it answers the reads a rule across rows
@@ -306,6 +364,34 @@ mod tests {
         assert_eq!(
             serde_json::to_value(Answer::Spec(Some(TypeSpec::new("Stock")))).unwrap(),
             json!({"spec": {"name": "Stock", "uses": []}})
+        );
+        assert_eq!(
+            serde_json::to_value(ReadRequest::sub_rows("Ticket", "t1", "Timers", "deadlines"))
+                .unwrap(),
+            json!({"kind": "subRows", "type": "Ticket", "key": "t1", "useId": "Timers", "table": "deadlines"})
+        );
+        let answer: Answer = serde_json::from_value(json!({"subRows": [
+            {"key": "respond", "values": {"baseAt": 1791536400000_i64, "armedFrom": "1791536400000", "dueAt": 1791536401500_i64, "fired": false}},
+            {"key": "idle"}
+        ]}))
+        .unwrap();
+        let Answer::SubRows(rows) = answer else {
+            panic!("sub-table rows");
+        };
+        assert_eq!(rows[0].value("fired"), Some(&json!(false)));
+        assert!(rows[1].values.is_empty());
+        assert_eq!(
+            SubRow::new(
+                "idle",
+                json!({"dueAt": null, "fired": true})
+                    .as_object()
+                    .cloned()
+                    .unwrap()
+            ),
+            SubRow {
+                key: "idle".into(),
+                values: json!({"fired": true}).as_object().cloned().unwrap()
+            }
         );
         let answer: Answer = serde_json::from_value(json!({"row": {
             "own": {"title": "Desk"},

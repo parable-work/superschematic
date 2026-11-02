@@ -10,7 +10,9 @@ use std::collections::BTreeMap;
 
 use serde_json::{json, Map, Value};
 
-use superschematic_rules::{Action, Code, ConfigIssueKind, Core, Refusal, TypeSpec, UseSpec};
+use superschematic_rules::{
+    Action, Code, ConfigIssueKind, Core, FieldSpec, Refusal, SubRow, TypeSpec, UseSpec,
+};
 
 use crate::host::{Logged, StoredRow};
 
@@ -21,13 +23,17 @@ pub const NAMESPACE: &str = "default";
 const NEW_VERSION_ADVICE: &str = "A new version may only add optional fields and enum values, widen bounds, change documentation and make the behavior changes each behavior allows; publish any other change under a new schema name";
 
 /// One own field a schema document declares, for the store's own-field
-/// check and a transcript's table.
+/// check, its normalization and a transcript's table.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FieldDef {
     pub name: String,
     pub required: bool,
     /// Its JSON type, from its `typeRef` ([`json_type`]).
     pub json_type: String,
+    /// Its `typeRef`'s name (`string`, `Temporal.DateTime`).
+    pub type_name: String,
+    /// Whether its values are instants ([`is_date_time`]).
+    pub date_time: bool,
 }
 
 /// A schema document read for the host: the type the core runs, and the
@@ -41,7 +47,8 @@ pub struct Defined {
 /// Reads a schema document: its instance type (the type named as the
 /// schema, else its first), its behaviors in list order, each a use on the
 /// type with its config as the document gives it (none where it gives
-/// none), and its own fields.
+/// none), and its own fields, which the type's spec lists too, each by its
+/// `typeRef`'s name and whether its values are instants.
 pub fn read_document(document: &Value) -> Result<Defined, String> {
     let name = document
         .get("name")
@@ -71,7 +78,7 @@ pub fn read_document(document: &Value) -> Result<Defined, String> {
         // it for a behavior that needs one, as the meta-schema did.
         spec = spec.with(UseSpec::on_type(behavior, entry.get("config").cloned()));
     }
-    let fields = shape
+    let fields: Vec<FieldDef> = shape
         .get("fields")
         .and_then(Value::as_array)
         .into_iter()
@@ -81,10 +88,90 @@ pub fn read_document(document: &Value) -> Result<Defined, String> {
                 name: field.get("name")?.as_str()?.to_owned(),
                 required: field.get("required").and_then(Value::as_bool) == Some(true),
                 json_type: json_type(field),
+                type_name: type_name(field).to_owned(),
+                date_time: is_date_time(field),
             })
         })
         .collect();
+    for field in &fields {
+        spec = spec.with_field(FieldSpec {
+            name: field.name.clone(),
+            type_name: field.type_name.clone(),
+            date_time: field.date_time,
+        });
+    }
     Ok(Defined { spec, fields })
+}
+
+// type_name is a field's typeRef's name; empty for a field with none.
+fn type_name(field: &Value) -> &str {
+    field
+        .get("typeRef")
+        .and_then(|type_ref| type_ref.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+}
+
+/// Whether a field a schema document declares holds instants: one value,
+/// not a list or a map, of a scalar the engine gives the JSON Schema format
+/// `date-time` by its name, one whose last dotted segment is `DateTime`
+/// (`Temporal.DateTime`; a `Temporal.Date` is a day, no instant), the rule
+/// the engine's scalar traits apply to a scalar that declares no format.
+pub fn is_date_time(field: &Value) -> bool {
+    let type_ref = field.get("typeRef");
+    let flag = |name: &str| {
+        type_ref
+            .and_then(|type_ref| type_ref.get(name))
+            .and_then(Value::as_bool)
+            == Some(true)
+    };
+    !flag("isArray")
+        && !flag("isMap")
+        && type_name(field)
+            .rsplit('.')
+            .next()
+            .is_some_and(|last| last.eq_ignore_ascii_case("datetime"))
+}
+
+/// A write's own fields as the store keeps them: each instant a date-time
+/// field holds as text in its canonical form, as the engine's parse of the
+/// scalar stores it (D16): the fraction of a second written without the
+/// zeros it ends with, and none when it is zero
+/// (`2026-10-12T09:00:00.000Z` is stored `2026-10-12T09:00:00Z`). Text that
+/// holds no instant, and every other field, stays as it is.
+pub fn normalize_own(fields: &[FieldDef], data: &Map<String, Value>) -> Map<String, Value> {
+    data.iter()
+        .map(|(name, value)| {
+            let instant = fields
+                .iter()
+                .any(|field| field.name == *name && field.date_time);
+            let value = match value {
+                Value::String(text) if instant => Value::from(canonical_instant(text)),
+                _ => value.clone(),
+            };
+            (name.clone(), value)
+        })
+        .collect()
+}
+
+// canonical_instant writes a date-time's text with its fraction of a second
+// cut to the digits that count; text that holds no instant stays.
+fn canonical_instant(text: &str) -> String {
+    if superschematic_rules_behaviors::parse_date_time(text).is_none() {
+        return text.to_owned();
+    }
+    let Some(dot) = text.find('.') else {
+        return text.to_owned();
+    };
+    let digits = text[dot + 1..]
+        .find(|c: char| !c.is_ascii_digit())
+        .map_or(text.len(), |end| dot + 1 + end);
+    let fraction = text[dot + 1..digits].trim_end_matches('0');
+    if fraction.is_empty() {
+        format!("{}{}", &text[..dot], &text[digits..])
+    } else {
+        format!("{}.{fraction}{}", &text[..dot], &text[digits..])
+    }
 }
 
 /// The JSON type of a field a schema document declares: `string`,
@@ -343,8 +430,16 @@ fn snake(field: &str) -> String {
 /// A row as the engine's record, with what this replayer compares: its id,
 /// its own fields, and the fields each behavior owns under `behaviors`, by
 /// use id, for each use whose behavior declares fields, a field with no
-/// value left out.
-pub fn record(core: &Core, spec: &TypeSpec, key: &str, row: &StoredRow) -> Value {
+/// value left out, with the fields the behavior computes on a read
+/// ([`Core::read_fields`], from the row and its sub-table rows, by use id
+/// and table).
+pub fn record(
+    core: &Core,
+    spec: &TypeSpec,
+    key: &str,
+    row: &StoredRow,
+    tables: &BTreeMap<String, BTreeMap<String, Vec<SubRow>>>,
+) -> Value {
     let mut behaviors = Map::new();
     for entry in &spec.uses {
         let declares = core
@@ -353,7 +448,7 @@ pub fn record(core: &Core, spec: &TypeSpec, key: &str, row: &StoredRow) -> Value
         if !declares {
             continue;
         }
-        let fields: Map<String, Value> = row
+        let mut fields: Map<String, Value> = row
             .owned
             .get(entry.id())
             .map(|fields| {
@@ -364,6 +459,16 @@ pub fn record(core: &Core, spec: &TypeSpec, key: &str, row: &StoredRow) -> Value
                     .collect()
             })
             .unwrap_or_default();
+        let empty = BTreeMap::new();
+        let computed = core
+            .read_fields(
+                spec,
+                entry.id(),
+                &row.as_row(),
+                tables.get(entry.id()).unwrap_or(&empty),
+            )
+            .unwrap_or_default();
+        fields.extend(computed);
         behaviors.insert(entry.id().to_owned(), Value::Object(fields));
     }
     json!({
@@ -378,8 +483,9 @@ pub fn record(core: &Core, spec: &TypeSpec, key: &str, row: &StoredRow) -> Value
 /// A change log entry as the engine's event, with what this replayer
 /// compares: its kind, and its change: a create's `data` and `behaviors`,
 /// an operation's `behavior`, `operation`, `params` and `patch`, an
-/// update's `patch`, a patch's `data` (the own fields it wrote) and
-/// `behaviors` (the owned ones), each left out when the write set none.
+/// update's `data` and `behaviors`, a deadline's `patch`, a patch's `data`
+/// (the own fields it wrote) and `behaviors` (the owned ones it changed),
+/// each left out when the write set none.
 pub fn event(spec: Option<&TypeSpec>, logged: &Logged) -> Value {
     let owned = owned_object(logged);
     let own = logged.own();
@@ -408,7 +514,8 @@ pub fn event(spec: Option<&TypeSpec>, logged: &Logged) -> Value {
                 "patch": patch,
             })
         }
-        Action::Update { .. } | Action::Deadline { .. } => json!({ "patch": patch }),
+        Action::Update { .. } => Value::Object(patch),
+        Action::Deadline { .. } => json!({ "patch": patch }),
         _ => json!({}),
     };
     json!({
@@ -421,14 +528,13 @@ pub fn event(spec: Option<&TypeSpec>, logged: &Logged) -> Value {
     })
 }
 
-// owned_object is the owned fields a write set, by use id, each use that
-// set none left out.
+// owned_object is the owned fields a write changed, by use id, each use
+// that changed none left out: the engine's event recorded what changed.
 fn owned_object(logged: &Logged) -> Value {
     Value::Object(
         logged
-            .owned()
+            .changed()
             .into_iter()
-            .filter(|(_, fields)| !fields.is_empty())
             .map(|(use_id, fields)| (use_id, Value::Object(fields)))
             .collect(),
     )
@@ -641,6 +747,10 @@ mod tests {
         assert_eq!(defined.spec.name, "Order");
         assert_eq!(defined.spec.uses.len(), 2);
         assert_eq!(
+            serde_json::to_value(&defined.spec.fields).unwrap(),
+            json!([{"name": "title", "type": ""}, {"name": "note", "type": ""}])
+        );
+        assert_eq!(
             serde_json::to_string(&defined.spec.uses[0].config).unwrap(),
             r#"{"states":["a"],"initial":"a"}"#
         );
@@ -664,6 +774,45 @@ mod tests {
             false
         )
         .is_empty());
+    }
+
+    #[test]
+    fn a_date_time_field_holds_instants_in_their_canonical_form() {
+        let defined = read_document(&json!({
+            "name": "Ticket",
+            "types": {"Ticket": {"fields": [
+                {"name": "title", "typeRef": {"name": "string"}},
+                {"name": "visitAt", "typeRef": {"name": "Temporal.DateTime"}},
+                {"name": "visitDay", "typeRef": {"name": "Temporal.Date"}},
+                {"name": "visits", "typeRef": {"name": "Temporal.DateTime", "isArray": true}}
+            ]}}
+        }))
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(&defined.spec.fields).unwrap(),
+            json!([
+                {"name": "title", "type": "string"},
+                {"name": "visitAt", "type": "Temporal.DateTime", "dateTime": true},
+                {"name": "visitDay", "type": "Temporal.Date"},
+                {"name": "visits", "type": "Temporal.DateTime"}
+            ])
+        );
+        let data = json!({
+            "title": "2026-10-12T09:00:00.000Z",
+            "visitAt": "2026-10-12T09:00:00.000Z"
+        });
+        assert_eq!(
+            Value::Object(normalize_own(&defined.fields, data.as_object().unwrap())),
+            json!({"title": "2026-10-12T09:00:00.000Z", "visitAt": "2026-10-12T09:00:00Z"})
+        );
+        for (text, canonical) in [
+            ("2026-10-12T09:00:00.100Z", "2026-10-12T09:00:00.1Z"),
+            ("2026-10-12T11:00:00+02:00", "2026-10-12T11:00:00+02:00"),
+            ("2026-10-12T11:00:00.000+02:00", "2026-10-12T11:00:00+02:00"),
+            ("not a time.000", "not a time.000"),
+        ] {
+            assert_eq!(canonical_instant(text), canonical, "{text}");
+        }
     }
 
     #[test]

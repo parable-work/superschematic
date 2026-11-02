@@ -2,7 +2,8 @@
   "file": "core-workflow",
   "source": "runtime/engine/testdata/scenarios/core-workflow.json",
   "behaviors": [
-    "Workflow"
+    "Workflow",
+    "Timers"
   ],
   "scenarios": [
     {
@@ -55,6 +56,12 @@
                   },
                   "anchor": "type"
                 }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                }
               ]
             },
             {
@@ -91,6 +98,12 @@
                     "initial": "open"
                   },
                   "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
                 }
               ]
             }
@@ -136,6 +149,12 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -189,6 +208,12 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -283,6 +308,12 @@
                 },
                 "anchor": "type"
               }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
             ]
           },
           "command": {
@@ -336,6 +367,12 @@
                   "initial": "open"
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -469,6 +506,12 @@
                   },
                   "anchor": "type"
                 }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                }
               ]
             }
           ]
@@ -513,6 +556,12 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -566,6 +615,12 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -767,6 +822,12 @@
                   },
                   "anchor": "type"
                 }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                }
               ]
             }
           ]
@@ -811,6 +872,12 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -864,6 +931,12 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -1040,6 +1113,12 @@
                   },
                   "anchor": "type"
                 }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                }
               ]
             }
           ]
@@ -1084,6 +1163,12 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -1137,6 +1222,12 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -1591,6 +1682,12 @@
                   },
                   "anchor": "type"
                 }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                }
               ]
             }
           ]
@@ -1635,6 +1732,12 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -1688,6 +1791,12 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -1913,6 +2022,12 @@
                   },
                   "anchor": "type"
                 }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                }
               ]
             }
           ]
@@ -1957,6 +2072,12 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -2010,6 +2131,12 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -2176,6 +2303,16 @@
                   },
                   "anchor": "type"
                 }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "status",
+                  "type": "string"
+                }
               ]
             }
           ]
@@ -2220,6 +2357,16 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "status",
+                "type": "string"
               }
             ]
           },
@@ -2273,6 +2420,16 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "status",
+                "type": "string"
               }
             ]
           },
@@ -2588,6 +2745,12 @@
                 },
                 "anchor": "type"
               }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
             ]
           },
           "command": {
@@ -2663,6 +2826,12 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -2740,6 +2909,12 @@
                 },
                 "anchor": "type"
               }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
             ]
           },
           "command": {
@@ -2816,6 +2991,12 @@
                 },
                 "anchor": "type"
               }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
             ]
           },
           "command": {
@@ -2890,6 +3071,12 @@
                   }
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -2967,6 +3154,12 @@
                 },
                 "anchor": "type"
               }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
             ]
           },
           "command": {
@@ -3015,6 +3208,12 @@
                   "transitions": []
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -3066,6 +3265,12 @@
                   "transitions": []
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -3142,6 +3347,12 @@
                 },
                 "anchor": "type"
               }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
             ]
           },
           "command": {
@@ -3217,6 +3428,12 @@
                 },
                 "anchor": "type"
               }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
             ]
           },
           "command": {
@@ -3290,6 +3507,12 @@
                 },
                 "anchor": "type"
               }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
             ]
           },
           "command": {
@@ -3334,6 +3557,12 @@
               {
                 "behavior": "Workflow",
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -3430,6 +3659,12 @@
                   },
                   "anchor": "type"
                 }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                }
               ]
             },
             {
@@ -3470,6 +3705,12 @@
                     ]
                   },
                   "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
                 }
               ]
             }
@@ -3515,6 +3756,12 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -3568,6 +3815,12 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -3666,6 +3919,12 @@
                 },
                 "anchor": "type"
               }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
             ]
           },
           "command": {
@@ -3709,6 +3968,12 @@
                       ]
                     },
                     "anchor": "type"
+                  }
+                ],
+                "fields": [
+                  {
+                    "name": "title",
+                    "type": "string"
                   }
                 ]
               }
@@ -3760,6 +4025,12 @@
                 },
                 "anchor": "type"
               }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
             ]
           },
           "command": {
@@ -3803,6 +4074,12 @@
                       ]
                     },
                     "anchor": "type"
+                  }
+                ],
+                "fields": [
+                  {
+                    "name": "title",
+                    "type": "string"
                   }
                 ]
               }
@@ -3961,6 +4238,12 @@
                 },
                 "anchor": "type"
               }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
             ]
           },
           "command": {
@@ -4010,6 +4293,12 @@
                     },
                     "anchor": "type"
                   }
+                ],
+                "fields": [
+                  {
+                    "name": "title",
+                    "type": "string"
+                  }
                 ]
               }
             }
@@ -4038,7 +4327,13 @@
           "database": "{{dir:1}}/engine.db",
           "spec": {
             "name": "Order",
-            "uses": []
+            "uses": [],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
           },
           "command": {
             "caller": {
@@ -4086,6 +4381,12 @@
                       ]
                     },
                     "anchor": "type"
+                  }
+                ],
+                "fields": [
+                  {
+                    "name": "title",
+                    "type": "string"
                   }
                 ]
               }
@@ -4165,6 +4466,12 @@
                   },
                   "anchor": "type"
                 }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                }
               ]
             },
             {
@@ -4191,6 +4498,12 @@
                   },
                   "anchor": "type"
                 }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                }
               ]
             },
             {
@@ -4211,6 +4524,12 @@
                     ]
                   },
                   "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
                 }
               ]
             }
@@ -4256,6 +4575,12 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -4309,6 +4634,12 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -4392,6 +4723,12 @@
                 },
                 "anchor": "type"
               }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
             ]
           },
           "command": {
@@ -4435,6 +4772,12 @@
                       ]
                     },
                     "anchor": "type"
+                  }
+                ],
+                "fields": [
+                  {
+                    "name": "title",
+                    "type": "string"
                   }
                 ]
               }
@@ -4507,6 +4850,12 @@
                 },
                 "anchor": "type"
               }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
             ]
           },
           "command": {
@@ -4551,6 +4900,12 @@
                     },
                     "anchor": "type"
                   }
+                ],
+                "fields": [
+                  {
+                    "name": "title",
+                    "type": "string"
+                  }
                 ]
               }
             }
@@ -4585,6 +4940,12 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -4630,6 +4991,12 @@
                     },
                     "anchor": "type"
                   }
+                ],
+                "fields": [
+                  {
+                    "name": "title",
+                    "type": "string"
+                  }
                 ]
               }
             }
@@ -4659,6 +5026,12 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -4694,6 +5067,12 @@
                     },
                     "anchor": "type"
                   }
+                ],
+                "fields": [
+                  {
+                    "name": "title",
+                    "type": "string"
+                  }
                 ]
               }
             }
@@ -4723,6 +5102,12 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -4758,6 +5143,12 @@
                     },
                     "anchor": "type"
                   }
+                ],
+                "fields": [
+                  {
+                    "name": "title",
+                    "type": "string"
+                  }
                 ]
               }
             }
@@ -4789,7 +5180,13 @@
           "versions": [
             {
               "name": "Order",
-              "uses": []
+              "uses": [],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                }
+              ]
             },
             {
               "name": "Order",
@@ -4825,11 +5222,23 @@
                   },
                   "anchor": "type"
                 }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                }
               ]
             },
             {
               "name": "Order",
-              "uses": []
+              "uses": [],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                }
+              ]
             }
           ]
         }
@@ -4842,7 +5251,13 @@
           "database": "{{dir:1}}/engine.db",
           "spec": {
             "name": "Order",
-            "uses": []
+            "uses": [],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
           },
           "command": {
             "caller": {
@@ -4863,7 +5278,13 @@
           "database": "{{dir:1}}/engine.db",
           "spec": {
             "name": "Order",
-            "uses": []
+            "uses": [],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
           },
           "command": {
             "caller": {
@@ -4917,6 +5338,12 @@
                 },
                 "anchor": "type"
               }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
             ]
           },
           "command": {
@@ -4929,7 +5356,13 @@
               "kind": "publish",
               "from": {
                 "name": "Order",
-                "uses": []
+                "uses": [],
+                "fields": [
+                  {
+                    "name": "title",
+                    "type": "string"
+                  }
+                ]
               }
             }
           },
@@ -4974,6 +5407,12 @@
                 },
                 "anchor": "type"
               }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
             ]
           },
           "command": {
@@ -4986,7 +5425,13 @@
               "kind": "publish",
               "from": {
                 "name": "Order",
-                "uses": []
+                "uses": [],
+                "fields": [
+                  {
+                    "name": "title",
+                    "type": "string"
+                  }
+                ]
               }
             }
           },
@@ -4999,7 +5444,13 @@
           "database": "{{dir:2}}/engine.db",
           "spec": {
             "name": "Order",
-            "uses": []
+            "uses": [],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
           },
           "command": {
             "caller": {
@@ -5020,7 +5471,13 @@
           "database": "{{dir:2}}/engine.db",
           "spec": {
             "name": "Order",
-            "uses": []
+            "uses": [],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
           },
           "command": {
             "caller": {
@@ -5107,6 +5564,12 @@
                 },
                 "anchor": "type"
               }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
             ]
           },
           "command": {
@@ -5119,7 +5582,13 @@
               "kind": "publish",
               "from": {
                 "name": "Order",
-                "uses": []
+                "uses": [],
+                "fields": [
+                  {
+                    "name": "title",
+                    "type": "string"
+                  }
+                ]
               }
             }
           },
@@ -5202,6 +5671,12 @@
                   },
                   "anchor": "type"
                 }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                }
               ]
             }
           ]
@@ -5246,6 +5721,12 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -5299,6 +5780,12 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -5418,6 +5905,12 @@
                   },
                   "anchor": "type"
                 }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                }
               ]
             }
           ]
@@ -5465,6 +5958,12 @@
                   }
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -5521,6 +6020,12 @@
                   }
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -5682,6 +6187,12 @@
                   },
                   "anchor": "type"
                 }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                }
               ]
             },
             {
@@ -5720,6 +6231,12 @@
                     }
                   },
                   "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
                 }
               ]
             },
@@ -5761,6 +6278,12 @@
                   },
                   "anchor": "type"
                 }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                }
               ]
             },
             {
@@ -5796,6 +6319,12 @@
                     ]
                   },
                   "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
                 }
               ]
             }
@@ -5844,6 +6373,12 @@
                   }
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -5900,6 +6435,12 @@
                   }
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -6038,6 +6579,12 @@
                 },
                 "anchor": "type"
               }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
             ]
           },
           "command": {
@@ -6084,6 +6631,12 @@
                       }
                     },
                     "anchor": "type"
+                  }
+                ],
+                "fields": [
+                  {
+                    "name": "title",
+                    "type": "string"
                   }
                 ]
               }
@@ -6133,6 +6686,12 @@
                 },
                 "anchor": "type"
               }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
             ]
           },
           "command": {
@@ -6179,6 +6738,12 @@
                       }
                     },
                     "anchor": "type"
+                  }
+                ],
+                "fields": [
+                  {
+                    "name": "title",
+                    "type": "string"
                   }
                 ]
               }
@@ -6229,6 +6794,12 @@
                 },
                 "anchor": "type"
               }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
             ]
           },
           "command": {
@@ -6275,6 +6846,12 @@
                       }
                     },
                     "anchor": "type"
+                  }
+                ],
+                "fields": [
+                  {
+                    "name": "title",
+                    "type": "string"
                   }
                 ]
               }
@@ -6325,6 +6902,12 @@
                 },
                 "anchor": "type"
               }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
             ]
           },
           "command": {
@@ -6372,6 +6955,12 @@
                     },
                     "anchor": "type"
                   }
+                ],
+                "fields": [
+                  {
+                    "name": "title",
+                    "type": "string"
+                  }
                 ]
               }
             }
@@ -6416,6 +7005,12 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -6465,6 +7060,12 @@
                     },
                     "anchor": "type"
                   }
+                ],
+                "fields": [
+                  {
+                    "name": "title",
+                    "type": "string"
+                  }
                 ]
               }
             }
@@ -6509,6 +7110,12 @@
                   ]
                 },
                 "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
               }
             ]
           },
@@ -6557,6 +7164,12 @@
                       }
                     },
                     "anchor": "type"
+                  }
+                ],
+                "fields": [
+                  {
+                    "name": "title",
+                    "type": "string"
                   }
                 ]
               }
@@ -6610,6 +7223,12 @@
                 },
                 "anchor": "type"
               }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
             ]
           },
           "command": {
@@ -6653,6 +7272,12 @@
                       ]
                     },
                     "anchor": "type"
+                  }
+                ],
+                "fields": [
+                  {
+                    "name": "title",
+                    "type": "string"
                   }
                 ]
               }

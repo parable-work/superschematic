@@ -2,6 +2,7 @@ package verify
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/behaviortypes"
@@ -36,7 +37,7 @@ func BehaviorOperationsMessage(set *ir.OperationSet, problem BehaviorOperationsP
 		if set.BehaviorOperations != nil {
 			typeName = set.BehaviorOperations.Type
 		}
-		return fmt.Sprintf("%s: a @behaviorOperations class has no members: the loader adds one operation for each operation of each behavior on %s's fields, and the generated server runs it", set.Name, typeName)
+		return fmt.Sprintf("%s: a @behaviorOperations class has no members: the loader adds one operation for each operation of each behavior %s composes, and the generated server runs it", set.Name, typeName)
 	case BehaviorOperationsAuthenticated:
 		return fmt.Sprintf("%s: a @behaviorOperations class does not extend Authenticated: write @auth on the class", set.Name)
 	case BehaviorOperationsEncrypted:
@@ -172,8 +173,39 @@ func checkBehaviorOperations(schema *ir.Schema, in Input, r *Result) {
 			continue
 		}
 		planned = append(planned, plannedSet{set: set, td: td, plan: plan})
+		warnDeadlinesUnrun(schema, set, td, in.Database, reg, r)
 	}
 	checkBehaviorOperationNames(schema, planned, r)
+}
+
+// warnDeadlinesUnrun warns when set serves td, whose behaviors arm
+// deadlines, and the API declares no @behaviorWorker of td to run them
+// (D103). It is a warning, not a refusal: another API over the database
+// may run them, and a table whose deadlines nothing runs is the author's
+// to choose; the docs and the agent skill say why not to.
+func warnDeadlinesUnrun(schema *ir.Schema, set *ir.OperationSet, td *ir.TypeDef, db *ir.Schema, reg *registry.Registry, r *Result) {
+	arming := armingBehaviors(td, reg)
+	if len(arming) == 0 {
+		return
+	}
+	for _, worker := range schema.Workers {
+		if worker != nil && worker.BehaviorWorker != nil && worker.BehaviorWorker.Type == td.Name {
+			return
+		}
+	}
+	r.warnf("", "%s: %s's behaviors arm deadlines (%s), and %s declares no @behaviorWorker(%s) to run them: they fall due and nothing runs them until a worker does; declare one on this API or another over %s (D103)", set.Name, td.Name, strings.Join(arming, ", "), schema.Name, td.Name, db.Name)
+}
+
+// armingBehaviors are the behaviors of td's table uses that arm deadlines,
+// each once, in list order.
+func armingBehaviors(td *ir.TypeDef, reg *registry.Registry) []string {
+	var out []string
+	for _, ref := range td.TableBehaviors() {
+		if b, ok := reg.Behavior(ref.Name); ok && b.ArmsDeadlines && !slices.Contains(out, ref.Name) {
+			out = append(out, ref.Name)
+		}
+	}
+	return out
 }
 
 // plannedSet is a set whose table passed its checks, and what the
@@ -239,9 +271,10 @@ func tableImportedFrom(schema *ir.Schema, set *ir.OperationSet, db string, r *Re
 	return false
 }
 
-// behaviorOperationsTable returns the table set names, a table of db one
-// of whose fields is a behavior, keyed by one field, each of whose uses'
-// operations runs on a row, refusing the set when it is not.
+// behaviorOperationsTable returns the table set names, a table of db that
+// composes a behavior, by implements or on a field, keyed by one field,
+// each of whose uses' operations runs on a row, refusing the set when it
+// is not.
 func behaviorOperationsTable(set *ir.OperationSet, db *ir.Schema, reg *registry.Registry, r *Result) (*ir.TypeDef, bool) {
 	typeName := set.BehaviorOperations.Type
 	td := db.Types[typeName]
@@ -255,8 +288,8 @@ func behaviorOperationsTable(set *ir.OperationSet, db *ir.Schema, reg *registry.
 	case td.IsEngineType():
 		r.errorf("", "%s: @behaviorOperations names %s, an engine type of %s (D58), whose engine serves its operations; a set serves a table one of whose fields is a behavior (D103)", set.Name, typeName, db.Name)
 		return nil, false
-	case len(td.FieldBehaviors()) == 0:
-		r.errorf("", "%s: @behaviorOperations names %s, a table of %s none of whose fields is a behavior; a set serves a table one of whose fields is, such as status: Workflow<{ ... }> (D103)", set.Name, typeName, db.Name)
+	case len(td.TableBehaviors()) == 0:
+		r.errorf("", "%s: @behaviorOperations names %s, a table of %s that composes no behavior; a set serves a table that does, such as status: Workflow<{ ... }> or implements Timers<%s, { ... }> (D103)", set.Name, typeName, db.Name, typeName)
 		return nil, false
 	}
 	var keys []string
@@ -274,7 +307,7 @@ func behaviorOperationsTable(set *ir.OperationSet, db *ir.Schema, reg *registry.
 		return nil, false
 	}
 	ok := true
-	for _, ref := range td.FieldBehaviors() {
+	for _, ref := range td.TableBehaviors() {
 		declaration, registered := reg.Behavior(ref.Name)
 		if !registered {
 			// The database's own load refuses it.

@@ -263,6 +263,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkQueues(schema, r)
 	checkEnqueueOnChange(schema, r)
 	checkWorkers(schema, r)
+	checkBehaviorWorkers(schema, in, r)
 	checkDerivers(schema, r)
 	checkMemoryStore(schema, in, r)
 	checkApps(schema, r)

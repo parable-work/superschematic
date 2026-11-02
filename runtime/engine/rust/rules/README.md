@@ -63,6 +63,15 @@ anchor's field, to set it or to clear it, since only the behavior's
 operations change it (`invalid_instance`, rule `owned`). A type anchor's
 fields sit apart from the own fields, which may take any name.
 
+A type may list its own fields too (`fields`, each a `FieldSpec`: its name,
+its IR type and `dateTime`, whether its values are instants, epoch
+milliseconds from a table's adapter or the ISO 8601 text an engine schema's
+date-time holds), which `ConfigTarget::fields()` gives a behavior whose
+config names a field of the type: a Timers deadline that starts from a
+field naming none of them, or one that holds no instant, is refused. The
+layout's `spec.fields` gives a table's; a host that gives none refuses such
+a config, `(its fields: none)`.
+
 ## The host loop
 
 1. Build the command (`Command::new`, since `Command` may gain members):
@@ -91,8 +100,9 @@ fields sit apart from the own fields, which may take any name.
    command again from fresh state, with the same request id, a bounded
    number of times, then refuse it as `busy` (D58's code, `Code::Busy`). A
    deadline command runs only while its deadline is still armed at the time
-   the command names (`Action::Deadline`'s `at`), checked before each run
-   and in the apply, which spends it. Return `changes.result`.
+   the command names (`Action::Deadline`'s `at`), which the host checks and
+   the apply spends (The adapter, below); the core does not. Return
+   `changes.result`.
 
 The core is a pure function of its inputs: the same type, command and
 answers give the same step, and running again from the top is how a run
@@ -145,8 +155,9 @@ joins it with the behaviors that react to one (D103's order of the work, step
   operation.
 - `Deadline { key, use_id, name, at, payload }`: a deadline a use armed that
   fell due, with the time it was armed to fall due at and the payload it was
-  armed with. The host runs it only while the deadline is still armed at
-  `at`, so one cleared or moved since does not fall due on its old arming.
+  armed with, run at the later of the host's clock and `at`. The host, never
+  the core, checks that it is still armed at `at`, so one cleared or moved
+  since does not fall due on its old arming (The adapter, below).
 
 A command on a row reads it first (`ReadRequest::Row`); a key the type has
 none of is `not_found`. Then the uses compose in list order:
@@ -166,18 +177,26 @@ first veto refuses (`vetoed`); the first refusal of any kind ends the run.
 
 A `ReadRequest` names logical targets: `Row { type, key }` (answered
 `Answer::Row(Option<Row>)`, a row's own fields, its owned fields by use id
-and field, and its version), `HasRows { type }` (`Answer::HasRows(bool)`)
-and `Spec { type }` (`Answer::Spec(Option<TypeSpec>)`, a type's live version,
+and field, and its version), `HasRows { type }` (`Answer::HasRows(bool)`),
+`Spec { type }` (`Answer::Spec(Option<TypeSpec>)`, a type's live version,
 which a call on another type's row binds and a behavior that reads another
-type's config reads; the core never asks it of the command's own type). The
-enum is open: sub-table rows by a condition and counts join it as behaviors
-need them, so a host matches it with a fallback arm, which refuses the
-command as `internal`. An answer of another kind than its request asks for
-is refused as `invalid_argument`.
+type's config reads; the core never asks it of the command's own type) and
+`SubRows { type, key, use_id, table }` (`Answer::SubRows(Vec<SubRow>)`, the
+rows of one sub-table of one use on one row, each its `key` and its
+`values` by declared field, in key order by code point, the key's field
+left out and a NULL column absent). The enum is open: sub-table rows by a
+condition and counts join it as behaviors need them, so a host matches it
+with a fallback arm, which refuses the command as `internal`. An answer of
+another kind than its request asks for is refused as `invalid_argument`.
 
 A hook reads through its context, `ctx.read_row(type, key)?`,
 `ctx.has_rows(type)?`, `ctx.read_spec(type)?`, `ctx.config_of(type,
 use_id)?` (a use's config as the type holds it, `{}` when it gives none),
+`ctx.read_sub_rows(type, key, use_id, table)?` (any row's, as the host read
+them), `ctx.sub_rows(table)?` (the use's own rows of one of its sub-tables
+on its row, with the run's own writes so far applied: an insert adds, an
+update merges, a delete removes; a row the run creates has none and reads
+no host; a table the declaration does not declare is a defect),
 `ctx.read(&request)?` or `ctx.read_many(&requests)?` for several at once. With the answer in hand it returns it; without, it
 stops the run with the request (`Stop::Read`), which the run returns as its
 step. The run returns every read it asked for and was not given even when a
@@ -294,14 +313,21 @@ A behavior implements `Behavior`:
   `ConfigTarget` gives the type's name and every use, for a config that
   names another (`status: 'fulfilment'`).
 - `declaration()`: its name, owned fields and the one that holds a field
-  anchor's value, sub-tables, operations (each writing or not), veto codes
-  and whether a create gives it parameters
-  (`Declaration::new(..).value(..).field(..).table(..).operation(name,
+  anchor's value, sub-tables, operations (each writing or not), veto codes,
+  whether a create gives it parameters and whether it arms deadlines
+  (`Declaration::new(..).value(..).field(..).sub_table(TableDecl::new(name,
+  key, fields)).arms_deadlines().operation(name,
   writes).veto(code).create_params()`; the struct may gain members, so it is
-  built so). The core holds a behavior to it: a field, a sub-table or a veto
-  code it does not declare is a defect, an entry of create parameters for a
-  behavior that takes none is refused, and so is a field anchor on one that
-  names no value field.
+  built so; `.table(name)` declares a sub-table of no key and no fields,
+  whose writes the core does not check). The core holds a behavior to it: a
+  field, a sub-table or a veto code it does not declare is a defect; so is
+  an `arm` or a `clear` by a behavior that arms no deadlines (`arm(respond):
+  it declares no deadlines (armsDeadlines)`), a value a sub-table declared
+  with fields does not hold (`insert_row: deadlines has no field x (its
+  fields: ...)`, and `update_row`'s), and the key's field among a write's
+  values (`insert_row: name is the row's key, which the write names`). An
+  entry of create parameters for a behavior that takes none is refused, and
+  so is a field anchor on one that names no value field.
 
 and the hooks it needs, each with a default:
 
@@ -330,6 +356,12 @@ and the hooks it needs, each with a default:
 - `after_change(cx, change)`: after a create, an update, a delete, a writing
   operation a caller called, or a deadline (`Change`); on another row, after
   a `create_row` of it or a writing operation of it a `call_on` called.
+- `read_fields(config, row, tables)`: the fields a read of a row shows for
+  the use beyond its owned columns, computed from its owned fields and its
+  sub-table rows by table (the engine's computed fields: Timers'
+  `deadlines`). None by default. `Core::read_fields(spec, use_id, row,
+  tables)` computes them; the replayer compares them, and no adapter serves
+  them yet (D103's Left for later).
 
 `GuardRequest`, `Change` and `ValidationRequest` are open, so a hook matches
 the cases it handles with a fallback arm.
@@ -348,7 +380,13 @@ payload)?`, `clear(name)?`; makes keys, `new_key(label)?`; and reaches other
 state through operations, `call(use_id, operation, params)?`,
 `call_on(type, key, use_id, operation, params)?` and `create_row(type, key,
 own, params)?`. A read-only operation's context refuses every write as a
-defect.
+defect. `unchanged()?` says the command's operation writes nothing: its
+change set holds no write, the row's version stays and no after-change hook
+runs, as the engine's `unchanged()` kept an idempotent call out of the log
+(Timers' `fireTimer` of a deadline not due). It is honored for the
+command's own operation and does nothing in a call, a deadline, an
+initializer or an after-change hook; a write in the same run, before it or
+after it, is a defect (`unchanged() and a write in one run: <what>`).
 
 `new_key(label)` derives a key from the command's request id, the use, the
 label and a count (`r1:Comments:comment:1`), so every key a run makes is new
@@ -402,9 +440,20 @@ the declarations, so a behavior adds no code to any of them (D103):
   generators' own: a `_` before each capital that follows a lowercase
   letter or a digit, each `-` a `_`, and the whole lowercased, so a run of
   capitals stays one word (`lastIPAddress`: `last_ipaddress`);
-- a sub-table `(use id, table)` to a table with a foreign key to the row;
-- an outbox event and a deadline to the rows of the outbox and the deadline
-  sub-table;
+- a sub-table `(use id, table)` to a table with a foreign key to the row,
+  deleted with it: `<row's type><member><table>` in Pascal case
+  (`TicketTimersDeadlines`, table `ticket_timers_deadlines`), the member being
+  a field use's field and an implements use's storage key in camel case
+  (`timers`), with a column holding the row's key (`ticket_id`), the
+  declared key's column (`name`), each declared field's, a surrogate `id`,
+  and one row per (row, key);
+- a deadline `(row, use id, name)` to a message of the table's deadline
+  queue, `<row's type>Deadline` (`TicketDeadline`, table
+  `ticket_deadline_queue`), whose `row_key`, `use_id`, `name`, `at` (epoch
+  milliseconds) and `payload` columns name it and whose `due_at` is `at`, one
+  live message (ready or claimed) per row, use and name;
+- an outbox event to the rows of the outbox (D103's order of the work, step
+  3, its second half);
 - a lock key to an advisory lock, or, on SQLite and D1, to a check in the
   change set's batch of each read made under it.
 
@@ -478,11 +527,29 @@ writes. For each command:
    that changes no row, or a check that fails, means the row moved: the
    adapter undoes the unit, forgets its answers and runs the command again
    from fresh state, with the same request id, up to eight runs, then
-   refuses it as `busy`. A
-   sub-table row, an outbox event or a deadline it refuses as `internal`
-   until the change that gives each a table (D103's order of the work, step
-   3): Workflow writes none.
+   refuses it as `busy`. A unit runs in this order: the checks of the reads
+   made under locks (fenced stores); every row write, each fenced on its
+   version; for a deadline command, the spend of its arming (below); the
+   sub-table rows, in order, skipping a deleted row's (an insert `ON
+   CONFLICT (row, key) DO NOTHING`, an update of the values present and a
+   delete, each held to one row, so one a raw write moved runs the command
+   again; an update with no values writes nothing); the deadline changes, in
+   order, skipping a deleted row's (an arm deletes the key's ready and
+   claimed messages and inserts one due at its time, a clear deletes them);
+   and, for each row a write deletes, every message of the row and, on a
+   hard delete, each of its uses' sub-table rows (SQLite enforces no foreign
+   key unless the connection turned it on). A soft-deleted row keeps its
+   sub-table rows. An outbox event it refuses as `internal` until the
+   outbox has a table of its own (D103's order of the work, step 3).
 6. It returns `changes.result`.
+
+For a `subRows` read it selects the use's sub-table rows of the row by the
+column that holds the row's key, the key's column and then the layout's
+fields, in key order (`COLLATE "C"` on Postgres), each converted as an
+owned column is. On a store whose locks are fenced (SQLite, D1) a
+`subRows` read made while the command holds a lock is refused as
+`internal` (`a read of sub-table rows under a lock has no check on SQLite
+or D1 yet (D103)`): the batch has no check of it yet.
 
 An upsert's insert applies no change set of the core's, so it binds what
 the core's create of the row gives it: the adapter runs the create to its
@@ -499,38 +566,70 @@ another transaction made since the read, an ORM write or a raw one, moves
 the row and runs the command again. A lock key is the behavior's logical
 name for what a rule across rows serializes; the adapter never parses it.
 
-When deadlines come (step 3), an adapter runs a deadline command only while
-the deadline is still armed at the time the command names, checked before
-each run and again in the apply, which spends it: the core does not check
-it yet.
+Whether a deadline is still armed is the host's to check, never the
+core's (D103): the queue message is the only record of an arming, and the
+core holds no deadline state. A deadline command runs at the later of the
+host's clock and `at`, so a worker whose clock lags the database's never
+runs one before it falls due in the core. With a worker's claim of the
+message, the unit's spend is the check: right after the command's own row
+write and before the change set's deadline changes, it deletes the claimed
+message by its id and claim token, held to one row. An arm or a clear that
+another command made since deleted it, so the spend finds no row and the
+unit applies nothing; the adapter then reads the claim, and a claim no
+longer held is lost (the run reports `claim lost`), while one still held
+runs again. An arming the fired command makes again (a snooze of a fired
+deadline, a `then` that re-enters a state) is inserted after the spend and
+survives it. Without a claim (the reference host, a transcript), the
+adapter reads the arming before each run: none, or one armed at another
+time, refuses the command `not_found` (`Ticket <key> has no deadline
+Timers.respond armed at <at>`), and one whose `at` falls after the
+command's time `invalid_argument` (`deadline Timers.respond of Ticket <key>
+falls due at <at>, after <now>`), in the reference host's words; the unit
+then spends the live message armed at `at`, held to one row. A deadline
+whose row or use the core finds gone (`not_found`) has its arming spent in
+a unit of its own (the run reports `gone`). Each adapter's deadline entry
+(`runDeadline`, `RunDeadline`, `run_deadline`) runs a claimed message so,
+in the transaction that completes it.
 
 Every adapter replays the recorded scenarios as transcripts:
-`superschematic-rules-testkit` writes `core-workflow.json` out as
-`runtime/engine/testdata/rules/core-workflow.transcript.json` (its
-`transcript` module is the format), the core's commands and what each must
-answer, through the replayer's own mapping, and an adapter's tests replay it
-against tables of their own on SQLite and on Postgres. The testkit's
-`tests/transcript.rs` fails when the checked-in file is not what the writer
-writes (`UPDATE_TRANSCRIPTS=1` rewrites it), and holds it to a floor of 96
-steps: 61 define and publish checks, 34 commands and one raw write, in the
-14 scenarios a core with no test fixtures runs. TypeScript's replay is the
-HTTP runtime's `src/rules-transcript.test.ts`, held to the same floor on
-bun:sqlite and on Postgres; Go's is `runtime/rules/go`'s
-`transcript_test.go`, on SQLite and on Postgres, and Rust's
-`../rules-adapter/tests/transcript.rs`, on rusqlite and on Postgres.
+`superschematic-rules-testkit` writes `core-workflow.json` and
+`core-timers.json` out as
+`runtime/engine/testdata/rules/core-workflow.transcript.json` and
+`core-timers.transcript.json` (its `transcript` module is the format), the
+core's commands and what each must answer, through the replayer's own
+mapping, and an adapter's tests replay them against tables of their own on
+SQLite and on Postgres. The testkit's `tests/transcript.rs` fails when a
+checked-in file is not what the writer writes (`UPDATE_TRANSCRIPTS=1`
+rewrites both), and holds each to a floor: `core-workflow` to 96 steps, 61
+define and publish checks, 34 commands and one raw write, in the 14
+scenarios a core with no test fixtures runs; `core-timers` to 101 steps, 50
+checks and 51 commands, 11 of them deadlines a runner ran, in 12
+scenarios. A transcript's `expect` holds the command's row's sub-table rows
+(`subRows`, by use id and table, each table's rows in key order) and its
+armed deadlines (`deadlines`, by use id and name), and an adapter adds a
+sub-table and a deadline queue to each type's tables as the transcript
+module says. TypeScript's replay is the HTTP runtime's
+`src/rules-transcript.test.ts`, held to the same floors on bun:sqlite and
+on Postgres; Go's is `runtime/rules/go`'s `transcript_test.go`, on SQLite
+and on Postgres, and Rust's `../rules-adapter/tests/transcript.rs`, on
+rusqlite and on Postgres, each replaying both files.
 
 ## The layout document
 
-The generator writes, for each table that composes field-anchored
-behaviors, where the core's names live
+The generator writes, for each table that composes behaviors (by
+`implements` or on a field), where the core's names live
 (`internal/generator/behaviorlayout`, which holds the layout rule in Go),
 and the generated ORM embeds it: the table, its key column and IR type, the
 version column, a soft-deletable table's `deletedAt` column (`live`), its
-own fields' columns, each use's id, behavior, anchor and
-owned columns (each declared field by its declared name, its IR field, its
-column, its IR type and how it converts), each use's operations, and the
-type as the core runs it, in `TypeSpec`'s JSON. For an `Order` whose
-`status` is a `Workflow`:
+own fields' columns, each use's id, behavior, member (the field of a field
+use, the storage key in camel case of an implements use: the name its
+operations sit under), anchor (a field use's field) and owned columns
+(each declared field by its declared name, its IR field, its column, its
+IR type and how it converts), each use's operations and sub-tables
+(`tables`), the table's deadline queue (`deadlines`) when its behaviors
+arm deadlines, and the type as the core runs it, in `TypeSpec`'s JSON,
+its own fields among it (`spec.fields`). For an `Order` whose `status` is a
+`Workflow`:
 
 ```json
 {
@@ -545,6 +644,7 @@ type as the core runs it, in `TypeSpec`'s JSON. For an `Order` whose
         {
           "id": "status",
           "behavior": "Workflow",
+          "member": "status",
           "anchor": "status",
           "fields": [
             { "name": "status", "field": "status", "column": "status", "type": "string", "value": true },
@@ -555,12 +655,52 @@ type as the core runs it, in `TypeSpec`'s JSON. For an `Order` whose
       ],
       "spec": {
         "name": "Order",
-        "uses": [{ "behavior": "Workflow", "config": { "states": ["draft", "paid"], "transitions": [{ "from": "draft", "to": "paid" }] }, "anchor": { "field": "status" } }]
+        "uses": [{ "behavior": "Workflow", "config": { "states": ["draft", "paid"], "transitions": [{ "from": "draft", "to": "paid" }] }, "anchor": { "field": "status" } }],
+        "fields": [{ "name": "title", "type": "string" }]
       }
     }
   }
 }
 ```
+
+A table that implements Timers (`Ticket implements Timers<Ticket, { ... }>`)
+has a use with no anchor and a sub-table, and its deadline queue:
+
+```json
+{
+  "id": "Timers",
+  "behavior": "Timers",
+  "member": "timers",
+  "fields": [],
+  "operations": [{ "name": "fireTimer", "writes": true }, { "name": "resetTimer", "writes": true }, { "name": "snoozeTimer", "writes": true }],
+  "tables": [
+    {
+      "name": "deadlines",
+      "table": "ticket_timers_deadlines",
+      "row": "ticket_id",
+      "key": { "name": "name", "field": "name", "column": "name", "type": "string" },
+      "fields": [
+        { "name": "baseAt", "field": "baseAt", "column": "base_at", "type": "Temporal.DateTime", "convert": "epochMillis" },
+        { "name": "armedFrom", "field": "armedFrom", "column": "armed_from", "type": "string" },
+        { "name": "dueAt", "field": "dueAt", "column": "due_at", "type": "Temporal.DateTime", "convert": "epochMillis" },
+        { "name": "fired", "field": "fired", "column": "fired", "type": "boolean" },
+        { "name": "firedAt", "field": "firedAt", "column": "fired_at", "type": "Temporal.DateTime", "convert": "epochMillis" },
+        { "name": "outcome", "field": "outcome", "column": "outcome", "type": "string" }
+      ]
+    }
+  ]
+}
+```
+
+```json
+"deadlines": { "queue": "TicketDeadline", "table": "ticket_deadline_queue", "rowKey": "row_key", "use": "use_id", "name": "name", "at": "at", "payload": "payload" }
+```
+
+A sub-table's `row` is the column holding the row's key, which binds as the
+row table's key binds; its `fields` leave the key out. `spec.fields` lists
+the own fields with `dateTime` set for one whose column converts as
+`epochMillis`, and an implements use's spec entry is `{ "behavior":
+"Timers", "config": { ... }, "anchor": "type" }`.
 
 A declared field's column type is its declaration's `type` (Workflow's
 `status` a `string`, `enteredAt` a `Temporal.DateTime`), and a date-time is
@@ -601,13 +741,22 @@ whether rows exist, the define check's uses, shapes and rules, create
 parameters, locks and the answers made before them, deadlines, a call on
 another type's row and a create of one, the keys a behavior makes, a source
 that refuses, a run that never settles and the defects the core holds a
-behavior to.
+behavior to; and the sub-table rows a run reads with its own writes applied,
+`unchanged()` (no write, no after-change hook, a defect beside a write,
+nothing in a call), an arm by a behavior that arms none, a sub-row value or
+key a table does not declare, and `read_fields`. `rules-behaviors`'
+`tests/workflow.rs` and `tests/timers.rs` hold each behavior to its
+declaration's schemas and its rules: Timers' starts, its `then`'s four
+outcomes, `until` in both forms, reset, snooze, the Workflow it reads
+(implied, named, several, none) and a field start as a number and as text.
 
-`superschematic-rules-testkit`'s `tests/workflow_scenarios.rs` replays
-`core-workflow.json` on Workflow through the reference host and fails on any
-step that answers otherwise than the engine, or when fewer steps are
-checked than its floor; `cargo test -p superschematic-rules-testkit` runs
-it, and `tests/transcript.rs` with it.
+`superschematic-rules-testkit`'s `tests/workflow_scenarios.rs` and
+`tests/timers_scenarios.rs` replay `core-workflow.json` on Workflow and
+`core-timers.json` on Workflow and Timers through the reference host, and
+fail on any step that answers otherwise than the engine, or when fewer
+steps are checked than their floors (154 and 324); `cargo test -p
+superschematic-rules-testkit` runs them, and `tests/transcript.rs` with
+them.
 
 TypeScript's binding and adapter:
 
@@ -658,7 +807,9 @@ generated Go ORM is held to the adapter by
 `go test ./internal/generator/ormgen -run TestWorkflowTablesOnPostgres`:
 it generates `fixture-workflow-db`'s Go types, ORM and DDL, and builds and
 tests the ORM module over the staged archive on the Postgres
-`SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL` names.
+`SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL` names, and
+`TestTimersTablesOnPostgres` does the same for `fixture-timers-db`'s
+Timers: its sub-table rows, its deadline queue and `RunDeadline`.
 
 Rust's adapter:
 

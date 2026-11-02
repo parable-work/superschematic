@@ -105,26 +105,109 @@ func (w *walker) behaviorFieldOf(class string, member *astNode) (use fieldUse, h
 	return fieldUse{ref: refs[0], node: member}, true, nil
 }
 
-// applyFieldBehaviors appends to td the uses its class composes on its
-// fields, in field order, after the @behavior decorators' uses, once the
-// decorators have settled td's role and @jsonField: a behavior is anchored
-// on a field of a DB table (D103), whose columns its declared fields
-// become. A type that composes behaviors both ways is the verification
-// pass's to refuse (verify.checkTypeBehaviors), as it is for the data
-// forms.
+// implementsCarrier reports the registered behavior an implements-clause
+// entry names when its symbol is one of @superschematic/db's behavior
+// carriers (D103), `implements Timers<Ticket, { ... }>`, resolved by its
+// origin as a field type's is.
+func (w *walker) implementsCarrier(t *astNode) (registry.Behavior, symbolIdentity, bool) {
+	id, ok := w.identityOf(t.AsExpressionWithTypeArguments().Expression)
+	if !ok {
+		return registry.Behavior{}, symbolIdentity{}, false
+	}
+	behavior, ok := w.behaviorOfIdentity(id)
+	return behavior, id, ok
+}
+
+// behaviorImplementsOf reads an implements-clause entry that names a
+// behavior's carrier, `implements Timers<Ticket, { ... }>`, into the use a
+// table implements, anchored on the type (D103): it takes two type
+// arguments, the class itself and the config, which the configReader reads
+// through the checker into canonical JSON, held to the behavior's config
+// schema. Whether the behavior may be implemented (the core runs it, and it
+// names no value field) is the verification pass's, as it is for the data
+// forms. class is the class declaration whose clause holds t.
+func (w *walker) behaviorImplementsOf(class, t *astNode, behavior registry.Behavior, id symbolIdentity) (fieldUse, *SchemaError) {
+	name := className(class)
+	var typeArgs []*astNode
+	if args := t.AsExpressionWithTypeArguments().TypeArguments; args != nil {
+		typeArgs = args.Nodes
+	}
+	if len(typeArgs) != 2 {
+		return fieldUse{}, errorAtNode(t, "type %s: implements %s takes two type arguments, the table and its config: implements %s<%s, { ... }> (D103)", name, id.name, id.name, name)
+	}
+	self := typeArgs[0]
+	selfOK := false
+	if self.Kind == kindTypeReference {
+		if ref, ok := w.identityOf(self.AsTypeReferenceNode().TypeName); ok && ref.decl == class {
+			selfOK = true
+		}
+	}
+	if !selfOK {
+		return fieldUse{}, errorAtNode(self, "type %s: implements %s<T, C>'s first type argument is the table itself, %s: implements %s<%s, { ... }> (D103)", name, id.name, name, id.name, name)
+	}
+	at := typeArgs[1]
+	where := fmt.Sprintf("type %s: behavior %s config", name, behavior.Name)
+	reader := configReader{w: w, where: where, root: at}
+	value, serr := reader.value(w.checker.GetTypeFromTypeNode(at), at, "", 0)
+	if serr != nil {
+		return fieldUse{}, serr
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return fieldUse{}, errorAtNode(at, "%s: %v", where, err)
+	}
+	refs := []ir.BehaviorRef{{Name: behavior.Name, Implements: true, Config: raw}}
+	if err := ir.CanonicalizeBehaviors(refs); err != nil {
+		return fieldUse{}, errorAtNode(at, "type %s: %v", name, err)
+	}
+	if err := behavior.ValidateConfig(refs[0].Config); err != nil {
+		return fieldUse{}, errorAtNode(at, "type %s: %s", name, err)
+	}
+	return fieldUse{ref: refs[0], node: t}, nil
+}
+
+// applyFieldBehaviors appends to td the uses its class composes as a
+// table, once the decorators have settled td's role and @jsonField: the
+// behaviors it implements, in the order of its implements clause, then
+// those it composes on its fields, in field order, after the @behavior
+// decorators' uses (D103). A behavior is implemented by, or anchored on a
+// field of, a DB table, whose columns its declared fields become. A type
+// that composes behaviors both ways is the verification pass's to refuse
+// (verify.checkTypeBehaviors), as it is for the data forms.
 func (w *walker) applyFieldBehaviors(node *astNode, td *ir.TypeDef) {
-	uses := w.classUses[node]
-	if len(uses) == 0 {
+	implemented, uses := w.classImplements[node], w.classUses[node]
+	if len(implemented) == 0 && len(uses) == 0 {
 		return
 	}
 	if w.cfg.Kind != ir.SchemaKindDB || td.Role != ir.RoleDBTable || td.JsonField {
+		if len(implemented) > 0 {
+			use := implemented[0]
+			w.addErr(errorAtNode(use.node, "type %s implements %s, and a type implements a behavior on a DB table, which %s is not (D103)", td.Name, use.ref.Name, td.Name))
+			return
+		}
 		use := uses[0]
 		w.addErr(errorAtNode(use.node, "type %s: field %s is a %s, and a behavior is anchored on a field of a DB table, which %s is not (D103)", td.Name, use.ref.Field, use.ref.Name, td.Name))
 		return
 	}
+	for _, use := range implemented {
+		td.Behaviors = append(td.Behaviors, use.ref)
+	}
 	for _, use := range uses {
 		td.Behaviors = append(td.Behaviors, use.ref)
 	}
+}
+
+// inheritedBehaviorImplements refuses a base class or a trait that
+// implements a behavior: a use a table implements is on the table that
+// declares it, and a class that extends or implements another copies its
+// fields, not its uses (D103). heritage is the clause entry that names
+// base.
+func (w *walker) inheritedBehaviorImplements(class string, heritage, base *astNode, baseName string) *SchemaError {
+	implemented := w.classImplements[base]
+	if len(implemented) == 0 {
+		return nil
+	}
+	return errorAtNode(heritage, "type %s: %s implements %s, which %s does not inherit: a behavior a table implements is on the table that declares it (D103)", class, baseName, implemented[0].ref.Name, class)
 }
 
 // inheritedBehaviorField refuses a base class or a trait whose fields

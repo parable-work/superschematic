@@ -1,0 +1,20 @@
+# fixture-timers-api in TypeScript on the local target (D103): its default
+# server serves the operations of fixture-timers-db's Ticket, and its
+# behavior worker TicketTimers, the deployable
+# fixture-timers-api-ticket-timers, runs Ticket's deadlines through the
+# database's repositories.
+kind: Stack
+types:
+  Timers:
+    name: Timers
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: fixture-timers-api, kind: API }
+      expose:
+        - service: { name: fixture-timers-api, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

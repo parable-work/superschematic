@@ -34,7 +34,7 @@
 {{- if .HasBehaviors }}
 //
 // The operations of its @behaviorOperations sets (D103) are each the
-// operation of a behavior on a field of a table of {{ .Deps.Database }}: the route
+// operation of a behavior {{ if .BehaviorsOnFields }}on a field of{{ else }}of{{ end }} a table of {{ .Deps.Database }}: the route
 // runs it through options.orm, the database's repositories, which run it
 // through the behaviors' core in a transaction of its own, as the request's
 // caller, and answers a refusal of the core's as the problem of its status,

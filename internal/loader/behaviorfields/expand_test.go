@@ -108,3 +108,38 @@ func TestExpandLeavesAlone(t *testing.T) {
 		t.Errorf("Expand = %v", err)
 	}
 }
+
+// A table named after a field its sub-table declares keeps both: the
+// sub-table names its row Outcome by outcomeRow beside Timers' outcome,
+// and a table named Name by nameRow beside the key name (D103).
+func TestASubTableNamesItsRowApartFromItsFields(t *testing.T) {
+	reg := registry.New(naming.Default())
+	for _, c := range []struct{ table, row string }{{"Ticket", "ticket"}, {"Outcome", "outcomeRow"}, {"Name", "nameRow"}, {"DueAt", "dueAtRow"}} {
+		schema := ir.NewSchema("support", ir.SchemaKindDB)
+		schema.Types[c.table] = &ir.TypeDef{
+			Name: c.table,
+			Role: ir.RoleDBTable,
+			Behaviors: []ir.BehaviorRef{{Name: "Timers", Implements: true,
+				Config: json.RawMessage(`{"deadlines":{"remind":{"afterMs":1000,"start":{"field":"dueOn"}}}}`)}},
+			Fields: []*ir.FieldDef{
+				{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Key: true, Required: true},
+				{Name: "dueOn", TypeRef: ir.TypeRef{Name: "Temporal.DateTime"}},
+			},
+		}
+		if _, err := Expand(schema, reg); err != nil {
+			t.Fatalf("%s: %v", c.table, err)
+		}
+		sub := schema.Types[c.table+"TimersDeadlines"]
+		if sub == nil {
+			t.Fatalf("%s: no sub-table among %v", c.table, schema.Types)
+		}
+		var names []string
+		for _, fd := range sub.Fields {
+			names = append(names, fd.Name)
+		}
+		want := c.row + " name baseAt armedFrom dueAt fired firedAt outcome"
+		if strings.Join(names, " ") != want || sub.BehaviorTable.RowField != c.row || sub.Fields[0].Relation == nil {
+			t.Errorf("%s: the sub-table's fields = %s, its row field %s, want %s", c.table, strings.Join(names, " "), sub.BehaviorTable.RowField, want)
+		}
+	}
+}

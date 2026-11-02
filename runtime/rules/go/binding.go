@@ -219,11 +219,25 @@ func (nativeCore) Check(specs []TypeSpec) ([]*Refusal, error) {
 // Declaration is a behavior's declaration file, as the core registers it:
 // the members a host reads (the others are ignored).
 type Declaration struct {
-	Name        string              `json:"name"`
-	Description string              `json:"description,omitempty"`
-	Value       string              `json:"value,omitempty"`
-	Fields      []DeclaredField     `json:"fields,omitempty"`
-	Operations  []DeclaredOperation `json:"operations,omitempty"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Value       string          `json:"value,omitempty"`
+	Fields      []DeclaredField `json:"fields,omitempty"`
+	// Tables are the sub-tables the behavior keeps per row, and
+	// ArmsDeadlines whether it arms deadlines (D103).
+	Tables        []DeclaredTable     `json:"tables,omitempty"`
+	ArmsDeadlines bool                `json:"armsDeadlines,omitempty"`
+	Operations    []DeclaredOperation `json:"operations,omitempty"`
+}
+
+// DeclaredTable is a sub-table a behavior declares: its name, the field
+// whose value keys a row within its row, and its typed fields, the key
+// among them.
+type DeclaredTable struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Key         string          `json:"key"`
+	Fields      []DeclaredField `json:"fields"`
 }
 
 // DeclaredField is a field a behavior declares: its declared name, and its

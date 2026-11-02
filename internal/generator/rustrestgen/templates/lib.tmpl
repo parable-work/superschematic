@@ -4,7 +4,7 @@
 {{ if .HasApps -}}
 pub mod apps;
 {{ end -}}
-{{ if .HasBehaviorOperations -}}
+{{ if .HasBehaviors -}}
 pub mod behaviors;
 {{ end -}}
 {{ if .HasEnvConfig -}}
@@ -28,7 +28,7 @@ pub use {{ .TypesCrateIdent }} as types;
 /// The http runtime crate the router and the interfaces are built on, for a
 /// crate that builds on this one with the same version of it.
 pub use {{ .RuntimeCrateIdent }} as runtime;
-{{- if .HasWorkers }}
+{{- if .HasDatabaseTypes }}
 
 /// The Rust types of {{ .Deps.Database }}, the API's database: the messages its
 /// workers handle, and the descriptors of their queues, which a worker claims

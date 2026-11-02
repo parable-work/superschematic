@@ -2,6 +2,8 @@ package behaviorlayout_test
 
 import (
 	"encoding/json"
+	"flag"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -45,11 +47,12 @@ func TestOf(t *testing.T) {
 	}
 	want := `{"type":"Order","table":"order","key":{"field":"id","column":"id","type":"Identity.UUID"},"version":"_version",` +
 		`"own":[{"field":"title","column":"title","type":"string"},{"field":"placedAt","column":"placed_at","type":"Temporal.DateTime","convert":"epochMillis"}],` +
-		`"uses":[{"id":"status","behavior":"Workflow","anchor":"status","fields":[` +
+		`"uses":[{"id":"status","behavior":"Workflow","anchor":"status","member":"status","fields":[` +
 		`{"name":"status","field":"status","column":"status","type":"string","value":true},` +
 		`{"name":"enteredAt","field":"statusEnteredAt","column":"status_entered_at","type":"Temporal.DateTime","convert":"epochMillis"}],` +
 		`"operations":[{"name":"transition","writes":true}]}],` +
-		`"spec":{"name":"Order","uses":[{"behavior":"Workflow","config":{"initial":"draft","states":["draft","paid","shipped"],"transitions":[{"from":"draft","to":"paid"},{"from":"paid","permission":"orders.ship","to":"shipped"}]},"anchor":{"field":"status"}}]}}`
+		`"spec":{"name":"Order","uses":[{"behavior":"Workflow","config":{"initial":"draft","states":["draft","paid","shipped"],"transitions":[{"from":"draft","to":"paid"},{"from":"paid","permission":"orders.ship","to":"shipped"}]},"anchor":{"field":"status"}}],` +
+		`"fields":[{"name":"title","type":"string"},{"name":"placedAt","type":"Temporal.DateTime","dateTime":true}]}}`
 	if string(data) != want {
 		t.Errorf("Order's layout =\n%s\nwant\n%s", data, want)
 	}
@@ -165,5 +168,94 @@ func TestOfLive(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `"version":"_version","live":{"column":"removed_at"},"own":`) {
 		t.Errorf("Order's layout = %s, want its live after its version", data)
+	}
+}
+
+var update = flag.Bool("update", false, "rewrite testdata/*.layout.json")
+
+// timersFixture is the DB service whose Ticket implements Timers beside its
+// status Workflow, and whose Invoice implements Timers that reads the
+// second of its two Workflows (D103).
+const timersFixture = "../../loader/tsreader/testdata/services/fixture-timers-db"
+
+// The layout document of a table that implements Timers holds every table
+// use with its member, the use's sub-table with its row's column, its key
+// and its fields, the table's deadline queue, and the spec's own fields,
+// a date-time marked; testdata/fixture-timers-db.layout.json is the
+// document the adapters of every language are written against.
+func TestOfTimers(t *testing.T) {
+	reg := registry.New(naming.Default())
+	schema, err := loader.LoadService(filepath.FromSlash(timersFixture), loader.WithRegistry(reg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout, err := behaviorlayout.Of(schema, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := json.MarshalIndent(layout, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = append(got, '\n')
+	golden := filepath.Join("testdata", "fixture-timers-db.layout.json")
+	if *update {
+		if err := os.MkdirAll(filepath.Dir(golden), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(golden, got, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatalf("missing golden (run with -update): %v", err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("the layout of fixture-timers-db differs from %s (run with -update and review the diff):\n%s", golden, got)
+	}
+
+	ticket := layout.Types["Ticket"]
+	if ticket == nil || len(ticket.Uses) != 2 {
+		t.Fatalf("Ticket's layout = %+v, want its Timers and its status", ticket)
+	}
+	timers := ticket.Uses[0]
+	if timers.ID != "Timers" || timers.Member != "timers" || timers.Anchor != "" || len(timers.Fields) != 0 || len(timers.Tables) != 1 {
+		t.Errorf("Ticket's Timers = %+v", timers)
+	}
+	if status := ticket.Uses[1]; status.Member != "status" || status.Anchor != "status" || len(status.Tables) != 0 {
+		t.Errorf("Ticket's status = %+v", status)
+	}
+	deadlines := timers.Tables[0]
+	if deadlines.Table != "ticket_timers_deadlines" || deadlines.Row != "ticket_id" || deadlines.Key.Column.Column != "name" || len(deadlines.Fields) != 6 {
+		t.Errorf("Ticket's deadlines = %+v", deadlines)
+	}
+	want2 := &behaviorlayout.Deadlines{Queue: "TicketDeadline", Table: "ticket_deadline_queue", RowKey: "row_key", Use: "use_id", Name: "name", At: "at", Payload: "payload"}
+	if d := ticket.Deadlines; d == nil || *d != *want2 {
+		t.Errorf("Ticket's deadlines queue = %+v, want %+v", d, want2)
+	}
+	fields, _ := json.Marshal(ticket.Spec.Fields)
+	if string(fields) != `[{"name":"title","type":"string"},{"name":"visitAt","type":"Temporal.DateTime","dateTime":true}]` {
+		t.Errorf("Ticket's spec fields = %s", fields)
+	}
+	if anchor, _ := json.Marshal(ticket.Spec.Uses[0].Anchor); string(anchor) != `"type"` {
+		t.Errorf("Ticket's Timers anchor = %s, want \"type\"", anchor)
+	}
+}
+
+// OwnFields are the layout's own fields: the key, the version and the
+// fields a behavior owns are none of them.
+func TestOwnFields(t *testing.T) {
+	reg := registry.New(naming.Default())
+	schema, err := loader.LoadService(filepath.FromSlash(timersFixture), loader.WithRegistry(reg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, c := range behaviorlayout.OwnFields(schema, schema.Types["Invoice"]) {
+		names = append(names, c.Field)
+	}
+	if got := strings.Join(names, ","); got != "number" {
+		t.Errorf("Invoice's own fields = %s, want number", got)
 	}
 }

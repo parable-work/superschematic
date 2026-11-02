@@ -12,7 +12,7 @@ use superschematic_rules::{
     Behavior, ConfigError, ConfigTarget, Cx, Declaration, Hook, Refusal, UseSpec,
 };
 use superschematic_rules_adapter::{
-    Column, Convert, Layout, Operation, OwnedField, Table, TypeSpec, Use,
+    Column, Convert, Deadlines, Layout, Operation, OwnedField, Table, TypeSpec, Use,
 };
 
 /// The variable that names the Postgres the tests run against; the
@@ -171,6 +171,33 @@ pub fn column_types(postgres: bool) -> ColumnTypes {
     }
 }
 
+/// A deadline queue's table in a dialect (D103), as sqlgen writes a
+/// queue's: its message's columns (`row_key` of `row_key_type`, the row
+/// table's key's), the queue's own, an `id` with the dialect's UUID
+/// default, since an arm's insert names none, its live messages unique by
+/// row, use and name, and an index of each row's.
+pub fn deadline_queue_ddl(postgres: bool, table: &str, row_key_type: &str) -> Vec<String> {
+    let t = column_types(postgres);
+    let (uuid, now) = if postgres {
+        ("UUID DEFAULT gen_random_uuid()", "CURRENT_TIMESTAMP")
+    } else {
+        (
+            "TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+            "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+        )
+    };
+    let token = if postgres { "UUID" } else { "TEXT" };
+    vec![
+        format!(
+            "CREATE TABLE \"{table}\" (id {uuid} NOT NULL PRIMARY KEY, row_key {row_key_type} NOT NULL, use_id TEXT NOT NULL, name TEXT NOT NULL, at BIGINT NOT NULL, payload {json}, state TEXT DEFAULT 'ready' NOT NULL, attempts INTEGER DEFAULT 0 NOT NULL, due_at {timestamp} DEFAULT {now} NOT NULL, claim_expires_at {timestamp}, claim_token {token}, last_error TEXT, created_at {timestamp} DEFAULT {now} NOT NULL, updated_at {timestamp} DEFAULT {now} NOT NULL)",
+            json = t.json,
+            timestamp = t.timestamp,
+        ),
+        format!("CREATE UNIQUE INDEX \"{table}_live\" ON \"{table}\" (row_key, use_id, name) WHERE state IN ('ready', 'claimed')"),
+        format!("CREATE INDEX \"{table}_row\" ON \"{table}\" (row_key)"),
+    ]
+}
+
 /// The nth placeholder in a dialect.
 pub fn p(postgres: bool, n: usize) -> String {
     if postgres {
@@ -223,13 +250,16 @@ pub fn order_table(type_name: &str, table: &str) -> Table {
         uses: vec![Use {
             id: "status".into(),
             behavior: "Workflow".into(),
+            member: "status".into(),
             anchor: Some("status".into()),
             fields: vec![owned("status", "status", "status", "string", true), entered],
             operations: vec![Operation {
                 name: "transition".into(),
                 writes: true,
             }],
+            tables: Vec::new(),
         }],
+        deadlines: None,
         spec: TypeSpec::new(type_name).with(UseSpec::on_field("status", "Workflow", flow())),
     }
 }
@@ -280,6 +310,7 @@ pub fn store_layout_in(room: &str) -> Layout {
         live: None,
         own: Vec::new(),
         uses: Vec::new(),
+        deadlines: None,
         spec: TypeSpec::new("Booking").with(UseSpec::on_type("OneRoom", json!({"room": room}))),
     };
     let loud = Table {
@@ -291,6 +322,15 @@ pub fn store_layout_in(room: &str) -> Layout {
     let timed = Table {
         type_name: "Timed".into(),
         table: "timed".into(),
+        deadlines: Some(Deadlines {
+            queue: "TimedDeadline".into(),
+            table: "timed_deadline_queue".into(),
+            row_key: "row_key".into(),
+            use_id: "use_id".into(),
+            name: "name".into(),
+            at: "at".into(),
+            payload: "payload".into(),
+        }),
         spec: TypeSpec::new("Timed").with(UseSpec::on_type("OneRoom", json!({"arm": true}))),
         ..booking.clone()
     };
@@ -336,6 +376,7 @@ pub fn store_ddl(postgres: bool) -> Vec<String> {
             ddl.push(sqlite_bump(table));
         }
     }
+    ddl.extend(deadline_queue_ddl(postgres, "timed_deadline_queue", "TEXT"));
     ddl
 }
 
@@ -345,15 +386,24 @@ pub fn store_ddl(postgres: bool) -> Vec<String> {
 /// rows, and lets its row be created only when there is none, refusing
 /// `conflict` otherwise. Only the row it creates is written, so only the
 /// lock holds two such commands apart. A config of `{"emit": true}` emits
-/// an event on a create instead, and one of `{"arm": true}` arms a
-/// deadline: writes the adapter does not take yet.
+/// an event on a create instead, a write the adapter does not take yet, and
+/// one of `{"arm": true}` arms the deadline `expire` a second after the
+/// create, which, when it falls due with the payload `{"again": true}`,
+/// arms itself again a second later.
 pub struct OneRoom;
 
 impl Behavior for OneRoom {
     type Config = Value;
 
     fn declaration(&self) -> Declaration {
-        Declaration::new("OneRoom")
+        Declaration::new("OneRoom").arms_deadlines()
+    }
+
+    fn deadline(&self, cx: &Cx<'_, Value>, name: &str, payload: &Value) -> Hook<()> {
+        if payload.get("again") == Some(&Value::Bool(true)) {
+            cx.arm(name, cx.now() + 1000, Value::Null)?;
+        }
+        Ok(())
     }
 
     fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<Value, ConfigError> {

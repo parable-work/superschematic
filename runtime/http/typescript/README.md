@@ -124,7 +124,18 @@ Its entry points:
   database connection, the Postgres value codec, the generated
   repositories' runtime, the behaviors' adapter on Postgres (D103,
   `src/rules.ts`), and a queue's enqueue and claims (below). It is the only
-  entry that imports `pg`.
+  entry that imports `pg`. The adapter applies a change set's row writes,
+  its sub-table rows and its deadline arms and clears, messages of the
+  table's deadline queue, in one unit; `runDeadline` runs a due deadline at
+  the later of the host's clock and its time, spending a worker's claim of
+  its message in that unit (`ran: false` with why `claim lost` when the
+  claim is no longer held, `gone` when the row or the use is), and without
+  a claim reads the arming before each run; `readSubRows` and
+  `readArmedDeadlines` read a row's sub-table rows and armed deadlines. A
+  generated repository whose table arms deadlines runs them with its
+  `runDeadline` (typed `BehaviorDeadlines`), in its transaction, and one
+  whose behaviors keep sub-tables or arm deadlines has no upserts
+  (`WithoutUpserts`), since an upsert applies no change set.
 - `@superschematic/http-runtime/identity`, the core user model's runtime
   (D50, below). The main entry point does not load it.
 - `@superschematic/http-runtime/gcs`, a `Bucket` on GCS, or on an
@@ -144,8 +155,10 @@ Its entry points:
 - `@superschematic/http-runtime/d1`, `SqlDatabase`, the runtime's copy of
   D1's interface, which `Deps.db` is for a database whose DB service lists
   `sqlite` first, `ping`, and the behaviors' adapter (D103, `src/rules.ts`)
-  with `sqliteRulesStore`, which runs a command of a table whose fields are
-  behaviors over the layout its generated `orm.ts` embeds.
+  with `sqliteRulesStore`, which runs a command of a table that composes
+  behaviors over the layout its generated `orm.ts` embeds. A `subRows` read
+  made under a lock is refused there as `internal`: a D1 batch has no check
+  of it yet.
 - `@superschematic/http-runtime/sqlite`, `openSqlite(path)`, a
   `SqlDatabase` over `bun:sqlite` for `stack dev`, and `sqliteFile(url)`,
   the path a `sqlite:` URL names. It runs under Bun alone.

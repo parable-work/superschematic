@@ -2,6 +2,7 @@ package sqlgen
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
@@ -36,7 +37,11 @@ func convertQueueToTable(typeDef *ir.TypeDef, schema *ir.Schema, deps map[string
 	if err != nil {
 		return Table{}, err
 	}
-	if len(message.ForeignKeys) > 0 || message.PrimaryKey != "" || len(message.Unique) > 0 || len(message.SearchFields) > 0 || len(message.Indexes) > 0 {
+	// The deadline queue a table's behaviors keep (D103) alone has indexes
+	// of its message's fields, which the loader gives it: one live message
+	// per row, use and deadline, and a row's messages by its key.
+	behaviorIndexes := typeDef.BehaviorQueue != nil
+	if len(message.ForeignKeys) > 0 || message.PrimaryKey != "" || len(message.Unique) > 0 || len(message.SearchFields) > 0 || (len(message.Indexes) > 0 && !behaviorIndexes) {
 		return Table{}, fmt.Errorf("queue %s: a message's fields are values, with no key, reference, unique field, search field or index", typeDef.Name)
 	}
 	name := QueueTableName(typeDef)
@@ -92,6 +97,19 @@ func convertQueueToTable(typeDef *ir.TypeDef, schema *ir.Schema, deps map[string
 		return Table{}, fmt.Errorf("queue %s: %w", typeDef.Name, err)
 	}
 	indexes = append(indexes, keyIndexes...)
+	if behaviorIndexes {
+		// Each is named for the queue's table, not the message's.
+		for i, idx := range message.Indexes {
+			columns := make([]string, len(idx.Columns))
+			for j, column := range idx.Columns {
+				columns[j] = strings.Trim(column, `"`)
+			}
+			if idx.Name, err = sqlutil.IndexName(name, columns, typeDef.Indexes[i].Name, idx.Unique); err != nil {
+				return Table{}, fmt.Errorf("queue %s: %w", typeDef.Name, err)
+			}
+			indexes = append(indexes, idx)
+		}
+	}
 	table := Table{
 		Name:         name,
 		QuotedName:   sqlutil.QuoteIdentifier(name),

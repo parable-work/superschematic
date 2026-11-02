@@ -305,7 +305,7 @@ rust:
 # own on a spare port, postgres://postgres:<password>@localhost:<port>/postgres?sslmode=disable),
 # each in a schema it creates and drops; without it they skip that pass.
 # The behaviors' Rust adapter (rules-adapter, D103) runs its store tests and
-# replays the core's transcript on SQLite, and on Postgres as well when
+# replays the core's transcripts on SQLite, and on Postgres as well when
 # SUPERSCHEMATIC_RULES_TEST_DATABASE_URL names one, in schemas of its own.
 # The test kit replays the scenario corpus
 # (runtime/engine/testdata/scenarios, or the directory ENGINE_CORPUS_DIR

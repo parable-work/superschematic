@@ -9,6 +9,7 @@ import {
   postgresRulesStore,
   readRow,
   runCreate,
+  runDeadline,
   runOperation,
   runUpdate,
   withRulesCore,
@@ -381,11 +382,162 @@ describe('the host loop on any core', () => {
       code: 'internal',
       status: 500,
       class: 'Error',
-      message: "rules: transition of Order writes outbox events, which the adapter takes once each has a table of its own (D103's order of the work, step 3)",
+      message: "rules: transition of Order writes outbox events, which the adapter takes once the outbox has a table of its own (D103's order of the work, step 3)",
     });
-    expect((await refusalOf([changed({ subRows: [{}] })])).message).toContain('writes sub-table rows');
-    expect((await refusalOf([changed({ deadlines: [{}] })])).message).toContain('writes deadlines');
+    const ref = { type: 'Order', key };
+    expect((await refusalOf([changed({ subRows: [{ row: ref, useId: 'status', table: 'notes', key: 'n', change: { kind: 'delete' } }] })])).message).toBe(
+      "rules: Order's use status (Workflow) keeps no table notes in the behaviors' layout"
+    );
+    expect((await refusalOf([changed({ deadlines: [{ kind: 'clear', row: ref, useId: 'status', name: 'late' }] })])).message).toBe(
+      "rules: Order keeps no deadline queue in the behaviors' layout, and a change set arms or runs a deadline of it"
+    );
     expect((await refusalOf([{ read: [{ kind: 'hasRows', type: 'Order' }] }])).message).toContain('still asked for reads or locks after 256 rounds');
+  });
+
+  /** Order with a sub-table of notes on its status use, and a deadline queue. */
+  const keeping: RulesLayout = {
+    types: {
+      Order: {
+        ...layout.types.Order!,
+        uses: [
+          {
+            ...layout.types.Order!.uses[0]!,
+            tables: [
+              {
+                name: 'notes',
+                table: 'order_status_notes',
+                row: 'order_id',
+                key: { name: 'name', field: 'name', column: 'name', type: 'string' },
+                fields: [
+                  { name: 'at', field: 'at', column: 'at', type: 'Temporal.DateTime', convert: 'epochMillis' },
+                  { name: 'seen', field: 'seen', column: 'seen', type: 'boolean' },
+                ],
+              },
+            ],
+          },
+        ],
+        deadlines: { queue: 'OrderDeadline', table: 'order_deadline_queue', rowKey: 'row_key', use: 'use_id', name: 'name', at: 'at', payload: 'payload' },
+      },
+    },
+  };
+
+  test("a unit writes the row, then its sub-table rows, then its deadlines, and a delete then the row's messages and sub-table rows", async () => {
+    const ref = { type: 'Order', key };
+    const steps: CoreStep[] = [
+      changed({
+        rows: [{ kind: 'update', type: 'Order', key, expectedVersion: 1, own: {}, owned: {} }],
+        subRows: [
+          { row: ref, useId: 'status', table: 'notes', key: 'a', change: { kind: 'insert', values: { seen: false, at: 5000 } } },
+          { row: ref, useId: 'status', table: 'notes', key: 'b', change: { kind: 'update', values: { seen: true } } },
+          { row: ref, useId: 'status', table: 'notes', key: 'c', change: { kind: 'update', values: {} } },
+          { row: ref, useId: 'status', table: 'notes', key: 'd', change: { kind: 'delete' } },
+        ],
+        deadlines: [
+          { kind: 'arm', row: ref, useId: 'status', name: 'late', at: 9000, payload: null },
+          { kind: 'clear', row: ref, useId: 'status', name: 'early' },
+        ],
+      }),
+    ];
+    for (const dialect of ['sqlite', 'postgres'] as const) {
+      const { store, recorded } = memoryStore(dialect, draftRow);
+      await execute({ core: scripted(steps).core, layout: keeping, store }, 'Order', transition('paid'));
+      const unit = recorded.applied[0]!.map(({ text, values, expect }) => ({ text, values, expect }));
+      expect(unit[0]!.text).toStartWith('UPDATE "order" SET');
+      const sqlite = dialect === 'sqlite';
+      const at5000 = sqlite ? new Date(5000).toISOString() : new Date(5000);
+      expect(unit.slice(1)).toEqual(
+        sqlite
+          ? [
+              { text: 'INSERT INTO "order_status_notes" ("order_id", "name", "at", "seen") VALUES (?1, ?2, ?3, ?4) ON CONFLICT ("order_id", "name") DO NOTHING', values: [keyColumn, 'a', at5000, 0], expect: 1 },
+              { text: 'UPDATE "order_status_notes" SET "seen" = ?3 WHERE "order_id" = ?1 AND "name" = ?2', values: [keyColumn, 'b', 1], expect: 1 },
+              { text: 'DELETE FROM "order_status_notes" WHERE "order_id" = ?1 AND "name" = ?2', values: [keyColumn, 'd'], expect: 1 },
+              { text: `DELETE FROM "order_deadline_queue" WHERE "row_key" = ?1 AND "use_id" = ?2 AND "name" = ?3`, values: [keyColumn, 'status', 'late'], expect: undefined },
+              {
+                text: `INSERT INTO "order_deadline_queue" ("row_key", "use_id", "name", "at", "payload", "due_at") VALUES (?1, ?2, ?3, ?4, ?5, strftime('%Y-%m-%dT%H:%M:%fZ', ?4 / 1000.0, 'unixepoch'))`,
+                values: [keyColumn, 'status', 'late', 9000, null],
+                expect: undefined,
+              },
+              { text: `DELETE FROM "order_deadline_queue" WHERE "row_key" = ?1 AND "use_id" = ?2 AND "name" = ?3`, values: [keyColumn, 'status', 'early'], expect: undefined },
+            ]
+          : [
+              { text: 'INSERT INTO "order_status_notes" ("order_id", "name", "at", "seen") VALUES ($1, $2, $3, $4) ON CONFLICT ("order_id", "name") DO NOTHING', values: [keyColumn, 'a', at5000, false], expect: 1 },
+              { text: 'UPDATE "order_status_notes" SET "seen" = $3 WHERE "order_id" = $1 AND "name" = $2', values: [keyColumn, 'b', true], expect: 1 },
+              { text: 'DELETE FROM "order_status_notes" WHERE "order_id" = $1 AND "name" = $2', values: [keyColumn, 'd'], expect: 1 },
+              { text: `DELETE FROM "order_deadline_queue" WHERE "row_key" = $1 AND "use_id" = $2 AND "name" = $3`, values: [keyColumn, 'status', 'late'], expect: undefined },
+              {
+                text: 'INSERT INTO "order_deadline_queue" ("row_key", "use_id", "name", "at", "payload", "due_at") VALUES ($1, $2, $3, $4, $5::jsonb, to_timestamp($4::bigint / 1000.0))',
+                values: [keyColumn, 'status', 'late', 9000, null],
+                expect: undefined,
+              },
+              { text: `DELETE FROM "order_deadline_queue" WHERE "row_key" = $1 AND "use_id" = $2 AND "name" = $3`, values: [keyColumn, 'status', 'early'], expect: undefined },
+            ]
+      );
+    }
+
+    // A delete leaves out the deleted row's sub-table rows and deadlines,
+    // and deletes its messages and, hard, its sub-table rows after it.
+    const { store, recorded } = memoryStore('postgres', draftRow);
+    const deleting = scripted([
+      changed({
+        rows: [{ kind: 'delete', type: 'Order', key, expectedVersion: 1 }],
+        subRows: [{ row: ref, useId: 'status', table: 'notes', key: 'a', change: { kind: 'delete' } }],
+        deadlines: [{ kind: 'clear', row: ref, useId: 'status', name: 'late' }],
+      }),
+    ]);
+    await execute({ core: deleting.core, layout: keeping, store }, 'Order', transition('paid'));
+    expect(recorded.applied[0]!.map(statement => statement.text)).toEqual([
+      'DELETE FROM "order" WHERE "id" = $1 AND "_version" = $2',
+      'DELETE FROM "order_deadline_queue" WHERE "row_key" = $1',
+      'DELETE FROM "order_status_notes" WHERE "order_id" = $1',
+    ]);
+  });
+
+  test("a deadline's not_found spends its claim as gone only when its row or its use is gone", async () => {
+    const claim = { id: '0b9c6f0e-5d55-4f2a-9a43-6a1f3c0c1001', token: '6c1d4a77-0a5e-4d43-8c6a-2a5c7e3d2002' };
+    const notFound = (message: string): CoreStep => ({ done: { refused: { code: 'not_found', status: 404, class: 'EngineError', message } } }) as CoreStep;
+    const due = (useId: string) => ({ key, useId, name: 'late', at: 4000, payload: null });
+    const spend = 'DELETE FROM "order_deadline_queue" WHERE "id" = $1::uuid AND "claim_token" = $2::uuid AND "state" = \'claimed\'';
+
+    // The row is gone: the claim is spent alone.
+    const gone = memoryStore('postgres', undefined);
+    const run = await runDeadline({ core: scripted([notFound(`Order ${key} not found`)]).core, layout: keeping, store: gone.store, now: () => 5000 }, 'Order', due('status'), alice, { claim });
+    expect(run).toMatchObject({ ran: false, why: 'gone', refusal: { code: 'not_found' } });
+    expect(gone.recorded.applied.map(unit => unit.map(statement => statement.text))).toEqual([[spend]]);
+
+    // The use is gone, the row there: the same.
+    const lapsed = memoryStore('postgres', draftRow);
+    expect(await runDeadline({ core: scripted([notFound('no use Lapsed')]).core, layout: keeping, store: lapsed.store, now: () => 5000 }, 'Order', due('Lapsed'), alice, { claim })).toMatchObject({ ran: false, why: 'gone' });
+
+    // Both there: a not_found of something a rule reached is the run's
+    // refusal, and nothing is spent, so the worker fails the message.
+    const there = memoryStore('postgres', draftRow);
+    await expect(runDeadline({ core: scripted([notFound('Shelf 7 not found')]).core, layout: keeping, store: there.store, now: () => 5000 }, 'Order', due('status'), alice, { claim })).rejects.toMatchObject({
+      refusal: { code: 'not_found', message: 'Shelf 7 not found' },
+    });
+    expect(there.recorded.applied).toEqual([]);
+  });
+
+  test('a sub-table row value the layout has no field for, the key among them, refuses the command as internal', async () => {
+    const ref = { type: 'Order', key };
+    for (const name of ['name', 'colour']) {
+      const { store } = memoryStore('postgres', draftRow);
+      const { core } = scripted([changed({ rows: [], subRows: [{ row: ref, useId: 'status', table: 'notes', key: 'a', change: { kind: 'insert', values: { [name]: 'x' } } }] })]);
+      await expect(execute({ core, layout: keeping, store }, 'Order', transition('paid'))).rejects.toMatchObject({ refusal: { code: 'internal', message: `rules: sub-table order_status_notes has no field ${name}` } });
+    }
+  });
+
+  test('a read of sub-table rows under a lock refuses the command as internal on a store whose locks are fenced, and is answered on one that holds them', async () => {
+    const subRows = { kind: 'subRows' as const, type: 'Order', key, useId: 'status', table: 'notes' };
+    const steps: CoreStep[] = [{ lock: ['Order/x'] }, { read: [subRows] }, changed({})];
+    const fenced = memoryStore('sqlite', draftRow);
+    await expect(execute({ core: scripted(steps).core, layout: keeping, store: { ...fenced.store, locks: 'fenced' } }, 'Order', transition('paid'))).rejects.toMatchObject({
+      refusal: { code: 'internal', message: 'rules: a read of sub-table rows under a lock has no check on SQLite or D1 yet (D103)' },
+    });
+    const held = memoryStore('postgres', { k: 'a', c0: new Date(7000), c1: true });
+    const { core, answers } = scripted(steps);
+    await execute({ core, layout: keeping, store: held.store }, 'Order', transition('paid'));
+    expect(answers[2]!.reads![0]!.answer).toEqual({ subRows: [{ key: 'a', values: { at: 7000, seen: true } }] });
+    expect(held.recorded.queries.at(-1)).toEqual({ text: 'SELECT "name" AS k, "at" AS c0, "seen" AS c1 FROM "order_status_notes" WHERE "order_id" = $1 ORDER BY "name" COLLATE "C"', values: [keyColumn] });
   });
 
   test('a command gets the host request id once, for every attempt', async () => {

@@ -4,6 +4,7 @@ export {
   app,
   auth,
   behaviorOperations,
+  behaviorWorker,
   bodyLimit,
   decrypted,
   deriver,
@@ -32,6 +33,7 @@ export {
 } from "./decorators";
 export type {
   AppOptions,
+  BehaviorWorkerOptions,
   BodyLimitConfig,
   DeriverOptions,
   DocsConfig,

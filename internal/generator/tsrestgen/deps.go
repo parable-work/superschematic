@@ -10,7 +10,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/behaviortypes"
+	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -209,6 +211,9 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 	if err := o.checkBehaviorDeps(deps); err != nil {
 		return err
 	}
+	if err := o.checkBehaviorWorkers(deps); err != nil {
+		return err
+	}
 	seen := map[string]string{}
 	for _, name := range depsFields {
 		seen[name] = "Deps." + name
@@ -287,10 +292,12 @@ type JobInfo struct {
 }
 
 // WorkerInfo is a worker of the API (D53): a method of the generated
-// Workers interface, which handles one message of its queue.
+// Workers interface, which handles one message of its queue; or a behavior
+// worker (D103), whose handler behavior-workers.ts holds.
 type WorkerInfo struct {
 	// Name is the worker's `@worker` class, and Method the Workers method
-	// that handles a message, the class in camel case.
+	// that handles a message, the class in camel case; empty for a
+	// behavior worker.
 	Name   string
 	Method string
 
@@ -300,8 +307,12 @@ type WorkerInfo struct {
 	Queue string
 
 	// Concurrency is the decorator's concurrency, for the method's
-	// comment.
+	// comment, and a behavior worker's for each of its queues.
 	Concurrency int
+
+	// Behavior is set for a @behaviorWorker (D103): a worker whose handler
+	// the generator writes, which the Workers interface has no method for.
+	Behavior *apigen.BehaviorWorkerInfo
 }
 
 // jobsOf reads the API's jobs, sorted by name.
@@ -316,8 +327,9 @@ func jobsOf(schema *ir.Schema) []JobInfo {
 	return jobs
 }
 
-// workersOf reads the API's workers, sorted by name.
-func workersOf(schema *ir.Schema) []WorkerInfo {
+// workersOf reads the API's workers, sorted by name, a behavior worker's
+// arming behaviors from its database among deps.
+func workersOf(schema *ir.Schema, deps map[string]*ir.Schema) []WorkerInfo {
 	var workers []WorkerInfo
 	for _, w := range schema.Workers {
 		if w == nil {
@@ -327,25 +339,140 @@ func workersOf(schema *ir.Schema) []WorkerInfo {
 		if concurrency <= 0 {
 			concurrency = ir.DefaultWorkerConcurrency
 		}
-		workers = append(workers, WorkerInfo{Name: w.Name, Method: tsutil.ToCamelCase(w.Name), Queue: w.Queue, Concurrency: concurrency})
+		info := WorkerInfo{Name: w.Name, Method: tsutil.ToCamelCase(w.Name), Queue: w.Queue, Concurrency: concurrency}
+		if bw := w.BehaviorWorker; bw != nil {
+			info.Method = ""
+			info.Behavior = &apigen.BehaviorWorkerInfo{
+				Table:       bw.Type,
+				Queues:      []string{w.Queue},
+				Subject:     ir.BehaviorWorkerSubject(schema.Name, w.Name),
+				Permissions: slices.Clone(bw.Permissions),
+				Behaviors:   apigen.ArmingBehaviors(schema, deps, bw.Type),
+			}
+		}
+		workers = append(workers, info)
 	}
 	slices.SortFunc(workers, func(a, b WorkerInfo) int { return strings.Compare(a.Name, b.Name) })
 	return workers
+}
+
+// OrdinaryWorkers are the API's @worker workers, each a method of the
+// generated Workers interface; a behavior worker is none (D103).
+func (o *APIOutput) OrdinaryWorkers() []WorkerInfo {
+	var out []WorkerInfo
+	for _, w := range o.Workers {
+		if w.Behavior == nil {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// BehaviorWorkers are the API's @behaviorWorker workers (D103), whose
+// queues behavior-workers.ts exports.
+func (o *APIOutput) BehaviorWorkers() []WorkerInfo {
+	var out []WorkerInfo
+	for _, w := range o.Workers {
+		if w.Behavior != nil {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// HasBehaviorWorkers reports whether the API declares a @behaviorWorker
+// (D103): the package then holds behavior-workers.ts.
+func (o *APIOutput) HasBehaviorWorkers() bool { return len(o.BehaviorWorkers()) > 0 }
+
+// BehaviorWorkersFile is the module of the API package that exports each
+// behavior worker's queues (D103), which index.ts exports.
+const BehaviorWorkersFile = "behavior-workers.ts"
+
+// QueuesFunc is the function behavior-workers.ts exports that builds a
+// behavior worker's queues (D103), the worker's class in camel case and
+// Queues: ticketTimersQueues, which the worker's main calls.
+func (w WorkerInfo) QueuesFunc() string { return tsutil.ToCamelCase(w.Name) + "Queues" }
+
+// Possessive is the worker's class as an owner: TicketTimers'.
+func (w WorkerInfo) Possessive() string {
+	if strings.HasSuffix(w.Name, "s") {
+		return w.Name + "'"
+	}
+	return w.Name + "'s"
+}
+
+// CallerConst is the constant behavior-workers.ts declares a behavior
+// worker's caller as (D103): ticketTimersCaller.
+func (w WorkerInfo) CallerConst() string { return tsutil.ToCamelCase(w.Name) + "Caller" }
+
+// Repository is the ORM's member that holds the repository of a behavior
+// worker's table, as tsgen names it: ticket.
+func (w WorkerInfo) Repository() string {
+	if w.Behavior == nil {
+		return ""
+	}
+	return lowerFirst(w.Behavior.Table)
+}
+
+// DeadlineQueueConst is the definition of a behavior worker's deadline
+// queue, its first, as the database's queues.ts exports it:
+// ticketDeadlineQueue.
+func (w WorkerInfo) DeadlineQueueConst() string {
+	if w.Behavior == nil || len(w.Behavior.Queues) == 0 {
+		return ""
+	}
+	return tsgen.QueueConst(w.Behavior.Queues[0])
+}
+
+// BehaviorQueueConsts are the queue definitions behavior-workers.ts
+// imports from the database's queues.ts, sorted and each once.
+func (o *APIOutput) BehaviorQueueConsts() []string {
+	var out []string
+	for _, w := range o.BehaviorWorkers() {
+		for _, queue := range w.Behavior.Queues {
+			if name := tsgen.QueueConst(queue); !slices.Contains(out, name) {
+				out = append(out, name)
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// QueuesEntry and ORMEntry are the entries of the database's types package
+// behavior-workers.ts imports from: its queues and its repositories.
+func (o *APIOutput) QueuesEntry() string { return tsgen.QueuesEntry }
+func (o *APIOutput) ORMEntry() string    { return tsgen.ORMEntry }
+
+// checkBehaviorWorkers refuses deps for an API that declares a behavior
+// worker (D103) when they hold no repositories: its handler runs each
+// deadline through Deps.orm's repository of the table, on Postgres.
+func (o *APIOutput) checkBehaviorWorkers(deps DepsInfo) error {
+	workers := o.BehaviorWorkers()
+	if len(workers) == 0 || depsORM(deps) {
+		return nil
+	}
+	w := workers[0]
+	if deps.Dialect == SQLiteDialect {
+		return fmt.Errorf("tsrestgen: worker %s runs %s, and %s lists sqlite first: the TypeScript repositories run behaviors on Postgres alone (D103)", w.Name, w.Behavior.Deadlines(), deps.Database)
+	}
+	return fmt.Errorf("tsrestgen: worker %s runs %s, through the repositories %s's TypeScript types export for Postgres (D103); enable outputs.types.typescript in %s's config", w.Name, w.Behavior.Deadlines(), deps.Database, deps.Database)
 }
 
 // HasJobs reports whether the API declares a job, for which deps.ts
 // declares Jobs and JobsConstructor.
 func (o *APIOutput) HasJobs() bool { return len(o.Jobs) > 0 }
 
-// HasWorkers reports whether the API declares a worker, for which deps.ts
-// declares Workers and WorkersConstructor.
-func (o *APIOutput) HasWorkers() bool { return len(o.Workers) > 0 }
+// HasWorkers reports whether the API declares a @worker, for which deps.ts
+// declares Workers and WorkersConstructor. A behavior worker is not one:
+// its handler is generated (D103).
+func (o *APIOutput) HasWorkers() bool { return len(o.OrdinaryWorkers()) > 0 }
 
-// WorkerQueues are the queues the API's workers handle, sorted and each
-// once: the message types deps.ts imports from the database's types.
+// WorkerQueues are the queues the API's @worker workers handle, sorted and
+// each once: the message types deps.ts imports from the database's types.
 func (o *APIOutput) WorkerQueues() []string {
 	var out []string
-	for _, w := range o.Workers {
+	for _, w := range o.OrdinaryWorkers() {
 		if !slices.Contains(out, w.Queue) {
 			out = append(out, w.Queue)
 		}

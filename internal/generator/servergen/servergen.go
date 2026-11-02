@@ -414,6 +414,12 @@ type Worker struct {
 	Database     *Database
 	Concurrency  int
 	GraceSeconds int
+
+	// Behavior is set for a @behaviorWorker (D103), whose handler the
+	// API's generator writes: its main runs the table's behavior queues
+	// and builds no Deps or Workers. Method is empty then. Nil for an
+	// ordinary worker.
+	Behavior *apigen.BehaviorWorkerInfo
 }
 
 // Background reports whether the entrypoint is a job's, a worker's or an
@@ -421,6 +427,19 @@ type Worker struct {
 // on no port, verifies no end user or caller, and decrypts no payload.
 func (s *Server) Background() bool {
 	return s.Job != nil || s.Worker != nil || s.Runner != nil
+}
+
+// BehaviorWorker reports whether the entrypoint is a behavior worker's
+// (D103): it opens the API's database and its ORM, and runs the queues of
+// the worker's generated handler, building no Deps and no implementation.
+func (s *Server) BehaviorWorker() bool {
+	return s.Worker != nil && s.Worker.Behavior != nil
+}
+
+// QueuesFunc is the function of the API package that returns a behavior
+// worker's queues (D103), as apigen writes it.
+func (w *Worker) QueuesFunc() string {
+	return apigen.WorkerInfo{Name: w.Name, Behavior: w.Behavior}.QueuesFunc()
 }
 
 // Require is a go.mod require line.
@@ -769,7 +788,7 @@ func Plan(in Input) (*Server, error) {
 			grace = ir.DefaultWorkerGraceSeconds
 		}
 		s.Kind, s.Binary = "worker", "worker"
-		s.Worker = &Worker{Name: o.Workers[i].Name, Method: o.Workers[i].Method, Queue: o.Workers[i].Queue, Concurrency: o.Workers[i].Concurrency, GraceSeconds: grace}
+		s.Worker = &Worker{Name: o.Workers[i].Name, Method: o.Workers[i].Method, Queue: o.Workers[i].Queue, Concurrency: o.Workers[i].Concurrency, GraceSeconds: grace, Behavior: o.Workers[i].Behavior}
 	case len(in.APIs) == 0:
 		return nil, fmt.Errorf("stack %s: server %s serves no API", in.Stack, in.Server)
 	default:
@@ -874,6 +893,11 @@ func Plan(in Input) (*Server, error) {
 				d.Types = taken.take(packageName(d.Service) + "types")
 				d.TypesModule = in.Naming.OrDefault().GoTypesModule(d.Service)
 			}
+		}
+		if s.BehaviorWorker() {
+			// A behavior worker builds no Deps: it opens the database alone,
+			// whose ORM its handler runs on (D103).
+			continue
 		}
 		for _, call := range o.Deps.Calls {
 			c := clients[call.Service]

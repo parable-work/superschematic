@@ -142,6 +142,11 @@
         "minLength": 1,
         "type": "string"
       },
+      "status": {
+        "description": "The field of the type whose Workflow the deadlines read and move: their enters starts, then and until. Implied when the type has one Workflow; needed when it has several. A type anchored Workflow is named Workflow.",
+        "minLength": 1,
+        "type": "string"
+      },
       "sweepMs": {
         "description": "How often the engine's runner fires the due deadlines, in milliseconds; 5000 when absent.",
         "minimum": 1000,
@@ -159,6 +164,51 @@
       "description": "Each started deadline, by name: { dueAt, fired, firedAt?, outcome? }, when it is due, in epoch milliseconds, whether it has fired and when, and what its then met: moved, skipped (the status was not one it moves from), vetoed or forbidden. A deadline not started, or cancelled, is absent. Nothing in it follows the clock: a deadline is overdue while it has not fired and its dueAt has passed."
     }
   ],
+  "tables": [
+    {
+      "name": "deadlines",
+      "description": "One row per deadline started on the row, keyed by the deadline's name: the time it starts from, the fact it started from, when it is due (null once until cancelled it), whether and when it fired, and what its then met.",
+      "key": "name",
+      "fields": [
+        {
+          "name": "name",
+          "description": "The deadline's name in the config.",
+          "type": "string"
+        },
+        {
+          "name": "baseAt",
+          "description": "The time the deadline starts from, in epoch milliseconds: the create's, the status's entry's, or the field's.",
+          "type": "Temporal.DateTime"
+        },
+        {
+          "name": "armedFrom",
+          "description": "The fact it started from, as text: the create's or the entry's time, or the field's value. A write that leaves it as it is arms nothing.",
+          "type": "string"
+        },
+        {
+          "name": "dueAt",
+          "description": "When it is due, in epoch milliseconds; null once until cancelled it.",
+          "type": "Temporal.DateTime"
+        },
+        {
+          "name": "fired",
+          "description": "Whether it fired.",
+          "type": "boolean"
+        },
+        {
+          "name": "firedAt",
+          "description": "When it fired.",
+          "type": "Temporal.DateTime"
+        },
+        {
+          "name": "outcome",
+          "description": "What its then met when it fired: moved, skipped, vetoed or forbidden.",
+          "type": "string"
+        }
+      ]
+    }
+  ],
+  "armsDeadlines": true,
   "operations": [
     {
       "name": "fireTimer",

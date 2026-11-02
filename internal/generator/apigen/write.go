@@ -43,7 +43,7 @@ var templatesFS embed.FS
 //	├── config.go        # EnvConfig and its loader (settings or derived fields)
 //	├── constants.go     # SystemUserID (public schemas with a UUID scalar)
 //	├── caller.go        # The ORM acting as each request's caller (D87; with a Deps database only)
-//	├── behaviors.go     # The behavior operations' caller and refusals (D103; with a behavior operation only)
+//	├── behaviors.go     # The behavior operations' caller and refusals, and the behavior workers' queues (D103; with either only)
 //	└── fileupload.go    # Multipart upload helpers (only with file uploads)
 func WriteAPI(output *APIOutput, outputDir string) error {
 	return WriteAPIWithProfile(output, outputDir, nil, false)
@@ -129,7 +129,7 @@ func WriteAPIWithProfile(output *APIOutput, outputDir string, prof *profile.Prof
 		{Condition: output.HasConstants(), Template: "constants.tmpl", Filename: "constants.go"},
 		{Condition: output.HasFileUpload, Template: "fileupload.tmpl", Filename: "fileupload.go"},
 		{Condition: output.Deps.Database != "", Template: "caller.tmpl", Filename: "caller.go"},
-		{Condition: output.HasBehaviorEndpoints(), Template: "behaviors.tmpl", Filename: "behaviors.go"},
+		{Condition: output.HasBehaviorEndpoints() || output.HasBehaviorWorkers(), Template: "behaviors.tmpl", Filename: "behaviors.go"},
 	}
 	if err := codegen.WriteConditionalFilesParallel(conditionalFiles, outputDir, func(templateName, outputPath string) error {
 		return generateFile(generator, templatesFS, templateName, outputPath, output, funcs)

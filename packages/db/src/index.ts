@@ -56,6 +56,9 @@ export type {
   OnDeleteAction,
   Relation,
   RelationOptions,
+  Timers,
+  TimersDeadlineOn,
+  TimersOn,
   Workflow,
   WorkflowConfig,
 } from "./wrappers";

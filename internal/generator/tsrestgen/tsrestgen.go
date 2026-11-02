@@ -30,6 +30,7 @@ import (
 	"text/template"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
+	"github.com/parable-work/superschematic/internal/generator/behaviorlayout"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/permcatalog"
@@ -190,8 +191,9 @@ type BehaviorRoute struct {
 	// Set is the @behaviorOperations set that serves the operation.
 	Set string
 	// Database, Type, Use, Behavior and Operation are the loader's marker:
-	// the API's database, the table, the use's id (its field), the
-	// behavior and the operation's name in the behavior's declaration.
+	// the API's database, the table, the use's id (its field, or the
+	// behavior's name for a use the table implements), the behavior and
+	// the operation's name in the behavior's declaration.
 	Database  string
 	Type      string
 	Use       string
@@ -200,16 +202,20 @@ type BehaviorRoute struct {
 	// Repository is the ORM's member that holds the table's repository, as
 	// tsgen names it: the table's name with its first letter lower-cased.
 	Repository string
+	// Member is the repository's member the use's operations sit under, as
+	// tsgen names it (behaviorlayout.UseMember): the field, or timers for
+	// implements Timers.
+	Member string
 	// Key is the path parameter that holds the row's key, which the
 	// repository's method takes first.
 	Key ParamInfo
 }
 
 // Method is the repository's method the route calls, under RouterOptions.orm:
-// order.status.transition, the operation under its use under the table's
-// repository, as orm.ts declares them.
+// order.status.transition or ticket.timers.fireTimer, the operation under
+// its use's member under the table's repository, as orm.ts declares them.
 func (r *BehaviorRoute) Method() string {
-	return r.Repository + "." + r.Use + "." + r.Operation
+	return r.Repository + "." + r.Member + "." + r.Operation
 }
 
 // UploadInfo is one file part of a multipart input (D81).
@@ -420,13 +426,14 @@ type APIOutput struct {
 	// User table.
 	Identity *IdentityInfo
 
-	// FieldBehaviors reports whether the API's database, found in
-	// Options.Dependencies or Options.AuthDB, has a table whose fields are
-	// behaviors (D103): its repositories, orm.ts, then import the
-	// behaviors' core's package (Naming.RulesNpmPackage), which a server
-	// that opens Deps.orm resolves and whose wasm module its image builds.
-	// Set whether or not the API serves the table's behavior operations.
-	FieldBehaviors bool
+	// TableBehaviors reports whether the API's database, found in
+	// Options.Dependencies or Options.AuthDB, has a table that composes
+	// behaviors, by implements or field types (D103): its repositories,
+	// orm.ts, then import the behaviors' core's package
+	// (Naming.RulesNpmPackage), which a server or a worker that opens
+	// Deps.orm resolves and whose wasm module its image builds. Set whether
+	// or not the API serves the table's behavior operations.
+	TableBehaviors bool
 
 	// TypeImports are the type-only imports of interfaces.ts from
 	// `<package>/types` (inputs, outputs, enum parameters);
@@ -533,6 +540,18 @@ func (o *APIOutput) BehaviorRoutes() []*BehaviorRoute {
 	return out
 }
 
+// BehaviorsOnFields reports whether every behavior operation the API serves
+// is a field's (D103), as router.ts's and the README's prose say; one of a
+// use a table implements is the table's.
+func (o *APIOutput) BehaviorsOnFields() bool {
+	for _, route := range o.BehaviorRoutes() {
+		if route.Member != route.Use {
+			return false
+		}
+	}
+	return true
+}
+
 // HasBehaviors reports whether the API serves a table's behavior
 // operations (D103): RouterOptions then takes orm, the repositories of the
 // API's database, which run them.
@@ -631,7 +650,7 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 		PGTypesVersion:        PGTypesVersion,
 		NodeTypesVersion:      NodeTypesVersion,
 		Jobs:                  jobsOf(schema),
-		Workers:               workersOf(schema),
+		Workers:               workersOf(schema, opts.Dependencies),
 	}
 
 	if opts.AuthDB != nil && opts.AuthDB.UserTable() != nil {
@@ -643,7 +662,7 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 		}
 	}
 
-	output.FieldBehaviors = databaseHasFieldBehaviors(schema, opts)
+	output.TableBehaviors = databaseHasTableBehaviors(schema, opts)
 
 	keyOf, err := operationKeys(apiOutput.Endpoints)
 	if err != nil {
@@ -806,20 +825,42 @@ func operationKeys(endpoints []apigen.EndpointInfo) (func(apigen.EndpointInfo) s
 	return keyOf, nil
 }
 
-// databaseHasFieldBehaviors reports whether the API's database (its authDb,
-// or its one DB dependency), as opts holds it loaded, has a table whose
-// fields are behaviors (D103).
-func databaseHasFieldBehaviors(schema *ir.Schema, opts Options) bool {
+// databaseOf is the API's database (its authDb, or its one DB dependency)
+// as opts holds it loaded, or nil.
+func databaseOf(schema *ir.Schema, opts Options) *ir.Schema {
 	db, _, ok := schema.Database()
 	if !ok {
-		return false
+		return nil
 	}
-	dbSchema := opts.Dependencies[db]
 	if opts.AuthDB != nil && opts.AuthDB.Name == db {
-		dbSchema = opts.AuthDB
+		return opts.AuthDB
 	}
-	_, _, _, found := dbSchema.FindFieldBehavior()
+	return opts.Dependencies[db]
+}
+
+// databaseHasTableBehaviors reports whether the API's database, as opts
+// holds it loaded, has a table that composes behaviors (D103).
+func databaseHasTableBehaviors(schema *ir.Schema, opts Options) bool {
+	_, _, found := databaseOf(schema, opts).FindTableBehavior()
 	return found
+}
+
+// useMember is the repository's member the operations of the use op names
+// sit under, as tsgen names it (behaviorlayout.UseMember): the use's field,
+// or the behavior's storage key in camel case for a use the table
+// implements, read from the API's database; the use's id in camel case
+// when the database is not loaded.
+func (b *builder) useMember(op *ir.BehaviorOperation) string {
+	if db := databaseOf(b.schema, b.opts); db != nil {
+		if td := db.Types[op.Type]; td != nil {
+			for _, ref := range td.TableBehaviors() {
+				if ref.UseID() == op.Use {
+					return behaviorlayout.UseMember(ref)
+				}
+			}
+		}
+	}
+	return tsutil.ToCamelCase(op.Use)
 }
 
 // identifierPattern matches a TypeScript identifier a member access can
@@ -846,8 +887,9 @@ func (b *builder) behaviorEndpoint(ep apigen.EndpointInfo, op *ir.BehaviorOperat
 		Behavior:   op.Behavior,
 		Operation:  op.Operation,
 		Repository: lowerFirst(op.Type),
+		Member:     b.useMember(op),
 	}
-	for _, member := range []string{route.Repository, route.Use, route.Operation} {
+	for _, member := range []string{route.Repository, route.Member, route.Operation} {
 		if !identifierPattern.MatchString(member) {
 			return endpoint, fmt.Errorf("tsrestgen: behavior operation %s.%s runs %s's %s %s, and the repository's member %q is no identifier the router can call it by", ep.Namespace, ep.Name, op.Type, op.Use, op.Operation, member)
 		}
@@ -1533,6 +1575,9 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 	if err := output.checkBehaviorDeps(output.Deps); err != nil {
 		return err
 	}
+	if err := output.checkBehaviorWorkers(output.Deps); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return fmt.Errorf("create output dir %s: %w", outputDir, err)
 	}
@@ -1553,6 +1598,15 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		if err := generateFile(file.templateName, filepath.Join(outputDir, file.outputName), output); err != nil {
 			return fmt.Errorf("generate %s: %w", file.outputName, err)
 		}
+	}
+	// behavior-workers.ts exports the behavior workers' queues (D103); one
+	// an earlier build wrote for a worker no longer declared is removed.
+	if output.HasBehaviorWorkers() {
+		if err := generateFile("behavior-workers.tmpl", filepath.Join(outputDir, BehaviorWorkersFile), output); err != nil {
+			return fmt.Errorf("generate %s: %w", BehaviorWorkersFile, err)
+		}
+	} else if err := os.Remove(filepath.Join(outputDir, BehaviorWorkersFile)); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove stale %s: %w", BehaviorWorkersFile, err)
 	}
 	// config.ts is envgen's, written after this when the API has a
 	// configuration; one an earlier build wrote would import what no

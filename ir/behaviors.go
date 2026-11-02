@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 )
 
 // BehaviorRef is one behavior a type composes: code that adds fields,
@@ -18,8 +19,11 @@ import (
 // field anchor is the field-type form, `status: Workflow<{ ... }>`: the type
 // stays a table, the behavior's declared fields become columns of it that
 // the loader adds as fields (see [FieldBehavior]), and a type may carry one
-// behavior on any number of fields. A type uses one form or the other,
-// never both.
+// behavior on any number of fields. A type anchor with Implements set is
+// the implements form on a table, `implements Timers<Ticket, { ... }>`: the
+// type stays a table, as with a field anchor, and lists the behavior at
+// most once. A type takes @behavior or the table's forms (implements and
+// field types), never both.
 type BehaviorRef struct {
 	// Name is the registered behavior name: bare for a core behavior,
 	// "<extension>.<Name>" for an extension's.
@@ -30,6 +34,12 @@ type BehaviorRef struct {
 	// and prefixes its other fields' columns and its operations. Empty for
 	// a type anchor.
 	Field string `json:"field,omitempty" yaml:"field,omitempty"`
+
+	// Implements is true for a use a DB table implements, the type-anchored
+	// form on a table that stays a table (D103): `implements Timers<Ticket,
+	// Config>`. Field is empty. A type anchor without it is @behavior's
+	// (D16), which makes the type an engine type (D58).
+	Implements bool `json:"implements,omitempty" yaml:"implements,omitempty"`
 
 	// Config is the type's configuration of the behavior in canonical JSON
 	// ([CanonicalJSON]), as extension data is, so it is the same bytes from
@@ -103,25 +113,39 @@ func CanonicalizeBehaviors(refs []BehaviorRef) error {
 	return nil
 }
 
-// TypeBehaviors returns td's type-anchored uses, in list order: the
-// @behavior decorator's (D16).
+// TypeBehaviors returns td's @behavior uses, in list order (D16): those
+// anchored on the type and not implemented by a table. An implements use
+// is left out, so [TypeDef.IsEngineType] and every engine path see only
+// the decorator's form.
 func (td *TypeDef) TypeBehaviors() []BehaviorRef {
-	return td.behaviorsWhere(false)
+	return td.behaviorsWhere(func(ref BehaviorRef) bool { return !ref.FieldAnchored() && !ref.Implements })
 }
 
 // FieldBehaviors returns td's field-anchored uses, in list order (D103):
 // each a field whose type is a behavior.
 func (td *TypeDef) FieldBehaviors() []BehaviorRef {
-	return td.behaviorsWhere(true)
+	return td.behaviorsWhere(BehaviorRef.FieldAnchored)
 }
 
-func (td *TypeDef) behaviorsWhere(fieldAnchored bool) []BehaviorRef {
+// ImplementsBehaviors returns td's implements uses, in list order (D103):
+// each a behavior the table implements, anchored on the type.
+func (td *TypeDef) ImplementsBehaviors() []BehaviorRef {
+	return td.behaviorsWhere(func(ref BehaviorRef) bool { return !ref.FieldAnchored() && ref.Implements })
+}
+
+// TableBehaviors returns td's uses on a table that stays a table (D103):
+// each implements use and each field use, in list order.
+func (td *TypeDef) TableBehaviors() []BehaviorRef {
+	return td.behaviorsWhere(func(ref BehaviorRef) bool { return ref.FieldAnchored() || ref.Implements })
+}
+
+func (td *TypeDef) behaviorsWhere(keep func(BehaviorRef) bool) []BehaviorRef {
 	if td == nil {
 		return nil
 	}
 	var out []BehaviorRef
 	for _, ref := range td.Behaviors {
-		if ref.FieldAnchored() == fieldAnchored {
+		if keep(ref) {
 			out = append(out, ref)
 		}
 	}
@@ -143,10 +167,10 @@ func (td *TypeDef) FieldBehavior(field string) (BehaviorRef, bool) {
 }
 
 // IsEngineType reports whether td, a type of a DB schema, is an engine
-// type (D58): one that composes a type-anchored behavior, whose rows the
+// type (D58): one that composes a behavior by @behavior, whose rows the
 // engine keeps in its own tables, so it gets no table, no repository and
-// no migration of its own. A type whose uses are all field-anchored is not
-// one: it stays a table (D103).
+// no migration of its own. A type whose uses are all implements uses and
+// field uses is not one: it stays a table (D103).
 func (td *TypeDef) IsEngineType() bool {
 	return len(td.TypeBehaviors()) > 0
 }
@@ -189,6 +213,93 @@ func (s *Schema) FindBehavior() (typeName, behavior string, found bool) {
 		}
 	}
 	return "", "", false
+}
+
+// FindTableBehavior returns the first type, in name order over Types and
+// then Inputs, with a table behavior ([TypeDef.TableBehaviors]), and its
+// first such use (D103): what a generator that renders a table but not
+// its behaviors refuses.
+func (s *Schema) FindTableBehavior() (typeName string, use BehaviorRef, found bool) {
+	if s == nil {
+		return "", BehaviorRef{}, false
+	}
+	for _, types := range []map[string]*TypeDef{s.Types, s.Inputs} {
+		for _, name := range sortedStringMapKeys(types) {
+			if uses := types[name].TableBehaviors(); len(uses) > 0 {
+				return types[name].Name, uses[0], true
+			}
+		}
+	}
+	return "", BehaviorRef{}, false
+}
+
+// BehaviorTable marks a sub-table the loader adds for a use's declared
+// table (D103): a child table of the row, with a foreign key to it that
+// deletes it with the row, which only the behavior's operations write and
+// for which no repository is generated. Its rows are keyed within their
+// row by the declared key.
+type BehaviorTable struct {
+	// Row is the row's type: Ticket.
+	Row string `json:"row" yaml:"row"`
+
+	// Use is the use's id ([BehaviorRef.UseID]): Timers.
+	Use string `json:"use" yaml:"use"`
+
+	// Behavior is the use's registered behavior name: Timers.
+	Behavior string `json:"behavior" yaml:"behavior"`
+
+	// Table is the table's name in the behavior's declaration: deadlines.
+	Table string `json:"table" yaml:"table"`
+
+	// Key is the declared key field: name.
+	Key string `json:"key" yaml:"key"`
+
+	// RowField is the sub-table's relation field to the row: ticket.
+	RowField string `json:"rowField" yaml:"rowField"`
+}
+
+// BehaviorQueueDeadlines is the kind of the queue a table whose behaviors
+// arm deadlines is given (D103): one message per row, use and deadline,
+// due when the deadline falls due.
+const BehaviorQueueDeadlines = "deadlines"
+
+// BehaviorQueue marks a queue the loader adds for a table's behaviors
+// (D103): the queue of the deadlines they arm ([BehaviorQueueDeadlines]),
+// which a @behaviorWorker of an API over the table's database runs.
+type BehaviorQueue struct {
+	// Row is the table's type: Ticket.
+	Row string `json:"row" yaml:"row"`
+
+	// Kind is what the queue holds: [BehaviorQueueDeadlines].
+	Kind string `json:"kind" yaml:"kind"`
+
+	// Behaviors are the behaviors of the table's uses whose messages it
+	// holds, each once in list order: those that arm deadlines (Timers),
+	// which a generator's refusal of the worker that runs them names.
+	Behaviors []string `json:"behaviors,omitempty" yaml:"behaviors,omitempty"`
+}
+
+// Same reports whether q and other mark the same queue: of one table, of
+// one kind, for the same behaviors.
+func (q *BehaviorQueue) Same(other *BehaviorQueue) bool {
+	if q == nil || other == nil {
+		return q == other
+	}
+	return q.Row == other.Row && q.Kind == other.Kind && slices.Equal(q.Behaviors, other.Behaviors)
+}
+
+// BehaviorQueueOf returns the queue the loader added to s for the table
+// row's behaviors of kind, or nil.
+func (s *Schema) BehaviorQueueOf(row, kind string) *TypeDef {
+	if s == nil {
+		return nil
+	}
+	for _, name := range sortedStringMapKeys(s.Types) {
+		if td := s.Types[name]; td != nil && td.BehaviorQueue != nil && td.BehaviorQueue.Row == row && td.BehaviorQueue.Kind == kind {
+			return td
+		}
+	}
+	return nil
 }
 
 // FindFieldBehavior returns the first type, in name order over Types and

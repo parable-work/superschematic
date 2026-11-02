@@ -366,6 +366,37 @@ export function behaviorOperations(_table: abstract new (...args: never[]) => un
   return noopClassDecorator;
 }
 
+/** The options of a behavior worker (D103). */
+export type BehaviorWorkerOptions = {
+  /** How many messages of each of the table's behavior queues an instance handles at a time; one unless set. An environment's settings change it. */
+  readonly concurrency?: number;
+  /** How long a stopping worker lets its running handlers finish before it gives their messages back, a duration of whole seconds; eight seconds unless set. */
+  readonly grace?: string;
+  /** The permissions the worker's commands hold, which the core checks a move's permission against (a Workflow transition's that a Timers deadline's then makes); none unless set. */
+  readonly permissions?: readonly string[];
+};
+
+/**
+ * Runs a table's behaviors' timed work (D103) on a class with no members:
+ * its deadlines, each claimed from the table's deadline queue as it falls
+ * due and run through the behaviors' core in one transaction with the
+ * message's completion, as the worker (subject <API>/<class>, holding the
+ * permissions set here). The class is a worker of the API, a deployable of
+ * kind worker named after the API and the class, as @worker's is; its
+ * handler is generated, so the API's Workers and its implementation have no
+ * method for it. The table is a class of the API's database, its authDb or
+ * its one DB dependency, imported from that service's package, and one
+ * class runs a table.
+ *
+ * ```ts
+ * @behaviorWorker(Ticket, { concurrency: 2 })
+ * export abstract class TicketTimers {}
+ * ```
+ */
+export function behaviorWorker(_table: abstract new (...args: never[]) => unknown, _options?: BehaviorWorkerOptions): ClassDecorator {
+  return noopClassDecorator;
+}
+
 /** The options of a job: when it runs, and how long and how often it tries. */
 export type JobOptions = {
   /**

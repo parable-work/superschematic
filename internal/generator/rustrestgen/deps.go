@@ -12,6 +12,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/rustgen"
@@ -216,6 +217,37 @@ type WorkerInfo struct {
 	// its running handlers finish.
 	Concurrency  int
 	GraceSeconds int
+
+	// Behavior is set for a @behaviorWorker (D103): the worker runs its
+	// table's behavior queues through the behaviors' core, by functions
+	// src/behaviors.rs holds, so the Workers trait has no method for it
+	// and Method is empty. BehaviorQueues are those queues as
+	// src/behaviors.rs names them, deadlines first.
+	Behavior       *apigen.BehaviorWorkerInfo
+	BehaviorQueues []BehaviorQueue
+}
+
+// BehaviorQueue is a queue a behavior worker runs (D103), as
+// src/behaviors.rs names it.
+type BehaviorQueue struct {
+	// Queue is the queue's class in the database, the message's type in
+	// its Rust types (TicketDeadline), and Const the constant that holds
+	// its descriptor there (TICKET_DEADLINE_QUEUE).
+	Queue string
+	Const string
+
+	// Func is the function that opens the queue on a pool of the
+	// database, and Handler the one that runs a message claimed from it
+	// (ticket_timers_deadlines and run_ticket_timers_deadline), which the
+	// worker's main hands to the HTTP runtime's claim loop.
+	Func    string
+	Handler string
+}
+
+// CallerFunc is the function of src/behaviors.rs that gives the caller a
+// behavior worker's commands run as: ticket_timers_caller.
+func (w WorkerInfo) CallerFunc() string {
+	return rustutil.ToSnakeCase(w.Name) + "_caller"
 }
 
 // jobsOf reads the API's jobs, sorted by name.
@@ -246,27 +278,54 @@ func jobsOf(schema *ir.Schema) ([]JobInfo, error) {
 	return jobs, nil
 }
 
-// workersOf reads the API's workers, sorted by name.
-func workersOf(schema *ir.Schema) ([]WorkerInfo, error) {
-	var workers []WorkerInfo
+// workersOf reads the API's workers, sorted by name: its @worker classes,
+// and apart its @behaviorWorker classes (D103), whose handlers
+// src/behaviors.rs holds, each with the behaviors that arm its deadlines
+// from its database among deps.
+func workersOf(schema *ir.Schema, deps map[string]*ir.Schema) (workers, behaviorWorkers []WorkerInfo, err error) {
 	for _, w := range schema.Workers {
 		if w == nil {
 			continue
 		}
 		if err := registry.CheckWorker(w); err != nil {
-			return nil, fmt.Errorf("rustrestgen: worker %s: %w", w.Name, err)
+			return nil, nil, fmt.Errorf("rustrestgen: worker %s: %w", w.Name, err)
 		}
-		workers = append(workers, WorkerInfo{
+		info := WorkerInfo{
 			Name:         w.Name,
 			Method:       rustutil.Identifier(w.Name, "handle"),
 			Queue:        w.Queue,
 			QueueConst:   rustgen.QueueConst(w.Queue),
 			Concurrency:  registry.WorkerConcurrency(w),
 			GraceSeconds: registry.WorkerGraceSeconds(w),
-		})
+		}
+		if b := w.BehaviorWorker; b != nil {
+			if w.Queue == "" {
+				return nil, nil, fmt.Errorf("rustrestgen: @behaviorWorker %s runs %s's behaviors (D103), and the loader gave it no queue: load the schema with its verification, which adds %s's deadline queue", w.Name, b.Type, b.Type)
+			}
+			stem := rustutil.ToSnakeCase(w.Name)
+			info.Method = ""
+			info.Behavior = &apigen.BehaviorWorkerInfo{
+				Table:       b.Type,
+				Queues:      []string{w.Queue},
+				Subject:     ir.BehaviorWorkerSubject(schema.Name, w.Name),
+				Permissions: b.Permissions,
+				Behaviors:   apigen.ArmingBehaviors(schema, deps, b.Type),
+			}
+			info.BehaviorQueues = []BehaviorQueue{{
+				Queue:   w.Queue,
+				Const:   rustgen.QueueConst(w.Queue),
+				Func:    stem + "_deadlines",
+				Handler: "run_" + stem + "_deadline",
+			}}
+			behaviorWorkers = append(behaviorWorkers, info)
+			continue
+		}
+		workers = append(workers, info)
 	}
-	slices.SortFunc(workers, func(a, b WorkerInfo) int { return strings.Compare(a.Name, b.Name) })
-	return workers, nil
+	byName := func(a, b WorkerInfo) int { return strings.Compare(a.Name, b.Name) }
+	slices.SortFunc(workers, byName)
+	slices.SortFunc(behaviorWorkers, byName)
+	return workers, behaviorWorkers, nil
 }
 
 // HasJobs reports whether the API declares a job, for which deps.rs
@@ -335,11 +394,18 @@ func (o *APIOutput) DepsExports() string {
 	return strings.TrimPrefix(rustutil.UseLine("deps", names), "use ")
 }
 
+// HasDatabaseTypes reports whether the crate re-exports its database's
+// Rust types as database_types: for its workers' messages and queues,
+// a behavior worker's among them (D65, D103).
+func (o *APIOutput) HasDatabaseTypes() bool {
+	return o.Deps != nil && o.Deps.DatabaseTypesCrate != "" && (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0)
+}
+
 // DatabaseTypesDependency is the Cargo.toml dependency on the database's
-// Rust types for an API with workers, nil without one or when the crate
-// depends on them already for a dependency's validators.
+// Rust types for an API with workers or derivers, nil without one or when
+// the crate depends on them already for a dependency's validators.
 func (o *APIOutput) DatabaseTypesDependency() *DependencyCrate {
-	if (!o.HasWorkers() && !o.HasDerivers()) || o.Deps.DatabaseTypesCrate == "" {
+	if (!o.HasDatabaseTypes() && !o.HasDerivers()) || o.Deps.DatabaseTypesCrate == "" {
 		return nil
 	}
 	for _, crate := range o.DependencyCrates {
@@ -376,7 +442,7 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 		}
 		seen[m.Field] = m.Service
 	}
-	if len(o.Workers) > 0 && deps.DatabaseTypesCrate == "" {
+	if (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0) && deps.DatabaseTypesCrate == "" {
 		return fmt.Errorf("rustrestgen: %s declares workers, whose messages are its database's Rust types, and its Deps names none", o.SchemaName)
 	}
 	if len(o.Derivers) > 0 && (deps.DatabaseTypesCrate == "" || deps.Engine == nil) {

@@ -142,6 +142,12 @@ documents leave it out (D37):
 | Tool name, `methodName` | `order.status.transition`, `status.transition`: the TypeScript SDK's method path |
 | Parameters | the row's key (`id`) and the operation's parameters (`to`, an enum of the config's states), each required as the operation takes it |
 
+A behavior the table implements takes the field's place with its name:
+Timers' `fireTimer` on `Ticket` is the tool `ticket_timers_fire_timer`,
+titled `Ticket timers: fire timer`, capability `ticket.timers.fire-timer`,
+its tool name `ticket.timers.fireTimer`, and its parameters `id` and
+`deadline`, an enum of the config's deadlines.
+
 A TypeScript API's endpoint lists the tool and runs it through its route,
 so the set's `@requirePermission` and the core's own permission checks
 apply to a call as to a request, and a tool whose policy is `"ask"` asks

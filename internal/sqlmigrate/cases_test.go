@@ -6,8 +6,11 @@ import (
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/loader/behaviorfields"
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -24,6 +27,22 @@ const (
 	// sqlgenFixtures holds the services sqlgen's goldens are built from.
 	sqlgenFixtures = "../loader/tsreader/testdata/services"
 )
+
+// implementTimers has Product implement Timers with a deadline that starts
+// at its create (D103), and adds what the loader adds for it: its
+// sub-table, its deadline queue and _version, with their scalars.
+func implementTimers(s *ir.Schema) {
+	reg := registry.New(naming.Default())
+	product := typeNamed(s, "Product")
+	product.Behaviors = append(product.Behaviors, ir.BehaviorRef{Name: "Timers", Implements: true,
+		Config: []byte(`{"deadlines":{"restock":{"afterMs":86400000,"start":{"create":true}}}}`)})
+	if _, err := behaviorfields.Expand(s, reg); err != nil {
+		panic(err)
+	}
+	if err := loader.HydrateScalars(s, reg.Scalars()); err != nil {
+		panic(err)
+	}
+}
 
 type planCase struct {
 	name string
@@ -423,6 +442,9 @@ var planCases = []planCase{
 			fieldNamed(s, "Order", "total").TypeRef = ir.TypeRef{Name: "number"}
 			fieldNamed(s, "OrderSummary", "total").TypeRef = ir.TypeRef{Name: "number"}
 		}},
+	// A table gains a behavior that keeps a sub-table and arms deadlines
+	// (D103): the sub-table, the deadline queue and _version.
+	{name: "add-behavior-tables", after: implementTimers},
 	{name: "optimistic-on", after: func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true }},
 	{name: "optimistic-off", before: func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true }},
 	{name: "optimistic-to-versioned", noSQLite: "sqlite does not support @versioned",

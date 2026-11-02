@@ -3,6 +3,7 @@ package registry
 import (
 	"embed"
 	"path"
+	"slices"
 )
 
 // coreBehaviorFiles holds the declarations of the behaviors the core
@@ -81,4 +82,18 @@ func coreBehaviorSpecs() []BehaviorSpec {
 		specs = append(specs, BehaviorSpec{Package: behavior.pkg, Declaration: data})
 	}
 	return specs
+}
+
+// RulesBehaviors are the behaviors the behaviors' core runs (D103): those
+// superschematic-rules-behaviors registers (its NAMES), in its order, so a
+// build-time table may compose them. Of these, a table implements one that
+// names no value field (implements Timers<T, C>) and carries one that does
+// on a field (status: Workflow<C>). A test holds the list to the behaviors
+// each transcript of runtime/engine/testdata/rules records.
+var RulesBehaviors = []string{"Workflow", "Timers"}
+
+// RunsOnTheCore reports whether the behaviors' core runs the behavior name
+// (RulesBehaviors).
+func RunsOnTheCore(name string) bool {
+	return slices.Contains(RulesBehaviors, name)
 }

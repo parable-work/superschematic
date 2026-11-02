@@ -18,8 +18,9 @@ use superschematic_rules::{Behavior, ConfigError, ConfigTarget, Cx, Declaration,
 use crate::convert::{iso_of_millis, Bind, Cell};
 use crate::run::{self, Dialect, Statement, Store};
 use crate::{
-    Action, Caller, Code, Column, Command, Convert, Core, CreateOptions, Error, ExecuteOptions,
-    Host, Layout, Operation, OwnedField, Refusal, Table, TypeSpec, Use, MAX_ATTEMPTS,
+    Action, Caller, Claim, Code, Column, Command, Convert, Core, CreateOptions, Deadline,
+    DeadlineRun, Deadlines, Error, ExecuteOptions, Host, Layout, Operation, OwnedField, Refusal,
+    SubTable, Table, TypeSpec, Use, MAX_ATTEMPTS,
 };
 
 /// A UUID key in its two forms: base62 on the wire and in the core,
@@ -70,13 +71,16 @@ pub(crate) fn order_table() -> Table {
         uses: vec![Use {
             id: "status".into(),
             behavior: "Workflow".into(),
+            member: "status".into(),
             anchor: Some("status".into()),
             fields: vec![status, entered],
             operations: vec![Operation {
                 name: "transition".into(),
                 writes: true,
             }],
+            tables: Vec::new(),
         }],
+        deadlines: None,
         spec: TypeSpec::new("Order").with(UseSpec::on_field("status", "Workflow", flow())),
     }
 }
@@ -86,16 +90,37 @@ fn layout() -> Layout {
 }
 
 /// Order with the toy behavior on the whole type, its one field `seen` in
-/// `toy_seen`.
+/// `toy_seen`, its sub-table `notes` in `order_toy_notes` (each row keyed
+/// by `key`, its `body` and its `at`), and the queue its deadlines are
+/// armed in, `order_deadline_queue`.
 pub(crate) fn toy_table() -> Table {
+    let mut at = owned_field("at", "at", "at", "Temporal.DateTime");
+    at.column = at.column.converted(Convert::EpochMillis);
     Table {
         uses: vec![Use {
             id: "Toy".into(),
             behavior: "Toy".into(),
+            member: "toy".into(),
             anchor: None,
             fields: vec![owned_field("seen", "toySeen", "toy_seen", "string")],
             operations: Vec::new(),
+            tables: vec![SubTable {
+                name: "notes".into(),
+                table: "order_toy_notes".into(),
+                row: "order_id".into(),
+                key: owned_field("key", "key", "key", "string"),
+                fields: vec![owned_field("body", "body", "body", "string"), at],
+            }],
         }],
+        deadlines: Some(Deadlines {
+            queue: "OrderDeadline".into(),
+            table: "order_deadline_queue".into(),
+            row_key: "row_key".into(),
+            use_id: "use_id".into(),
+            name: "name".into(),
+            at: "at".into(),
+            payload: "payload".into(),
+        }),
         spec: TypeSpec::new("Order").with(UseSpec::on_type("Toy", None)),
         ..order_table()
     }
@@ -112,12 +137,16 @@ impl Behavior for Toy {
         Declaration::new("Toy")
             .field("seen")
             .table("notes")
+            .arms_deadlines()
             .operation("reserve", true)
             .operation("fence", true)
             .operation("ask", false)
             .operation("emit", true)
             .operation("note", true)
+            .operation("notes", false)
+            .operation("lockedNotes", false)
             .operation("arm", true)
+            .operation("clear", true)
             .operation("walk", false)
             .operation("mint", true)
     }
@@ -178,12 +207,36 @@ impl Behavior for Toy {
                 cx.emit("paid", json!({}))?;
                 Ok(Value::Null)
             }
+            // A sub-table row: inserted with the values params give, or
+            // updated with params' update, or deleted.
             "note" => {
-                cx.insert_row("notes", "n1", Map::new())?;
+                let values = |name: &str| {
+                    params
+                        .get(name)
+                        .and_then(Value::as_object)
+                        .cloned()
+                        .unwrap_or_default()
+                };
+                match params.get("change").and_then(Value::as_str) {
+                    Some("update") => cx.update_row("notes", "n1", values("values"))?,
+                    Some("delete") => cx.delete_row("notes", "n1")?,
+                    _ => cx.insert_row("notes", "n1", values("values"))?,
+                }
                 Ok(Value::Null)
             }
+            // The row's notes, as the core reads them, and under a lock.
+            "notes" => Ok(serde_json::to_value(cx.sub_rows("notes")?).unwrap_or_default()),
+            "lockedNotes" => {
+                cx.lock("Stock/s1")?;
+                Ok(serde_json::to_value(cx.sub_rows("notes")?).unwrap_or_default())
+            }
             "arm" => {
-                cx.arm("expire", cx.now() + 1000, Value::Null)?;
+                let payload = params.get("payload").cloned().unwrap_or(Value::Null);
+                cx.arm("expire", cx.now() + 1000, payload)?;
+                Ok(Value::Null)
+            }
+            "clear" => {
+                cx.clear("expire")?;
                 Ok(Value::Null)
             }
             // Reads a row it has not read on every run, so it never
@@ -201,6 +254,21 @@ impl Behavior for Toy {
             }
             _ => Err(cx.defect(format!("no operation {name}"))),
         }
+    }
+
+    // A deadline marks the row with its name, and one armed with
+    // {"again": true} arms itself again, a second later; one armed with
+    // {"reach": true} is refused not_found, as a rule that reached a row
+    // that is gone would be, while its own row and use are there.
+    fn deadline(&self, cx: &Cx<'_, Value>, name: &str, payload: &Value) -> Hook<()> {
+        if payload.get("reach") == Some(&Value::Bool(true)) {
+            return Err(Refusal::not_found("Shelf 7 not found").into());
+        }
+        cx.set("seen", format!("fired {name}"))?;
+        if payload.get("again") == Some(&Value::Bool(true)) {
+            cx.arm(name, cx.now() + 1000, Value::Null)?;
+        }
+        Ok(())
     }
 }
 
@@ -224,14 +292,16 @@ struct Recorded {
 
 /// A transaction in memory: a read of a row answers the row it holds (none
 /// for the key `absent`, or when it holds none), an existence probe whether
-/// it holds one, and apply what `applies` says for each attempt, true
-/// unless it says otherwise.
+/// it holds one, a read that begins with one of `responds`' texts its rows,
+/// and apply what `applies` says for each attempt, true unless it says
+/// otherwise.
 struct MemoryStore {
     dialect: Dialect,
     fenced: bool,
     row: Option<Vec<Cell>>,
     absent: Option<Bind>,
     applies: Vec<bool>,
+    responds: Vec<(String, Vec<Vec<Cell>>)>,
     recorded: RefCell<Recorded>,
 }
 
@@ -243,12 +313,20 @@ impl MemoryStore {
             row,
             absent: None,
             applies: Vec::new(),
+            responds: Vec::new(),
             recorded: RefCell::default(),
         }
     }
 
     fn applying(mut self, applies: &[bool]) -> Self {
         self.applies = applies.to_vec();
+        self
+    }
+
+    /// The store answering a read whose text begins with `text` with
+    /// `rows`.
+    fn responding(mut self, text: &str, rows: Vec<Vec<Cell>>) -> Self {
+        self.responds.push((text.to_owned(), rows));
         self
     }
 
@@ -279,6 +357,13 @@ impl Store for MemoryStore {
         let mut recorded = self.recorded.borrow_mut();
         recorded.queries.push((text.to_owned(), values.to_vec()));
         recorded.log.push("query".into());
+        if let Some((_, rows)) = self
+            .responds
+            .iter()
+            .find(|(prefix, _)| text.starts_with(prefix.as_str()))
+        {
+            return Ok(rows.clone());
+        }
         let row = match (&self.absent, values.first()) {
             (Some(absent), Some(first)) if absent == first => None,
             _ => self.row.clone(),
@@ -1031,7 +1116,7 @@ fn a_read_of_whether_a_type_has_rows_and_of_its_spec_answer_from_the_store_and_t
 }
 
 #[test]
-fn a_write_the_adapter_does_not_take_yet_and_a_run_that_never_settles_refuse_the_command_as_internal(
+fn an_outbox_event_the_adapter_does_not_take_yet_and_a_run_that_never_settles_refuse_the_command_as_internal(
 ) {
     let core = toy();
     let layout = Layout::new([toy_table()]);
@@ -1050,13 +1135,611 @@ fn a_write_the_adapter_does_not_take_yet_and_a_run_that_never_settles_refuse_the
     };
     assert_eq!(
         refused_by("emit"),
-        Refusal::internal("rules: emit of Order writes outbox events, which the adapter takes once each has a table of its own (D103's order of the work, step 3)")
+        Refusal::internal("rules: emit of Order writes outbox events, which the adapter takes once the outbox has a table of its own (D103's order of the work, step 3)")
     );
-    assert!(refused_by("note").message.contains("writes sub-table rows"));
-    assert!(refused_by("arm").message.contains("writes deadlines"));
     assert_eq!(
         refused_by("walk").message,
         "rules: walk of Order: the run still asked for reads or locks after 256 rounds"
+    );
+}
+
+/// The statements a toy operation's unit applies, on a store of `dialect`
+/// holding the toy's row.
+fn unit_of(dialect: Dialect, operation: &str, params: Value) -> Vec<Statement> {
+    let core = toy();
+    let layout = Layout::new([toy_table()]);
+    let host = Host::new(&core, &layout).with_clock(|| 2000);
+    let store = MemoryStore::new(dialect, Some(draft_row_of_toy()));
+    block(run::execute(
+        &host,
+        &store,
+        "Order",
+        toy_op(operation, params),
+        &ExecuteOptions::default(),
+    ))
+    .expect("applied");
+    let mut applied = store.applied();
+    assert_eq!(applied.len(), 1, "one unit");
+    applied.remove(0)
+}
+
+/// The toy row's write, held to its version: the first statement of every
+/// unit of a toy operation that writes.
+fn toy_row_write(dialect: Dialect) -> Statement {
+    let (key, version) = match dialect {
+        Dialect::Postgres => ("$1", "$2"),
+        Dialect::Sqlite => ("?1", "?2"),
+    };
+    write(
+        &format!(
+            r#"UPDATE "order" SET "_version" = "_version" + 1 WHERE "id" = {key} AND "_version" = {version}"#
+        ),
+        vec![text(KEY_COLUMN), Bind::Int(1)],
+    )
+}
+
+#[test]
+fn a_sub_table_row_write_is_one_statement_after_the_rows_held_to_one_row_its_values_in_the_layouts_order(
+) {
+    let insert = unit_of(
+        Dialect::Postgres,
+        "note",
+        json!({"values": {"at": 5000, "body": "hi"}}),
+    );
+    assert_eq!(
+        insert,
+        [
+            toy_row_write(Dialect::Postgres),
+            write(
+                r#"INSERT INTO "order_toy_notes" ("order_id", "key", "body", "at") VALUES ($1, $2, $3, $4) ON CONFLICT ("order_id", "key") DO NOTHING"#,
+                vec![text(KEY_COLUMN), text("n1"), text("hi"), iso(5000)]
+            )
+        ]
+    );
+    let update = unit_of(
+        Dialect::Sqlite,
+        "note",
+        json!({"change": "update", "values": {"body": "bye", "at": null}}),
+    );
+    assert_eq!(
+        update[1..],
+        [write(
+            r#"UPDATE "order_toy_notes" SET "body" = ?3, "at" = ?4 WHERE "order_id" = ?1 AND "key" = ?2"#,
+            vec![text(KEY_COLUMN), text("n1"), text("bye"), Bind::Null]
+        )]
+    );
+    // An update that sets nothing writes nothing.
+    assert_eq!(
+        unit_of(Dialect::Postgres, "note", json!({"change": "update"})),
+        [toy_row_write(Dialect::Postgres)]
+    );
+    assert_eq!(
+        unit_of(Dialect::Postgres, "note", json!({"change": "delete"}))[1..],
+        [write(
+            r#"DELETE FROM "order_toy_notes" WHERE "order_id" = $1 AND "key" = $2"#,
+            vec![text(KEY_COLUMN), text("n1")]
+        )]
+    );
+
+    // A value the layout's table does not hold, the key's among them, is
+    // the host's defect.
+    let core = toy();
+    let layout = Layout::new([toy_table()]);
+    let host = Host::new(&core, &layout);
+    for values in [json!({"colour": "red"}), json!({"key": "n2"})] {
+        let store = MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy()));
+        let refused = refusal(block(run::execute(
+            &host,
+            &store,
+            "Order",
+            toy_op("note", json!({ "values": values })),
+            &ExecuteOptions::default(),
+        )));
+        assert_eq!(refused.code, Code::Internal);
+        assert!(
+            refused
+                .message
+                .starts_with("rules: sub-table order_toy_notes has no field "),
+            "{}",
+            refused.message
+        );
+        assert!(store.applied().is_empty());
+    }
+}
+
+#[test]
+fn a_read_of_sub_table_rows_selects_the_rows_of_the_row_in_key_order_converted_as_owned_fields_are()
+{
+    let core = toy();
+    let layout = Layout::new([toy_table()]);
+    let host = Host::new(&core, &layout);
+    let read = r#"SELECT to_jsonb("key") AS c0, to_jsonb("body") AS c1, to_jsonb("at") AS c2 FROM "order_toy_notes" WHERE "order_id" = $1 ORDER BY "key" COLLATE "C""#;
+    let store = MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy())).responding(
+        r#"SELECT to_jsonb("key")"#,
+        vec![
+            vec![
+                Cell::Json(json!("n1")),
+                Cell::Json(json!("hi")),
+                Cell::Json(json!("1970-01-01T00:00:05+00:00")),
+            ],
+            vec![Cell::Json(json!("n2")), Cell::Json(Value::Null), Cell::Null],
+        ],
+    );
+    let executed = block(run::execute(
+        &host,
+        &store,
+        "Order",
+        toy_op("notes", json!({})),
+        &ExecuteOptions::default(),
+    ))
+    .expect("read");
+    assert_eq!(
+        executed.result,
+        json!([{"key": "n1", "values": {"body": "hi", "at": 5000}}, {"key": "n2", "values": {}}])
+    );
+    assert!(store
+        .queries()
+        .contains(&(read.to_owned(), vec![text(KEY_COLUMN)])));
+
+    // SQLite reads each column as it is stored, in its own key order.
+    let store = MemoryStore::new(Dialect::Sqlite, Some(draft_row_of_toy())).responding(
+        r#"SELECT "key""#,
+        vec![vec![
+            Cell::Text("n1".into()),
+            Cell::Null,
+            Cell::Text("1970-01-01T00:00:05.000Z".into()),
+        ]],
+    );
+    let executed = block(run::execute(
+        &host,
+        &store,
+        "Order",
+        toy_op("notes", json!({})),
+        &ExecuteOptions::default(),
+    ))
+    .expect("read");
+    assert_eq!(
+        executed.result,
+        json!([{"key": "n1", "values": {"at": 5000}}])
+    );
+    assert!(store.queries().iter().any(|(text, _)| text
+        == r#"SELECT "key" AS c0, "body" AS c1, "at" AS c2 FROM "order_toy_notes" WHERE "order_id" = ?1 ORDER BY "key""#));
+
+    // A store whose locks are fenced has no check of one under a lock yet.
+    let fenced = MemoryStore::new(Dialect::Sqlite, Some(draft_row_of_toy())).fenced();
+    let refused = refusal(block(run::execute(
+        &host,
+        &fenced,
+        "Order",
+        toy_op("lockedNotes", json!({})),
+        &ExecuteOptions::default(),
+    )));
+    assert_eq!(
+        refused,
+        Refusal::internal(
+            "rules: a read of sub-table rows under a lock has no check on SQLite or D1 yet (D103)"
+        )
+    );
+}
+
+#[test]
+fn a_deadline_armed_or_cleared_deletes_its_messages_and_an_arm_inserts_one_due_when_it_falls_due() {
+    let key = || vec![text(KEY_COLUMN), text("Toy"), text("expire")];
+    let clear = |p: [&str; 3]| Statement {
+        text: format!(
+            r#"DELETE FROM "order_deadline_queue" WHERE "row_key" = {} AND "use_id" = {} AND "name" = {}"#,
+            p[0], p[1], p[2]
+        ),
+        values: key(),
+        expect: None,
+        check: false,
+    };
+    let armed = |text: &str, payload: Bind| Statement {
+        text: text.into(),
+        values: [key(), vec![Bind::Int(3000), payload]].concat(),
+        expect: None,
+        check: false,
+    };
+    assert_eq!(
+        unit_of(Dialect::Postgres, "arm", json!({"payload": {"n": 1}})),
+        [
+            toy_row_write(Dialect::Postgres),
+            clear(["$1", "$2", "$3"]),
+            armed(
+                r#"INSERT INTO "order_deadline_queue" ("row_key", "use_id", "name", "at", "payload", "due_at") VALUES ($1, $2, $3, $4, $5::jsonb, to_timestamp($4::bigint / 1000.0))"#,
+                text(r#"{"n":1}"#)
+            )
+        ]
+    );
+    assert_eq!(
+        unit_of(Dialect::Sqlite, "arm", json!({}))[1..],
+        [
+            clear(["?1", "?2", "?3"]),
+            armed(
+                r#"INSERT INTO "order_deadline_queue" ("row_key", "use_id", "name", "at", "payload", "due_at") VALUES (?1, ?2, ?3, ?4, ?5, strftime('%Y-%m-%dT%H:%M:%fZ', ?4 / 1000.0, 'unixepoch'))"#,
+                Bind::Null
+            )
+        ]
+    );
+    // A string payload binds as its JSON text.
+    assert_eq!(
+        unit_of(Dialect::Postgres, "arm", json!({"payload": "soon"}))[2].values[4],
+        text(r#""soon""#)
+    );
+    assert_eq!(
+        unit_of(Dialect::Postgres, "clear", json!({})),
+        [toy_row_write(Dialect::Postgres), clear(["$1", "$2", "$3"])]
+    );
+}
+
+#[test]
+fn a_delete_deletes_the_rows_messages_and_a_hard_one_its_sub_table_rows_after_its_fenced_write() {
+    let core = toy();
+    let layout = Layout::new([toy_table()]);
+    let host = Host::new(&core, &layout);
+    let store = MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy()));
+    block(run::run_delete(
+        &host,
+        &store,
+        "Order",
+        KEY,
+        alice(),
+        &ExecuteOptions::default(),
+    ))
+    .expect("deleted");
+    let any = |text: &str| Statement {
+        text: text.into(),
+        values: vec![self::text(KEY_COLUMN)],
+        expect: None,
+        check: false,
+    };
+    assert_eq!(
+        store.applied(),
+        [[
+            write(
+                r#"DELETE FROM "order" WHERE "id" = $1 AND "_version" = $2"#,
+                vec![text(KEY_COLUMN), Bind::Int(1)]
+            ),
+            any(r#"DELETE FROM "order_deadline_queue" WHERE "row_key" = $1"#),
+            any(r#"DELETE FROM "order_toy_notes" WHERE "order_id" = $1"#),
+        ]]
+    );
+
+    // A soft delete keeps the row's sub-table rows, its state for a
+    // restore, and deletes its messages.
+    let store = MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy()));
+    let options = ExecuteOptions {
+        own_columns: None,
+        soft_delete: Some(own(json!({"deleted_at": "1970-01-01T00:00:09.000Z"}))),
+    };
+    block(run::run_delete(
+        &host,
+        &store,
+        "Order",
+        KEY,
+        alice(),
+        &options,
+    ))
+    .expect("deleted");
+    let applied = store.applied();
+    assert_eq!(applied[0].len(), 2, "{applied:?}");
+    assert_eq!(
+        applied[0][1],
+        any(r#"DELETE FROM "order_deadline_queue" WHERE "row_key" = $1"#)
+    );
+}
+
+/// The toy's deadline `expire` of the row, armed at 3000 with `payload`.
+fn expire(payload: Value) -> Deadline {
+    Deadline {
+        key: KEY.into(),
+        use_id: "Toy".into(),
+        name: "expire".into(),
+        at: 3000,
+        payload,
+    }
+}
+
+fn claim() -> Claim {
+    Claim {
+        id: "6c1f6f1e-6d3a-4f39-9a2b-1d2e3f4a5b6c".into(),
+        token: "0b7c5e1a-2f3d-4c5b-8a9e-7d6c5b4a3f2e".into(),
+    }
+}
+
+/// The spend of a claim, by its id and token, held to one row.
+fn claim_spend() -> Statement {
+    write(
+        r#"DELETE FROM "order_deadline_queue" WHERE "id" = $1::uuid AND "claim_token" = $2::uuid AND "state" = 'claimed'"#,
+        vec![text(&claim().id), text(&claim().token)],
+    )
+}
+
+#[test]
+fn a_claimed_deadline_runs_at_its_time_and_spends_its_claim_after_the_row_write_and_before_the_deadline_it_arms_again(
+) {
+    let core = toy();
+    let layout = Layout::new([toy_table()]);
+    // The host's clock lags the time the deadline fell due at.
+    let host = Host::new(&core, &layout).with_clock(|| 2500);
+    let store = MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy()));
+    let run = block(run::run_deadline(
+        &host,
+        &store,
+        "Order",
+        &expire(json!({"again": true})),
+        Caller::new("api/Expiry", Vec::<String>::new()),
+        Some(&claim()),
+    ))
+    .expect("ran");
+    let DeadlineRun::Ran(executed) = &run else {
+        panic!("not run: {run:?}");
+    };
+    assert_eq!((run.ran(), run.why()), (true, ""));
+    // It ran at the time it fell due, not the host's.
+    assert_eq!(executed.changes.deadlines.len(), 1);
+    let applied = store.applied();
+    assert_eq!(applied.len(), 1);
+    let unit = &applied[0];
+    assert_eq!(
+        unit[0],
+        write(
+            r#"UPDATE "order" SET "toy_seen" = $1, "_version" = "_version" + 1 WHERE "id" = $2 AND "_version" = $3"#,
+            vec![text("fired expire"), text(KEY_COLUMN), Bind::Int(1)]
+        )
+    );
+    assert_eq!(unit[1], claim_spend());
+    assert!(unit[2]
+        .text
+        .starts_with(r#"DELETE FROM "order_deadline_queue" WHERE "row_key""#));
+    assert!(unit[3]
+        .text
+        .starts_with(r#"INSERT INTO "order_deadline_queue""#));
+    assert_eq!(
+        unit[3].values[3],
+        Bind::Int(4000),
+        "armed a second after 3000"
+    );
+    assert_eq!(unit.len(), 4);
+    // The claim needs no read of the arming: the spend in the unit is the
+    // check.
+    assert!(!store
+        .queries()
+        .iter()
+        .any(|(text, _)| text.contains("order_deadline_queue")));
+}
+
+#[test]
+fn a_claimed_deadline_whose_unit_did_not_apply_reads_its_claim_and_runs_nothing_once_it_is_gone() {
+    let core = toy();
+    let layout = Layout::new([toy_table()]);
+    let host = Host::new(&core, &layout).with_clock(|| 9000);
+    let held = r#"SELECT 1 FROM "order_deadline_queue" WHERE "id" = $1::uuid AND "claim_token" = $2::uuid AND "state" = 'claimed'"#;
+    let lost = MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy()))
+        .applying(&[false])
+        .responding(held, Vec::new());
+    let run = block(run::run_deadline(
+        &host,
+        &lost,
+        "Order",
+        &expire(Value::Null),
+        Caller::default(),
+        Some(&claim()),
+    ))
+    .expect("ran nothing");
+    assert!(matches!(run, DeadlineRun::ClaimLost), "{run:?}");
+    assert_eq!(run.why(), "claim lost");
+    assert_eq!(lost.applied().len(), 1);
+    assert!(lost.queries().contains(&(
+        held.to_owned(),
+        vec![text(&claim().id), text(&claim().token)]
+    )));
+
+    // A claim still held when its row moved runs again from fresh state.
+    let moved = MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy()))
+        .applying(&[false, true])
+        .responding(held, vec![vec![Cell::Int(1)]]);
+    let run = block(run::run_deadline(
+        &host,
+        &moved,
+        "Order",
+        &expire(Value::Null),
+        Caller::default(),
+        Some(&claim()),
+    ))
+    .expect("ran");
+    let DeadlineRun::Ran(executed) = run else {
+        panic!("not run");
+    };
+    assert_eq!(executed.attempts, 2);
+}
+
+#[test]
+fn a_deadline_whose_row_is_gone_spends_its_arming_in_a_unit_of_its_own_and_runs_nothing() {
+    let core = toy();
+    let layout = Layout::new([toy_table()]);
+    let host = Host::new(&core, &layout).with_clock(|| 9000);
+    let gone = MemoryStore::new(Dialect::Postgres, None);
+    let run = block(run::run_deadline(
+        &host,
+        &gone,
+        "Order",
+        &expire(Value::Null),
+        Caller::default(),
+        Some(&claim()),
+    ))
+    .expect("ran nothing");
+    let DeadlineRun::Gone(refusal) = &run else {
+        panic!("not gone: {run:?}");
+    };
+    assert_eq!(refusal.code, Code::NotFound);
+    assert_eq!(run.why(), "gone");
+    assert_eq!(gone.applied(), [[claim_spend()]]);
+
+    // A use the layout no longer lists is gone with its row there.
+    let lapsed = MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy()));
+    let deadline = Deadline {
+        use_id: "Lapsed".into(),
+        ..expire(Value::Null)
+    };
+    let run = block(run::run_deadline(
+        &host,
+        &lapsed,
+        "Order",
+        &deadline,
+        Caller::default(),
+        Some(&claim()),
+    ))
+    .expect("ran nothing");
+    assert!(matches!(run, DeadlineRun::Gone(_)), "{run:?}");
+    assert_eq!(lapsed.applied(), [[claim_spend()]]);
+
+    // A not_found while the row and the use are there is of something a
+    // rule reached: the run's refusal, nothing spent, so the worker fails
+    // the message and it falls due again.
+    let there = MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy()));
+    let refused = block(run::run_deadline(
+        &host,
+        &there,
+        "Order",
+        &expire(json!({"reach": true})),
+        Caller::default(),
+        Some(&claim()),
+    ));
+    let Err(Error::Refused(refusal)) = &refused else {
+        panic!("not refused: {refused:?}");
+    };
+    assert_eq!(
+        (refusal.code, refusal.message.as_str()),
+        (Code::NotFound, "Shelf 7 not found")
+    );
+    assert!(there.applied().is_empty());
+
+    // A spend that finds the claim gone ran nothing either.
+    let lost = MemoryStore::new(Dialect::Postgres, None).applying(&[false]);
+    let run = block(run::run_deadline(
+        &host,
+        &lost,
+        "Order",
+        &expire(Value::Null),
+        Caller::default(),
+        Some(&claim()),
+    ))
+    .expect("ran nothing");
+    assert!(matches!(run, DeadlineRun::ClaimLost), "{run:?}");
+}
+
+#[test]
+fn a_deadline_with_no_claim_runs_only_while_it_is_armed_at_its_time_and_spends_that_arming() {
+    let core = toy();
+    let layout = Layout::new([toy_table()]);
+    let host = Host::new(&core, &layout).with_clock(|| 9000);
+    let armed = r#"SELECT "at", "payload" FROM "order_deadline_queue" WHERE "row_key" = ?1 AND "use_id" = ?2 AND "name" = ?3 AND "state" IN ('ready', 'claimed')"#;
+    let deadline = |at: i64, now: i64| {
+        Command::new(
+            alice(),
+            now,
+            Action::Deadline {
+                key: KEY.into(),
+                use_id: "Toy".into(),
+                name: "expire".into(),
+                at,
+                payload: Value::Null,
+            },
+        )
+        .with_request("r9")
+    };
+    let store = |rows: Vec<Vec<Cell>>| {
+        MemoryStore::new(Dialect::Sqlite, Some(draft_row_of_toy())).responding(armed, rows)
+    };
+
+    let none = store(Vec::new());
+    let refused = refusal(block(run::execute(
+        &host,
+        &none,
+        "Order",
+        deadline(3000, 9000),
+        &ExecuteOptions::default(),
+    )));
+    assert_eq!(
+        refused,
+        Refusal::not_found(format!(
+            "Order {KEY} has no deadline Toy.expire armed at 3000"
+        ))
+    );
+    assert!(none.applied().is_empty());
+    assert_eq!(
+        none.queries()[0],
+        (
+            armed.to_owned(),
+            vec![text(KEY_COLUMN), text("Toy"), text("expire")]
+        )
+    );
+    // Armed at another time, it is not armed at this one.
+    let moved = store(vec![vec![Cell::Int(4000), Cell::Null]]);
+    let refused = refusal(block(run::execute(
+        &host,
+        &moved,
+        "Order",
+        deadline(3000, 9000),
+        &ExecuteOptions::default(),
+    )));
+    assert_eq!(refused.code, Code::NotFound);
+    // Armed at its time, and not yet due.
+    let early = store(vec![vec![Cell::Int(3000), Cell::Null]]);
+    let refused = refusal(block(run::execute(
+        &host,
+        &early,
+        "Order",
+        deadline(3000, 2000),
+        &ExecuteOptions::default(),
+    )));
+    assert_eq!(
+        refused,
+        Refusal::invalid_argument(format!(
+            "deadline Toy.expire of Order {KEY} falls due at 3000, after 2000"
+        ))
+    );
+
+    let due = store(vec![vec![Cell::Int(3000), Cell::Text("null".into())]]);
+    let executed = block(run::execute(
+        &host,
+        &due,
+        "Order",
+        deadline(3000, 9000),
+        &ExecuteOptions::default(),
+    ))
+    .expect("ran");
+    assert_eq!(executed.key.as_deref(), Some(KEY));
+    let unit = &due.applied()[0];
+    assert_eq!(
+        unit[1],
+        write(
+            r#"DELETE FROM "order_deadline_queue" WHERE "row_key" = ?1 AND "use_id" = ?2 AND "name" = ?3 AND "at" = ?4 AND "state" IN ('ready', 'claimed')"#,
+            vec![
+                text(KEY_COLUMN),
+                text("Toy"),
+                text("expire"),
+                Bind::Int(3000)
+            ]
+        )
+    );
+
+    // A table the layout gives no deadline queue runs none.
+    let bare = Layout::new([Table {
+        deadlines: None,
+        ..toy_table()
+    }]);
+    let refused = refusal(block(run::execute(
+        &Host::new(&core, &bare),
+        &store(Vec::new()),
+        "Order",
+        deadline(3000, 9000),
+        &ExecuteOptions::default(),
+    )));
+    assert_eq!(
+        refused,
+        Refusal::internal("rules: a deadline Toy.expire of Order ran, and the behaviors' layout gives Order no deadline queue")
     );
 }
 
@@ -1286,18 +1969,36 @@ fn a_create_of_a_type_whose_key_the_adapter_makes_none_for_names_its_key() {
 
 /// The tables the store tests on real databases run on, in a dialect: the
 /// layout of [`order_table`] as `order` and as the soft-deletable `ticket`,
-/// and [`toy_table`]'s as `toy`, each with sqlgen's `@optimistic` trigger.
+/// and [`toy_table`]'s as `toy`, with its sub-table `order_toy_notes` and
+/// its deadline queue `order_deadline_queue` as sqlgen writes a queue's,
+/// its live messages unique by row, use and name (D103), each table with
+/// sqlgen's `@optimistic` trigger.
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub(crate) fn ddl(postgres: bool) -> Vec<String> {
-    let (timestamp, version) = if postgres {
-        ("TIMESTAMPTZ", "BIGINT DEFAULT 1 NOT NULL")
+    let (timestamp, version, uuid, now, json) = if postgres {
+        (
+            "TIMESTAMPTZ",
+            "BIGINT DEFAULT 1 NOT NULL",
+            "UUID DEFAULT gen_random_uuid()",
+            "CURRENT_TIMESTAMP",
+            "JSONB",
+        )
     } else {
-        ("TEXT", "INTEGER DEFAULT 1 NOT NULL")
+        (
+            "TEXT",
+            "INTEGER DEFAULT 1 NOT NULL",
+            "TEXT DEFAULT (lower(hex(randomblob(16))))",
+            "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+            "TEXT",
+        )
     };
     let mut ddl = vec![
         format!("CREATE TABLE \"order\" (id TEXT PRIMARY KEY, title TEXT, status TEXT, status_entered_at {timestamp}, _version {version})"),
         format!("CREATE TABLE ticket (id TEXT PRIMARY KEY, title TEXT, status TEXT, status_entered_at {timestamp}, deleted_at {timestamp}, _version {version})"),
         format!("CREATE TABLE toy (id TEXT PRIMARY KEY, title TEXT, toy_seen TEXT, _version {version})"),
+        format!("CREATE TABLE order_toy_notes (order_id TEXT NOT NULL, key TEXT NOT NULL, body TEXT, at {timestamp}, PRIMARY KEY (order_id, key))"),
+        format!("CREATE TABLE order_deadline_queue (id {uuid} NOT NULL PRIMARY KEY, row_key TEXT NOT NULL, use_id TEXT NOT NULL, name TEXT NOT NULL, at BIGINT NOT NULL, payload {json}, state TEXT DEFAULT 'ready' NOT NULL, attempts INTEGER DEFAULT 0 NOT NULL, due_at {timestamp} DEFAULT {now} NOT NULL, claim_expires_at {timestamp}, claim_token {}, last_error TEXT)", if postgres { "UUID" } else { "TEXT" }),
+        "CREATE UNIQUE INDEX order_deadline_queue_live ON order_deadline_queue (row_key, use_id, name) WHERE state IN ('ready', 'claimed')".to_owned(),
     ];
     for table in ["order", "ticket", "toy"] {
         if postgres {

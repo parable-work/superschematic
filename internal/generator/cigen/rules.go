@@ -13,8 +13,10 @@ import (
 
 // rulesOf sets st's RulesCheckout, RulesGo and RulesTypeScript (D103): the
 // Go and TypeScript servers, jobs and workers of envs with a sql edge to a
-// database a table of which has a field that is a behavior, whose ORM and
-// repositories link the behaviors' core, when the naming file's [paths]
+// database a table of which composes a behavior (implements it, or has a
+// field that is one), whose ORM and repositories link the behaviors' core,
+// the behavior workers that run its deadlines among them, when the naming
+// file's [paths]
 // rules_go or rules_typescript names a checkout of the core's Go module or
 // npm package. A checkout outside the repository, where a CI job starts,
 // is logged and left out. A database the build cannot load is left to the
@@ -42,7 +44,7 @@ func rulesOf(c registry.GenerateContext, name string, st *registry.CIStack, envs
 			}
 			has, ok := behaviors[e.Service.Name]
 			if !ok {
-				has = fieldBehaviors(c, e.Service.Name)
+				has = tableBehaviors(c, e.Service.Name)
 				behaviors[e.Service.Name] = has
 			}
 			if !has {
@@ -90,9 +92,9 @@ func rulesCheckout(paths naming.LocalPaths) string {
 	return ""
 }
 
-// fieldBehaviors reports whether a table of the database db has a field
-// that is a behavior (D103).
-func fieldBehaviors(c registry.GenerateContext, db string) bool {
+// tableBehaviors reports whether a table of the database db composes a
+// behavior, by implements or on a field (D103).
+func tableBehaviors(c registry.GenerateContext, db string) bool {
 	if c.LoadDependency == nil {
 		return false
 	}
@@ -100,7 +102,7 @@ func fieldBehaviors(c registry.GenerateContext, db string) bool {
 	if err != nil {
 		return false
 	}
-	_, _, _, found := schema.FindFieldBehavior()
+	_, _, found := schema.FindTableBehavior()
 	return found
 }
 

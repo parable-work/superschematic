@@ -329,3 +329,57 @@ func (db *DB) Timestamp(t time.Time) any {
 	}
 	return t.UTC().Format("2006-01-02T15:04:05.000Z")
 }
+
+// sqliteUUIDDefault is a version 4 UUID's lowercase text, the default
+// internal/sqlmigrate's SQLite model gives a UUID key.
+const sqliteUUIDDefault = "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || " +
+	"substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || " +
+	"substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))"
+
+// DeadlineQueue is the DDL of a table's deadline queue (D103) as sqlgen
+// writes one in the dialect: a plain queue's columns, the message's row
+// key (of the SQL type rowKey, the row table's key's), use id, name, time
+// and payload, its unique index of the live messages by row, use and name,
+// and its index by row. Its id takes the dialect's UUID default, since an
+// arm's insert names none.
+func (db *DB) DeadlineQueue(table, rowKey string) []string {
+	quoted := `"` + strings.ReplaceAll(table, `"`, `""`) + `"`
+	var columns string
+	if db.Dialect == rules.DialectPostgres {
+		columns = fmt.Sprintf(`id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  row_key %s NOT NULL,
+  use_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  at BIGINT NOT NULL,
+  payload JSONB,
+  state TEXT DEFAULT 'ready' NOT NULL,
+  attempts INTEGER DEFAULT 0 NOT NULL,
+  due_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  claim_expires_at TIMESTAMPTZ,
+  claim_token UUID,
+  last_error TEXT,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL`, rowKey)
+	} else {
+		now := "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+		columns = fmt.Sprintf(`id TEXT DEFAULT %s NOT NULL PRIMARY KEY,
+  row_key %s NOT NULL,
+  use_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  payload TEXT,
+  state TEXT DEFAULT 'ready' NOT NULL,
+  attempts INTEGER DEFAULT 0 NOT NULL,
+  due_at TEXT DEFAULT %s NOT NULL,
+  claim_expires_at TEXT,
+  claim_token TEXT,
+  last_error TEXT,
+  created_at TEXT DEFAULT %s NOT NULL,
+  updated_at TEXT DEFAULT %s NOT NULL`, sqliteUUIDDefault, rowKey, now, now, now)
+	}
+	return []string{
+		fmt.Sprintf("CREATE TABLE %s (\n  %s\n)", quoted, columns),
+		fmt.Sprintf(`CREATE UNIQUE INDEX "%s_live" ON %s (row_key, use_id, name) WHERE state IN ('ready', 'claimed')`, table, quoted),
+		fmt.Sprintf(`CREATE INDEX "%s_row" ON %s (row_key)`, table, quoted),
+	}
+}

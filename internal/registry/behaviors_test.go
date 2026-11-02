@@ -687,3 +687,62 @@ func TestRegisterBehaviorNamespaceOperationsAndAsksRead(t *testing.T) {
 		t.Fatalf("operations = %v, want %v", got, want)
 	}
 }
+
+// A declaration's sub-tables (D103) are each named in camelCase once, keyed
+// by one of their string fields, and hold typed, stored fields, none named
+// id; Timers' declares its deadlines and arms deadlines.
+func TestRegisterBehaviorTables(t *testing.T) {
+	field := func(name, typeName string) map[string]any {
+		f := map[string]any{"name": name}
+		if typeName != "" {
+			f["type"] = typeName
+		}
+		return f
+	}
+	table := func(name, key string, fields ...map[string]any) map[string]any {
+		list := make([]any, len(fields))
+		for i, f := range fields {
+			list[i] = f
+		}
+		return map[string]any{"name": name, "key": key, "fields": list}
+	}
+	reg := New(naming.Default())
+	if err := reg.RegisterBehavior(BehaviorSpec{Extension: "acme", Declaration: declaration("acme.Clock", map[string]any{
+		"tables":        []any{table("ticks", "at", field("at", "string"), field("count", "number"))},
+		"armsDeadlines": true,
+	})}); err != nil {
+		t.Fatal(err)
+	}
+	clock, _ := reg.Behavior("acme.Clock")
+	if ticks, ok := clock.Table("ticks"); !ok || ticks.Key != "at" || len(ticks.Fields) != 2 || !clock.ArmsDeadlines {
+		t.Errorf("acme.Clock = %+v", clock.BehaviorDeclaration)
+	}
+	for _, tc := range []struct {
+		name   string
+		tables []any
+		want   string
+	}{
+		{"not camelCase", []any{table("Ticks", "at", field("at", "string"))}, `registry: behavior acme.Bad table "Ticks" is not camelCase`},
+		{"twice", []any{table("ticks", "at", field("at", "string")), table("ticks", "at", field("at", "string"))}, "registry: behavior acme.Bad table ticks is declared twice"},
+		{"a key of no field", []any{table("ticks", "when", field("at", "string"))}, `registry: behavior acme.Bad table ticks key "when" is not one of its fields`},
+		{"a key that is no string", []any{table("ticks", "at", field("at", "number"))}, "registry: behavior acme.Bad table ticks key at is of type number: a sub-table's key is a string"},
+		{"an untyped field", []any{table("ticks", "at", field("at", "string"), field("count", ""))}, "registry: behavior acme.Bad table ticks field count has no type: a sub-table's field is a column"},
+		{"a volatile field", []any{table("ticks", "at", field("at", "string"), map[string]any{"name": "count", "type": "number", "volatile": true})}, "registry: behavior acme.Bad table ticks field count is volatile: a sub-table's field is stored"},
+		{"a field named id", []any{table("ticks", "at", field("at", "string"), field("id", "string"))}, "registry: behavior acme.Bad table ticks declares a field id, the surrogate key the build gives every sub-table: name it otherwise"},
+		{"a field twice", []any{table("ticks", "at", field("at", "string"), field("at", "string"))}, `registry: behavior acme.Bad table ticks declares field "at" twice`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reg := New(naming.Default())
+			err := reg.RegisterBehavior(BehaviorSpec{Extension: "acme", Declaration: declaration("acme.Bad", map[string]any{"tables": tc.tables})})
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("RegisterBehavior = %v, want %q", err, tc.want)
+			}
+		})
+	}
+	core := New(naming.Default())
+	timers, _ := core.Behavior("Timers")
+	deadlines, ok := timers.Table("deadlines")
+	if !ok || deadlines.Key != "name" || !timers.ArmsDeadlines || len(deadlines.Fields) != 7 {
+		t.Errorf("Timers = tables %+v, armsDeadlines %v", timers.Tables, timers.ArmsDeadlines)
+	}
+}

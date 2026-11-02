@@ -2,14 +2,15 @@
 //! compiler registers and the engine embeds
 //! (`runtime/engine/rust/behaviors/declarations`): its name, the fields it
 //! owns and the one that holds a field anchor's value (`value`), its
-//! operations and whether each writes, its veto codes, and whether a create
-//! gives it parameters (a createParamsSchema). The file stays the one
-//! declaration; the core reads only what it holds a behavior to, and the
-//! rest (descriptions, schemas, each field's column type, which a table's
-//! layout reads) is the file's.
+//! sub-tables (`tables`: each one's name, key and fields) and whether it
+//! arms deadlines (`armsDeadlines`), its operations and whether each
+//! writes, its veto codes, and whether a create gives it parameters (a
+//! createParamsSchema). The file stays the one declaration; the core reads
+//! only what it holds a behavior to, and the rest (descriptions, schemas,
+//! each field's column type, which a table's layout reads) is the file's.
 
 use serde_json::Value;
-use superschematic_rules::Declaration;
+use superschematic_rules::{Declaration, TableDecl};
 
 /// The core's declaration of a declaration file's text. A member the file
 /// lacks reads as none, so a file that does not parse declares a behavior
@@ -25,6 +26,22 @@ pub(crate) fn declaration(text: &str) -> Declaration {
     }
     if let Some(value) = file.get("value").and_then(Value::as_str) {
         declaration = declaration.value(value);
+    }
+    for table in listed(&file, "tables") {
+        if let Some(name) = table.get("name").and_then(Value::as_str) {
+            declaration = declaration.sub_table(TableDecl {
+                name: name.to_owned(),
+                key: table.get("key").and_then(Value::as_str).map(str::to_owned),
+                fields: listed(table, "fields")
+                    .filter_map(|field| field.get("name").and_then(Value::as_str))
+                    .map(str::to_owned)
+                    .collect(),
+            });
+        }
+    }
+    // A behavior arms deadlines only when its file says so.
+    if file.get("armsDeadlines") == Some(&Value::Bool(true)) {
+        declaration = declaration.arms_deadlines();
     }
     for operation in listed(&file, "operations") {
         if let Some(name) = operation.get("name").and_then(Value::as_str) {
@@ -87,6 +104,19 @@ mod tests {
             declaration(r#"{"name": "Tally", "fields": [{"name": "count"}], "value": "count"}"#);
         assert_eq!(valued, Declaration::new("Tally").value("count"));
         assert_eq!(valued.fields, ["count"]);
+        // A file that declares sub-tables and arms deadlines says so.
+        let timed = declaration(
+            r#"{"name": "Tally",
+                "tables": [{"name": "entries", "key": "name", "fields": [{"name": "name", "type": "string"}, {"name": "at"}]}, {"description": "no name"}],
+                "armsDeadlines": true}"#,
+        );
+        assert_eq!(
+            timed,
+            Declaration::new("Tally")
+                .sub_table(TableDecl::new("entries", "name", ["name", "at"]))
+                .arms_deadlines()
+        );
+        assert!(!declaration(r#"{"name": "Tally", "armsDeadlines": "yes"}"#).arms_deadlines);
     }
 
     #[test]

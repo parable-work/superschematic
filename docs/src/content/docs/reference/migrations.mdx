@@ -722,8 +722,9 @@ the feature and the dialect:
 
 - `@versioned`, whose triggers SQLite's adapter does not read yet
   (`@optimistic` plans on SQLite: its bump is an `AFTER UPDATE` trigger
-  that gives the row it updated the next `_version`, which a table whose
-  fields are behaviors takes, D103);
+  that gives the row it updated the next `_version`, which a table that
+  composes behaviors takes, D103; its sub-tables and its deadline queue
+  plan on both dialects as any table);
 - projections;
 - an index method other than BTREE, such as the GIN or GIST an `@index`
   over a list, a JSON or an `LTREE` column picks, and an operator class

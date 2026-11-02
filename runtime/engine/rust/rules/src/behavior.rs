@@ -22,13 +22,15 @@
 //! [`ValidationRequest`]) are open: a hook matches the cases it handles and
 //! lets the rest through with a fallback arm.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::context::{ConfigCx, Cx, View};
-use crate::reads::{LockKey, ReadRequest};
+use crate::reads::{LockKey, ReadRequest, Row, SubRow};
 use crate::refusal::{Refusal, SchemaIssue, ValidationIssue, Veto};
-use crate::spec::{Anchor, TypeSpec, UseSpec};
+use crate::spec::{Anchor, FieldSpec, TypeSpec, UseSpec};
 
 /// What a hook returns: its value, or why the run stops here.
 pub type Hook<T> = Result<T, Stop>;
@@ -70,11 +72,13 @@ impl From<Refusal> for Stop {
 }
 
 /// What a behavior declares: its name, the fields it owns on a row and the
-/// one that holds a field anchor's value, its sub-tables, its operations,
-/// the veto codes it refuses with, and whether a create gives it
-/// parameters. The core holds a behavior's writes to it: a field or a
-/// sub-table it does not declare is a defect, and so is a veto code it does
-/// not list. Names are logical; the host's layout maps them to columns and
+/// one that holds a field anchor's value, its sub-tables, whether it arms
+/// deadlines, its operations, the veto codes it refuses with, and whether a
+/// create gives it parameters. The core holds a behavior's writes to it: a
+/// field or a sub-table it does not declare is a defect, and so are a value
+/// a sub-table it declares with fields does not hold, a deadline armed or
+/// cleared by a behavior that declares none, and a veto code it does not
+/// list. Names are logical; the host's layout maps them to columns and
 /// tables. It may gain members, so a behavior builds it with
 /// [`Declaration::new`] and the builder methods.
 ///
@@ -88,6 +92,9 @@ impl From<Refusal> for Stop {
 /// case>`, the storage key being the behavior's name lowercased with each
 /// run of other characters one `_` (Workflow: `workflow_status`,
 /// `workflow_entered_at`), so an own field of the same name sits beside it.
+/// A sub-table maps to a table of its own with a foreign key to the row,
+/// its key and each declared field a column, and a behavior that arms
+/// deadlines gives the row's table a deadline queue (the README's layout).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
@@ -100,8 +107,15 @@ pub struct Declaration {
     /// none cannot be anchored on a field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
+    /// The sub-tables it keeps per row, each a child table of the row its
+    /// uses run on, deleted with it, which only its operations write.
     #[serde(default)]
-    pub tables: Vec<String>,
+    pub tables: Vec<TableDecl>,
+    /// Whether it arms deadlines ([`crate::Cx::arm`]): a table that
+    /// composes it gets a deadline queue, which a worker of the API runs
+    /// (D103). One that declares none arms and clears none.
+    #[serde(default)]
+    pub arms_deadlines: bool,
     #[serde(default)]
     pub operations: Vec<OperationDecl>,
     #[serde(default)]
@@ -111,6 +125,56 @@ pub struct Declaration {
     /// use whose behavior takes none is refused, `{}` included.
     #[serde(default)]
     pub create_params: bool,
+}
+
+/// One declared sub-table: its name, the field whose value keys a row
+/// within its row (the key a sub-row write names), and its fields, the key
+/// among them. A table declared with no fields is not checked: the core
+/// takes any value of a row of it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableDecl {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    #[serde(default)]
+    pub fields: Vec<String>,
+}
+
+impl TableDecl {
+    /// A table with its key field and its fields, the key among them (a
+    /// key the fields leave out is added first).
+    pub fn new<F: Into<String>>(
+        name: impl Into<String>,
+        key: impl Into<String>,
+        fields: impl IntoIterator<Item = F>,
+    ) -> Self {
+        let key = key.into();
+        let mut fields: Vec<String> = fields.into_iter().map(Into::into).collect();
+        if !fields.contains(&key) {
+            fields.insert(0, key.clone());
+        }
+        TableDecl {
+            name: name.into(),
+            key: Some(key),
+            fields,
+        }
+    }
+
+    /// Whether the core checks the values a write of a row of it names:
+    /// it declares fields.
+    pub fn is_checked(&self) -> bool {
+        !self.fields.is_empty()
+    }
+
+    /// The fields a write of a row of it may set: every field but the key.
+    pub fn values(&self) -> Vec<String> {
+        self.fields
+            .iter()
+            .filter(|field| Some(field.as_str()) != self.key.as_deref())
+            .cloned()
+            .collect()
+    }
 }
 
 /// One declared operation: its name, and whether it writes. A writing
@@ -148,9 +212,25 @@ impl Declaration {
         self
     }
 
-    /// The declaration with a sub-table.
+    /// The declaration with a sub-table that declares no key and no
+    /// fields, whose writes the core does not check.
     pub fn table(mut self, name: impl Into<String>) -> Self {
-        self.tables.push(name.into());
+        self.tables.push(TableDecl {
+            name: name.into(),
+            ..TableDecl::default()
+        });
+        self
+    }
+
+    /// The declaration with a sub-table of its key and fields.
+    pub fn sub_table(mut self, table: TableDecl) -> Self {
+        self.tables.push(table);
+        self
+    }
+
+    /// The declaration of a behavior that arms deadlines.
+    pub fn arms_deadlines(mut self) -> Self {
+        self.arms_deadlines = true;
         self
     }
 
@@ -187,7 +267,17 @@ impl Declaration {
     }
 
     pub fn has_table(&self, name: &str) -> bool {
-        self.tables.iter().any(|table| table == name)
+        self.find_table(name).is_some()
+    }
+
+    /// The sub-table with a name.
+    pub fn find_table(&self, name: &str) -> Option<&TableDecl> {
+        self.tables.iter().find(|table| table.name == name)
+    }
+
+    /// The names of its sub-tables, in order.
+    pub fn table_names(&self) -> Vec<String> {
+        self.tables.iter().map(|table| table.name.clone()).collect()
     }
 }
 
@@ -294,6 +384,12 @@ impl<'a> ConfigTarget<'a> {
     /// Every use of the type, in list order.
     pub fn uses(&self) -> &'a [UseSpec] {
         &self.spec.uses
+    }
+
+    /// The type's own fields, as its spec gives them: what a config that
+    /// names a field is held to. Empty for a host that gives none.
+    pub fn fields(&self) -> &'a [FieldSpec] {
+        &self.spec.fields
     }
 }
 
@@ -558,6 +654,22 @@ pub trait Behavior: Send + Sync + 'static {
         let _ = (cx, change);
         Ok(())
     }
+
+    /// The fields a read of a row shows for the use beyond its owned
+    /// columns, computed from its owned fields and its sub-table rows, by
+    /// the table's name, each table's rows in key order (the engine's
+    /// computed fields: Timers' `deadlines`). None by default. No adapter
+    /// serves them yet (D103); the replayer compares them
+    /// ([`crate::Core::read_fields`]).
+    fn read_fields(
+        &self,
+        config: &Self::Config,
+        row: &Row,
+        tables: &BTreeMap<String, Vec<SubRow>>,
+    ) -> Map<String, Value> {
+        let _ = (config, row, tables);
+        Map::new()
+    }
 }
 
 #[cfg(test)]
@@ -577,11 +689,37 @@ mod tests {
         assert!(declaration.has_field("status"));
         assert!(!declaration.has_field("title"));
         assert!(!declaration.has_table("rows"));
+        assert!(!declaration.arms_deadlines);
         assert_eq!(
             declaration.find_operation("transition").map(|op| op.writes),
             Some(true)
         );
         assert!(declaration.find_operation("ship").is_none());
+    }
+
+    #[test]
+    fn a_declaration_holds_its_sub_tables_and_whether_it_arms_deadlines() {
+        let declaration = Declaration::new("Timers")
+            .sub_table(TableDecl::new("deadlines", "name", ["dueAt", "fired"]))
+            .table("notes")
+            .arms_deadlines();
+        assert!(declaration.arms_deadlines);
+        assert_eq!(declaration.table_names(), ["deadlines", "notes"]);
+        let deadlines = declaration.find_table("deadlines").expect("a table");
+        assert_eq!(deadlines.fields, ["name", "dueAt", "fired"]);
+        assert_eq!(deadlines.values(), ["dueAt", "fired"]);
+        assert!(deadlines.is_checked());
+        assert!(!declaration
+            .find_table("notes")
+            .expect("a table")
+            .is_checked());
+        assert_eq!(
+            serde_json::to_value(&declaration.tables).unwrap(),
+            json!([
+                {"name": "deadlines", "key": "name", "fields": ["name", "dueAt", "fired"]},
+                {"name": "notes", "fields": []}
+            ])
+        );
     }
 
     #[test]

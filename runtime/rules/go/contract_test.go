@@ -117,6 +117,9 @@ func TestContractJSON(t *testing.T) {
 			{rules.Answer{Kind: rules.ReadKindHasRows}, `{"hasRows":false}`},
 			{rules.Answer{Kind: rules.ReadKindSpec}, `{"spec":null}`},
 			{rules.Answer{Kind: rules.ReadKindSpec, Spec: &rules.TypeSpec{Name: "Order"}}, `{"spec":{"name":"Order"}}`},
+			{rules.Answer{Kind: rules.ReadKindSpec, Spec: &rules.TypeSpec{Name: "Ticket", Fields: []rules.FieldSpec{{Name: "title", Type: "string"}, {Name: "visitAt", Type: "Temporal.DateTime", DateTime: true}}}}, `{"spec":{"name":"Ticket","fields":[{"name":"title","type":"string"},{"name":"visitAt","type":"Temporal.DateTime","dateTime":true}]}}`},
+			{rules.Answer{Kind: rules.ReadKindSubRows}, `{"subRows":[]}`},
+			{rules.Answer{Kind: rules.ReadKindSubRows, SubRows: []rules.SubRow{{Key: "idle"}, {Key: "respond", Values: map[string]json.RawMessage{"dueAt": json.RawMessage(`2500`), "fired": json.RawMessage(`false`)}}}}, `{"subRows":[{"key":"idle","values":{}},{"key":"respond","values":{"dueAt":2500,"fired":false}}]}`},
 		}
 		for _, c := range cases {
 			got := marshal(t, c.answer)
@@ -134,6 +137,10 @@ func TestContractJSON(t *testing.T) {
 		answered := rules.Answered{Request: rules.ReadRequest{Kind: rules.ReadKindHasRows, Type: "Order"}, Answer: rules.Answer{Kind: rules.ReadKindHasRows}, Held: 1}
 		if got := marshal(t, answered); got != `{"request":{"kind":"hasRows","type":"Order"},"answer":{"hasRows":false},"held":1}` {
 			t.Errorf("an answered read = %s", got)
+		}
+		subRows := rules.ReadRequest{Kind: rules.ReadKindSubRows, Type: "Ticket", Key: "t1", UseID: "Timers", Table: "deadlines"}
+		if got := marshal(t, subRows); got != `{"kind":"subRows","type":"Ticket","key":"t1","useId":"Timers","table":"deadlines"}` {
+			t.Errorf("a read of sub-table rows = %s", got)
 		}
 	})
 
@@ -187,6 +194,34 @@ func TestContractJSON(t *testing.T) {
 		}
 		if other.Done == nil || other.Done.Refused != nil || other.Done.Changed != nil || string(other.Done.Raw) != `{"postponed":true}` {
 			t.Errorf("an outcome of another kind = %+v", other.Done)
+		}
+	})
+
+	t.Run("sub-table rows and deadlines", func(t *testing.T) {
+		const text = `{"rows":[],"subRows":[` +
+			`{"row":{"type":"Ticket","key":"t1"},"useId":"Timers","table":"deadlines","key":"respond","change":{"kind":"insert","values":{"dueAt":2500}}},` +
+			`{"row":{"type":"Ticket","key":"t1"},"useId":"Timers","table":"deadlines","key":"respond","change":{"kind":"update","values":{}}},` +
+			`{"row":{"type":"Ticket","key":"t1"},"useId":"Timers","table":"deadlines","key":"idle","change":{"kind":"delete"}}],` +
+			`"events":[],"deadlines":[` +
+			`{"kind":"arm","row":{"type":"Ticket","key":"t1"},"useId":"Timers","name":"respond","at":0,"payload":null},` +
+			`{"kind":"clear","row":{"type":"Ticket","key":"t1"},"useId":"Timers","name":"idle"}],"result":null}`
+		var changes rules.ChangeSet
+		if err := json.Unmarshal([]byte(text), &changes); err != nil {
+			t.Fatal(err)
+		}
+		if len(changes.SubRows) != 3 || changes.SubRows[0].Change.Kind != rules.SubRowInsert || *changes.SubRows[0].Row.Key != "t1" || changes.Deadlines[0].Kind != rules.DeadlineArm || changes.Deadlines[1].Name != "idle" {
+			t.Errorf("a change set = %+v", changes)
+		}
+		if got := marshal(t, changes); got != text {
+			t.Errorf("a change set writes\n%s\nwant\n%s", got, text)
+		}
+		var snooze rules.DeadlineChange
+		if err := json.Unmarshal([]byte(`{"kind":"snooze","name":"x"}`), &snooze); err != nil || string(snooze.Raw) != `{"kind":"snooze","name":"x"}` || marshal(t, snooze) != `{"kind":"snooze","name":"x"}` {
+			t.Errorf("a deadline change of another kind = %+v, %v", snooze, err)
+		}
+		var touch rules.SubRowChange
+		if err := json.Unmarshal([]byte(`{"kind":"touch"}`), &touch); err != nil || marshal(t, touch) != `{"kind":"touch"}` {
+			t.Errorf("a sub-table row change of another kind = %+v, %v", touch, err)
 		}
 	})
 

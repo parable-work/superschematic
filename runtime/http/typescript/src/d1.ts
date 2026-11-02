@@ -35,19 +35,43 @@ layout its database's generated orm.ts embeds.
 
 export type { QueueDefinition, QueueField, QueueStatements } from './queue-core.js';
 export { enqueueSqlite, enqueueStatement } from './queue-sqlite.js';
-export { MAX_ATTEMPTS, RulesRefusal, busyRefusal, execute, lazyCore, prepareCreate, readRow, runCreate, runDelete, runOperation, runUpdate, sqliteRulesStore } from './rules.js';
+export {
+  MAX_ATTEMPTS,
+  RulesRefusal,
+  busyRefusal,
+  execute,
+  lazyCore,
+  prepareCreate,
+  readArmedDeadlines,
+  readRow,
+  readSubRows,
+  runCreate,
+  runDeadline,
+  runDelete,
+  runOperation,
+  runUpdate,
+  sqliteRulesStore,
+} from './rules.js';
 export type {
+  ArmedDeadline,
   CoreCaller,
   CoreChangeSet,
   CoreCommand,
+  CoreDeadline,
+  CoreFieldSpec,
   CoreOwned,
   CoreRefusal,
   CoreRow,
+  CoreSubRow,
   CoreTypeSpec,
   CreateOptions,
+  DeadlineClaim,
+  DeadlineOptions,
+  DeadlineRun,
   ExecuteOptions,
   RulesColumn,
   RulesCore,
+  RulesDeadlines,
   RulesHost,
   RulesLayout,
   RulesLive,
@@ -55,6 +79,7 @@ export type {
   RulesOwnedField,
   RulesResult,
   RulesStore,
+  RulesSubTable,
   RulesTable,
   RulesUse,
 } from './rules.js';

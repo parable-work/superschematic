@@ -14,8 +14,8 @@
 // layout") states the same rule for the adapters of every language.
 //
 // The document of a schema is a [Layout]: each table that composes
-// field-anchored behaviors, by its type's name. For an Order whose status
-// is a Workflow:
+// behaviors as a table, implemented or anchored on its fields, by its
+// type's name. For an Order whose status is a Workflow:
 //
 //	{
 //	  "types": {
@@ -33,6 +33,7 @@
 //	          "id": "status",
 //	          "behavior": "Workflow",
 //	          "anchor": "status",
+//	          "member": "status",
 //	          "fields": [
 //	            { "name": "status", "field": "status", "column": "status", "type": "string", "value": true },
 //	            { "name": "enteredAt", "field": "statusEnteredAt", "column": "status_entered_at", "type": "Temporal.DateTime", "convert": "epochMillis" }
@@ -48,11 +49,22 @@
 //	            "config": { "initial": "draft", "states": ["draft", "paid", "shipped"], "transitions": [{ "from": "draft", "to": "paid" }, { "from": "paid", "to": "shipped" }] },
 //	            "anchor": { "field": "status" }
 //	          }
+//	        ],
+//	        "fields": [
+//	          { "name": "title", "type": "string" }
 //	        ]
 //	      }
 //	    }
 //	  }
 //	}
+//
+// A use the table implements, `implements Timers<Ticket, { ... }>`, has no
+// anchor and sits under its member (timers); each sub-table its behavior
+// declares is in the use's tables, by its declared name, with its table,
+// its column of the row's key, its key and its fields; and a table whose
+// behaviors arm deadlines names its deadline queue's table and columns in
+// deadlines (testdata/fixture-timers-db.layout.json is the whole document
+// of such a schema).
 package behaviorlayout
 
 import (
@@ -112,8 +124,9 @@ func convertOfRef(ref ir.TypeRef) Convert {
 }
 
 // Layout is the layout document of a DB schema: each table that composes a
-// field-anchored behavior, by its type's name. A table with none is not in
-// it, and a schema with none has no document.
+// behavior as a table (ir.TypeDef.TableBehaviors: implements and field
+// uses), by its type's name. A table with none is not in it, and a schema
+// with none has no document.
 type Layout struct {
 	Types map[string]*Table `json:"types"`
 }
@@ -153,11 +166,40 @@ type Table struct {
 	// generated row holds it, <field>Id, typed as the target's key.
 	Own []Column `json:"own"`
 
-	// Uses are the type's field-anchored uses, in the type's list order.
+	// Uses are the type's table uses, implements and field uses, in the
+	// type's list order.
 	Uses []Use `json:"uses"`
+
+	// Deadlines is where the deadlines its behaviors arm are kept, the
+	// queue the loader adds (D103); absent for a table whose behaviors arm
+	// none.
+	Deadlines *Deadlines `json:"deadlines,omitempty"`
 
 	// Spec is the type as the core runs it.
 	Spec TypeSpec `json:"spec"`
+}
+
+// Deadlines is the queue a table's deadlines are messages of (D103): one
+// live message per row, use and deadline, due when the deadline falls
+// due, which an adapter arms and clears as a change set's deadline changes
+// say and a behavior worker claims. Each column is unquoted.
+type Deadlines struct {
+	// Queue is the queue's type: TicketDeadline.
+	Queue string `json:"queue"`
+	// Table is the queue's table: ticket_deadline_queue.
+	Table string `json:"table"`
+	// RowKey is the column of the row's key, which binds as the row
+	// table's key binds.
+	RowKey string `json:"rowKey"`
+	// Use is the column of the use's id.
+	Use string `json:"use"`
+	// Name is the column of the deadline's name.
+	Name string `json:"name"`
+	// At is the column of the time it was armed to fall due at, epoch
+	// milliseconds.
+	At string `json:"at"`
+	// Payload is the column of the arming's payload, JSON.
+	Payload string `json:"payload"`
 }
 
 // Live is the condition a live row of a soft-deletable table meets: its
@@ -185,27 +227,63 @@ type Column struct {
 	Convert Convert `json:"convert,omitempty"`
 }
 
-// Use is one field-anchored use of a behavior on a table.
+// Use is one use of a behavior on a table: implemented by the table, or
+// anchored on one of its fields.
 type Use struct {
 	// ID is the use's id, by which the core names its owned fields,
-	// sub-tables and operations: its anchor field's name.
+	// sub-tables and operations: its anchor field's name, or the
+	// behavior's name for an implements use.
 	ID string `json:"id"`
 
 	// Behavior is the behavior's registered name.
 	Behavior string `json:"behavior"`
 
-	// Anchor is the anchor field's name. A type anchor, which a table does
-	// not carry until D103's step 5, has none.
+	// Anchor is the anchor field's name; an implements use, anchored on
+	// the type, has none.
 	Anchor string `json:"anchor,omitempty"`
 
-	// Fields are the behavior's declared fields, each the column it takes
-	// on the table, in the declaration's order.
+	// Member is the name the use's operations sit under in a repository and
+	// an SDK ([UseMember]): the anchor field, or the behavior's storage key
+	// in camel case for an implements use (timers).
+	Member string `json:"member"`
+
+	// Fields are the behavior's declared fields that take a column, each
+	// the column it takes on the table, in the declaration's order. An
+	// untyped field of an implements use (Timers' deadlines, a read the
+	// behavior computes) takes none and is not here.
 	Fields []OwnedField `json:"fields"`
 
 	// Operations are the behavior's declared operations on a row, in the
 	// declaration's order: each a method of the generated repository under
-	// the use's id (orm.order.status.transition).
+	// the use's member (orm.order.status.transition,
+	// orm.ticket.timers.fireTimer).
 	Operations []Operation `json:"operations"`
+
+	// Tables are the sub-tables the behavior keeps per row, in the
+	// declaration's order; absent when it declares none.
+	Tables []SubTable `json:"tables,omitempty"`
+}
+
+// SubTable is one sub-table a use keeps per row (D103): a child table of
+// the row the loader adds, keyed within the row by its declared key.
+type SubTable struct {
+	// Name is the table's name in the behavior's declaration, as the core
+	// names it in a read and a change set (deadlines).
+	Name string `json:"name"`
+
+	// Table is the table, unquoted (ticket_timers_deadlines).
+	Table string `json:"table"`
+
+	// Row is the column holding the row's key, which binds as the row
+	// table's key binds.
+	Row string `json:"row"`
+
+	// Key is the declared key field and its column.
+	Key OwnedField `json:"key"`
+
+	// Fields are its other declared fields and their columns, in the
+	// declaration's order.
+	Fields []OwnedField `json:"fields"`
 }
 
 // OwnedField is a behavior's declared field and the column it takes.
@@ -229,10 +307,21 @@ type Operation struct {
 
 // TypeSpec is the type as the core runs it: superschematic_rules::TypeSpec
 // in its JSON shape, which serde writes in camelCase. Uses are in the
-// type's list order.
+// type's list order, and Fields are its own fields ([OwnFields]), what a
+// config that names a field is held to (a Timers field start).
 type TypeSpec struct {
-	Name string    `json:"name"`
-	Uses []UseSpec `json:"uses"`
+	Name   string      `json:"name"`
+	Uses   []UseSpec   `json:"uses"`
+	Fields []FieldSpec `json:"fields,omitempty"`
+}
+
+// FieldSpec is one own field as the core takes it,
+// superschematic_rules::FieldSpec: its name, its IR type's name, and
+// whether its values are instants, epoch milliseconds from the adapter.
+type FieldSpec struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	DateTime bool   `json:"dateTime,omitempty"`
 }
 
 // UseSpec is one use as the core takes it, superschematic_rules::UseSpec:
@@ -313,6 +402,45 @@ func OwnedColumn(use ir.BehaviorRef, declared string, value bool) string {
 	return StorageKey(use.Name) + "_" + codegen.ToSnakeCase(declared)
 }
 
+// UseMember is the name a use's operations sit under in a repository and
+// an SDK, and the use's sub-tables' names begin with (D103): its anchor
+// field for a field use, the behavior's storage key in camel case for a
+// use anchored on the type (Timers: timers; acme.Rating: acmeRating). The
+// loader, the operations' expansion and the ORM generators call it.
+func UseMember(use ir.BehaviorRef) string {
+	if use.FieldAnchored() {
+		return use.Field
+	}
+	return codegen.ToCamelCase(StorageKey(use.Name))
+}
+
+// SubTableTypeName is the name of the type the loader adds for the
+// sub-table table of the use on the table row (D103): the row's type, the
+// use's member and the table's name, in Pascal case
+// (TicketTimersDeadlines). Its table is the name in snake case
+// (ticket_timers_deadlines).
+func SubTableTypeName(row string, use ir.BehaviorRef, table string) string {
+	return row + codegen.ToPascalCase(UseMember(use)) + codegen.ToPascalCase(table)
+}
+
+// DeadlineQueueTypeName is the name of the queue the loader adds for the
+// deadlines the behaviors of the table row arm (D103): TicketDeadline,
+// whose table is ticket_deadline_queue.
+func DeadlineQueueTypeName(row string) string {
+	return row + "Deadline"
+}
+
+// The fields of the deadline queue's message, by the core's names of a
+// deadline (D103): the row's key, the use's id, the deadline's name, the
+// time it was armed to fall due at and the arming's payload.
+const (
+	DeadlineRowKeyField  = "rowKey"
+	DeadlineUseField     = "useId"
+	DeadlineNameField    = "name"
+	DeadlineAtField      = "at"
+	DeadlinePayloadField = "payload"
+)
+
 var notLowerAlphanumeric = regexp.MustCompile(`[^a-z0-9]+`)
 
 // StorageKey is a behavior's name as a type anchor's columns begin with
@@ -323,7 +451,7 @@ func StorageKey(behavior string) string {
 }
 
 // Of is the layout document of schema, a DB schema: [TableOf] of each
-// table that composes a field-anchored behavior, by its type's name. It
+// table that composes a behavior as a table, by its type's name. It
 // returns nil for a schema with none.
 func Of(schema *ir.Schema, reg *registry.Registry) (*Layout, error) {
 	if schema == nil {
@@ -332,7 +460,7 @@ func Of(schema *ir.Schema, reg *registry.Registry) (*Layout, error) {
 	var tables []sqlutil.TableModel
 	var layout *Layout
 	for _, td := range sqlutil.TableTypes(schema) {
-		if len(td.FieldBehaviors()) == 0 {
+		if len(td.TableBehaviors()) == 0 {
 			continue
 		}
 		if tables == nil {
@@ -353,12 +481,15 @@ func Of(schema *ir.Schema, reg *registry.Registry) (*Layout, error) {
 	return layout, nil
 }
 
-// TableOf is the layout of td, a table of schema that composes field
-// behaviors, from the fields the loader's pass added (ir.FieldDef.Behavior),
-// their columns (sqlutil.ColumnName) and the registry's declarations of its
-// behaviors (each declared field, the value field, the operations). It
-// fails when a declared field has no owned field on td, which the
-// loader's pass makes impossible, so a failure is a defect of the build.
+// TableOf is the layout of td, a table of schema that composes behaviors
+// as a table, from the fields the loader's pass added
+// (ir.FieldDef.Behavior), the sub-tables and the deadline queue it added
+// (ir.TypeDef.BehaviorTable and BehaviorQueue), their columns
+// (sqlutil.ColumnName) and the registry's declarations of its behaviors
+// (each declared field, the value field, the tables, the operations). It
+// fails when a declared typed field has no owned field on td, or a
+// declared table no sub-table, which the loader's pass makes impossible,
+// so a failure is a defect of the build.
 func TableOf(schema *ir.Schema, td *ir.TypeDef, reg *registry.Registry) (*Table, error) {
 	tables, err := sqlutil.TablesOf(schema, nil)
 	if err != nil {
@@ -384,55 +515,46 @@ func tableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel, reg
 	if !model.HasVersion {
 		return nil, fmt.Errorf("behaviorlayout: table %s composes behaviors and keeps no %s column, which the loader gives it", td.Name, VersionColumn)
 	}
-	t := &Table{Type: td.Name, Table: model.Name, Version: VersionColumn, Own: []Column{}, Uses: []Use{}}
+	t := &Table{Type: td.Name, Table: model.Name, Version: VersionColumn, Own: ownColumns(schema, model), Uses: []Use{}}
 	if deletedAt := model.AuditColumn(sqlutil.AuditDeletedAt); model.SoftDelete && deletedAt != nil {
 		t.Live = &Live{Column: deletedAt.Name}
 	}
 	for _, c := range model.Columns {
-		switch {
-		case c.Key:
+		if c.Key {
 			t.Key = Column{Field: c.Field, Column: c.Name, Type: keyType(c)}
 			t.Key.Convert = ConvertOf(t.Key.Type)
-		case c.Def == nil, c.Def.Owned(), c.Audit != "", c.Internal:
-		case c.Relation != "":
-			// A to-one relation's column holds its target's key, which a
-			// generated row holds as <field>Id.
-			column := Column{Field: c.Field + "Id", Column: c.Name, Type: keyType(c)}
-			if target := schema.Types[c.Relation]; target != nil {
-				for _, f := range target.Fields {
-					if f != nil && f.Key {
-						column.Type = f.TypeRef.Name
-					}
-				}
-			}
-			column.Convert = ConvertOf(column.Type)
-			t.Own = append(t.Own, column)
-		default:
-			t.Own = append(t.Own, Column{Field: c.Field, Column: c.Name, Type: c.Def.TypeRef.Name, Convert: convertOfRef(c.Def.TypeRef)})
 		}
 	}
 	if t.Key.Column == "" {
 		return nil, fmt.Errorf("behaviorlayout: table %s has no key column", td.Name)
 	}
-	t.Spec = TypeSpec{Name: td.Name, Uses: []UseSpec{}}
-	for _, ref := range td.FieldBehaviors() {
+	t.Spec = TypeSpec{Name: td.Name, Uses: []UseSpec{}, Fields: fieldSpecs(t.Own)}
+	armsDeadlines := false
+	for _, ref := range td.TableBehaviors() {
+		where := fmt.Sprintf("behaviorlayout: table %s: field %s", td.Name, ref.Field)
+		if !ref.FieldAnchored() {
+			where = fmt.Sprintf("behaviorlayout: table %s: implements %s", td.Name, ref.Name)
+		}
 		behavior, ok := reg.Behavior(ref.Name)
 		if !ok {
-			return nil, fmt.Errorf("behaviorlayout: table %s: field %s: behavior %s is not registered", td.Name, ref.Field, ref.Name)
+			return nil, fmt.Errorf("%s: behavior %s is not registered", where, ref.Name)
 		}
-		use := Use{ID: ref.UseID(), Behavior: ref.Name, Anchor: ref.Field, Fields: []OwnedField{}, Operations: []Operation{}}
+		use := Use{ID: ref.UseID(), Behavior: ref.Name, Anchor: ref.Field, Member: UseMember(ref), Fields: []OwnedField{}, Operations: []Operation{}}
 		for _, declared := range behavior.Fields {
-			if declared.Volatile {
+			// A volatile field is computed at a read, and so is an
+			// untyped one of a use the table implements (Timers'
+			// deadlines): neither takes a column.
+			if declared.Volatile || (declared.Type == "" && !ref.FieldAnchored()) {
 				continue
 			}
 			value := declared.Name == behavior.Value
 			fd := ownedField(td, ref, declared.Name)
 			if fd == nil {
-				return nil, fmt.Errorf("behaviorlayout: table %s: field %s: behavior %s's field %s has no owned field on the table", td.Name, ref.Field, ref.Name, declared.Name)
+				return nil, fmt.Errorf("%s: behavior %s's field %s has no owned field on the table", where, ref.Name, declared.Name)
 			}
 			column := sqlutil.ColumnName(fd)
 			if want := OwnedColumn(ref, declared.Name, value); column != want {
-				return nil, fmt.Errorf("behaviorlayout: table %s: field %s: behavior %s's field %s is the column %s, and the layout rule names it %s", td.Name, ref.Field, ref.Name, declared.Name, column, want)
+				return nil, fmt.Errorf("%s: behavior %s's field %s is the column %s, and the layout rule names it %s", where, ref.Name, declared.Name, column, want)
 			}
 			use.Fields = append(use.Fields, OwnedField{
 				Name:   declared.Name,
@@ -446,6 +568,14 @@ func tableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel, reg
 			}
 			use.Operations = append(use.Operations, Operation{Name: op.Name, Writes: op.Writes})
 		}
+		for _, declared := range behavior.Tables {
+			sub, err := subTableOf(schema, td, ref, declared, tables)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", where, err)
+			}
+			use.Tables = append(use.Tables, sub)
+		}
+		armsDeadlines = armsDeadlines || behavior.ArmsDeadlines
 		t.Uses = append(t.Uses, use)
 		spec := UseSpec{Behavior: ref.Name, Anchor: Anchor{Field: ref.Field}}
 		if len(ref.Config) > 0 {
@@ -453,7 +583,164 @@ func tableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel, reg
 		}
 		t.Spec.Uses = append(t.Spec.Uses, spec)
 	}
+	if armsDeadlines {
+		deadlines, err := deadlinesOf(schema, td)
+		if err != nil {
+			return nil, err
+		}
+		t.Deadlines = deadlines
+	}
 	return t, nil
+}
+
+// ownColumns are the own fields of the table model holds, of schema: each
+// column but the key, the version, the owned fields, the audit fields,
+// internal metadata and the generated ones, in column order. A to-one
+// relation's column holds its target's key, which a generated row holds as
+// <field>Id, typed as the target's key.
+func ownColumns(schema *ir.Schema, model *sqlutil.TableModel) []Column {
+	own := []Column{}
+	for _, c := range model.Columns {
+		switch {
+		case c.Key, c.Def == nil, c.Def.Owned(), c.Audit != "", c.Internal:
+		case c.Relation != "":
+			column := Column{Field: c.Field + "Id", Column: c.Name, Type: keyType(c)}
+			if target := schema.Types[c.Relation]; target != nil {
+				for _, f := range target.Fields {
+					if f != nil && f.Key {
+						column.Type = f.TypeRef.Name
+					}
+				}
+			}
+			column.Convert = ConvertOf(column.Type)
+			own = append(own, column)
+		default:
+			own = append(own, Column{Field: c.Field, Column: c.Name, Type: c.Def.TypeRef.Name, Convert: convertOfRef(c.Def.TypeRef)})
+		}
+	}
+	return own
+}
+
+// OwnFields are td's own fields, a table of schema, as the layout's own
+// holds them (D103): each column but the key, the version, the fields a
+// behavior owns, the audit fields, internal metadata and the generated
+// ones, in column order. A config that names a field is held to them, by
+// the core at a command (the spec's fields) and by the loader's checks
+// before it (a Timers field start), so both list the same names. It is nil
+// when schema's tables cannot be modelled, which the build reports
+// elsewhere.
+func OwnFields(schema *ir.Schema, td *ir.TypeDef) []Column {
+	if schema == nil || td == nil {
+		return nil
+	}
+	tables, err := sqlutil.TablesOf(schema, nil)
+	if err != nil {
+		return nil
+	}
+	for i := range tables {
+		if tables[i].Type == td.Name {
+			return ownColumns(schema, &tables[i])
+		}
+	}
+	return nil
+}
+
+// fieldSpecs are own's columns as the core's spec holds the type's own
+// fields: each by its name and IR type, a date-time (epoch milliseconds
+// from the adapter) marked.
+func fieldSpecs(own []Column) []FieldSpec {
+	var specs []FieldSpec
+	for _, c := range own {
+		specs = append(specs, FieldSpec{Name: c.Field, Type: c.Type, DateTime: c.Convert == ConvertEpochMillis})
+	}
+	return specs
+}
+
+// subTableOf is the layout of the sub-table declared for the use ref on
+// td: the type the loader added for it (ir.TypeDef.BehaviorTable), its
+// row's column and each declared field's column.
+func subTableOf(schema *ir.Schema, td *ir.TypeDef, ref ir.BehaviorRef, declared registry.BehaviorTable, tables []sqlutil.TableModel) (SubTable, error) {
+	var sub *ir.TypeDef
+	for _, other := range schema.Types {
+		if m := other.BehaviorTable; m != nil && m.Row == td.Name && m.Use == ref.UseID() && m.Table == declared.Name {
+			sub = other
+		}
+	}
+	if sub == nil {
+		return SubTable{}, fmt.Errorf("behavior %s's table %s has no sub-table in the schema", ref.Name, declared.Name)
+	}
+	var model *sqlutil.TableModel
+	for i := range tables {
+		if tables[i].Type == sub.Name {
+			model = &tables[i]
+		}
+	}
+	if model == nil {
+		return SubTable{}, fmt.Errorf("behavior %s's table %s is the type %s, which is no table of the schema", ref.Name, declared.Name, sub.Name)
+	}
+	out := SubTable{Name: declared.Name, Table: model.Name, Fields: []OwnedField{}}
+	columns := map[string]string{}
+	for _, c := range model.Columns {
+		if c.Def == nil {
+			continue
+		}
+		if c.Def.Name == sub.BehaviorTable.RowField {
+			out.Row = c.Name
+			continue
+		}
+		columns[c.Def.Name] = c.Name
+	}
+	if out.Row == "" {
+		return SubTable{}, fmt.Errorf("behavior %s's table %s, the type %s, has no column of its row %s", ref.Name, declared.Name, sub.Name, sub.BehaviorTable.RowField)
+	}
+	for _, field := range declared.Fields {
+		fd := sqlutil.FieldNamed(sub, field.Name)
+		column, ok := columns[field.Name]
+		if fd == nil || !ok {
+			return SubTable{}, fmt.Errorf("behavior %s's table %s, the type %s, has no column of its field %s", ref.Name, declared.Name, sub.Name, field.Name)
+		}
+		owned := OwnedField{Name: field.Name, Column: Column{Field: fd.Name, Column: column, Type: fd.TypeRef.Name, Convert: convertOfRef(fd.TypeRef)}}
+		if field.Name == declared.Key {
+			out.Key = owned
+			continue
+		}
+		out.Fields = append(out.Fields, owned)
+	}
+	return out, nil
+}
+
+// deadlinesOf is the layout of the deadline queue the loader added for td
+// (ir.TypeDef.BehaviorQueue).
+func deadlinesOf(schema *ir.Schema, td *ir.TypeDef) (*Deadlines, error) {
+	queue := schema.BehaviorQueueOf(td.Name, ir.BehaviorQueueDeadlines)
+	if queue == nil {
+		return nil, fmt.Errorf("behaviorlayout: table %s: its behaviors arm deadlines, and the schema has no deadline queue of it", td.Name)
+	}
+	column := func(field string) (string, error) {
+		fd := sqlutil.FieldNamed(queue, field)
+		if fd == nil {
+			return "", fmt.Errorf("behaviorlayout: table %s: its deadline queue %s has no field %s", td.Name, queue.Name, field)
+		}
+		return sqlutil.ColumnName(fd), nil
+	}
+	out := &Deadlines{Queue: queue.Name, Table: sqlutil.QueueTableName(queue)}
+	for _, f := range []struct {
+		field string
+		into  *string
+	}{
+		{DeadlineRowKeyField, &out.RowKey},
+		{DeadlineUseField, &out.Use},
+		{DeadlineNameField, &out.Name},
+		{DeadlineAtField, &out.At},
+		{DeadlinePayloadField, &out.Payload},
+	} {
+		c, err := column(f.field)
+		if err != nil {
+			return nil, err
+		}
+		*f.into = c
+	}
+	return out, nil
 }
 
 // keyType is the IR type of a key or a relation's column: its field's, or

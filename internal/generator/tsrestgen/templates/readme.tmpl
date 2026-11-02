@@ -39,7 +39,7 @@ Generated TypeScript API server for the `{{ .SchemaName }}` schema. Built on
 {{- end }}
 {{- if .HasBehaviors }}
   The operations of its `@behaviorOperations` sets (D103) have no
-  implementation method: each runs the operation of a behavior on a field of
+  implementation method: each runs the operation of a behavior {{ if .BehaviorsOnFields }}on a field of{{ else }}of{{ end }}
   a table of `{{ .Deps.Database }}` through `options.orm`, the database's
   repositories (`Deps.orm`), in a transaction of its own and as the
   request's caller, and answers a refusal of the behaviors' core as the

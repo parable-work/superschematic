@@ -191,9 +191,22 @@ type TypeDef struct {
 	SeedRoles []*RoleSeed `json:"seedRoles,omitempty" yaml:"seedRoles,omitempty"`
 
 	// Origin names the declaration the loader expanded this type from:
-	// [OriginVersionGraph] for the graph tables a version graph adds.
-	// Empty for every authored type. The data forms have no key for it.
+	// [OriginVersionGraph] for the graph tables a version graph adds, and
+	// [OriginBehavior] for the sub-tables and queues a table's behaviors
+	// add (D103). Empty for every authored type. The data forms have no
+	// key for it.
 	Origin string `json:"origin,omitempty" yaml:"origin,omitempty" jsonschema:"-"`
+
+	// BehaviorTable marks a sub-table the loader adds for a use's declared
+	// table (D103): a child table of the row, which only the behavior's
+	// operations write, and for which no repository is generated. Nil for
+	// every other type. See [BehaviorTable].
+	BehaviorTable *BehaviorTable `json:"behaviorTable,omitempty" yaml:"behaviorTable,omitempty" jsonschema:"-"`
+
+	// BehaviorQueue marks the queue the loader adds for a table whose
+	// behaviors arm deadlines (D103). Nil for every other type. See
+	// [BehaviorQueue].
+	BehaviorQueue *BehaviorQueue `json:"behaviorQueue,omitempty" yaml:"behaviorQueue,omitempty" jsonschema:"-"`
 
 	// Projection is the @projection declaration of a RoleProjection type: the
 	// view's address, the table it reads and the tables it joins, its row

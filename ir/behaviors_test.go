@@ -197,3 +197,53 @@ func TestCanonicalizeBehaviors_NamesTheField(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// A use a table implements (D103) is anchored on the type and marked
+// implements: it is no @behavior use, so the type stays a table, and it
+// joins the field uses among the table's uses, in list order.
+func TestBehaviors_Implements(t *testing.T) {
+	td := &TypeDef{Name: "Ticket", Behaviors: []BehaviorRef{
+		{Name: "Timers", Implements: true},
+		{Name: "Workflow", Field: "status"},
+	}}
+	if got := td.TypeBehaviors(); len(got) != 0 || td.IsEngineType() {
+		t.Errorf("TypeBehaviors = %v, engine type %v; an implements use is a table's", got, td.IsEngineType())
+	}
+	if got := td.ImplementsBehaviors(); len(got) != 1 || got[0].Name != "Timers" || got[0].UseID() != "Timers" {
+		t.Errorf("ImplementsBehaviors = %v", got)
+	}
+	if got := td.TableBehaviors(); len(got) != 2 || got[0].Name != "Timers" || got[1].Field != "status" {
+		t.Errorf("TableBehaviors = %v", got)
+	}
+	engine := &TypeDef{Name: "Task", Behaviors: []BehaviorRef{{Name: "Comments"}}}
+	if !engine.IsEngineType() || len(engine.TableBehaviors()) != 0 {
+		t.Errorf("a @behavior use: engine type %v, table uses %v", engine.IsEngineType(), engine.TableBehaviors())
+	}
+	data, err := json.Marshal(td.Behaviors[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != `{"name":"Timers","implements":true}` {
+		t.Errorf("JSON = %s", data)
+	}
+
+	s := NewSchema("tickets-db", SchemaKindDB)
+	if _, _, found := s.FindTableBehavior(); found {
+		t.Error("FindTableBehavior of an empty schema found one")
+	}
+	s.Types["Task"] = engine
+	s.Types["Ticket"] = td
+	s.Types["TicketDeadline"] = &TypeDef{Name: "TicketDeadline", BehaviorQueue: &BehaviorQueue{Row: "Ticket", Kind: BehaviorQueueDeadlines}}
+	if name, use, found := s.FindTableBehavior(); !found || name != "Ticket" || use.Name != "Timers" {
+		t.Errorf("FindTableBehavior = %s, %+v, %v", name, use, found)
+	}
+	if queue := s.BehaviorQueueOf("Ticket", BehaviorQueueDeadlines); queue == nil || queue.Name != "TicketDeadline" {
+		t.Errorf("BehaviorQueueOf = %+v", queue)
+	}
+	if queue := s.BehaviorQueueOf("Task", BehaviorQueueDeadlines); queue != nil {
+		t.Errorf("BehaviorQueueOf a table with none = %+v", queue)
+	}
+	if got := BehaviorWorkerSubject("tickets-api", "TicketTimers"); got != "tickets-api/TicketTimers" {
+		t.Errorf("BehaviorWorkerSubject = %q", got)
+	}
+}

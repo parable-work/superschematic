@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -15,34 +16,45 @@ import (
 	"github.com/parable-work/superschematic/runtime/rules/go/internal/rulestest"
 )
 
-// The recorded scenarios are the specification (D103): the transcript
-// superschematic-rules-testkit writes from core-workflow.json
-// (runtime/engine/testdata/rules/core-workflow.transcript.json, whose
+// The recorded scenarios are the specification (D103): the transcripts
+// superschematic-rules-testkit writes from core-workflow.json and
+// core-timers.json (runtime/engine/testdata/rules/*.transcript.json, whose
 // format its transcript module states) replayed through this adapter on
-// SQLite and on Postgres, as the TypeScript adapter replays it
+// SQLite and on Postgres, as the TypeScript adapter replays them
 // (runtime/http/typescript/src/rules-transcript.test.ts). Each scenario
 // gets a table per type and database, its own fields' columns beside the
 // owned columns the layout rule gives each use of any version and
-// _version, with @optimistic's trigger; each check runs on the core alone,
-// answering whether the type has rows from its table; each command runs
-// through Execute in a transaction of its own with the version live at it,
-// its refusal compared whole and the row it names read back after it and
-// compared; and each raw step writes owned columns with SQL past the
-// adapter. The Postgres replay skips without
+// _version, with @optimistic's trigger; for each use whose behavior
+// declares tables, a sub-table per table, a child of the row; and, when a
+// use's behavior arms deadlines, the type's deadline queue. Each check runs
+// on the core alone, answering whether the type has rows from its table;
+// each command runs through Execute in a transaction of its own with the
+// version live at it (a deadline the runner ran among them, which reads
+// its arming and spends it), its refusal compared whole and the row it
+// names read back after it and compared, with its sub-table rows and its
+// armed deadlines; and each raw step writes owned columns with SQL past
+// the adapter. The Postgres replay skips without
 // SUPERSCHEMATIC_RULES_TEST_DATABASE_URL.
 //
 // The tables here follow the layout rule as the core's README states it,
 // restated by this test (the corpus's uses are type-anchored: Workflow's
-// workflow_status and workflow_entered_at). The layout the generator writes
+// workflow_status and workflow_entered_at, Timers' sub-table
+// <table>_timers_deadlines). The layout the generator writes
 // (internal/generator/behaviorlayout) is held by the generated packages'
 // own end-to-end tests, not by this one.
 
-// transcriptFloor is the steps the transcript holds, the testkit's floor
-// (tests/transcript.rs): each dialect replays every one, so a regression
-// cannot pass by skipping.
-const transcriptFloor = 96
+// transcriptFile is a transcript and its floor: the steps it holds, the
+// testkit's floor (tests/transcript.rs), each of which each dialect
+// replays, so a regression cannot pass by skipping.
+type transcriptFile struct {
+	path  string
+	floor int
+}
 
-const transcriptPath = "../../engine/testdata/rules/core-workflow.transcript.json"
+var transcriptFiles = []transcriptFile{
+	{"../../engine/testdata/rules/core-workflow.transcript.json", 96},
+	{"../../engine/testdata/rules/core-timers.transcript.json", 101},
+}
 
 type transcript struct {
 	File      string     `json:"file"`
@@ -83,32 +95,42 @@ type transcriptStep struct {
 	Command  *rules.Command                        `json:"command"`
 	Owned    map[string]map[string]json.RawMessage `json:"owned"`
 	Expect   struct {
-		Refused json.RawMessage `json:"refused"`
-		Result  json.RawMessage `json:"result"`
-		Key     *string         `json:"key"`
-		Row     json.RawMessage `json:"row"`
+		Refused   json.RawMessage `json:"refused"`
+		Result    json.RawMessage `json:"result"`
+		Key       *string         `json:"key"`
+		Row       json.RawMessage `json:"row"`
+		SubRows   json.RawMessage `json:"subRows"`
+		Deadlines json.RawMessage `json:"deadlines"`
 	} `json:"expect"`
 }
 
-func readTranscript(t *testing.T) *transcript {
+func readTranscript(t *testing.T, path string) *transcript {
 	t.Helper()
-	text, err := os.ReadFile(transcriptPath)
+	text, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var out transcript
 	if err := json.Unmarshal(text, &out); err != nil {
-		t.Fatalf("%s: %v", transcriptPath, err)
+		t.Fatalf("%s: %v", path, err)
 	}
 	return &out
 }
 
 func TestTranscriptOnSQLite(t *testing.T) {
-	replayTranscript(t, rulestest.SQLite(t))
+	for _, file := range transcriptFiles {
+		t.Run(filepath.Base(file.path), func(t *testing.T) {
+			replayTranscript(t, rulestest.SQLite(t), file)
+		})
+	}
 }
 
 func TestTranscriptOnPostgres(t *testing.T) {
-	replayTranscript(t, rulestest.Postgres(t))
+	for _, file := range transcriptFiles {
+		t.Run(filepath.Base(file.path), func(t *testing.T) {
+			replayTranscript(t, rulestest.Postgres(t), file)
+		})
+	}
 }
 
 // storageKey is a behavior's storage key: its name lowercased, each run of
@@ -165,11 +187,13 @@ func sqlType(db *rulestest.DB, column rules.Column) string {
 	return types.JSON
 }
 
-// usesOf is the uses of a type across its versions, each with the owned
-// columns the layout rule gives it and its declared operations.
-func usesOf(t *testing.T, declarations []rules.Declaration, typ transcriptType) []rules.Use {
+// usesOf is the uses of a type of a table across its versions, each with
+// the owned columns the layout rule gives it, its declared operations and
+// its declared sub-tables, and whether a use's behavior arms deadlines.
+func usesOf(t *testing.T, declarations []rules.Declaration, typ transcriptType, table string) ([]rules.Use, bool) {
 	t.Helper()
 	var uses []rules.Use
+	arms := false
 	seen := map[string]bool{}
 	for _, version := range typ.Versions {
 		for _, use := range version.Uses {
@@ -191,7 +215,35 @@ func usesOf(t *testing.T, declarations []rules.Declaration, typ transcriptType) 
 			if declaration == nil {
 				t.Fatalf("the core declares no behavior %s", use.Behavior)
 			}
-			out := rules.Use{ID: id, Behavior: use.Behavior, Anchor: anchor, Fields: []rules.OwnedField{}, Operations: []rules.Operation{}}
+			member := anchor
+			if member == "" {
+				member = camel(storageKey(use.Behavior))
+			}
+			out := rules.Use{ID: id, Behavior: use.Behavior, Member: member, Anchor: anchor, Fields: []rules.OwnedField{}, Operations: []rules.Operation{}}
+			arms = arms || declaration.ArmsDeadlines
+			for _, declared := range declaration.Tables {
+				sub := rules.SubTable{
+					Name:   declared.Name,
+					Table:  table + "_" + snake(member) + "_" + snake(declared.Name),
+					Row:    snake(typ.Name) + "_id",
+					Fields: []rules.OwnedField{},
+				}
+				for _, field := range declared.Fields {
+					column := rules.OwnedField{Name: field.Name, Column: rules.Column{Field: field.Name, Column: snake(field.Name), Type: field.Type}}
+					if field.Type == "Temporal.DateTime" {
+						column.Convert = rules.ConvertEpochMillis
+					}
+					if field.Name == declared.Key {
+						sub.Key = column
+						continue
+					}
+					sub.Fields = append(sub.Fields, column)
+				}
+				if sub.Key.Name == "" {
+					t.Fatalf("behavior %s's table %s names no key field %s", use.Behavior, declared.Name, declared.Key)
+				}
+				out.Tables = append(out.Tables, sub)
+			}
 			for _, field := range declaration.Fields {
 				if field.Type == "" {
 					continue
@@ -218,7 +270,7 @@ func usesOf(t *testing.T, declarations []rules.Declaration, typ transcriptType) 
 			uses = append(uses, out)
 		}
 	}
-	return uses
+	return uses, arms
 }
 
 // mismatch is a step that answered otherwise than the transcript.
@@ -230,8 +282,8 @@ type mismatch struct {
 	actual   string
 }
 
-func replayTranscript(t *testing.T, db *rulestest.DB) {
-	tr := readTranscript(t)
+func replayTranscript(t *testing.T, db *rulestest.DB, file transcriptFile) {
+	tr := readTranscript(t, file.path)
 	declarations, err := rules.Native().Declarations()
 	if err != nil {
 		t.Fatal(err)
@@ -279,9 +331,10 @@ func replayTranscript(t *testing.T, db *rulestest.DB) {
 			// tableOf is the layout of a type's table in one of the
 			// scenario's databases, with a version's spec.
 			tableOf := func(database, typeName string, spec *rules.TypeSpec) *rules.Table {
+				name := fmt.Sprintf("s%d_d%d_%s", index, databaseIndex(database), snake(typeName))
 				table := &rules.Table{
 					Type:    typeName,
-					Table:   fmt.Sprintf("s%d_d%d_%s", index, databaseIndex(database), snake(typeName)),
+					Table:   name,
 					Key:     rules.Column{Field: "id", Column: "id", Type: "string"},
 					Version: "_version",
 					Own:     []rules.Column{},
@@ -292,7 +345,11 @@ func replayTranscript(t *testing.T, db *rulestest.DB) {
 					for _, field := range typ.Fields {
 						table.Own = append(table.Own, rules.Column{Field: field.Name, Column: field.Name, Type: irType(field.Type)})
 					}
-					table.Uses = usesOf(t, declarations, *typ)
+					uses, arms := usesOf(t, declarations, *typ, name)
+					table.Uses = uses
+					if arms {
+						table.Deadlines = &rules.Deadlines{Queue: typeName + "Deadline", Table: name + "_deadline_queue", RowKey: "row_key", Use: "use_id", Name: "name", At: "at", Payload: "payload"}
+					}
 					if len(typ.Versions) > 0 {
 						table.Spec = typ.Versions[0]
 					}
@@ -322,6 +379,27 @@ func replayTranscript(t *testing.T, db *rulestest.DB) {
 				db.Exec(t, fmt.Sprintf(`CREATE TABLE "%s" (%s)`, table.Table, strings.Join(columns, ", ")))
 				for _, ddl := range db.BumpVersion(table.Table) {
 					db.Exec(t, ddl)
+				}
+				// Each sub-table a child of the row, keyed within it, deleted
+				// with it; and the deadline queue, keyed by the row's key as
+				// text.
+				for _, use := range table.Uses {
+					for _, sub := range use.Tables {
+						columns := []string{
+							fmt.Sprintf(`"%s" %s NOT NULL REFERENCES "%s" (id) ON DELETE CASCADE`, sub.Row, db.ColumnTypes().Text, table.Table),
+							fmt.Sprintf(`"%s" %s NOT NULL`, sub.Key.Column.Column, db.ColumnTypes().Text),
+						}
+						for _, field := range sub.Fields {
+							columns = append(columns, fmt.Sprintf(`"%s" %s`, field.Column.Column, sqlType(db, field.Column)))
+						}
+						columns = append(columns, fmt.Sprintf(`PRIMARY KEY ("%s", "%s")`, sub.Row, sub.Key.Column.Column))
+						db.Exec(t, fmt.Sprintf(`CREATE TABLE "%s" (%s)`, sub.Table, strings.Join(columns, ", ")))
+					}
+				}
+				if table.Deadlines != nil {
+					for _, ddl := range db.DeadlineQueue(table.Deadlines.Table, db.ColumnTypes().Text) {
+						db.Exec(t, ddl)
+					}
 				}
 			}
 			var found []mismatch
@@ -463,6 +541,9 @@ func replayTranscript(t *testing.T, db *rulestest.DB) {
 							actualRow = jsonOf(t, map[string]any{"own": row.Own, "owned": row.Owned})
 						}
 						compare(step, "row", step.Expect.Row, actualRow)
+						subRows, deadlines := subStateOf(t, db, layout, step.Type, rowKey)
+						compare(step, "subRows", step.Expect.SubRows, subRows)
+						compare(step, "deadlines", step.Expect.Deadlines, deadlines)
 					}
 				default:
 					t.Fatalf("step %d: a step of kind %q", step.Step, step.Kind)
@@ -478,12 +559,53 @@ func replayTranscript(t *testing.T, db *rulestest.DB) {
 	replayed := counts["command"] + counts["check"] + counts["raw"]
 	t.Logf("%s on %s: %d scenarios, %d steps replayed (%d commands, %d checks, %d raw writes), %d left out by the transcript with its reasons",
 		tr.File, db.Name, len(tr.Scenarios), replayed, counts["command"], counts["check"], counts["raw"], skipped)
-	if replayed < transcriptFloor {
-		t.Errorf("replayed %d steps, below the floor of %d", replayed, transcriptFloor)
+	if replayed < file.floor {
+		t.Errorf("replayed %d steps, below the floor of %d", replayed, file.floor)
 	}
 	if len(mismatches) > 0 {
 		t.Errorf("%d mismatches", len(mismatches))
 	}
+}
+
+// subStateOf is a row's sub-table rows, by use id and then table, each
+// table's rows in key order, and its armed deadlines, as a transcript's
+// expect writes them: nil for none.
+func subStateOf(t *testing.T, db *rulestest.DB, layout *rules.Layout, typeName, key string) (json.RawMessage, json.RawMessage) {
+	t.Helper()
+	tables := map[string]map[string][]rules.SubRow{}
+	var deadlines []rules.ArmedDeadline
+	err := db.InTx(context.Background(), func(tx *rulestest.Tx) error {
+		host := rules.Host{Layout: layout, Store: tx.Store()}
+		for _, use := range layout.Types[typeName].Uses {
+			for _, sub := range use.Tables {
+				rows, err := rules.ReadSubRows(context.Background(), host, typeName, key, use.ID, sub.Name)
+				if err != nil {
+					return err
+				}
+				if len(rows) == 0 {
+					continue
+				}
+				if tables[use.ID] == nil {
+					tables[use.ID] = map[string][]rules.SubRow{}
+				}
+				tables[use.ID][sub.Name] = rows
+			}
+		}
+		var err error
+		deadlines, err = rules.ReadDeadlines(context.Background(), host, typeName, key)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("read %s %s's sub-table rows and deadlines back: %v", typeName, key, err)
+	}
+	var subRows, armed json.RawMessage
+	if len(tables) > 0 {
+		subRows = jsonOf(t, tables)
+	}
+	if len(deadlines) > 0 {
+		armed = jsonOf(t, deadlines)
+	}
+	return subRows, armed
 }
 
 // rawValue is a raw step's value as the dialect binds its column.

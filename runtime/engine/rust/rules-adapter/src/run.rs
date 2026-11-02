@@ -13,15 +13,16 @@ use std::collections::{BTreeMap, HashSet};
 use serde::Serialize;
 use serde_json::{Map, Value};
 use superschematic_rules::{
-    Action, Answer, Answered, Answers, Caller, ChangeSet, Code, Command, Core, Outcome,
-    ReadRequest, Refusal, Row, RowWrite, Step, TypeSpec, ValidationIssue,
+    Action, Answer, Answered, Answers, Caller, ChangeSet, Code, Command, Core, DeadlineChange,
+    Outcome, ReadRequest, Refusal, Row, RowWrite, Step, SubRow, SubRowChange, SubRowWrite,
+    TypeSpec, ValidationIssue,
 };
 
 use crate::convert::{base62, from_cell, internal, key_value, to_column, Bind, Cell, UUID_TYPES};
 use crate::host::Host;
-use crate::layout::{Column, Layout, Table};
+use crate::layout::{Column, Deadlines, Layout, SubTable, Table};
 use crate::{busy_refusal, CreateOptions, Error, ExecuteOptions, Executed, Owned};
-use crate::{MAX_ATTEMPTS, MAX_ROUNDS};
+use crate::{Claim, Deadline, DeadlineRun, MAX_ATTEMPTS, MAX_ROUNDS};
 
 /// The SQL a store's statements are written in. A build with one store
 /// writes its dialect alone.
@@ -56,6 +57,16 @@ impl Statement {
             text,
             values,
             expect: Some(1),
+            check: false,
+        }
+    }
+
+    /// A write that may change any number of rows.
+    fn any(text: String, values: Vec<Bind>) -> Self {
+        Statement {
+            text,
+            values,
+            expect: None,
             check: false,
         }
     }
@@ -121,7 +132,9 @@ fn busy_or<S: Store>(
 /// Runs one command on a type of the layout to its outcome, in the store's
 /// transaction: answers its reads, takes its locks, applies its change set
 /// whole with each row fenced on its version, and runs it again from fresh
-/// state when a row moved, up to [`MAX_ATTEMPTS`] times.
+/// state when a row moved, up to [`MAX_ATTEMPTS`] times. A deadline command
+/// runs only while its deadline is armed at its `at`, read before each run
+/// and spent in the unit that applies its change set (D103).
 pub(crate) async fn execute<S: Store>(
     host: &Host<'_>,
     store: &S,
@@ -129,30 +142,312 @@ pub(crate) async fn execute<S: Store>(
     command: Command,
     options: &ExecuteOptions,
 ) -> Result<Executed, Error> {
+    match attempts(host, store, type_name, command, options, None, false).await? {
+        DeadlineRun::Ran(executed) => Ok(*executed),
+        // A command with no claim that spends nothing on a refusal comes
+        // to neither.
+        DeadlineRun::ClaimLost | DeadlineRun::Gone(_) => Err(internal(format!(
+            "a command on {type_name} ran nothing and was refused nothing"
+        ))
+        .into()),
+    }
+}
+
+/// Runs a due deadline of a row (D103) at the later of the host's time and
+/// the time it was armed to fall due at, so a host whose clock lags the
+/// database's never runs it before it falls due in the core.
+///
+/// With a claim of its message, the unit that applies the command's change
+/// set spends the claim (its message deleted by its id and token, right
+/// after the command's own row write and before the change set's deadline
+/// changes), so a deadline armed or cleared since the claim, which deleted
+/// the claimed message, never runs on its old arming: the claim is read
+/// when the unit does not apply, and one that is gone ran nothing
+/// ([`DeadlineRun::ClaimLost`]). Without one, the deadline is read armed at
+/// its `at` before each run, and its message spent in the unit by its row,
+/// use, name and `at`.
+///
+/// A row or a use that is gone (the core's `not_found` while the table
+/// holds no live row of the key, or the layout no such use) spends the
+/// arming in a unit of its own: [`DeadlineRun::Gone`] with the refusal, or
+/// [`DeadlineRun::ClaimLost`] when the claim was lost first. Any other
+/// refusal comes back as [`Error::Refused`], nothing applied, a `not_found`
+/// of something else a rule reached among them.
+pub(crate) async fn run_deadline<S: Store>(
+    host: &Host<'_>,
+    store: &S,
+    type_name: &str,
+    deadline: &Deadline,
+    caller: Caller,
+    claim: Option<&Claim>,
+) -> Result<DeadlineRun, Error> {
+    let action = Action::Deadline {
+        key: deadline.key.clone(),
+        use_id: deadline.use_id.clone(),
+        name: deadline.name.clone(),
+        at: deadline.at,
+        payload: deadline.payload.clone(),
+    };
+    let now = host.now().max(deadline.at);
+    let command = Command::new(caller, now, action).with_request(host.request());
+    attempts(
+        host,
+        store,
+        type_name,
+        command,
+        &ExecuteOptions::default(),
+        claim,
+        true,
+    )
+    .await
+}
+
+/// The runs of one command: each settles the core on fresh reads and
+/// applies its change set as one unit, until a unit applies, a claim is
+/// lost or the attempts run out. `gone` spends a deadline whose row or use
+/// the core finds gone, in a unit of its own.
+async fn attempts<S: Store>(
+    host: &Host<'_>,
+    store: &S,
+    type_name: &str,
+    command: Command,
+    options: &ExecuteOptions,
+    claim: Option<&Claim>,
+    gone: bool,
+) -> Result<DeadlineRun, Error> {
     let table = table_of(host.layout, type_name)?;
     refuse_checked(host, type_name)?;
     let run = prepared(host, table, command)?;
     refuse_owned_writes(table, &run.action)?;
+    let due = match &run.action {
+        Action::Deadline {
+            key,
+            use_id,
+            name,
+            at,
+            ..
+        } => Some(Due {
+            table,
+            queue: queue_of(table, use_id, name)?,
+            key,
+            use_id,
+            name,
+            at: *at,
+        }),
+        _ => None,
+    };
     for attempt in 1..=MAX_ATTEMPTS {
         let busy = |error| busy_or(store, error, type_name, &run, attempt);
-        let (changes, answers) = settle(host, store, &table.spec, &run).await.map_err(busy)?;
+        let spend = match &due {
+            Some(due) => {
+                if claim.is_none() {
+                    due.armed(store, run.now).await.map_err(busy)?;
+                }
+                Some(due.spend(store.dialect(), claim)?)
+            }
+            None => None,
+        };
+        let (changes, answers) = match settle(host, store, &table.spec, &run).await {
+            Ok(settled) => settled,
+            Err(Error::Refused(refusal)) if gone && refusal.code == Code::NotFound => {
+                let (Some(due), Some(spend)) = (&due, spend) else {
+                    return Err(Error::Refused(refusal));
+                };
+                if !due.gone(store).await.map_err(busy)? {
+                    return Err(Error::Refused(refusal));
+                }
+                // The row or the use is gone, and so is the arming once
+                // this unit spends it.
+                if store.apply(&[spend]).await.map_err(busy)? {
+                    return Ok(DeadlineRun::Gone(refusal));
+                }
+                if claim.is_some() {
+                    return Ok(DeadlineRun::ClaimLost);
+                }
+                continue;
+            }
+            Err(error) => return Err(busy(error)),
+        };
         let mut statements = fences_of(host.layout, store, &answers)?;
         statements.extend(
-            statements_of(host.layout, store, type_name, &run, &changes, options)
-                .await
-                .map_err(busy)?,
+            statements_of(
+                host.layout,
+                store,
+                type_name,
+                &run,
+                &changes,
+                options,
+                spend,
+            )
+            .await
+            .map_err(busy)?,
         );
         if store.apply(&statements).await.map_err(busy)? {
             let result = changes.result.clone();
-            return Ok(Executed {
+            return Ok(DeadlineRun::Ran(Box::new(Executed {
                 changes,
                 result,
                 key: run.action.key().map(str::to_owned),
                 attempts: attempt,
-            });
+            })));
+        }
+        // A row moved, a check failed, or the claim was spent before this
+        // unit could spend it: a claim armed or cleared since, or claimed
+        // again after its lease, runs nothing.
+        if let (Some(due), Some(claim)) = (&due, claim) {
+            if !due.claimed(store, claim).await.map_err(busy)? {
+                return Ok(DeadlineRun::ClaimLost);
+            }
         }
     }
     Err(busy_refusal(type_name, &run, MAX_ATTEMPTS).into())
+}
+
+/// The deadline a deadline command runs: its row's table and its queue, the
+/// row's key, the use, the name and the time it was armed to fall due at.
+struct Due<'a> {
+    table: &'a Table,
+    queue: &'a Deadlines,
+    key: &'a str,
+    use_id: &'a str,
+    name: &'a str,
+    at: i64,
+}
+
+impl Due<'_> {
+    /// Whether the deadline's row or use is gone: the layout lists no such
+    /// use of the table, or the table holds no live row of the key. A
+    /// `not_found` the core gave while both are there is of something a
+    /// rule reached, which the run refuses rather than spends.
+    async fn gone<S: Store>(&self, store: &S) -> Result<bool, Error> {
+        if self.table.uses.iter().all(|used| used.id != self.use_id) {
+            return Ok(true);
+        }
+        Ok(read_row_of(store, self.table, self.key).await?.is_none())
+    }
+
+    /// Refuses the command unless the deadline is armed at its `at` and has
+    /// fallen due by `now`, in the reference host's words.
+    async fn armed<S: Store>(&self, store: &S, now: i64) -> Result<(), Error> {
+        let dialect = store.dialect();
+        let q = self.queue;
+        let text = format!(
+            "SELECT {}, {} FROM {} WHERE {} = {} AND {} = {} AND {} = {} AND \"state\" IN ('ready', 'claimed')",
+            quote(&q.at),
+            quote(&q.payload),
+            quote(&q.table),
+            quote(&q.row_key),
+            placeholder(dialect, 1),
+            quote(&q.use_id),
+            placeholder(dialect, 2),
+            quote(&q.name),
+            placeholder(dialect, 3)
+        );
+        let values = [
+            key_value(self.table, self.key)?,
+            Bind::Text(self.use_id.to_owned()),
+            Bind::Text(self.name.to_owned()),
+        ];
+        let rows = store.query(&text, &values).await?;
+        let armed = rows
+            .iter()
+            .any(|cells| cells.first().and_then(integer_of) == Some(self.at));
+        if !armed {
+            return Err(Refusal::not_found(format!(
+                "{} {} has no deadline {}.{} armed at {}",
+                self.table.type_name, self.key, self.use_id, self.name, self.at
+            ))
+            .into());
+        }
+        if self.at > now {
+            return Err(Refusal::invalid_argument(format!(
+                "deadline {}.{} of {} {} falls due at {}, after {now}",
+                self.use_id, self.name, self.table.type_name, self.key, self.at
+            ))
+            .into());
+        }
+        Ok(())
+    }
+
+    /// The statement that spends the arming, expecting one row: with a
+    /// claim, the claimed message by its id and token; without one, the
+    /// live message armed at `at`.
+    fn spend(&self, dialect: Dialect, claim: Option<&Claim>) -> Result<Statement, Error> {
+        let q = self.queue;
+        Ok(match claim {
+            Some(claim) => Statement::write(
+                format!("DELETE FROM {} WHERE {}", quote(&q.table), claimed_where(dialect)),
+                vec![Bind::Text(claim.id.clone()), Bind::Text(claim.token.clone())],
+            ),
+            None => Statement::write(
+                format!(
+                    "DELETE FROM {} WHERE {} = {} AND {} = {} AND {} = {} AND {} = {} AND \"state\" IN ('ready', 'claimed')",
+                    quote(&q.table),
+                    quote(&q.row_key),
+                    placeholder(dialect, 1),
+                    quote(&q.use_id),
+                    placeholder(dialect, 2),
+                    quote(&q.name),
+                    placeholder(dialect, 3),
+                    quote(&q.at),
+                    placeholder(dialect, 4)
+                ),
+                vec![
+                    key_value(self.table, self.key)?,
+                    Bind::Text(self.use_id.to_owned()),
+                    Bind::Text(self.name.to_owned()),
+                    Bind::Int(self.at),
+                ],
+            ),
+        })
+    }
+
+    /// Whether the claim still holds its message.
+    async fn claimed<S: Store>(&self, store: &S, claim: &Claim) -> Result<bool, Error> {
+        let text = format!(
+            "SELECT 1 FROM {} WHERE {}",
+            quote(&self.queue.table),
+            claimed_where(store.dialect())
+        );
+        let values = [
+            Bind::Text(claim.id.clone()),
+            Bind::Text(claim.token.clone()),
+        ];
+        Ok(!store.query(&text, &values).await?.is_empty())
+    }
+}
+
+/// The condition of a claimed message by its id and its claim's token.
+fn claimed_where(dialect: Dialect) -> &'static str {
+    match dialect {
+        Dialect::Postgres => {
+            "\"id\" = $1::uuid AND \"claim_token\" = $2::uuid AND \"state\" = 'claimed'"
+        }
+        Dialect::Sqlite => "\"id\" = ?1 AND \"claim_token\" = ?2 AND \"state\" = 'claimed'",
+    }
+}
+
+/// A cell's integer: a deadline's `at` as a store reads it.
+fn integer_of(cell: &Cell) -> Option<i64> {
+    match cell {
+        Cell::Int(n) => Some(*n),
+        Cell::Real(x) if x.is_finite() && x.fract() == 0.0 => Some(*x as i64),
+        Cell::Text(text) => text.trim().parse().ok(),
+        Cell::Json(Value::Number(number)) => number.as_i64(),
+        _ => None,
+    }
+}
+
+/// The deadline queue of a table a deadline command runs on, or an internal
+/// refusal for a table the layout gives none.
+fn queue_of<'t>(table: &'t Table, use_id: &str, name: &str) -> Result<&'t Deadlines, Error> {
+    table.deadlines.as_ref().ok_or_else(|| {
+        internal(format!(
+            "a deadline {use_id}.{name} of {type_name} ran, and the behaviors' layout gives {type_name} no deadline queue",
+            type_name = table.type_name
+        ))
+        .into()
+    })
 }
 
 /// Runs an operation of a use on a row and returns its result.
@@ -315,6 +610,23 @@ pub(crate) async fn read_row<S: Store>(
     read_row_of(store, table_of(host.layout, type_name)?, key).await
 }
 
+/// Reads the rows of one sub-table of a use on a row of a type, as the core
+/// reads them; none for a type the layout lacks.
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub(crate) async fn read_sub_rows_of<S: Store>(
+    host: &Host<'_>,
+    store: &S,
+    type_name: &str,
+    key: &str,
+    use_id: &str,
+    table: &str,
+) -> Result<Vec<SubRow>, Error> {
+    let Some(of) = host.layout.table(type_name) else {
+        return Ok(Vec::new());
+    };
+    read_sub_rows(store, of, sub_table_of(of, use_id, table)?, key).await
+}
+
 /// The command a wrapper builds: the caller, the host's time and a request
 /// id of its own.
 fn command_of(host: &Host<'_>, caller: Caller, action: Action) -> Command {
@@ -454,6 +766,18 @@ async fn settle<S: Store>(
             Step::Done(Outcome::Changed(changes)) => return Ok((*changes, answers)),
             Step::Read(requests) => {
                 for request in requests {
+                    // A store whose locks are fenced checks each read made
+                    // under one in the unit that writes, and has no check
+                    // of sub-table rows yet (D103, left for later).
+                    if store.fenced()
+                        && !answers.locks.is_empty()
+                        && matches!(request, ReadRequest::SubRows { .. })
+                    {
+                        return Err(internal(
+                            "a read of sub-table rows under a lock has no check on SQLite or D1 yet (D103)",
+                        )
+                        .into());
+                    }
                     let answer = answer_of(host.layout, store, &request).await?;
                     answers.answer(request, answer);
                 }
@@ -502,6 +826,20 @@ async fn answer_of<S: Store>(
         ReadRequest::Spec { type_name } => Ok(Answer::Spec(
             layout.table(type_name).map(|table| table.spec.clone()),
         )),
+        ReadRequest::SubRows {
+            type_name,
+            key,
+            use_id,
+            table: name,
+        } => {
+            let Some(table) = layout.table(type_name) else {
+                return Ok(Answer::SubRows(Vec::new()));
+            };
+            let sub = sub_table_of(table, use_id, name)?;
+            Ok(Answer::SubRows(
+                read_sub_rows(store, table, sub, key).await?,
+            ))
+        }
         other => Err(internal(format!(
             "the adapter answers no read of this kind: {}",
             json_of(other)
@@ -564,6 +902,55 @@ async fn read_row_of<S: Store>(store: &S, table: &Table, key: &str) -> Result<Op
     Ok(Some(row))
 }
 
+/// The rows of a use's sub-table on one row, in key order (by code point,
+/// as the core's reference host orders them): each by its key, its values
+/// by the declared field's name, converted as an owned field's are, a NULL
+/// column absent.
+async fn read_sub_rows<S: Store>(
+    store: &S,
+    table: &Table,
+    sub: &SubTable,
+    key: &str,
+) -> Result<Vec<SubRow>, Error> {
+    let dialect = store.dialect();
+    let list: Vec<String> = std::iter::once(&sub.key)
+        .chain(&sub.fields)
+        .enumerate()
+        .map(|(i, field)| format!("{} AS c{i}", selected(dialect, &field.column.column)))
+        .collect();
+    let order = match dialect {
+        Dialect::Postgres => " COLLATE \"C\"",
+        Dialect::Sqlite => "",
+    };
+    let text = format!(
+        "SELECT {} FROM {} WHERE {} = {} ORDER BY {}{order}",
+        list.join(", "),
+        quote(&sub.table),
+        quote(&sub.row),
+        placeholder(dialect, 1),
+        quote(&sub.key.column.column)
+    );
+    let mut rows = Vec::new();
+    for cells in store.query(&text, &[key_value(table, key)?]).await? {
+        let mut cells = cells.into_iter();
+        let mut next =
+            |column: &Column| from_cell(cells.next().unwrap_or(Cell::Null), column, table);
+        let at = match next(&sub.key.column)? {
+            Some(Value::String(at)) => at,
+            Some(other) => other.to_string(),
+            None => continue,
+        };
+        let mut values = Map::new();
+        for field in &sub.fields {
+            if let Some(value) = next(&field.column)? {
+                values.insert(field.name.clone(), value);
+            }
+        }
+        rows.push(SubRow { key: at, values });
+    }
+    Ok(rows)
+}
+
 /// A row's version as its column holds it.
 fn version_of(cell: Option<Cell>, table: &Table, key: &str) -> Result<i64, Error> {
     let version = match &cell {
@@ -588,7 +975,8 @@ fn version_of(cell: Option<Cell>, table: &Table, key: &str) -> Result<i64, Error
 /// writes: a row read is still at the version read, a row read absent is
 /// still absent, and a table read to have rows still has them, or still
 /// none, each of a soft-deletable table's live rows. A read of a type the
-/// layout lacks, or of a spec, answers from the layout and needs none.
+/// layout lacks, or of a spec, answers from the layout and needs none; one
+/// of sub-table rows under a lock was refused as it was asked for.
 fn fences_of<S: Store>(
     layout: &Layout,
     store: &S,
@@ -649,10 +1037,14 @@ fn fences_of<S: Store>(
     Ok(fences)
 }
 
-/// The statements of a change set, in its order, each fenced to change one
-/// row. A create of a key the table holds is refused as conflict;
-/// sub-table rows, outbox events and deadlines, and a kind of write the
-/// adapter does not know, refuse the command as internal.
+/// The statements of a change set, in the order of a unit (D103): every row
+/// write, each fenced to change one row (a create of a key the table holds
+/// is refused as conflict); a deadline command's spend of its arming; the
+/// sub-table row writes; the deadlines armed and cleared; then, for each
+/// row the change set deletes, its deadlines' messages and, deleted for
+/// good, its sub-table rows, whose writes and deadlines the unit skips.
+/// Outbox events, and a kind of write the adapter does not know, refuse
+/// the command as internal.
 async fn statements_of<S: Store>(
     layout: &Layout,
     store: &S,
@@ -660,26 +1052,21 @@ async fn statements_of<S: Store>(
     command: &Command,
     changes: &ChangeSet,
     options: &ExecuteOptions,
+    spend: Option<Statement>,
 ) -> Result<Vec<Statement>, Error> {
-    let not_yet = |what: &str| -> Error {
-        internal(format!(
-            "{} of {type_name} writes {what}, which the adapter takes once each has a table of its own (D103's order of the work, step 3)",
+    if !changes.events.is_empty() {
+        return Err(internal(format!(
+            "{} of {type_name} writes outbox events, which the adapter takes once the outbox has a table of its own (D103's order of the work, step 3)",
             command.action.name()
         ))
-        .into()
-    };
-    if !changes.sub_rows.is_empty() {
-        return Err(not_yet("sub-table rows"));
-    }
-    if !changes.events.is_empty() {
-        return Err(not_yet("outbox events"));
-    }
-    if !changes.deadlines.is_empty() {
-        return Err(not_yet("deadlines"));
+        .into());
     }
     let dialect = store.dialect();
     let command_key = command.action.key();
     let mut statements = Vec::new();
+    // Each row the change set deletes: its table, its key and whether it
+    // is deleted for good.
+    let mut deleted: Vec<(&Table, &str, bool)> = Vec::new();
     for write in &changes.rows {
         let table = table_of(layout, write.type_name())?;
         // The command's own row binds the columns its caller encoded.
@@ -722,6 +1109,7 @@ async fn statements_of<S: Store>(
                 ..
             } => match options.soft_delete.as_ref().filter(|_| mine) {
                 Some(soft) => {
+                    deleted.push((table, key, false));
                     let mut binder = Binder::new(dialect);
                     let mut sets: Vec<String> = soft
                         .iter()
@@ -739,6 +1127,7 @@ async fn statements_of<S: Store>(
                     )?
                 }
                 None => {
+                    deleted.push((table, key, true));
                     let mut binder = Binder::new(dialect);
                     held_write(
                         &mut binder,
@@ -759,7 +1148,285 @@ async fn statements_of<S: Store>(
         };
         statements.push(statement);
     }
+    // The arming a deadline command spends, after the rows it holds to
+    // their versions, so its lock comes after theirs as every command's
+    // does, and before the deadlines the command arms again.
+    statements.extend(spend);
+    let gone = |type_name: &str, key: Option<&str>| {
+        deleted
+            .iter()
+            .any(|(table, deleted, _)| table.type_name == type_name && key == Some(*deleted))
+    };
+    for write in &changes.sub_rows {
+        if gone(&write.row.type_name, write.row.key.as_deref()) {
+            continue;
+        }
+        statements.extend(sub_row_of(layout, dialect, write)?);
+    }
+    for change in &changes.deadlines {
+        let row = change.row();
+        if gone(&row.type_name, row.key.as_deref()) {
+            continue;
+        }
+        statements.extend(deadline_of(layout, dialect, change)?);
+    }
+    for (table, key, hard) in deleted {
+        let at_row = || key_value(table, key);
+        if let Some(queue) = &table.deadlines {
+            statements.push(Statement::any(
+                format!(
+                    "DELETE FROM {} WHERE {} = {}",
+                    quote(&queue.table),
+                    quote(&queue.row_key),
+                    placeholder(dialect, 1)
+                ),
+                vec![at_row()?],
+            ));
+        }
+        // A soft-deleted row keeps its sub-table rows, its state for a
+        // restore; SQLite deletes them with the row only when its
+        // connection enforces foreign keys, so the unit deletes them.
+        if hard {
+            for sub in table.uses.iter().flat_map(|used| &used.tables) {
+                statements.push(Statement::any(
+                    format!(
+                        "DELETE FROM {} WHERE {} = {}",
+                        quote(&sub.table),
+                        quote(&sub.row),
+                        placeholder(dialect, 1)
+                    ),
+                    vec![at_row()?],
+                ));
+            }
+        }
+    }
     Ok(statements)
+}
+
+/// The statement of one sub-table row write, each expecting one row: an
+/// insert that a row of its key the table holds already leaves as it is,
+/// an update of the values it sets, none for an update that sets none, or
+/// a delete. The row and the key bind first, then each value the write
+/// names, in the layout's field order.
+fn sub_row_of(
+    layout: &Layout,
+    dialect: Dialect,
+    write: &SubRowWrite,
+) -> Result<Option<Statement>, Error> {
+    let table = table_of(layout, &write.row.type_name)?;
+    let Some(key) = write.row.key.as_deref() else {
+        return Err(internal(format!(
+            "a write of {}'s {}.{} reached the adapter without its row's key",
+            table.type_name, write.use_id, write.table
+        ))
+        .into());
+    };
+    let sub = sub_table_of(table, &write.use_id, &write.table)?;
+    let mut values = vec![
+        key_value(table, key)?,
+        to_column(&Value::String(write.key.clone()), &sub.key.column, table)?,
+    ];
+    let at_row = format!(
+        "{} = {} AND {} = {}",
+        quote(&sub.row),
+        placeholder(dialect, 1),
+        quote(&sub.key.column.column),
+        placeholder(dialect, 2)
+    );
+    let statement = match &write.change {
+        SubRowChange::Insert { values: set } => {
+            let mut columns = vec![quote(&sub.row), quote(&sub.key.column.column)];
+            for (column, value) in sub_values(table, sub, set)? {
+                columns.push(quote(column));
+                values.push(value);
+            }
+            let placeholders: Vec<String> = (1..=values.len())
+                .map(|n| placeholder(dialect, n))
+                .collect();
+            Statement::write(
+                format!(
+                    "INSERT INTO {} ({}) VALUES ({}) ON CONFLICT ({}, {}) DO NOTHING",
+                    quote(&sub.table),
+                    columns.join(", "),
+                    placeholders.join(", "),
+                    quote(&sub.row),
+                    quote(&sub.key.column.column)
+                ),
+                values,
+            )
+        }
+        SubRowChange::Update { values: set } => {
+            let mut sets = Vec::new();
+            for (column, value) in sub_values(table, sub, set)? {
+                values.push(value);
+                sets.push(format!(
+                    "{} = {}",
+                    quote(column),
+                    placeholder(dialect, values.len())
+                ));
+            }
+            if sets.is_empty() {
+                return Ok(None);
+            }
+            Statement::write(
+                format!(
+                    "UPDATE {} SET {} WHERE {at_row}",
+                    quote(&sub.table),
+                    sets.join(", ")
+                ),
+                values,
+            )
+        }
+        SubRowChange::Delete => Statement::write(
+            format!("DELETE FROM {} WHERE {at_row}", quote(&sub.table)),
+            values,
+        ),
+        other => {
+            return Err(internal(format!(
+                "the adapter takes no sub-table row write of this kind: {}",
+                json_of(other)
+            ))
+            .into())
+        }
+    };
+    Ok(Some(statement))
+}
+
+/// The columns and values a sub-table row write sets, in the layout's
+/// field order; a value of a field the table does not hold, the key's
+/// among them, is internal.
+fn sub_values<'s>(
+    table: &Table,
+    sub: &'s SubTable,
+    set: &Map<String, Value>,
+) -> Result<Vec<(&'s str, Bind)>, Error> {
+    if let Some(name) = set.keys().find(|name| sub.field(name).is_none()) {
+        return Err(internal(format!("sub-table {} has no field {name}", sub.table)).into());
+    }
+    sub.fields
+        .iter()
+        .filter_map(|field| set.get(&field.name).map(|value| (field, value)))
+        .map(|(field, value)| {
+            Ok((
+                field.column.column.as_str(),
+                to_column(value, &field.column, table)?,
+            ))
+        })
+        .collect()
+}
+
+/// A use's sub-table on a table by the use's id and the table's declared
+/// name, or an internal refusal for one the layout lacks.
+fn sub_table_of<'t>(table: &'t Table, use_id: &str, name: &str) -> Result<&'t SubTable, Error> {
+    let Some(used) = table.uses.iter().find(|used| used.id == use_id) else {
+        return Err(internal(format!(
+            "{} has no use {use_id} in the behaviors' layout",
+            table.type_name
+        ))
+        .into());
+    };
+    used.table(name).ok_or_else(|| {
+        internal(format!(
+            "{}'s use {use_id} ({}) has no sub-table {name} in the behaviors' layout",
+            table.type_name, used.behavior
+        ))
+        .into()
+    })
+}
+
+/// The statements of a deadline armed or cleared (D103), neither held to a
+/// count: a clear deletes the deadline's messages, ready, claimed or dead,
+/// so a claim on its old arming finds its message gone and a dead arming
+/// the new one supersedes goes, and an operator's retry of the queue's dead
+/// messages never meets a live one of the same deadline; an arm deletes
+/// them and inserts its message, due at the time it falls due, with its
+/// payload's JSON.
+fn deadline_of(
+    layout: &Layout,
+    dialect: Dialect,
+    change: &DeadlineChange,
+) -> Result<Vec<Statement>, Error> {
+    let row = change.row();
+    let table = table_of(layout, &row.type_name)?;
+    let (use_id, name) = (change.use_id(), change.name());
+    let Some(queue) = &table.deadlines else {
+        return Err(internal(format!(
+            "{type_name}'s use {use_id} arms the deadline {name}, and the behaviors' layout gives {type_name} no deadline queue",
+            type_name = table.type_name
+        ))
+        .into());
+    };
+    let Some(key) = row.key.as_deref() else {
+        return Err(internal(format!(
+            "a deadline {use_id}.{name} of {} reached the adapter without its row's key",
+            table.type_name
+        ))
+        .into());
+    };
+    let p = |n| placeholder(dialect, n);
+    let mut values = vec![
+        key_value(table, key)?,
+        Bind::Text(use_id.to_owned()),
+        Bind::Text(name.to_owned()),
+    ];
+    let clear = Statement::any(
+        format!(
+            "DELETE FROM {} WHERE {} = {} AND {} = {} AND {} = {}",
+            quote(&queue.table),
+            quote(&queue.row_key),
+            p(1),
+            quote(&queue.use_id),
+            p(2),
+            quote(&queue.name),
+            p(3)
+        ),
+        values.clone(),
+    );
+    match change {
+        DeadlineChange::Clear { .. } => Ok(vec![clear]),
+        DeadlineChange::Arm { at, payload, .. } => {
+            values.push(Bind::Int(*at));
+            values.push(match payload {
+                Value::Null => Bind::Null,
+                payload => Bind::Text(payload.to_string()),
+            });
+            let (payload_at, due_at) = match dialect {
+                Dialect::Postgres => (
+                    format!("{}::jsonb", p(5)),
+                    format!("to_timestamp({}::bigint / 1000.0)", p(4)),
+                ),
+                Dialect::Sqlite => (
+                    p(5),
+                    format!(
+                        "strftime('%Y-%m-%dT%H:%M:%fZ', {} / 1000.0, 'unixepoch')",
+                        p(4)
+                    ),
+                ),
+            };
+            let insert = Statement::any(
+                format!(
+                    "INSERT INTO {} ({}, {}, {}, {}, {}, \"due_at\") VALUES ({}, {}, {}, {}, {payload_at}, {due_at})",
+                    quote(&queue.table),
+                    quote(&queue.row_key),
+                    quote(&queue.use_id),
+                    quote(&queue.name),
+                    quote(&queue.at),
+                    quote(&queue.payload),
+                    p(1),
+                    p(2),
+                    p(3),
+                    p(4)
+                ),
+                values,
+            );
+            Ok(vec![clear, insert])
+        }
+        other => Err(internal(format!(
+            "the adapter takes no deadline change of this kind: {}",
+            json_of(other)
+        ))
+        .into()),
+    }
 }
 
 /// A create's insert of its key, its own columns and its owned columns,

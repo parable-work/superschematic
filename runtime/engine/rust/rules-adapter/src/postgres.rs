@@ -26,7 +26,10 @@ use tokio_postgres::GenericClient;
 
 use crate::convert::{internal, Bind, Cell};
 use crate::run::{self, Dialect, Statement, Store};
-use crate::{Caller, Command, CreateOptions, Error, ExecuteOptions, Executed, Host, Owned, Row};
+use crate::{
+    Caller, Claim, Command, CreateOptions, Deadline, DeadlineRun, Error, ExecuteOptions, Executed,
+    Host, Owned, Row, SubRow,
+};
 
 /// The savepoint a change set applies in, named apart from a repository's
 /// nested transactions.
@@ -150,6 +153,50 @@ pub async fn read_row<C: GenericClient + Sync>(
     key: &str,
 ) -> Result<Option<Row>, Error> {
     run::read_row(host, &PgStore { client }, type_name, key).await
+}
+
+/// Reads the rows of one sub-table of a use on a row, as the core reads
+/// them (D103): each by its key, in key order, its values by the declared
+/// field's name, a column with no value absent. A row of a type the layout
+/// lacks has none.
+pub async fn read_sub_rows<C: GenericClient + Sync>(
+    host: &Host<'_>,
+    client: &C,
+    type_name: &str,
+    key: &str,
+    use_id: &str,
+    table: &str,
+) -> Result<Vec<SubRow>, Error> {
+    run::read_sub_rows_of(host, &PgStore { client }, type_name, key, use_id, table).await
+}
+
+/// Runs a due deadline of a row of a type in `client`'s transaction (D103),
+/// at the later of the host's time and the time it was armed to fall due
+/// at, as `caller`: a behavior worker's handler passes the claim of its
+/// message, which the unit that applies the change set spends, and
+/// commits. A deadline armed or cleared since the claim runs nothing
+/// ([`DeadlineRun::ClaimLost`]); a row or a use that is gone spends the
+/// arming and runs nothing ([`DeadlineRun::Gone`]). Without a claim the
+/// deadline runs only while it is armed at its `at`, and its message is
+/// spent in the unit. Any other refusal comes back as [`Error::Refused`],
+/// nothing applied, and the transaction goes on.
+pub async fn run_deadline<C: GenericClient + Sync>(
+    host: &Host<'_>,
+    client: &C,
+    type_name: &str,
+    deadline: &Deadline,
+    caller: Caller,
+    claim: Option<&Claim>,
+) -> Result<DeadlineRun, Error> {
+    run::run_deadline(
+        host,
+        &PgStore { client },
+        type_name,
+        deadline,
+        caller,
+        claim,
+    )
+    .await
 }
 
 /// The store over a client in a transaction.
@@ -385,6 +432,25 @@ mod tests {
                 Caller::default(),
             ));
             send(&read_row(host, tx, "Order", "o1"));
+            let deadline = Deadline {
+                key: "o1".into(),
+                use_id: "Timers".into(),
+                name: "respond".into(),
+                at: 0,
+                payload: Value::Null,
+            };
+            let claim = Claim {
+                id: "m1".into(),
+                token: "t1".into(),
+            };
+            send(&run_deadline(
+                host,
+                tx,
+                "Order",
+                &deadline,
+                Caller::default(),
+                Some(&claim),
+            ));
         }
         let _ = check;
     }

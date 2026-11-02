@@ -22,6 +22,12 @@ import (
 // its paymentStatus.
 const workflowFixture = "fixture-workflow-db"
 
+// timersFixture is the DB service whose tables implement Timers (D103): a
+// Ticket held to its SLA, and an Invoice with two Workflows whose Timers
+// names the one it reads. Each table keeps its deadlines in a sub-table and
+// arms them on its deadline queue.
+const timersFixture = "fixture-timers-db"
+
 var update = flag.Bool("update", false, "rewrite golden files")
 
 const fixturesDir = "../../loader/tsreader/testdata/services"
@@ -39,7 +45,7 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 	// core's registry.
 	var loadOpts []loader.Option
 	var reg *registry.Registry
-	if svc == workflowFixture {
+	if svc == workflowFixture || svc == timersFixture {
 		reg = registry.New(naming.Default())
 		loadOpts = append(loadOpts, loader.WithRegistry(reg))
 	}
@@ -114,6 +120,10 @@ func TestWriteORMGolden(t *testing.T) {
 		// layout, and each repository runs its writes and its fields'
 		// operations through the core.
 		{workflowFixture, []string{"repository_order.go", "repository_shipment.go", "rules.go"}},
+		// Tables that implement Timers (D103): their operations under
+		// Timers(), RunDeadline, no upsert, no repository of a sub-table,
+		// and the deadline queues.
+		{timersFixture, []string{"repository_ticket.go", "repository_invoice.go", "rules.go", "queues.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)

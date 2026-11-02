@@ -17,12 +17,22 @@
 //!   answers optional and none when absent, to the [`Step`] the core
 //!   returns: `{"read": [ReadRequest]}`, `{"lock": [LockKey]}`, or
 //!   `{"done": {"refused": Refusal}}` or `{"done": {"changed": ChangeSet}}`.
-//!   A refusal is an outcome, not an error.
+//!   A refusal is an outcome, not an error. A spec lists its own fields
+//!   (`fields`: each one's name, IR type and `dateTime`), which a config
+//!   that names a field is held to; a read asks for a row, whether a type
+//!   has rows, a type's live version, or one sub-table's rows of a row
+//!   (`{"kind": "subRows", "type", "key", "useId", "table"}`, answered
+//!   `{"subRows": [{"key", "values"}]}` in key order); and a deadline
+//!   command (`{"kind": "deadline", ...}`) runs only while the host holds
+//!   the deadline armed at its `at`, which the host checks, never the core
+//!   (D103).
 //! - `declarations`: no input (an empty document, or any), to the
 //!   declaration file of each behavior the core registers, in its order
 //!   (`superschematic_rules_behaviors::DECLARATIONS`): a JSON array of the
-//!   documents the compiler registers, each field's column type and the
-//!   value field among them.
+//!   documents the compiler registers, each field's column type, the value
+//!   field, the sub-tables (`tables`: each one's name, key and typed
+//!   fields) and whether it arms deadlines (`armsDeadlines`) among them,
+//!   which a host's tables and deadline queue are made from.
 //! - `check`: `{"specs": [TypeSpec], "caller"?: Caller, "now"?: number}`, to
 //!   the define check of each spec, in order: a JSON array whose entry is
 //!   null for a spec the core takes and the [`Refusal`] for one it refuses.
@@ -198,6 +208,67 @@ mod tests {
         assert_eq!(files[0]["name"], "Workflow");
         assert_eq!(files[0]["value"], "status");
         assert_eq!(files[0]["fields"][1]["type"], "Temporal.DateTime");
+        assert_eq!(files[1]["name"], "Timers");
+        assert_eq!(files[1]["armsDeadlines"], true);
+        assert_eq!(files[1]["tables"][0]["name"], "deadlines");
+        assert_eq!(files[1]["tables"][0]["key"], "name");
+        assert_eq!(
+            files[1]["tables"][0]["fields"][3]["type"],
+            "Temporal.DateTime"
+        );
+    }
+
+    // A ticket whose status is a Workflow field and whose Timers starts a
+    // deadline at the create, an hour out.
+    fn ticket() -> Value {
+        json!({
+            "name": "Ticket",
+            "uses": [
+                {"behavior": "Workflow", "config": flow(), "anchor": {"field": "status"}},
+                {"behavior": "Timers", "config": {"deadlines": {"respond": {"start": {"create": true}, "afterMs": 3_600_000}}}, "anchor": "type"}
+            ],
+            "fields": [{"name": "title", "type": "string"}]
+        })
+    }
+
+    #[test]
+    fn a_create_writes_timers_sub_table_row_and_arms_its_deadline() {
+        let input = json!({
+            "spec": ticket(),
+            "command": {"caller": {"subject": "sam"}, "now": 1000, "request": "r1",
+                "action": {"kind": "create", "id": "t1", "own": {"title": "t1"}}}
+        });
+        let (out, ok) = run_json(Op::Run, input.to_string().as_bytes());
+        assert!(ok, "{out}");
+        let step: Value = serde_json::from_str(&out).unwrap();
+        let changed = &step["done"]["changed"];
+        assert_eq!(
+            changed["subRows"],
+            json!([{"row": {"type": "Ticket", "key": "t1"}, "useId": "Timers", "table": "deadlines", "key": "respond",
+                "change": {"kind": "insert", "values": {"baseAt": 1000, "armedFrom": "1000", "dueAt": 3_601_000, "fired": false}}}])
+        );
+        assert_eq!(
+            changed["deadlines"],
+            json!([{"kind": "arm", "row": {"type": "Ticket", "key": "t1"}, "useId": "Timers", "name": "respond", "at": 3_601_000, "payload": null}])
+        );
+    }
+
+    #[test]
+    fn a_timers_operation_asks_for_the_rows_sub_table_rows() {
+        let input = json!({
+            "spec": ticket(),
+            "command": {"caller": {"subject": "sam"}, "now": 1000, "request": "r1",
+                "action": {"kind": "operation", "key": "t1", "useId": "Timers", "operation": "fireTimer", "params": {"deadline": "respond"}}},
+            "answers": {"reads": [{"request": {"kind": "row", "type": "Ticket", "key": "t1"},
+                "answer": {"row": {"own": {"title": "t1"}, "owned": {"status": {"status": "draft", "enteredAt": 1000}}, "version": 1}}}]}
+        });
+        let (out, ok) = run_json(Op::Run, input.to_string().as_bytes());
+        assert!(ok, "{out}");
+        let step: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            step,
+            json!({"read": [{"kind": "subRows", "type": "Ticket", "key": "t1", "useId": "Timers", "table": "deadlines"}]})
+        );
     }
 
     #[test]

@@ -2721,7 +2721,9 @@ func (r *{{ .Name }}) scanReturned(row pgx.Row, inserted *bool) (*types.{{ .Type
 }
 
 {{- if .HasBehaviors }}
+{{- if not .NoUpsert }}
 {{ template "behaviorUpsertOne" . }}
+{{- end }}
 {{- else }}
 
 // UpsertOne inserts input, or, when a row already holds its value of the
@@ -3138,7 +3140,9 @@ func (r *{{ .Name }}) upsertRow(ctx context.Context, input *types.{{ .TypeName }
 }
 
 {{- if .HasBehaviors }}
+{{- if not .NoUpsert }}
 {{ template "behaviorUpsertMany" . }}
+{{- end }}
 {{- else }}
 
 // UpsertMany inserts each input, or, when a row already holds its value of
@@ -4530,14 +4534,14 @@ type {{ .Interface }} interface {
 	{{- end }}
 }
 
-// {{ .GoName }} returns the operations of {{ $repo.TypeName }}'s {{ .ID }}.
+// {{ .GoName }} returns the operations of {{ $repo.TypeName }}'s {{ .Member }}.
 func (r *{{ $repo.Name }}) {{ .GoName }}() {{ .Interface }} { return {{ .Value }}{r: r} }
 
 {{ docComment "" (printf "%s runs %s through the behaviors' core on the repository's connection." .Value .Interface) }}
 type {{ .Value }} struct{ r *{{ $repo.Name }} }
 {{- range .Operations }}
 
-{{ docComment "" (printf "%s runs %s's %s on the row id names, in a transaction, and returns its result. It returns ErrNotFound when no live row holds id, and any other refusal of the core's as the *rules.Refusal it is." .GoName $use.ID .Name) }}
+{{ docComment "" (printf "%s runs %s's %s on the row id names, in a transaction, and returns its result. It returns ErrNotFound when no live row holds id, and any other refusal of the core's as the *rules.Refusal it is." .GoName $use.Member .Name) }}
 func (o {{ $use.Value }}) {{ .GoName }}(ctx context.Context, id {{ $repo.PrimaryKeyType }}, params {{ .Params }}) ({{ .ResultReturn }}, error) {
 	{{- if eq .Params "json.RawMessage" }}
 	var given any = params
@@ -4554,17 +4558,30 @@ func (o {{ $use.Value }}) {{ .GoName }}(ctx context.Context, id {{ $repo.Primary
 		{{- if .ResultIsStruct }}
 		out = &{{ .Result }}{}
 		if err := json.Unmarshal(raw, out); err != nil {
-			return nil, fmt.Errorf("orm: the result of {{ $repo.TypeName }}'s {{ $use.ID }} {{ .Name }}, %s: %w", raw, err)
+			return nil, fmt.Errorf("orm: the result of {{ $repo.TypeName }}'s {{ $use.Member }} {{ .Name }}, %s: %w", raw, err)
 		}
 		{{- else }}
 		if err := json.Unmarshal(raw, &out); err != nil {
-			return out, fmt.Errorf("orm: the result of {{ $repo.TypeName }}'s {{ $use.ID }} {{ .Name }}, %s: %w", raw, err)
+			return out, fmt.Errorf("orm: the result of {{ $repo.TypeName }}'s {{ $use.Member }} {{ .Name }}, %s: %w", raw, err)
 		}
 		{{- end }}
 		return out, nil
 	})
 }
 {{- end }}
+{{- end }}
+{{- with .Deadline }}
+
+{{ docComment "" (printf "RunDeadline runs a due deadline of a %s row, a message of the queue %s, through the behaviors' core (D103), in a transaction: at the later of now and the time it was armed to fall due at, as the caller WithBehaviorCaller names, a behavior worker's, with claim, the worker's claim of the message, which the unit that applies its change set completes. Its write of the row is stamped as an operation's (operationOptions). It runs nothing, and says why, when the claim is lost or the row or the use is gone; any other refusal of the core's it returns as the *rules.Refusal it is, nothing of it written. Without a claim it runs only while the deadline is armed at the time it names." $repo.TypeName $repo.DeadlineQueue) }}
+func (r *{{ $repo.Name }}) RunDeadline(ctx context.Context, deadline types.{{ $repo.DeadlineQueue }}, claim *rules.Claim) (*rules.DeadlineRun, error) {
+	payload, err := json.Marshal({{ .Payload }})
+	if err != nil {
+		return nil, fmt.Errorf("orm: the payload of {{ $repo.TypeName }}'s deadline %s.%s: %w", {{ .UseID }}, {{ .Name }}, err)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (*rules.DeadlineRun, error) {
+		return rules.RunDeadline(ctx, rulesHost(tx), {{ printf "%q" $repo.TypeName }}, rules.Deadline{Key: {{ .RowKey }}, UseID: {{ .UseID }}, Name: {{ .Name }}, At: {{ .At }}, Payload: payload}, behaviorCaller(ctx), claim, r.operationOptions(ctx))
+	})
+}
 {{- end }}
 
 {{ docComment "" (printf "coreOwn is row's own fields as the behaviors' core reads them (D103), by the layout's field names: each own column's value as encoding/json writes it, a date-time as epoch milliseconds, and a member the insert leaves unset absent.%s" (or (and .EncryptedFields " An encrypted field's envelope is no value of the core's.") "")) }}
