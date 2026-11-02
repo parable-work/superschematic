@@ -7,9 +7,9 @@
 // It reads its whole configuration from the environment, as the API's server
 // does: the API's @envVars settings and the fields its edges derive, one
 // variable per member (section 3.4). It opens fixture-timers-db's repositories and
-// runs Ticket's behavior queues, TicketDeadline, with the handlers the API's
+// runs Ticket's behavior queues, TicketDeadline, TicketChange, with the handlers the API's
 // package generates (ticketTimersQueues): each message is claimed as it falls
-// due and its deadline run through the behaviors' core in one transaction
+// due and its deadline or change run through the behaviors' core in one transaction
 // with the message's completion, as fixture-timers-api/TicketTimers. It builds no Deps
 // and calls no createWorkers: the API's implementation has no method for
 // the worker. WORKER_CONCURRENCY, which the platform sets, says how many

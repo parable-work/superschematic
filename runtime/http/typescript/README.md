@@ -131,10 +131,21 @@ Its entry points:
   its message in that unit (`ran: false` with why `claim lost` when the
   claim is no longer held, `gone` when the row or the use is), and without
   a claim reads the arming before each run; `readSubRows` and
-  `readArmedDeadlines` read a row's sub-table rows and armed deadlines. A
-  generated repository whose table arms deadlines runs them with its
-  `runDeadline` (typed `BehaviorDeadlines`), in its transaction, and one
-  whose behaviors keep sub-tables or arm deadlines has no upserts
+  `readArmedDeadlines` read a row's sub-table rows and armed deadlines.
+  With a claim, a fire a guard vetoes is released, due again in a minute
+  (`VETOED_RETRY_SECONDS`) counting no attempt (`ran: false` with why
+  `vetoed`). `runChange` runs a message of a table's change queue, as its
+  trigger wrote it, through the core's change command: the key and the
+  images mapped by the layout and converted as a row read converts each
+  column, a worker's claim of the message spent in the unit after the row
+  writes (`claim lost` when it is no longer held), a gone row's deadline
+  messages and, deleted for good, its sub-table rows deleted. The adapter
+  answers the core's `linked` read (a type's rows whose own field holds a
+  key, a page at a time, in key order). A generated repository whose table
+  arms deadlines runs them with its `runDeadline` (typed
+  `BehaviorDeadlines`), and one whose writes are heard runs its changes
+  with its `runChange` (typed `BehaviorChanges`), each in its transaction,
+  and one whose behaviors keep sub-tables or arm deadlines has no upserts
   (`WithoutUpserts`), since an upsert applies no change set.
 - `@superschematic/http-runtime/identity`, the core user model's runtime
   (D50, below). The main entry point does not load it.
@@ -156,9 +167,9 @@ Its entry points:
   D1's interface, which `Deps.db` is for a database whose DB service lists
   `sqlite` first, `ping`, and the behaviors' adapter (D103, `src/rules.ts`)
   with `sqliteRulesStore`, which runs a command of a table that composes
-  behaviors over the layout its generated `orm.ts` embeds. A `subRows` read
-  made under a lock is refused there as `internal`: a D1 batch has no check
-  of it yet.
+  behaviors over the layout its generated `orm.ts` embeds. A `subRows` or
+  `linked` read made under a lock is refused there as `internal`: a D1
+  batch has no check of it yet.
 - `@superschematic/http-runtime/sqlite`, `openSqlite(path)`, a
   `SqlDatabase` over `bun:sqlite` for `stack dev`, and `sqliteFile(url)`,
   the path a `sqlite:` URL names. It runs under Bun alone.

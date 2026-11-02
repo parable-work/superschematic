@@ -61,7 +61,7 @@ pub const BUILTIN_OPERATIONS: [&str; 6] = ["create", "get", "list", "update", "d
 /// characters.
 pub const VETO_CODE: &str = "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$";
 
-const DECLARATION_KEYS: [&str; 14] = [
+const DECLARATION_KEYS: [&str; 15] = [
     "name",
     "description",
     "configSchema",
@@ -72,6 +72,7 @@ const DECLARATION_KEYS: [&str; 14] = [
     "value",
     "tables",
     "armsDeadlines",
+    "hearsChanges",
     "operations",
     "signals",
     "preconditionSchema",
@@ -416,7 +417,8 @@ impl BehaviorDeclaration {
 }
 
 /// A declaration without the members only a table's layout reads (D103):
-/// its `value`, its `tables` and `armsDeadlines`, and each field's `type`,
+/// its `value`, its `tables`, `armsDeadlines` and `hearsChanges`, and each
+/// field's `type`,
 /// which the engine, keeping no table, never answers with. It shifts them
 /// out, so the members after them keep the order the declaration writes
 /// them in.
@@ -425,6 +427,7 @@ fn without_layout_members(mut value: Value) -> Value {
         members.shift_remove("value");
         members.shift_remove("tables");
         members.shift_remove("armsDeadlines");
+        members.shift_remove("hearsChanges");
         if let Some(Value::Array(fields)) = members.get_mut("fields") {
             for field in fields {
                 if let Value::Object(field) = field {
@@ -495,6 +498,12 @@ pub fn check_declaration(value: &Value) -> Vec<String> {
         .is_some_and(|arms| !arms.is_boolean())
     {
         problems.push("armsDeadlines is a boolean".to_owned());
+    }
+    if members
+        .get("hearsChanges")
+        .is_some_and(|hears| !hears.is_boolean())
+    {
+        problems.push("hearsChanges is a boolean".to_owned());
     }
     check_operations(members.get("operations"), &mut problems);
     check_beside_fields(members, &mut problems);
@@ -1064,9 +1073,10 @@ mod tests {
         assert_eq!(field, ["name", "description"]);
     }
 
-    /// A declaration may declare the sub-tables a table's row keeps and
-    /// whether it arms deadlines (D103): the engine checks their shape and
-    /// answers with neither, so its Timers answers as it did.
+    /// A declaration may declare the sub-tables a table's row keeps, whether
+    /// it arms deadlines and whether it hears its table's writes (D103): the
+    /// engine checks their shape and answers with none of them, so its
+    /// Timers and Reactions answer as they did.
     #[test]
     fn the_sub_tables_and_deadlines_are_checked_and_left_out_of_its_json() {
         assert_eq!(
@@ -1077,7 +1087,8 @@ mod tests {
                     {"name": "1x", "key": 2, "fields": [{"name": "a", "x": 1}], "y": true},
                     "z"
                 ],
-                "armsDeadlines": "yes"
+                "armsDeadlines": "yes",
+                "hearsChanges": 1
             })),
             [
                 "tables[1] has the unknown key \"y\"",
@@ -1085,7 +1096,8 @@ mod tests {
                 "tables[1].key is a string",
                 "tables[1].fields[0] has the unknown key \"x\"",
                 "tables[2] is an object",
-                "armsDeadlines is a boolean"
+                "armsDeadlines is a boolean",
+                "hearsChanges is a boolean"
             ]
         );
         assert_eq!(
@@ -1098,6 +1110,7 @@ mod tests {
         .expect("Timers' declaration is sound");
         assert!(timers.json.get("tables").is_none());
         assert!(timers.json.get("armsDeadlines").is_none());
+        assert!(timers.json.get("hearsChanges").is_none());
         let members: Vec<&str> = timers
             .json
             .as_object()

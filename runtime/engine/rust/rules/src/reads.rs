@@ -68,6 +68,38 @@ pub enum ReadRequest {
         use_id: String,
         table: String,
     },
+    /// The rows of a type whose own field holds a key ([`Answer::Linked`]),
+    /// in the key column's order, at most `limit`, after the key `after`
+    /// when given: what a rule over the rows that link to a row reads
+    /// (Reactions' allTerminal). A soft-deletable table's live rows alone.
+    Linked {
+        #[serde(rename = "type")]
+        type_name: String,
+        field: String,
+        key: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        after: Option<String>,
+        limit: usize,
+    },
+}
+
+/// How many rows a linked read asks for at a time: Links' page (500).
+pub const LINKED_PAGE: usize = 500;
+
+/// The key a field's value names, as a command names a row by it: a string
+/// itself, and a whole number its decimal text, the form a table keyed by a
+/// number has its keys in (a to-one relation's column holds its target's
+/// key as the target's key column types it); None for any other value.
+pub fn key_of(value: &Value) -> Option<String> {
+    match value {
+        Value::String(key) => Some(key.clone()),
+        Value::Number(n) if n.is_i64() || n.is_u64() => Some(n.to_string()),
+        Value::Number(n) => n
+            .as_f64()
+            .filter(|f| f.fract() == 0.0 && f.abs() < 9_007_199_254_740_992.0)
+            .map(|f| format!("{}", f as i64)),
+        _ => None,
+    }
 }
 
 impl ReadRequest {
@@ -105,6 +137,23 @@ impl ReadRequest {
             key: key.into(),
             use_id: use_id.into(),
             table: table.into(),
+        }
+    }
+
+    /// One page of the rows of a type whose own field holds a key:
+    /// [`LINKED_PAGE`] at most, after a key when given.
+    pub fn linked(
+        type_name: impl Into<String>,
+        field: impl Into<String>,
+        key: impl Into<String>,
+        after: Option<&str>,
+    ) -> Self {
+        ReadRequest::Linked {
+            type_name: type_name.into(),
+            field: field.into(),
+            key: key.into(),
+            after: after.map(str::to_owned),
+            limit: LINKED_PAGE,
         }
     }
 }
@@ -176,6 +225,29 @@ pub enum Answer {
     /// The sub-table's rows of the row, in key order; none for a row that
     /// has none, or that does not exist.
     SubRows(Vec<SubRow>),
+    /// The rows a [`ReadRequest::Linked`] asks for, and whether more follow.
+    Linked(LinkedRows),
+}
+
+/// One page of the rows of a type whose own field holds a key, each with
+/// its key, in key order, and whether more follow it. A type the host does
+/// not have answers no rows. The core's rules never depend on the order; a
+/// host orders by its key column (the reference host by code point).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkedRows {
+    #[serde(default)]
+    pub rows: Vec<KeyedRow>,
+    #[serde(default)]
+    pub more: bool,
+}
+
+/// A row with its key, as a linked read answers it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyedRow {
+    pub key: String,
+    pub row: Row,
 }
 
 /// A key the host locks before it answers the reads a rule across rows
@@ -407,6 +479,29 @@ mod tests {
         assert_eq!(
             serde_json::to_value(Answer::Row(None)).unwrap(),
             json!({"row": null})
+        );
+        assert_eq!(
+            serde_json::to_value(ReadRequest::linked("Task", "projectId", "p1", Some("t9")))
+                .unwrap(),
+            json!({"kind": "linked", "type": "Task", "field": "projectId", "key": "p1", "after": "t9", "limit": 500})
+        );
+        assert_eq!(
+            serde_json::to_value(ReadRequest::linked("Task", "projectId", "p1", None)).unwrap(),
+            json!({"kind": "linked", "type": "Task", "field": "projectId", "key": "p1", "limit": 500})
+        );
+        let answer: Answer = serde_json::from_value(json!({"linked": {"rows": [
+            {"key": "t1", "row": {"own": {"projectId": "p1"}, "owned": {"Workflow": {"status": "done"}}, "version": 3}}
+        ], "more": false}}))
+        .unwrap();
+        let Answer::Linked(page) = answer else {
+            panic!("a linked page");
+        };
+        assert_eq!(page.rows[0].key, "t1");
+        assert_eq!(page.rows[0].row.version, 3);
+        assert!(!page.more);
+        assert_eq!(
+            serde_json::to_value(Answer::Linked(LinkedRows::default())).unwrap(),
+            json!({"linked": {"rows": [], "more": false}})
         );
     }
 }

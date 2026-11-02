@@ -236,13 +236,23 @@ type BehaviorQueue struct {
 	Queue string
 	Const string
 
+	// Kind is what the queue holds: ir.BehaviorQueueDeadlines, the
+	// table's deadlines, or ir.BehaviorQueueChanges, the writes of its
+	// rows its behaviors hear.
+	Kind string
+
 	// Func is the function that opens the queue on a pool of the
 	// database, and Handler the one that runs a message claimed from it
-	// (ticket_timers_deadlines and run_ticket_timers_deadline), which the
+	// (ticket_timers_deadlines and run_ticket_timers_deadline,
+	// ticket_timers_changes and run_ticket_timers_change), which the
 	// worker's main hands to the HTTP runtime's claim loop.
 	Func    string
 	Handler string
 }
+
+// Changes reports whether the queue is a table's change queue, whose
+// handler runs the core's change command, rather than its deadline queue.
+func (q BehaviorQueue) Changes() bool { return q.Kind == ir.BehaviorQueueChanges }
 
 // CallerFunc is the function of src/behaviors.rs that gives the caller a
 // behavior worker's commands run as: ticket_timers_caller.
@@ -280,8 +290,9 @@ func jobsOf(schema *ir.Schema) ([]JobInfo, error) {
 
 // workersOf reads the API's workers, sorted by name: its @worker classes,
 // and apart its @behaviorWorker classes (D103), whose handlers
-// src/behaviors.rs holds, each with the behaviors that arm its deadlines
-// from its database among deps.
+// src/behaviors.rs holds, each with its table's deadline queue and change
+// queue, deadlines first, and the behaviors that arm and hear them from
+// its database among deps (apigen.BehaviorWorkerOf).
 func workersOf(schema *ir.Schema, deps map[string]*ir.Schema) (workers, behaviorWorkers []WorkerInfo, err error) {
 	for _, w := range schema.Workers {
 		if w == nil {
@@ -299,24 +310,24 @@ func workersOf(schema *ir.Schema, deps map[string]*ir.Schema) (workers, behavior
 			GraceSeconds: registry.WorkerGraceSeconds(w),
 		}
 		if b := w.BehaviorWorker; b != nil {
-			if w.Queue == "" {
-				return nil, nil, fmt.Errorf("rustrestgen: @behaviorWorker %s runs %s's behaviors (D103), and the loader gave it no queue: load the schema with its verification, which adds %s's deadline queue", w.Name, b.Type, b.Type)
+			info.Method = ""
+			info.Behavior = apigen.BehaviorWorkerOf(schema, deps, w)
+			if info.Behavior == nil || len(info.Behavior.Queues) == 0 {
+				return nil, nil, fmt.Errorf("rustrestgen: @behaviorWorker %s runs %s's behaviors (D103), and the loader gave it no queue: load the schema with its verification, which adds %s's deadline and change queues", w.Name, b.Type, b.Type)
 			}
 			stem := rustutil.ToSnakeCase(w.Name)
-			info.Method = ""
-			info.Behavior = &apigen.BehaviorWorkerInfo{
-				Table:       b.Type,
-				Queues:      []string{w.Queue},
-				Subject:     ir.BehaviorWorkerSubject(schema.Name, w.Name),
-				Permissions: b.Permissions,
-				Behaviors:   apigen.ArmingBehaviors(schema, deps, b.Type),
+			for _, queue := range info.Behavior.Queues {
+				q := BehaviorQueue{Queue: queue, Const: rustgen.QueueConst(queue)}
+				switch queue {
+				case info.Behavior.DeadlineQueue:
+					q.Kind, q.Func, q.Handler = ir.BehaviorQueueDeadlines, stem+"_deadlines", "run_"+stem+"_deadline"
+				case info.Behavior.ChangeQueue:
+					q.Kind, q.Func, q.Handler = ir.BehaviorQueueChanges, stem+"_changes", "run_"+stem+"_change"
+				default:
+					return nil, nil, fmt.Errorf("rustrestgen: @behaviorWorker %s runs %s, which is neither %s's deadline queue nor its change queue (D103)", w.Name, queue, b.Type)
+				}
+				info.BehaviorQueues = append(info.BehaviorQueues, q)
 			}
-			info.BehaviorQueues = []BehaviorQueue{{
-				Queue:   w.Queue,
-				Const:   rustgen.QueueConst(w.Queue),
-				Func:    stem + "_deadlines",
-				Handler: "run_" + stem + "_deadline",
-			}}
 			behaviorWorkers = append(behaviorWorkers, info)
 			continue
 		}

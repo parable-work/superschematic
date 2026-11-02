@@ -20,10 +20,11 @@ const (
 )
 
 // A table that implements Timers stays a table: it gets _version, the
-// sub-table its deadlines keep and its deadline queue, and its API's
-// @behaviorOperations set serves Timers' operations under timers and its
-// @behaviorWorker becomes an ordinary worker of the queue (D103). The
-// expanded IR of both fixtures is held to its golden.
+// sub-table its deadlines keep, its deadline queue and its change queue,
+// and its API's @behaviorOperations set serves Timers' operations under
+// timers and its @behaviorWorker becomes an ordinary worker of both queues,
+// deadlines first (D103). The expanded IR of both fixtures is held to its
+// golden.
 func TestTimersFixturesExpand(t *testing.T) {
 	db, err := LoadService(filepath.FromSlash(timersDBFixture))
 	if err != nil {
@@ -45,6 +46,14 @@ func TestTimersFixturesExpand(t *testing.T) {
 	if db.Types["InvoiceTimersDeadlines"] == nil || db.Types["InvoiceDeadline"] == nil {
 		t.Error("Invoice has no sub-table or no deadline queue")
 	}
+	// Timers hears its table's writes, so a raw write arms and clears its
+	// deadlines when the worker runs the change (D103).
+	for _, table := range []string{"Ticket", "Invoice"} {
+		changes := db.BehaviorQueueOf(table, ir.BehaviorQueueChanges)
+		if changes == nil || changes.Name != table+"Change" || !changes.BehaviorQueue.Same(&ir.BehaviorQueue{Row: table, Kind: ir.BehaviorQueueChanges, Behaviors: []string{"Timers"}}) {
+			t.Errorf("%s's change queue = %+v", table, changes)
+		}
+	}
 	compareExpanded(t, db, "fixture-timers-db.expanded.json")
 
 	api, err := LoadService(filepath.FromSlash(timersAPIFixture))
@@ -52,7 +61,7 @@ func TestTimersFixturesExpand(t *testing.T) {
 		t.Fatal(err)
 	}
 	worker := api.Worker("TicketTimers")
-	if worker == nil || worker.Queue != "TicketDeadline" || worker.Origin != ir.OriginBehavior || worker.Concurrency != 2 ||
+	if worker == nil || worker.Queue != "TicketDeadline" || !reflect.DeepEqual(worker.Queues, []string{"TicketDeadline", "TicketChange"}) || worker.Origin != ir.OriginBehavior || worker.Concurrency != 2 ||
 		!reflect.DeepEqual(worker.BehaviorWorker, &ir.BehaviorWorkerConfig{Type: "Ticket"}) {
 		t.Errorf("TicketTimers = %+v", worker)
 	}

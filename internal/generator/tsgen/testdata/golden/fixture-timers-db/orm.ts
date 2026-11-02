@@ -42,11 +42,17 @@ own fields alone; a table whose behaviors keep sub-tables or arm deadlines
 has no upserts, and its repository runs a due deadline, as a behavior
 worker claimed it (runDeadline). A behavior's sub-table has no repository:
 only its operations write it. A raw SQL write of an owned column or a
-sub-table row is never refused, and arms or clears no deadline.
+sub-table row is never refused. A table whose writes its behaviors
+hear (D103) keeps a change queue, which a trigger of the table writes a
+message of for each write of a row, whoever makes it: the repositories'
+own, updateMany's, deleteMany's and hardDeleteOne's among them, and raw
+SQL's; its repository runs one, as a behavior worker claimed it
+(runChange), so the row's deadlines reconcile, and its rules run, after the
+write commits.
 */
 import { initSync } from '@superschematic/rules';
 import { ormOf, withRulesCore } from '@superschematic/http-runtime/postgres';
-import type { BehaviorDeadlines, DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, Repository, RulesLayout, StringFilter, TableDefinition, UseOperations, UuidFilter, WithoutUpserts } from '@superschematic/http-runtime/postgres';
+import type { BehaviorChanges, BehaviorDeadlines, DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, Repository, RulesLayout, StringFilter, TableDefinition, UseOperations, UuidFilter, WithoutUpserts } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
 
 /**
@@ -163,7 +169,7 @@ export type InvoiceRepository = WithoutUpserts<Repository<
   T.IdentityUUID,
   InvoicePageKey,
   InvoiceRelations
->> & InvoiceUses & BehaviorDeadlines<T.IdentityUUID>;
+>> & InvoiceUses & BehaviorDeadlines<T.IdentityUUID> & BehaviorChanges<T.IdentityUUID>;
 
 /** The invoice table, as the runtime reads and writes it. */
 export const invoiceTable: TableDefinition = {
@@ -324,7 +330,7 @@ export type TicketRepository = WithoutUpserts<Repository<
   T.IdentityUUID,
   TicketPageKey,
   TicketRelations
->> & TicketUses & BehaviorDeadlines<T.IdentityUUID>;
+>> & TicketUses & BehaviorDeadlines<T.IdentityUUID> & BehaviorChanges<T.IdentityUUID>;
 
 /** The ticket table, as the runtime reads and writes it. */
 export const ticketTable: TableDefinition = {
@@ -548,6 +554,15 @@ export const fixtureTimersDbRules: RulesLayout = {
         "at": "at",
         "payload": "payload"
       },
+      "changes": {
+        "queue": "InvoiceChange",
+        "table": "invoice_change_queue",
+        "rowKey": "row_key",
+        "write": "write",
+        "at": "at",
+        "before": "before",
+        "after": "after"
+      },
       "spec": {
         "name": "Invoice",
         "uses": [
@@ -765,6 +780,15 @@ export const fixtureTimersDbRules: RulesLayout = {
         "name": "name",
         "at": "at",
         "payload": "payload"
+      },
+      "changes": {
+        "queue": "TicketChange",
+        "table": "ticket_change_queue",
+        "rowKey": "row_key",
+        "write": "write",
+        "at": "at",
+        "before": "before",
+        "after": "after"
       },
       "spec": {
         "name": "Ticket",

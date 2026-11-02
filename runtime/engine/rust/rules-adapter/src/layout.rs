@@ -4,7 +4,8 @@
 //! behaviors, by its type's name: the table, its key column and IR type,
 //! the version column, a soft-deletable table's `deletedAt` column, its own
 //! fields' columns, each use's owned columns, operations and sub-tables, the
-//! queue its deadlines are armed in, and the type as the core runs it.
+//! queue its deadlines are armed in, the queue its change trigger writes
+//! its writes to, and the type as the core runs it.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -145,6 +146,11 @@ pub struct Table {
     /// use and deadline; `None` for a table whose behaviors arm none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deadlines: Option<Deadlines>,
+    /// The queue the table's change trigger writes a message of for each
+    /// write its behaviors hear, whoever makes it (D103); `None` for a
+    /// table nothing hears.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changes: Option<Changes>,
     /// The type as the core runs it.
     pub spec: TypeSpec,
 }
@@ -172,6 +178,34 @@ pub struct Deadlines {
     pub at: String,
     /// The payload it was armed with, as JSON.
     pub payload: String,
+}
+
+/// The change queue of a table whose writes its behaviors hear (D103): a
+/// queue of its database the loader adds (`<Type>Change`), keyed by the
+/// row's key and serialized, to which the table's trigger writes a message
+/// for each insert, update and delete of a row, whoever makes it, and
+/// which a behavior worker runs through the core's change command. Each
+/// member is a column, unquoted, beside the queue's own (`id`, `state`,
+/// `claim_token`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Changes {
+    /// The queue's name in the IR (`TicketChange`).
+    pub queue: String,
+    /// The queue's table.
+    pub table: String,
+    /// The row's key, as the row table's key column holds it.
+    pub row_key: String,
+    /// What the write did: `insert`, `update` or `delete`.
+    pub write: String,
+    /// When it was made, in epoch milliseconds, by the database's clock.
+    pub at: String,
+    /// The row's columns before the write, as JSON by column; NULL for an
+    /// insert.
+    pub before: String,
+    /// The row's columns after the write, as JSON by column; NULL for a
+    /// delete.
+    pub after: String,
 }
 
 /// What a live row of a soft-deletable table holds: NULL in its

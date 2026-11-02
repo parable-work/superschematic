@@ -110,7 +110,7 @@ func TestTimersChecks(t *testing.T) {
 	}{
 		{"a behavior the core does not run", func(_, ticket map[string]any) {
 			ticket["behaviors"] = append(ticket["behaviors"].([]any), map[string]any{"name": "Comments", "implements": true})
-		}, "type Ticket implements Comments, which the behaviors' core does not run: a table implements one of Timers (D103)"},
+		}, "type Ticket implements Comments, which the behaviors' core does not run: a table implements one of Reactions, Timers (D103)"},
 		{"a behavior with a value field", func(_, ticket map[string]any) {
 			ticket["behaviors"] = append(ticket["behaviors"].([]any), map[string]any{"name": "Workflow", "implements": true, "config": map[string]any{"states": []any{"a"}, "transitions": []any{}}})
 		}, "type Ticket implements Workflow, whose declaration names its value field status, so it is anchored on a field: write status: Workflow<{ ... }> (D103)"},

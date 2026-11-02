@@ -10,6 +10,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/behaviorlayout"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
+	"github.com/parable-work/superschematic/internal/loader/behaviorfields"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -94,6 +95,11 @@ func checkTypeBehaviors(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool
 			// reads the Workflow it names; the engine's Timers reads its
 			// one Workflow and would ignore it (D103).
 			r.errorf(td.Owner, "type %s: @behavior Timers names status, the Workflow field a table's Timers reads (implements Timers<%s, C>, D103); an engine type's Timers reads its one Workflow, so leave status out", td.Name, td.Name)
+		} else if ref.Name == reactionsBehavior && !ref.FieldAnchored() && !ref.Implements && configNames(ref.Config, "status") {
+			// Reactions' declaration takes status for a table, whose core
+			// reads and moves the Workflow it names; the engine's Reactions
+			// reads its one Workflow and would ignore it (D103).
+			r.errorf(td.Owner, "type %s: @behavior Reactions names status, the Workflow field a table's Reactions reads (implements Reactions<%s, C>, D103); an engine type's Reactions reads its one Workflow, so leave status out", td.Name, td.Name)
 		}
 		if ref.FieldAnchored() || ref.Implements {
 			uses[id] = behavior
@@ -191,7 +197,8 @@ var fieldName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // itself, so td declares no field of its name, and a table that composes
 // behaviors keeps its version in _version (@optimistic), which no own
 // column may take. A Timers use's config is held to the table
-// (checkTimersConfig).
+// (checkTimersConfig), and a Reactions use's to the table and the tables
+// of its database (checkReactionsConfig).
 func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, uses map[string]registry.Behavior, r *Result) {
 	if schema.Kind != ir.SchemaKindDB || !hasTable(td, bases) {
 		if implemented := td.ImplementsBehaviors(); len(implemented) > 0 {
@@ -268,8 +275,13 @@ func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, us
 		} else {
 			where = fmt.Sprintf("type %s: implements %s", td.Name, ref.Name)
 			adder = "implements " + ref.Name + "'s"
-			if ref.Name == timersBehavior {
+			switch ref.Name {
+			case timersBehavior:
 				checkTimersConfig(schema, td, ref, r)
+			case reactionsBehavior:
+				if behavior.ValidateConfig(ref.Config) == nil {
+					checkReactionsConfig(schema, td, ref, r)
+				}
 			}
 		}
 		for _, field := range behavior.Fields {
@@ -307,13 +319,15 @@ func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, us
 }
 
 // checkTableStorage holds what td's uses keep beside the table (D103):
-// the sub-tables their behaviors declare and the deadline queue of a
-// table whose behaviors arm deadlines. Their rows and messages name the
-// row by its key, so td has one key field, and the types the loader adds
-// for them take no name of a type or a table the schema declares. A type
-// the loader added, as an IR read back holds it, is the one it adds.
+// the sub-tables their behaviors declare, the deadline queue of a table
+// whose behaviors arm deadlines and the change queue of a table whose
+// writes are heard, by its own behaviors or another table's through a
+// relation of it (behaviorfields.HeardBy). Their rows and messages name
+// the row by its key, so td has one key field, and the types the loader
+// adds for them take no name of a type or a table the schema declares. A
+// type the loader added, as an IR read back holds it, is the one it adds.
 func checkTableStorage(schema *ir.Schema, td *ir.TypeDef, uses map[string]registry.Behavior, r *Result) {
-	var keeping, arming []string
+	var keeping, arming, hearing []string
 	for _, ref := range td.TableBehaviors() {
 		behavior, ok := uses[ref.UseID()]
 		if !ok {
@@ -325,8 +339,14 @@ func checkTableStorage(schema *ir.Schema, td *ir.TypeDef, uses map[string]regist
 		if behavior.ArmsDeadlines && !slices.Contains(arming, ref.Name) {
 			arming = append(arming, ref.Name)
 		}
+		if behavior.HearsChanges && !slices.Contains(hearing, ref.Name) {
+			hearing = append(hearing, ref.Name)
+		}
 	}
-	if len(keeping) == 0 && len(arming) == 0 {
+	for _, table := range behaviorfields.HeardBy(schema)[td.Name] {
+		hearing = append(hearing, table+"'s Reactions")
+	}
+	if len(keeping) == 0 && len(arming) == 0 && len(hearing) == 0 {
 		return
 	}
 	var keys []string
@@ -339,6 +359,10 @@ func checkTableStorage(schema *ir.Schema, td *ir.TypeDef, uses map[string]regist
 		names := keeping
 		if len(names) == 0 {
 			names = arming
+		}
+		if len(names) == 0 {
+			r.errorf(td.Owner, "type %s: its writes are heard (%s), and %s's key is %d fields (%s): a table whose writes are heard has one @key field, which its change queue's messages name (D103)", td.Name, strings.Join(hearing, ", "), td.Name, len(keys), strings.Join(keys, ", "))
+			return
 		}
 		r.errorf(td.Owner, "type %s: behavior %s keeps rows of its own per row, and %s's key is %d fields (%s): a table whose behaviors keep sub-tables or arm deadlines has one @key field (D103)", td.Name, names[0], td.Name, len(keys), strings.Join(keys, ", "))
 		return
@@ -370,16 +394,26 @@ func checkTableStorage(schema *ir.Schema, td *ir.TypeDef, uses map[string]regist
 			}
 		}
 	}
-	if len(arming) == 0 {
-		return
+	// queueTaken reports whether the queue the build adds as name for td
+	// takes a type's or a table's name the schema declares.
+	queueTaken := func(name string) (string, bool) {
+		sql := codegen.ToSnakeCase(name) + ir.QueueTableSuffix
+		if added := schema.Types[name]; added != nil && added.BehaviorQueue != nil && added.BehaviorQueue.Row == td.Name {
+			return sql, false
+		}
+		return sql, schema.Types[name] != nil || schema.Inputs[name] != nil || tables[sql] != ""
 	}
-	name := behaviorlayout.DeadlineQueueTypeName(td.Name)
-	sql := codegen.ToSnakeCase(name) + ir.QueueTableSuffix
-	if added := schema.Types[name]; added != nil && added.BehaviorQueue != nil && added.BehaviorQueue.Row == td.Name {
-		return
+	if len(arming) > 0 {
+		name := behaviorlayout.DeadlineQueueTypeName(td.Name)
+		if sql, taken := queueTaken(name); taken {
+			r.errorf(td.Owner, "type %s: its behaviors arm deadlines (%s), whose queue the build adds as %s (%s), which the schema also declares; rename that type (D103)", td.Name, strings.Join(arming, ", "), name, sql)
+		}
 	}
-	if schema.Types[name] != nil || schema.Inputs[name] != nil || tables[sql] != "" {
-		r.errorf(td.Owner, "type %s: its behaviors arm deadlines (%s), whose queue the build adds as %s (%s), which the schema also declares; rename that type (D103)", td.Name, strings.Join(arming, ", "), name, sql)
+	if len(hearing) > 0 {
+		name := behaviorlayout.ChangeQueueTypeName(td.Name)
+		if sql, taken := queueTaken(name); taken {
+			r.errorf(td.Owner, "type %s: its writes are heard (%s), whose queue the build adds as %s (%s), which the schema also declares; rename that type (D103)", td.Name, strings.Join(hearing, ", "), name, sql)
+		}
 	}
 }
 

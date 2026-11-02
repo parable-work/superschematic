@@ -1,4 +1,4 @@
-import type { BehaviorConfigs, TimersDeadline } from "@superschematic/schema";
+import type { BehaviorConfigs, TimersDeadline, WorkflowOutcome } from "@superschematic/schema";
 
 // FK ON DELETE actions expressible on a relation. SET NULL clears the
 // reference instead of deleting the row, so it needs a nullable foreign key
@@ -74,3 +74,36 @@ export interface TimersDeadlineOn<T> extends Omit<TimersDeadline, "start"> {
  * imposes no members. The first type argument is the table itself.
  */
 export type Timers<T, C extends TimersOn<T>> = NonNullable<unknown>;
+
+/**
+ * Reactions' config on a table (D103): its rules, each a when and a then, the
+ * fields and relations they name typed by the table. holds and revised wait
+ * for Rollups, Revisions and Branches on the core.
+ */
+export interface ReactionsOn<T> {
+  readonly rules: readonly ReactionRuleOn<T>[];
+  /** The field whose Workflow the rules read and move (enters, a changes rule on it, a then without a link); implied when the table has one Workflow, needed when it has several. */
+  readonly status?: Extract<keyof T, string>;
+}
+
+/** One rule of ReactionsOn<T>. */
+export interface ReactionRuleOn<T> {
+  readonly when:
+    | { readonly enters: string }
+    | { readonly changes: { readonly field: Extract<keyof T, string>; readonly to?: unknown; readonly from?: unknown } }
+    | { readonly allTerminal: { readonly schema: string; readonly link: string; readonly outcomes?: readonly WorkflowOutcome[] } }
+    | { readonly anyTerminal: { readonly schema: string; readonly link: string; readonly outcomes: readonly WorkflowOutcome[] } };
+  readonly then: { readonly transition: string; readonly link?: Extract<keyof T, string> };
+}
+
+/**
+ * Rules that move Workflow statuses after a write commits (D103):
+ * `export abstract class Project implements Reactions<Project, { rules: [...] }>`.
+ * The type stays a table. A rule hears every write of the table's rows, and
+ * of the rows of another table whose relation names this one (allTerminal,
+ * anyTerminal: schema the table, link its relation field), whoever makes it,
+ * through the table's change queue, which the API's @behaviorWorker runs.
+ * Reactions has no operations. Like Timers, it resolves to the empty object
+ * type; the first type argument is the table itself.
+ */
+export type Reactions<T, C extends ReactionsOn<T>> = NonNullable<unknown>;

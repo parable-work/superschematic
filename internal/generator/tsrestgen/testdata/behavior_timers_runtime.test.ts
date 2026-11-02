@@ -8,19 +8,24 @@ serves the API over the generated repositories of fixture-timers-db
 (createOrm), in a schema of the test's own, with an authenticator that reads
 `Authorization: Bearer <subject>[:<permission>,...]`; and the behavior
 worker TicketTimers runs in process, its queues as the API's package
-generates them (ticketTimersQueues) under the runtime's runWorker. A
+generates them (ticketTimersQueues: Ticket's deadline queue, then its change
+queue, since Timers hears its writes) under the runtime's runWorker. A
 ticket's first answer is due 1.5 seconds after its create (respond, which
 escalates it unless it leaves open first); its wait on its customer closes
-it after an hour (idle). A create arms respond: its sub-table row and its
-queue message, due when it falls due; the worker runs it when it falls due,
-moving the status and recording the outcome; a status that leaves open
-cancels it; a deadline snoozed while the worker holds its claim never fires
-on its old arming; resetTimer and snoozeTimer need the permission the config
-names, which the core checks; fireTimer through the SDK fires a due deadline
-and spends its message; deleting the row removes its deadlines; and the MCP
-endpoint lists and calls ticket_timers_fire_timer. The only real wait is
-respond's 1.5 seconds; the idle deadline is made due with SQL, the escape
-hatch an operator has.
+it after an hour (idle); and a reminder falls due a day before its visit
+(remind). A create arms respond: its sub-table row and its queue message,
+due when it falls due; the worker runs it when it falls due, moving the
+status and recording the outcome; a status that leaves open cancels it; a
+deadline snoozed while the worker holds its claim never fires on its old
+arming; resetTimer and snoozeTimer need the permission the config names,
+which the core checks; fireTimer through the SDK fires a due deadline and
+spends its message; deleting the row removes its deadlines; a raw SQL
+update of visitAt, a raw SQL delete of a ticket and a repository's bulk
+update of visitAt are heard through the change queue, which the worker runs
+(D103): remind re-arms at the new time, and a deleted ticket's messages go;
+and the MCP endpoint lists and calls ticket_timers_fire_timer. The only real
+wait is respond's 1.5 seconds; the idle deadline is made due with SQL, the
+escape hatch an operator has.
 */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -165,6 +170,35 @@ function startWorker(): () => Promise<void> {
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+/** Runs the worker's queues until done holds, asking every 100 ms for at most ten seconds, then stops them. */
+async function workUntil(done: () => Promise<boolean>): Promise<void> {
+  const stop = startWorker();
+  try {
+    const deadline = Date.now() + 10_000;
+    while (!(await done()) && Date.now() < deadline) await sleep(100);
+  } finally {
+    await stop();
+  }
+}
+
+const DAY = 86_400_000;
+
+/** Creates a ticket with a visit through the repository. */
+async function visit(title: string, at: number): Promise<string> {
+  const id = (await orm.ticket.createOne({ title, visitAt: new Date(at) })).id;
+  titles.set(id, title);
+  return id;
+}
+
+/** A ticket's live remind messages: what each was armed at. */
+async function remindMessages(id: string): Promise<number[]> {
+  const { rows } = await pool.query(
+    `SELECT q.at FROM ticket_deadline_queue q JOIN ticket t ON t.id = q.row_key WHERE t.title = $1 AND q.name = 'remind' AND q.state IN ('ready', 'claimed')`,
+    [titles.get(id)]
+  );
+  return rows.map(row => Number(row.at));
+}
+
 describe('Timers on fixture-timers-api', () => {
   let waiting: string;
 
@@ -246,6 +280,40 @@ describe('Timers on fixture-timers-api', () => {
     expect(await sdk(SAM).ticket.timers.fireTimer(id, { deadline: TicketTimersDeadline.Respond })).toEqual({ fired: true, outcome: 'moved' });
     expect((await orm.ticket.getOne(id)).status).toBe('escalated');
     expect(await liveMessages(id)).toEqual({});
+  });
+
+  test('a raw SQL update of a Timers field start re-arms its deadline', async () => {
+    const id = await visit('Boiler', Date.now() + 2 * DAY);
+    const moved = Date.now() + 3 * DAY;
+    expect((await pool.query(`UPDATE ticket SET visit_at = $2 WHERE title = $1`, ['Boiler', new Date(moved)])).rowCount).toBe(1);
+    await workUntil(async () => (await deadlineRows(id)).remind?.dueAt === moved - DAY);
+    expect((await deadlineRows(id)).remind).toMatchObject({ dueAt: moved - DAY, fired: false });
+    expect(await remindMessages(id)).toEqual([moved - DAY]);
+    expect((await liveMessages(id)).remind).toEqual({ at: moved - DAY, dueAt: moved - DAY });
+  });
+
+  test('a raw SQL delete of a ticket clears its deadline messages', async () => {
+    await visit('Pipe', Date.now() + 2 * DAY);
+    const { rows } = await pool.query(`SELECT id FROM ticket WHERE title = $1`, ['Pipe']);
+    const key = rows[0].id as string;
+    const messages = async () => Number((await pool.query(`SELECT count(*) AS n FROM ticket_deadline_queue WHERE row_key = $1`, [key])).rows[0].n);
+    expect(await messages()).toBe(2);
+    expect((await pool.query(`DELETE FROM ticket WHERE id = $1`, [key])).rowCount).toBe(1);
+    await workUntil(async () => (await messages()) === 0);
+    expect(await messages()).toBe(0);
+  });
+
+  test("a repository's bulk update of a field start re-arms its deadline", async () => {
+    const bolt = await visit('Bolt', Date.now() + 2 * DAY);
+    const nut = await visit('Nut', Date.now() + 2 * DAY);
+    const moved = Date.now() + 4 * DAY;
+    expect(await orm.ticket.updateMany({ title: { in: ['Bolt', 'Nut'] } }, { visitAt: new Date(moved) })).toBe(2);
+    const rearmed = async (id: string) => (await deadlineRows(id)).remind?.dueAt === moved - DAY;
+    await workUntil(async () => (await rearmed(bolt)) && (await rearmed(nut)));
+    for (const id of [bolt, nut]) {
+      expect((await deadlineRows(id)).remind).toMatchObject({ dueAt: moved - DAY, fired: false });
+      expect(await remindMessages(id)).toEqual([moved - DAY]);
+    }
   });
 
   test('deleting the row removes its deadlines', async () => {

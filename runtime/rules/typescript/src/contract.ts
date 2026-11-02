@@ -30,6 +30,14 @@ export interface FieldSpec {
   readonly type: string;
   /** Whether its values are instants: epoch milliseconds from a table's adapter, or the ISO 8601 text an engine schema's date-time holds. */
   readonly dateTime?: boolean;
+  /** The to-one relation whose key the field holds (D103); absent for a field that holds none. */
+  readonly relation?: RelationSpec;
+}
+
+/** A to-one relation an own field holds the key of (superschematic_rules::RelationSpec): the relation field's name and the type it points at. */
+export interface RelationSpec {
+  readonly name: string;
+  readonly type: string;
 }
 
 /** A type the core runs: its name, its uses in list order, and its own fields, none when the host gives none (superschematic_rules::TypeSpec). */
@@ -62,7 +70,26 @@ export type Action =
   | { readonly kind: 'update'; readonly key: string; readonly patch: Readonly<Record<string, unknown>> }
   | { readonly kind: 'delete'; readonly key: string }
   | { readonly kind: 'operation'; readonly key: string; readonly useId: string; readonly operation: string; readonly params?: unknown }
-  | { readonly kind: 'deadline'; readonly key: string; readonly useId: string; readonly name: string; readonly at: number; readonly payload?: unknown };
+  | { readonly kind: 'deadline'; readonly key: string; readonly useId: string; readonly name: string; readonly at: number; readonly payload?: unknown }
+  /** A write of a row the table's change queue hands the core (D103): the row's key and the change. */
+  | { readonly kind: 'change'; readonly key: string; readonly change: RowChange };
+
+/** What a write did to a row (superschematic_rules::WriteKind). */
+export type WriteKind = 'insert' | 'update' | 'delete';
+
+/** A row's fields as a write found or left them: own fields by name, owned fields by use id and declared name, a field with no value absent (superschematic_rules::RowImage). */
+export interface RowImage {
+  readonly own?: Readonly<Record<string, unknown>>;
+  readonly owned?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+}
+
+/** A write of a row as a table's change trigger wrote it (superschematic_rules::RowChange): what it did, when (epoch milliseconds, the database's clock), and the row before it (none for an insert) and after it (none for a delete). */
+export interface RowChange {
+  readonly write: WriteKind;
+  readonly at: number;
+  readonly before?: RowImage;
+  readonly after?: RowImage;
+}
 
 /** One command (superschematic_rules::Command): who calls, when (epoch milliseconds), what, and the host's id for the request, the same for every run of the command. */
 export interface Command {
@@ -78,7 +105,9 @@ export type ReadRequest =
   | { readonly kind: 'hasRows'; readonly type: string }
   | { readonly kind: 'spec'; readonly type: string }
   /** The rows of one sub-table of one use on one row (Answer subRows), each by its key, in key order by code point. */
-  | { readonly kind: 'subRows'; readonly type: string; readonly key: string; readonly useId: string; readonly table: string };
+  | { readonly kind: 'subRows'; readonly type: string; readonly key: string; readonly useId: string; readonly table: string }
+  /** The rows of a type whose own field holds a key (Answer linked), in the host's key order, at most limit (the core asks for its LINKED_PAGE, 500), after the key after when given; a soft-deletable table's live rows alone (D103). */
+  | { readonly kind: 'linked'; readonly type: string; readonly field: string; readonly key: string; readonly after?: string; readonly limit: number };
 
 /** One row as the host read it: its own fields, each use's owned fields by use id then declared name, and its version. */
 export interface Row {
@@ -93,8 +122,25 @@ export interface SubRow {
   readonly values?: Readonly<Record<string, unknown>>;
 }
 
+/** A row a linked read answers, with its key (superschematic_rules::KeyedRow). */
+export interface KeyedRow {
+  readonly key: string;
+  readonly row: Row;
+}
+
+/** The rows a linked read asks for, and whether more follow (superschematic_rules::LinkedRows). */
+export interface LinkedRows {
+  readonly rows: readonly KeyedRow[];
+  readonly more: boolean;
+}
+
 /** The host's answer to one request, of the variant it asks for. */
-export type Answer = { readonly row: Row | null } | { readonly hasRows: boolean } | { readonly spec: TypeSpec | null } | { readonly subRows: readonly SubRow[] };
+export type Answer =
+  | { readonly row: Row | null }
+  | { readonly hasRows: boolean }
+  | { readonly spec: TypeSpec | null }
+  | { readonly subRows: readonly SubRow[] }
+  | { readonly linked: LinkedRows };
 
 /** A key the host locks before it answers the reads a rule across rows decides on. */
 export type LockKey = string;
@@ -164,7 +210,9 @@ export type RowWrite =
       readonly own: Readonly<Record<string, unknown>>;
       readonly owned: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
     }
-  | { readonly kind: 'delete'; readonly type: string; readonly key: string; readonly expectedVersion: number };
+  | { readonly kind: 'delete'; readonly type: string; readonly key: string; readonly expectedVersion: number }
+  /** A row a change command found gone (D103): no write of it; its deadlines go, and its sub-table rows when no row of the key is left at all. */
+  | { readonly kind: 'gone'; readonly type: string; readonly key: string };
 
 /** What happens to a sub-table row, tagged by kind. Open. */
 export type SubRowChange =
@@ -252,6 +300,8 @@ export interface BehaviorDeclaration {
   readonly tables?: readonly DeclaredTable[];
   /** Whether the behavior arms deadlines, which a table that composes it keeps in a deadline queue (D103). */
   readonly armsDeadlines?: boolean;
+  /** Whether the behavior hears its row's writes, which a table that composes it keeps in a change queue its trigger writes (D103). */
+  readonly hearsChanges?: boolean;
   readonly operations?: readonly DeclaredOperation[];
   readonly vetoes?: readonly { readonly code: string; readonly description?: string }[];
   readonly [member: string]: unknown;

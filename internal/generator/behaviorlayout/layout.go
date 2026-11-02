@@ -61,10 +61,14 @@
 // A use the table implements, `implements Timers<Ticket, { ... }>`, has no
 // anchor and sits under its member (timers); each sub-table its behavior
 // declares is in the use's tables, by its declared name, with its table,
-// its column of the row's key, its key and its fields; and a table whose
+// its column of the row's key, its key and its fields; a table whose
 // behaviors arm deadlines names its deadline queue's table and columns in
 // deadlines (testdata/fixture-timers-db.layout.json is the whole document
-// of such a schema).
+// of such a schema); and a table whose writes its behaviors hear, or
+// another table's do through a relation of it, names its change queue's
+// table and columns in changes, and its spec's fields name each to-one
+// relation an own field holds the key of
+// (testdata/fixture-reactions-db.layout.json).
 package behaviorlayout
 
 import (
@@ -175,6 +179,11 @@ type Table struct {
 	// none.
 	Deadlines *Deadlines `json:"deadlines,omitempty"`
 
+	// Changes is the queue the table's change trigger writes a message of
+	// for each write its behaviors hear (D103); absent for a table nothing
+	// hears.
+	Changes *Changes `json:"changes,omitempty"`
+
 	// Spec is the type as the core runs it.
 	Spec TypeSpec `json:"spec"`
 }
@@ -200,6 +209,31 @@ type Deadlines struct {
 	At string `json:"at"`
 	// Payload is the column of the arming's payload, JSON.
 	Payload string `json:"payload"`
+}
+
+// Changes is a hearing table's change queue (D103), each column unquoted:
+// one message per write of a row, whoever makes it, which the table's
+// change trigger writes and a behavior worker claims and runs through the
+// core's change command.
+type Changes struct {
+	// Queue is the queue's type: TicketChange.
+	Queue string `json:"queue"`
+	// Table is the queue's table: ticket_change_queue.
+	Table string `json:"table"`
+	// RowKey is the column of the written row's key, which binds as the
+	// row table's key binds.
+	RowKey string `json:"rowKey"`
+	// Write is the column of what the write did: insert, update or delete.
+	Write string `json:"write"`
+	// At is the column of the write's time, epoch milliseconds by the
+	// database's clock.
+	At string `json:"at"`
+	// Before is the column of the row's image before the write, JSON by
+	// column; null for an insert.
+	Before string `json:"before"`
+	// After is the column of the row's image after the write, JSON by
+	// column; null for a delete.
+	After string `json:"after"`
 }
 
 // Live is the condition a live row of a soft-deletable table meets: its
@@ -316,12 +350,21 @@ type TypeSpec struct {
 }
 
 // FieldSpec is one own field as the core takes it,
-// superschematic_rules::FieldSpec: its name, its IR type's name, and
-// whether its values are instants, epoch milliseconds from the adapter.
+// superschematic_rules::FieldSpec: its name, its IR type's name, whether
+// its values are instants, epoch milliseconds from the adapter, and the
+// to-one relation whose target's key it holds, if any (D103).
 type FieldSpec struct {
-	Name     string `json:"name"`
-	Type     string `json:"type"`
-	DateTime bool   `json:"dateTime,omitempty"`
+	Name     string        `json:"name"`
+	Type     string        `json:"type"`
+	DateTime bool          `json:"dateTime,omitempty"`
+	Relation *RelationSpec `json:"relation,omitempty"`
+}
+
+// RelationSpec is a to-one relation an own field holds the key of, as the
+// core's spec names it: the relation field's name and its target type.
+type RelationSpec struct {
+	Name string `json:"name"` // project
+	Type string `json:"type"` // Project
 }
 
 // UseSpec is one use as the core takes it, superschematic_rules::UseSpec:
@@ -430,6 +473,21 @@ func DeadlineQueueTypeName(row string) string {
 	return row + "Deadline"
 }
 
+// ChangeQueueTypeName is the name of the queue the loader adds for the
+// writes of the table row that its behaviors hear (D103): TicketChange,
+// whose table is ticket_change_queue.
+func ChangeQueueTypeName(row string) string { return row + "Change" }
+
+// The fields of the change queue's message (D103): the written row's key,
+// what the write did, when, and the row's image before and after it.
+const (
+	ChangeRowKeyField = "rowKey"
+	ChangeWriteField  = "write"
+	ChangeAtField     = "at"
+	ChangeBeforeField = "before"
+	ChangeAfterField  = "after"
+)
+
 // The fields of the deadline queue's message, by the core's names of a
 // deadline (D103): the row's key, the use's id, the deadline's name, the
 // time it was armed to fall due at and the arming's payload.
@@ -515,7 +573,8 @@ func tableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel, reg
 	if !model.HasVersion {
 		return nil, fmt.Errorf("behaviorlayout: table %s composes behaviors and keeps no %s column, which the loader gives it", td.Name, VersionColumn)
 	}
-	t := &Table{Type: td.Name, Table: model.Name, Version: VersionColumn, Own: ownColumns(schema, model), Uses: []Use{}}
+	own, relations := ownColumnsOf(schema, model)
+	t := &Table{Type: td.Name, Table: model.Name, Version: VersionColumn, Own: own, Uses: []Use{}}
 	if deletedAt := model.AuditColumn(sqlutil.AuditDeletedAt); model.SoftDelete && deletedAt != nil {
 		t.Live = &Live{Column: deletedAt.Name}
 	}
@@ -528,7 +587,7 @@ func tableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel, reg
 	if t.Key.Column == "" {
 		return nil, fmt.Errorf("behaviorlayout: table %s has no key column", td.Name)
 	}
-	t.Spec = TypeSpec{Name: td.Name, Uses: []UseSpec{}, Fields: fieldSpecs(t.Own)}
+	t.Spec = TypeSpec{Name: td.Name, Uses: []UseSpec{}, Fields: fieldSpecs(t.Own, relations)}
 	armsDeadlines := false
 	for _, ref := range td.TableBehaviors() {
 		where := fmt.Sprintf("behaviorlayout: table %s: field %s", td.Name, ref.Field)
@@ -590,6 +649,13 @@ func tableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel, reg
 		}
 		t.Deadlines = deadlines
 	}
+	if queue := schema.BehaviorQueueOf(td.Name, ir.BehaviorQueueChanges); queue != nil {
+		changes, err := changesOf(td, queue)
+		if err != nil {
+			return nil, err
+		}
+		t.Changes = changes
+	}
 	return t, nil
 }
 
@@ -599,7 +665,16 @@ func tableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel, reg
 // relation's column holds its target's key, which a generated row holds as
 // <field>Id, typed as the target's key.
 func ownColumns(schema *ir.Schema, model *sqlutil.TableModel) []Column {
+	own, _ := ownColumnsOf(schema, model)
+	return own
+}
+
+// ownColumnsOf is ownColumns with, beside each column, the to-one relation
+// whose target's key it holds (its relation field and target type), nil
+// for any other column.
+func ownColumnsOf(schema *ir.Schema, model *sqlutil.TableModel) ([]Column, []*RelationSpec) {
 	own := []Column{}
+	var relations []*RelationSpec
 	for _, c := range model.Columns {
 		switch {
 		case c.Key, c.Def == nil, c.Def.Owned(), c.Audit != "", c.Internal:
@@ -614,11 +689,13 @@ func ownColumns(schema *ir.Schema, model *sqlutil.TableModel) []Column {
 			}
 			column.Convert = ConvertOf(column.Type)
 			own = append(own, column)
+			relations = append(relations, &RelationSpec{Name: c.Field, Type: c.Relation})
 		default:
 			own = append(own, Column{Field: c.Field, Column: c.Name, Type: c.Def.TypeRef.Name, Convert: convertOfRef(c.Def.TypeRef)})
+			relations = append(relations, nil)
 		}
 	}
-	return own
+	return own, relations
 }
 
 // OwnFields are td's own fields, a table of schema, as the layout's own
@@ -647,13 +724,88 @@ func OwnFields(schema *ir.Schema, td *ir.TypeDef) []Column {
 
 // fieldSpecs are own's columns as the core's spec holds the type's own
 // fields: each by its name and IR type, a date-time (epoch milliseconds
-// from the adapter) marked.
-func fieldSpecs(own []Column) []FieldSpec {
+// from the adapter) marked, and a to-one relation's column with its
+// relation, relations[i] being own[i]'s.
+func fieldSpecs(own []Column, relations []*RelationSpec) []FieldSpec {
 	var specs []FieldSpec
-	for _, c := range own {
-		specs = append(specs, FieldSpec{Name: c.Field, Type: c.Type, DateTime: c.Convert == ConvertEpochMillis})
+	for i, c := range own {
+		specs = append(specs, FieldSpec{Name: c.Field, Type: c.Type, DateTime: c.Convert == ConvertEpochMillis, Relation: relations[i]})
 	}
 	return specs
+}
+
+// ImageColumns are the columns of td's rows that its change trigger writes
+// as a write's image (D103), unquoted: the layout's own columns and each
+// use's owned columns, in the layout's order, a binary, vector or
+// geometric column left out. It is nil when schema's tables cannot be
+// modelled.
+func ImageColumns(schema *ir.Schema, td *ir.TypeDef) []string {
+	model := modelOf(schema, td)
+	if model == nil {
+		return nil
+	}
+	byName := map[string]sqlutil.ColumnModel{}
+	for _, c := range model.Columns {
+		byName[c.Name] = c
+	}
+	// A binary column (BYTEA, a BLOB on SQLite) or a vector is left out:
+	// no behavior reads one, and SQLite's json_object refuses a BLOB. So is
+	// a POINT, GEOGRAPHY or GEOMETRY column, which Postgres has no equality
+	// for: the trigger's comparison of one would fail every write of the
+	// table.
+	imaged := func(name string) bool {
+		c, ok := byName[name]
+		if !ok || c.Name == VersionColumn {
+			return false
+		}
+		return !sqlutil.IsBinaryType(c.Type) && (c.Def == nil || c.Def.TypeRef.Name != ir.VectorScalarName) && !sqlutil.IsVectorType(c.Type) && sqlutil.HasEquality(c.Type)
+	}
+	columns := []string{}
+	for _, c := range ownColumns(schema, model) {
+		if imaged(c.Column) {
+			columns = append(columns, c.Column)
+		}
+	}
+	for _, fd := range td.OwnedFields() {
+		if column := sqlutil.ColumnName(fd); imaged(column) {
+			columns = append(columns, column)
+		}
+	}
+	return columns
+}
+
+// LiveColumn is the column a soft delete of td's rows stamps, deleted_at,
+// unquoted, as the layout's live condition names it, or "" for a table
+// that is not soft-deletable or when schema's tables cannot be modelled.
+// The change trigger hears a write that moves it alone (D103): a soft
+// delete, or a restore.
+func LiveColumn(schema *ir.Schema, td *ir.TypeDef) string {
+	model := modelOf(schema, td)
+	if model == nil || !model.SoftDelete {
+		return ""
+	}
+	if deletedAt := model.AuditColumn(sqlutil.AuditDeletedAt); deletedAt != nil {
+		return deletedAt.Name
+	}
+	return ""
+}
+
+// modelOf is the table model of td, a table of schema, or nil when it is
+// none or schema's tables cannot be modelled.
+func modelOf(schema *ir.Schema, td *ir.TypeDef) *sqlutil.TableModel {
+	if schema == nil || td == nil {
+		return nil
+	}
+	tables, err := sqlutil.TablesOf(schema, nil)
+	if err != nil {
+		return nil
+	}
+	for i := range tables {
+		if tables[i].Type == td.Name {
+			return &tables[i]
+		}
+	}
+	return nil
 }
 
 // subTableOf is the layout of the sub-table declared for the use ref on
@@ -739,6 +891,29 @@ func deadlinesOf(schema *ir.Schema, td *ir.TypeDef) (*Deadlines, error) {
 			return nil, err
 		}
 		*f.into = c
+	}
+	return out, nil
+}
+
+// changesOf is the layout of the change queue the loader added for td
+// (ir.TypeDef.BehaviorQueue of kind changes).
+func changesOf(td *ir.TypeDef, queue *ir.TypeDef) (*Changes, error) {
+	out := &Changes{Queue: queue.Name, Table: sqlutil.QueueTableName(queue)}
+	for _, f := range []struct {
+		field string
+		into  *string
+	}{
+		{ChangeRowKeyField, &out.RowKey},
+		{ChangeWriteField, &out.Write},
+		{ChangeAtField, &out.At},
+		{ChangeBeforeField, &out.Before},
+		{ChangeAfterField, &out.After},
+	} {
+		fd := sqlutil.FieldNamed(queue, f.field)
+		if fd == nil {
+			return nil, fmt.Errorf("behaviorlayout: table %s: its change queue %s has no field %s", td.Name, queue.Name, f.field)
+		}
+		*f.into = sqlutil.ColumnName(fd)
 	}
 	return out, nil
 }

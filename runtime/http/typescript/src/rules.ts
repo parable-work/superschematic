@@ -36,8 +36,8 @@ check its read changed, it applies nothing, forgets its answers and runs
 the command again from fresh state with the same request id, up to
 MAX_ATTEMPTS runs, and then refuses it as busy. A kind of read, write or
 change it does not know (the core's enums are open) refuses the command as
-internal, and so do outbox events until the outbox has a table (D103's
-order of the work, step 3).
+internal, and so do a behavior's own outbox events (Cx::emit), which no
+ported behavior emits and the event stream comes later to carry (D103).
 
 A use's sub-tables are child tables of its row (the layout's tables), whose
 rows the core reads (subRows) and the change set inserts, updates and
@@ -52,7 +52,23 @@ spends the claim right after the row's fenced write and before the change
 set's own deadline changes: a claim another command's arm or clear deleted
 spends nothing, so its old arming never fires, and an arming the fired
 command makes again survives the completion. Whether a deadline is still
-armed is the claim's to say, never the core's (D103).
+armed is the claim's to say, never the core's (D103). A claimed fire a
+guard vetoes releases its message, due again in VETOED_RETRY_SECONDS with
+its attempt not counted, so it stays armed while the guard vetoes it.
+
+A table whose writes its behaviors hear (Timers', Reactions', or another
+table's Reactions through a relation of it) keeps a change queue (the
+layout's changes), which a trigger of the table writes a message of for
+each write of a row, whoever makes it: the core, a repository's bulk or
+hard write, a script, psql. A worker claims a message and runs it through
+runChange, which hands the core the write (Action change) with the row's
+images as the trigger wrote them, mapped by the layout to the row's own
+and owned fields; the core runs the uses that hear the row's writes on the
+row as it is now and the listeners its relations reach, reading the rows
+that link to a row (the linked read) where a rule asks, and a row it finds
+gone purges its deadlines (the change set's gone). The unit spends the
+claimed message after the row writes, as a deadline's, so a raw SQL write
+is heard after its commit, and its deadlines reconcile then (D103).
 
 The generated repositories call it (./orm): each use's operations are
 methods under the use's member (orm.order.status.transition(key, { to:
@@ -88,6 +104,16 @@ export interface CoreFieldSpec {
   readonly type: string;
   /** Whether its values are instants: epoch milliseconds from a table's adapter. */
   readonly dateTime?: boolean;
+  /** The to-one relation whose key the field holds (D103): the relation's name and its target type; absent for a field that holds none. */
+  readonly relation?: CoreRelationSpec;
+}
+
+/** A to-one relation an own field holds the key of: superschematic_rules::RelationSpec. */
+export interface CoreRelationSpec {
+  /** The relation field's name (project for projectId). */
+  readonly name: string;
+  /** The type it points at. */
+  readonly type: string;
 }
 
 /** A type the core runs: its name, its uses in list order, and its own fields. */
@@ -112,7 +138,30 @@ export type CoreAction =
   | { readonly kind: 'update'; readonly key: string; readonly patch: Readonly<Record<string, unknown>> }
   | { readonly kind: 'delete'; readonly key: string }
   | { readonly kind: 'operation'; readonly key: string; readonly useId: string; readonly operation: string; readonly params?: unknown }
-  | { readonly kind: 'deadline'; readonly key: string; readonly useId: string; readonly name: string; readonly at: number; readonly payload?: unknown };
+  | { readonly kind: 'deadline'; readonly key: string; readonly useId: string; readonly name: string; readonly at: number; readonly payload?: unknown }
+  | { readonly kind: 'change'; readonly key: string; readonly change: CoreRowChange };
+
+/** What a write did to a row (D103): superschematic_rules::WriteKind. */
+export type CoreWriteKind = 'insert' | 'update' | 'delete';
+
+/** A row's fields as a write found or left them: its own fields by name and its uses' owned fields by use id and declared name, a field with no value absent (superschematic_rules::RowImage). */
+export interface CoreRowImage {
+  readonly own?: Readonly<Record<string, unknown>>;
+  readonly owned?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+}
+
+/**
+ * A write of a row a table's change trigger wrote to its change queue
+ * (D103): what it did, when (epoch milliseconds, the database's clock), and
+ * the row before it (none for an insert) and after it (none for a delete):
+ * superschematic_rules::RowChange.
+ */
+export interface CoreRowChange {
+  readonly write: CoreWriteKind;
+  readonly at: number;
+  readonly before?: CoreRowImage;
+  readonly after?: CoreRowImage;
+}
 
 /** One command: who calls, when (epoch milliseconds), what, and the host's id for the request. */
 export interface CoreCommand {
@@ -127,7 +176,9 @@ export type CoreReadRequest =
   | { readonly kind: 'row'; readonly type: string; readonly key: string }
   | { readonly kind: 'hasRows'; readonly type: string }
   | { readonly kind: 'spec'; readonly type: string }
-  | { readonly kind: 'subRows'; readonly type: string; readonly key: string; readonly useId: string; readonly table: string };
+  | { readonly kind: 'subRows'; readonly type: string; readonly key: string; readonly useId: string; readonly table: string }
+  /** The rows of a type whose own field holds a key, in its key column's order, at most limit, after the key after when given (D103). */
+  | { readonly kind: 'linked'; readonly type: string; readonly field: string; readonly key: string; readonly after?: string; readonly limit: number };
 
 /** One row as the host read it: own fields, owned fields by use id then declared name, and its version. */
 export interface CoreRow {
@@ -142,12 +193,19 @@ export interface CoreSubRow {
   readonly values?: Readonly<Record<string, unknown>>;
 }
 
+/** The rows a linked read answers, each with its key, and whether more follow (superschematic_rules::LinkedRows). */
+export interface CoreLinkedRows {
+  readonly rows: readonly { readonly key: string; readonly row: CoreRow }[];
+  readonly more: boolean;
+}
+
 /** The host's answer to one request, of the variant it asks for. */
 export type CoreAnswer =
   | { readonly row: CoreRow | null }
   | { readonly hasRows: boolean }
   | { readonly spec: CoreTypeSpec | null }
-  | { readonly subRows: readonly CoreSubRow[] };
+  | { readonly subRows: readonly CoreSubRow[] }
+  | { readonly linked: CoreLinkedRows };
 
 /** One answered request, and how many locks the host held when it made the read. */
 export interface CoreAnswered {
@@ -214,7 +272,9 @@ export type CoreRowWrite =
       readonly own: Readonly<Record<string, unknown>>;
       readonly owned: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
     }
-  | { readonly kind: 'delete'; readonly type: string; readonly key: string; readonly expectedVersion: number };
+  | { readonly kind: 'delete'; readonly type: string; readonly key: string; readonly expectedVersion: number }
+  /** A row a change command found gone (D103): no write of it; its deadlines go, and its sub-table rows when no row of the key is left at all. */
+  | { readonly kind: 'gone'; readonly type: string; readonly key: string };
 
 /** One write of a sub-table row. */
 export interface CoreSubRowWrite {
@@ -344,6 +404,30 @@ export interface RulesDeadlines {
   readonly payload: string;
 }
 
+/**
+ * The queue a table whose writes its behaviors hear keeps them in (D103),
+ * one message per write of a row, whoever makes it, which the table's
+ * change trigger writes: its table and the columns of its message's
+ * fields, each unquoted. The queue's own columns (id, state, due_at,
+ * claim_token) are every queue's.
+ */
+export interface RulesChanges {
+  /** The queue's type (TicketChange). */
+  readonly queue: string;
+  /** Its table. */
+  readonly table: string;
+  /** The column of the written row's key. */
+  readonly rowKey: string;
+  /** The column of what the write did: insert, update or delete. */
+  readonly write: string;
+  /** The column of the write's time, in epoch milliseconds by the database's clock. */
+  readonly at: string;
+  /** The column of the row's columns before the write, JSON by column. */
+  readonly before: string;
+  /** The column of the row's columns after the write, JSON by column. */
+  readonly after: string;
+}
+
 /** What a live row of a soft-deletable table holds: NULL in its deletedAt column. */
 export interface RulesLive {
   /** The deletedAt column, unquoted. */
@@ -374,6 +458,8 @@ export interface RulesTable {
   readonly uses: readonly RulesUse[];
   /** The queue the table's armed deadlines are messages of; absent when no behavior of it arms any. */
   readonly deadlines?: RulesDeadlines;
+  /** The queue the table's change trigger writes a message of for each write its behaviors hear; absent for a table nothing hears. */
+  readonly changes?: RulesChanges;
   /** The type as the core runs it. */
   readonly spec: CoreTypeSpec;
 }
@@ -632,8 +718,15 @@ export interface DeadlineClaim {
   readonly token: string;
 }
 
-/** What running a due deadline came to: run, or nothing run because the claim was lost or the row or the use is gone. */
-export type DeadlineRun = { readonly ran: true; readonly result: RulesResult } | { readonly ran: false; readonly why: 'claim lost' | 'gone'; readonly refusal?: CoreRefusal };
+/**
+ * What running a due deadline came to: run, or nothing run because the
+ * claim was lost, the row or the use is gone, or a guard vetoed the fire
+ * and the claimed message was released, due again in VETOED_RETRY_SECONDS.
+ */
+export type DeadlineRun = { readonly ran: true; readonly result: RulesResult } | { readonly ran: false; readonly why: 'claim lost' | 'gone' | 'vetoed'; readonly refusal?: CoreRefusal };
+
+/** How long a fire a guard vetoed waits before its released message falls due again, in seconds (D103). */
+export const VETOED_RETRY_SECONDS = 60;
 
 /** What runDeadline takes beside the deadline and the caller. */
 export interface DeadlineOptions extends ExecuteOptions {
@@ -650,10 +743,15 @@ export interface DeadlineOptions extends ExecuteOptions {
  * claim another command's re-arm or clear deleted, or one whose lease
  * expired and another worker holds, is lost, and nothing is applied. A
  * not_found of the core whose row or use is gone (the table holds no live
- * row of the key, or the layout no such use) spends the claim alone.
- * Without a claim the arming at the deadline's time is read before each
- * run and spent by its key and time. Any other refusal is thrown, a
- * not_found of something else a rule reached among them.
+ * row of the key, or the layout no such use) spends the claim alone. With
+ * a claim, a refusal vetoed (a guard holding the fire) releases the
+ * claimed message, due again in VETOED_RETRY_SECONDS and counting no
+ * attempt, so the deadline stays armed and its sub-table row pending, and
+ * comes back while the guard vetoes it, as the engine's sweep tried it at
+ * every run. Without a claim the arming at the deadline's time is read
+ * before each run and spent by its key and time, and a veto is thrown. Any
+ * other refusal is thrown, a not_found of something else a rule reached
+ * among them.
  */
 export async function runDeadline(host: RulesHost, type: string, deadline: CoreDeadline, caller: CoreCaller, options: DeadlineOptions = {}): Promise<DeadlineRun> {
   const action: CoreAction = { kind: 'deadline', key: deadline.key, useId: deadline.useId, name: deadline.name, at: deadline.at, payload: deadline.payload ?? null };
@@ -662,10 +760,61 @@ export async function runDeadline(host: RulesHost, type: string, deadline: CoreD
 }
 
 /**
- * How a deadline command spends its arming: by the worker's claim of its
- * message, or without one by the arming at its time, which is read before
- * each run; and whether a row or a use the core finds gone spends it
- * alone (runDeadline) or is a refusal (execute).
+ * A message of a table's change queue as its trigger wrote it (D103): the
+ * row's key, in its wire form or its column's (a UUID's base62 or
+ * hyphenated text), what the write did (insert, update or delete), its
+ * time in epoch milliseconds, which Postgres's BIGINT may hand over as
+ * text, and the row's columns before and after it, each a JSON object by
+ * column, or its text on SQLite, null or absent for none.
+ */
+export interface TableChange {
+  readonly key: string;
+  readonly write: string;
+  readonly at: number | string;
+  readonly before?: unknown;
+  readonly after?: unknown;
+}
+
+/** What running a change came to (D103): run, or nothing run because the claim of its message was lost. */
+export type ChangeRun = { readonly ran: true; readonly result: RulesResult } | { readonly ran: false; readonly why: 'claim lost' };
+
+/** What runChange takes beside the change and the caller. */
+export interface ChangeOptions extends ExecuteOptions {
+  /** The worker's claim of the change's message, which the unit that applies the change set completes; absent, nothing is spent. */
+  readonly claim?: DeadlineClaim;
+}
+
+/**
+ * Runs a change of a row of a type, a message of the table's change queue,
+ * through the core in the store's transaction, as caller (a behavior
+ * worker's subject), at the host's time (D103): the core runs the uses of
+ * the type that hear its writes on the row as it is now (Timers
+ * reconciling its deadlines, Reactions' rules) and the listeners of the
+ * types its relations point at (Reactions' allTerminal and anyTerminal),
+ * and a row it finds gone purges its deadlines (Gone). The message is
+ * converted as its trigger wrote it: the key as the key column reads, and
+ * each image's columns by the layout to the row's own and owned fields as
+ * a row read converts them. With a claim, the unit spends the claimed
+ * message by its id and token after the row writes and before the
+ * sub-table rows and deadlines, so a unit that did not apply because the
+ * claim no longer holds its message runs nothing (claim lost), and one
+ * that did not apply for a row that moved runs again, up to MAX_ATTEMPTS
+ * times. Without one, nothing is spent. A refusal is thrown, nothing of it
+ * applied: a worker's message then fails, as D68 retries it.
+ */
+export async function runChange(host: RulesHost, type: string, change: TableChange, caller: CoreCaller, options: ChangeOptions = {}): Promise<ChangeRun> {
+  const table = tableOf(host.layout, type);
+  const key = wireKeyOf(table, change.key);
+  const action: CoreAction = { kind: 'change', key, change: rowChangeOf(table, host.store.dialect, key, change) };
+  const command: CoreCommand = { caller, now: (host.now ?? Date.now)(), action, request: (host.request ?? randomRequest)() };
+  return (await perform(host, type, command, options, { claim: options.claim, gone: false })) as ChangeRun;
+}
+
+/**
+ * How a deadline or a change command spends its message: by the worker's
+ * claim of it, or a deadline's without one by the arming at its time,
+ * which is read before each run; and whether a row or a use the core finds
+ * gone spends a deadline's alone (runDeadline) or is a refusal (execute).
  */
 interface Spending {
   readonly claim?: DeadlineClaim;
@@ -673,11 +822,12 @@ interface Spending {
 }
 
 /**
- * The host loop of execute and runDeadline: runs the command to its
- * outcome and applies its change set whole, again from fresh state when a
- * fenced row moved, up to MAX_ATTEMPTS times. A deadline command's unit
- * spends its arming (spending); a claim the unit could not spend that is
- * no longer held is lost.
+ * The host loop of execute, runDeadline and runChange: runs the command to
+ * its outcome and applies its change set whole, again from fresh state
+ * when a fenced row moved, up to MAX_ATTEMPTS times. A deadline command's
+ * unit spends its arming, and a claimed change's its message (spending);
+ * a claim the unit could not spend that is no longer held is lost. A
+ * claimed deadline the core refuses as vetoed releases its message.
  */
 async function perform(host: RulesHost, type: string, command: CoreCommand, options: ExecuteOptions, spending: Spending): Promise<DeadlineRun> {
   const table = tableOf(host.layout, type);
@@ -686,13 +836,23 @@ async function perform(host: RulesHost, type: string, command: CoreCommand, opti
   const run = prepared(host, table, command);
   refuseOwnedWrites(table, run);
   const deadline = run.action.kind === 'deadline' ? run.action : undefined;
-  const spend = deadline === undefined ? undefined : spendOf(host, table, deadline, spending.claim);
+  // The queue table a claim's message is in: the deadline queue for a
+  // deadline, the change queue for a change.
+  const queue = spending.claim === undefined ? undefined : deadline !== undefined ? deadlinesOf(table).table : run.action.kind === 'change' ? changesOf(table).table : undefined;
+  const spend =
+    deadline !== undefined ? spendOf(host, table, deadline, spending.claim) : queue !== undefined && spending.claim !== undefined ? claimSpend(host, queue, spending.claim) : undefined;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     if (deadline !== undefined && spending.claim === undefined) await stillArmed(host, table, run, deadline);
     let settled: Awaited<ReturnType<typeof settle>>;
     try {
       settled = await settle(host, table.spec, run);
     } catch (error) {
+      if (deadline !== undefined && spending.claim !== undefined && error instanceof RulesRefusal && error.refusal.code === 'vetoed') {
+        // A guard holds the fire: the message goes back, due again a
+        // while on, its attempt not counted, and the deadline stays armed.
+        if (await host.store.apply([releaseOf(host, table, spending.claim)])) return { ran: false, why: 'vetoed', refusal: error.refusal };
+        return { ran: false, why: 'claim lost' };
+      }
       if (deadline === undefined || spend === undefined || !spending.gone || !(error instanceof RulesRefusal) || error.refusal.code !== 'not_found') throw error;
       if (!(await deadlineGone(host, table, deadline))) throw error;
       // The row or the use is gone: its arming is spent alone.
@@ -705,7 +865,7 @@ async function perform(host: RulesHost, type: string, command: CoreCommand, opti
     if (await host.store.apply(statements)) {
       return { ran: true, result: { changes, result: changes.result ?? null, key: keyOfCommand(run), attempts: attempt } };
     }
-    if (spending.claim !== undefined && !(await claimHeld(host, table, spending.claim))) return { ran: false, why: 'claim lost' };
+    if (queue !== undefined && spending.claim !== undefined && !(await claimHeld(host, queue, spending.claim))) return { ran: false, why: 'claim lost' };
   }
   throw new RulesRefusal(busyRefusal(type, run, MAX_ATTEMPTS));
 }
@@ -725,6 +885,12 @@ async function deadlineGone(host: RulesHost, table: RulesTable, deadline: Extrac
 function deadlinesOf(table: RulesTable): RulesDeadlines {
   if (table.deadlines === undefined) throw internal(`${table.type} keeps no deadline queue in the behaviors' layout, and a change set arms or runs a deadline of it`);
   return table.deadlines;
+}
+
+/** The change queue of a table, or an internal refusal for a table whose layout keeps none. */
+function changesOf(table: RulesTable): RulesChanges {
+  if (table.changes === undefined) throw internal(`${table.type} keeps no change queue in the behaviors' layout, and a worker's claim runs a change of it`);
+  return table.changes;
 }
 
 /** The condition on a deadline message that it is live: ready, or claimed by a worker that has not completed it. */
@@ -760,9 +926,7 @@ function spendOf(host: RulesHost, table: RulesTable, deadline: Extract<CoreActio
   const q = deadlinesOf(table);
   const dialect = host.store.dialect;
   const p = (n: number) => placeholder(dialect, n);
-  if (claim !== undefined) {
-    return { text: `DELETE FROM ${quote(q.table)} WHERE ${claimed(dialect)}`, values: [claim.id, claim.token], expect: 1 };
-  }
+  if (claim !== undefined) return claimSpend(host, q.table, claim);
   return {
     text: `DELETE FROM ${quote(q.table)} WHERE ${quote(q.rowKey)} = ${p(1)} AND ${quote(q.use)} = ${p(2)} AND ${quote(q.name)} = ${p(3)} AND ${quote(q.at)} = ${p(4)} AND ${LIVE_MESSAGE}`,
     values: [keyValue(table, deadline.key), deadline.useId, deadline.name, deadline.at],
@@ -775,10 +939,29 @@ function claimed(dialect: RulesDialect): string {
   return dialect === 'postgres' ? `"id" = $1::uuid AND "claim_token" = $2::uuid AND "state" = 'claimed'` : `"id" = ?1 AND "claim_token" = ?2 AND "state" = 'claimed'`;
 }
 
-/** Whether the claim still holds its message: what a unit that did not apply is read after, to tell a moved row from a lost claim. */
-async function claimHeld(host: RulesHost, table: RulesTable, claim: DeadlineClaim): Promise<boolean> {
+/** The statement a unit spends a claimed message of a queue table with: its delete by the claim's id and token, which must delete one. */
+function claimSpend(host: RulesHost, queue: string, claim: DeadlineClaim): RulesStatement {
+  return { text: `DELETE FROM ${quote(queue)} WHERE ${claimed(host.store.dialect)}`, values: [claim.id, claim.token], expect: 1 };
+}
+
+/**
+ * The statement that releases a claimed deadline message whose fire a
+ * guard vetoed (D103): ready again, due VETOED_RETRY_SECONDS on by the
+ * database's clock, the claim's attempt not counted, as D80's release
+ * counts none; it must change one message, the claim's.
+ */
+function releaseOf(host: RulesHost, table: RulesTable, claim: DeadlineClaim): RulesStatement {
   const q = deadlinesOf(table);
-  const rows = await host.store.query(`SELECT 1 FROM ${quote(q.table)} WHERE ${claimed(host.store.dialect)}`, [claim.id, claim.token]);
+  const text =
+    host.store.dialect === 'postgres'
+      ? `UPDATE ${quote(q.table)} SET "state" = 'ready', "attempts" = GREATEST("attempts" - 1, 0), "claim_token" = NULL, "claim_expires_at" = NULL, "due_at" = now() + make_interval(secs => $3), "updated_at" = now() WHERE ${claimed('postgres')}`
+      : `UPDATE ${quote(q.table)} SET "state" = 'ready', "attempts" = MAX("attempts" - 1, 0), "claim_token" = NULL, "claim_expires_at" = NULL, "due_at" = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?3) || ' seconds'), "updated_at" = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE ${claimed('sqlite')}`;
+  return { text, values: [claim.id, claim.token, VETOED_RETRY_SECONDS], expect: 1 };
+}
+
+/** Whether the claim still holds its message in the queue table: what a unit that did not apply is read after, to tell a moved row from a lost claim. */
+async function claimHeld(host: RulesHost, queue: string, claim: DeadlineClaim): Promise<boolean> {
+  const rows = await host.store.query(`SELECT 1 FROM ${quote(queue)} WHERE ${claimed(host.store.dialect)}`, [claim.id, claim.token]);
   return rows.length > 0;
 }
 
@@ -849,16 +1032,24 @@ export async function prepareCreate(host: RulesHost, type: string, own: Readonly
 /** Reads a row of a type by its key as the core reads it: its own fields and owned fields, each column with no value absent, and its version; null when the table has no such row, or none that is live. */
 export async function readRow(host: RulesHost, type: string, key: string): Promise<CoreRow | null> {
   const table = tableOf(host.layout, type);
-  const dialect = host.store.dialect;
-  const owned = table.uses.flatMap(use => use.fields);
-  const selected = [...table.own, ...owned];
-  // Each column under an alias of its place, so no two columns' names
-  // meet in the row and none needs its case kept.
-  const list = [...selected.map((column, i) => `${quote(column.column)} AS c${i}`), `${quote(table.version)} AS v`].join(', ');
-  const text = `SELECT ${list} FROM ${quote(table.table)} WHERE ${quote(table.key.column)} = ${placeholder(dialect, 1)}${live(table)}`;
+  const text = `SELECT ${rowList(table)} FROM ${quote(table.table)} WHERE ${quote(table.key.column)} = ${placeholder(host.store.dialect, 1)}${live(table)}`;
   const rows = await host.store.query(text, [keyValue(table, key)]);
   const row = rows[0];
-  if (row === undefined) return null;
+  return row === undefined ? null : rowFrom(table, row);
+}
+
+/**
+ * The select list of a row read: each own and owned column under an alias
+ * of its place, so no two columns' names meet in the row and none needs
+ * its case kept, and the version.
+ */
+function rowList(table: RulesTable): string {
+  const selected = [...table.own, ...table.uses.flatMap(use => use.fields)];
+  return [...selected.map((column, i) => `${quote(column.column)} AS c${i}`), `${quote(table.version)} AS v`].join(', ');
+}
+
+/** A row read by rowList's select list as the core reads it: each column converted, one with no value absent, and a use with none absent. */
+function rowFrom(table: RulesTable, row: Readonly<Record<string, unknown>>): CoreRow {
   const own: Record<string, unknown> = {};
   table.own.forEach((column, i) => {
     const value = fromColumn(row[`c${i}`], column, table);
@@ -875,6 +1066,33 @@ export async function readRow(host: RulesHost, type: string, key: string): Promi
     if (Object.keys(values).length > 0) fields[use.id] = values;
   }
   return { own, owned: fields, version: Number(row.v) };
+}
+
+/**
+ * Reads the rows of a type whose own field holds a key, as the core reads
+ * them (ReadRequest::Linked, D103): at most limit of them in the key
+ * column's order, after the key after when given, a soft-deletable table's
+ * live rows alone, each with its key in its wire form and converted as a
+ * row read converts it, and whether more follow. A type the layout lacks
+ * has none; a field that is no own column of the type refuses the command
+ * as internal.
+ */
+export async function readLinked(host: RulesHost, type: string, field: string, key: string, after: string | undefined, limit: number): Promise<CoreLinkedRows> {
+  const table = host.layout.types[type];
+  if (table === undefined) return { rows: [], more: false };
+  const column = table.own.find(c => c.field === field);
+  if (column === undefined) throw internal(`${type} has no own field ${field} in the behaviors' layout`);
+  if (!Number.isSafeInteger(limit) || limit < 0) throw internal(`a linked read of ${type} asks for ${JSON.stringify(limit)} rows`);
+  const dialect = host.store.dialect;
+  const values: unknown[] = [toColumn(key, column, table, dialect)];
+  let where = `${quote(column.column)} = ${placeholder(dialect, 1)}${live(table)}`;
+  if (after !== undefined) {
+    values.push(keyValue(table, after));
+    where += ` AND ${quote(table.key.column)} > ${placeholder(dialect, 2)}`;
+  }
+  const text = `SELECT ${quote(table.key.column)} AS k, ${rowList(table)} FROM ${quote(table.table)} WHERE ${where} ORDER BY ${quote(table.key.column)} LIMIT ${limit + 1}`;
+  const found = await host.store.query(text, values);
+  return { rows: found.slice(0, limit).map(row => ({ key: wireKeyOf(table, row.k), row: rowFrom(table, row) })), more: found.length > limit };
 }
 
 /** The table of a type, or an internal refusal for a type the layout lacks. */
@@ -1010,6 +1228,10 @@ async function settle(host: RulesHost, spec: CoreTypeSpec, command: CoreCommand)
           // fencesOf has no check of a sub-table's rows to put in the unit.
           throw internal('a read of sub-table rows under a lock has no check on SQLite or D1 yet (D103)');
         }
+        if (request.kind === 'linked' && locks.length > 0 && host.store.locks === 'fenced') {
+          // Nor of the rows that link to a row.
+          throw internal('a read of the rows that link to a row under a lock has no check on SQLite or D1 yet (D103)');
+        }
         const answered: CoreAnswered = { request, answer: await answerOf(host, request), held: locks.length };
         const same = JSON.stringify(request);
         const at = reads.findIndex(known => JSON.stringify(known.request) === same);
@@ -1035,6 +1257,73 @@ function actionName(action: CoreAction): string {
   return action.kind === 'operation' ? action.operation : action.kind === 'deadline' ? action.name : action.kind;
 }
 
+/** A row's key in its wire form, from either form: a UUID key's base62 text from its hyphenated or base62 text, any other key its text. */
+function wireKeyOf(table: RulesTable, key: unknown): string {
+  return UUID_TYPES.has(table.key.type) ? uuidFromDb(typeof key === 'string' ? key : String(key)) : String(key);
+}
+
+/**
+ * A change message's write as the core takes it (D103): its kind, its time
+ * as a number, and each image mapped from its columns to the row's own and
+ * owned fields (imageOf). A write of another kind, or a time that is no
+ * number, refuses the command as internal.
+ */
+function rowChangeOf(table: RulesTable, dialect: RulesDialect, key: string, change: TableChange): CoreRowChange {
+  const write = change.write;
+  if (write !== 'insert' && write !== 'update' && write !== 'delete') {
+    throw internal(`${table.type}'s change of ${key} is a write of ${write}, which is no insert, update or delete`);
+  }
+  const at = typeof change.at === 'number' ? change.at : Number(change.at);
+  if (!Number.isFinite(at)) throw internal(`${table.type}'s change of ${key} was written at ${JSON.stringify(change.at)}, which is no epoch milliseconds`);
+  const before = imageOf(table, dialect, change.before, `${table.type}'s change of ${key}`);
+  const after = imageOf(table, dialect, change.after, `${table.type}'s change of ${key}`);
+  return { write, at, ...(before !== undefined ? { before } : {}), ...(after !== undefined ? { after } : {}) };
+}
+
+/**
+ * A write's image as the core takes it: none for null or absent; else the
+ * JSON object the trigger wrote, by column (its text on SQLite, parsed
+ * first), each layout own column's member an own field and each use's
+ * owned column's member an owned field by use id and declared name, other
+ * members passed over, each value converted as the row read converts its
+ * column in the store's dialect (on SQLite, where json_object writes a
+ * boolean column's 1 or 0, a true or false as 1 or 0 first), and a null or
+ * a use with no field that has a value absent.
+ */
+function imageOf(table: RulesTable, dialect: RulesDialect, image: unknown, what: string): CoreRowImage | undefined {
+  if (image === null || image === undefined) return undefined;
+  let members = image;
+  if (typeof members === 'string') {
+    try {
+      members = JSON.parse(members);
+    } catch (error) {
+      throw internal(`${what}: an image that is no JSON: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (members === null) return undefined;
+  if (typeof members !== 'object' || Array.isArray(members)) throw internal(`${what}: an image that is no JSON object by column: ${JSON.stringify(members)}`);
+  const columns = members as Readonly<Record<string, unknown>>;
+  const value = (column: RulesColumn): unknown => {
+    const cell = columns[column.column];
+    return fromColumn(dialect === 'sqlite' && typeof cell === 'boolean' ? (cell ? 1 : 0) : cell, column, table);
+  };
+  const own: Record<string, unknown> = {};
+  for (const column of table.own) {
+    const found = value(column);
+    if (found !== undefined) own[column.field] = found;
+  }
+  const owned: Record<string, Record<string, unknown>> = {};
+  for (const use of table.uses) {
+    const values: Record<string, unknown> = {};
+    for (const field of use.fields) {
+      const found = value(field);
+      if (found !== undefined) values[field.name] = found;
+    }
+    if (Object.keys(values).length > 0) owned[use.id] = values;
+  }
+  return { own, owned };
+}
+
 /** The answer to one of the core's reads, through the store; a kind of read the adapter does not take refuses the command as internal. */
 async function answerOf(host: RulesHost, request: CoreReadRequest): Promise<CoreAnswer> {
   switch (request.kind) {
@@ -1050,6 +1339,8 @@ async function answerOf(host: RulesHost, request: CoreReadRequest): Promise<Core
       return { spec: host.layout.types[request.type]?.spec ?? null };
     case 'subRows':
       return { subRows: await readSubRows(host, request.type, request.key, request.useId, request.table) };
+    case 'linked':
+      return { linked: await readLinked(host, request.type, request.field, request.key, request.after, request.limit) };
     default:
       throw internal(`the adapter answers no read of this kind: ${JSON.stringify(request)}`);
   }
@@ -1156,11 +1447,13 @@ function live(table: RulesTable): string {
  *     columns, its owned columns and the next version where the row is live
  *     and at the version expected, a delete where the row is live and at
  *     the version expected (a soft delete's set of options.softDelete for
- *     the command's own row), each fenced to change one row. The command's
+ *     the command's own row), each fenced to change one row, and a gone
+ *     row's deletes of its deadlines' messages and its sub-table rows,
+ *     each unless a row of the key is back, with no fence. The command's
  *     own row binds its own columns from options.ownColumns when the caller
  *     encoded them;
- *  2. a deadline command's spend of its arming (spend), which must delete
- *     one message;
+ *  2. a deadline command's spend of its arming, or a claimed change's of
+ *     its message (spend), which must delete one message;
  *  3. each sub-table row write, an insert that must add one row, an update
  *     of the values it names and a delete that must change one, a deleted
  *     row's left out;
@@ -1171,13 +1464,13 @@ function live(table: RulesTable): string {
  *     delete the rows of its uses' sub-tables, which SQLite holds to no
  *     foreign key unless its connection turned them on.
  *
- * A create of a key the table holds is refused as conflict; outbox events,
- * which have no table yet (D103's order of the work, step 3), and a kind
- * of write the adapter does not know refuse the command as internal.
+ * A create of a key the table holds is refused as conflict; a behavior's
+ * own outbox events, which have no table yet (D103), and a kind of write
+ * the adapter does not know refuse the command as internal.
  */
 async function statementsOf(host: RulesHost, type: string, command: CoreCommand, changes: CoreChangeSet, options: ExecuteOptions, spend?: RulesStatement): Promise<RulesStatement[]> {
   if ((changes.events ?? []).length > 0) {
-    throw internal(`${actionName(command.action)} of ${type} writes outbox events, which the adapter takes once the outbox has a table of its own (D103's order of the work, step 3)`);
+    throw internal(`${actionName(command.action)} of ${type} writes outbox events of a behavior's own, which the adapter does not take yet: a table's change queue holds its writes, and the event stream comes later (D103)`);
   }
   const dialect = host.store.dialect;
   const commandKey = keyOfCommand(command);
@@ -1226,6 +1519,27 @@ async function statementsOf(host: RulesHost, type: string, command: CoreCommand,
         }
         const where = `${quote(table.key.column)} = ${bind(keyValue(table, write.key))} AND ${quote(table.version)} = ${bind(write.expectedVersion)}${live(table)}`;
         statements.push({ text: `DELETE FROM ${quote(table.table)} WHERE ${where}`, values, expect: 1 });
+        break;
+      }
+      case 'gone': {
+        // No write of a row a change command found gone: its deadlines'
+        // messages go unless a live row of the key is back, and its
+        // sub-table rows unless any row of the key is (a soft delete keeps
+        // them, as one through the core does).
+        const key = keyValue(table, write.key);
+        const p1 = placeholder(dialect, 1);
+        if (table.deadlines !== undefined) {
+          statements.push({
+            text: `DELETE FROM ${quote(table.deadlines.table)} WHERE ${quote(table.deadlines.rowKey)} = ${p1} AND NOT EXISTS (SELECT 1 FROM ${quote(table.table)} WHERE ${quote(table.key.column)} = ${p1}${live(table)})`,
+            values: [key],
+          });
+        }
+        for (const sub of table.uses.flatMap(use => use.tables ?? [])) {
+          statements.push({
+            text: `DELETE FROM ${quote(sub.table)} WHERE ${quote(sub.row)} = ${p1} AND NOT EXISTS (SELECT 1 FROM ${quote(table.table)} WHERE ${quote(table.key.column)} = ${p1})`,
+            values: [key],
+          });
+        }
         break;
       }
       default:
@@ -1504,6 +1818,25 @@ export interface RunDeadlineOptions {
  */
 export interface BehaviorDeadlines<Key = string> {
   runDeadline(deadline: { readonly rowKey: Key; readonly useId: string; readonly name: string; readonly at: number; readonly payload?: unknown }, options?: RunDeadlineOptions): Promise<DeadlineRun>;
+}
+
+/** What a repository's runChange takes beside the change. */
+export interface RunChangeOptions {
+  /** The worker's claim of the change's message, which the unit that applies the change set completes; absent, nothing is spent. */
+  readonly claim?: DeadlineClaim;
+  /** The caller the change's command runs as; the ORM's acting user, holding no permissions, unless set. */
+  readonly caller?: CoreCaller;
+}
+
+/**
+ * The method a repository of a table whose writes its behaviors hear has
+ * (D103): runs a change of a row, a message of the table's change queue as
+ * a worker claimed it, through the behaviors' core in the repository's
+ * transaction (one it opens when it has none), and resolves to whether it
+ * ran (ChangeRun). The generated <Type>Repository adds it.
+ */
+export interface BehaviorChanges<Key = string> {
+  runChange(change: { readonly rowKey: Key; readonly write: string; readonly at: number | string; readonly before?: unknown; readonly after?: unknown }, options?: RunChangeOptions): Promise<ChangeRun>;
 }
 
 /**

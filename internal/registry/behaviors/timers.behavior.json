@@ -131,6 +131,7 @@
     }
   ],
   "armsDeadlines": true,
+  "hearsChanges": true,
   "operations": [
     {
       "name": "fireTimer",

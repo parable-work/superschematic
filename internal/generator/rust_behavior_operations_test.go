@@ -141,10 +141,11 @@ func TestRustBehaviorDeps(t *testing.T) {
 
 // TestRustBehaviorDepsOfABehaviorWorker: the Rust crate of
 // fixture-timers-api (D103), whose @behaviorWorker TicketTimers runs
-// Ticket's deadlines beside its @behaviorOperations set, takes its
-// database's layout, Ticket's deadline queue in it, and its database's
+// Ticket's deadlines and changes beside its @behaviorOperations set, takes
+// its database's layout, Ticket's deadline queue in it, and its database's
 // Rust types, which declare the queue's message; a refusal of a crate that
-// runs a behavior worker alone names the table and the worker.
+// runs a behavior worker alone names the table, what the worker runs and
+// the worker.
 func TestRustBehaviorDepsOfABehaviorWorker(t *testing.T) {
 	output, _, err := rustBehaviorRunOf(t, "fixture-timers-db", "fixture-timers-api", rustBehaviorPaths(), nil).rustAPI()
 	if err != nil {
@@ -161,7 +162,7 @@ func TestRustBehaviorDepsOfABehaviorWorker(t *testing.T) {
 		t.Errorf("the crate re-exports %q, want fixture-timers-db's Rust types", output.Deps.DatabaseTypesCrate)
 	}
 	schema := &ir.Schema{Workers: []*ir.Worker{{Name: "Plain", Queue: "Q"}, {Name: "TicketTimers", BehaviorWorker: &ir.BehaviorWorkerConfig{Type: "Ticket"}}}}
-	if got, want := behaviorWorkerUse(schema, nil, nil), "Ticket's deadlines by its @behaviorWorker TicketTimers"; got != want {
+	if got, want := behaviorWorkerUse(schema, nil), "Ticket's deadlines by its @behaviorWorker TicketTimers"; got != want {
 		t.Errorf("behaviorWorkerUse: %q, want %q", got, want)
 	}
 	reg := CoreRegistry(naming.Default())
@@ -169,10 +170,22 @@ func TestRustBehaviorDepsOfABehaviorWorker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := behaviorWorkerUse(schema, db, reg), "Ticket's deadlines, which Timers arms, by its @behaviorWorker TicketTimers"; got != want {
+	if got, want := behaviorWorkerUse(schema, db), "Ticket's deadlines and changes by its @behaviorWorker TicketTimers"; got != want {
 		t.Errorf("behaviorWorkerUse with the database: %q, want %q", got, want)
 	}
-	if got := behaviorWorkerUse(&ir.Schema{}, db, reg); got != "" {
+	arming := &ir.Schema{Workers: []*ir.Worker{{Name: "TicketTimers", Queue: "TicketDeadline", Queues: []string{"TicketDeadline"}, BehaviorWorker: &ir.BehaviorWorkerConfig{Type: "Ticket"}}}}
+	if got, want := behaviorWorkerUse(arming, nil), "Ticket's deadlines by its @behaviorWorker TicketTimers"; got != want {
+		t.Errorf("behaviorWorkerUse of a worker of deadlines alone: %q, want %q", got, want)
+	}
+	reactions, err := loader.LoadService(filepath.Join(tsFixtures, "fixture-reactions-db"), loader.WithRegistry(reg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hearing := &ir.Schema{Workers: []*ir.Worker{{Name: "TaskReactions", BehaviorWorker: &ir.BehaviorWorkerConfig{Type: "Task"}}}}
+	if got, want := behaviorWorkerUse(hearing, reactions), "Task's changes by its @behaviorWorker TaskReactions"; got != want {
+		t.Errorf("behaviorWorkerUse of a worker of changes alone: %q, want %q", got, want)
+	}
+	if got := behaviorWorkerUse(&ir.Schema{}, db); got != "" {
 		t.Errorf("behaviorWorkerUse of a schema with no behavior worker: %q", got)
 	}
 }

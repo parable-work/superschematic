@@ -104,18 +104,20 @@ func respondBehaviorError(w gohttp.ResponseWriter, r *gohttp.Request, err error)
 }
 
 // TicketTimersQueues are the queues of the behavior worker TicketTimers
-// (D103): fixture-timers-db's Ticket's deadlines, each claimed as it falls
-// due and run through the behaviors' core as the worker,
+// (D103): fixture-timers-db's Ticket's deadlines and changes, each claimed as
+// it falls due and run through the behaviors' core as the worker,
 // fixture-timers-api/TicketTimers, in one transaction with its message's
 // completion. Its main runs them with worker.RunAll; logger, nil for none,
-// logs a message spent with nothing run, its claim lost or its row gone.
+// logs a message spent with nothing run: its claim lost, its row gone, or its
+// fire vetoed and released.
 func TicketTimersQueues(db *orm.Database, logger *zap.Logger) []worker.Queue {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	caller := rules.Caller{Subject: "fixture-timers-api/TicketTimers"}
+	var queues []worker.Queue
 	deadlines := db.TicketDeadlineQueue()
-	return []worker.Queue{{
+	queues = append(queues, worker.Queue{
 		Name:  "TicketDeadline",
 		Lease: orm.TicketDeadlineLease,
 		Claim: func(ctx context.Context, n int, lease time.Duration) ([]worker.Message, error) {
@@ -149,5 +151,42 @@ func TicketTimersQueues(db *orm.Database, logger *zap.Logger) []worker.Queue {
 		Fail:     deadlines.Fail,
 		Release:  deadlines.Release,
 		Prune:    deadlines.Prune,
-	}}
+	})
+	changes := db.TicketChangeQueue()
+	queues = append(queues, worker.Queue{
+		Name:  "TicketChange",
+		Lease: orm.TicketChangeLease,
+		Claim: func(ctx context.Context, n int, lease time.Duration) ([]worker.Message, error) {
+			claims, err := changes.Claim(ctx, n, lease)
+			if err != nil {
+				return nil, err
+			}
+			messages := make([]worker.Message, len(claims))
+			for i, claim := range claims {
+				messages[i] = worker.Message{
+					ID:      claim.ID,
+					Token:   claim.Token,
+					Attempt: claim.Attempt,
+					Handle: func(ctx context.Context) error {
+						run, err := db.GetTicketRepository().RunChange(orm.WithBehaviorCaller(ctx, caller), claim.Message, &rules.Claim{ID: claim.ID, Token: claim.Token})
+						if err != nil {
+							return err
+						}
+						if !run.Ran {
+							logger.Info("change ran nothing", zap.String("queue", "TicketChange"), zap.String("message", claim.ID), zap.String("why", run.Why))
+						}
+						return nil
+					},
+				}
+			}
+			return messages, nil
+		},
+		Extend: changes.Extend,
+		// The handler completes its message in the transaction that runs it.
+		Complete: func(context.Context, string, string) error { return nil },
+		Fail:     changes.Fail,
+		Release:  changes.Release,
+		Prune:    changes.Prune,
+	})
+	return queues
 }

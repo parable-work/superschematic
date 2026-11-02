@@ -8,7 +8,7 @@
 //! It reads its configuration from the environment, as the API's server
 //! does, and opens a pool on fixture-timers-db, the API's database. It builds no Deps
 //! and calls no implementation: it runs Ticket's behavior queues
-//! (TicketDeadline) in the HTTP runtime's claim loop (`worker::run_worker`), one
+//! (TicketDeadline, TicketChange) in the HTTP runtime's claim loop (`worker::run_worker`), one
 //! loop per queue, together, each message's handler the one the API crate's
 //! `behaviors` module holds, which runs it through the behaviors' core as the
 //! worker, in one transaction with its message's completion, so the loop
@@ -98,7 +98,7 @@ async fn run() -> Result<(), Failure> {
     tracing::info!(
         api = "fixture-timers-api",
         class = "TicketTimers",
-        queues = "TicketDeadline",
+        queues = "TicketDeadline, TicketChange",
         concurrency,
         "worker started"
     );
@@ -119,7 +119,23 @@ async fn run() -> Result<(), Failure> {
             fixture_timers_api_api::behaviors::run_ticket_timers_deadline(&pool, claimed).await
         }
     };
-    worker::run_worker(deadlines, run_deadlines, options, shutdown).await?;
+
+    // Ticket's changes, TicketChange of fixture-timers-db (D103).
+    let changes =
+        fixture_timers_api_api::behaviors::ticket_timers_changes(&fixture_timers_db_pool)?;
+    let pool = fixture_timers_db_pool.clone();
+    let run_changes = move |claimed| {
+        let pool = pool.clone();
+        async move {
+            fixture_timers_api_api::behaviors::run_ticket_timers_change(&pool, claimed).await
+        }
+    };
+    let ran = tokio::join!(
+        worker::run_worker(deadlines, run_deadlines, options, shutdown.clone()),
+        worker::run_worker(changes, run_changes, options, shutdown.clone()),
+    );
+    ran.0?;
+    ran.1?;
     Ok(())
 }
 

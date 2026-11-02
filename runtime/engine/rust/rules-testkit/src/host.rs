@@ -3,14 +3,20 @@
 //! published versions (a [`TypeSpec`] each, its behavior uses and their
 //! configs), the rows (own fields, owned fields by use id, a version), the
 //! sub-table rows, the outbox of the behaviors' events, the armed
-//! deadlines, and the change log a build-time project's trigger writes, one
-//! entry per change.
+//! deadlines, the change log of the core's writes, one entry per row a
+//! change set writes, and the outbox of changes a build-time project's
+//! change trigger writes ([`QueuedChange`]): one per write of a row of a type
+//! whose writes its behaviors hear, the core's and a raw one alike, with the
+//! row's own and owned fields before and after it.
 //!
 //! It runs the host loop the core's README describes: it gives each
 //! command a request id, calls the core, answers its reads from memory (a
 //! row, whether a type has rows, a type's live version, a row's sub-table
-//! rows), grants its lock keys (nothing to take in memory, where one writer
-//! holds), and applies the change set all or nothing. It holds every row
+//! rows, the rows of a type whose own field holds a key), grants its lock
+//! keys (nothing to take in memory, where one writer holds), and applies the
+//! change set all or nothing. It runs the queued changes as the API's worker
+//! runs a table's change queue, each a change command of its own, first in
+//! first out ([`MemoryHost::run_changes`]). It holds every row
 //! the change set writes to the version it expects; when one has moved, it
 //! runs the command again from fresh state, at most [`MAX_ATTEMPTS`] times,
 //! then refuses it as `busy`. Whether a deadline is still armed is the
@@ -23,19 +29,24 @@
 //! maps logical names onto memory the way a database adapter maps them
 //! onto its layout.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value};
 
 use superschematic_rules::{
-    merge_patch, Action, Answer, Answers, Caller, ChangeSet, Code, Command, Core, DeadlineChange,
-    LockKey, OutboxEvent, Outcome, ReadRequest, Refusal, Row, RowRef, RowWrite, Step, SubRow,
-    SubRowChange, TypeSpec, MAX_ROUNDS,
+    key_of, merge_patch, Action, Answer, Answers, Caller, ChangeSet, Code, Command, Core,
+    DeadlineChange, KeyedRow, LinkedRows, LockKey, OutboxEvent, Outcome, ReadRequest, Refusal, Row,
+    RowChange, RowImage, RowRef, RowWrite, Step, SubRow, SubRowChange, TypeSpec, WriteKind,
+    MAX_ROUNDS,
 };
 
 /// How many times the host runs a command whose row moved before it
 /// refuses the command as `busy`.
 pub const MAX_ATTEMPTS: usize = 8;
+
+/// How many queued changes [`MemoryHost::run_changes`] runs in one call, the
+/// ones the changes it runs queue included.
+pub const MAX_CHANGES: usize = 1024;
 
 /// One row of a type, as the host keeps it.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -61,6 +72,36 @@ impl StoredRow {
             version: self.version,
         }
     }
+
+    /// The row's own and owned fields as a change trigger writes them, a
+    /// field with no value absent.
+    pub fn image(&self) -> RowImage {
+        let present = |fields: &Map<String, Value>| -> Map<String, Value> {
+            fields
+                .iter()
+                .filter(|(_, value)| !value.is_null())
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect()
+        };
+        RowImage {
+            own: present(&self.own),
+            owned: self
+                .owned
+                .iter()
+                .map(|(use_id, fields)| (use_id.clone(), present(fields)))
+                .filter(|(_, fields)| !fields.is_empty())
+                .collect(),
+        }
+    }
+}
+
+/// A write of a row the change trigger of a type whose writes its behaviors
+/// hear wrote to the outbox (D103): the row's type and key, and the change.
+#[derive(Clone, Debug, PartialEq)]
+pub struct QueuedChange {
+    pub type_name: String,
+    pub key: String,
+    pub change: RowChange,
 }
 
 /// A type's versions: the ones published, in order, and the one defined
@@ -183,7 +224,8 @@ impl Logged {
 }
 
 /// What the host keeps: types, rows, sub-table rows, the outbox, the armed
-/// deadlines and the change log.
+/// deadlines, the change log, and the changes its hearing types' triggers
+/// queued.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Store {
     types: BTreeMap<String, TypeVersions>,
@@ -193,6 +235,10 @@ pub struct Store {
     deadlines: BTreeMap<DeadlineKey, Armed>,
     log: Vec<Logged>,
     next_ordinal: u64,
+    /// The types whose writes a behavior hears, which a change trigger
+    /// queues a change of each write for.
+    hearing: BTreeSet<String>,
+    changes: Vec<QueuedChange>,
 }
 
 /// Why a change set did not apply.
@@ -272,8 +318,11 @@ impl Store {
     }
 
     /// Writes a row as a database writes one past the adapter (a repair,
-    /// a test's competing writer): the host moves its version on.
-    pub fn write_row(&mut self, type_name: &str, key: &str, own: Map<String, Value>) {
+    /// a test's competing writer) at a time, in epoch milliseconds: the host
+    /// moves its version on, and the type's change trigger, when its writes
+    /// are heard, queues the write (an update, or an insert of a new row).
+    pub fn write_row(&mut self, type_name: &str, key: &str, own: Map<String, Value>, at: i64) {
+        let before = self.row(type_name, key).map(StoredRow::image);
         let ordinal = self.next_ordinal;
         let rows = self.rows.entry(type_name.to_owned()).or_default();
         match rows.get_mut(key) {
@@ -294,19 +343,23 @@ impl Store {
                 self.next_ordinal += 1;
             }
         }
+        let after = self.row(type_name, key).map(StoredRow::image);
+        self.queue(type_name, key, at, before, after);
     }
 
     /// Sets fields a behavior owns on a row as a database writes them past
-    /// the adapter: an operator's repair, which nothing refuses (D103), or
-    /// a test's raw SQL. Null clears a field. The version stays where it
-    /// was, as a raw write that leaves the `@optimistic` column alone
-    /// leaves it, and the change log, which logs the core's writes, gets
-    /// no entry. Returns whether the row exists.
+    /// the adapter at a time, in epoch milliseconds: an operator's repair,
+    /// which nothing refuses (D103), or a test's raw SQL. Null clears a
+    /// field. The version stays where it was, as a raw write that leaves the
+    /// `@optimistic` column alone leaves it, the change log, which logs the
+    /// core's writes, gets no entry, and the type's change trigger, when its
+    /// writes are heard, queues the update. Returns whether the row exists.
     pub fn write_owned(
         &mut self,
         type_name: &str,
         key: &str,
         owned: &BTreeMap<String, Map<String, Value>>,
+        at: i64,
     ) -> bool {
         let Some(row) = self
             .rows
@@ -315,8 +368,88 @@ impl Store {
         else {
             return false;
         };
+        let before = row.image();
         set_owned(&mut row.owned, owned);
+        let after = row.image();
+        self.queue(type_name, key, at, Some(before), Some(after));
         true
+    }
+
+    /// Deletes a row as a database deletes one past the adapter at a time,
+    /// in epoch milliseconds: its sub-table rows go with it, as their
+    /// foreign key cascades, and its deadlines stay, a queue's messages
+    /// holding no key of the row, until its type's change trigger, when its
+    /// writes are heard, has the delete run. Returns whether the row
+    /// existed.
+    pub fn delete_row(&mut self, type_name: &str, key: &str, at: i64) -> bool {
+        let Some(row) = self
+            .rows
+            .get_mut(type_name)
+            .and_then(|rows| rows.remove(key))
+        else {
+            return false;
+        };
+        self.sub_rows
+            .retain(|held, _| !(held.type_name == type_name && held.key == key));
+        self.queue(type_name, key, at, Some(row.image()), None);
+        true
+    }
+
+    // ---- the changes the triggers queue ----
+
+    /// Whether a type's writes are heard: its change trigger queues a
+    /// change of each.
+    pub fn hears(&self, type_name: &str) -> bool {
+        self.hearing.contains(type_name)
+    }
+
+    /// The types whose writes are heard, which the host sets from its core
+    /// whenever a type's live version changes.
+    pub fn set_hearing(&mut self, types: BTreeSet<String>) {
+        self.hearing = types;
+    }
+
+    /// The changes queued and not run yet, first in first out.
+    pub fn changes(&self) -> &[QueuedChange] {
+        &self.changes
+    }
+
+    /// Takes the first change queued, as a worker claims a change queue's
+    /// head.
+    pub fn take_change(&mut self) -> Option<QueuedChange> {
+        (!self.changes.is_empty()).then(|| self.changes.remove(0))
+    }
+
+    // queue writes a change of a row of a type whose writes are heard, as
+    // its change trigger does: an insert with no row before, a delete with
+    // none after, and an update only when its own or owned fields moved.
+    fn queue(
+        &mut self,
+        type_name: &str,
+        key: &str,
+        at: i64,
+        before: Option<RowImage>,
+        after: Option<RowImage>,
+    ) {
+        if !self.hears(type_name) {
+            return;
+        }
+        let write = match (&before, &after) {
+            (None, Some(_)) => WriteKind::Insert,
+            (Some(_), None) => WriteKind::Delete,
+            (Some(before), Some(after)) if before != after => WriteKind::Update,
+            _ => return,
+        };
+        self.changes.push(QueuedChange {
+            type_name: type_name.to_owned(),
+            key: key.to_owned(),
+            change: RowChange {
+                write,
+                at,
+                before,
+                after,
+            },
+        });
     }
 
     /// A row's sub-table rows, by use id, sub-table and key.
@@ -420,18 +553,64 @@ impl Store {
             } => Some(Answer::SubRows(
                 self.sub_table(type_name, key, use_id, table),
             )),
+            ReadRequest::Linked {
+                type_name,
+                field,
+                key,
+                after,
+                limit,
+            } => Some(Answer::Linked(self.linked(
+                type_name,
+                field,
+                key,
+                after.as_deref(),
+                *limit,
+            ))),
             _ => None,
         }
+    }
+
+    /// The rows of a type whose own field holds a key, in key order (by
+    /// code point), after `after` when given, at most `limit`, and whether
+    /// more follow: a linked read's answer.
+    pub fn linked(
+        &self,
+        type_name: &str,
+        field: &str,
+        key: &str,
+        after: Option<&str>,
+        limit: usize,
+    ) -> LinkedRows {
+        let mut rows: Vec<KeyedRow> = self
+            .rows
+            .get(type_name)
+            .into_iter()
+            .flatten()
+            .filter(|(row_key, row)| {
+                row.own.get(field).and_then(key_of).as_deref() == Some(key)
+                    && after.is_none_or(|after| row_key.as_str() > after)
+            })
+            .map(|(row_key, row)| KeyedRow {
+                key: row_key.clone(),
+                row: row.as_row(),
+            })
+            .collect();
+        let more = rows.len() > limit;
+        rows.truncate(limit);
+        LinkedRows { rows, more }
     }
 
     // ---- applying ----
 
     /// Applies a command's change set, all or nothing: every row it writes,
     /// each held to the version it expects, with a change log entry for
-    /// each; for a deadline command, the spend of its arming, which applies
-    /// only while the deadline is still armed at the time the command
-    /// names; then its sub-table rows, its events and its deadlines, those
-    /// of a row it deletes left out, since the row's go with it. The
+    /// each and, for a type whose writes are heard, a queued change; a row a
+    /// change command found gone, whose deadlines go, and its sub-table rows
+    /// unless the row came back; for a deadline command, the spend of its
+    /// arming, which applies only while the deadline is still armed at the
+    /// time the command names; then its sub-table rows, its events and its
+    /// deadlines, those of a row it deletes left out, since the row's go with
+    /// it. The
     /// command runs on a row of `type_name`. Returns the version of the
     /// command's own row after the write; `None` when the change set does
     /// not write that row, or deletes it.
@@ -458,11 +637,15 @@ impl Store {
         let mut deleted: Vec<(String, String)> = Vec::new();
         for write in &changes.rows {
             let key = keyed(&write.row())?;
-            let before = self
+            if let RowWrite::Gone { type_name, .. } = write {
+                self.gone(type_name, &key);
+                continue;
+            }
+            let held = self
                 .row(write.type_name(), &key)
-                .filter(|_| !matches!(write, RowWrite::Create { .. }))
-                .map(|row| row.owned.clone())
-                .unwrap_or_default();
+                .filter(|_| !matches!(write, RowWrite::Create { .. }));
+            let image = held.map(StoredRow::image);
+            let before = held.map(|row| row.owned.clone()).unwrap_or_default();
             let after = self.write(write.type_name(), &key, write)?;
             if write.type_name() == type_name && Some(key.as_str()) == own_key {
                 version = after;
@@ -470,6 +653,8 @@ impl Store {
             if matches!(write, RowWrite::Delete { .. }) {
                 deleted.push((write.type_name().to_owned(), key.clone()));
             }
+            let left = self.row(write.type_name(), &key).map(StoredRow::image);
+            self.queue(write.type_name(), &key, command.now, image, left);
             let mut logged = write.clone();
             if let RowWrite::Create { key: slot, .. } = &mut logged {
                 *slot = Some(key.clone());
@@ -605,6 +790,18 @@ impl Store {
             }
             other => Err(ApplyError::Refused(unknown("row write", other))),
         }
+    }
+
+    // gone applies a change command's row found gone: its deadlines go, and
+    // its sub-table rows with them, unless the row came back since.
+    fn gone(&mut self, type_name: &str, key: &str) {
+        if self.row(type_name, key).is_some() {
+            return;
+        }
+        self.sub_rows
+            .retain(|at, _| !(at.type_name == type_name && at.key == key));
+        self.deadlines
+            .retain(|at, _| !(at.type_name == type_name && at.key == key));
     }
 
     fn write_sub_row(&mut self, at: SubRowKey, change: &SubRowChange) -> Result<(), ApplyError> {
@@ -785,13 +982,55 @@ impl MemoryHost {
     /// A host over a core and a store that holds what an earlier host
     /// wrote (an engine reopened on the same file).
     pub fn with_store(core: Core, store: Store) -> Self {
-        MemoryHost {
+        let mut host = MemoryHost {
             core,
             store,
             attempts: MAX_ATTEMPTS,
             ids: IdSource::default(),
             requests: 0,
+        };
+        host.hear();
+        host
+    }
+
+    /// The types whose writes are heard, as the core's behaviors say from
+    /// the types' live versions: a type one of whose uses' behaviors hears
+    /// its row's writes, and a type a listener of another type names
+    /// ([`Core::listeners`]) through a relation of it to that type. A type
+    /// whose configs the core refuses names no listener.
+    pub fn hearing(&self) -> BTreeSet<String> {
+        let store = &self.store;
+        let mut hearing = BTreeSet::new();
+        for name in store.type_names() {
+            let Some(spec) = store.live(&name) else {
+                continue;
+            };
+            let hears = spec.uses.iter().any(|entry| {
+                self.core
+                    .declaration(&entry.behavior)
+                    .is_some_and(|declaration| declaration.hears_changes)
+            });
+            if hears {
+                hearing.insert(name.clone());
+            }
+            for listen in self.core.listeners(spec).unwrap_or_default() {
+                let points_here = store
+                    .live(&listen.type_name)
+                    .and_then(|heard| heard.relation(&listen.link))
+                    .and_then(|field| field.relation.as_ref())
+                    .is_some_and(|relation| relation.type_name == name);
+                if points_here {
+                    hearing.insert(listen.type_name);
+                }
+            }
         }
+        hearing
+    }
+
+    // hear sets the store's hearing types from the live versions.
+    fn hear(&mut self) {
+        let hearing = self.hearing();
+        self.store.set_hearing(hearing);
     }
 
     /// The host with a bound of its own on how many times a command runs
@@ -867,7 +1106,9 @@ impl MemoryHost {
         let versions = self.store.types.entry(type_name.to_owned()).or_default();
         versions.published.push(draft);
         versions.draft = None;
-        Ok(Some(versions.published.len()))
+        let published = versions.published.len();
+        self.hear();
+        Ok(Some(published))
     }
 
     /// The version [`MemoryHost::publish`] would publish and the check it
@@ -1003,6 +1244,41 @@ impl MemoryHost {
             );
             let outcome = self.execute(&at.type_name, command);
             ran.push((at, outcome));
+        }
+        ran
+    }
+
+    /// The change command a queued change runs as, as a worker that claimed
+    /// it runs it: the caller and the time.
+    pub fn change_command(queued: &QueuedChange, caller: &Caller, now: i64) -> Command {
+        Command::new(
+            caller.clone(),
+            now,
+            Action::Change {
+                key: queued.key.clone(),
+                change: queued.change.clone(),
+            },
+        )
+    }
+
+    /// Runs the queued changes, first in first out, each a change command of
+    /// its own at a time, as the caller: what the API's worker runs of a
+    /// table's change queue (D103). The changes the commands queue run too,
+    /// at most [`MAX_CHANGES`] in one call. A change refused is taken off, as
+    /// a message that goes dead.
+    pub fn run_changes(
+        &mut self,
+        caller: &Caller,
+        now: i64,
+    ) -> Vec<(QueuedChange, Result<Applied, Refusal>)> {
+        let mut ran = Vec::new();
+        while ran.len() < MAX_CHANGES {
+            let Some(queued) = self.store.take_change() else {
+                break;
+            };
+            let command = Self::change_command(&queued, caller, now);
+            let outcome = self.execute(&queued.type_name, command);
+            ran.push((queued, outcome));
         }
         ran
     }

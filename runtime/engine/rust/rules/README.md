@@ -70,7 +70,12 @@ date-time holds), which `ConfigTarget::fields()` gives a behavior whose
 config names a field of the type: a Timers deadline that starts from a
 field naming none of them, or one that holds no instant, is refused. The
 layout's `spec.fields` gives a table's; a host that gives none refuses such
-a config, `(its fields: none)`.
+a config, `(its fields: none)`. An own field that holds the key of a
+to-one relation names it (`relation`: the relation's name and its target
+type, `FieldSpec::relation(name, type, relation, target)`;
+`TypeSpec::relation(name)` finds it by the relation's name), which the core
+follows from a write of the row to the uses of the target type that listen
+to it (a change command, below).
 
 ## The host loop
 
@@ -122,9 +127,8 @@ refusal.
 
 ## Commands
 
-`Action` is one of the following. The list is open: an event from the outbox
-joins it with the behaviors that react to one (D103's order of the work, step
-3), so a host matches it with a fallback arm.
+`Action` is one of the following. The list is open, so a host matches it
+with a fallback arm.
 
 - `Define`: every use names a behavior the core runs, the ids are distinct,
   and each behavior parses its config (the one given, or `{}`). The check
@@ -158,6 +162,21 @@ joins it with the behaviors that react to one (D103's order of the work, step
   armed with, run at the later of the host's clock and `at`. The host, never
   the core, checks that it is still armed at `at`, so one cleared or moved
   since does not fall due on its old arming (The adapter, below).
+- `Change { key, change }`: a write of the row that the table's change queue
+  hands the core (D103), whoever made it, the core, a repository's bulk or
+  hard write, or a raw SQL one. `change` is a `RowChange`: what the write did
+  (`WriteKind`: `insert`, `update` or `delete`), when (`at`, epoch
+  milliseconds by the database's clock), and the row before it (none for an
+  insert) and after it (none for a delete), each a `RowImage`, its own fields
+  by name (`own`) and its uses' owned fields by use id and declared name
+  (`owned`), a field with no value absent. Its result is null.
+
+  ```json
+  {"kind": "change", "key": "t1", "change": {
+    "write": "update", "at": 1001000,
+    "before": {"own": {"title": "t1", "projectId": "p1"}, "owned": {"Workflow": {"status": "todo", "enteredAt": 1000000}}},
+    "after":  {"own": {"title": "t1", "projectId": "p1"}, "owned": {"Workflow": {"status": "doing", "enteredAt": 1001000}}}}}
+  ```
 
 A command on a row reads it first (`ReadRequest::Row`); a key the type has
 none of is `not_found`. Then the uses compose in list order:
@@ -169,9 +188,34 @@ none of is `not_found`. Then the uses compose in list order:
 | delete | every `guard`, every `after_change` |
 | operation | the use's `check_params`, every `guard`, its handler; for a writing one, every `after_change` |
 | deadline | the use's `deadline` handler, every `after_change` |
+| change | on a row that is there, every hearing use's `heard` (`Heard::Own`); then, for each own field that holds a to-one relation, the listening uses of its target type, each `heard` (`Heard::Linked`) on each row the relation holds the key of; after each, when it wrote its row, every `after_change` of that row (`Change::Heard`) |
 
 Validation issues from every use refuse together (`invalid_instance`); the
 first veto refuses (`vetoed`); the first refusal of any kind ends the run.
+
+A change command runs on the row as it is now; the images say what moved.
+It reads the row first: a row that is gone runs no hook of it and writes
+`RowWrite::Gone` (The change set, below). On a row that is there, each use
+whose declaration hears changes (`Declaration::hears_changes`, the file's
+`"hearsChanges": true`: Timers and Reactions) runs `heard` with
+`Heard::Own { change }`, in list order, in a writable scope whose action is
+`change`. Then, for each own field that holds a to-one relation, in field
+order, the core binds its target type (one the host has no spec of is
+passed over) and, for each of its uses whose `listens` names the command's
+type and the relation (`Listen { type, link }`), runs `heard` with
+`Heard::Linked { type_name, key, link, change }` on each row the relation
+holds the key of, in the row now, after the write and before it, each once,
+a key read as a command names a row (`key_of`: a string, or a whole number's
+decimal text, the form a table keyed by a number has its keys in); a target
+not found is passed over, and any other refusal ends the run. A
+row a hook writes is held to the version it was read at, and its
+after-change hooks run with `Change::Heard`. A change whose hooks write
+nothing writes no row (an empty `rows`, or a `Gone` alone), so applying it
+moves no version. Every hearing rule is idempotent against a write the core
+already applied: a write through the core is heard too, by its change after
+the commit, and Timers' reconcile then finds its deadlines as the write left
+them and Reactions' rules act only where they can, so it changes nothing
+more than the rules it sets off.
 
 ## The read exchange
 
@@ -184,9 +228,16 @@ type's config reads; the core never asks it of the command's own type) and
 `SubRows { type, key, use_id, table }` (`Answer::SubRows(Vec<SubRow>)`, the
 rows of one sub-table of one use on one row, each its `key` and its
 `values` by declared field, in key order by code point, the key's field
-left out and a NULL column absent). The enum is open: sub-table rows by a
-condition and counts join it as behaviors need them, so a host matches it
-with a fallback arm, which refuses the command as `internal`. An answer of
+left out and a NULL column absent) and `Linked { type, field, key, after,
+limit }` (`Answer::Linked(LinkedRows)`: `rows`, each a `KeyedRow` of its key
+and its `Row`, and `more`, whether rows follow), the rows of a type whose own
+field `field` holds `key`, in its key column's order, after the key `after`
+when given, at most `limit` (`LINKED_PAGE`, 500, Links' page), a
+soft-deletable table's live rows alone, and none for a type the host does
+not have: what a rule over the rows that link to a row reads (Reactions'
+allTerminal). The enum is open: sub-table rows by a condition and counts
+join it as behaviors need them, so a host matches it with a fallback arm,
+which refuses the command as `internal`. An answer of
 another kind than its request asks for is refused as `invalid_argument`.
 
 A hook reads through its context, `ctx.read_row(type, key)?`,
@@ -197,6 +248,10 @@ them), `ctx.sub_rows(table)?` (the use's own rows of one of its sub-tables
 on its row, with the run's own writes so far applied: an insert adds, an
 update merges, a delete removes; a row the run creates has none and reads
 no host; a table the declaration does not declare is a defect),
+`ctx.read_linked(type, field, key, after)?` (one page of a linked read),
+`ctx.row_of(type, key)?` (a row of any type as the run has it: its writes so
+far applied when the run reached it, else the host's; `None` when there is
+none of the key or the run deleted it),
 `ctx.read(&request)?` or `ctx.read_many(&requests)?` for several at once. With the answer in hand it returns it; without, it
 stops the run with the request (`Stop::Read`), which the run returns as its
 step. The run returns every read it asked for and was not given even when a
@@ -229,14 +284,20 @@ host keys and gives to every entry that names it so):
   key, expected_version, own, owned }` (`own` the command's patch, empty for
   an operation, a deadline and a row reached by a call; the host moves the
   version on) or `RowWrite::Delete { type, key, expected_version }` (the
-  row's sub-table rows and deadlines go with it); empty for a read-only
-  operation and the define and publish checks. `owned` maps use id to field
-  to value; null clears a field.
+  row's sub-table rows and deadlines go with it), or `RowWrite::Gone { type,
+  key }` (`{"kind": "gone", "type": "Task", "key": "t1"}`), a row a change
+  command found gone: no write of it, but its deadlines go, and its
+  sub-table rows when no row of the key is left at all (a soft-deleted row
+  keeps them, as a soft delete through the core does); empty for a
+  read-only operation and the define and publish checks. `owned` maps use
+  id to field to value; null clears a field.
 - `sub_rows`: `SubRowWrite { row, use_id, table, key, change }`, the change
   `Insert { values }`, `Update { values }` or `Delete`, in order.
-- `events`: `OutboxEvent { row, kind, use_id, payload }`, the outbox rows the
-  behaviors emitted, which the host writes in the same transaction whatever
-  rows the change set writes.
+- `events`: `OutboxEvent { row, kind, use_id, payload }`, the events a
+  behavior emitted of its own (`Cx::emit`), which the event stream will
+  take (D103). No ported behavior emits one, and every adapter refuses a
+  change set that holds one as `internal`; a row's writes reach the
+  behaviors that hear them through the table's change queue, not these.
 - `deadlines`: `DeadlineChange::Arm { row, use_id, name, at, payload }` or
   `Clear { row, use_id, name }`, in order; a later entry for the same row,
   use and name replaces an earlier one.
@@ -311,12 +372,19 @@ A behavior implements `Behavior`:
   rule's reason. A use that gives no config and whose `{}` the behavior
   refuses for its shape is refused for the config it lacks.
   `ConfigTarget` gives the type's name and every use, for a config that
-  names another (`status: 'fulfilment'`).
+  names another (`status: 'fulfilment'`), its own fields (`fields()`), and,
+  when the core builds it, the declaration of a behavior the core runs
+  (`declaration(behavior)`), so a config that names another use's field
+  reads what that behavior declares (`ConfigTarget::new`, a host's, has
+  none).
 - `declaration()`: its name, owned fields and the one that holds a field
   anchor's value, sub-tables, operations (each writing or not), veto codes,
-  whether a create gives it parameters and whether it arms deadlines
+  whether a create gives it parameters, whether it arms deadlines, whether
+  it hears its row's writes (a table that composes it gets a change queue,
+  D103) and the fields it computes at a read, which no column holds and no
+  write carries (Timers' `deadlines`)
   (`Declaration::new(..).value(..).field(..).sub_table(TableDecl::new(name,
-  key, fields)).arms_deadlines().operation(name,
+  key, fields)).arms_deadlines().hears_changes().computed(name).operation(name,
   writes).veto(code).create_params()`; the struct may gain members, so it is
   built so; `.table(name)` declares a sub-table of no key and no fields,
   whose writes the core does not check). The core holds a behavior to it: a
@@ -355,7 +423,18 @@ and the hooks it needs, each with a default:
   defect.
 - `after_change(cx, change)`: after a create, an update, a delete, a writing
   operation a caller called, or a deadline (`Change`); on another row, after
-  a `create_row` of it or a writing operation of it a `call_on` called.
+  a `create_row` of it or a writing operation of it a `call_on` called; and
+  on a row a `heard` hook wrote (`Change::Heard`).
+- `listens(config)`: the types whose rows' writes the use hears beside its
+  own row's, each a `Listen { type, link }`, the type and its to-one
+  relation to the use's type (Reactions' allTerminal over Task's `project`:
+  `{ type: Task, link: project }`). None by default. `Core::listeners(spec)`
+  gives a type's, each once, in list order; a host that keeps no layout
+  (the reference host) reads from it which types are heard.
+- `heard(cx, heard)`: a write the use hears: of its own row (`Heard::Own`),
+  for a behavior whose declaration hears changes, on the row as it is now;
+  or of a row of a type it listens to (`Heard::Linked`), on the row the
+  relation holds, or held, the key of. Nothing by default.
 - `read_fields(config, row, tables)`: the fields a read of a row shows for
   the use beyond its owned columns, computed from its owned fields and its
   sub-table rows by table (the engine's computed fields: Timers'
@@ -363,7 +442,7 @@ and the hooks it needs, each with a default:
   tables)` computes them; the replayer compares them, and no adapter serves
   them yet (D103's Left for later).
 
-`GuardRequest`, `Change` and `ValidationRequest` are open, so a hook matches
+`GuardRequest`, `Change`, `Heard` and `ValidationRequest` are open, so a hook matches
 the cases it handles with a fallback arm.
 
 Every hook returns `Hook<T>`, a `Result<T, Stop>`, and passes on with `?`
@@ -452,8 +531,17 @@ the declarations, so a behavior adds no code to any of them (D103):
   `ticket_deadline_queue`), whose `row_key`, `use_id`, `name`, `at` (epoch
   milliseconds) and `payload` columns name it and whose `due_at` is `at`, one
   live message (ready or claimed) per row, use and name;
-- an outbox event to the rows of the outbox (D103's order of the work, step
-  3, its second half);
+- a row's writes to messages of the table's change queue, `<row's
+  type>Change` (`TicketChange`, table `ticket_change_queue`), which a
+  trigger on the table writes for every insert, update and delete, whoever
+  makes it: the row's key (`row_key`), the write (`write`), its time (`at`,
+  epoch milliseconds by the database's clock) and the row's columns before
+  and after it as JSON (`before`, `after`), which the adapter maps to the
+  core's names as it maps a row read, and the table's behavior worker runs
+  as a change command; a table gets one when one of its behaviors hears
+  changes, or another table's listens to it;
+- an outbox event of a behavior's own (`Cx::emit`) to nothing yet: the event
+  stream takes them later (D103);
 - a lock key to an advisory lock, or, on SQLite and D1, to a check in the
   change set's batch of each read made under it.
 
@@ -529,7 +617,9 @@ writes. For each command:
    from fresh state, with the same request id, up to eight runs, then
    refuses it as `busy`. A unit runs in this order: the checks of the reads
    made under locks (fenced stores); every row write, each fenced on its
-   version; for a deadline command, the spend of its arming (below); the
+   version, and a `Gone`'s deletes; for a deadline command the spend of its
+   arming, and for a change command with a claim the spend of its message
+   (below); the
    sub-table rows, in order, skipping a deleted row's (an insert `ON
    CONFLICT (row, key) DO NOTHING`, an update of the values present and a
    delete, each held to one row, so one a raw write moved runs the command
@@ -539,8 +629,13 @@ writes. For each command:
    and, for each row a write deletes, every message of the row and, on a
    hard delete, each of its uses' sub-table rows (SQLite enforces no foreign
    key unless the connection turned it on). A soft-deleted row keeps its
-   sub-table rows. An outbox event it refuses as `internal` until the
-   outbox has a table of its own (D103's order of the work, step 3).
+   sub-table rows. A row a change command found gone (`Gone`) it applies in
+   the row writes' place, with no fence and no count expected: the row's
+   deadline messages are deleted unless a live row of its key exists, and
+   its sub-table rows unless any row of its key does, so a soft-deleted
+   row keeps its sub-table rows and a row that came back keeps everything.
+   An outbox event of a behavior's own it refuses as `internal`: a table's
+   change queue holds its writes, and the event stream comes later (D103).
 6. It returns `changes.result`.
 
 For a `subRows` read it selects the use's sub-table rows of the row by the
@@ -550,6 +645,16 @@ owned column is. On a store whose locks are fenced (SQLite, D1) a
 `subRows` read made while the command holds a lock is refused as
 `internal` (`a read of sub-table rows under a lock has no check on SQLite
 or D1 yet (D103)`): the batch has no check of it yet.
+
+For a `linked` read it selects the type's rows whose own column for `field`
+holds the key (bound as that column binds a value, a UUID hyphenated), the
+key column first, live rows alone, after `after` when given (bound as the
+key column binds a key), ordered by the key column, `LIMIT limit + 1`; each
+row converts as a row read converts it, and `more` is whether the extra row
+came back. A type the layout lacks answers no rows; a field that is no own
+field of it is refused as `internal` (`rules: <Type> has no own field
+<field> in the behaviors' layout`). On SQLite and D1 one made under a lock is
+refused as `internal`, as a `subRows` read is.
 
 An upsert's insert applies no change set of the core's, so it binds what
 the core's create of the row gives it: the adapter runs the create to its
@@ -591,28 +696,70 @@ a unit of its own (the run reports `gone`). Each adapter's deadline entry
 (`runDeadline`, `RunDeadline`, `run_deadline`) runs a claimed message so,
 in the transaction that completes it.
 
+With a claim, a deadline command a guard vetoes (`vetoed`: a guard holding
+the fire) releases its message rather than failing it: ready again, due in
+60 seconds (`VETOED_RETRY_SECONDS`), its claim cleared and the attempt the
+claim counted given back, in the store's transaction, with nothing of the
+run applied, so it comes back every minute for as long as the guard holds
+it, as the engine's sweep tried it at every run, and its sub-table row stays
+pending. The run reports `vetoed` with the refusal, or `claim lost` when the
+release finds the claim gone, and the handler logs it as it logs a lost
+claim. Any other refusal, `busy` and a failure of the database among them,
+fails the message as before: due again after D68's backoff, dead after its
+last attempt. Without a claim (a transcript) the veto comes back as it is.
+
+Each adapter's change entry (`runChange`, `RunChange`, `run_change`) runs a
+message of a table's change queue as its trigger wrote it: the row's key, in
+the core's form or its column's (a UUID's base62 or hyphenated text); the
+write, whatever else than `insert`, `update` or `delete` refused as
+`internal`; its time; and the images, each a JSON object by column or null,
+a SQLite TEXT parsed first, each column the layout maps converted as a row
+read converts it (on Postgres the JSON value as a `to_jsonb` cell is; on
+SQLite a string as TEXT, an integer as INTEGER, any other number as REAL,
+`true` and `false` as 1 and 0), other members ignored and a null absent. It
+runs at the host's clock. With a worker's claim, the unit deletes the
+claimed message by its id and token, held to one row, after the fenced row
+writes and before the sub-table rows and deadlines: a unit that does not
+apply because the claim no longer holds the message runs nothing (`claim
+lost`), and one that does not apply for a row that moved runs again.
+Without a claim nothing is spent. A refusal comes back whole, nothing of it
+applied, and the worker's claim loop fails the message (D68).
+
 Every adapter replays the recorded scenarios as transcripts:
-`superschematic-rules-testkit` writes `core-workflow.json` and
-`core-timers.json` out as
-`runtime/engine/testdata/rules/core-workflow.transcript.json` and
-`core-timers.transcript.json` (its `transcript` module is the format), the
-core's commands and what each must answer, through the replayer's own
-mapping, and an adapter's tests replay them against tables of their own on
-SQLite and on Postgres. The testkit's `tests/transcript.rs` fails when a
-checked-in file is not what the writer writes (`UPDATE_TRANSCRIPTS=1`
-rewrites both), and holds each to a floor: `core-workflow` to 96 steps, 61
-define and publish checks, 34 commands and one raw write, in the 14
-scenarios a core with no test fixtures runs; `core-timers` to 101 steps, 50
-checks and 51 commands, 11 of them deadlines a runner ran, in 12
-scenarios. A transcript's `expect` holds the command's row's sub-table rows
-(`subRows`, by use id and table, each table's rows in key order) and its
-armed deadlines (`deadlines`, by use id and name), and an adapter adds a
-sub-table and a deadline queue to each type's tables as the transcript
-module says. TypeScript's replay is the HTTP runtime's
-`src/rules-transcript.test.ts`, held to the same floors on bun:sqlite and
-on Postgres; Go's is `runtime/rules/go`'s `transcript_test.go`, on SQLite
-and on Postgres, and Rust's `../rules-adapter/tests/transcript.rs`, on
-rusqlite and on Postgres, each replaying both files.
+`superschematic-rules-testkit` writes `core-workflow.json`,
+`core-timers.json`, `core-reactions.json` and `core-reactions-changes.json`
+out as `runtime/engine/testdata/rules/<name>.transcript.json` (its
+`transcript` module is the format), the core's commands and what each must
+answer, through the replayer's own mapping, and an adapter's tests replay
+them against tables of their own on SQLite and on Postgres. The testkit's
+`tests/transcript.rs` fails when a checked-in file is not what the writer
+writes (`UPDATE_TRANSCRIPTS=1` rewrites them), and holds each to a floor:
+`core-workflow` to 96 steps, 61 define and publish checks, 34 commands and
+one raw write, in the 14 scenarios a core with no test fixtures runs;
+`core-timers` to 125 steps, 50 checks and 75 commands, 10 of them deadlines
+and 25 changes a runner ran, in 12 scenarios; `core-reactions` to 586
+steps, 110 checks and 476 commands, 252 of them changes, in 26 scenarios;
+and `core-reactions-changes` to 60 steps, 12 checks and 48 commands, 24 of
+them changes, in 4 scenarios. A change a runner's sweep ran is a command
+step whose action is `change`, under the step of the `runner.runDue` that
+ran it. A transcript's `expect` holds the command's row's sub-table rows
+(`subRows`, by use id and table, each table's rows in key order), its armed
+deadlines (`deadlines`, by use id and name), and the other rows its change
+set wrote (`others`, each its type, key and row as read back after the
+step, absent when it was deleted), which an adapter compares on every
+command step. A type's `fields` list an engine Links link the replay maps to
+a to-one relation as its `<link>Id` field, and its versions' specs carry the
+relation. An adapter adds a sub-table and a deadline queue to each type's
+tables as the transcript module says, and runs each command over a layout
+of every type live in its database, each at the version the scenario last
+made live (a check whose spec equals one of the type's versions, or a
+command on it), since a step names its own type's version alone.
+TypeScript's replay is the HTTP runtime's `src/rules-transcript.test.ts`,
+held to the same floors on bun:sqlite and on Postgres; Go's is
+`runtime/rules/go`'s `transcript_test.go`, on SQLite and on Postgres, and
+Rust's `../rules-adapter/tests/transcript.rs`, on rusqlite and on Postgres,
+each replaying the four files. A change step runs as the transcript writes
+it, never from an adapter's own change queue.
 
 ## The layout document
 
@@ -627,9 +774,10 @@ operations sit under), anchor (a field use's field) and owned columns
 (each declared field by its declared name, its IR field, its column, its
 IR type and how it converts), each use's operations and sub-tables
 (`tables`), the table's deadline queue (`deadlines`) when its behaviors
-arm deadlines, and the type as the core runs it, in `TypeSpec`'s JSON,
-its own fields among it (`spec.fields`). For an `Order` whose `status` is a
-`Workflow`:
+arm deadlines, its change queue (`changes`) when its writes are heard, and
+the type as the core runs it, in `TypeSpec`'s JSON, its own fields among it
+(`spec.fields`), a to-one relation's with its `relation`. For an `Order`
+whose `status` is a `Workflow`:
 
 ```json
 {
@@ -696,8 +844,23 @@ has a use with no anchor and a sub-table, and its deadline queue:
 "deadlines": { "queue": "TicketDeadline", "table": "ticket_deadline_queue", "rowKey": "row_key", "use": "use_id", "name": "name", "at": "at", "payload": "payload" }
 ```
 
-A sub-table's `row` is the column holding the row's key, which binds as the
-row table's key binds; its `fields` leave the key out. `spec.fields` lists
+A table whose writes are heard (Timers and Reactions hear them, and so does
+another table's Reactions through a to-one relation of this one) has its
+change queue's columns:
+
+```json
+"changes": { "queue": "TicketChange", "table": "ticket_change_queue", "rowKey": "row_key", "write": "write", "at": "at", "before": "before", "after": "after" }
+```
+
+and a to-one relation's own field names its relation in `spec.fields`:
+
+```json
+{ "name": "projectId", "type": "Identity.UUID", "relation": { "name": "project", "type": "Project" } }
+```
+
+A layout of a table with neither is as it was. A sub-table's `row` is the
+column holding the row's key, which binds as the row table's key binds; its
+`fields` leave the key out. `spec.fields` lists
 the own fields with `dateTime` set for one whose column converts as
 `epochMillis`, and an implements use's spec entry is `{ "behavior":
 "Timers", "config": { ... }, "anchor": "type" }`.
@@ -733,7 +896,7 @@ cargo build -p superschematic-rules-wasm --target wasm32-unknown-unknown
 ```
 
 with `RUSTUP_TOOLCHAIN` set to the toolchain `tools.env` pins.
-`tests/core.rs` runs the core through its public API with toy behaviors: the
+`tests/core.rs` (44 cases) runs the core through its public API with toy behaviors: the
 read exchange, vetoes, a call between two behaviors, two uses of one
 behavior on two fields and the own writes their fields refuse, a field
 anchor on a behavior with no value field, a config change that reads
@@ -744,19 +907,39 @@ that refuses, a run that never settles and the defects the core holds a
 behavior to; and the sub-table rows a run reads with its own writes applied,
 `unchanged()` (no write, no after-change hook, a defect beside a write,
 nothing in a call), an arm by a behavior that arms none, a sub-row value or
-key a table does not declare, and `read_fields`. `rules-behaviors`'
-`tests/workflow.rs` and `tests/timers.rs` hold each behavior to its
-declaration's schemas and its rules: Timers' starts, its `then`'s four
-outcomes, `until` in both forms, reset, snooze, the Workflow it reads
-(implied, named, several, none) and a field start as a number and as text.
+key a table does not declare, and `read_fields`; and the change command:
+the hearing uses on the row as it is, a gone row's `Gone` with no hook run,
+a listener reached through a relation by the row now, after and before, a
+gone target passed over, a linked read paging by key, a heard write fenced
+with its after-change hooks, a change that writes nothing, `Core::listeners`
+and the JSON of the action, the read and `Gone`. `rules-behaviors`'
+`tests/workflow.rs` (19), `tests/timers.rs` (18) and `tests/reactions.rs`
+(15) hold each behavior to its declaration's schemas and its rules: Timers'
+starts, its `then`'s four outcomes, `until` in both forms, reset, snooze,
+the Workflow it reads (implied, named, several, none), a field start as a
+number and as text, a heard write the core applied changing nothing, a raw
+write of a field start arming it again, a raw insert arming a create
+deadline from its `at`, and a deadline reconciling its row before it fires;
+Reactions' when kinds firing and not, each `then` that leaves its target as
+it is, a `forbidden` move refusing the command, each config message, the
+cycle check and `listens`.
 
-`superschematic-rules-testkit`'s `tests/workflow_scenarios.rs` and
-`tests/timers_scenarios.rs` replay `core-workflow.json` on Workflow and
-`core-timers.json` on Workflow and Timers through the reference host, and
-fail on any step that answers otherwise than the engine, or when fewer
-steps are checked than their floors (154 and 324); `cargo test -p
-superschematic-rules-testkit` runs them, and `tests/transcript.rs` with
-them.
+`superschematic-rules-testkit`'s `tests/workflow_scenarios.rs`,
+`tests/timers_scenarios.rs` and `tests/reactions_scenarios.rs` replay
+`core-workflow.json` on Workflow, `core-timers.json` on Workflow and Timers,
+and `core-reactions.json` and `core-reactions-changes.json` on Workflow,
+Reactions and Timers through the reference host, and fail on any step that
+answers otherwise than the engine, or when fewer steps are checked than
+their floors (154, 324, 443 and 65). The reference host keeps the outbox:
+every write of a type whose writes are heard, the core's and a raw one,
+queues a change, and the replay's `runner.runDue` drains the changes through
+the core, runs the due deadlines and drains again. An engine Links link with
+one target is a to-one relation, its link and unlink updates of it; what a
+table cannot express (a link that holds a list, holds and revised, the value
+store, a runner's depth limit) is skipped, each with its reason, and
+`core-reactions-holds-revised.json` waits for step 4. `tests/changes.rs`
+holds the outbox to the core. `cargo test -p superschematic-rules-testkit`
+runs them, and `tests/transcript.rs` with them.
 
 TypeScript's binding and adapter:
 
@@ -809,7 +992,8 @@ it generates `fixture-workflow-db`'s Go types, ORM and DDL, and builds and
 tests the ORM module over the staged archive on the Postgres
 `SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL` names, and
 `TestTimersTablesOnPostgres` does the same for `fixture-timers-db`'s
-Timers: its sub-table rows, its deadline queue and `RunDeadline`.
+Timers: its sub-table rows, its deadline queue, `RunDeadline` and
+`RunChange` over the table's real change trigger.
 
 Rust's adapter:
 

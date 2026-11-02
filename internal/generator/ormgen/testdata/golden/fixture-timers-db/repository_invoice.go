@@ -302,10 +302,11 @@ func (o invoicePaymentOperations) Transition(ctx context.Context, id types.Ident
 // WithBehaviorCaller names, a behavior worker's, with claim, the worker's
 // claim of the message, which the unit that applies its change set completes.
 // Its write of the row is stamped as an operation's (operationOptions). It
-// runs nothing, and says why, when the claim is lost or the row or the use is
-// gone; any other refusal of the core's it returns as the *rules.Refusal it
-// is, nothing of it written. Without a claim it runs only while the deadline
-// is armed at the time it names.
+// runs nothing, and says why, when the claim is lost, the row or the use is
+// gone, or a guard vetoed the fire, whose message it releases to fall due
+// again in a minute; any other refusal of the core's it returns as the
+// *rules.Refusal it is, nothing of it written. Without a claim it runs only
+// while the deadline is armed at the time it names.
 func (r *InvoiceRepository) RunDeadline(ctx context.Context, deadline types.InvoiceDeadline, claim *rules.Claim) (*rules.DeadlineRun, error) {
 	payload, err := json.Marshal(deadline.Payload)
 	if err != nil {
@@ -313,6 +314,31 @@ func (r *InvoiceRepository) RunDeadline(ctx context.Context, deadline types.Invo
 	}
 	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (*rules.DeadlineRun, error) {
 		return rules.RunDeadline(ctx, rulesHost(tx), "Invoice", rules.Deadline{Key: deadline.RowKey.String(), UseID: string(deadline.UseId), Name: string(deadline.Name), At: int64(deadline.At), Payload: payload}, behaviorCaller(ctx), claim, r.operationOptions(ctx))
+	})
+}
+
+// RunChange runs a write of a Invoice row, a message of the queue
+// InvoiceChange, through the behaviors' core (D103), in a transaction: the
+// uses that hear the row's writes, on the row as it is now, and the uses of
+// other tables that hear it through a relation of the row, as the caller
+// WithBehaviorCaller names, a behavior worker's, with claim, the worker's
+// claim of the message, which the unit that applies its change set completes.
+// Its write of the row is stamped as an operation's (operationOptions). A row
+// the write left gone takes its deadlines with it. It runs nothing, and says
+// why, when the claim is lost; a refusal of the core's it returns as the
+// *rules.Refusal it is, nothing of it written, for the worker to fail the
+// message. Without a claim it spends no message.
+func (r *InvoiceRepository) RunChange(ctx context.Context, change types.InvoiceChange, claim *rules.Claim) (*rules.ChangeRun, error) {
+	before, err := json.Marshal(change.Before)
+	if err != nil {
+		return nil, fmt.Errorf("orm: the image before Invoice's change of %s: %w", change.RowKey.String(), err)
+	}
+	after, err := json.Marshal(change.After)
+	if err != nil {
+		return nil, fmt.Errorf("orm: the image after Invoice's change of %s: %w", change.RowKey.String(), err)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (*rules.ChangeRun, error) {
+		return rules.RunChange(ctx, rulesHost(tx), "Invoice", rules.Change{Key: change.RowKey.String(), Write: string(change.Write), At: int64(change.At), Before: before, After: after}, behaviorCaller(ctx), claim, r.operationOptions(ctx))
 	})
 }
 

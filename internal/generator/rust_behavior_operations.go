@@ -3,14 +3,13 @@ package generator
 import (
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/behaviorlayout"
 	"github.com/parable-work/superschematic/internal/generator/behaviortypes"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/rustrestgen"
-	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -56,7 +55,7 @@ func (r run) rustBehaviorDeps(apiDir string, deps *rustrestgen.DepsInfo) error {
 	served := behaviorOperationUse(r.Schema)
 	worker := served == ""
 	if worker {
-		served = behaviorWorkerUse(r.Schema, nil, nil)
+		served = behaviorWorkerUse(r.Schema, nil)
 	} else {
 		served = "the behavior operations of " + served
 	}
@@ -71,7 +70,7 @@ func (r run) rustBehaviorDeps(apiDir string, deps *rustrestgen.DepsInfo) error {
 		return fmt.Errorf("generator: load %s, the database whose tables' behaviors %s runs (D103): %w", deps.Database, r.Config.Name, err)
 	}
 	if worker {
-		served = behaviorWorkerUse(r.Schema, db, r.Registry)
+		served = behaviorWorkerUse(r.Schema, db)
 	}
 	behaviors := &rustrestgen.DepsBehaviors{}
 	for _, c := range rustBehaviorCrates {
@@ -133,30 +132,31 @@ func behaviorOperationUse(schema *ir.Schema) string {
 }
 
 // behaviorWorkerUse names the first @behaviorWorker of the schema (D103),
-// as a refusal names what runs through the behaviors' core: the table whose
-// behaviors it runs, the behaviors of it that arm deadlines when db, the
-// table's database, and reg say, and the worker (Ticket's deadlines, which
-// Timers arms, by its @behaviorWorker TicketTimers); "" for a schema
-// without one.
-func behaviorWorkerUse(schema *ir.Schema, db *ir.Schema, reg *registry.Registry) string {
+// as a refusal names what runs through the behaviors' core: what the
+// worker runs, as apigen's BehaviorWorkerInfo.Runs words it for the other
+// generators (its table's deadlines, its changes, or both), from the
+// queues the loader gave it or, when db, the table's database, is given,
+// from the queues db holds with the behaviors that arm its deadlines, and
+// the worker (Ticket's deadlines and changes by its @behaviorWorker
+// TicketTimers); "" for a schema without one.
+func behaviorWorkerUse(schema *ir.Schema, db *ir.Schema) string {
 	for _, w := range schema.Workers {
 		if w == nil || w.BehaviorWorker == nil {
 			continue
 		}
+		info := apigen.BehaviorWorkerOf(schema, nil, w)
 		table := w.BehaviorWorker.Type
-		var arming []string
-		if db != nil && reg != nil {
-			td := db.Types[table]
-			for _, ref := range td.TableBehaviors() {
-				if b, ok := reg.Behavior(ref.Name); ok && b.ArmsDeadlines && !slices.Contains(arming, ref.Name) {
-					arming = append(arming, ref.Name)
-				}
-			}
+		if queue := db.BehaviorQueueOf(table, ir.BehaviorQueueDeadlines); queue != nil {
+			info.DeadlineQueue, info.Behaviors = queue.Name, queue.BehaviorQueue.Behaviors
 		}
-		if len(arming) == 0 {
-			return fmt.Sprintf("%s's deadlines by its @behaviorWorker %s", table, w.Name)
+		if queue := db.BehaviorQueueOf(table, ir.BehaviorQueueChanges); queue != nil {
+			info.ChangeQueue = queue.Name
 		}
-		return fmt.Sprintf("%s's deadlines, which %s arms, by its @behaviorWorker %s", table, strings.Join(arming, " and "), w.Name)
+		runs := info.Runs()
+		if strings.Contains(runs, ", which ") {
+			runs += ","
+		}
+		return runs + " by its @behaviorWorker " + w.Name
 	}
 	return ""
 }

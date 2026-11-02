@@ -17,24 +17,27 @@ import (
 )
 
 // The recorded scenarios are the specification (D103): the transcripts
-// superschematic-rules-testkit writes from core-workflow.json and
-// core-timers.json (runtime/engine/testdata/rules/*.transcript.json, whose
-// format its transcript module states) replayed through this adapter on
-// SQLite and on Postgres, as the TypeScript adapter replays them
+// superschematic-rules-testkit writes from core-workflow.json,
+// core-timers.json, core-reactions.json and core-reactions-changes.json
+// (runtime/engine/testdata/rules/*.transcript.json, whose format its
+// transcript module states) replayed through this adapter on SQLite and on
+// Postgres, as the TypeScript adapter replays them
 // (runtime/http/typescript/src/rules-transcript.test.ts). Each scenario
-// gets a table per type and database, its own fields' columns beside the
-// owned columns the layout rule gives each use of any version and
-// _version, with @optimistic's trigger; for each use whose behavior
-// declares tables, a sub-table per table, a child of the row; and, when a
-// use's behavior arms deadlines, the type's deadline queue. Each check runs
-// on the core alone, answering whether the type has rows from its table;
-// each command runs through Execute in a transaction of its own with the
-// version live at it (a deadline the runner ran among them, which reads
-// its arming and spends it), its refusal compared whole and the row it
-// names read back after it and compared, with its sub-table rows and its
-// armed deadlines; and each raw step writes owned columns with SQL past
-// the adapter. The Postgres replay skips without
-// SUPERSCHEMATIC_RULES_TEST_DATABASE_URL.
+// gets a table per type and database, its own fields' columns (a mapped
+// link's <link>Id among them) beside the owned columns the layout rule
+// gives each use of any version and _version, with @optimistic's trigger;
+// for each use whose behavior declares tables, a sub-table per table, a
+// child of the row; and, when a use's behavior arms deadlines, the type's
+// deadline queue. Each check runs on the core alone, answering whether the
+// type has rows from its table; each command runs through Execute in a
+// transaction of its own over a layout of every type the step's database
+// holds, each at the version live at it (a deadline the runner ran among
+// them, which reads its arming and spends it, and a change the runner
+// drained, whose listeners write rows of other types), its refusal compared
+// whole and the row it names read back after it and compared, with its
+// sub-table rows, its armed deadlines and the other rows its change set
+// wrote; and each raw step writes owned columns with SQL past the adapter.
+// The Postgres replay skips without SUPERSCHEMATIC_RULES_TEST_DATABASE_URL.
 //
 // The tables here follow the layout rule as the core's README states it,
 // restated by this test (the corpus's uses are type-anchored: Workflow's
@@ -53,7 +56,9 @@ type transcriptFile struct {
 
 var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-workflow.transcript.json", 96},
-	{"../../engine/testdata/rules/core-timers.transcript.json", 101},
+	{"../../engine/testdata/rules/core-timers.transcript.json", 125},
+	{"../../engine/testdata/rules/core-reactions.transcript.json", 586},
+	{"../../engine/testdata/rules/core-reactions-changes.transcript.json", 60},
 }
 
 type transcript struct {
@@ -101,7 +106,19 @@ type transcriptStep struct {
 		Row       json.RawMessage `json:"row"`
 		SubRows   json.RawMessage `json:"subRows"`
 		Deadlines json.RawMessage `json:"deadlines"`
+		// Others are the rows other than the command's own its change set
+		// wrote, each read back after the step.
+		Others json.RawMessage `json:"others"`
 	} `json:"expect"`
+}
+
+// transcriptOther is a row other than a command's own that its change set
+// wrote, as a transcript's expect writes it: its type, its key, and the row
+// read back after the step, absent when it is gone.
+type transcriptOther struct {
+	Type string          `json:"type"`
+	Key  string          `json:"key"`
+	Row  json.RawMessage `json:"row,omitempty"`
 }
 
 func readTranscript(t *testing.T, path string) *transcript {
@@ -359,9 +376,35 @@ func replayTranscript(t *testing.T, db *rulestest.DB, file transcriptFile) {
 				}
 				return table
 			}
+			var ensure func(table *rules.Table)
+			// live is the version of each type live in each database, by its index
+			// in the type's versions: a check the core took sets it to the version
+			// whose spec it checked, and a command to its own.
+			live := map[string]map[string]int{}
+			setLive := func(database, typeName string, version int) {
+				if live[database] == nil {
+					live[database] = map[string]int{}
+				}
+				live[database][typeName] = version
+			}
+			// layoutOf is the layout of every type live in a database, each at its
+			// live version, its table created.
+			layoutOf := func(database string) *rules.Layout {
+				layout := &rules.Layout{Types: map[string]*rules.Table{}}
+				for typeName, version := range live[database] {
+					typ := typeOf(typeName)
+					if typ == nil || version >= len(typ.Versions) {
+						continue
+					}
+					table := tableOf(database, typeName, &typ.Versions[version])
+					ensure(table)
+					layout.Types[typeName] = table
+				}
+				return layout
+			}
 			created := map[string]bool{}
 			// ensure creates a table the first time a step needs it.
-			ensure := func(table *rules.Table) {
+			ensure = func(table *rules.Table) {
 				if created[table.Table] {
 					return
 				}
@@ -449,6 +492,15 @@ func replayTranscript(t *testing.T, db *rulestest.DB, file transcriptFile) {
 						t.Fatalf("step %d: the check never settled", step.Step)
 					}
 					compare(step, "refused", step.Expect.Refused, refusalJSON(t, refused))
+					if refused == nil {
+						if typ := typeOf(step.Spec.Name); typ != nil {
+							for i := range typ.Versions {
+								if sameJSON(jsonOf(t, typ.Versions[i]), jsonOf(t, *step.Spec)) {
+									setLive(step.Database, step.Spec.Name, i)
+								}
+							}
+						}
+					}
 				case "raw":
 					// Past the adapter, as an operator's repair or the test's
 					// own SQL: the escape hatch D103 keeps open.
@@ -488,9 +540,8 @@ func replayTranscript(t *testing.T, db *rulestest.DB, file transcriptFile) {
 					if typ == nil || step.Version >= len(typ.Versions) {
 						t.Fatalf("step %d: no version %d of %s", step.Step, step.Version, step.Type)
 					}
-					table := tableOf(step.Database, step.Type, &typ.Versions[step.Version])
-					ensure(table)
-					layout := &rules.Layout{Types: map[string]*rules.Table{step.Type: table}}
+					setLive(step.Database, step.Type, step.Version)
+					layout := layoutOf(step.Database)
 					var result *rules.Result
 					err := db.InTx(ctx, func(tx *rulestest.Tx) error {
 						var err error
@@ -545,6 +596,11 @@ func replayTranscript(t *testing.T, db *rulestest.DB, file transcriptFile) {
 						compare(step, "subRows", step.Expect.SubRows, subRows)
 						compare(step, "deadlines", step.Expect.Deadlines, deadlines)
 					}
+					var others json.RawMessage
+					if result != nil {
+						others = othersOf(t, db, layout, result.Changes, step.Type, rowKey)
+					}
+					compare(step, "others", step.Expect.Others, others)
 				default:
 					t.Fatalf("step %d: a step of kind %q", step.Step, step.Kind)
 				}
@@ -606,6 +662,39 @@ func subStateOf(t *testing.T, db *rulestest.DB, layout *rules.Layout, typeName, 
 		armed = jsonOf(t, deadlines)
 	}
 	return subRows, armed
+}
+
+// othersOf is the rows other than the command's own (typeName's row of key)
+// a change set wrote, each once in the change set's order, read back after
+// the step as a transcript's expect writes them: nil for none.
+func othersOf(t *testing.T, db *rulestest.DB, layout *rules.Layout, changes rules.ChangeSet, typeName, key string) json.RawMessage {
+	t.Helper()
+	var others []transcriptOther
+	seen := map[[2]string]bool{{typeName, key}: true}
+	for _, write := range changes.Rows {
+		if write.Key == nil || seen[[2]string{write.Type, *write.Key}] {
+			continue
+		}
+		seen[[2]string{write.Type, *write.Key}] = true
+		var row *rules.Row
+		err := db.InTx(context.Background(), func(tx *rulestest.Tx) error {
+			var err error
+			row, err = rules.ReadRow(context.Background(), rules.Host{Layout: layout, Store: tx.Store()}, write.Type, *write.Key)
+			return err
+		})
+		if err != nil {
+			t.Fatalf("read %s %s back: %v", write.Type, *write.Key, err)
+		}
+		other := transcriptOther{Type: write.Type, Key: *write.Key}
+		if row != nil {
+			other.Row = jsonOf(t, map[string]any{"own": row.Own, "owned": row.Owned})
+		}
+		others = append(others, other)
+	}
+	if len(others) == 0 {
+		return nil
+	}
+	return jsonOf(t, others)
 }
 
 // rawValue is a raw step's value as the dialect binds its column.

@@ -14,15 +14,16 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 use superschematic_rules::{
     Action, Answer, Answered, Answers, Caller, ChangeSet, Code, Command, Core, DeadlineChange,
-    Outcome, ReadRequest, Refusal, Row, RowWrite, Step, SubRow, SubRowChange, SubRowWrite,
-    TypeSpec, ValidationIssue,
+    KeyedRow, LinkedRows, Outcome, ReadRequest, Refusal, Row, RowChange, RowImage, RowWrite, Step,
+    SubRow, SubRowChange, SubRowWrite, TypeSpec, ValidationIssue, WriteKind,
 };
 
 use crate::convert::{base62, from_cell, internal, key_value, to_column, Bind, Cell, UUID_TYPES};
 use crate::host::Host;
-use crate::layout::{Column, Deadlines, Layout, SubTable, Table};
+use crate::layout::{Changes, Column, Deadlines, Layout, SubTable, Table};
 use crate::{busy_refusal, CreateOptions, Error, ExecuteOptions, Executed, Owned};
-use crate::{Claim, Deadline, DeadlineRun, MAX_ATTEMPTS, MAX_ROUNDS};
+use crate::{ChangeRun, Claim, Deadline, DeadlineRun, TableChange};
+use crate::{MAX_ATTEMPTS, MAX_ROUNDS, VETOED_RETRY_SECONDS};
 
 /// The SQL a store's statements are written in. A build with one store
 /// writes its dialect alone.
@@ -142,13 +143,13 @@ pub(crate) async fn execute<S: Store>(
     command: Command,
     options: &ExecuteOptions,
 ) -> Result<Executed, Error> {
-    match attempts(host, store, type_name, command, options, None, false).await? {
+    match attempts(host, store, type_name, command, options, Spent::Nothing).await? {
         DeadlineRun::Ran(executed) => Ok(*executed),
         // A command with no claim that spends nothing on a refusal comes
         // to neither.
-        DeadlineRun::ClaimLost | DeadlineRun::Gone(_) => Err(internal(format!(
-            "a command on {type_name} ran nothing and was refused nothing"
-        ))
+        DeadlineRun::ClaimLost | DeadlineRun::Gone(_) | DeadlineRun::Vetoed(_) => Err(internal(
+            format!("a command on {type_name} ran nothing and was refused nothing"),
+        )
         .into()),
     }
 }
@@ -170,9 +171,14 @@ pub(crate) async fn execute<S: Store>(
 /// A row or a use that is gone (the core's `not_found` while the table
 /// holds no live row of the key, or the layout no such use) spends the
 /// arming in a unit of its own: [`DeadlineRun::Gone`] with the refusal, or
-/// [`DeadlineRun::ClaimLost`] when the claim was lost first. Any other
-/// refusal comes back as [`Error::Refused`], nothing applied, a `not_found`
-/// of something else a rule reached among them.
+/// [`DeadlineRun::ClaimLost`] when the claim was lost first. With a claim,
+/// a fire a guard vetoes (the core's `vetoed`) releases the claimed
+/// message in a unit of its own, due again in
+/// [`crate::VETOED_RETRY_SECONDS`] and counting no attempt:
+/// [`DeadlineRun::Vetoed`] with the veto, or [`DeadlineRun::ClaimLost`]
+/// when the claim was lost first. Any other refusal comes back as
+/// [`Error::Refused`], nothing applied, a `not_found` of something else a
+/// rule reached among them, and so does a veto without a claim.
 pub(crate) async fn run_deadline<S: Store>(
     host: &Host<'_>,
     store: &S,
@@ -196,29 +202,214 @@ pub(crate) async fn run_deadline<S: Store>(
         type_name,
         command,
         &ExecuteOptions::default(),
-        claim,
-        true,
+        Spent::Deadline(claim),
     )
     .await
 }
 
+/// Runs a write of a row of a type that the table's change trigger wrote
+/// to its change queue (D103), as the core's change command, at the host's
+/// time: the uses that hear the row's writes, on the row as it is now, and
+/// the listeners of other types its relations reach.
+///
+/// With a claim of its message, the unit that applies the command's change
+/// set spends the claim (its message deleted by its id and token, right
+/// after the change set's row writes and before its sub-table rows and
+/// deadlines), and one whose claim no longer holds its message runs nothing
+/// ([`ChangeRun::ClaimLost`]); a row that moved runs it again from fresh
+/// state. Without one, nothing is spent. A refusal comes back as
+/// [`Error::Refused`], nothing applied.
+pub(crate) async fn run_change<S: Store>(
+    host: &Host<'_>,
+    store: &S,
+    type_name: &str,
+    change: &TableChange,
+    caller: Caller,
+    claim: Option<&Claim>,
+) -> Result<ChangeRun, Error> {
+    let table = table_of(host.layout, type_name)?;
+    let key = change_key(table, &change.key)?;
+    let action = Action::Change {
+        change: row_change(table, store.dialect(), &key, change)?,
+        key,
+    };
+    let command = command_of(host, caller, action);
+    let spent = match claim {
+        Some(claim) => Spent::Change(claim),
+        None => Spent::Nothing,
+    };
+    let options = ExecuteOptions::default();
+    match attempts(host, store, type_name, command, &options, spent).await? {
+        DeadlineRun::Ran(executed) => Ok(ChangeRun::Ran(executed)),
+        DeadlineRun::ClaimLost => Ok(ChangeRun::ClaimLost),
+        DeadlineRun::Gone(_) | DeadlineRun::Vetoed(_) => Err(internal(format!(
+            "a change of {type_name} ran nothing and was refused nothing"
+        ))
+        .into()),
+    }
+}
+
+/// The key of a change's row as the core takes it: the message's key as a
+/// row read converts the key column (a UUID's base62 from either form).
+fn change_key(table: &Table, key: &str) -> Result<String, Error> {
+    match from_cell(Cell::Text(key.to_owned()), &table.key, table)? {
+        Some(Value::String(key)) => Ok(key),
+        Some(other) => Ok(other.to_string()),
+        None => Err(internal(format!("{}'s change names no row's key", table.type_name)).into()),
+    }
+}
+
+/// A change's message of the row `key` as the core's [`RowChange`]: its
+/// write, its time, and its images before and after it, each mapped from
+/// its columns to the core's names by the layout and converted as a row
+/// read in `dialect` converts each column.
+fn row_change(
+    table: &Table,
+    dialect: Dialect,
+    key: &str,
+    change: &TableChange,
+) -> Result<RowChange, Error> {
+    let write = match change.write.as_str() {
+        "insert" => WriteKind::Insert,
+        "update" => WriteKind::Update,
+        "delete" => WriteKind::Delete,
+        other => {
+            return Err(internal(format!(
+                "{}'s change of {key} is a write of {other}, which is no insert, update or delete",
+                table.type_name
+            ))
+            .into())
+        }
+    };
+    Ok(RowChange {
+        write,
+        at: change.at,
+        before: row_image(table, dialect, &change.before)?,
+        after: row_image(table, dialect, &change.after)?,
+    })
+}
+
+/// One image of a change, `None` for none (null, or JSON text of null): a
+/// JSON object by column, or SQLite's text of one, each member a layout own
+/// column mapped to its own field and each use's owned column to that use's
+/// declared field, a member the layout does not map left out, and a value
+/// with none absent.
+fn row_image(table: &Table, dialect: Dialect, image: &Value) -> Result<Option<RowImage>, Error> {
+    let parsed;
+    let image = match image {
+        Value::String(text) => {
+            parsed = serde_json::from_str::<Value>(text).map_err(|error| {
+                internal(format!(
+                    "{}'s change holds an image that is no JSON: {error}",
+                    table.type_name
+                ))
+            })?;
+            &parsed
+        }
+        other => other,
+    };
+    let columns = match image {
+        Value::Null => return Ok(None),
+        Value::Object(columns) => columns,
+        other => {
+            return Err(internal(format!(
+                "{}'s change holds an image that is no object: {other}",
+                table.type_name
+            ))
+            .into())
+        }
+    };
+    let value = |column: &Column| -> Result<Option<Value>, Error> {
+        let Some(value) = columns.get(&column.column) else {
+            return Ok(None);
+        };
+        Ok(from_cell(image_cell(dialect, value), column, table)?)
+    };
+    let mut row = RowImage::default();
+    for column in &table.own {
+        if let Some(value) = value(column)? {
+            row.own.insert(column.field.clone(), value);
+        }
+    }
+    for used in &table.uses {
+        let mut values = Map::new();
+        for field in &used.fields {
+            if let Some(value) = value(&field.column)? {
+                values.insert(field.name.clone(), value);
+            }
+        }
+        if !values.is_empty() {
+            row.owned.insert(used.id.clone(), values);
+        }
+    }
+    Ok(Some(row))
+}
+
+/// A value of an image as the cell a row read in `dialect` reads of its
+/// column: on Postgres the `to_jsonb` JSON `jsonb_build_object` wrote; on
+/// SQLite the storage class `json_object` wrote it from, a string as TEXT,
+/// an integer as INTEGER, any other number as REAL and a boolean as 1 or 0.
+fn image_cell(dialect: Dialect, value: &Value) -> Cell {
+    match (dialect, value) {
+        (_, Value::Null) => Cell::Null,
+        (Dialect::Postgres, value) => Cell::Json(value.clone()),
+        (Dialect::Sqlite, Value::String(text)) => Cell::Text(text.clone()),
+        (Dialect::Sqlite, Value::Bool(flag)) => Cell::Int(i64::from(*flag)),
+        (Dialect::Sqlite, Value::Number(number)) => match number.as_i64() {
+            Some(n) => Cell::Int(n),
+            None => number.as_f64().map_or(Cell::Null, Cell::Real),
+        },
+        (Dialect::Sqlite, value) => Cell::Json(value.clone()),
+    }
+}
+
+/// What the unit that applies a run's change set spends beside it.
+#[derive(Clone, Copy)]
+enum Spent<'a> {
+    /// Nothing but what the command itself holds: a caller's command, or
+    /// a deadline command run as a transcript runs it, which spends the
+    /// arming it ran for by its `at`.
+    Nothing,
+    /// A due deadline's arming, by a worker's claim of its message or,
+    /// without one, by its `at`: a row or a use the core finds gone spends
+    /// it in a unit of its own, and a fire a guard vetoes with a claim
+    /// releases its message.
+    Deadline(Option<&'a Claim>),
+    /// A change's message of the table's change queue, by a worker's claim
+    /// of it (D103).
+    Change(&'a Claim),
+}
+
+impl<'a> Spent<'a> {
+    /// The worker's claim the unit spends, when it spends one.
+    fn claim(self) -> Option<&'a Claim> {
+        match self {
+            Spent::Nothing => None,
+            Spent::Deadline(claim) => claim,
+            Spent::Change(claim) => Some(claim),
+        }
+    }
+}
+
 /// The runs of one command: each settles the core on fresh reads and
 /// applies its change set as one unit, until a unit applies, a claim is
-/// lost or the attempts run out. `gone` spends a deadline whose row or use
-/// the core finds gone, in a unit of its own.
+/// lost or the attempts run out. A deadline run ([`Spent::Deadline`])
+/// spends a deadline whose row or use the core finds gone, and releases
+/// one whose fire a guard vetoed with a claim, each in a unit of its own.
 async fn attempts<S: Store>(
     host: &Host<'_>,
     store: &S,
     type_name: &str,
     command: Command,
     options: &ExecuteOptions,
-    claim: Option<&Claim>,
-    gone: bool,
+    spent: Spent<'_>,
 ) -> Result<DeadlineRun, Error> {
     let table = table_of(host.layout, type_name)?;
     refuse_checked(host, type_name)?;
     let run = prepared(host, table, command)?;
     refuse_owned_writes(table, &run.action)?;
+    let claim = spent.claim();
+    let deadline = matches!(spent, Spent::Deadline(_));
     let due = match &run.action {
         Action::Deadline {
             key,
@@ -236,20 +427,27 @@ async fn attempts<S: Store>(
         }),
         _ => None,
     };
+    // The queue whose claimed message the unit spends.
+    let claimed = match (spent, &due) {
+        (Spent::Change(_), _) => Some(changes_of(table)?.table.as_str()),
+        (Spent::Deadline(Some(_)), Some(due)) => Some(due.queue.table.as_str()),
+        _ => None,
+    };
     for attempt in 1..=MAX_ATTEMPTS {
         let busy = |error| busy_or(store, error, type_name, &run, attempt);
-        let spend = match &due {
-            Some(due) => {
+        let spend = match (&due, spent) {
+            (_, Spent::Change(claim)) => Some(spend_claim(store.dialect(), table, claim)?),
+            (Some(due), _) => {
                 if claim.is_none() {
                     due.armed(store, run.now).await.map_err(busy)?;
                 }
                 Some(due.spend(store.dialect(), claim)?)
             }
-            None => None,
+            (None, _) => None,
         };
         let (changes, answers) = match settle(host, store, &table.spec, &run).await {
             Ok(settled) => settled,
-            Err(Error::Refused(refusal)) if gone && refusal.code == Code::NotFound => {
+            Err(Error::Refused(refusal)) if deadline && refusal.code == Code::NotFound => {
                 let (Some(due), Some(spend)) = (&due, spend) else {
                     return Err(Error::Refused(refusal));
                 };
@@ -265,6 +463,22 @@ async fn attempts<S: Store>(
                     return Ok(DeadlineRun::ClaimLost);
                 }
                 continue;
+            }
+            Err(Error::Refused(refusal)) if deadline && refusal.code == Code::Vetoed => {
+                let (Some(due), Some(claim)) = (&due, claim) else {
+                    return Err(Error::Refused(refusal));
+                };
+                // A guard holds the fire: the message falls due again in a
+                // minute, as the engine's sweep tried it at every run, and
+                // its sub-table row stays pending (D103).
+                if store
+                    .apply(&[due.release(store.dialect(), claim)])
+                    .await
+                    .map_err(busy)?
+                {
+                    return Ok(DeadlineRun::Vetoed(refusal));
+                }
+                return Ok(DeadlineRun::ClaimLost);
             }
             Err(error) => return Err(busy(error)),
         };
@@ -294,13 +508,41 @@ async fn attempts<S: Store>(
         // A row moved, a check failed, or the claim was spent before this
         // unit could spend it: a claim armed or cleared since, or claimed
         // again after its lease, runs nothing.
-        if let (Some(due), Some(claim)) = (&due, claim) {
-            if !due.claimed(store, claim).await.map_err(busy)? {
+        if let (Some(queue), Some(claim)) = (claimed, claim) {
+            if !claim_held(store, queue, claim).await.map_err(busy)? {
                 return Ok(DeadlineRun::ClaimLost);
             }
         }
     }
     Err(busy_refusal(type_name, &run, MAX_ATTEMPTS).into())
+}
+
+/// The change queue of a table a claimed change runs on, or an internal
+/// refusal for a table the layout gives none.
+fn changes_of(table: &Table) -> Result<&Changes, Error> {
+    table.changes.as_ref().ok_or_else(|| {
+        internal(format!(
+            "a change of {type_name} ran with a claim of its message, and the behaviors' layout gives {type_name} no change queue",
+            type_name = table.type_name
+        ))
+        .into()
+    })
+}
+
+/// The statement that spends a claimed change, expecting one row: its
+/// message of the table's change queue, by its id and its claim's token.
+fn spend_claim(dialect: Dialect, table: &Table, claim: &Claim) -> Result<Statement, Error> {
+    Ok(Statement::write(
+        format!(
+            "DELETE FROM {} WHERE {}",
+            quote(&changes_of(table)?.table),
+            claimed_where(dialect)
+        ),
+        vec![
+            Bind::Text(claim.id.clone()),
+            Bind::Text(claim.token.clone()),
+        ],
+    ))
 }
 
 /// The deadline a deadline command runs: its row's table and its queue, the
@@ -402,19 +644,51 @@ impl Due<'_> {
         })
     }
 
-    /// Whether the claim still holds its message.
-    async fn claimed<S: Store>(&self, store: &S, claim: &Claim) -> Result<bool, Error> {
-        let text = format!(
-            "SELECT 1 FROM {} WHERE {}",
-            quote(&self.queue.table),
-            claimed_where(store.dialect())
-        );
-        let values = [
-            Bind::Text(claim.id.clone()),
-            Bind::Text(claim.token.clone()),
-        ];
-        Ok(!store.query(&text, &values).await?.is_empty())
+    /// The statement that releases the claimed message of a vetoed fire,
+    /// expecting one row: ready again, due in
+    /// [`crate::VETOED_RETRY_SECONDS`], its claim's attempt given back, as
+    /// D80's release counts none.
+    fn release(&self, dialect: Dialect, claim: &Claim) -> Statement {
+        let (attempts, due_at, now) = match dialect {
+            Dialect::Postgres => (
+                "GREATEST(\"attempts\" - 1, 0)",
+                "now() + make_interval(secs => $3)",
+                "now()",
+            ),
+            Dialect::Sqlite => (
+                "MAX(\"attempts\" - 1, 0)",
+                "strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+' || (?3) || ' seconds')",
+                "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+            ),
+        };
+        Statement::write(
+            format!(
+                "UPDATE {} SET \"state\" = 'ready', \"attempts\" = {attempts}, \"claim_token\" = NULL, \"claim_expires_at\" = NULL, \"due_at\" = {due_at}, \"updated_at\" = {now} WHERE {}",
+                quote(&self.queue.table),
+                claimed_where(dialect)
+            ),
+            vec![
+                Bind::Text(claim.id.clone()),
+                Bind::Text(claim.token.clone()),
+                Bind::Int(VETOED_RETRY_SECONDS),
+            ],
+        )
     }
+}
+
+/// Whether a claim still holds its message of a queue's table: the
+/// message's id and the claim's token, claimed.
+async fn claim_held<S: Store>(store: &S, table: &str, claim: &Claim) -> Result<bool, Error> {
+    let text = format!(
+        "SELECT 1 FROM {} WHERE {}",
+        quote(table),
+        claimed_where(store.dialect())
+    );
+    let values = [
+        Bind::Text(claim.id.clone()),
+        Bind::Text(claim.token.clone()),
+    ];
+    Ok(!store.query(&text, &values).await?.is_empty())
 }
 
 /// The condition of a claimed message by its id and its claim's token.
@@ -768,15 +1042,20 @@ async fn settle<S: Store>(
                 for request in requests {
                     // A store whose locks are fenced checks each read made
                     // under one in the unit that writes, and has no check
-                    // of sub-table rows yet (D103, left for later).
-                    if store.fenced()
-                        && !answers.locks.is_empty()
-                        && matches!(request, ReadRequest::SubRows { .. })
-                    {
-                        return Err(internal(
-                            "a read of sub-table rows under a lock has no check on SQLite or D1 yet (D103)",
-                        )
-                        .into());
+                    // of sub-table rows or of the rows that link to a row
+                    // yet (D103, left for later).
+                    if store.fenced() && !answers.locks.is_empty() {
+                        match request {
+                            ReadRequest::SubRows { .. } => return Err(internal(
+                                "a read of sub-table rows under a lock has no check on SQLite or D1 yet (D103)",
+                            )
+                            .into()),
+                            ReadRequest::Linked { .. } => return Err(internal(
+                                "a read of the rows that link to a row under a lock has no check on SQLite or D1 yet (D103)",
+                            )
+                            .into()),
+                            _ => {}
+                        }
                     }
                     let answer = answer_of(host.layout, store, &request).await?;
                     answers.answer(request, answer);
@@ -840,6 +1119,20 @@ async fn answer_of<S: Store>(
                 read_sub_rows(store, table, sub, key).await?,
             ))
         }
+        ReadRequest::Linked {
+            type_name,
+            field,
+            key,
+            after,
+            limit,
+        } => {
+            let Some(table) = layout.table(type_name) else {
+                return Ok(Answer::Linked(LinkedRows::default()));
+            };
+            Ok(Answer::Linked(
+                read_linked(store, table, field, key, after.as_deref(), *limit).await?,
+            ))
+        }
         other => Err(internal(format!(
             "the adapter answers no read of this kind: {}",
             json_of(other)
@@ -853,23 +1146,9 @@ async fn answer_of<S: Store>(
 /// NULL column absent, a use with no value absent, and its version.
 async fn read_row_of<S: Store>(store: &S, table: &Table, key: &str) -> Result<Option<Row>, Error> {
     let dialect = store.dialect();
-    let owned = table
-        .uses
-        .iter()
-        .flat_map(|used| used.fields.iter().map(|field| &field.column));
-    // Each column under an alias of its place, so no two columns' names
-    // meet in the row.
-    let mut list: Vec<String> = table
-        .own
-        .iter()
-        .chain(owned)
-        .enumerate()
-        .map(|(i, column)| format!("{} AS c{i}", selected(dialect, &column.column)))
-        .collect();
-    list.push(format!("{} AS v", quote(&table.version)));
     let text = format!(
         "SELECT {} FROM {} WHERE {} = {}{}",
-        list.join(", "),
+        row_list(dialect, table).join(", "),
         quote(&table.table),
         quote(&table.key.column),
         placeholder(dialect, 1),
@@ -879,7 +1158,30 @@ async fn read_row_of<S: Store>(store: &S, table: &Table, key: &str) -> Result<Op
     let Some(cells) = rows.into_iter().next() else {
         return Ok(None);
     };
-    let mut cells = cells.into_iter();
+    Ok(Some(row_of(cells.into_iter(), table, key)?))
+}
+
+/// The select list of a row read: each own column, then each use's owned
+/// columns, each under an alias of its place, so no two columns' names
+/// meet in the row, and the version last.
+fn row_list(dialect: Dialect, table: &Table) -> Vec<String> {
+    let owned = table
+        .uses
+        .iter()
+        .flat_map(|used| used.fields.iter().map(|field| &field.column));
+    let mut list: Vec<String> = table
+        .own
+        .iter()
+        .chain(owned)
+        .enumerate()
+        .map(|(i, column)| format!("{} AS c{i}", selected(dialect, &column.column)))
+        .collect();
+    list.push(format!("{} AS v", quote(&table.version)));
+    list
+}
+
+/// A row from the cells of [`row_list`], in its order.
+fn row_of(mut cells: impl Iterator<Item = Cell>, table: &Table, key: &str) -> Result<Row, Error> {
     let mut next = |column: &Column| from_cell(cells.next().unwrap_or(Cell::Null), column, table);
     let mut row = Row::default();
     for column in &table.own {
@@ -899,7 +1201,70 @@ async fn read_row_of<S: Store>(store: &S, table: &Table, key: &str) -> Result<Op
         }
     }
     row.version = version_of(cells.next(), table, key)?;
-    Ok(Some(row))
+    Ok(row)
+}
+
+/// One page of the rows of a table whose own field `field` holds `key`
+/// (D103): live rows alone on a soft-deletable table, in the key column's
+/// order, after the key `after` when given, at most `limit`, each by its
+/// key as the key column reads (a UUID's base62) and read as a row read
+/// reads it, and whether more follow. A field the table has no own column
+/// for is internal.
+async fn read_linked<S: Store>(
+    store: &S,
+    table: &Table,
+    field: &str,
+    key: &str,
+    after: Option<&str>,
+    limit: usize,
+) -> Result<LinkedRows, Error> {
+    let Some(column) = table.own.iter().find(|column| column.field == field) else {
+        return Err(internal(format!(
+            "{} has no own field {field} in the behaviors' layout",
+            table.type_name
+        ))
+        .into());
+    };
+    let dialect = store.dialect();
+    let mut values = vec![to_column(&Value::String(key.to_owned()), column, table)?];
+    let mut text = format!(
+        "SELECT {} AS k, {} FROM {} WHERE {} = {}{}",
+        selected(dialect, &table.key.column),
+        row_list(dialect, table).join(", "),
+        quote(&table.table),
+        quote(&column.column),
+        placeholder(dialect, 1),
+        live_and(table)
+    );
+    if let Some(after) = after {
+        values.push(key_value(table, after)?);
+        text.push_str(&format!(
+            " AND {} > {}",
+            quote(&table.key.column),
+            placeholder(dialect, 2)
+        ));
+    }
+    text.push_str(&format!(
+        " ORDER BY {} LIMIT {}",
+        quote(&table.key.column),
+        limit.saturating_add(1)
+    ));
+    let mut page = LinkedRows::default();
+    for cells in store.query(&text, &values).await? {
+        if page.rows.len() == limit {
+            page.more = true;
+            break;
+        }
+        let mut cells = cells.into_iter();
+        let at = match from_cell(cells.next().unwrap_or(Cell::Null), &table.key, table)? {
+            Some(Value::String(at)) => at,
+            Some(other) => other.to_string(),
+            None => continue,
+        };
+        let row = row_of(cells, table, &at)?;
+        page.rows.push(KeyedRow { key: at, row });
+    }
+    Ok(page)
 }
 
 /// The rows of a use's sub-table on one row, in key order (by code point,
@@ -1039,12 +1404,14 @@ fn fences_of<S: Store>(
 
 /// The statements of a change set, in the order of a unit (D103): every row
 /// write, each fenced to change one row (a create of a key the table holds
-/// is refused as conflict); a deadline command's spend of its arming; the
-/// sub-table row writes; the deadlines armed and cleared; then, for each
-/// row the change set deletes, its deadlines' messages and, deleted for
-/// good, its sub-table rows, whose writes and deadlines the unit skips.
-/// Outbox events, and a kind of write the adapter does not know, refuse
-/// the command as internal.
+/// is refused as conflict), and a row a change command found gone, its
+/// deadlines and sub-table rows deleted unless a row of its key came back;
+/// a deadline command's spend of its arming, or a change command's of its
+/// message; the sub-table row writes; the deadlines armed and cleared;
+/// then, for each row the change set deletes, its deadlines' messages and,
+/// deleted for good, its sub-table rows, whose writes and deadlines the
+/// unit skips. Outbox events, and a kind of write the adapter does not
+/// know, refuse the command as internal.
 async fn statements_of<S: Store>(
     layout: &Layout,
     store: &S,
@@ -1056,7 +1423,7 @@ async fn statements_of<S: Store>(
 ) -> Result<Vec<Statement>, Error> {
     if !changes.events.is_empty() {
         return Err(internal(format!(
-            "{} of {type_name} writes outbox events, which the adapter takes once the outbox has a table of its own (D103's order of the work, step 3)",
+            "{} of {type_name} writes outbox events of a behavior's own, which the adapter does not take yet: a table's change queue holds its writes, and the event stream comes later (D103)",
             command.action.name()
         ))
         .into());
@@ -1138,6 +1505,10 @@ async fn statements_of<S: Store>(
                     )?
                 }
             },
+            RowWrite::Gone { key, .. } => {
+                statements.extend(gone_of(dialect, table, key)?);
+                continue;
+            }
             other => {
                 return Err(internal(format!(
                     "the adapter takes no row write of this kind: {}",
@@ -1148,9 +1519,10 @@ async fn statements_of<S: Store>(
         };
         statements.push(statement);
     }
-    // The arming a deadline command spends, after the rows it holds to
-    // their versions, so its lock comes after theirs as every command's
-    // does, and before the deadlines the command arms again.
+    // The arming a deadline command spends, or the message a change
+    // command does, after the rows it holds to their versions, so its lock
+    // comes after theirs as every command's does, and before the deadlines
+    // the command arms again.
     statements.extend(spend);
     let gone = |type_name: &str, key: Option<&str>| {
         deleted
@@ -1199,6 +1571,46 @@ async fn statements_of<S: Store>(
                 ));
             }
         }
+    }
+    Ok(statements)
+}
+
+/// The statements of a row a change command found gone (D103), neither
+/// fenced nor held to a count, each harmless when the row came back: its
+/// deadlines' messages, unless a live row of its key is there, and its
+/// sub-table rows, unless any row of its key is there (a soft-deleted row
+/// keeps them, as a soft delete through the core does).
+fn gone_of(dialect: Dialect, table: &Table, key: &str) -> Result<Vec<Statement>, Error> {
+    let p1 = placeholder(dialect, 1);
+    let row = |live: &str| {
+        format!(
+            "NOT EXISTS (SELECT 1 FROM {} WHERE {} = {p1}{live})",
+            quote(&table.table),
+            quote(&table.key.column)
+        )
+    };
+    let mut statements = Vec::new();
+    if let Some(queue) = &table.deadlines {
+        statements.push(Statement::any(
+            format!(
+                "DELETE FROM {} WHERE {} = {p1} AND {}",
+                quote(&queue.table),
+                quote(&queue.row_key),
+                row(&live_and(table))
+            ),
+            vec![key_value(table, key)?],
+        ));
+    }
+    for sub in table.uses.iter().flat_map(|used| &used.tables) {
+        statements.push(Statement::any(
+            format!(
+                "DELETE FROM {} WHERE {} = {p1} AND {}",
+                quote(&sub.table),
+                quote(&sub.row),
+                row("")
+            ),
+            vec![key_value(table, key)?],
+        ));
     }
     Ok(statements)
 }

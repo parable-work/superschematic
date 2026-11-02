@@ -5,8 +5,11 @@
 //! then's four outcomes, until both ways, reset and snooze and their
 //! permission, the Workflow a config reads (implied, named, several, none),
 //! a config change that reconciles at the next write, the computed
-//! deadlines a read shows, and the config and the operations' parameters
-//! held to the declaration file's schemas. Where the engine's message names
+//! deadlines a read shows, a write heard from the table's change queue (the
+//! core's own, which changes nothing, a raw update of a field start and a
+//! raw insert, which arm), a deadline that reconciles its row before it
+//! fires, and the config and the operations' parameters held to the
+//! declaration file's schemas. Where the engine's message names
 //! a namespace or a version, the core's leaves them out and a host writes
 //! them (the core's README).
 
@@ -16,7 +19,8 @@ use serde_json::{json, Map, Value};
 use superschematic_rules::{
     merge_patch, Action, Answer, Behavior, Caller, ChangeSet, Command, ConfigError, ConfigTarget,
     Core, DeadlineChange, Declaration, FieldSpec, GuardRequest, Hook, Outcome, ReadRequest,
-    Refusal, Row, RowWrite, Source, SubRow, SubRowChange, TableDecl, TypeSpec, UseSpec, Veto, View,
+    Refusal, Row, RowChange, RowImage, RowWrite, Source, SubRow, SubRowChange, TableDecl, TypeSpec,
+    UseSpec, Veto, View, WriteKind,
 };
 use superschematic_rules_behaviors::{core, Timers, TimersConfig};
 
@@ -305,6 +309,40 @@ impl Host {
     fn status(&self) -> Value {
         self.memory.rows["t1"].owned["status"]["status"].clone()
     }
+
+    // image is t1's fields as a write's image holds them.
+    fn image(&self) -> RowImage {
+        let row = &self.memory.rows["t1"];
+        RowImage {
+            own: row.own.clone(),
+            owned: row.owned.clone(),
+        }
+    }
+
+    // hear runs a write of t1 its table's change queue heard, as the worker
+    // runs it, and applies what it writes.
+    fn hear(
+        &mut self,
+        write: WriteKind,
+        before: Option<RowImage>,
+        after: Option<RowImage>,
+        at: i64,
+    ) -> ChangeSet {
+        let change = RowChange {
+            write,
+            at,
+            before,
+            after,
+        };
+        changed(self.run(
+            &runner(),
+            at,
+            Action::Change {
+                key: "t1".to_owned(),
+                change,
+            },
+        ))
+    }
 }
 
 // ---- the fixtures ----
@@ -453,7 +491,7 @@ fn the_declaration_is_the_files() {
     assert_eq!(
         Timers.declaration(),
         Declaration::new("Timers")
-            .field("deadlines")
+            .computed("deadlines")
             .sub_table(TableDecl::new(
                 "deadlines",
                 "name",
@@ -468,6 +506,7 @@ fn the_declaration_is_the_files() {
                 ]
             ))
             .arms_deadlines()
+            .hears_changes()
             .operation("fireTimer", true)
             .operation("resetTimer", true)
             .operation("snoozeTimer", true)
@@ -1028,4 +1067,135 @@ fn a_config_lists_its_deadlines_in_name_order() {
         .collect();
     assert_eq!(names, ["chase", "respond"]);
     assert_eq!(parsed.status, None, "no deadline reads the status");
+}
+
+// ---- writes heard from the table's change queue ----
+
+/// A write the core made, heard from the table's change queue after the
+/// commit, changes nothing: the core's own write left the row reconciled.
+#[test]
+fn a_heard_write_the_core_made_changes_nothing() {
+    let mut host = Host::new(json!({"deadlines": {
+        "respond": {"start": {"create": true}, "afterMs": HOUR},
+        "idle": {"start": {"enters": "waiting"}, "afterMs": HOUR},
+        "remind": {"start": {"field": "visitAt"}, "afterMs": -HOUR}
+    }}));
+    host.create(
+        "t1",
+        json!({"title": "t1", "visitAt": START + 24 * HOUR}),
+        START,
+    );
+    let inserted = host.image();
+    let quiet = |changes: ChangeSet| {
+        assert!(
+            changes.rows.is_empty() && changes.sub_rows.is_empty() && changes.deadlines.is_empty(),
+            "{changes:?}"
+        );
+    };
+    quiet(host.hear(WriteKind::Insert, None, Some(inserted.clone()), START));
+    changed(host.transition("waiting", START + 10));
+    let moved = host.image();
+    quiet(host.hear(WriteKind::Update, Some(inserted), Some(moved), START + 10));
+    assert_eq!(
+        host.armed(),
+        [
+            ("idle".to_owned(), START + 10 + HOUR),
+            ("remind".to_owned(), START + 23 * HOUR),
+            ("respond".to_owned(), START + HOUR)
+        ]
+    );
+}
+
+/// A raw write of a field start, past the core, heard from the table's
+/// change queue, arms the deadline again from the time the field holds now,
+/// held to the version the row is at.
+#[test]
+fn a_raw_write_of_a_field_start_heard_arms_it_again() {
+    let mut host = Host::new(
+        json!({"deadlines": {"remind": {"start": {"field": "visitAt"}, "afterMs": -HOUR}}}),
+    );
+    host.create(
+        "t1",
+        json!({"title": "t1", "visitAt": START + 24 * HOUR}),
+        START,
+    );
+    let before = host.image();
+    host.memory
+        .rows
+        .get_mut("t1")
+        .expect("t1")
+        .own
+        .insert("visitAt".into(), json!(START + 48 * HOUR));
+    let after = host.image();
+    let heard = host.hear(WriteKind::Update, Some(before), Some(after), START + 5);
+    assert!(matches!(
+        heard.rows.as_slice(),
+        [RowWrite::Update {
+            expected_version: 1,
+            ..
+        }]
+    ));
+    assert_eq!(host.armed(), [("remind".to_owned(), START + 47 * HOUR)]);
+    assert_eq!(
+        host.deadlines(),
+        json!({"remind": {"dueAt": START + 47 * HOUR, "fired": false}})
+    );
+}
+
+/// A raw insert, heard from the table's change queue, arms a create
+/// deadline from the insert's time, which the row's sub-table keeps from
+/// then on; heard again, it arms nothing new.
+#[test]
+fn a_raw_insert_heard_arms_a_create_deadline_from_its_time() {
+    let mut host =
+        Host::new(json!({"deadlines": {"respond": {"start": {"create": true}, "afterMs": HOUR}}}));
+    host.memory.rows.insert(
+        "t1".to_owned(),
+        Row {
+            own: object(json!({"title": "t1"})),
+            owned: [(
+                "status".to_owned(),
+                object(json!({"status": "open", "enteredAt": START})),
+            )]
+            .into_iter()
+            .collect(),
+            version: 1,
+        },
+    );
+    let inserted = host.image();
+    host.hear(WriteKind::Insert, None, Some(inserted.clone()), START + 7);
+    assert_eq!(host.armed(), [("respond".to_owned(), START + 7 + HOUR)]);
+    let again = host.hear(WriteKind::Insert, None, Some(inserted), START + 9);
+    assert!(again.sub_rows.is_empty() && again.deadlines.is_empty());
+    assert_eq!(host.armed(), [("respond".to_owned(), START + 7 + HOUR)]);
+}
+
+/// A deadline that falls due reconciles its row first: one whose field a
+/// raw write moved, before that write's change ran, is armed again at its
+/// new time rather than fired on its old arming.
+#[test]
+fn a_deadline_reconciles_its_row_before_it_fires() {
+    let mut host = Host::new(
+        json!({"deadlines": {"remind": {"start": {"field": "visitAt"}, "afterMs": -HOUR}}}),
+    );
+    host.create(
+        "t1",
+        json!({"title": "t1", "visitAt": START + 2 * HOUR}),
+        START,
+    );
+    assert_eq!(host.armed(), [("remind".to_owned(), START + HOUR)]);
+    host.memory
+        .rows
+        .get_mut("t1")
+        .expect("t1")
+        .own
+        .insert("visitAt".into(), json!(START + 5 * HOUR));
+    let ran = host.fall_due(START + HOUR, &runner());
+    assert_eq!(ran.len(), 1);
+    changed(ran.into_iter().next().expect("a run").1);
+    assert_eq!(host.armed(), [("remind".to_owned(), START + 4 * HOUR)]);
+    assert_eq!(
+        host.deadlines(),
+        json!({"remind": {"dueAt": START + 4 * HOUR, "fired": false}})
+    );
 }

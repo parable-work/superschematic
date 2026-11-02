@@ -28,7 +28,7 @@ use serde_json::{Map, Value};
 use crate::behavior::{Hook, Stop};
 use crate::changes::{DeadlineChange, OutboxEvent, SubRowChange, SubRowWrite};
 use crate::command::Caller;
-use crate::reads::{Answer, LockKey, ReadRequest, Row, SubRow};
+use crate::reads::{Answer, LinkedRows, LockKey, ReadRequest, Row, SubRow};
 use crate::refusal::{Refusal, Veto};
 use crate::run::{Frame, Run};
 use crate::spec::{Anchor, TypeSpec};
@@ -161,6 +161,29 @@ impl<'r, C> View<'r, C> {
     /// Whether a type has any rows.
     pub fn has_rows(&self, type_name: &str) -> Hook<bool> {
         self.run.has_rows(type_name)
+    }
+
+    /// One page of the rows of a type whose own field holds a key, as the
+    /// host read them, in key order: [`crate::LINKED_PAGE`] at most, after
+    /// the key `after` when given. A rule over the rows that link to a row
+    /// pages it to the end (Reactions' allTerminal); the run's own writes
+    /// are not in it.
+    pub fn read_linked(
+        &self,
+        type_name: &str,
+        field: &str,
+        key: &str,
+        after: Option<&str>,
+    ) -> Hook<&'r LinkedRows> {
+        self.run
+            .read_linked(&ReadRequest::linked(type_name, field, key, after))
+    }
+
+    /// A row of any type as the run has it: with its writes so far applied
+    /// when the run reached it, else the host's; `None` when the type has
+    /// none of the key or the run deleted it.
+    pub fn row_of(&self, type_name: &str, key: &str) -> Hook<Option<Row>> {
+        self.run.row_of(type_name, key)
     }
 
     /// A sub-table's rows of any row, as the host read them, in key order:

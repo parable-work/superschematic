@@ -27,7 +27,9 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::changes::RowChange;
 use crate::context::{ConfigCx, Cx, View};
+use crate::core::Core;
 use crate::reads::{LockKey, ReadRequest, Row, SubRow};
 use crate::refusal::{Refusal, SchemaIssue, ValidationIssue, Veto};
 use crate::spec::{Anchor, FieldSpec, TypeSpec, UseSpec};
@@ -72,8 +74,9 @@ impl From<Refusal> for Stop {
 }
 
 /// What a behavior declares: its name, the fields it owns on a row and the
-/// one that holds a field anchor's value, its sub-tables, whether it arms
-/// deadlines, its operations, the veto codes it refuses with, and whether a
+/// one that holds a field anchor's value, the ones it computes at a read,
+/// its sub-tables, whether it arms deadlines and whether it hears its row's
+/// writes, its operations, the veto codes it refuses with, and whether a
 /// create gives it parameters. The core holds a behavior's writes to it: a
 /// field or a sub-table it does not declare is a defect, and so are a value
 /// a sub-table it declares with fields does not hold, a deadline armed or
@@ -93,8 +96,10 @@ impl From<Refusal> for Stop {
 /// run of other characters one `_` (Workflow: `workflow_status`,
 /// `workflow_entered_at`), so an own field of the same name sits beside it.
 /// A sub-table maps to a table of its own with a foreign key to the row,
-/// its key and each declared field a column, and a behavior that arms
-/// deadlines gives the row's table a deadline queue (the README's layout).
+/// its key and each declared field a column, a behavior that arms
+/// deadlines gives the row's table a deadline queue, and one that hears
+/// changes gives it a change queue its trigger writes (the README's
+/// layout).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
@@ -116,6 +121,15 @@ pub struct Declaration {
     /// (D103). One that declares none arms and clears none.
     #[serde(default)]
     pub arms_deadlines: bool,
+    /// Whether it hears its row's writes, whoever makes them
+    /// ([`Behavior::heard`]): a table that composes it gets a change queue
+    /// its trigger writes, which a worker of the API runs (D103).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hears_changes: bool,
+    /// The fields among `fields` it computes at a read and no column holds
+    /// (Timers' `deadlines`), which a write of the row does not carry.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub computed: Vec<String>,
     #[serde(default)]
     pub operations: Vec<OperationDecl>,
     #[serde(default)]
@@ -125,6 +139,10 @@ pub struct Declaration {
     /// use whose behavior takes none is refused, `{}` included.
     #[serde(default)]
     pub create_params: bool,
+}
+
+fn is_false(flag: &bool) -> bool {
+    !*flag
 }
 
 /// One declared sub-table: its name, the field whose value keys a row
@@ -234,6 +252,30 @@ impl Declaration {
         self
     }
 
+    /// The declaration of a behavior that hears its row's writes.
+    pub fn hears_changes(mut self) -> Self {
+        self.hears_changes = true;
+        self
+    }
+
+    /// The declaration with a field it computes at a read, which it
+    /// declares as a field too.
+    pub fn computed(mut self, name: impl Into<String>) -> Self {
+        let name = name.into();
+        if !self.has_field(&name) {
+            self.fields.push(name.clone());
+        }
+        if !self.computed.contains(&name) {
+            self.computed.push(name);
+        }
+        self
+    }
+
+    /// Whether it computes a field at a read.
+    pub fn is_computed(&self, name: &str) -> bool {
+        self.computed.iter().any(|field| field == name)
+    }
+
     /// The declaration with an operation.
     pub fn operation(mut self, name: impl Into<String>, writes: bool) -> Self {
         self.operations.push(OperationDecl {
@@ -341,17 +383,42 @@ impl std::error::Error for ConfigError {}
 
 /// The type a config is parsed on: the use's own entry and the type's other
 /// uses, so a config that names another use (`status: 'fulfilment'`) can be
-/// checked against the list.
+/// checked against the list, and the declarations of the behaviors the core
+/// runs, so one that names another use's field can be checked against what
+/// that behavior declares.
 #[derive(Clone, Copy, Debug)]
 pub struct ConfigTarget<'a> {
     pub(crate) spec: &'a TypeSpec,
     pub(crate) index: usize,
+    pub(crate) core: Option<&'a Core>,
 }
 
 impl<'a> ConfigTarget<'a> {
-    /// The target of the use at a position of a type's list.
+    /// The target of the use at a position of a type's list, with no
+    /// declarations: a host's, which runs no core.
     pub fn new(spec: &'a TypeSpec, index: usize) -> Self {
-        ConfigTarget { spec, index }
+        ConfigTarget {
+            spec,
+            index,
+            core: None,
+        }
+    }
+
+    // of_core is the target the core parses a use on, which knows the
+    // behaviors it runs.
+    pub(crate) fn of_core(core: &'a Core, spec: &'a TypeSpec, index: usize) -> Self {
+        ConfigTarget {
+            spec,
+            index,
+            core: Some(core),
+        }
+    }
+
+    /// A behavior's declaration, by its name, when the core runs it: what a
+    /// config that names another use's field reads. `None` for a target a
+    /// host made ([`ConfigTarget::new`]).
+    pub fn declaration(&self, behavior: &str) -> Option<&'a Declaration> {
+        self.core.and_then(|core| core.declaration(behavior))
     }
 
     pub fn type_name(&self) -> &'a str {
@@ -487,10 +554,12 @@ pub enum Change<'a> {
         use_id: &'a str,
         name: &'a str,
     },
+    /// The run wrote the row while it heard a change ([`Behavior::heard`]).
+    Heard,
 }
 
 impl Change<'_> {
-    /// `create`, `update`, `delete`, `operation` or `deadline`.
+    /// `create`, `update`, `delete`, `operation`, `deadline` or `heard`.
     pub fn kind(&self) -> &'static str {
         match self {
             Change::Create => "create",
@@ -498,6 +567,54 @@ impl Change<'_> {
             Change::Delete => "delete",
             Change::Operation { .. } => "operation",
             Change::Deadline { .. } => "deadline",
+            Change::Heard => "heard",
+        }
+    }
+}
+
+/// A type whose rows' writes a use hears beside its own row's (D103), by a
+/// to-one relation of that type to the use's type: Reactions' allTerminal
+/// over Task's `project` listens to `{ type: Task, link: project }`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Listen {
+    /// The type whose writes it hears (`Task`).
+    #[serde(rename = "type")]
+    pub type_name: String,
+    /// The name of that type's relation to the use's type (`project`).
+    pub link: String,
+}
+
+impl Listen {
+    pub fn new(type_name: impl Into<String>, link: impl Into<String>) -> Self {
+        Listen {
+            type_name: type_name.into(),
+            link: link.into(),
+        }
+    }
+}
+
+/// A write a use hears ([`Behavior::heard`]).
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub enum Heard<'a> {
+    /// A write of the row the hook runs on.
+    Own { change: &'a RowChange },
+    /// A write of a row of `type_name` by its key, whose relation `link`
+    /// holds, or held, the key of the row the hook runs on.
+    Linked {
+        type_name: &'a str,
+        key: &'a str,
+        link: &'a str,
+        change: &'a RowChange,
+    },
+}
+
+impl<'a> Heard<'a> {
+    /// The write heard.
+    pub fn change(&self) -> &'a RowChange {
+        match self {
+            Heard::Own { change } | Heard::Linked { change, .. } => change,
         }
     }
 }
@@ -647,11 +764,34 @@ pub trait Behavior: Send + Sync + 'static {
     }
 
     /// Runs after a create (after every initializer), an update, a delete,
-    /// a writing operation a caller called, or a deadline, in list order;
-    /// and on another row, after a create of it (`create_row`) or a
-    /// writing operation of it a use called (`call_on`).
+    /// a writing operation a caller called, a deadline, or a write heard
+    /// from the outbox whose hearing hooks wrote the row ([`Change::Heard`]),
+    /// in list order; and on another row, after a create of it
+    /// (`create_row`) or a writing operation of it a use called
+    /// (`call_on`).
     fn after_change(&self, cx: &Cx<'_, Self::Config>, change: &Change<'_>) -> Hook<()> {
         let _ = (cx, change);
+        Ok(())
+    }
+
+    /// The types whose rows' writes the use hears beside its own row's
+    /// (D103), each by a to-one relation of that type to the use's type:
+    /// what the core matches a change of a row of that type against. None
+    /// by default.
+    fn listens(&self, config: &Self::Config) -> Vec<Listen> {
+        let _ = config;
+        Vec::new()
+    }
+
+    /// Runs when the outbox hands the core a write the use hears: of its
+    /// own row, for a behavior whose declaration hears changes, on the row
+    /// as it is now; or of a row of a type it listens to
+    /// ([`Behavior::listens`]), on the row the relation holds the key of.
+    /// When it writes that row, the core holds the write to the version it
+    /// read and runs the row's after-change hooks ([`Change::Heard`]).
+    /// Nothing by default.
+    fn heard(&self, cx: &Cx<'_, Self::Config>, heard: &Heard<'_>) -> Hook<()> {
+        let _ = (cx, heard);
         Ok(())
     }
 
@@ -690,6 +830,7 @@ mod tests {
         assert!(!declaration.has_field("title"));
         assert!(!declaration.has_table("rows"));
         assert!(!declaration.arms_deadlines);
+        assert!(!declaration.hears_changes);
         assert_eq!(
             declaration.find_operation("transition").map(|op| op.writes),
             Some(true)
@@ -719,6 +860,30 @@ mod tests {
                 {"name": "deadlines", "key": "name", "fields": ["name", "dueAt", "fired"]},
                 {"name": "notes", "fields": []}
             ])
+        );
+    }
+
+    #[test]
+    fn a_declaration_holds_whether_it_hears_changes_and_what_it_computes() {
+        let declaration = Declaration::new("Timers")
+            .computed("deadlines")
+            .computed("deadlines")
+            .hears_changes();
+        assert!(declaration.hears_changes);
+        assert_eq!(declaration.fields, ["deadlines"]);
+        assert!(declaration.is_computed("deadlines"));
+        assert!(!declaration.is_computed("status"));
+        let written = serde_json::to_value(&declaration).unwrap();
+        assert_eq!(written["hearsChanges"], json!(true));
+        assert_eq!(written["computed"], json!(["deadlines"]));
+        // A declaration that hears nothing and computes nothing writes
+        // neither member.
+        let plain = serde_json::to_value(Declaration::new("Workflow")).unwrap();
+        assert!(plain.get("hearsChanges").is_none());
+        assert!(plain.get("computed").is_none());
+        assert_eq!(
+            serde_json::to_value(Listen::new("Task", "project")).unwrap(),
+            json!({"type": "Task", "link": "project"})
         );
     }
 

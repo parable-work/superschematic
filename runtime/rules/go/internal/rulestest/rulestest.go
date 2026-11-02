@@ -383,3 +383,61 @@ func (db *DB) DeadlineQueue(table, rowKey string) []string {
 		fmt.Sprintf(`CREATE INDEX "%s_row" ON %s (row_key)`, table, quoted),
 	}
 }
+
+// ChangeQueue is the DDL of a table's change queue (D103) as sqlgen writes
+// one in the dialect: a plain queue's columns and the message's row key (of
+// the SQL type rowKey, the row table's key's), write, time and images. Its
+// id takes the dialect's UUID default, as the change trigger's insert names
+// none.
+func (db *DB) ChangeQueue(table, rowKey string) []string {
+	quoted := `"` + strings.ReplaceAll(table, `"`, `""`) + `"`
+	var columns string
+	if db.Dialect == rules.DialectPostgres {
+		columns = fmt.Sprintf(`id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  row_key %s NOT NULL,
+  write TEXT NOT NULL,
+  at BIGINT NOT NULL,
+  before JSONB,
+  after JSONB,
+  state TEXT DEFAULT 'ready' NOT NULL,
+  attempts INTEGER DEFAULT 0 NOT NULL,
+  due_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  claim_expires_at TIMESTAMPTZ,
+  claim_token UUID,
+  last_error TEXT,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL`, rowKey)
+	} else {
+		now := "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+		columns = fmt.Sprintf(`id TEXT DEFAULT %s NOT NULL PRIMARY KEY,
+  row_key %s NOT NULL,
+  write TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  before TEXT,
+  after TEXT,
+  state TEXT DEFAULT 'ready' NOT NULL,
+  attempts INTEGER DEFAULT 0 NOT NULL,
+  due_at TEXT DEFAULT %s NOT NULL,
+  claim_expires_at TEXT,
+  claim_token TEXT,
+  last_error TEXT,
+  created_at TEXT DEFAULT %s NOT NULL,
+  updated_at TEXT DEFAULT %s NOT NULL`, sqliteUUIDDefault, rowKey, now, now, now)
+	}
+	return []string{fmt.Sprintf("CREATE TABLE %s (\n  %s\n)", quoted, columns)}
+}
+
+// Now is the database's clock, read past the adapter: Postgres's now() of
+// a statement of its own, SQLite's 'now'.
+func (db *DB) Now(t testing.TB) time.Time {
+	t.Helper()
+	if db.Dialect == rules.DialectPostgres {
+		return db.Rows(t, "SELECT now()")[0][0].(time.Time)
+	}
+	text := fmt.Sprint(db.Rows(t, "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')")[0][0])
+	at, err := time.Parse(time.RFC3339Nano, text)
+	if err != nil {
+		t.Fatalf("SQLite's now %q: %v", text, err)
+	}
+	return at
+}

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import {
   MAX_ATTEMPTS,
   RulesRefusal,
+  VETOED_RETRY_SECONDS,
   execute,
   readArmedDeadlines,
   readSubRows,
@@ -13,6 +14,7 @@ import {
   type CoreCaller,
   type CoreChangeSet,
   type CoreCommand,
+  type CoreRefusal,
   type CoreStep,
   type CoreTypeSpec,
   type DeadlineClaim,
@@ -30,7 +32,9 @@ import { bumpVersion, columnTypes, postgresDatabase, rulesDsn, sqliteDatabase, t
 // in a sub-table (alarm_clock_rings) and arms it as a message of the
 // table's deadline queue (alarm_deadline_queue), whose tables are written
 // by hand as sqlgen writes them. A claim is made with SQL, as a worker's
-// claim statement makes one. The Postgres cases are skipped without
+// claim statement makes one. A guard's veto of a fire, which no ported
+// behavior's guard can make, is a core of the test's own that refuses the
+// deadline command as vetoed. The Postgres cases are skipped without
 // SUPERSCHEMATIC_RULES_TEST_DATABASE_URL.
 
 const layout: RulesLayout = {
@@ -133,6 +137,23 @@ const clock: RulesCore = {
   },
 };
 
+/** The refusal a guard of a behavior Hold makes of a fire, as the core gives a veto. */
+const held: CoreRefusal = {
+  code: 'vetoed',
+  status: 409,
+  class: 'BehaviorVetoError',
+  message: 'behavior Hold vetoed fireTimer of Ticket t1: held',
+  details: { behavior: 'Hold' },
+};
+
+/** Clock with a guard that holds every fire: a deadline command is refused as vetoed; the rest run as Clock's. */
+const holding: RulesCore = {
+  run(spec, command, answers) {
+    if (command.action.kind === 'deadline') return { done: { refused: held } };
+    return clock.run(spec, command, answers);
+  },
+};
+
 const alice: CoreCaller = { subject: 'alice', permissions: [] };
 const worker: CoreCaller = { subject: 'alarms-api/AlarmClock', permissions: [] };
 
@@ -173,16 +194,17 @@ for (const dialect of dialects) {
   due_at ${pg ? 'TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP' : "TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"} NOT NULL,
   claim_expires_at ${t.timestamp},
   claim_token ${pg ? 'UUID' : 'TEXT'},
-  last_error TEXT
+  last_error TEXT,
+  updated_at ${pg ? 'TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP' : "TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"} NOT NULL
 )`);
       await db.exec(`CREATE UNIQUE INDEX alarm_deadline_queue_live ON alarm_deadline_queue (row_key, use_id, name) WHERE state IN ('ready', 'claimed')`);
     });
     afterAll(async () => db?.close());
 
-    /** Runs fn on a host over a transaction of the database, at the next tick of the test's clock. */
-    const inTransaction = <T>(fn: (host: RulesHost) => Promise<T>, wrap: (store: RulesStore) => RulesStore = s => s): Promise<T> => {
+    /** Runs fn on a host over a transaction of the database, at the next tick of the test's clock, on Clock unless another core is named. */
+    const inTransaction = <T>(fn: (host: RulesHost) => Promise<T>, wrap: (store: RulesStore) => RulesStore = s => s, core: RulesCore = clock): Promise<T> => {
       const at = (now += 1000);
-      return db.transaction(store => fn({ core: clock, layout, store: wrap(store), now: () => at }));
+      return db.transaction(store => fn({ core, layout, store: wrap(store), now: () => at }));
     };
 
     /** The messages of a row's deadlines, every state, with their due time as epoch milliseconds. */
@@ -338,6 +360,32 @@ for (const dialect of dialects) {
       const run = await inTransaction(host => runDeadline(host, 'Alarm', { key: 'a10', useId: 'Clock', name: 'ring', at: message!.at, payload: null }, worker, { claim: held }));
       expect(run).toEqual({ ran: false, why: 'gone', refusal: { code: 'not_found', status: 404, class: 'EngineError', message: 'Alarm a10 does not exist' } });
       expect(await messages('a10')).toEqual([]);
+    });
+
+    test('a vetoed fire is released, due again in a minute, counting no attempt', async () => {
+      await inTransaction(host => runCreate(host, 'Alarm', { title: 'Tide' }, alice, { id: 'a12' }));
+      const [message] = await messages('a12');
+      const ringBefore = await rings('a12');
+      const [before] = await db.rows(`SELECT attempts FROM alarm_deadline_queue WHERE id = ${p(1)}`, [message!.id]);
+      const claimed = await claim('a12');
+      const due = { key: 'a12', useId: 'Clock', name: 'ring', at: message!.at, payload: { n: 1 } };
+      const run = await inTransaction(host => runDeadline(host, 'Alarm', due, worker, { claim: claimed }), undefined, holding);
+      expect(run).toEqual({ ran: false, why: 'vetoed', refusal: held });
+      // Ready again, its attempt not counted, no claim on it, and due a
+      // minute on by the database's clock.
+      const seconds = db.dialect === 'postgres' ? 'EXTRACT(EPOCH FROM (due_at - now()))' : "(julianday(due_at) - julianday('now')) * 86400";
+      const [after] = await db.rows(`SELECT state, attempts, claim_token, claim_expires_at, ${seconds} AS wait FROM alarm_deadline_queue WHERE id = ${p(1)}`, [claimed.id]);
+      expect(after).toMatchObject({ state: 'ready', claim_token: null, claim_expires_at: null });
+      expect(Number(after!.attempts)).toBe(Number(before!.attempts));
+      expect(Number(after!.wait)).toBeGreaterThanOrEqual(VETOED_RETRY_SECONDS - 1);
+      expect(Number(after!.wait)).toBeLessThanOrEqual(VETOED_RETRY_SECONDS + 1);
+      // The deadline stays armed, its sub-table row as it was.
+      expect(await rings('a12')).toEqual(ringBefore);
+      expect(await armed('a12')).toEqual([{ useId: 'Clock', name: 'ring', at: message!.at, payload: { n: 1 } }]);
+      // The claim released, a second release of it finds no message it holds.
+      expect(await inTransaction(host => runDeadline(host, 'Alarm', due, worker, { claim: claimed }), undefined, holding)).toEqual({ ran: false, why: 'claim lost' });
+      // Without a claim, a veto is the refusal it was.
+      await expect(inTransaction(host => execute(host, 'Alarm', { caller: worker, now: message!.at, action: { kind: 'deadline', ...due } }), undefined, holding)).rejects.toMatchObject({ refusal: held });
     });
 
     test('a sub-table row write that changes no row moves the unit, which a raw SQL write alone can make, until the command is busy', async () => {

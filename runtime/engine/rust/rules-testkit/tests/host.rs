@@ -240,7 +240,7 @@ fn a_row_that_moved_runs_again_from_fresh_state() {
         .execute_racing("Counter", add("c1", 2), |store: &mut Store, attempt| {
             if attempt == 0 {
                 // Another writer commits between the run and its apply.
-                store.write_row("Counter", "c1", object(json!({ "title": "Oak desk" })));
+                store.write_row("Counter", "c1", object(json!({ "title": "Oak desk" })), NOW);
             }
         })
         .unwrap();
@@ -266,7 +266,7 @@ fn a_row_that_keeps_moving_is_refused_as_busy_and_nothing_applies() {
         let refused = host
             .execute_racing("Counter", add("c1", 2), |store: &mut Store, _| {
                 raced += 1;
-                store.write_row("Counter", "c1", object(json!({ "title": "Desk" })));
+                store.write_row("Counter", "c1", object(json!({ "title": "Desk" })), NOW);
             })
             .unwrap_err();
         assert_eq!(raced, bound);
@@ -534,7 +534,7 @@ fn a_change_set_that_writes_two_rows_is_held_to_both_versions() {
     let applied = host
         .execute_racing("Counter", add_to("c2", 1), |store: &mut Store, attempt| {
             if attempt == 0 {
-                store.write_row("Counter", "c2", object(json!({ "title": "moved" })));
+                store.write_row("Counter", "c2", object(json!({ "title": "moved" })), NOW);
             }
         })
         .unwrap();
@@ -603,7 +603,7 @@ fn the_host_gives_each_command_a_request_id_kept_through_its_runs() {
     let applied = host
         .execute_racing("Counter", note(), |store: &mut Store, attempt| {
             if attempt == 0 {
-                store.write_row("Counter", "c1", object(json!({ "title": "Oak" })));
+                store.write_row("Counter", "c1", object(json!({ "title": "Oak" })), NOW);
             }
         })
         .unwrap();

@@ -223,10 +223,12 @@ type Declaration struct {
 	Description string          `json:"description,omitempty"`
 	Value       string          `json:"value,omitempty"`
 	Fields      []DeclaredField `json:"fields,omitempty"`
-	// Tables are the sub-tables the behavior keeps per row, and
-	// ArmsDeadlines whether it arms deadlines (D103).
+	// Tables are the sub-tables the behavior keeps per row, ArmsDeadlines
+	// whether it arms deadlines, and HearsChanges whether it hears the
+	// writes of its row, whoever makes them (D103).
 	Tables        []DeclaredTable     `json:"tables,omitempty"`
 	ArmsDeadlines bool                `json:"armsDeadlines,omitempty"`
+	HearsChanges  bool                `json:"hearsChanges,omitempty"`
 	Operations    []DeclaredOperation `json:"operations,omitempty"`
 }
 

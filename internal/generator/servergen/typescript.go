@@ -372,6 +372,20 @@ type TypeScriptWorker struct {
 	QueuesFunc string
 }
 
+// Messages names what a behavior worker's messages carry, for its main's
+// comment (D103): its table's deadline, change, or deadline or change.
+func (w *TypeScriptWorker) Messages() string {
+	switch {
+	case w == nil || w.Behavior == nil:
+		return ""
+	case w.Behavior.DeadlineQueue != "" && w.Behavior.ChangeQueue != "":
+		return "deadline or change"
+	case w.Behavior.ChangeQueue != "":
+		return "change"
+	}
+	return "deadline"
+}
+
 // TypeScriptDeriver is the deriver a TypeScript deriver's entrypoint runs
 // (D74): its @deriver class, the member of the API's Derivers that holds
 // its methods, and the engine it pulls from and settles to, the API's
@@ -765,10 +779,10 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			Package:      o.Deps.DatabaseTypesPackage,
 		}
 		if w.Behavior != nil {
-			// A behavior worker runs its table's deadlines through the
-			// repositories, on Postgres alone (D103).
+			// A behavior worker runs its table's deadlines and changes
+			// through the repositories, on Postgres alone (D103).
 			if !o.DepsORM() {
-				return nil, fmt.Errorf("stack %s: worker %s runs %s of %s, a behavior worker (D103), which runs %s's deadlines through the repositories %s's TypeScript types export for Postgres, and %s has none", in.Stack, in.Server, w.Name, o.SchemaName, w.Behavior.Table, o.Deps.Database, o.SchemaName)
+				return nil, fmt.Errorf("stack %s: worker %s runs %s of %s, a behavior worker (D103), which runs %s through the repositories %s's TypeScript types export for Postgres, and %s has none", in.Stack, in.Server, w.Name, o.SchemaName, w.Behavior.Runs(), o.Deps.Database, o.SchemaName)
 			}
 			s.Worker.Behavior = w.Behavior
 			s.Worker.QueuesFunc = w.QueuesFunc()
@@ -811,7 +825,7 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			return nil, fmt.Errorf("stack %s: %s %s runs on a platform whose artifact is a bundle, and a Workers entrypoint is built for a server, a job or a worker alone (D64, D92)", in.Stack, s.Kind, in.Server)
 		}
 		if s.Worker != nil && s.Worker.Behavior != nil {
-			return nil, fmt.Errorf("servergen: stack %s: worker %s runs %s, the behavior worker %s (D103), and an environment places it on Cloudflare Workers, whose drain.ts runs a @worker's handler alone; place the worker on a platform that builds an image", in.Stack, in.Server, s.Worker.Behavior.Deadlines(), s.Worker.Name)
+			return nil, fmt.Errorf("servergen: stack %s: worker %s runs %s, the behavior worker %s (D103), and an environment places it on Cloudflare Workers, whose drain.ts runs a @worker's handler alone; place the worker on a platform that builds an image", in.Stack, in.Server, s.Worker.Behavior.Runs(), s.Worker.Name)
 		}
 		s.Workers = true
 	}

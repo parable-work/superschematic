@@ -373,5 +373,11 @@ describe.skipIf(rulesCore === undefined || rulesDsn === '')('a repository of a t
     await expect(bare.order.createOne({ title: 'Desk' })).rejects.toThrow('opened with no core');
     const clash: RulesLayout = { types: { Order: { ...rules.types.Order!, uses: [{ ...rules.types.Order!.uses[0]!, id: 'getOne' }] } } };
     expect(() => ormOf(pool, { ...definition, rules: clash })).toThrow("Order's behavior Workflow on getOne would be the repository's own member getOne");
+    // A use with no operations, as Reactions has none (D103), adds no
+    // member, so none can clash.
+    const quiet: RulesLayout = { types: { Order: { ...rules.types.Order!, uses: [...rules.types.Order!.uses, { id: 'Reactions', behavior: 'Reactions', member: 'getOne', fields: [], operations: [] }] } } };
+    const repositories = ormOf<Repositories>(pool, { ...definition, rules: quiet });
+    expect(Object.keys(repositories.order)).not.toContain('reactions');
+    expect(typeof repositories.order.getOne).toBe('function');
   });
 });

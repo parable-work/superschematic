@@ -26,15 +26,28 @@
 //!   create's fields, an operation's behavior, name and parameters, and the
 //!   own and owned fields a write set, the fields a behavior computes on a
 //!   read left out of the recorded change, since an outbox carries none.
-//! - `runner.runDue` runs each deadline armed and due at the step's time,
-//!   earliest first, as the engine's runner (the `open` step's
-//!   `runner.principal`), each a deadline command of its own, as the
-//!   API's worker runs one (D103); the engine's counters are the store's
-//!   and are not compared, but a deadline the core refuses for anything
-//!   but a veto, which the engine's sweep passes over, is a mismatch. A
-//!   deadline command's change-log entry is compared as the engine's
-//!   sweep event of the operation the deadline's handler calls on its own
-//!   use ([`SWEEP_OPERATIONS`]).
+//! - `runner.runDue` runs the changes the hearing types' triggers queued,
+//!   each a change command of its own, then each deadline armed and due at
+//!   the step's time, earliest first, then the changes again, as the
+//!   engine's runner (the `open` step's `runner.principal`), as the API's
+//!   worker runs a table's change queue and deadline queue (D103); the
+//!   engine's counters are the store's and are not compared, but a deadline
+//!   the core refuses for anything but a veto, which the engine's sweep
+//!   passes over, and a change it refuses, are mismatches, unless the
+//!   recording's run failed. A runDue whose recording failed stops the
+//!   scenario after it: the engine halted the subscription, which heard
+//!   nothing after it, where a table's change queue fails the one message
+//!   and hears the next. A deadline command's change-log entry is compared
+//!   as the engine's sweep event of the operation the deadline's handler
+//!   calls on its own use ([`SWEEP_OPERATIONS`]).
+//! - The engine's Links is a to-one relation on a table (D103): each link
+//!   with one target is an own field `<link>Id` holding the target's key
+//!   ([`shape::read_document`]), a create's `behaviors.Links.<link>` sets
+//!   it, `link` and `unlink` are updates of it answered as Links answered,
+//!   and a record shows it as the engine's `Links.targets`. A link that
+//!   holds a list of targets or pins one stops the scenario, and Links' own
+//!   validation, a refusal that names Links, and a define refused of a type
+//!   that lists Links (its paths count Links among the uses) are skipped.
 //! - `schemas.list`, `schemas.live` and `schemas.behaviors` are compared
 //!   by the types defined, the live version's behavior configs, and each
 //!   behavior's declared fields, operations and veto codes.
@@ -60,7 +73,11 @@
 //! scenario there, since the steps after it read what it wrote. A step that
 //! cannot be mapped (a call outside this surface, a behavior written in
 //! TypeScript that no fixture ports, a fixture's operation that tests the
-//! store) is skipped with its reason.
+//! store) is skipped with its reason. So is an engine opened with options
+//! no table has a counterpart of: a runner's depth limit, and the value
+//! store. A define the recording took and the core refuses as waiting for a
+//! later step of D103's order of the work stops the scenario there with the
+//! core's reason.
 //!
 //! [`crate::transcript`] writes a recording out as a transcript through this
 //! same mapping: the replayer records each command, check and raw write it
@@ -78,7 +95,7 @@ use superschematic_rules::{
 };
 
 use crate::fixtures;
-use crate::host::{Applied, Logged, MemoryHost, Store};
+use crate::host::{Applied, Logged, MemoryHost, Store, MAX_CHANGES};
 use crate::shape::{self, FieldDef};
 use crate::symbols::Symbols;
 use crate::transcript::{Recorded, TranscriptClock};
@@ -109,6 +126,35 @@ pub const PUBLISH_REWRITES: [(&str, Rewrites); 1] = [("Timers", timers_rewrites)
 
 /// Why a scenario stops at a publish that [`PUBLISH_REWRITES`] names.
 const REWRITE_REASON: &str = "the engine's afterConfigChange rewrites every row's deadlines at the publish, and the core writes no row at a publish (a build-time project's config change is a build, and each row's deadlines reconcile at its next write through the core, D103), so the steps after it read state the core does not make";
+
+/// The behavior whose moves the engine logged with their cause.
+const REACTIONS: &str = "Reactions";
+
+/// Why a step whose recorded refusal names Links, or a refused define of a
+/// type that lists it, is not compared.
+const LINKS_REFUSAL: &str = "the engine's refusal names its Links; a table's link is a relation, which the core names so (D103)";
+
+/// Why a step Links' own validation refuses is not compared.
+const LINKS_OWN: &str =
+    "Links' own validation, which a relation's foreign key holds on a table (D103)";
+
+/// Why a define the engine's requires check refuses is not compared.
+const REQUIRES_REFUSAL: &str = "the engine's check that a type lists each behavior another requires; the core holds each rule that reads a Workflow to the type's (D103)";
+
+/// Why an events.read whose log the core's cannot map is not compared.
+const EVENTS_UNMAPPED: &str = "a read of the engine's event log that holds what a table's writes do not: a Links operation, which a table writes as an update of its relation's column, or a move a rule made, which a change command writes as an update of the row's owned fields (D103)";
+
+/// Why an events.read of rows a heard change wrote is not compared.
+const HEARD_WRITE: &str = "a read of the change log where a change command wrote a row it heard, a write the engine made at another event if at all: a table's change queue runs a write's rules after the commit, Timers' reconcile under the live version among them, where the engine's ran at the write or at the deadline's fire (D103)";
+
+/// Why an engine opened with a runner's depth limit is not mapped.
+const MAX_DEPTH_REASON: &str = "the engine's runner stops a chain at its depth limit; a table's change queue hears each move as any write (D103)";
+
+/// Why an engine opened with a value store is not mapped.
+const VALUES_REASON: &str = "its engine keeps large values in a value store, which a table has no counterpart of: a column holds the value (D103)";
+
+/// Why a scenario stops after a runDue whose recording failed.
+const HALTED_RUN: &str = "the engine halts a subscription that fails, which hears nothing after it; a table's change queue fails the one message and hears the next (D103)";
 
 /// What replaying one file did.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -308,7 +354,8 @@ fn names(scenario: &Value, key: &str) -> Vec<String> {
 // skip_reason says why no step of a scenario is mapped, or None: only the
 // recording's own host runs it (a permission matcher of the test's own
 // skips only its engine's steps), it needs a test behavior no fixture
-// ports, or it composes a behavior the core does not run.
+// ports, or it composes a behavior the core does not run, Links aside,
+// whose links are relations.
 fn skip_reason(file: &str, scenario: &Value, runs: &[String]) -> Option<String> {
     let js: Vec<String> = names(scenario, "js")
         .into_iter()
@@ -331,9 +378,10 @@ fn skip_reason(file: &str, scenario: &Value, runs: &[String]) -> Option<String> 
             listed(&unported)
         ));
     }
+    // Links is mapped onto relations, which no behavior runs.
     let missing: Vec<String> = names(scenario, "behaviors")
         .into_iter()
-        .filter(|name| !tests.contains(name) && !runs.contains(name))
+        .filter(|name| !tests.contains(name) && !runs.contains(name) && name != shape::LINKS)
         .collect();
     if !missing.is_empty() {
         return Some(format!(
@@ -437,6 +485,8 @@ impl Expected<'_> {
 // What one step came to.
 enum Done {
     Checked(Vec<Found>),
+    /// Checked, and every step after it skipped.
+    Last(Vec<Found>, String),
     Skipped(String),
     /// Skipped, and so is every step after it.
     Halted(String),
@@ -533,8 +583,12 @@ impl<'r> Run<'r> {
         } else {
             self.make(step)
         };
+        let last = match &done {
+            Done::Last(_, reason) => Some(reason.clone()),
+            _ => None,
+        };
         match done {
-            Done::Checked(found) => {
+            Done::Checked(found) | Done::Last(found, _) => {
                 self.report.checked += 1;
                 let call = call_of(step).to_owned();
                 self.report
@@ -546,6 +600,9 @@ impl<'r> Run<'r> {
                         expected: found.expected,
                         actual: found.actual,
                     }));
+                if let Some(reason) = last {
+                    self.halted = Some((index + 1, reason));
+                }
             }
             Done::Skipped(reason) => self.skip(index, step, reason),
             Done::Halted(reason) => {
@@ -608,6 +665,16 @@ impl<'r> Run<'r> {
             self.engines[at].host.queue_ids(ids);
         }
         let expected = Expected::of(step);
+        if let (true, Expected::Error(error)) = (call.starts_with("instances."), &expected) {
+            let linked = args
+                .first()
+                .and_then(Value::as_str)
+                .and_then(|type_name| self.engines[at].host.store().live(type_name))
+                .is_some_and(|spec| spec.fields.iter().any(|field| field.relation.is_some()));
+            if linked && names_links(error) {
+                return Done::Skipped(LINKS_REFUSAL.to_owned());
+            }
+        }
         let cx = Cx {
             at,
             caller: &caller,
@@ -672,6 +739,16 @@ impl<'r> Run<'r> {
                     off = Some("its permission matcher is a function of the test's, which the recording does not carry and no fixture ports (js: permissionMatcher)".to_owned());
                 }
             }
+        }
+        if options
+            .get("runner")
+            .and_then(|runner| runner.get("maxDepth"))
+            .is_some()
+        {
+            off.get_or_insert_with(|| MAX_DEPTH_REASON.to_owned());
+        }
+        if options.contains_key("values") {
+            off.get_or_insert_with(|| VALUES_REASON.to_owned());
         }
         match options.get("policy").and_then(Value::as_str) {
             Some("allowAll") => {}
@@ -872,7 +949,7 @@ impl<'r> Run<'r> {
         };
         if !host
             .store_mut()
-            .write_owned(&write.type_name, &write.key, &write.owned)
+            .write_owned(&write.type_name, &write.key, &write.owned, cx.now)
         {
             return halted;
         }
@@ -900,11 +977,24 @@ impl<'r> Run<'r> {
                 ))
             }
         };
+        if let Some(reason) = &defined.unmapped {
+            return Done::Halted(reason.clone());
+        }
         if let Expected::Error(error) = cx.expected {
             if is_document_error(error) {
                 return Done::Skipped(
                     "the schema document's own validation is the store's".to_owned(),
                 );
+            }
+            if defined.links || names_links(error) {
+                return Done::Skipped(LINKS_REFUSAL.to_owned());
+            }
+            if error
+                .get("message")
+                .and_then(Value::as_str)
+                .is_some_and(|message| message.contains(" requires behavior "))
+            {
+                return Done::Skipped(REQUIRES_REFUSAL.to_owned());
             }
         }
         let type_name = defined.spec.name.clone();
@@ -913,6 +1003,17 @@ impl<'r> Run<'r> {
         let check = engine.host.define_command(&defined.spec, cx.caller, cx.now);
         let spec = defined.spec.clone();
         let outcome = engine.host.define(defined.spec, cx.caller, cx.now);
+        // A config the core takes at a later step of D103's order of the
+        // work stops the scenario, whose steps after it read what the
+        // engine made of it.
+        if let (Err(refusal), false) = (&outcome, matches!(cx.expected, Expected::Error(_))) {
+            if refusal.message.contains("waits for") {
+                return Done::Halted(format!(
+                    "the core refuses what the engine took: {}",
+                    refusal.message
+                ));
+            }
+        }
         if let Some(recorded) = &mut self.recorded {
             recorded.check(
                 &self.current,
@@ -1038,10 +1139,12 @@ impl<'r> Run<'r> {
                 )
             });
         self.judge(cx, type_name, 0, Ok(actual), |checks, expected, actual| {
+            // The engine's Links is the type's relations, no use of it.
             let recorded: Vec<Value> = expected
                 .as_array()
                 .into_iter()
                 .flatten()
+                .filter(|entry| entry.get("name").and_then(Value::as_str) != Some(shape::LINKS))
                 .map(|entry| {
                     json!({
                         "name": entry.get("name").cloned().unwrap_or(Value::Null),
@@ -1077,16 +1180,101 @@ impl<'r> Run<'r> {
         if let Some(done) = self.store_refuses(cx, type_name, data, true) {
             return done;
         }
+        let mut own = self.stored(cx.at, type_name, data);
+        let mut params = options
+            .get("behaviors")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        // A create's links are its relations' keys.
+        if let Some(links) = params.remove(shape::LINKS) {
+            let live = self.engines[cx.at].host.store().live(type_name);
+            for (link, id) in links.as_object().into_iter().flatten() {
+                let field = live.and_then(|spec| spec.relation(link));
+                let (Some(field), Value::String(_)) = (field, id) else {
+                    return Done::Skipped(LINKS_OWN.to_owned());
+                };
+                own.insert(field.name.clone(), id.clone());
+            }
+        }
         let action = Action::Create {
             id: options.get("id").and_then(Value::as_str).map(str::to_owned),
-            own: self.stored(cx.at, type_name, data),
-            params: options
-                .get("behaviors")
-                .and_then(Value::as_object)
-                .cloned()
-                .unwrap_or_default(),
+            own,
+            params,
         };
         self.write(cx, type_name, action)
+    }
+
+    // link maps Links' link and unlink onto an update of the relation's own
+    // field, answered as Links answered: the link's name, its target's
+    // schema and id (the one unlink took away). Links' own validation, and
+    // its listLinked, which a table answers with a query, are not mapped.
+    fn link(
+        &mut self,
+        cx: &Cx<'_>,
+        type_name: &str,
+        key: &str,
+        operation: &str,
+        params: &Value,
+    ) -> Done {
+        if let Expected::Error(_) = cx.expected {
+            return Done::Skipped(LINKS_OWN.to_owned());
+        }
+        let store = self.engines[cx.at].host.store();
+        let name = params
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let Some(field) = store.live(type_name).and_then(|spec| spec.relation(name)) else {
+            return Done::Skipped(LINKS_OWN.to_owned());
+        };
+        let target = field
+            .relation
+            .as_ref()
+            .map(|relation| relation.type_name.clone())
+            .unwrap_or_default();
+        let field = field.name.clone();
+        let (value, id) = match operation {
+            "link" => match params.get("id") {
+                Some(Value::String(id)) => (Value::from(id.as_str()), Value::from(id.as_str())),
+                _ => return Done::Skipped(LINKS_OWN.to_owned()),
+            },
+            "unlink" => {
+                let held = store
+                    .row(type_name, key)
+                    .and_then(|row| row.own.get(&field))
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                (Value::Null, held)
+            }
+            _ => {
+                return Done::Skipped(format!(
+                    "Links' {operation}, a read a table answers with a query of its relation's column (D103)"
+                ))
+            }
+        };
+        let answer = if id.is_null() {
+            Value::Null
+        } else {
+            json!({ "name": name, "schema": target, "id": id })
+        };
+        let mut patch = Map::new();
+        patch.insert(field, value);
+        let live_version = store.live_version(type_name);
+        let command = Command::new(
+            cx.caller.clone(),
+            cx.now,
+            Action::Update {
+                key: key.to_owned(),
+                patch,
+            },
+        );
+        let outcome = self
+            .execute(cx.at, type_name, command)
+            .map(|_| answer.clone());
+        self.judge(cx, type_name, live_version, outcome, |checks, e, a| {
+            checks.eq("result", e, a);
+        })
     }
 
     fn update(&mut self, cx: &Cx<'_>) -> Done {
@@ -1228,6 +1416,14 @@ impl<'r> Run<'r> {
             .unwrap_or_default();
         if let Some(reason) = unmapped_options(&options, &[]) {
             return Done::Skipped(reason);
+        }
+        let linked = self.engines[cx.at]
+            .host
+            .store()
+            .live(type_name)
+            .is_some_and(|spec| spec.fields.iter().any(|field| field.relation.is_some()));
+        if linked && matches!(operation, "link" | "unlink" | "listLinked") {
+            return self.link(cx, type_name, key, operation, &params);
         }
         let engine = &mut self.engines[cx.at];
         let live_version = engine.host.store().live_version(type_name);
@@ -1395,10 +1591,33 @@ impl<'r> Run<'r> {
         if let Some(reason) = unmapped_options(&options, &["schema", "instanceId"]) {
             return Done::Skipped(reason);
         }
+        if let Expected::Value(page) = cx.expected {
+            let unmapped = page
+                .get("events")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .any(|event| {
+                    event["cause"].get("behavior").and_then(Value::as_str) == Some(REACTIONS)
+                        || event["change"].get("behavior").and_then(Value::as_str)
+                            == Some(shape::LINKS)
+                });
+            if unmapped {
+                return Done::Skipped(EVENTS_UNMAPPED.to_owned());
+            }
+        }
         let schema = options.get("schema").and_then(Value::as_str);
         let instance = options.get("instanceId").and_then(Value::as_str);
         let host = &self.engines[cx.at].host;
         let store = host.store();
+        let heard = store.log().iter().any(|logged| {
+            schema.is_none_or(|schema| logged.type_name == schema)
+                && instance.is_none_or(|key| logged.key == key)
+                && matches!(logged.command.action, Action::Change { .. })
+        });
+        if heard {
+            return Done::Skipped(HEARD_WRITE.to_owned());
+        }
         let events: Vec<Value> = store
             .log()
             .iter()
@@ -1432,16 +1651,26 @@ impl<'r> Run<'r> {
         )
     }
 
-    // run_due runs each deadline armed and due at the step's time, earliest
-    // first, as the engine's runner, each a deadline command at that time
-    // (never before the time it was armed for, as a worker whose clock lags
-    // runs it, D103). A deadline one run before it cleared or moved is not
-    // run. A refusal other than a veto, which the engine's sweep passes
-    // over, is a mismatch unless the recording's run failed.
+    // run_due runs the queued changes, then each deadline armed and due at
+    // the step's time, earliest first, then the changes again, as the
+    // engine's runner: each change a change command at the step's time, each
+    // deadline a deadline command at that time (never before the time it
+    // was armed for, as a worker whose clock lags runs it, D103). A deadline
+    // one run before it cleared or moved is not run. A deadline's refusal
+    // other than a veto, which the engine's sweep passes over, and a
+    // change's refusal are mismatches unless the recording's run failed,
+    // and a run whose recording failed is the scenario's last step.
     fn run_due(&mut self, cx: &Cx<'_>) -> Done {
         let runner = self.engines[cx.at].runner.clone();
-        let due = self.engines[cx.at].host.store().due(cx.now);
+        let failed = match cx.expected {
+            Expected::Value(counters) => {
+                counters.get("failed").and_then(Value::as_u64).unwrap_or(0) > 0
+            }
+            _ => false,
+        };
         let mut found = Vec::new();
+        self.run_changes(cx, &runner, failed, &mut found);
+        let due = self.engines[cx.at].host.store().due(cx.now);
         for (at, armed) in due {
             if self.engines[cx.at].host.store().armed_at(&at) != Some(armed.at) {
                 continue;
@@ -1458,12 +1687,6 @@ impl<'r> Run<'r> {
                 },
             );
             let outcome = self.execute(cx.at, &at.type_name, command);
-            let failed = match cx.expected {
-                Expected::Value(counters) => {
-                    counters.get("failed").and_then(Value::as_u64).unwrap_or(0) > 0
-                }
-                _ => false,
-            };
             if let Err(refusal) = outcome {
                 if refusal.code != Code::Vetoed && !failed {
                     let live = self.engines[cx.at].host.store().live_version(&at.type_name);
@@ -1478,7 +1701,52 @@ impl<'r> Run<'r> {
                 }
             }
         }
+        self.run_changes(cx, &runner, failed, &mut found);
+        if failed {
+            return Done::Last(found, HALTED_RUN.to_owned());
+        }
         Done::Checked(found)
+    }
+
+    // run_changes runs the changes the hearing types' triggers queued, first
+    // in first out, those the commands queue included, at most MAX_CHANGES,
+    // each a change command as the runner: at the step's time on a fixed
+    // clock, and at the wall clock's next instant on the wall clock, as the
+    // engine's runner read its clock for each event. A change the core
+    // refuses is taken off, as a message that goes dead, and is a mismatch
+    // unless the recording's run failed.
+    fn run_changes(&mut self, cx: &Cx<'_>, runner: &Caller, failed: bool, found: &mut Vec<Found>) {
+        for _ in 0..MAX_CHANGES {
+            let Some(queued) = self.engines[cx.at].host.store_mut().take_change() else {
+                return;
+            };
+            let now = match self.engines[cx.at].clock {
+                Clock::Fixed(_) => cx.now,
+                Clock::Wall => {
+                    self.wall += 1;
+                    self.wall
+                }
+            };
+            let command = MemoryHost::change_command(&queued, runner, now);
+            if let Err(refusal) = self.execute(cx.at, &queued.type_name, command) {
+                if !failed {
+                    let live = self.engines[cx.at]
+                        .host
+                        .store()
+                        .live_version(&queued.type_name);
+                    found.push(Found {
+                        what: format!(
+                            "change of {} {} ({})",
+                            queued.type_name,
+                            queued.key,
+                            queued.change.write.as_str()
+                        ),
+                        expected: json!("heard"),
+                        actual: shape::engine_error(&refusal, &queued.type_name, live),
+                    });
+                }
+            }
+        }
     }
 }
 
@@ -1526,6 +1794,11 @@ fn unmapped_options(options: &Map<String, Value>, taken: &[&str]) -> Option<Stri
             unmapped.join(", ")
         )
     })
+}
+
+// names_links says whether a recorded refusal names the engine's Links.
+fn names_links(error: &Value) -> bool {
+    serde_json::to_string(error).is_ok_and(|text| text.contains(shape::LINKS))
 }
 
 // is_document_error says whether a define's refusal is the schema

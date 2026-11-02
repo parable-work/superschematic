@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // The Timers fixture (D103): fixture-timers-api serves TicketActions,
@@ -38,11 +39,13 @@ func timersDeps(t *testing.T) (*APIOutput, DepsInfo) {
 // table implements, under timers (fire-timer, reset-timer, snooze-timer)
 // beside its status's transition, each run through the behaviors' core;
 // the behavior worker TicketTimers has no method of the Workers trait, and
-// deps.rs declares none, while src/behaviors.rs holds its queue, opened on
-// a pool as one its handler completes itself, and its handler, which runs
-// each claimed deadline through the adapter's run_deadline as the worker;
-// and the crate re-exports fixture-timers-db's Rust types, whose
-// TicketDeadline is the queue's message. Regenerate with:
+// deps.rs declares none, while src/behaviors.rs holds its two queues,
+// deadlines first, each opened on a pool as one its handler completes
+// itself, and their handlers, which run each claimed deadline through the
+// adapter's run_deadline and each claimed change through its run_change
+// as the worker; and the crate re-exports fixture-timers-db's Rust types,
+// whose TicketDeadline and TicketChange are the queues' messages.
+// Regenerate with:
 // go test ./internal/generator/rustrestgen -run TestWriteRustAPIGoldenTimers -update
 func TestWriteRustAPIGoldenTimers(t *testing.T) {
 	output, deps := timersDeps(t)
@@ -68,10 +71,13 @@ func TestWriteRustAPIGoldenTimers(t *testing.T) {
 	}
 	w := output.BehaviorWorkers[0]
 	if w.Name != "TicketTimers" || w.Method != "" || w.Concurrency != 2 || w.Behavior.Table != "Ticket" ||
-		w.Behavior.Subject != "fixture-timers-api/TicketTimers" || !slices.Equal(w.Behavior.Queues, []string{"TicketDeadline"}) {
+		w.Behavior.Subject != "fixture-timers-api/TicketTimers" || !slices.Equal(w.Behavior.Queues, []string{"TicketDeadline", "TicketChange"}) {
 		t.Errorf("TicketTimers is %+v (%+v)", w, w.Behavior)
 	}
-	if q := w.BehaviorQueues; len(q) != 1 || q[0] != (BehaviorQueue{Queue: "TicketDeadline", Const: "TICKET_DEADLINE_QUEUE", Func: "ticket_timers_deadlines", Handler: "run_ticket_timers_deadline"}) {
+	if q := w.BehaviorQueues; !slices.Equal(q, []BehaviorQueue{
+		{Queue: "TicketDeadline", Const: "TICKET_DEADLINE_QUEUE", Kind: ir.BehaviorQueueDeadlines, Func: "ticket_timers_deadlines", Handler: "run_ticket_timers_deadline"},
+		{Queue: "TicketChange", Const: "TICKET_CHANGE_QUEUE", Kind: ir.BehaviorQueueChanges, Func: "ticket_timers_changes", Handler: "run_ticket_timers_change"},
+	}) {
 		t.Errorf("TicketTimers' queues %+v", q)
 	}
 	if output.HasWorkers() || output.HasBackgroundWork() {
@@ -89,12 +95,16 @@ func TestWriteRustAPIGoldenTimers(t *testing.T) {
 			"\"Ticket\",\n        &args.id,\n        \"Timers\",\n        \"fireTimer\",",
 		},
 		"src/behaviors.rs": {
-			"use crate::database_types::{TicketDeadline, TICKET_DEADLINE_QUEUE};",
+			"use crate::database_types::{\n    TicketChange, TicketDeadline, TICKET_CHANGE_QUEUE, TICKET_DEADLINE_QUEUE,\n};",
 			`Caller::new("fixture-timers-api/TicketTimers", Vec::<String>::new())`,
 			"pub fn ticket_timers_deadlines(\n    pool: &Pool,\n) -> Result<SelfCompleting<PostgresQueue<TicketDeadline>>, BoxError> {",
 			"pub async fn run_ticket_timers_deadline(",
 			"let run = postgres::run_deadline(",
 			"Some(&claim),",
+			"pub fn ticket_timers_changes(\n    pool: &Pool,\n) -> Result<SelfCompleting<PostgresQueue<TicketChange>>, BoxError> {",
+			"pub async fn run_ticket_timers_change(",
+			"let run = postgres::run_change(",
+			"fn change_of<M: Serialize>(message: &M) -> Result<TableChange, BoxError> {",
 		},
 	} {
 		for _, text := range want {
@@ -135,7 +145,7 @@ func TestABehaviorWorkerAloneNeedsNoCreateWorkers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, absent := range []string{WorkersFunc, "Workers", "ticket_timers", "TicketDeadline"} {
+	for _, absent := range []string{WorkersFunc, "Workers", "ticket_timers", "TicketDeadline", "TicketChange"} {
 		if strings.Contains(string(lib), absent) {
 			t.Errorf("the implementation's scaffold holds %s, which the behavior worker's generated handler serves:\n%s", absent, lib)
 		}
@@ -168,10 +178,12 @@ func TestTimersAPICrateBuilds(t *testing.T) {
 // TestRustTimersOperationsAndWorkerOnPostgres serves fixture-timers-api's
 // build_router on a local socket, over a schema of its own in the Postgres
 // at SUPERSCHEMATIC_RULES_TEST_DATABASE_URL that holds fixture-timers-db's
-// tables, creates its rows with the adapter's run_create, calls Ticket's
-// status and timers operations through the generated Rust SDK, and runs its
-// behavior worker's queue and handler in process (D103): the seven cases
-// every language's end-to-end test runs, by the same names. Its
+// tables and their change triggers, creates its rows with the adapter's
+// run_create, calls Ticket's status and timers operations through the
+// generated Rust SDK, and runs its behavior worker's queues and handlers in
+// process (D103): the cases every language's end-to-end test runs, by the
+// same names, among them a raw SQL write of a field start, a raw SQL
+// delete and a bulk update, each heard through Ticket's change queue. Its
 // authenticator reads Bearer <subject>:<permission>,... . It skips without
 // the database, without cargo, and in -short mode.
 func TestRustTimersOperationsAndWorkerOnPostgres(t *testing.T) {
@@ -201,18 +213,23 @@ func TestRustTimersOperationsAndWorkerOnPostgres(t *testing.T) {
 // API crate, beside fixture-timers-db's DDL. The only real wait is
 // respond's 1.5 seconds; every other deadline is an hour or more out, and
 // the one a case needs due is made due with SQL, an operator's escape
-// hatch.
+// hatch. A write the change queue hears is waited for by running the
+// worker's queues and polling every 100 ms for at most ten seconds.
 const timersRoundtripTest = `//! Ticket's Timers end to end (D103): fixture-timers-api's router over a
 //! schema of its own in the Postgres at SUPERSCHEMATIC_RULES_TEST_DATABASE_URL,
 //! which holds fixture-timers-db's tables, called through the generated Rust
-//! SDK, and its behavior worker TicketTimers' queue and handler run in
-//! process.
+//! SDK, and its behavior worker TicketTimers' queues and handlers run in
+//! process: its deadlines and the writes its change queue hears, a raw SQL
+//! write's among them.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use API_CRATE::behaviors::{run_ticket_timers_deadline, ticket_timers_deadlines, RULES_LAYOUT};
+use API_CRATE::behaviors::{
+    run_ticket_timers_change, run_ticket_timers_deadline, ticket_timers_changes, ticket_timers_deadlines, RULES_LAYOUT,
+};
 use API_CRATE::runtime::postgres::{deadpool_postgres, tokio_postgres, Pool};
+use API_CRATE::runtime::queue::QueueError;
 use API_CRATE::runtime::worker::{run_worker, Options, WorkerQueue};
 use API_CRATE::runtime::{bearer_token, ApiError, Authenticator, Principal, Shutdown};
 use API_CRATE::{build_router, types, Handlers, Implementations};
@@ -313,6 +330,21 @@ impl Database {
         (serde_json::from_value(json!(key)).unwrap(), text)
     }
 
+    /// Creates a ticket with a visit at visit_at, in epoch milliseconds,
+    /// through the core, and answers its key and its column's text.
+    async fn create_visit(&self, title: &str, visit_at: i64) -> (types::IdentityUUID, String) {
+        let core = superschematic_rules_behaviors::core();
+        let layout = Layout::from_json(RULES_LAYOUT).unwrap();
+        let host = Host::new(&core, &layout);
+        let mut client = self.pool.get().await.unwrap();
+        let tx = client.transaction().await.unwrap();
+        let own = json!({ "title": title, "visitAt": visit_at }).as_object().cloned().unwrap();
+        let key = postgres::run_create(&host, &*tx, "Ticket", own, tester(), &CreateOptions::default()).await.unwrap();
+        tx.commit().await.unwrap();
+        let text: String = self.client.query_one("SELECT id::text FROM ticket WHERE title = $1", &[&title]).await.unwrap().get(0);
+        (serde_json::from_value(json!(key)).unwrap(), text)
+    }
+
     /// Deletes a ticket through the core, as the repository's delete does.
     async fn delete(&self, id: &types::IdentityUUID) {
         let core = superschematic_rules_behaviors::core();
@@ -366,6 +398,48 @@ fn tester() -> Caller {
     Caller::new("tester", Vec::<String>::new())
 }
 
+/// TicketTimers' two queues, its deadlines and its changes, each in a claim
+/// loop of its own, as its main runs them, until shutdown.
+fn start_worker(pool: &Pool, shutdown: &Shutdown) -> Vec<tokio::task::JoinHandle<Result<(), QueueError>>> {
+    let options = Options { concurrency: 2, idle: Duration::from_millis(100), ..Options::default() };
+    let deadlines = ticket_timers_deadlines(pool).unwrap();
+    let changes = ticket_timers_changes(pool).unwrap();
+    let (on_deadlines, on_changes) = (pool.clone(), pool.clone());
+    vec![
+        tokio::spawn(run_worker(
+            deadlines,
+            move |claimed| {
+                let pool = on_deadlines.clone();
+                async move { run_ticket_timers_deadline(&pool, claimed).await }
+            },
+            options,
+            shutdown.clone(),
+        )),
+        tokio::spawn(run_worker(
+            changes,
+            move |claimed| {
+                let pool = on_changes.clone();
+                async move { run_ticket_timers_change(&pool, claimed).await }
+            },
+            options,
+            shutdown.clone(),
+        )),
+    ]
+}
+
+/// Polls holds every 100 ms until it holds, failing after ten seconds.
+async fn wait_until<F, Fut>(what: &str, mut holds: F)
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    let started = Instant::now();
+    while !holds().await {
+        assert!(started.elapsed() < Duration::from_secs(10), "{what} within 10 s");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 async fn serve(pool: Pool) -> String {
     let implementations = Implementations::new(Handlers { authenticator: Arc::new(Tokens) }, pool);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -401,6 +475,7 @@ fn now_ms() -> i64 {
 }
 
 const HOUR: i64 = 3_600_000;
+const DAY: i64 = 24 * HOUR;
 
 /// The cases run in a task of their own, so the schema is dropped whether
 /// they pass or fail.
@@ -513,5 +588,51 @@ async fn cases(db: Arc<Database>) {
     assert_eq!(db.sub_row(&t3, "idle").await, None);
     assert_eq!(db.sub_row(&t3, "respond").await, None);
     assert_eq!(db.messages(&t3).await, 0);
+
+    // The worker runs both its queues from here on: the change queue hears
+    // every write of a ticket, the core's and a raw one alike.
+    let shutdown = Shutdown::new();
+    let workers = start_worker(&db.pool, &shutdown);
+    let base = now_ms() / 1000 * 1000;
+
+    println!("a raw SQL update of a Timers field start re-arms its deadline");
+    let (_, t7) = db.create_visit("t7", base + 2 * DAY).await;
+    let remind = db.sub_row(&t7, "remind").await.expect("remind's sub-table row");
+    assert_eq!(remind.due_at, Some(base + DAY));
+    let moved = base + 3 * DAY;
+    db.client.execute("UPDATE ticket SET visit_at = to_timestamp($2::bigint / 1000.0) WHERE id::text = $1", &[&t7, &moved]).await.unwrap();
+    wait_until("t7's remind re-armed", || async {
+        db.sub_row(&t7, "remind").await.and_then(|row| row.due_at) == Some(moved - DAY)
+            && db.live(&t7).await.iter().any(|m| m.name == "remind" && m.at == moved - DAY)
+    })
+    .await;
+    let reminds: Vec<i64> = db.live(&t7).await.iter().filter(|m| m.name == "remind").map(|m| m.at).collect();
+    assert_eq!(reminds, [moved - DAY], "one live message of remind, at its new time");
+
+    println!("a raw SQL delete of a ticket clears its deadline messages");
+    let (_, t8) = db.create_visit("t8", base + 2 * DAY).await;
+    assert!(!db.live(&t8).await.is_empty(), "t8 has live deadline messages");
+    db.client.execute("DELETE FROM ticket WHERE id::text = $1", &[&t8]).await.unwrap();
+    wait_until("t8's deadline messages cleared", || async { db.messages(&t8).await == 0 }).await;
+
+    println!("a repository's bulk update of a field start re-arms its deadline");
+    let (_, t9) = db.create_visit("t9", base + 2 * DAY).await;
+    let (_, t10) = db.create_visit("t10", base + 2 * DAY).await;
+    let bulk = base + 4 * DAY;
+    let ids = vec![t9.clone(), t10.clone()];
+    let changed = db.client.execute("UPDATE ticket SET visit_at = to_timestamp($1::bigint / 1000.0) WHERE id::text = ANY($2)", &[&bulk, &ids]).await.unwrap();
+    assert_eq!(changed, 2);
+    for ticket in [&t9, &t10] {
+        wait_until("a bulk-updated ticket's remind re-armed", || async {
+            db.sub_row(ticket, "remind").await.and_then(|row| row.due_at) == Some(bulk - DAY)
+                && db.live(ticket).await.iter().any(|m| m.name == "remind" && m.at == bulk - DAY)
+        })
+        .await;
+    }
+
+    shutdown.cancel();
+    for worker in workers {
+        worker.await.unwrap().unwrap();
+    }
 }
 `

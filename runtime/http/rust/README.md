@@ -251,8 +251,9 @@ TypeScript runtimes' (D51):
   message's handling is a consumer span, `process <queue>`.
   `SelfCompleting<Q>` wraps a queue whose handler completes each message
   itself, in the transaction that does its work: a behavior worker's
-  deadline queue (D103), whose generated handler runs a deadline through
-  the behaviors' core and spends its claim in the same commit. Its
+  deadline queue and change queue (D103), whose generated handlers run a
+  deadline or a change of a row through the behaviors' core and spend
+  their claim in the same commit. Its
   messages are `Claimed<M> { id, token, message }`, the claim beside the
   message, its `complete` does nothing, and every other call is the
   queue's, so a handler's error still fails its message and a stopping

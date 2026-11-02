@@ -86,6 +86,13 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 			m.Triggers = append(m.Triggers, trigger)
 		}
 	}
+	// A hearing table's change trigger (D103): one trigger per write, two
+	// when its image is empty, with no backfill.
+	for _, c := range out.ChangeTriggers {
+		for _, t := range c.SQLiteTriggers(qs) {
+			m.Triggers = append(m.Triggers, &Trigger{Name: t.Name, Table: t.Table, Definition: t.Definition, Origin: c.Origin})
+		}
+	}
 
 	graphs, err := modelGraphs(schema, m)
 	if err != nil {

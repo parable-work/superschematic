@@ -21,8 +21,9 @@ const goBehaviorWorkerGoldenRoot = "testdata/golden/behaviors/go-worker"
 // goTimersAPI is fixture-timers-api's Go output as the dispatch layer
 // hands it to a worker's plan: its Timers operations among its endpoints,
 // the behavior worker TicketTimers, which runs fixture-timers-db's Ticket's
-// deadline queue, its Deps holding the ORM of fixture-timers-db, whose
-// tables implement Timers, and its EnvConfig the database's field.
+// deadline queue and change queue, its Deps holding the ORM of
+// fixture-timers-db, whose tables implement Timers, and its EnvConfig the
+// database's field.
 func goTimersAPI() *apigen.APIOutput {
 	n := naming.Default()
 	return &apigen.APIOutput{
@@ -45,9 +46,11 @@ func goTimersAPI() *apigen.APIOutput {
 			Queue:       "TicketDeadline",
 			Concurrency: 2,
 			Behavior: &apigen.BehaviorWorkerInfo{
-				Table:   "Ticket",
-				Queues:  []string{"TicketDeadline"},
-				Subject: "fixture-timers-api/TicketTimers",
+				Table:         "Ticket",
+				Queues:        []string{"TicketDeadline", "TicketChange"},
+				DeadlineQueue: "TicketDeadline",
+				ChangeQueue:   "TicketChange",
+				Subject:       "fixture-timers-api/TicketTimers",
 			},
 		}},
 		Deps: apigen.DepsInfo{Database: "fixture-timers-db", ORMModule: n.GoORMModule("fixture-timers-db"), Rules: true},

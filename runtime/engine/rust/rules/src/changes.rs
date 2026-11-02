@@ -12,6 +12,12 @@
 //! The host applies a change set in one transaction with the caller's
 //! writes, all of it or none: when any row it writes is no longer at the
 //! version it expects, it runs the command again from fresh state.
+//!
+//! A write of a row, whoever made it, comes back to the core as a
+//! [`RowChange`] (D103): the table's change trigger writes one to the
+//! outbox per insert, update and delete, with the row's images before and
+//! after it ([`RowImage`]), and the host hands each to the core as a change
+//! command ([`crate::Action::Change`]).
 
 use std::collections::BTreeMap;
 
@@ -125,6 +131,15 @@ pub enum RowWrite {
         key: String,
         expected_version: i64,
     },
+    /// A row a change command found gone (D103): no write of the row, which
+    /// is not there. Its deadlines go, and so do its sub-table rows when no
+    /// row of the key is left at all (a soft-deleted row keeps them, as a
+    /// soft delete through the core does).
+    Gone {
+        #[serde(rename = "type")]
+        type_name: String,
+        key: String,
+    },
 }
 
 impl RowWrite {
@@ -133,7 +148,8 @@ impl RowWrite {
         match self {
             RowWrite::Create { type_name, .. }
             | RowWrite::Update { type_name, .. }
-            | RowWrite::Delete { type_name, .. } => type_name,
+            | RowWrite::Delete { type_name, .. }
+            | RowWrite::Gone { type_name, .. } => type_name,
         }
     }
 
@@ -141,7 +157,9 @@ impl RowWrite {
     pub fn key(&self) -> Option<&str> {
         match self {
             RowWrite::Create { key, .. } => key.as_deref(),
-            RowWrite::Update { key, .. } | RowWrite::Delete { key, .. } => Some(key),
+            RowWrite::Update { key, .. }
+            | RowWrite::Delete { key, .. }
+            | RowWrite::Gone { key, .. } => Some(key),
         }
     }
 
@@ -150,10 +168,11 @@ impl RowWrite {
         RowRef::new(self.type_name(), self.key())
     }
 
-    /// The version the row must be at; `None` for a create.
+    /// The version the row must be at; `None` for a create and a row
+    /// found gone, which nothing fences.
     pub fn expected_version(&self) -> Option<i64> {
         match self {
-            RowWrite::Create { .. } => None,
+            RowWrite::Create { .. } | RowWrite::Gone { .. } => None,
             RowWrite::Update {
                 expected_version, ..
             }
@@ -169,9 +188,72 @@ impl RowWrite {
             RowWrite::Create { owned, .. } | RowWrite::Update { owned, .. } => {
                 owned.get(use_id).and_then(|fields| fields.get(field))
             }
-            RowWrite::Delete { .. } => None,
+            RowWrite::Delete { .. } | RowWrite::Gone { .. } => None,
         }
     }
+}
+
+/// What a write did to a row (D103).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[non_exhaustive]
+pub enum WriteKind {
+    Insert,
+    Update,
+    Delete,
+}
+
+impl WriteKind {
+    /// The write as the outbox names it: `insert`, `update` or `delete`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WriteKind::Insert => "insert",
+            WriteKind::Update => "update",
+            WriteKind::Delete => "delete",
+        }
+    }
+}
+
+/// A row's fields as a write found or left them: its own fields by name and
+/// its uses' owned fields by use id and declared name, a field with no
+/// value absent.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RowImage {
+    #[serde(default)]
+    pub own: Map<String, Value>,
+    #[serde(default)]
+    pub owned: BTreeMap<String, Map<String, Value>>,
+}
+
+impl RowImage {
+    /// An own field's value; `None` when it has none.
+    pub fn own_field(&self, name: &str) -> Option<&Value> {
+        self.own.get(name).filter(|value| !value.is_null())
+    }
+
+    /// An owned field's value, by use id and declared name; `None` when it
+    /// has none.
+    pub fn owned(&self, use_id: &str, field: &str) -> Option<&Value> {
+        self.owned
+            .get(use_id)
+            .and_then(|fields| fields.get(field))
+            .filter(|value| !value.is_null())
+    }
+}
+
+/// A write of a row the table's change trigger wrote to the outbox (D103):
+/// what it did, when (epoch milliseconds, the database's clock), and the row
+/// before it (none for an insert) and after it (none for a delete).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RowChange {
+    pub write: WriteKind,
+    pub at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before: Option<RowImage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<RowImage>,
 }
 
 /// One write of a sub-table row: the row that owns it, the use that owns
@@ -319,6 +401,19 @@ mod tests {
             &RowRef::new("Order", Some("o1"))
         );
         assert_eq!(
+            serde_json::to_value(RowWrite::Gone {
+                type_name: "Task".into(),
+                key: "t1".into()
+            })
+            .unwrap(),
+            json!({"kind": "gone", "type": "Task", "key": "t1"})
+        );
+        let gone: RowWrite =
+            serde_json::from_value(json!({"kind": "gone", "type": "Task", "key": "t1"})).unwrap();
+        assert_eq!(gone.key(), Some("t1"));
+        assert_eq!(gone.expected_version(), None);
+        assert_eq!(gone.owned("Workflow", "status"), None);
+        assert_eq!(
             serde_json::to_value(&changes).unwrap(),
             json!({
                 "rows": [
@@ -331,5 +426,36 @@ mod tests {
                 "result": {"from": "draft", "to": "open"}
             })
         );
+    }
+
+    #[test]
+    fn a_row_change_reads_as_the_outbox_writes_it() {
+        let change: RowChange = serde_json::from_value(json!({
+            "write": "update", "at": 1001000,
+            "before": {"own": {"title": "t1", "projectId": "p1"}, "owned": {"Workflow": {"status": "todo", "enteredAt": 1000000}}},
+            "after": {"own": {"title": "t1", "projectId": "p1"}, "owned": {"Workflow": {"status": "doing", "enteredAt": 1001000, "x": null}}}
+        }))
+        .unwrap();
+        assert_eq!(change.write, WriteKind::Update);
+        assert_eq!(change.write.as_str(), "update");
+        let after = change.after.as_ref().expect("an after image");
+        assert_eq!(after.owned("Workflow", "status"), Some(&json!("doing")));
+        assert_eq!(after.owned("Workflow", "x"), None);
+        assert_eq!(after.own_field("projectId"), Some(&json!("p1")));
+        // An insert has no before, a delete no after, and neither writes one.
+        let insert = RowChange {
+            write: WriteKind::Insert,
+            at: 5,
+            before: None,
+            after: Some(RowImage::default()),
+        };
+        assert_eq!(
+            serde_json::to_value(&insert).unwrap(),
+            json!({"write": "insert", "at": 5, "after": {"own": {}, "owned": {}}})
+        );
+        let delete: RowChange =
+            serde_json::from_value(json!({"write": "delete", "at": 6, "before": {}})).unwrap();
+        assert_eq!(delete.before, Some(RowImage::default()));
+        assert_eq!(delete.after, None);
     }
 }

@@ -79,6 +79,26 @@
 //! use id and then name, absent when none. Both are absent after a delete,
 //! and a refused command's are as they were.
 //!
+//! A write of a row that the type's change trigger queued (D103) is a
+//! `command` step whose action is `change`, with the `step` and `call` of
+//! the `runner.runDue` that ran it, the runner's caller, its `now` and its
+//! `request`, as a deadline's is: each a write's key, kind, time and the
+//! row's own and owned fields before and after it, which an adapter runs as
+//! written, never from its own change queue. A command that writes rows
+//! other than its own (a rule that moves the project a task points at)
+//! lists them in `others`, in the change set's order, each read back after
+//! the step, its row absent when it was deleted:
+//!
+//! ```json
+//! "others": [{"type": "Project", "key": "p1", "row": {"own": {"title": "Launch"}, "owned": {"Workflow": {"status": "active", "enteredAt": 1001000}}}}]
+//! ```
+//!
+//! A recording's Links is each type's to-one relations: a link with one
+//! target is an own field `<link>Id`, in `fields` as a string, whose
+//! versions' specs name the relation (`relation: {name, type}`); an adapter
+//! makes its column as any own field's, and a linked read finds it by its
+//! name.
+//!
 //! How an adapter replays a scenario:
 //!
 //! 1. For each type, create its table in a database of the scenario's own:
@@ -106,7 +126,8 @@
 //!    refusal whole (code, status, class, message, details), or the
 //!    result, a create's key, and the row the command named, read back from
 //!    the table after the step (its own and owned fields; absent after a
-//!    delete), and its sub-table rows and armed deadlines. A field with no
+//!    delete), its sub-table rows and armed deadlines, and the other rows it
+//!    wrote (`others`). A field with no
 //!    value is absent in `row`, and an adapter reads a NULL column as
 //!    absent. A `deadline` command runs only while its deadline is armed at
 //!    its `at`, which the adapter reads before each run, and its unit
@@ -134,7 +155,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use superschematic_engine_testkit::ScenarioFile;
-use superschematic_rules::{Action, Command, Core, Refusal, SubRow, TypeSpec};
+use superschematic_rules::{Action, Command, Core, Refusal, RowWrite, SubRow, TypeSpec};
 
 use crate::host::{Applied, Store, StoredRow};
 use crate::replay::replay_recording;
@@ -297,6 +318,24 @@ pub struct TranscriptExpect {
     /// then name; absent when it has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub deadlines: Vec<TranscriptDeadline>,
+    /// The rows other than the command's own that its change set wrote, in
+    /// the change set's order, each read back after the step (its row
+    /// absent when it was deleted); absent when none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub others: Vec<TranscriptOther>,
+}
+
+/// A row other than the command's own that its change set wrote, read back
+/// after the step.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptOther {
+    #[serde(rename = "type")]
+    pub type_name: String,
+    pub key: String,
+    /// The row after the step; absent when the step deleted it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub row: Option<TranscriptRow>,
 }
 
 /// A deadline armed on a row: its use, its name, the time it falls due,
@@ -508,10 +547,12 @@ fn left_out_reason(call: &str) -> &'static str {
             "a read of the types the host keeps, which the transcript holds as each type's versions"
         }
         "events.read" => {
-            "a read of the change log, which the outbox the build-time trigger writes holds once it comes (D103's order of the work, step 3)"
+            "a read of the engine's event log, which a table has no counterpart of: its writes are heard through its change queue (D103), and the event stream comes later"
         }
         "schemas.publish" => "nothing waited to be published, which the host answers without the core",
-        "runner.runDue" => "no deadline was armed and due, so the runner ran no command",
+        "runner.runDue" => {
+            "no change waited and no deadline was armed and due, so the runner ran no command"
+        }
         _ => "the replayer checked it on the reference host, and no step of an adapter's maps it",
     }
 }
@@ -644,6 +685,7 @@ impl Recorded {
                 row: row.map(row_of),
                 sub_rows,
                 deadlines,
+                others: others_of(type_name, &applied.key, &applied.changes.rows, store),
             },
         };
         self.steps.push(TranscriptStep::Command {
@@ -679,6 +721,31 @@ impl TranscriptStep {
             | TranscriptStep::Raw { step, .. } => *step,
         }
     }
+}
+
+// others_of is the rows other than the command's own a change set wrote, in
+// its order, each once, read back from the store the host left; a row found
+// gone is the command's own, which a change set writes no other way.
+fn others_of(type_name: &str, key: &str, rows: &[RowWrite], store: &Store) -> Vec<TranscriptOther> {
+    let mut others: Vec<TranscriptOther> = Vec::new();
+    for write in rows {
+        let Some(other) = write.key() else {
+            continue;
+        };
+        let own = write.type_name() == type_name && other == key;
+        let listed = others
+            .iter()
+            .any(|known| known.type_name == write.type_name() && known.key == other);
+        if own || listed || matches!(write, RowWrite::Gone { .. }) {
+            continue;
+        }
+        others.push(TranscriptOther {
+            type_name: write.type_name().to_owned(),
+            key: other.to_owned(),
+            row: store.row(write.type_name(), other).map(row_of),
+        });
+    }
+    others
 }
 
 // row_of is a row as an adapter reads it back: each field with no value

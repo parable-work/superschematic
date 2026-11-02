@@ -74,8 +74,8 @@
 //! due calls the use's own `fireTimer` (`Cx::call`), so every use's guards
 //! run as the sweep's invoke ran them, and passes on any refusal: a guard's
 //! veto of the fire refuses the command, which leaves the deadline armed,
-//! and the worker tries it again (D53), as the sweep tried it at its next
-//! run. `fireTimer` fires one deadline that is due and has not fired, and is
+//! and the worker releases its message to fall due again a minute on (D53,
+//! D103), as the sweep tried it at its next run. `fireTimer` fires one deadline that is due and has not fired, and is
 //! `Cx::unchanged()` on any other, so the worker and a caller never fire one
 //! twice; one whose until holds when it comes due is cancelled instead. A
 //! caller's fire before the worker's clears the deadline, which spends its
@@ -87,11 +87,27 @@
 //! Deleting the row deletes its sub-table rows and its deadlines, which the
 //! host's delete does.
 //!
-//! A create start's fact is the create's time, which the after-change hook
-//! of the create reads; afterwards it is the sub-table row's `baseAt`. A row
+//! A create start's fact is the sub-table row's `baseAt` once it has one,
+//! and before that the create's time, which the after-change hook of a
+//! create through the core reads, as does a heard insert (below). A row
 //! created before Timers joined its table has no create time: it gets no
 //! create deadline, and `resetTimer` of one refuses `not_armed`. The engine
 //! read the instance's `createdAt`.
+//!
+//! Timers hears its row's writes (D103: its declaration's `hearsChanges`),
+//! whoever makes them: a raw SQL write, a repository's bulk or hard write and
+//! a write through the core alike reach it from the table's change queue,
+//! which the API's worker runs after the commit ([`Behavior::heard`]). A
+//! heard write runs the reconcile an after-change hook runs, on the row as
+//! it is now, so a raw write that moves a field start or the status arms,
+//! moves or clears the deadline, and a raw insert arms a create deadline
+//! from the insert's time; a write the core made already left the row
+//! reconciled, and hearing it changes nothing. A row that is gone runs no
+//! hook: the core's change command writes it gone, and the host takes its
+//! deadlines. And a deadline that falls due reconciles its row before it
+//! fires, so one whose fact a raw write moved, before that write's change
+//! ran, is armed again at its new time rather than fired on its old arming;
+//! for a row only the core wrote this changes nothing.
 //!
 //! A field's time is epoch milliseconds, as a table's adapter reads a
 //! date-time column, or ISO 8601 text, as an engine schema's date-time
@@ -126,8 +142,8 @@ use std::collections::BTreeMap;
 
 use serde_json::{json, Map, Value};
 use superschematic_rules::{
-    Behavior, Change, Code, ConfigCx, ConfigError, ConfigTarget, Cx, Declaration, Hook, Row,
-    SchemaIssue, Stop, SubRow, UseSpec, Veto, View,
+    Behavior, Change, Code, ConfigCx, ConfigError, ConfigTarget, Cx, Declaration, Heard, Hook, Row,
+    SchemaIssue, Stop, SubRow, UseSpec, Veto, View, WriteKind,
 };
 
 use crate::declared;
@@ -345,7 +361,7 @@ impl Behavior for Timers {
     type Config = TimersConfig;
 
     // The declaration file names its deadlines sub-table and says it arms
-    // deadlines (D103).
+    // deadlines and hears its row's writes (D103).
     fn declaration(&self) -> Declaration {
         declared::declaration(DECLARATION)
     }
@@ -387,10 +403,13 @@ impl Behavior for Timers {
         }
     }
 
-    // A deadline that falls due fires through the use's own fireTimer, so
-    // every use's guards run on it; one the config no longer names deletes
-    // its row and changes nothing else.
+    // A deadline that falls due reconciles its row first, so one a raw
+    // write moved since it was armed is armed again rather than fired, then
+    // fires through the use's own fireTimer, so every use's guards run on
+    // it; one the config no longer names deletes its row and changes
+    // nothing else.
     fn deadline(&self, cx: &Cx<'_, TimersConfig>, name: &str, _payload: &Value) -> Hook<()> {
+        reconcile(cx, None)?;
         if cx.config().deadline(name).is_none() {
             if row_named(&cx.sub_rows(DEADLINES)?, name).is_some() {
                 cx.delete_row(DEADLINES, name)?;
@@ -401,49 +420,24 @@ impl Behavior for Timers {
         Ok(())
     }
 
-    // after_change arms each deadline whose fact has changed, then cancels
-    // each pending one whose until holds, from the row as the change left
-    // it, and deletes the rows of deadlines the config no longer names. A
-    // delete takes the row's sub-table rows and deadlines with it.
+    // after_change reconciles the row as the change left it; a create's
+    // time is a create start's fact. A delete takes the row's sub-table rows
+    // and deadlines with it.
     fn after_change(&self, cx: &Cx<'_, TimersConfig>, change: &Change<'_>) -> Hook<()> {
         if matches!(change, Change::Delete) {
             return Ok(());
         }
-        let config = cx.config();
-        let facts = facts_of(cx);
-        let rows = cx.sub_rows(DEADLINES)?;
-        let own = cx.own();
-        let created_at = matches!(change, Change::Create).then(|| cx.now());
-        for (name, deadline) in &config.deadlines {
-            let row = row_named(&rows, name);
-            let start = start_of(deadline, &own, &facts, row, created_at);
-            if matches!(deadline.start, TimersStart::Field(_)) && start.is_none() {
-                // The field cleared, or never set: no deadline.
-                if row.is_some() {
-                    cx.delete_row(DEADLINES, name)?;
-                    cx.clear(name)?;
-                }
-                continue;
-            }
-            let mut pending = row.is_some_and(is_pending);
-            if let Some(start) = &start {
-                let armed_from = row.and_then(|row| row.value("armedFrom"));
-                if armed_from.and_then(Value::as_str) != Some(start.fact.as_str()) {
-                    arm(cx, name, deadline, start, row.is_some())?;
-                    pending = true;
-                }
-            }
-            if pending && cancelled(deadline, facts.status.as_deref()) {
-                cancel(cx, name)?;
-            }
-        }
-        for row in &rows {
-            if config.deadline(&row.key).is_none() {
-                cx.delete_row(DEADLINES, &row.key)?;
-                cx.clear(&row.key)?;
-            }
-        }
-        Ok(())
+        reconcile(cx, matches!(change, Change::Create).then(|| cx.now()))
+    }
+
+    // A write of the row, heard from its table's change queue, reconciles
+    // the row as it is now; an insert's time is a create start's fact. A
+    // write of another type's row is not Timers' to hear.
+    fn heard(&self, cx: &Cx<'_, TimersConfig>, heard: &Heard<'_>) -> Hook<()> {
+        let Heard::Own { change } = heard else {
+            return Ok(());
+        };
+        reconcile(cx, (change.write == WriteKind::Insert).then_some(change.at))
     }
 
     // A read of the row shows its started deadlines, as the engine's
@@ -459,6 +453,48 @@ impl Behavior for Timers {
         fields.insert(DEADLINES.into(), deadlines_field(config, rows));
         fields
     }
+}
+
+// reconcile arms each deadline whose fact has changed, then cancels each
+// pending one whose until holds, from the row as the run has it, and
+// deletes the rows of deadlines the config no longer names. `created_at`
+// is the time of the row's create, a create start's fact while its row has
+// none: a create's after-change hook's, or a heard insert's.
+fn reconcile(cx: &Cx<'_, TimersConfig>, created_at: Option<i64>) -> Hook<()> {
+    let config = cx.config();
+    let facts = facts_of(cx);
+    let rows = cx.sub_rows(DEADLINES)?;
+    let own = cx.own();
+    for (name, deadline) in &config.deadlines {
+        let row = row_named(&rows, name);
+        let start = start_of(deadline, &own, &facts, row, created_at);
+        if matches!(deadline.start, TimersStart::Field(_)) && start.is_none() {
+            // The field cleared, or never set: no deadline.
+            if row.is_some() {
+                cx.delete_row(DEADLINES, name)?;
+                cx.clear(name)?;
+            }
+            continue;
+        }
+        let mut pending = row.is_some_and(is_pending);
+        if let Some(start) = &start {
+            let armed_from = row.and_then(|row| row.value("armedFrom"));
+            if armed_from.and_then(Value::as_str) != Some(start.fact.as_str()) {
+                arm(cx, name, deadline, start, row.is_some())?;
+                pending = true;
+            }
+        }
+        if pending && cancelled(deadline, facts.status.as_deref()) {
+            cancel(cx, name)?;
+        }
+    }
+    for row in &rows {
+        if config.deadline(&row.key).is_none() {
+            cx.delete_row(DEADLINES, &row.key)?;
+            cx.clear(&row.key)?;
+        }
+    }
+    Ok(())
 }
 
 fn fire_timer(cx: &Cx<'_, TimersConfig>, params: &Value) -> Hook<Value> {
@@ -639,8 +675,10 @@ fn facts_of(view: &View<'_, TimersConfig>) -> Facts {
 // nothing: a create start on a row created before Timers kept its
 // deadlines, an enters deadline while the status is in another state, or
 // was entered before Workflow kept when, and a field that holds no
-// date-time. `created_at` is the create's time in the create's after-change
-// hook; afterwards a create start reads its row's baseAt.
+// date-time. A create start reads its row's baseAt once it has one, and
+// before that `created_at`, the create's time in the create's after-change
+// hook or a heard insert's, so an insert the core made and armed already
+// arms nothing again when it is heard.
 fn start_of(
     deadline: &TimersDeadline,
     own: &Map<String, Value>,
@@ -649,20 +687,18 @@ fn start_of(
     created_at: Option<i64>,
 ) -> Option<Start> {
     match &deadline.start {
-        TimersStart::Create => match created_at {
-            Some(at) => Some(Start {
-                fact: at.to_string(),
-                at,
-            }),
-            None => {
-                let row = row?;
-                let at = millis(row.value("baseAt"))?;
+        TimersStart::Create => match row.and_then(|row| millis(row.value("baseAt"))) {
+            Some(at) => {
                 let fact = row
-                    .value("armedFrom")
+                    .and_then(|row| row.value("armedFrom"))
                     .and_then(Value::as_str)
                     .map_or_else(|| at.to_string(), str::to_owned);
                 Some(Start { fact, at })
             }
+            None => created_at.map(|at| Start {
+                fact: at.to_string(),
+                at,
+            }),
         },
         TimersStart::Enters(state) => match (&facts.status, facts.entered_at) {
             (Some(status), Some(at)) if status == state => Some(Start {

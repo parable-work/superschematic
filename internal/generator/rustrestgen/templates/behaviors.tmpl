@@ -12,13 +12,7 @@
 {{- if or $i $.HasBehaviorOperations }}
 //!
 {{- end }}
-//! The behavior worker {{ $w.Name }} of {{ $.SchemaName }} (D103): {{ $w.Behavior.Table }}'s deadlines,
-//! each claimed from {{ $.BehaviorDatabase }}'s queue {{ (index $w.BehaviorQueues 0).Queue }} as it falls due
-//! and run through the behaviors' core by superschematic-rules-adapter on a
-//! transaction of the pool, as the worker, its message completed in the same
-//! commit. Its main runs `{{ (index $w.BehaviorQueues 0).Func }}` with `{{ (index $w.BehaviorQueues 0).Handler }}`
-//! as the handler in the HTTP runtime's claim loop; no implementation method
-//! serves it.
+{{ $w.ModuleDoc $.SchemaName $.BehaviorDatabase }}
 {{- end }}
 
 use std::sync::OnceLock;
@@ -182,13 +176,53 @@ fn internal(err: impl std::fmt::Display) -> ApiError {
 {{- end }}
 
 {{- range $w := .BehaviorWorkers }}
-{{- $q := index $w.BehaviorQueues 0 }}
 
 /// The caller {{ $w.Name }}'s commands run as (D103): the worker, not a user,
 /// holding the permissions its @behaviorWorker grants.
 fn {{ $w.CallerFunc }}() -> Caller {
 {{ $w.BehaviorWorkerCaller }}
 }
+{{- range $q := $w.BehaviorQueues }}
+{{- if $q.Changes }}
+
+/// The change queue of the behavior worker {{ $w.Name }} (D103),
+/// {{ $.BehaviorDatabase }}'s {{ $q.Queue }}, on `pool`, a pool of {{ $.BehaviorDatabase }}:
+/// a queue whose handler, `{{ $q.Handler }}`, completes each message
+/// itself, which `worker::run_worker` runs.
+{{ $q.FuncSignature }}
+    let definition = QueueDefinition::parse({{ $q.Const }})?;
+    let queue = PostgresQueue::new(pool.clone(), definition);
+    Ok(SelfCompleting::new(queue))
+}
+
+/// Runs a claimed change of {{ $w.Behavior.Table }} through the behaviors' core on a
+/// transaction of the pool, as the worker, its message's completion in the
+/// same commit (D103): the uses that hear the row's writes, on the row as it
+/// is now, and the listeners its relations reach. A claim lost runs nothing,
+/// which it logs; a refusal or a failure of the database rolls the
+/// transaction back and fails the message, which the queue retries after its
+/// backoff.
+{{ $q.HandlerSignature }}
+    let change = change_of(&claimed.message)?;
+    let claim = Claim {
+        id: claimed.id.clone(),
+        token: claimed.token.clone(),
+    };
+    let mut client = pool.get().await?;
+    let tx = client.transaction().await?;
+    let host = Host::new(core(), layout());
+{{ $w.RunChangeCall }}
+    tx.commit().await?;
+    if !run.ran() {
+        tracing::info!(
+            message = claimed.id.as_str(),
+            why = run.why(),
+            "change ran nothing"
+        );
+    }
+    Ok(())
+}
+{{- else }}
 
 /// The deadline queue of the behavior worker {{ $w.Name }} (D103),
 /// {{ $.BehaviorDatabase }}'s {{ $q.Queue }}, on `pool`, a pool of {{ $.BehaviorDatabase }}:
@@ -204,7 +238,8 @@ fn {{ $w.CallerFunc }}() -> Caller {
 /// transaction of the pool, as the worker, at the later of now and the time
 /// it was armed to fall due at, its message's completion in the same commit
 /// (D103). A deadline armed or cleared since the claim, or of a row or a use
-/// that is gone, runs nothing, which it logs; a refusal or a failure of the
+/// that is gone, runs nothing, and a fire a guard vetoes is released, due
+/// again in a minute, each of which it logs; a refusal or a failure of the
 /// database rolls the transaction back and fails the message, which the
 /// queue retries after its backoff.
 {{ $q.HandlerSignature }}
@@ -228,7 +263,9 @@ fn {{ $w.CallerFunc }}() -> Caller {
     Ok(())
 }
 {{- end }}
-{{- if .BehaviorWorkers }}
+{{- end }}
+{{- end }}
+{{- if .HasDeadlineQueues }}
 
 /// The deadline a message of a deadline queue holds (D103): its row's key
 /// in its wire form, the use, the deadline's name, the time it was armed to
@@ -255,6 +292,37 @@ fn deadline_of<M: Serialize>(message: &M) -> Result<Deadline, BoxError> {
         name,
         at,
         payload: fields.remove("payload").unwrap_or(Value::Null),
+    })
+}
+{{- end }}
+{{- if .HasChangeQueues }}
+
+/// The change a message of a change queue holds (D103), as the table's
+/// trigger wrote it: its row's key in its wire form, the write, its time in
+/// epoch milliseconds, and the row's columns before and after it, each
+/// null when absent.
+fn change_of<M: Serialize>(message: &M) -> Result<TableChange, BoxError> {
+    let Value::Object(mut fields) = serde_json::to_value(message)? else {
+        return Err("a change's message is no object".into());
+    };
+    let mut text = |name: &str| -> Result<String, BoxError> {
+        match fields.remove(name) {
+            Some(Value::String(text)) => Ok(text),
+            Some(other) if !other.is_null() => Ok(other.to_string()),
+            _ => Err(format!("a change's message has no {name}").into()),
+        }
+    };
+    let (key, write) = (text("rowKey")?, text("write")?);
+    let at = fields
+        .get("at")
+        .and_then(Value::as_i64)
+        .ok_or("a change's message has no at")?;
+    Ok(TableChange {
+        key,
+        write,
+        at,
+        before: fields.remove("before").unwrap_or(Value::Null),
+        after: fields.remove("after").unwrap_or(Value::Null),
     })
 }
 {{- end }}

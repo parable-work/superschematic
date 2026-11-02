@@ -16,8 +16,8 @@ mod common;
 use serde_json::{json, Map, Value};
 use superschematic_rules::Code;
 use superschematic_rules_adapter::{
-    Caller, Claim, CreateOptions, Deadline, DeadlineRun, Error, ExecuteOptions, Host, Owned,
-    Refusal, Row,
+    Caller, ChangeRun, Claim, CreateOptions, Deadline, DeadlineRun, Error, ExecuteOptions, Host,
+    Owned, Refusal, Row, SubRow, TableChange,
 };
 
 use common::{iso, p, Param};
@@ -28,6 +28,49 @@ enum Db {
     Sqlite(rusqlite::Connection),
     #[cfg(feature = "postgres")]
     Postgres(tokio_postgres::Client),
+}
+
+/// A message of a change queue as the trigger wrote it (D103): its id, the
+/// row's key, the write, its time, its images' JSON text, and its state.
+#[derive(Debug)]
+struct Written {
+    id: String,
+    row_key: String,
+    write: String,
+    at: i64,
+    before: Option<String>,
+    after: Option<String>,
+    state: String,
+}
+
+impl Written {
+    /// The message as a worker hands it to the adapter: its images the
+    /// JSON Postgres's `jsonb` holds, or SQLite's text as it is.
+    fn change(&self, postgres: bool) -> TableChange {
+        let image = |text: &Option<String>| match text {
+            None => Value::Null,
+            Some(text) if postgres => serde_json::from_str(text).expect("an image of JSON"),
+            Some(text) => Value::String(text.clone()),
+        };
+        TableChange {
+            key: self.row_key.clone(),
+            write: self.write.clone(),
+            at: self.at,
+            before: image(&self.before),
+            after: image(&self.after),
+        }
+    }
+}
+
+/// A message of a queue as a release leaves it: its state, its attempts,
+/// whether a claim's token is on it, and how many seconds from the
+/// database's now it falls due.
+#[derive(Debug)]
+struct Queued {
+    state: String,
+    attempts: i64,
+    token: bool,
+    due_in: f64,
 }
 
 /// A row of Order's shape as the database holds it, its timestamp as ISO
@@ -430,6 +473,201 @@ impl Db {
         }
     }
 
+    /// A row's rows of a use's sub-table, read in a transaction of its own.
+    async fn sub_rows(
+        &mut self,
+        host: &Host<'_>,
+        type_name: &str,
+        key: &str,
+        use_id: &str,
+        table: &str,
+    ) -> Vec<SubRow> {
+        let read: Result<Vec<SubRow>, Error> = in_transaction!(
+            self,
+            |tx| superschematic_rules_adapter::sqlite::read_sub_rows(
+                host, &tx, type_name, key, use_id, table
+            ),
+            superschematic_rules_adapter::postgres::read_sub_rows(
+                host, &tx, type_name, key, use_id, table
+            )
+            .await
+        );
+        read.expect("the sub-table rows read")
+    }
+
+    /// A row's messages of Probe's change queue, in the order they fall
+    /// due.
+    async fn written(&mut self, row_key: &str) -> Vec<Written> {
+        match self {
+            #[cfg(feature = "sqlite")]
+            Db::Sqlite(conn) => {
+                let text = "SELECT id, row_key, \"write\", at, \"before\", \"after\", state FROM probe_change_queue WHERE row_key = ?1 ORDER BY due_at, at, rowid";
+                let mut statement = conn.prepare(text).expect("the read prepares");
+                let rows = statement
+                    .query_map([row_key], |row| {
+                        Ok(Written {
+                            id: row.get(0)?,
+                            row_key: row.get(1)?,
+                            write: row.get(2)?,
+                            at: row.get(3)?,
+                            before: row.get(4)?,
+                            after: row.get(5)?,
+                            state: row.get(6)?,
+                        })
+                    })
+                    .expect("the read runs");
+                rows.collect::<Result<_, _>>().expect("the messages read")
+            }
+            #[cfg(feature = "postgres")]
+            Db::Postgres(client) => {
+                let text = "SELECT id::text, row_key, \"write\", at, \"before\"::text, \"after\"::text, state FROM probe_change_queue WHERE row_key = $1 ORDER BY due_at, at";
+                client
+                    .query(text, &[&row_key])
+                    .await
+                    .expect("the read runs")
+                    .iter()
+                    .map(|row| Written {
+                        id: row.get(0),
+                        row_key: row.get(1),
+                        write: row.get(2),
+                        at: row.get(3),
+                        before: row.get(4),
+                        after: row.get(5),
+                        state: row.get(6),
+                    })
+                    .collect()
+            }
+        }
+    }
+
+    /// Claims a message of Probe's change queue by its id, as a worker's
+    /// claim does, and answers the claim.
+    async fn claim_change(&mut self, id: &str) -> Claim {
+        let postgres = self.postgres();
+        let (token, cast) = if postgres {
+            ("gen_random_uuid()", "::text")
+        } else {
+            ("lower(hex(randomblob(16)))", "")
+        };
+        let text = format!(
+            "UPDATE probe_change_queue SET state = 'claimed', attempts = attempts + 1, claim_token = {token} WHERE id{cast} = {} AND state = 'ready' RETURNING id{cast}, claim_token{cast}",
+            p(postgres, 1)
+        );
+        let (id, token): (String, String) = match self {
+            #[cfg(feature = "sqlite")]
+            Db::Sqlite(conn) => conn
+                .query_row(&text, [id], |row| Ok((row.get(0)?, row.get(1)?)))
+                .expect("the message is claimed"),
+            #[cfg(feature = "postgres")]
+            Db::Postgres(client) => {
+                let row = client
+                    .query_one(&text, &[&id])
+                    .await
+                    .expect("the message is claimed");
+                (row.get(0), row.get(1))
+            }
+        };
+        Claim { id, token }
+    }
+
+    /// A message's state and whether a claim's token is on it, by its id.
+    async fn change_state(&mut self, id: &str) -> Option<(String, bool)> {
+        match self {
+            #[cfg(feature = "sqlite")]
+            Db::Sqlite(conn) => conn
+                .query_row(
+                    "SELECT state, claim_token IS NOT NULL FROM probe_change_queue WHERE id = ?1",
+                    [id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .ok(),
+            #[cfg(feature = "postgres")]
+            Db::Postgres(client) => client
+                .query_opt(
+                    "SELECT state, claim_token IS NOT NULL FROM probe_change_queue WHERE id::text = $1",
+                    &[&id],
+                )
+                .await
+                .expect("the read runs")
+                .map(|row| (row.get(0), row.get(1))),
+        }
+    }
+
+    /// Runs a change in a transaction of its own, with a claim or none, as
+    /// a behavior worker of Probe.
+    async fn run_change(
+        &mut self,
+        host: &Host<'_>,
+        change: &TableChange,
+        claim: Option<&Claim>,
+    ) -> Result<ChangeRun, Error> {
+        let worker = || Caller::new("probe-api/ProbeWorker", Vec::<String>::new());
+        in_transaction!(
+            self,
+            |tx| superschematic_rules_adapter::sqlite::run_change(
+                host,
+                &tx,
+                "Probe",
+                change,
+                worker(),
+                claim
+            ),
+            superschematic_rules_adapter::postgres::run_change(
+                host,
+                &tx,
+                "Probe",
+                change,
+                worker(),
+                claim
+            )
+            .await
+        )
+    }
+
+    /// A row's messages of a queue as a release leaves them: each its
+    /// state, its attempts, whether it holds a claim's token, and how many
+    /// seconds from the database's now it falls due.
+    async fn queued(&mut self, queue: &str, row_key: &str) -> Vec<Queued> {
+        match self {
+            #[cfg(feature = "sqlite")]
+            Db::Sqlite(conn) => {
+                let text = format!(
+                    "SELECT state, attempts, claim_token IS NOT NULL, (julianday(due_at) - julianday('now')) * 86400.0 FROM \"{queue}\" WHERE row_key = ?1"
+                );
+                let mut statement = conn.prepare(&text).expect("the read prepares");
+                let rows = statement
+                    .query_map([row_key], |row| {
+                        Ok(Queued {
+                            state: row.get(0)?,
+                            attempts: row.get(1)?,
+                            token: row.get(2)?,
+                            due_in: row.get(3)?,
+                        })
+                    })
+                    .expect("the read runs");
+                rows.collect::<Result<_, _>>().expect("the messages read")
+            }
+            #[cfg(feature = "postgres")]
+            Db::Postgres(client) => {
+                let text = format!(
+                    "SELECT state, attempts::bigint, claim_token IS NOT NULL, extract(epoch FROM due_at - now())::float8 FROM \"{queue}\" WHERE row_key = $1"
+                );
+                client
+                    .query(&text, &[&row_key])
+                    .await
+                    .expect("the read runs")
+                    .iter()
+                    .map(|row| Queued {
+                        state: row.get(0),
+                        attempts: row.get(1),
+                        token: row.get(2),
+                        due_in: row.get(3),
+                    })
+                    .collect()
+            }
+        }
+    }
+
     /// A transition the core vetoes, then one it takes, in one transaction:
     /// the first's failure leaves the caller's transaction going on.
     async fn vetoed_then_moved(&mut self, host: &Host<'_>, key: &str) -> Result<Value, Error> {
@@ -798,7 +1036,7 @@ async fn a_create_with_no_id_gets_a_uuid_key_and_a_type_the_layout_lacks_is_inte
     );
     assert_eq!(
         unknown.message,
-        "rules: the behaviors' layout has no type Invoice; it holds Booking, Item, Loud, Order, Ticket, Timed"
+        "rules: the behaviors' layout has no type Invoice; it holds Booking, Held, Item, Loud, Order, Probe, Ticket, Timed"
     );
 }
 
@@ -916,7 +1154,7 @@ async fn rules_across_rows_and_writes_taken_later(mut db: Db) {
     let loud = refusal(db.create(&host, "Loud", json!({}), Some("l1")).await);
     assert_eq!(
         loud,
-        Refusal::internal("rules: create of Loud writes outbox events, which the adapter takes once the outbox has a table of its own (D103's order of the work, step 3)")
+        Refusal::internal("rules: create of Loud writes outbox events of a behavior's own, which the adapter does not take yet: a table's change queue holds its writes, and the event stream comes later (D103)")
     );
     assert!(db.ids("loud").await.is_empty());
     db.create(&host, "Timed", json!({}), Some("d1"))
@@ -1060,8 +1298,359 @@ async fn a_deadline_armed_again_survives_its_spend_and_a_rows_go_with_it(mut db:
     assert!(db.messages(TIMED_QUEUE, "d3").await.is_empty());
 }
 
+/// The queue Held's deadlines are armed in.
+const HELD_QUEUE: &str = "held_deadline_queue";
+
+/// A fire a guard vetoes (D103): with a claim, the run releases the claimed
+/// message, ready again and due in a minute, the claim's attempt given
+/// back and its token gone, and leaves the deadline's sub-table row
+/// pending, as it was; a second release of the same claim finds it lost.
+/// Hold, the tests' toy, vetoes every fireTimer of Held's Timers.
+async fn a_vetoed_fire_is_released_counting_no_attempt(mut db: Db) {
+    let core = common::core();
+    let layout = common::store_layout();
+    let host = Host::new(&core, &layout).with_clock(|| 3_000_000);
+    db.create(&host, "Held", json!({}), Some("h1"))
+        .await
+        .expect("created");
+    let pending = db
+        .sub_rows(&host, "Held", "h1", "Timers", "deadlines")
+        .await;
+    assert_eq!(pending.len(), 1, "{pending:?}");
+    assert_eq!(pending[0].values.get("fired"), Some(&json!(false)));
+    let before = db.queued(HELD_QUEUE, "h1").await;
+    assert_eq!(before.len(), 1, "{before:?}");
+    let claim = db.claim(HELD_QUEUE, "h1").await;
+    let expire = Deadline {
+        key: "h1".into(),
+        use_id: "Timers".into(),
+        name: "expire".into(),
+        at: 3_001_000,
+        payload: Value::Null,
+    };
+    let run = db
+        .run_deadline(&host, "Held", &expire, Some(&claim))
+        .await
+        .expect("ran nothing");
+    assert_eq!((run.ran(), run.why()), (false, "vetoed"));
+    let DeadlineRun::Vetoed(veto) = &run else {
+        panic!("not released: {run:?}");
+    };
+    assert_eq!(
+        (veto.code, veto.status, veto.class.as_str()),
+        (Code::Vetoed, 409, "BehaviorVetoError")
+    );
+    let details = veto.details.as_ref().expect("the veto's details");
+    assert_eq!(
+        (details.get("behavior"), details.get("vetoCode")),
+        (Some(&json!("Hold")), Some(&json!("held")))
+    );
+    let released = db.queued(HELD_QUEUE, "h1").await;
+    let [message] = released.as_slice() else {
+        panic!("one message: {released:?}");
+    };
+    assert_eq!(
+        (message.state.as_str(), message.attempts, message.token),
+        ("ready", before[0].attempts, false)
+    );
+    assert!(
+        (59.0..=61.0).contains(&message.due_in),
+        "due in {}s",
+        message.due_in
+    );
+    assert_eq!(
+        db.sub_rows(&host, "Held", "h1", "Timers", "deadlines")
+            .await,
+        pending
+    );
+    let again = db
+        .run_deadline(&host, "Held", &expire, Some(&claim))
+        .await
+        .expect("ran nothing");
+    assert!(matches!(again, DeadlineRun::ClaimLost), "{again:?}");
+}
+
+/// Probe rows' keys, in their columns' hyphenated form.
+const P1: &str = "00000000-0000-4000-8000-0000000000a1";
+const P2: &str = "00000000-0000-4000-8000-0000000000a2";
+const P3: &str = "00000000-0000-4000-8000-0000000000a3";
+const P4: &str = "00000000-0000-4000-8000-0000000000a4";
+
+/// A UUID an own column holds, hyphenated, and its wire form.
+const OWNER: (&str, &str) = (
+    "db360f43-5530-c407-56da-9cd8e0c971dd",
+    "6fe1XoZ0UJpMNNdUOSMC2X",
+);
+
+/// The change Echo heard last on a Probe row, as the core got it.
+async fn echoed(db: &mut Db, host: &Host<'_>, key: &str) -> Value {
+    let row = db
+        .read(host, "Probe", key)
+        .await
+        .expect("read")
+        .expect("a row");
+    let mark = row.owned["Echo"]["heard"]
+        .as_str()
+        .expect("a mark")
+        .to_owned();
+    serde_json::from_str(&mark).expect("the mark is JSON")
+}
+
+/// Inserts Probe's row P1 with SQL, past the adapter, in the database's
+/// session time zone of +05:30 on Postgres, and answers the one message
+/// the trigger wrote, an insert, whose image holds the offset there.
+async fn insert_raw(db: &mut Db) -> Written {
+    let postgres = db.postgres();
+    if postgres {
+        db.exec("SET TIME ZONE 'Asia/Kolkata'", &[]).await;
+    }
+    let insert = format!(
+        "INSERT INTO probe (id, title, due, owner_id, done, data) VALUES ({}, 'Desk', {}, {}, {}, {})",
+        p(postgres, 1),
+        p(postgres, 2),
+        p(postgres, 3),
+        if postgres { "true" } else { "1" },
+        p(postgres, 4)
+    );
+    let values = [
+        Param::text(P1),
+        Param::text(iso(1234)),
+        Param::text(OWNER.0),
+        Param::text(r#"{"a":1}"#),
+    ];
+    assert_eq!(db.exec(&insert, &values).await, 1);
+    let mut written = db.written(P1).await;
+    assert_eq!(written.len(), 1, "one message: {written:?}");
+    let message = written.remove(0);
+    assert_eq!(
+        (
+            message.write.as_str(),
+            message.state.as_str(),
+            message.before.as_deref()
+        ),
+        ("insert", "ready", None)
+    );
+    if postgres {
+        let after = message.after.as_deref().unwrap_or_default();
+        assert!(after.contains("+05:30"), "{after}");
+    }
+    message
+}
+
+/// After P1's insert ran, its message is spent, and Echo's mark is a write
+/// of its own, which the trigger wrote and whose run writes nothing more.
+async fn its_own_write_writes_nothing_more(db: &mut Db, host: &Host<'_>) {
+    let written = db.written(P1).await;
+    let [marked] = written.as_slice() else {
+        panic!("one message: {written:?}");
+    };
+    assert_eq!(marked.write, "update");
+    let version = db
+        .read(host, "Probe", P1)
+        .await
+        .expect("read")
+        .expect("a row")
+        .version;
+    let claim = db.claim_change(&marked.id).await;
+    let ChangeRun::Ran(executed) = db
+        .run_change(host, &marked.change(db.postgres()), Some(&claim))
+        .await
+        .expect("ran")
+    else {
+        panic!("not run");
+    };
+    assert!(executed.changes.rows.is_empty(), "{executed:?}");
+    assert!(db.written(P1).await.is_empty());
+    let after = db.read(host, "Probe", P1).await.expect("read");
+    assert_eq!(after.map(|row| row.version), Some(version));
+}
+
+/// A raw SQL insert is heard (D103): the table's trigger writes a message
+/// of its change queue, its image the JSON its dialect writes (Postgres a
+/// timestamp with the session's offset, SQLite a boolean 1 and JSON as
+/// text); a worker's run of it on its claim hands the core the row's own
+/// fields converted as a row read converts them, Timers arms the create
+/// deadline from the write's time, and the message is spent in the same
+/// commit. The write the run made is heard in turn and writes nothing more;
+/// the first claim again finds its message gone.
+async fn a_raw_write_is_heard_through_the_change_queue_its_images_converted_as_its_dialect_wrote_them(
+    mut db: Db,
+) {
+    let core = common::core();
+    let layout = common::store_layout();
+    let host = Host::new(&core, &layout).with_clock(|| 9_000_000);
+    let postgres = db.postgres();
+    let message = insert_raw(&mut db).await;
+    let at = message.at;
+    let claim = db.claim_change(&message.id).await;
+    let change = message.change(postgres);
+    let run = db
+        .run_change(&host, &change, Some(&claim))
+        .await
+        .expect("ran");
+    assert_eq!((run.ran(), run.why()), (true, ""));
+    assert_eq!(
+        echoed(&mut db, &host, P1).await,
+        json!({
+            "write": "insert",
+            "at": at,
+            "after": {"own": {"title": "Desk", "due": 1234, "ownerId": OWNER.1, "done": true, "data": {"a": 1}}, "owned": {}}
+        })
+    );
+    assert_eq!(
+        db.messages("probe_deadline_queue", P1).await,
+        [("expire".to_owned(), at + 1000, "ready".to_owned())]
+    );
+    its_own_write_writes_nothing_more(&mut db, &host).await;
+    let lost = db
+        .run_change(&host, &change, Some(&claim))
+        .await
+        .expect("ran nothing");
+    assert!(matches!(lost, ChangeRun::ClaimLost), "{lost:?}");
+    assert_eq!(lost.why(), "claim lost");
+}
+
+/// A change of a row that is gone (D103): a soft-deleted row's deadlines
+/// go and its sub-table rows stay, a row deleted for good loses both, and
+/// a row a change names as deleted that is still there keeps everything.
+async fn a_change_of_a_row_that_is_gone_clears_its_deadlines_and_a_soft_deleted_row_keeps_its_sub_table_rows(
+    mut db: Db,
+) {
+    let core = common::core();
+    let layout = common::store_layout();
+    let host = Host::new(&core, &layout).with_clock(|| 9_000_000);
+    let postgres = db.postgres();
+    db.create(&host, "Probe", json!({"title": "Desk"}), Some(P2))
+        .await
+        .expect("created");
+    assert_eq!(
+        db.messages("probe_deadline_queue", P2).await,
+        [("expire".to_owned(), 9_001_000, "ready".to_owned())]
+    );
+    let soft = format!(
+        "UPDATE probe SET deleted_at = {} WHERE id = {}",
+        p(postgres, 1),
+        p(postgres, 2)
+    );
+    db.exec(&soft, &[Param::text(iso(9_100_000)), Param::text(P2)])
+        .await;
+    let change = |write: &str, key: &str| TableChange {
+        key: key.into(),
+        write: write.into(),
+        at: 9_200_000,
+        before: Value::Null,
+        after: Value::Null,
+    };
+    let ChangeRun::Ran(executed) = db
+        .run_change(&host, &change("update", P2), None)
+        .await
+        .expect("ran")
+    else {
+        panic!("not run");
+    };
+    let key = executed.key.clone().expect("the row's key");
+    assert_eq!(
+        serde_json::to_value(&executed.changes.rows).expect("json"),
+        json!([{"kind": "gone", "type": "Probe", "key": key}])
+    );
+    assert!(db.messages("probe_deadline_queue", P2).await.is_empty());
+    assert_eq!(
+        db.sub_rows(&host, "Probe", P2, "Timers", "deadlines")
+            .await
+            .len(),
+        1
+    );
+
+    // Deleted for good, its trigger's message runs: its sub-table rows go
+    // too, which SQLite keeps without its foreign keys enforced.
+    db.exec(
+        &format!("DELETE FROM probe WHERE id = {}", p(postgres, 1)),
+        &[Param::text(P2)],
+    )
+    .await;
+    let written = db.written(P2).await;
+    let deleted = written
+        .iter()
+        .find(|message| message.write == "delete")
+        .expect("the delete's message");
+    db.run_change(&host, &deleted.change(postgres), None)
+        .await
+        .expect("ran");
+    assert!(db
+        .sub_rows(&host, "Probe", P2, "Timers", "deadlines")
+        .await
+        .is_empty());
+
+    // A row that is there keeps its deadlines and sub-table rows whatever
+    // a change names.
+    db.create(&host, "Probe", json!({"title": "Lamp"}), Some(P3))
+        .await
+        .expect("created");
+    let ChangeRun::Ran(executed) = db
+        .run_change(&host, &change("delete", P3), None)
+        .await
+        .expect("ran")
+    else {
+        panic!("not run");
+    };
+    assert!(
+        !executed
+            .changes
+            .rows
+            .iter()
+            .any(|write| matches!(write, superschematic_rules::RowWrite::Gone { .. })),
+        "{executed:?}"
+    );
+    assert_eq!(db.messages("probe_deadline_queue", P3).await.len(), 1);
+    assert_eq!(
+        db.sub_rows(&host, "Probe", P3, "Timers", "deadlines")
+            .await
+            .len(),
+        1
+    );
+}
+
+/// A change the adapter refuses rolls its transaction back and leaves its
+/// message claimed, for the claim loop to fail and retry (D103).
+async fn a_refused_change_leaves_its_message_claimed(mut db: Db) {
+    let core = common::core();
+    let layout = common::store_layout();
+    let host = Host::new(&core, &layout).with_clock(|| 9_000_000);
+    db.create(&host, "Probe", json!({"title": "Desk"}), Some(P4))
+        .await
+        .expect("created");
+    let written = db.written(P4).await;
+    let [message] = written.as_slice() else {
+        panic!("one message: {written:?}");
+    };
+    let claim = db.claim_change(&message.id).await;
+    let tampered = TableChange {
+        write: "upsert".into(),
+        ..message.change(db.postgres())
+    };
+    let refused = refusal(db.run_change(&host, &tampered, Some(&claim)).await);
+    assert_eq!(refused.code, superschematic_rules::Code::Internal);
+    assert!(
+        refused
+            .message
+            .ends_with("is a write of upsert, which is no insert, update or delete"),
+        "{}",
+        refused.message
+    );
+    assert_eq!(
+        db.change_state(&message.id).await,
+        Some(("claimed".to_owned(), true))
+    );
+}
+
+on_each_dialect!(
+    a_raw_write_is_heard_through_the_change_queue_its_images_converted_as_its_dialect_wrote_them
+);
+on_each_dialect!(a_change_of_a_row_that_is_gone_clears_its_deadlines_and_a_soft_deleted_row_keeps_its_sub_table_rows);
+on_each_dialect!(a_refused_change_leaves_its_message_claimed);
 on_each_dialect!(a_deadline_runs_on_its_claim_and_a_lost_claim_runs_nothing);
 on_each_dialect!(a_deadline_armed_again_survives_its_spend_and_a_rows_go_with_it);
+on_each_dialect!(a_vetoed_fire_is_released_counting_no_attempt);
 
 /// Of two creates that each take one room, in transactions of their own on
 /// two connections to one SQLite file, the second waits for the first and

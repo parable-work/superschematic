@@ -378,8 +378,9 @@ jobs:
           SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
           # The generated Go, TypeScript and Rust servers' behavior
           # operations (D103) run on it, each in a schema of its own, through
-          # their SDKs, and their behavior workers' deadline queues in
-          # process (the Timers end-to-end tests): the Go one over the rules
+          # their SDKs, and their behavior workers' deadline and change
+          # queues in process (the Timers and Reactions end-to-end tests,
+          # raw SQL writes heard among them): the Go one over the rules
           # archive staged above, the TypeScript one over the rules package
           # built above, and the Rust one over the engine workspace's
           # rules-adapter crate.
@@ -845,9 +846,9 @@ jobs:
           # above.
           SUPERSCHEMATIC_TEST_MEMORY_STORE: redis://127.0.0.1:6379/1
           # The behaviors' adapter tests (src/rules*.test.ts, D103) on the
-          # Postgres above too, each in a schema of its own, deadlines
-          # among them, and the core's transcripts replayed there as on
-          # bun:sqlite.
+          # Postgres above too, each in a schema of its own, deadlines and
+          # change queues among them, and the core's four transcripts
+          # replayed there as on bun:sqlite.
           SUPERSCHEMATIC_RULES_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: |
           bun install --frozen-lockfile
@@ -1383,8 +1384,9 @@ jobs:
       - name: Binding, adapter and stores (build / vet / test -race on SQLite and Postgres, the transcripts replayed on both)
         # The binding's tests call the core from many goroutines at once,
         # under the race detector; the replays fail on any mismatch and
-        # below their floors, 96 steps for core-workflow and 101 for
-        # core-timers.
+        # below their floors, 96 steps for core-workflow, 125 for
+        # core-timers, 586 for core-reactions and 60 for
+        # core-reactions-changes.
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
           CGO_ENABLED: "1"

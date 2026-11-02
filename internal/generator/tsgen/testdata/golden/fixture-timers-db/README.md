@@ -22,7 +22,7 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { GenericInt64, GenericJSON, IdentityUUID, TemporalDateTime, Invoice, InvoiceDeadline, InvoiceTimersDeadlines, Ticket, TicketDeadline, TicketTimersDeadlines,  } from '@schemas/fixture-timers-db-types/types';
+import type { GenericInt64, GenericJSON, IdentityUUID, TemporalDateTime, Invoice, InvoiceChange, InvoiceDeadline, InvoiceTimersDeadlines, Ticket, TicketChange, TicketDeadline, TicketTimersDeadlines,  } from '@schemas/fixture-timers-db-types/types';
 
 // Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-timers-db-types';
@@ -104,11 +104,13 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 
 
-### Types (6)
+### Types (8)
 
 
 - **Invoice** - An invoice with two Workflows, whose Timers names the one it reads:
 an issued invoice unpaid for thirty days is overdue.
+
+- **InvoiceChange** - The writes of Invoice's rows its behaviors hear, one message per write, whoever makes it, which a trigger of the table writes and a behavior worker runs (D103).
 
 - **InvoiceDeadline** - The deadlines Invoice's behaviors arm, one message per row, use and deadline, due when it falls due (D103).
 
@@ -118,6 +120,8 @@ an issued invoice unpaid for thirty days is overdue.
 its SLA. The first answer is due 1.5 seconds after the create, and a
 ticket still open then escalates; one left waiting on its customer an
 hour closes; and a reminder falls due a day before a visit.
+
+- **TicketChange** - The writes of Ticket's rows its behaviors hear, one message per write, whoever makes it, which a trigger of the table writes and a behavior worker runs (D103).
 
 - **TicketDeadline** - The deadlines Ticket's behaviors arm, one message per row, use and deadline, due when it falls due (D103).
 

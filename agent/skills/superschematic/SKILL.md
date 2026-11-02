@@ -278,19 +278,54 @@ Most are load errors; knowing them saves a build round-trip:
   deadlines with a worker of the API, a class with no members:
   `@behaviorWorker(Ticket, { concurrency: 2 }) export abstract class
   TicketTimers {}`, with `permissions: [...]` when a `then`'s transition
-  needs one. Write no handler or `Workers` method for it. Without such a
-  worker on some API over the database the deadlines fall due and nothing
-  runs them; the build only warns. Create, update and delete rows one at a
-  time through the repositories (`createOne`, `updateOne`, `deleteOne`;
-  `CreateOne`, `UpdateOne`, `DeleteOne` in Go) or the operations: those
-  arm and clear the deadlines. A raw SQL write arms and clears nothing yet,
-  and nor do the bulk and hard writes, TypeScript's `updateMany`,
-  `deleteMany` and `hardDeleteOne` and Go's `UpdateMany`, `DeleteMany` and
-  `HardDeleteOne`: a moved date-time leaves its deadline armed at the old
-  time. Never write the sub-table or the queue's rows by hand, nor enqueue
-  a `<Table>Deadline` message yourself. A deadline whose fire keeps being
-  refused goes dead after its sixth attempt and is not armed again: retry
-  it with `stack queue retry`.
+  needs one. Write no handler or `Workers` method for it. The same worker
+  runs the table's change queue (`ticket_change_queue`), which a trigger
+  writes on every insert, update and delete of a row, a soft delete and a
+  restore among them, whoever makes it, and runs one row's in the order
+  written, a failed one holding the row's later ones until it runs or is
+  dead. Without such a worker on some API over the database the deadlines
+  fall due, the changes pile up and nothing runs them; the build only
+  warns. On SQLite and D1 no behavior worker claims yet, so the change
+  queue only grows there.
+  Writes through the repositories one row at a time (`createOne`,
+  `updateOne`, `deleteOne`; `CreateOne`, `UpdateOne`, `DeleteOne` in Go)
+  and the operations arm and clear the deadlines in their own
+  transaction. A raw SQL write and the bulk and hard writes (TypeScript's
+  `updateMany`, `deleteMany` and `hardDeleteOne`, Go's `UpdateMany`,
+  `DeleteMany` and `HardDeleteOne`) are heard after the commit, when the
+  worker runs their change: until then a moved date-time leaves its
+  deadline armed at the old time, though a deadline that falls due first
+  reconciles its row before it fires. Never write the sub-table or the
+  queues' rows by hand, nor enqueue a `<Table>Deadline` or `<Table>Change`
+  message yourself. A fire a guard vetoes comes back a minute later; one
+  that keeps failing otherwise goes dead after its sixth attempt and is not
+  armed again: retry it with `stack queue retry`.
+- To move statuses when rows are written (a project active when a task
+  starts, done when every task is done, failed when one fails), implement
+  Reactions on the table, its first type argument the table itself:
+  `export abstract class Project implements Reactions<Project, { rules: [
+  { when: { allTerminal: { schema: "Task"; link: "project"; outcomes:
+  ["success"] } }; then: { transition: "done" } } ] }> { ... status:
+  Workflow<{ ... }> }` and `export abstract class Task implements
+  Reactions<Task, { rules: [{ when: { enters: "doing" }; then: { link:
+  "project"; transition: "active" } }] }> { ... project:
+  Relation<Project>; status: Workflow<{ ... }> }` (D103). A `when` is
+  `enters`, `changes: { field, to?, from? }` (a field of the table by its
+  name), `allTerminal` or `anyTerminal` (`schema` another table of the
+  database, `link` its to-one relation to this one); a `then` moves this
+  row's Workflow, or with `link` the row a to-one relation of this table
+  points at. Give the Workflow fields' terminal states `outcomes` for
+  `allTerminal` and `anyTerminal`. `holds` and `revised` are refused on a
+  table. A rule runs after the write commits, for every write of the row,
+  raw SQL included, when a `@behaviorWorker` of the table runs its change
+  queue: declare one for each table with a change queue, the linking table
+  (`Task`) too, since its worker runs the other table's `allTerminal` and
+  `anyTerminal` and moves that row with its own `permissions` (the build
+  warns an API serving `Project` that declares no worker of `Task`). A
+  `changes` rule cannot name a binary, vector or `Geo.Location` field. A
+  rule that cannot move its target (already there, no transition, vetoed,
+  gone) leaves it as it is. Reactions has no operations, so no route or
+  SDK method comes from it.
 - A service's config is the `@envVars` class no other `@envVars` class
   extends; it holds the fields of each class it extends. Two `@envVars`
   classes that do not extend one another fail the load: make the

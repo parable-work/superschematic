@@ -26,9 +26,9 @@ import (
 // the table's repository under the use's member,
 // orm.order.status.transition(key, { to: 'paid' }) and
 // orm.ticket.timers.fireTimer(key, { deadline: 'respond' }). A table whose
-// behaviors arm deadlines has runDeadline, which a behavior worker's
-// handler calls, and one whose behaviors keep sub-tables or arm deadlines
-// has no upserts. Nothing here names a behavior: the operations, their
+// behaviors arm deadlines has runDeadline, and one whose writes its
+// behaviors hear runChange, which a behavior worker's handlers call, and
+// one whose behaviors keep sub-tables or arm deadlines has no upserts. Nothing here names a behavior: the operations, their
 // parameters and results, and the owned fields' types come from each
 // behavior's declaration, narrowed by its config where behaviortypes
 // narrows one.
@@ -55,7 +55,7 @@ var repositoryMembers = []string{
 	"caller", "columnNamed", "ownedColumns", "coreOwn", "createColumns", "updateColumns",
 	"operationColumns", "wireKey", "createThroughCore", "updateThroughCore", "deleteThroughCore",
 	"notFound", "operate", "bindUses", "refuseOwnedUpdate", "refuseUpsert", "upsertInputs", "actor",
-	"clearActor", "runDeadline",
+	"clearActor", "runDeadline", "runChange",
 }
 
 // ORMUse is a use of a behavior on a table as orm.ts writes it: ID, the
@@ -113,7 +113,9 @@ func typeScriptRules(schema *ir.Schema, reg *registry.Registry) (*ormRules, erro
 			if use.Anchor == "" {
 				where = "implements " + use.Behavior
 			}
-			if slices.Contains(repositoryMembers, member) {
+			// A use with no operations (Reactions) puts no member on the
+			// repository (D103).
+			if len(use.Operations) > 0 && slices.Contains(repositoryMembers, member) {
 				if use.Anchor == "" {
 					return nil, fmt.Errorf("tsgen: table %s: implements %s would put its operations under the repository's member %s, which the repository holds itself", name, use.Behavior, member)
 				}
@@ -167,7 +169,9 @@ func typeScriptRules(schema *ir.Schema, reg *registry.Registry) (*ormRules, erro
 					Result: renderNarrowed(narrowed.Results[op.Name], aliases, "      "),
 				})
 			}
-			out.uses[name] = append(out.uses[name], ormUse)
+			if len(ormUse.Operations) > 0 {
+				out.uses[name] = append(out.uses[name], ormUse)
+			}
 		}
 	}
 	return out, nil

@@ -121,7 +121,7 @@ func respondBehaviorError(w gohttp.ResponseWriter, r *gohttp.Request, err error)
 }
 {{- end }}
 {{- range .BehaviorWorkers }}
-{{- $queue := index .Behavior.Queues 0 }}
+{{- $w := . }}
 
 {{ .QueuesDoc $.Deps.Database }}
 func {{ .QueuesFunc }}(db *orm.Database, logger *zap.Logger) []worker.Queue {
@@ -129,10 +129,12 @@ func {{ .QueuesFunc }}(db *orm.Database, logger *zap.Logger) []worker.Queue {
 		logger = zap.NewNop()
 	}
 	caller := rules.Caller{Subject: {{ printf "%q" .Behavior.Subject }}{{ with .Behavior.Permissions }}, Permissions: []string{ {{- range $i, $p := . }}{{ if $i }}, {{ end }}{{ printf "%q" $p }}{{ end -}} }{{ end }}}
-	deadlines := db.{{ $queue }}Queue()
-	return []worker.Queue{{ "{{" }}
-		Name:  {{ printf "%q" $queue }},
-		Lease: orm.{{ $queue }}Lease,
+	var queues []worker.Queue
+{{- with .Behavior.DeadlineQueue }}
+	deadlines := db.{{ . }}Queue()
+	queues = append(queues, worker.Queue{
+		Name:  {{ printf "%q" . }},
+		Lease: orm.{{ . }}Lease,
 		Claim: func(ctx context.Context, n int, lease time.Duration) ([]worker.Message, error) {
 			claims, err := deadlines.Claim(ctx, n, lease)
 			if err != nil {
@@ -145,12 +147,12 @@ func {{ .QueuesFunc }}(db *orm.Database, logger *zap.Logger) []worker.Queue {
 					Token:   claim.Token,
 					Attempt: claim.Attempt,
 					Handle: func(ctx context.Context) error {
-						run, err := db.Get{{ .Behavior.Table }}Repository().RunDeadline(orm.WithBehaviorCaller(ctx, caller), claim.Message, &rules.Claim{ID: claim.ID, Token: claim.Token})
+						run, err := db.Get{{ $w.Behavior.Table }}Repository().RunDeadline(orm.WithBehaviorCaller(ctx, caller), claim.Message, &rules.Claim{ID: claim.ID, Token: claim.Token})
 						if err != nil {
 							return err
 						}
 						if !run.Ran {
-							logger.Info("deadline ran nothing", zap.String("queue", {{ printf "%q" $queue }}), zap.String("message", claim.ID), zap.String("why", run.Why))
+							logger.Info("deadline ran nothing", zap.String("queue", {{ printf "%q" . }}), zap.String("message", claim.ID), zap.String("why", run.Why))
 						}
 						return nil
 					},
@@ -164,6 +166,46 @@ func {{ .QueuesFunc }}(db *orm.Database, logger *zap.Logger) []worker.Queue {
 		Fail:     deadlines.Fail,
 		Release:  deadlines.Release,
 		Prune:    deadlines.Prune,
-	{{ "}}" }}
+	})
+{{- end }}
+{{- with .Behavior.ChangeQueue }}
+	changes := db.{{ . }}Queue()
+	queues = append(queues, worker.Queue{
+		Name:  {{ printf "%q" . }},
+		Lease: orm.{{ . }}Lease,
+		Claim: func(ctx context.Context, n int, lease time.Duration) ([]worker.Message, error) {
+			claims, err := changes.Claim(ctx, n, lease)
+			if err != nil {
+				return nil, err
+			}
+			messages := make([]worker.Message, len(claims))
+			for i, claim := range claims {
+				messages[i] = worker.Message{
+					ID:      claim.ID,
+					Token:   claim.Token,
+					Attempt: claim.Attempt,
+					Handle: func(ctx context.Context) error {
+						run, err := db.Get{{ $w.Behavior.Table }}Repository().RunChange(orm.WithBehaviorCaller(ctx, caller), claim.Message, &rules.Claim{ID: claim.ID, Token: claim.Token})
+						if err != nil {
+							return err
+						}
+						if !run.Ran {
+							logger.Info("change ran nothing", zap.String("queue", {{ printf "%q" . }}), zap.String("message", claim.ID), zap.String("why", run.Why))
+						}
+						return nil
+					},
+				}
+			}
+			return messages, nil
+		},
+		Extend: changes.Extend,
+		// The handler completes its message in the transaction that runs it.
+		Complete: func(context.Context, string, string) error { return nil },
+		Fail:     changes.Fail,
+		Release:  changes.Release,
+		Prune:    changes.Prune,
+	})
+{{- end }}
+	return queues
 }
 {{- end }}

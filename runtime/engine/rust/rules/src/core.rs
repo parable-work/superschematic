@@ -19,7 +19,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::behavior::{Behavior, Declaration};
+use crate::behavior::{Behavior, Declaration, Listen};
 use crate::changes::ChangeSet;
 use crate::command::Command;
 use crate::context::listed;
@@ -186,6 +186,29 @@ impl Core {
             .behavior
             .read_fields(&*bound.config, row, tables)
             .ok_or_else(|| Refusal::defect(&bound.spec.behavior, CONFIG_OF_ANOTHER_TYPE))
+    }
+
+    /// What a type's uses listen to (D103): each use's
+    /// [`Behavior::listens`], in list order, each once. A type whose
+    /// configs the define check refuses is refused so. A host that keeps no
+    /// layout (the reference host) reads which types hear changes from it:
+    /// a type a listener names through a relation of that type to this one.
+    pub fn listeners(&self, spec: &TypeSpec) -> Result<Vec<Listen>, Refusal> {
+        let uses = Run::bind(self, spec)?;
+        let mut listens: Vec<Listen> = Vec::new();
+        for bound in &uses {
+            let heard = bound
+                .registered
+                .behavior
+                .listens(&*bound.config)
+                .ok_or_else(|| Refusal::defect(&bound.spec.behavior, CONFIG_OF_ANOTHER_TYPE))?;
+            for listen in heard {
+                if !listens.contains(&listen) {
+                    listens.push(listen);
+                }
+            }
+        }
+        Ok(listens)
     }
 
     /// Runs a command to its outcome, asking a source for every read and

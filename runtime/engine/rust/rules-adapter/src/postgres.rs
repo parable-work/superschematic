@@ -27,8 +27,8 @@ use tokio_postgres::GenericClient;
 use crate::convert::{internal, Bind, Cell};
 use crate::run::{self, Dialect, Statement, Store};
 use crate::{
-    Caller, Claim, Command, CreateOptions, Deadline, DeadlineRun, Error, ExecuteOptions, Executed,
-    Host, Owned, Row, SubRow,
+    Caller, ChangeRun, Claim, Command, CreateOptions, Deadline, DeadlineRun, Error, ExecuteOptions,
+    Executed, Host, Owned, Row, SubRow, TableChange,
 };
 
 /// The savepoint a change set applies in, named apart from a repository's
@@ -176,10 +176,13 @@ pub async fn read_sub_rows<C: GenericClient + Sync>(
 /// message, which the unit that applies the change set spends, and
 /// commits. A deadline armed or cleared since the claim runs nothing
 /// ([`DeadlineRun::ClaimLost`]); a row or a use that is gone spends the
-/// arming and runs nothing ([`DeadlineRun::Gone`]). Without a claim the
-/// deadline runs only while it is armed at its `at`, and its message is
-/// spent in the unit. Any other refusal comes back as [`Error::Refused`],
-/// nothing applied, and the transaction goes on.
+/// arming and runs nothing ([`DeadlineRun::Gone`]); a fire a guard vetoes
+/// releases the claimed message, due again in
+/// [`crate::VETOED_RETRY_SECONDS`] and counting no attempt, and runs
+/// nothing ([`DeadlineRun::Vetoed`]). Without a claim the deadline runs
+/// only while it is armed at its `at`, and its message is spent in the
+/// unit. Any other refusal comes back as [`Error::Refused`], nothing
+/// applied, and the transaction goes on.
 pub async fn run_deadline<C: GenericClient + Sync>(
     host: &Host<'_>,
     client: &C,
@@ -197,6 +200,28 @@ pub async fn run_deadline<C: GenericClient + Sync>(
         claim,
     )
     .await
+}
+
+/// Runs a write of a row of a type in `client`'s transaction (D103): a
+/// message of the table's change queue as its trigger wrote it, run as the
+/// core's change command at the host's time, as `caller`. The uses that
+/// hear the row's writes run on the row as it is now, and the listeners
+/// its relations reach on the rows they hold the keys of; a row that is
+/// gone runs none of its own and has its deadlines cleared. A behavior
+/// worker's handler passes the claim of the message, which the unit that
+/// applies the change set spends, and commits; a claim that no longer holds
+/// the message runs nothing ([`ChangeRun::ClaimLost`]). Without a claim
+/// nothing is spent. A refusal comes back as [`Error::Refused`], nothing
+/// applied, and the transaction goes on.
+pub async fn run_change<C: GenericClient + Sync>(
+    host: &Host<'_>,
+    client: &C,
+    type_name: &str,
+    change: &TableChange,
+    caller: Caller,
+    claim: Option<&Claim>,
+) -> Result<ChangeRun, Error> {
+    run::run_change(host, &PgStore { client }, type_name, change, caller, claim).await
 }
 
 /// The store over a client in a transaction.

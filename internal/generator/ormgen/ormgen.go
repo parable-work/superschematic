@@ -387,6 +387,13 @@ type Repository struct {
 	// for a table without one.
 	Deadline *DeadlineMessage
 
+	// ChangeQueue is the change queue of a table whose writes behaviors
+	// hear (D103), its message's type (TicketChange), whose RunChange runs
+	// one; "" for any other table. Change is how RunChange reads a message
+	// of it; nil for a table without one.
+	ChangeQueue string
+	Change      *ChangeMessage
+
 	// Import requirements computed from the field/relationship shapes so the
 	// repository template emits exactly the imports it uses.
 	NeedsTime               bool
@@ -998,6 +1005,9 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		return nil, err
 	}
 	if err := attachDeadlines(repositories, queues); err != nil {
+		return nil, err
+	}
+	if err := attachChanges(repositories, queues); err != nil {
 		return nil, err
 	}
 	queries, err := queriesOf(schema, scalarMap, unionNames, opts.Dependencies)

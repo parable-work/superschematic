@@ -26,8 +26,9 @@ import (
 // of the table's repository named for the use's member, its field or the
 // behavior (db.Order.Status().Transition(ctx, id, params),
 // db.Ticket.Timers().FireTimer(ctx, id, params)). A use's sub-tables get no
-// repository, and a table whose behaviors arm deadlines gets RunDeadline,
-// which its behavior worker's handler calls. Nothing here names a behavior:
+// repository, a table whose behaviors arm deadlines gets RunDeadline, and
+// a table whose writes behaviors hear gets RunChange, which its behavior
+// worker's handlers call. Nothing here names a behavior:
 // the operations, their parameters and results, the owned fields and the
 // sub-tables come from each behavior's declaration, narrowed by its config
 // where behaviortypes narrows one.
@@ -341,6 +342,19 @@ func (o *ORMOutput) HasDeadlines() bool {
 	return slices.ContainsFunc(o.Repositories, func(r Repository) bool { return r.DeadlineQueue != "" })
 }
 
+// HasChanges reports whether a table's writes are heard through its
+// change queue, whose repository's RunChange runs a message of it (D103).
+func (o *ORMOutput) HasChanges() bool {
+	return slices.ContainsFunc(o.Repositories, func(r Repository) bool { return r.ChangeQueue != "" })
+}
+
+// HasBehaviorQueues reports whether a table has a behavior queue, a
+// deadline queue or a change queue, whose repository's RunDeadline or
+// RunChange interfaces.go declares with the rules module's types (D103).
+func (o *ORMOutput) HasBehaviorQueues() bool {
+	return slices.ContainsFunc(o.Repositories, func(r Repository) bool { return r.DeadlineQueue != "" || r.ChangeQueue != "" })
+}
+
 // OperationsUseRawJSON reports whether an operation of a use of any
 // table's takes or returns json.RawMessage, which interfaces.go's no-op
 // operations name.
@@ -378,7 +392,7 @@ var repositoryMethods = []string{
 	"CreateOne", "CreateMany", "UpsertOne", "UpsertOneResult", "UpsertMany",
 	"UpdateOne", "UpdateOneIfVersion", "UpdateMany", "DeleteOne", "DeleteOneIfVersion",
 	"DeleteMany", "HardDeleteOne", "GetVersion", "ListVersions", "GetAsOf",
-	"PruneHistory", "PruneHistoryFunctionName", "Nearest", "Reencrypt", "RunDeadline",
+	"PruneHistory", "PruneHistoryFunctionName", "Nearest", "Reencrypt", "RunDeadline", "RunChange",
 }
 
 // repositoryTypeSuffixes are the suffixes of the names the ORM declares for
@@ -485,6 +499,9 @@ func attachTableRules(schema *ir.Schema, repo *Repository, table *behaviorlayout
 		repo.DeadlineQueue = table.Deadlines.Queue
 		repo.NoUpsert = true
 	}
+	if table.Changes != nil {
+		repo.ChangeQueue = table.Changes.Queue
+	}
 
 	for _, column := range table.Own {
 		own := CoreOwnColumn{Field: column.Field}
@@ -531,9 +548,6 @@ func attachTableRules(schema *ir.Schema, repo *Repository, table *behaviorlayout
 			repo.NoUpsert = true
 		}
 		goName := codegen.ToPascalCase(member)
-		if slices.Contains(repositoryMethods, goName) || strings.HasPrefix(goName, "ListAsOfBy") {
-			return fmt.Errorf("ormgen: table %s: the behavior %s %s would put its operations under the repository's method %s, which the repository holds itself; %s", repo.TypeName, use.Behavior, where, goName, rename)
-		}
 		for _, field := range use.Fields {
 			var fd *Field
 			for i := range repo.Fields {
@@ -558,6 +572,16 @@ func attachTableRules(schema *ir.Schema, repo *Repository, table *behaviorlayout
 				DateTime: dateTime,
 				Pointer:  fd.MemberGoType() != fd.ValueGoType(),
 			})
+		}
+
+		// A use with no operations (Reactions) puts no member on the
+		// repository, as TypeScript's repositories put none (D103): its rules
+		// run from the table's change queue, and it has nothing to call.
+		if len(use.Operations) == 0 {
+			continue
+		}
+		if slices.Contains(repositoryMethods, goName) || strings.HasPrefix(goName, "ListAsOfBy") {
+			return fmt.Errorf("ormgen: table %s: the behavior %s %s would put its operations under the repository's method %s, which the repository holds itself; %s", repo.TypeName, use.Behavior, where, goName, rename)
 		}
 
 		ref, _ := td.FieldBehavior(use.ID)
@@ -1007,6 +1031,79 @@ func attachDeadlines(repositories []Repository, queues []Queue) error {
 			*each.expr = expr
 		}
 		repo.Deadline = message
+	}
+	return nil
+}
+
+// ChangeMessage is how a repository's RunChange reads a message of its
+// table's change queue (D103): the Go expressions, of change, a
+// types.<Queue>, of the row's key in the core's form, the write, its time
+// as an int64, and the row's images before and after it, which
+// encoding/json writes.
+type ChangeMessage struct {
+	RowKey, Write, At, Before, After string
+}
+
+// attachChanges gives each repository whose table's writes behaviors hear
+// how its RunChange reads a message of the change queue, from the queue's
+// fields as the loader added them (D103). It fails for a table whose queue
+// the schema lacks or whose message lacks a field, which the loader makes
+// impossible.
+func attachChanges(repositories []Repository, queues []Queue) error {
+	for i := range repositories {
+		repo := &repositories[i]
+		if repo.ChangeQueue == "" {
+			continue
+		}
+		var queue *Queue
+		for j := range queues {
+			if queues[j].Name == repo.ChangeQueue {
+				queue = &queues[j]
+			}
+		}
+		if queue == nil {
+			return fmt.Errorf("ormgen: table %s: its writes are heard through the queue %s, which the schema does not declare", repo.TypeName, repo.ChangeQueue)
+		}
+		fields := map[string]Field{}
+		for _, f := range queue.Fields {
+			fields[f.Name] = f
+		}
+		member := func(name string) (string, Field, error) {
+			f, ok := fields[name]
+			if !ok {
+				return "", Field{}, fmt.Errorf("ormgen: table %s: its change queue %s has no field %s", repo.TypeName, queue.Name, name)
+			}
+			return "change." + codegen.ToPascalCase(name), f, nil
+		}
+		message := &ChangeMessage{}
+		rowKey, f, err := member(behaviorlayout.ChangeRowKeyField)
+		if err != nil {
+			return err
+		}
+		message.RowKey = "fmt.Sprint(" + rowKey + ")"
+		if f.IsUUIDScalar {
+			message.RowKey = rowKey + ".String()"
+		}
+		for _, each := range []struct {
+			name string
+			expr *string
+			wrap string
+		}{
+			{behaviorlayout.ChangeWriteField, &message.Write, "string"},
+			{behaviorlayout.ChangeAtField, &message.At, "int64"},
+			{behaviorlayout.ChangeBeforeField, &message.Before, ""},
+			{behaviorlayout.ChangeAfterField, &message.After, ""},
+		} {
+			expr, _, err := member(each.name)
+			if err != nil {
+				return err
+			}
+			if each.wrap != "" {
+				expr = each.wrap + "(" + expr + ")"
+			}
+			*each.expr = expr
+		}
+		repo.Change = message
 	}
 	return nil
 }

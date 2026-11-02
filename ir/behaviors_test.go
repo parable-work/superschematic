@@ -243,6 +243,19 @@ func TestBehaviors_Implements(t *testing.T) {
 	if queue := s.BehaviorQueueOf("Task", BehaviorQueueDeadlines); queue != nil {
 		t.Errorf("BehaviorQueueOf a table with none = %+v", queue)
 	}
+	// A change queue is another kind of the same table's, marked with the
+	// tables that hear it through a relation, which Same compares (D103).
+	changes := &BehaviorQueue{Row: "Ticket", Kind: BehaviorQueueChanges, Behaviors: []string{"Timers"}, HeardBy: []string{"Project"}}
+	s.Types["TicketChange"] = &TypeDef{Name: "TicketChange", BehaviorQueue: changes}
+	if queue := s.BehaviorQueueOf("Ticket", BehaviorQueueChanges); queue == nil || queue.Name != "TicketChange" {
+		t.Errorf("BehaviorQueueOf the change queue = %+v", queue)
+	}
+	if other := *changes; !changes.Same(&other) {
+		t.Error("a change queue is not the same as its copy")
+	}
+	if other := (BehaviorQueue{Row: "Ticket", Kind: BehaviorQueueChanges, Behaviors: []string{"Timers"}}); changes.Same(&other) {
+		t.Error("change queues heard by other tables are the same")
+	}
 	if got := BehaviorWorkerSubject("tickets-api", "TicketTimers"); got != "tickets-api/TicketTimers" {
 		t.Errorf("BehaviorWorkerSubject = %q", got)
 	}

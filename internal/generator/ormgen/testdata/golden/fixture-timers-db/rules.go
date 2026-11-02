@@ -21,6 +21,14 @@ transaction: the rows of a behavior's sub-tables, which no repository writes,
 and the deadlines it arms, messages of the table's deadline queue, which
 RunDeadline runs as they fall due. A raw SQL write of an owned column or a
 sub-table (Tx.Exec) is never refused.
+
+A table whose writes behaviors hear keeps a change queue, which a trigger of
+the table writes a message of for each insert, update and delete of a row,
+whoever makes it: the core, UpdateMany, DeleteMany and HardDeleteOne, a raw
+SQL write. RunChange runs each through the core after the commit, as the
+table's behavior worker claims it, so the deadlines a raw write moves
+reconcile then, and a deadline that falls due first reconciles its row
+before it fires.
 */
 
 // rulesLayoutJSON is the layout document of the tables that compose
@@ -184,6 +192,15 @@ const rulesLayoutJSON = `{
         "name": "name",
         "at": "at",
         "payload": "payload"
+      },
+      "changes": {
+        "queue": "InvoiceChange",
+        "table": "invoice_change_queue",
+        "rowKey": "row_key",
+        "write": "write",
+        "at": "at",
+        "before": "before",
+        "after": "after"
       },
       "spec": {
         "name": "Invoice",
@@ -402,6 +419,15 @@ const rulesLayoutJSON = `{
         "name": "name",
         "at": "at",
         "payload": "payload"
+      },
+      "changes": {
+        "queue": "TicketChange",
+        "table": "ticket_change_queue",
+        "rowKey": "row_key",
+        "write": "write",
+        "at": "at",
+        "before": "before",
+        "after": "after"
       },
       "spec": {
         "name": "Ticket",

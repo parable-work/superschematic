@@ -170,6 +170,17 @@ CREATE INDEX {{ quote (searchIndexName $table.Name) }} ON {{ $table.QuotedName }
 {{ $enqueue.Trigger.SQL }};
 {{- end }}
 {{- end }}
+{{- if .ChangeTriggers }}
+
+-- Create the functions and triggers that write a table's change queue: a
+-- message for each write of a row its behaviors hear, whoever writes it
+{{- range $change := .ChangeTriggers }}
+
+{{ $change.FunctionSQL }};
+
+{{ $change.Trigger.SQL }};
+{{- end }}
+{{- end }}
 {{- if .Projections }}
 
 -- Create projection views: read-only relations over the tables above. A

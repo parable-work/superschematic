@@ -205,9 +205,15 @@ type Worker struct {
 	// Queue is the name of the `@queue` class whose messages the worker
 	// handles. It is a class of the DB service the API connects to, its
 	// authDb or its one DB dependency, which the schema imports. A
-	// behavior worker's is the queue the loader added to that database for
-	// its table's deadlines (D103), which the loader fills.
+	// behavior worker's is the first of its Queues (D103), which the
+	// loader fills.
 	Queue string `json:"queue,omitempty" yaml:"queue,omitempty"`
+
+	// Queues are a behavior worker's queues, deadlines first: its table's
+	// deadline queue and its change queue, each when the database holds it
+	// (D103). The loader fills it with Queue, which is its first; the data
+	// forms have no key for it.
+	Queues []string `json:"queues,omitempty" yaml:"queues,omitempty" jsonschema:"-"`
 
 	// Concurrency is how many messages an instance handles at a time.
 	// Zero is DefaultWorkerConcurrency; an environment's settings change
@@ -222,7 +228,8 @@ type Worker struct {
 	// BehaviorWorker is @behaviorWorker(Type, options) (D103): the worker
 	// runs the table's behavior queues through the behaviors' core, by a
 	// handler the API's generator writes; the API's Workers has no method
-	// for it. The loader fills Queue with the table's deadline queue.
+	// for it. The loader fills Queues with the table's deadline queue and
+	// change queue, and Queue with the first.
 	BehaviorWorker *BehaviorWorkerConfig `json:"behaviorWorker,omitempty" yaml:"behaviorWorker,omitempty"`
 
 	// Origin is [OriginBehavior] once the loader filled Queue from

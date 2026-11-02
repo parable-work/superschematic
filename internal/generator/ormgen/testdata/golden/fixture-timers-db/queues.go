@@ -228,6 +228,178 @@ func (t queueTable) update(ctx context.Context, pool *pgxpool.Pool, what, statem
 	return nil
 }
 
+// invoiceChangeQueue is the table of the queue InvoiceChange.
+var invoiceChangeQueue = queueTable{
+	name:       `invoice_change_queue`,
+	retries:    5,
+	backoff:    30 * time.Second,
+	maxBackoff: 3600 * time.Second,
+	retain:     0 * time.Second,
+	statements: queueStatements{
+		insert: `INSERT INTO invoice_change_queue`,
+		expire: `UPDATE invoice_change_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
+  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
+WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
+		claim: `WITH due AS (
+  SELECT m.id FROM invoice_change_queue AS m
+  WHERE ((m.state = 'ready' AND m.due_at <= now()) OR (m.state = 'claimed' AND m.claim_expires_at <= now()))
+    AND NOT EXISTS (SELECT 1 FROM invoice_change_queue AS o WHERE o.row_key = m.row_key AND o.id <> m.id
+      AND (o.state = 'claimed' OR (m.state = 'ready' AND o.state = 'ready' AND (o.created_at, o.id) < (m.created_at, m.id))))
+  ORDER BY m.due_at, m.id
+  LIMIT $1
+  FOR UPDATE OF m SKIP LOCKED
+)
+UPDATE invoice_change_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),
+  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()
+FROM due WHERE q.id = due.id
+RETURNING q.id::text, q.claim_token::text, q.attempts, q.row_key, q.write, q.at, q.before, q."after"`,
+		complete: `DELETE FROM invoice_change_queue
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+		fail: `UPDATE invoice_change_queue SET
+  state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,
+  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => LEAST($4 * power(2, LEAST(attempts - 1, 40)), $6)) END,
+  last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'
+RETURNING state`,
+		extend: `UPDATE invoice_change_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+		release: `UPDATE invoice_change_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+		prune: `DELETE FROM invoice_change_queue WHERE id IN (
+  SELECT id FROM invoice_change_queue
+  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)
+  ORDER BY updated_at
+  LIMIT $2
+  FOR UPDATE SKIP LOCKED
+)`,
+	},
+}
+
+// InvoiceChangeLease is how long a claim on a message of InvoiceChange holds it: a
+// worker extends the claim while its handler runs.
+const InvoiceChangeLease = 60 * time.Second
+
+// EnqueueInvoiceChange writes msg into the queue InvoiceChange in tx, the caller's
+// transaction: the message is due once tx commits, and never if it rolls
+// back. A field writes its column as a table's field does.
+func EnqueueInvoiceChange(ctx context.Context, tx TxInterface, msg *types.InvoiceChange) error {
+	var columns []string
+	var values []any
+	columns = append(columns, `row_key`)
+	values = append(values, msg.RowKey.ToUUID())
+	columns = append(columns, `write`)
+	values = append(values, msg.Write)
+	columns = append(columns, `at`)
+	values = append(values, msg.At)
+	if msg.Before != nil {
+		columns = append(columns, `before`)
+		value, err := marshalJSONFieldValue(msg.Before)
+		if err != nil {
+			return fmt.Errorf("enqueue InvoiceChange: field before: %w", err)
+		}
+		values = append(values, value)
+	}
+	if msg.After != nil {
+		columns = append(columns, `"after"`)
+		value, err := marshalJSONFieldValue(msg.After)
+		if err != nil {
+			return fmt.Errorf("enqueue InvoiceChange: field after: %w", err)
+		}
+		values = append(values, value)
+	}
+	return invoiceChangeQueue.insert(ctx, tx, columns, values)
+}
+
+// InvoiceChangeQueue claims the messages of the queue InvoiceChange for a worker. A
+// message whose handler fails is due again after 30s, doubled for each
+// attempt before, up to 3600s, and is dead after 5 such retries. A done
+// message is removed as it completes.
+//
+// The writes of Invoice's rows its behaviors hear, one message per write, whoever makes it, which a trigger of the table writes and a behavior worker runs (D103).
+type InvoiceChangeQueue struct {
+	pool *pgxpool.Pool
+}
+
+// InvoiceChangeQueue returns the queue InvoiceChange of the database.
+func (db *Database) InvoiceChangeQueue() *InvoiceChangeQueue {
+	return &InvoiceChangeQueue{pool: db.pool}
+}
+
+// InvoiceChangeClaim is a claimed message of InvoiceChange: its ID, the token of
+// the claim, which attempt this is, from 1, and the message.
+type InvoiceChangeClaim struct {
+	ID      string
+	Token   string
+	Attempt int
+	Message types.InvoiceChange
+}
+
+// Claim claims up to n due messages for lease; a message that does not read
+// into its type it fails alone, recording Unreadable and why. Each field
+// reads its column as a table's field does.
+func (q *InvoiceChangeQueue) Claim(ctx context.Context, n int, lease time.Duration) ([]InvoiceChangeClaim, error) {
+	var claims []InvoiceChangeClaim
+	err := invoiceChangeQueue.claim(ctx, q.pool, n, lease, func(rows pgx.Rows) error {
+		var claim InvoiceChangeClaim
+		msg := &claim.Message
+		var tempBefore []byte
+		var tempAfter []byte
+		if err := rows.Scan(&claim.ID, &claim.Token, &claim.Attempt, &msg.RowKey, &msg.Write, &msg.At, &tempBefore, &tempAfter); err != nil {
+			return err
+		}
+		if len(tempBefore) > 0 {
+			if err := unmarshalGenericJSONFieldValue(tempBefore, &msg.Before); err != nil {
+				return &queueUnreadable{id: claim.ID, token: claim.Token, err: fmt.Errorf("message %s field before: %w", claim.ID, err)}
+			}
+		}
+		if len(tempAfter) > 0 {
+			if err := unmarshalGenericJSONFieldValue(tempAfter, &msg.After); err != nil {
+				return &queueUnreadable{id: claim.ID, token: claim.Token, err: fmt.Errorf("message %s field after: %w", claim.ID, err)}
+			}
+		}
+		claims = append(claims, claim)
+		return nil
+	})
+	if errors.Is(err, errKeyHeld) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return claims, nil
+}
+
+// Complete deletes the message id, which token claims: it is done, and the
+// queue keeps no done message.
+func (q *InvoiceChangeQueue) Complete(ctx context.Context, id, token string) error {
+	return invoiceChangeQueue.complete(ctx, q.pool, id, token)
+}
+
+// Fail records cause on the message id, which token claims, and makes it
+// due again after the backoff, doubled for each attempt before and capped at
+// the maximum backoff, or dead when its retries are spent. It reports
+// whether the message is dead.
+func (q *InvoiceChangeQueue) Fail(ctx context.Context, id, token, cause string) (bool, error) {
+	return invoiceChangeQueue.fail(ctx, q.pool, id, token, cause)
+}
+
+// Extend holds the message id, which token claims, for lease from now.
+func (q *InvoiceChangeQueue) Extend(ctx context.Context, id, token string, lease time.Duration) error {
+	return invoiceChangeQueue.extend(ctx, q.pool, id, token, lease)
+}
+
+// Release gives the message id, which token claims, back, due at once.
+func (q *InvoiceChangeQueue) Release(ctx context.Context, id, token string) error {
+	return invoiceChangeQueue.release(ctx, q.pool, id, token)
+}
+
+// Prune deletes up to limit done messages, the oldest first, which the queue
+// holds only from before it kept none, and returns how many it deleted. It
+// never deletes a dead message.
+func (q *InvoiceChangeQueue) Prune(ctx context.Context, limit int) (int, error) {
+	return invoiceChangeQueue.prune(ctx, q.pool, limit)
+}
+
 // invoiceDeadlineQueue is the table of the queue InvoiceDeadline.
 var invoiceDeadlineQueue = queueTable{
 	name:       `invoice_deadline_queue`,
@@ -384,6 +556,178 @@ func (q *InvoiceDeadlineQueue) Release(ctx context.Context, id, token string) er
 // never deletes a dead message.
 func (q *InvoiceDeadlineQueue) Prune(ctx context.Context, limit int) (int, error) {
 	return invoiceDeadlineQueue.prune(ctx, q.pool, limit)
+}
+
+// ticketChangeQueue is the table of the queue TicketChange.
+var ticketChangeQueue = queueTable{
+	name:       `ticket_change_queue`,
+	retries:    5,
+	backoff:    30 * time.Second,
+	maxBackoff: 3600 * time.Second,
+	retain:     0 * time.Second,
+	statements: queueStatements{
+		insert: `INSERT INTO ticket_change_queue`,
+		expire: `UPDATE ticket_change_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
+  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
+WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
+		claim: `WITH due AS (
+  SELECT m.id FROM ticket_change_queue AS m
+  WHERE ((m.state = 'ready' AND m.due_at <= now()) OR (m.state = 'claimed' AND m.claim_expires_at <= now()))
+    AND NOT EXISTS (SELECT 1 FROM ticket_change_queue AS o WHERE o.row_key = m.row_key AND o.id <> m.id
+      AND (o.state = 'claimed' OR (m.state = 'ready' AND o.state = 'ready' AND (o.created_at, o.id) < (m.created_at, m.id))))
+  ORDER BY m.due_at, m.id
+  LIMIT $1
+  FOR UPDATE OF m SKIP LOCKED
+)
+UPDATE ticket_change_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),
+  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()
+FROM due WHERE q.id = due.id
+RETURNING q.id::text, q.claim_token::text, q.attempts, q.row_key, q.write, q.at, q.before, q."after"`,
+		complete: `DELETE FROM ticket_change_queue
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+		fail: `UPDATE ticket_change_queue SET
+  state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,
+  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => LEAST($4 * power(2, LEAST(attempts - 1, 40)), $6)) END,
+  last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'
+RETURNING state`,
+		extend: `UPDATE ticket_change_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+		release: `UPDATE ticket_change_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+		prune: `DELETE FROM ticket_change_queue WHERE id IN (
+  SELECT id FROM ticket_change_queue
+  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)
+  ORDER BY updated_at
+  LIMIT $2
+  FOR UPDATE SKIP LOCKED
+)`,
+	},
+}
+
+// TicketChangeLease is how long a claim on a message of TicketChange holds it: a
+// worker extends the claim while its handler runs.
+const TicketChangeLease = 60 * time.Second
+
+// EnqueueTicketChange writes msg into the queue TicketChange in tx, the caller's
+// transaction: the message is due once tx commits, and never if it rolls
+// back. A field writes its column as a table's field does.
+func EnqueueTicketChange(ctx context.Context, tx TxInterface, msg *types.TicketChange) error {
+	var columns []string
+	var values []any
+	columns = append(columns, `row_key`)
+	values = append(values, msg.RowKey.ToUUID())
+	columns = append(columns, `write`)
+	values = append(values, msg.Write)
+	columns = append(columns, `at`)
+	values = append(values, msg.At)
+	if msg.Before != nil {
+		columns = append(columns, `before`)
+		value, err := marshalJSONFieldValue(msg.Before)
+		if err != nil {
+			return fmt.Errorf("enqueue TicketChange: field before: %w", err)
+		}
+		values = append(values, value)
+	}
+	if msg.After != nil {
+		columns = append(columns, `"after"`)
+		value, err := marshalJSONFieldValue(msg.After)
+		if err != nil {
+			return fmt.Errorf("enqueue TicketChange: field after: %w", err)
+		}
+		values = append(values, value)
+	}
+	return ticketChangeQueue.insert(ctx, tx, columns, values)
+}
+
+// TicketChangeQueue claims the messages of the queue TicketChange for a worker. A
+// message whose handler fails is due again after 30s, doubled for each
+// attempt before, up to 3600s, and is dead after 5 such retries. A done
+// message is removed as it completes.
+//
+// The writes of Ticket's rows its behaviors hear, one message per write, whoever makes it, which a trigger of the table writes and a behavior worker runs (D103).
+type TicketChangeQueue struct {
+	pool *pgxpool.Pool
+}
+
+// TicketChangeQueue returns the queue TicketChange of the database.
+func (db *Database) TicketChangeQueue() *TicketChangeQueue {
+	return &TicketChangeQueue{pool: db.pool}
+}
+
+// TicketChangeClaim is a claimed message of TicketChange: its ID, the token of
+// the claim, which attempt this is, from 1, and the message.
+type TicketChangeClaim struct {
+	ID      string
+	Token   string
+	Attempt int
+	Message types.TicketChange
+}
+
+// Claim claims up to n due messages for lease; a message that does not read
+// into its type it fails alone, recording Unreadable and why. Each field
+// reads its column as a table's field does.
+func (q *TicketChangeQueue) Claim(ctx context.Context, n int, lease time.Duration) ([]TicketChangeClaim, error) {
+	var claims []TicketChangeClaim
+	err := ticketChangeQueue.claim(ctx, q.pool, n, lease, func(rows pgx.Rows) error {
+		var claim TicketChangeClaim
+		msg := &claim.Message
+		var tempBefore []byte
+		var tempAfter []byte
+		if err := rows.Scan(&claim.ID, &claim.Token, &claim.Attempt, &msg.RowKey, &msg.Write, &msg.At, &tempBefore, &tempAfter); err != nil {
+			return err
+		}
+		if len(tempBefore) > 0 {
+			if err := unmarshalGenericJSONFieldValue(tempBefore, &msg.Before); err != nil {
+				return &queueUnreadable{id: claim.ID, token: claim.Token, err: fmt.Errorf("message %s field before: %w", claim.ID, err)}
+			}
+		}
+		if len(tempAfter) > 0 {
+			if err := unmarshalGenericJSONFieldValue(tempAfter, &msg.After); err != nil {
+				return &queueUnreadable{id: claim.ID, token: claim.Token, err: fmt.Errorf("message %s field after: %w", claim.ID, err)}
+			}
+		}
+		claims = append(claims, claim)
+		return nil
+	})
+	if errors.Is(err, errKeyHeld) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return claims, nil
+}
+
+// Complete deletes the message id, which token claims: it is done, and the
+// queue keeps no done message.
+func (q *TicketChangeQueue) Complete(ctx context.Context, id, token string) error {
+	return ticketChangeQueue.complete(ctx, q.pool, id, token)
+}
+
+// Fail records cause on the message id, which token claims, and makes it
+// due again after the backoff, doubled for each attempt before and capped at
+// the maximum backoff, or dead when its retries are spent. It reports
+// whether the message is dead.
+func (q *TicketChangeQueue) Fail(ctx context.Context, id, token, cause string) (bool, error) {
+	return ticketChangeQueue.fail(ctx, q.pool, id, token, cause)
+}
+
+// Extend holds the message id, which token claims, for lease from now.
+func (q *TicketChangeQueue) Extend(ctx context.Context, id, token string, lease time.Duration) error {
+	return ticketChangeQueue.extend(ctx, q.pool, id, token, lease)
+}
+
+// Release gives the message id, which token claims, back, due at once.
+func (q *TicketChangeQueue) Release(ctx context.Context, id, token string) error {
+	return ticketChangeQueue.release(ctx, q.pool, id, token)
+}
+
+// Prune deletes up to limit done messages, the oldest first, which the queue
+// holds only from before it kept none, and returns how many it deleted. It
+// never deletes a dead message.
+func (q *TicketChangeQueue) Prune(ctx context.Context, limit int) (int, error) {
+	return ticketChangeQueue.prune(ctx, q.pool, limit)
 }
 
 // ticketDeadlineQueue is the table of the queue TicketDeadline.

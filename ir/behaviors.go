@@ -263,29 +263,43 @@ type BehaviorTable struct {
 // due when the deadline falls due.
 const BehaviorQueueDeadlines = "deadlines"
 
+// BehaviorQueueChanges is the kind of the queue a table whose writes its
+// behaviors hear is given (D103): one message per write of a row, whoever
+// makes it, which the table's change trigger writes.
+const BehaviorQueueChanges = "changes"
+
 // BehaviorQueue marks a queue the loader adds for a table's behaviors
 // (D103): the queue of the deadlines they arm ([BehaviorQueueDeadlines]),
-// which a @behaviorWorker of an API over the table's database runs.
+// or of the writes of its rows they hear ([BehaviorQueueChanges]), which a
+// @behaviorWorker of an API over the table's database runs.
 type BehaviorQueue struct {
 	// Row is the table's type: Ticket.
 	Row string `json:"row" yaml:"row"`
 
-	// Kind is what the queue holds: [BehaviorQueueDeadlines].
+	// Kind is what the queue holds: [BehaviorQueueDeadlines] or
+	// [BehaviorQueueChanges].
 	Kind string `json:"kind" yaml:"kind"`
 
 	// Behaviors are the behaviors of the table's uses whose messages it
-	// holds, each once in list order: those that arm deadlines (Timers),
-	// which a generator's refusal of the worker that runs them names.
+	// holds, each once in list order, which a generator's refusal of the
+	// worker that runs them names: on a deadline queue those that arm
+	// deadlines (Timers), on a change queue those that hear the table's
+	// writes (Timers, Reactions).
 	Behaviors []string `json:"behaviors,omitempty" yaml:"behaviors,omitempty"`
+
+	// HeardBy are the tables of the schema whose behaviors hear the table's
+	// writes through a relation of it (Project's Reactions hearing Task
+	// through task.project), sorted by name; set on a change queue alone.
+	HeardBy []string `json:"heardBy,omitempty" yaml:"heardBy,omitempty"`
 }
 
 // Same reports whether q and other mark the same queue: of one table, of
-// one kind, for the same behaviors.
+// one kind, for the same behaviors, heard by the same tables.
 func (q *BehaviorQueue) Same(other *BehaviorQueue) bool {
 	if q == nil || other == nil {
 		return q == other
 	}
-	return q.Row == other.Row && q.Kind == other.Kind && slices.Equal(q.Behaviors, other.Behaviors)
+	return q.Row == other.Row && q.Kind == other.Kind && slices.Equal(q.Behaviors, other.Behaviors) && slices.Equal(q.HeardBy, other.HeardBy)
 }
 
 // BehaviorQueueOf returns the queue the loader added to s for the table

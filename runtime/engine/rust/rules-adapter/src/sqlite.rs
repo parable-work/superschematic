@@ -40,8 +40,8 @@ use serde_json::{Map, Value};
 use crate::convert::{internal, Bind, Cell};
 use crate::run::{self, Dialect, Statement, Store};
 use crate::{
-    Caller, Claim, Command, CreateOptions, Deadline, DeadlineRun, Error, ExecuteOptions, Executed,
-    Host, Owned, Row, SubRow,
+    Caller, ChangeRun, Claim, Command, CreateOptions, Deadline, DeadlineRun, Error, ExecuteOptions,
+    Executed, Host, Owned, Row, SubRow, TableChange,
 };
 
 /// The savepoint a change set applies in.
@@ -219,8 +219,9 @@ pub fn read_sub_rows(
 /// of the host's time and the time it was armed to fall due at, as
 /// `caller`, its arming spent in the unit that applies its change set: a
 /// claim of its message by its id and token, or, without one, the message
-/// armed at its `at`, which is read before each run. A claim lost and a row
-/// or a use gone run nothing, as Postgres's `run_deadline` says.
+/// armed at its `at`, which is read before each run. A claim lost, a row or
+/// a use gone and a fire a guard vetoes run nothing, as Postgres's
+/// `run_deadline` says.
 pub fn run_deadline(
     host: &Host<'_>,
     conn: &Connection,
@@ -234,6 +235,29 @@ pub fn run_deadline(
         &SqliteStore { conn },
         type_name,
         deadline,
+        caller,
+        claim,
+    ))
+}
+
+/// Runs a write of a row of a type on `conn` (D103): a message of the
+/// table's change queue as its trigger wrote it (its images JSON text or
+/// objects), run as the core's change command at the host's time, as
+/// `caller`, the claim of its message spent in the unit that applies its
+/// change set. A claim lost runs nothing, as Postgres's `run_change` says.
+pub fn run_change(
+    host: &Host<'_>,
+    conn: &Connection,
+    type_name: &str,
+    change: &TableChange,
+    caller: Caller,
+    claim: Option<&Claim>,
+) -> Result<ChangeRun, Error> {
+    finish(run::run_change(
+        host,
+        &SqliteStore { conn },
+        type_name,
+        change,
         caller,
         claim,
     ))

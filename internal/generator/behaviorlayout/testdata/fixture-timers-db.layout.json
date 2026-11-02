@@ -157,6 +157,15 @@
         "at": "at",
         "payload": "payload"
       },
+      "changes": {
+        "queue": "InvoiceChange",
+        "table": "invoice_change_queue",
+        "rowKey": "row_key",
+        "write": "write",
+        "at": "at",
+        "before": "before",
+        "after": "after"
+      },
       "spec": {
         "name": "Invoice",
         "uses": [
@@ -374,6 +383,15 @@
         "name": "name",
         "at": "at",
         "payload": "payload"
+      },
+      "changes": {
+        "queue": "TicketChange",
+        "table": "ticket_change_queue",
+        "rowKey": "row_key",
+        "write": "write",
+        "at": "at",
+        "before": "before",
+        "after": "after"
       },
       "spec": {
         "name": "Ticket",

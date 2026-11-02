@@ -328,7 +328,8 @@ func jobsOf(schema *ir.Schema) []JobInfo {
 }
 
 // workersOf reads the API's workers, sorted by name, a behavior worker's
-// arming behaviors from its database among deps.
+// queues and the behaviors that arm and hear them from its database among
+// deps (apigen.BehaviorWorkerOf).
 func workersOf(schema *ir.Schema, deps map[string]*ir.Schema) []WorkerInfo {
 	var workers []WorkerInfo
 	for _, w := range schema.Workers {
@@ -340,15 +341,9 @@ func workersOf(schema *ir.Schema, deps map[string]*ir.Schema) []WorkerInfo {
 			concurrency = ir.DefaultWorkerConcurrency
 		}
 		info := WorkerInfo{Name: w.Name, Method: tsutil.ToCamelCase(w.Name), Queue: w.Queue, Concurrency: concurrency}
-		if bw := w.BehaviorWorker; bw != nil {
+		if w.BehaviorWorker != nil {
 			info.Method = ""
-			info.Behavior = &apigen.BehaviorWorkerInfo{
-				Table:       bw.Type,
-				Queues:      []string{w.Queue},
-				Subject:     ir.BehaviorWorkerSubject(schema.Name, w.Name),
-				Permissions: slices.Clone(bw.Permissions),
-				Behaviors:   apigen.ArmingBehaviors(schema, deps, bw.Type),
-			}
+			info.Behavior = apigen.BehaviorWorkerOf(schema, deps, w)
 		}
 		workers = append(workers, info)
 	}
@@ -415,13 +410,37 @@ func (w WorkerInfo) Repository() string {
 }
 
 // DeadlineQueueConst is the definition of a behavior worker's deadline
-// queue, its first, as the database's queues.ts exports it:
-// ticketDeadlineQueue.
+// queue as the database's queues.ts exports it, ticketDeadlineQueue; ""
+// for a worker of a table whose behaviors arm none.
 func (w WorkerInfo) DeadlineQueueConst() string {
-	if w.Behavior == nil || len(w.Behavior.Queues) == 0 {
+	if w.Behavior == nil || w.Behavior.DeadlineQueue == "" {
 		return ""
 	}
-	return tsgen.QueueConst(w.Behavior.Queues[0])
+	return tsgen.QueueConst(w.Behavior.DeadlineQueue)
+}
+
+// ChangeQueueConst is the definition of a behavior worker's change queue
+// (D103) as the database's queues.ts exports it, ticketChangeQueue; "" for
+// a worker of a table nothing hears.
+func (w WorkerInfo) ChangeQueueConst() string {
+	if w.Behavior == nil || w.Behavior.ChangeQueue == "" {
+		return ""
+	}
+	return tsgen.QueueConst(w.Behavior.ChangeQueue)
+}
+
+// QueueKinds names what a behavior worker's queues hold, for its queues
+// function's comment: deadlines, changes, or deadlines and changes.
+func (w WorkerInfo) QueueKinds() string {
+	switch {
+	case w.Behavior == nil:
+		return ""
+	case w.Behavior.DeadlineQueue != "" && w.Behavior.ChangeQueue != "":
+		return "deadlines and changes"
+	case w.Behavior.ChangeQueue != "":
+		return "changes"
+	}
+	return "deadlines"
 }
 
 // BehaviorQueueConsts are the queue definitions behavior-workers.ts
@@ -445,8 +464,9 @@ func (o *APIOutput) QueuesEntry() string { return tsgen.QueuesEntry }
 func (o *APIOutput) ORMEntry() string    { return tsgen.ORMEntry }
 
 // checkBehaviorWorkers refuses deps for an API that declares a behavior
-// worker (D103) when they hold no repositories: its handler runs each
-// deadline through Deps.orm's repository of the table, on Postgres.
+// worker (D103) when they hold no repositories: its handlers run each
+// deadline and each change through Deps.orm's repository of the table, on
+// Postgres.
 func (o *APIOutput) checkBehaviorWorkers(deps DepsInfo) error {
 	workers := o.BehaviorWorkers()
 	if len(workers) == 0 || depsORM(deps) {
@@ -454,9 +474,9 @@ func (o *APIOutput) checkBehaviorWorkers(deps DepsInfo) error {
 	}
 	w := workers[0]
 	if deps.Dialect == SQLiteDialect {
-		return fmt.Errorf("tsrestgen: worker %s runs %s, and %s lists sqlite first: the TypeScript repositories run behaviors on Postgres alone (D103)", w.Name, w.Behavior.Deadlines(), deps.Database)
+		return fmt.Errorf("tsrestgen: worker %s runs %s, and %s lists sqlite first: the TypeScript repositories run behaviors on Postgres alone (D103)", w.Name, w.Behavior.Runs(), deps.Database)
 	}
-	return fmt.Errorf("tsrestgen: worker %s runs %s, through the repositories %s's TypeScript types export for Postgres (D103); enable outputs.types.typescript in %s's config", w.Name, w.Behavior.Deadlines(), deps.Database, deps.Database)
+	return fmt.Errorf("tsrestgen: worker %s runs %s, through the repositories %s's TypeScript types export for Postgres (D103); enable outputs.types.typescript in %s's config", w.Name, w.Behavior.Runs(), deps.Database, deps.Database)
 }
 
 // HasJobs reports whether the API declares a job, for which deps.ts

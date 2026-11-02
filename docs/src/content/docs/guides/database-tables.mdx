@@ -1041,11 +1041,21 @@ repository and no migration, and writes the schema's engine document
 instead
 ([Engine types](/superschematic/guides/engine-behaviors/#engine-types)). A
 table that types a field as a behavior, `status: Workflow<{ ... }>`, or
-implements one, `implements Timers<Ticket, { ... }>`, stays a table: the
-behavior's fields are its columns, its sub-tables and its deadline queue
-are tables beside it, and its operations change them through the
-behaviors' core
+implements one, `implements Timers<Ticket, { ... }>` or `implements
+Reactions<Project, { ... }>`, stays a table: the behavior's fields are its
+columns, its sub-tables, its deadline queue and its change queue are
+tables beside it, and its operations change them through the behaviors'
+core
 ([A table's behavior operations](/superschematic/guides/api-routes/#a-tables-behavior-operations),
-[A table's deadlines](/superschematic/guides/api-routes/#a-tables-deadlines-timers-and-its-worker)).
-Such a table has no upserts when its behaviors keep sub-tables or arm
-deadlines.
+[A table's deadlines](/superschematic/guides/api-routes/#a-tables-deadlines-timers-and-its-worker),
+[A table's reactions](/superschematic/guides/api-routes/#a-tables-reactions-and-its-change-queue)).
+A table whose writes a behavior hears (`Timers`, `Reactions`, or another
+table's `Reactions` through a to-one relation of it) gets a change queue,
+`<table>_change_queue`, and a trigger that writes a message to it for
+every insert, update and delete of a row, whoever makes it: the
+repositories, a bulk, hard or soft delete, a script or psql. The trigger
+never refuses a write, and the API's `@behaviorWorker` of the table runs
+the messages after the commit, one row's in the order they were written.
+No behavior worker claims on SQLite or D1 yet, where the messages
+accumulate until one does. Such a table has no upserts when its behaviors
+keep sub-tables or arm deadlines.

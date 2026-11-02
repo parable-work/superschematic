@@ -2,6 +2,7 @@ package registry
 
 import (
 	"embed"
+	"encoding/json"
 	"path"
 	"slices"
 )
@@ -90,10 +91,57 @@ func coreBehaviorSpecs() []BehaviorSpec {
 // names no value field (implements Timers<T, C>) and carries one that does
 // on a field (status: Workflow<C>). A test holds the list to the behaviors
 // each transcript of runtime/engine/testdata/rules records.
-var RulesBehaviors = []string{"Workflow", "Timers"}
+var RulesBehaviors = []string{"Workflow", "Reactions", "Timers"}
 
 // RunsOnTheCore reports whether the behaviors' core runs the behavior name
 // (RulesBehaviors).
 func RunsOnTheCore(name string) bool {
 	return slices.Contains(RulesBehaviors, name)
+}
+
+// BehaviorListen is a table whose writes a use of another table hears
+// through a relation of that table (D103): Reactions' allTerminal over
+// Task's project hears Task through task.project.
+type BehaviorListen struct {
+	Type string // the table whose writes are heard: Task
+	Link string // its to-one relation to the listening table: project
+}
+
+// BehaviorListens are the tables a use of the behavior name with config
+// listens to, in rule order, each once: Reactions' allTerminal and
+// anyTerminal rules ({ schema, link }); none for any other behavior or a
+// config that does not read. Per-behavior code, as Timers' check is, until
+// step 5 derives it from the behavior's class (D103).
+func BehaviorListens(name string, config json.RawMessage) []BehaviorListen {
+	if name != "Reactions" || len(config) == 0 {
+		return nil
+	}
+	type terminal struct {
+		Schema string `json:"schema"`
+		Link   string `json:"link"`
+	}
+	var parsed struct {
+		Rules []struct {
+			When struct {
+				AllTerminal *terminal `json:"allTerminal"`
+				AnyTerminal *terminal `json:"anyTerminal"`
+			} `json:"when"`
+		} `json:"rules"`
+	}
+	if json.Unmarshal(config, &parsed) != nil {
+		return nil
+	}
+	var out []BehaviorListen
+	for _, rule := range parsed.Rules {
+		for _, heard := range []*terminal{rule.When.AllTerminal, rule.When.AnyTerminal} {
+			if heard == nil || heard.Schema == "" || heard.Link == "" {
+				continue
+			}
+			listen := BehaviorListen{Type: heard.Schema, Link: heard.Link}
+			if !slices.Contains(out, listen) {
+				out = append(out, listen)
+			}
+		}
+	}
+	return out
 }

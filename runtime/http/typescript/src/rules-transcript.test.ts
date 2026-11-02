@@ -10,6 +10,7 @@ import {
   type CoreAnswered,
   type CoreCommand,
   type CoreRefusal,
+  type CoreRowWrite,
   type CoreSubRow,
   type CoreTypeSpec,
   type RulesColumn,
@@ -27,20 +28,27 @@ import { bumpVersion, columnTypes, core, packageCore, postgresDatabase, rulesDsn
 // superschematic-rules-testkit writes from a recording
 // (runtime/engine/testdata/rules/<file>.transcript.json, whose format its
 // transcript module states) replayed through this adapter on bun:sqlite
-// and on Postgres: core-workflow's, and core-timers', whose uses keep
-// sub-tables and arm deadlines. Each scenario gets a table per type and
-// database, its own fields' columns beside the owned columns the layout
-// rule gives each use of any version and _version, and, for a use whose
-// behavior declares tables, each sub-table, and for a type whose
-// behaviors arm deadlines, its deadline queue; each check runs on the core
-// alone, answering whether the type has rows from its table; each command
-// runs through execute in a transaction with the version live at it, its
-// refusal compared whole and the row it names read back after it and
-// compared, with the row's sub-table rows and armed deadlines; a deadline
-// is a command whose action is deadline, which the adapter runs only
-// while its arming is a live message of the queue; and each raw step
-// writes owned columns with SQL past the adapter. The Postgres replay is
-// skipped without SUPERSCHEMATIC_RULES_TEST_DATABASE_URL.
+// and on Postgres: core-workflow's; core-timers', whose uses keep
+// sub-tables, arm deadlines and hear their rows' writes; and
+// core-reactions' and core-reactions-changes', whose rules hear writes of
+// their own rows and of the rows that link to them through a relation (an
+// engine Links link with one target, mapped to an own field <link>Id). Each
+// scenario gets a table per type and database, its own fields' columns
+// beside the owned columns the layout rule gives each use of any version
+// and _version, and, for a use whose behavior declares tables, each
+// sub-table, and for a type whose behaviors arm deadlines, its deadline
+// queue; each check runs on the core alone, answering whether the type has
+// rows from its table; each command runs through execute in a transaction
+// over a layout of every type of its database, the command's own at the
+// version live at it and each other at the one its last publish made live,
+// its refusal compared whole and the row it names read back after it and
+// compared, with the row's sub-table rows and armed deadlines, and each
+// other row its change set wrote (others); a deadline is a command whose
+// action is deadline, which the adapter runs only while its arming is a
+// live message of the queue, and a change one whose action is change, the
+// write the reference host's outbox heard, with its images; and each raw
+// step writes owned columns with SQL past the adapter. The Postgres replay
+// is skipped without SUPERSCHEMATIC_RULES_TEST_DATABASE_URL.
 //
 // The tables here follow the layout rule as the core's README states it,
 // restated by this test (the corpus's uses are type-anchored: Workflow's
@@ -49,24 +57,31 @@ import { bumpVersion, columnTypes, core, packageCore, postgresDatabase, rulesDsn
 // (internal/generator/behaviorlayout) is held by the generated packages'
 // own end-to-end tests, not by this one.
 
-/** The steps core-timers' transcript holds, as the core's milestone states them. */
-const TIMERS_FLOOR = 101;
-
 /**
  * The transcripts, each with the steps it holds, the testkit's floor
- * (tests/transcript.rs): each dialect replays every one, so a regression
- * cannot pass by skipping.
+ * (tests/transcript.rs), as the core's first green run set it: each
+ * dialect replays every one, so a regression cannot pass by skipping.
  */
 const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] = [
   { file: 'core-workflow', floor: 96 },
-  { file: 'core-timers', floor: TIMERS_FLOOR },
+  { file: 'core-timers', floor: 125 },
+  { file: 'core-reactions', floor: 586 },
+  { file: 'core-reactions-changes', floor: 60 },
 ];
+
+/** A row as the transcript holds it: its own and owned fields, each with no value absent. */
+interface TranscriptRow {
+  readonly own: Record<string, unknown>;
+  readonly owned: Record<string, Record<string, unknown>>;
+}
 
 interface Expect {
   readonly refused?: CoreRefusal;
   readonly result?: unknown;
   readonly key?: string;
-  readonly row?: { readonly own: Record<string, unknown>; readonly owned: Record<string, Record<string, unknown>> };
+  readonly row?: TranscriptRow;
+  /** The rows other than the command's own its change set wrote, in its order, each read back after the step (absent when deleted); absent for none. */
+  readonly others?: readonly { readonly type: string; readonly key: string; readonly row?: TranscriptRow }[];
   /** The row's sub-table rows after the step, by use id and table, each table's in key order; absent for none. */
   readonly subRows?: Record<string, Record<string, CoreSubRow[]>>;
   /** The row's armed deadlines after the step, by use id then name; absent for none. */
@@ -297,6 +312,26 @@ for (const { file, floor } of TRANSCRIPTS) {
             }
           };
 
+          /**
+           * The spec each type of a database runs at, by database and type:
+           * the one its last publish made live, which a check of a publish
+           * the core passed holds; a command's own type runs at the version
+           * the step names.
+           */
+          const live = new Map<string, CoreTypeSpec>();
+          const liveKey = (database: string, typeName: string) => `${database}\u0000${typeName}`;
+
+          /** The layout a command of a database runs on: each of the scenario's types with a live version there, the command's own at its version. */
+          const layoutOf = (database: string, typeName: string, spec: CoreTypeSpec): RulesLayout => {
+            const types: Record<string, RulesTable> = {};
+            for (const other of scenario.types) {
+              const at = other.name === typeName ? spec : live.get(liveKey(database, other.name));
+              if (at !== undefined) types[other.name] = tableOf(database, other.name, at);
+            }
+            types[typeName] ??= tableOf(database, typeName, spec);
+            return { types };
+          };
+
           const mismatches: { step: number; call: string; what: string; expected: unknown; actual: unknown }[] = [];
           const compare = (step: Step, what: string, expected: unknown, actual: unknown) => {
             if (!Bun.deepEquals(actual, expected, true)) mismatches.push({ step: step.step, call: step.call, what, expected, actual });
@@ -326,6 +361,7 @@ for (const { file, floor } of TRANSCRIPTS) {
                 }
               }
               compare(step, 'refused', step.expect.refused, refused);
+              if (refused === undefined && step.command.action.kind === 'publish') live.set(liveKey(step.database, step.spec.name), step.spec);
               continue;
             }
             const type = scenario.types.find(t => t.name === step.type)!;
@@ -348,16 +384,19 @@ for (const { file, floor } of TRANSCRIPTS) {
               compare(step, 'raw.changes', 1, await db.exec(`UPDATE "${table.table}" SET ${sets.join(', ')} WHERE id = ${p(values.length)}`, values));
               continue;
             }
-            const table = tableOf(step.database, step.type, type.versions[step.version]);
-            await ensure(table);
-            const layout: RulesLayout = { types: { [step.type]: table } };
+            const layout = layoutOf(step.database, step.type, type.versions[step.version]!);
+            const table = layout.types[step.type]!;
+            for (const known of Object.values(layout.types)) await ensure(known);
+            const host = (store: RulesHost['store']): RulesHost => ({ core: core(), layout, store });
             let refused: CoreRefusal | undefined;
             let result: unknown = null;
             let key: string | null = null;
+            let written: readonly CoreRowWrite[] = [];
             try {
-              const applied = await db.transaction(store => execute({ core: core(), layout, store }, step.type, step.command));
+              const applied = await db.transaction(store => execute(host(store), step.type, step.command));
               result = applied.result;
               key = applied.key;
+              written = applied.changes.rows ?? [];
             } catch (error) {
               if (!(error instanceof RulesRefusal)) throw error;
               refused = error.refusal;
@@ -367,8 +406,19 @@ for (const { file, floor } of TRANSCRIPTS) {
             if (step.expect.key !== undefined) compare(step, 'key', step.expect.key, key);
             const action = step.command.action;
             const rowKey = action.kind === 'create' ? action.id : 'key' in action ? action.key : undefined;
+            // The other rows the change set wrote, a change command's
+            // listener's move among them, each once in its order, read back;
+            // a row found gone is the command's own.
+            const others: { type: string; key: string; row?: TranscriptRow }[] = [];
+            for (const write of written) {
+              const otherKey = write.key ?? null;
+              if (otherKey === null || write.kind === 'gone' || (write.type === step.type && otherKey === (key ?? rowKey))) continue;
+              if (others.some(other => other.type === write.type && other.key === otherKey)) continue;
+              const row = await db.transaction(store => readRow(host(store), write.type, otherKey));
+              others.push({ type: write.type, key: otherKey, ...(row === null ? {} : { row: { own: row.own ?? {}, owned: row.owned ?? {} } as TranscriptRow }) });
+            }
+            compare(step, 'others', step.expect.others, others.length > 0 ? others : undefined);
             if (rowKey) {
-              const host = (store: RulesHost['store']): RulesHost => ({ core: core(), layout, store });
               const row = await db.transaction(store => readRow(host(store), step.type, rowKey));
               compare(step, 'row', step.expect.row, row === null ? undefined : { own: row.own, owned: row.owned });
               // The row's sub-table rows, by use id and table, each absent when

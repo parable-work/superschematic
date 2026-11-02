@@ -26,6 +26,14 @@ DROP TRIGGER IF EXISTS {{ quote $enqueue.TriggerName }} ON {{ $enqueue.QuotedTab
 DROP FUNCTION IF EXISTS {{ quote $enqueue.FunctionName }}();
 {{- end }}
 {{- end }}
+{{- if .ChangeTriggers }}
+
+-- Drop the triggers and functions that write a table's change queue
+{{- range $change := .ChangeTriggers }}
+DROP TRIGGER IF EXISTS {{ quote $change.TriggerName }} ON {{ $change.QuotedTable }};
+DROP FUNCTION IF EXISTS {{ quote $change.FunctionName }}();
+{{- end }}
+{{- end }}
 
 -- Drop indexes
 {{- range $table := .Tables | reverse }}
