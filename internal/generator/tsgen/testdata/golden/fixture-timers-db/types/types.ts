@@ -27,6 +27,22 @@ export interface Invoice {
 }
 
 /**
+ * InvoiceChange - The writes of Invoice's rows its behaviors hear, one message per write, whoever makes it, which a trigger of the table writes and a behavior worker runs (D103).
+ */
+export interface InvoiceChange {
+  /** The key of the Invoice row written. */
+  rowKey: IdentityUUID;
+  /** What the write did: insert, update or delete. */
+  write: string;
+  /** When the write was made, in epoch milliseconds, by the database's clock. */
+  at: GenericInt64;
+  /** The row's columns before the write, by column, as JSON; null for an insert. */
+  before?: GenericJSON | null;
+  /** The row's columns after the write, by column, as JSON; null for a delete. */
+  after?: GenericJSON | null;
+}
+
+/**
  * InvoiceDeadline - The deadlines Invoice's behaviors arm, one message per row, use and deadline, due when it falls due (D103).
  */
 export interface InvoiceDeadline {
@@ -79,6 +95,22 @@ export interface Ticket {
   /** When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition. */
   statusEnteredAt?: TemporalDateTime | null;
   _version: number;
+}
+
+/**
+ * TicketChange - The writes of Ticket's rows its behaviors hear, one message per write, whoever makes it, which a trigger of the table writes and a behavior worker runs (D103).
+ */
+export interface TicketChange {
+  /** The key of the Ticket row written. */
+  rowKey: IdentityUUID;
+  /** What the write did: insert, update or delete. */
+  write: string;
+  /** When the write was made, in epoch milliseconds, by the database's clock. */
+  at: GenericInt64;
+  /** The row's columns before the write, by column, as JSON; null for an insert. */
+  before?: GenericJSON | null;
+  /** The row's columns after the write, by column, as JSON; null for a delete. */
+  after?: GenericJSON | null;
 }
 
 /**

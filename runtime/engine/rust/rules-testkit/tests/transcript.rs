@@ -1,12 +1,12 @@
 //! The checked-in transcripts of the recorded scenarios the core runs
-//! (`runtime/engine/testdata/rules/<name>.transcript.json`, D103), Workflow's
-//! and Timers': the core's commands and what each must answer, which every
-//! language's adapter replays against tables of its own. The test fails
-//! when a file is not what the writer writes from its recording, so a
-//! change to the core, a behavior or the replayer that changes an answer
-//! changes the file in the same commit. `UPDATE_TRANSCRIPTS=1 cargo test -p
-//! superschematic-rules-testkit --test transcript` rewrites both; review
-//! the diff before keeping them.
+//! (`runtime/engine/testdata/rules/<name>.transcript.json`, D103),
+//! Workflow's, Timers' and Reactions' two: the core's commands and what each
+//! must answer, which every language's adapter replays against tables of
+//! its own. The test fails when a file is not what the writer writes from
+//! its recording, so a change to the core, a behavior or the replayer that
+//! changes an answer changes the file in the same commit.
+//! `UPDATE_TRANSCRIPTS=1 cargo test -p superschematic-rules-testkit --test
+//! transcript` rewrites them; review the diff before keeping them.
 
 use std::fs;
 
@@ -28,26 +28,57 @@ use superschematic_rules_testkit::{
 const WORKFLOW_FLOOR: usize = 96;
 
 /// The steps `core-timers.transcript.json` holds, of `core-timers.json`'s
-/// 420: 50 define and publish checks and 51 commands, 40 creates, updates,
-/// invokes and a delete and the 11 deadlines the runner's sweeps ran, each
-/// under the step number of the `runner.runDue` that ran it (so the 101
-/// steps hold 98 of the recording's), in the 12 scenarios the core an
-/// adapter embeds runs. Six hold none: two compose a test behavior
-/// (test.Bounce, test.Hold), which the reference host runs as a fixture;
-/// two compose StateRules or Reactions, which the core does not run; one's
-/// access policy is the test's own; and one names namespaces, which the
-/// reference host does not keep. The rest of the 322 left out are opens,
-/// reads of rows, of the change log and of the runner's status, the sweeps
-/// that ran nothing, the describes, and the steps from a publish whose
-/// Timers change the engine rewrote rows for. An adapter's replay holds its
+/// 420: 50 define and publish checks and 75 commands, 40 creates, updates,
+/// invokes and a delete, the 10 deadlines the runner's sweeps ran and the 25
+/// changes they ran, each a write of a row of a type Timers hears, each
+/// under the step number of the `runner.runDue` that ran it, in the 12
+/// scenarios the core an adapter embeds runs. A change runs Timers'
+/// reconcile on the row as it is, which writes nothing for a write the
+/// core made, deletes nothing but the deadlines of a row that is gone, and,
+/// in one scenario, cancels a deadline whose until a version published
+/// after the write added, before it falls due. Six scenarios hold none: two
+/// compose a test behavior (test.Bounce, test.Hold), which the reference
+/// host runs as a fixture; one composes StateRules, which the core does not
+/// run; one's Reactions rule names a field Timers computes at a read, which
+/// a table's rule waits for a later step to hear; one's access policy is
+/// the test's own; and one names namespaces, which the reference host does
+/// not keep. The rest of the 317 left out are opens, reads of rows, of the
+/// change log and of the runner's status, the sweeps that ran nothing, the
+/// describes, and the steps from a publish whose Timers change the engine
+/// rewrote rows for. An adapter's replay holds its own count to this one.
+const TIMERS_FLOOR: usize = 125;
+
+/// The steps `core-reactions.transcript.json` holds, of
+/// `core-reactions.json`'s 601: 110 define and publish checks and 476
+/// commands, 224 creates, updates, invokes and a delete, the engine's link
+/// and unlink among them as updates of a relation's column, and the 252
+/// changes
+/// the runner's sweeps ran, each a write of a row of a type Reactions hears
+/// or listens to, each under the step number of the `runner.runDue` that ran
+/// it, with the rows a rule moved as its `others`. The rest of the 215 left
+/// out are opens, reads of rows and of the event log, the sweeps that ran
+/// nothing, and what the replay skips: a scenario that composes
+/// Dependencies, the defines that name Links, the runner's status, and the
+/// steps after a sweep whose recording failed. An adapter's replay holds its
 /// own count to this one.
-const TIMERS_FLOOR: usize = 101;
+const REACTIONS_FLOOR: usize = 586;
+
+/// The steps `core-reactions-changes.transcript.json` holds, of
+/// `core-reactions-changes.json`'s 151: 12 define and publish checks and 48
+/// commands, 24 creates, updates, invokes and a delete and the 24 changes
+/// the runner's sweeps ran. The rest of the 104 left out are what the replay
+/// skips (Revisions, a test behavior, the value store, a runner's depth
+/// limit), opens, reads of rows and of the event log. An adapter's replay
+/// holds its own count to this one.
+const REACTIONS_CHANGES_FLOOR: usize = 60;
 
 #[test]
 fn the_checked_in_transcripts_are_what_the_writer_writes() {
     for (name, floor) in [
         ("core-workflow", WORKFLOW_FLOOR),
         ("core-timers", TIMERS_FLOOR),
+        ("core-reactions", REACTIONS_FLOOR),
+        ("core-reactions-changes", REACTIONS_CHANGES_FLOOR),
     ] {
         let written = written(name);
         let kinds = |kind: fn(&TranscriptStep) -> bool| {

@@ -1,21 +1,26 @@
 //! The recorded scenarios are the specification (D103): the transcripts
-//! `superschematic-rules-testkit` writes from `core-workflow.json` and
-//! `core-timers.json` (`runtime/engine/testdata/rules/<name>.transcript.json`,
-//! whose format its `transcript` module states) replayed through this
-//! adapter on rusqlite and on Postgres, as the HTTP runtime's
-//! `src/rules-transcript.test.ts` replays them through TypeScript's. Each
-//! scenario gets a table per type and database, its own fields' columns
+//! `superschematic-rules-testkit` writes from `core-workflow.json`,
+//! `core-timers.json`, `core-reactions.json` and
+//! `core-reactions-changes.json`
+//! (`runtime/engine/testdata/rules/<name>.transcript.json`, whose format its
+//! `transcript` module states) replayed through this adapter on rusqlite
+//! and on Postgres, as the HTTP runtime's `src/rules-transcript.test.ts`
+//! replays them through TypeScript's. Each scenario gets a table per type
+//! and database, its own fields' columns (a link's `<link>Id` among them)
 //! beside the owned columns the layout rule gives each use of any version
 //! and `_version` with sqlgen's trigger, a sub-table per table a use's
 //! behavior declares, and a deadline queue when a use's behavior arms
 //! deadlines; each check runs on the core alone, answering whether the
 //! type has rows from its table; each command runs through `execute` in a
-//! transaction of its own with the version live at it (a deadline the
-//! runner ran among them, run only while it is armed at its time and its
-//! message spent with it), its refusal compared whole and the row it names
-//! read back after it and compared, with that row's sub-table rows and its
-//! armed deadlines; and each raw step writes owned columns with SQL past
-//! the adapter. The Postgres replay is skipped without
+//! transaction of its own over a layout of every type of its database, the
+//! command's type at the version live at it and each other at the version
+//! the scenario last made live (a deadline the runner ran among them, run
+//! only while it is armed at its time and its message spent with it, and a
+//! write a type's change trigger queued, run as written), its refusal
+//! compared whole and the row it names read back after it and compared,
+//! with that row's sub-table rows and its armed deadlines and the other
+//! rows its change set wrote; and each raw step writes owned columns with
+//! SQL past the adapter. The Postgres replay is skipped without
 //! `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL`.
 //!
 //! The tables here follow the layout rule as the core's README states it,
@@ -28,7 +33,7 @@
 
 mod common;
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde_json::{json, Map, Value};
 use superschematic_rules::{Answer, Answers, Core, ReadRequest, Refusal, Step};
@@ -45,11 +50,25 @@ use common::{camel, column_types, p, snake, storage_key, Param};
 /// The transcripts every dialect replays, each with the steps it holds,
 /// the testkit's floor (`tests/transcript.rs`): each dialect replays every
 /// one, so a regression cannot pass by skipping.
-const TRANSCRIPTS: [(&str, usize); 2] = [("core-workflow", 96), ("core-timers", TIMERS_FLOOR)];
+const TRANSCRIPTS: [(&str, usize); 4] = [
+    ("core-workflow", 96),
+    ("core-timers", TIMERS_FLOOR),
+    ("core-reactions", REACTIONS_FLOOR),
+    ("core-reactions-changes", REACTIONS_CHANGES_FLOOR),
+];
 
-/// core-timers' floor, as the core's milestone states it: 101 steps, 51
-/// commands (11 of them deadlines the runner ran) and 50 checks.
-const TIMERS_FLOOR: usize = 101;
+/// core-timers' floor, as the core's milestone states it: 125 steps, 75
+/// commands (10 of them deadlines and 25 changes the runner ran) and 50
+/// checks (D103).
+const TIMERS_FLOOR: usize = 125;
+
+/// core-reactions' floor, as the core's milestone states it: 586 steps,
+/// 476 commands (252 of them changes the runner ran) and 110 checks.
+const REACTIONS_FLOOR: usize = 586;
+
+/// core-reactions-changes' floor, as the core's milestone states it: 60
+/// steps, 48 commands (24 of them changes) and 12 checks.
+const REACTIONS_CHANGES_FLOOR: usize = 60;
 
 /// How many runs a check makes before the test calls it unsettled.
 const CHECK_ROUNDS: usize = 16;
@@ -461,6 +480,8 @@ struct Scenario<'s> {
     databases: Vec<&'s str>,
     declared: &'s [Declared],
     created: HashSet<String>,
+    /// The index of each type's version the scenario last made live.
+    live: HashMap<String, usize>,
     mismatches: Vec<String>,
 }
 
@@ -485,6 +506,7 @@ impl<'s> Scenario<'s> {
             databases,
             declared,
             created: HashSet::new(),
+            live: HashMap::new(),
             mismatches: Vec::new(),
         }
     }
@@ -534,6 +556,7 @@ impl<'s> Scenario<'s> {
                 .unwrap_or_default(),
             uses,
             deadlines,
+            changes: None,
             spec: spec
                 .cloned()
                 .or_else(|| type_def.and_then(|known| known.versions.first().cloned()))
@@ -649,6 +672,19 @@ impl<'s> Scenario<'s> {
         else {
             return;
         };
+        // A check that passes makes its spec the type's live version, as
+        // the define or publish the recording made after it.
+        if expect.refused.is_none() {
+            if let Some(index) = self
+                .scenario
+                .types
+                .iter()
+                .find(|known| known.name == spec.name)
+                .and_then(|known| known.versions.iter().position(|version| version == spec))
+            {
+                self.live.insert(spec.name.clone(), index);
+            }
+        }
         let table = self.table_of(database, &spec.name, None);
         self.ensure(db, &table).await;
         let mut answers = Answers::new();
@@ -755,15 +791,32 @@ impl<'s> Scenario<'s> {
             .iter()
             .find(|known| known.name == *type_name);
         let spec = type_def.and_then(|known| known.versions.get(*version));
+        self.live.insert(type_name.clone(), *version);
         let table = self.table_of(database, type_name, spec);
         self.ensure(db, &table).await;
-        let layout = Layout::new([table]);
+        // Every other type of the database at the version the scenario
+        // last made live: what a listener or a rule's move reads of it.
+        let mut tables = vec![table];
+        for other in &self.scenario.types {
+            if other.name == *type_name {
+                continue;
+            }
+            let spec = self
+                .live
+                .get(&other.name)
+                .and_then(|at| other.versions.get(*at));
+            let table = self.table_of(database, &other.name, spec);
+            self.ensure(db, &table).await;
+            tables.push(table);
+        }
+        let layout = Layout::new(tables);
         let host = Host::new(core, &layout);
-        let (refused, result, key) = match db.execute(&host, type_name, command.clone()).await {
-            Ok(executed) => (None, executed.result, executed.key),
-            Err(Error::Refused(refusal)) => (Some(*refusal), Value::Null, None),
-            Err(error) => panic!("step {at} ({call}): {error}"),
-        };
+        let (refused, result, key, written) =
+            match db.execute(&host, type_name, command.clone()).await {
+                Ok(executed) => (None, executed.result, executed.key, executed.changes.rows),
+                Err(Error::Refused(refusal)) => (Some(*refusal), Value::Null, None, Vec::new()),
+                Err(error) => panic!("step {at} ({call}): {error}"),
+            };
         self.compare(*at, call, "refused", json!(expect.refused), json!(refused));
         self.compare(*at, call, "result", expect.result.clone(), result);
         if let Some(expected) = &expect.key {
@@ -817,6 +870,40 @@ impl<'s> Scenario<'s> {
                 json!(actual),
             );
         }
+        // The other rows the change set wrote, each once, in its order,
+        // read back after the step: a row a rule moved through a relation.
+        let own_key = match &command.action {
+            Action::Create { id, .. } => id.clone().or(key.clone()),
+            action => action.key().map(str::to_owned),
+        };
+        let mut others: Vec<(String, String)> = Vec::new();
+        for write in &written {
+            let (Some(write_key), write_type) = (write.key(), write.type_name()) else {
+                continue;
+            };
+            let other = (write_type.to_owned(), write_key.to_owned());
+            let mine = write_type == type_name && own_key.as_deref() == Some(write_key);
+            if !mine && !others.contains(&other) {
+                others.push(other);
+            }
+        }
+        let mut actual = Vec::new();
+        for (other_type, other_key) in others {
+            let mut entry = json!({"type": other_type, "key": other_key});
+            if let Some(row) = db.read_row(&host, &other_type, &other_key).await {
+                entry["row"] = json!({"own": row.own, "owned": row.owned});
+            }
+            actual.push(entry);
+        }
+        let expected = serde_json::to_value(expect).expect("an expectation of JSON");
+        let actual = (!actual.is_empty()).then_some(Value::Array(actual));
+        self.compare(
+            *at,
+            call,
+            "others",
+            json!(expected.get("others")),
+            json!(actual),
+        );
     }
 }
 

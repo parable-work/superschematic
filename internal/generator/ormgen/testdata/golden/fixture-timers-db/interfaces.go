@@ -28,6 +28,7 @@ type InvoiceRepositoryInterface interface {
 	Status() InvoiceStatusOperations
 	Payment() InvoicePaymentOperations
 	RunDeadline(ctx context.Context, deadline types.InvoiceDeadline, claim *rules.Claim) (*rules.DeadlineRun, error)
+	RunChange(ctx context.Context, change types.InvoiceChange, claim *rules.Claim) (*rules.ChangeRun, error)
 }
 
 // TicketRepositoryInterface defines the contract for Ticket data access.
@@ -46,6 +47,7 @@ type TicketRepositoryInterface interface {
 	Timers() TicketTimersOperations
 	Status() TicketStatusOperations
 	RunDeadline(ctx context.Context, deadline types.TicketDeadline, claim *rules.Claim) (*rules.DeadlineRun, error)
+	RunChange(ctx context.Context, change types.TicketChange, claim *rules.Claim) (*rules.ChangeRun, error)
 }
 
 // DatabaseInterface defines the interface-first ORM database surface.
@@ -183,6 +185,12 @@ func (r *NoOpInvoiceRepository) RunDeadline(_ context.Context, _ types.InvoiceDe
 	return &rules.DeadlineRun{Why: rules.WhyGone}, nil
 }
 
+// RunChange runs nothing: the no-op repository holds no row, so a change
+// finds its row gone, which leaves it nothing to write.
+func (r *NoOpInvoiceRepository) RunChange(_ context.Context, _ types.InvoiceChange, _ *rules.Claim) (*rules.ChangeRun, error) {
+	return &rules.ChangeRun{Ran: true, Result: &rules.Result{}}, nil
+}
+
 func (r *NoOpInvoiceRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *InvoiceUpdate) (*types.Invoice, error) {
 	return nil, ErrNotFound
 }
@@ -297,6 +305,12 @@ func (r *NoOpTicketRepository) CreateMany(_ context.Context, inputs []*TicketCre
 // RunDeadline runs no deadline: the no-op repository holds no row.
 func (r *NoOpTicketRepository) RunDeadline(_ context.Context, _ types.TicketDeadline, _ *rules.Claim) (*rules.DeadlineRun, error) {
 	return &rules.DeadlineRun{Why: rules.WhyGone}, nil
+}
+
+// RunChange runs nothing: the no-op repository holds no row, so a change
+// finds its row gone, which leaves it nothing to write.
+func (r *NoOpTicketRepository) RunChange(_ context.Context, _ types.TicketChange, _ *rules.Claim) (*rules.ChangeRun, error) {
+	return &rules.ChangeRun{Ran: true, Result: &rules.Result{}}, nil
 }
 
 func (r *NoOpTicketRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *TicketUpdate) (*types.Ticket, error) {

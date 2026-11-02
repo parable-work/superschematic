@@ -46,6 +46,17 @@ func TestContractJSON(t *testing.T) {
 			},
 			{rules.Action{Kind: rules.ActionDeadline, Key: "o1", UseID: "timers", Name: "expire", At: 5000}, `{"kind":"deadline","key":"o1","useId":"timers","name":"expire","at":5000,"payload":null}`},
 			{rules.Action{Kind: rules.ActionDeadline, Key: "o1", UseID: "timers", Name: "expire", At: 5000, Payload: json.RawMessage(`{"n":1}`)}, `{"kind":"deadline","key":"o1","useId":"timers","name":"expire","at":5000,"payload":{"n":1}}`},
+			{
+				rules.Action{Kind: rules.ActionChange, Key: "t1", Change: &rules.RowChange{Write: "insert", At: 1000000, After: &rules.RowImage{Own: map[string]json.RawMessage{"title": json.RawMessage(`"t1"`)}}}},
+				`{"kind":"change","key":"t1","change":{"write":"insert","at":1000000,"after":{"own":{"title":"t1"},"owned":{}}}}`,
+			},
+			{
+				rules.Action{Kind: rules.ActionChange, Key: "t1", Change: &rules.RowChange{Write: "update", At: 1001000,
+					Before: &rules.RowImage{Own: map[string]json.RawMessage{"projectId": json.RawMessage(`"p1"`)}, Owned: map[string]map[string]json.RawMessage{"Workflow": {"status": json.RawMessage(`"todo"`)}}},
+					After:  &rules.RowImage{Own: map[string]json.RawMessage{"projectId": json.RawMessage(`"p1"`)}, Owned: map[string]map[string]json.RawMessage{"Workflow": {"status": json.RawMessage(`"doing"`)}}}}},
+				`{"kind":"change","key":"t1","change":{"write":"update","at":1001000,"before":{"own":{"projectId":"p1"},"owned":{"Workflow":{"status":"todo"}}},"after":{"own":{"projectId":"p1"},"owned":{"Workflow":{"status":"doing"}}}}}`,
+			},
+			{rules.Action{Kind: rules.ActionChange, Key: "t1", Change: &rules.RowChange{Write: "delete", At: 7}}, `{"kind":"change","key":"t1","change":{"write":"delete","at":7}}`},
 		}
 		for _, c := range cases {
 			got := marshal(t, c.action)
@@ -66,6 +77,13 @@ func TestContractJSON(t *testing.T) {
 		var unknown rules.Action
 		if err := json.Unmarshal([]byte(`{"kind":"touch"}`), &unknown); err == nil {
 			t.Error("an action of no known kind read")
+		}
+		if _, err := json.Marshal(rules.Action{Kind: rules.ActionChange, Key: "t1"}); err == nil {
+			t.Error("a change with no write marshalled")
+		}
+		var bare rules.Action
+		if err := json.Unmarshal([]byte(`{"kind":"change","key":"t1"}`), &bare); err == nil {
+			t.Error("a change with no write read")
 		}
 		command := rules.Command{Caller: rules.Caller{Subject: "alice"}, Now: 1, Action: rules.Action{Kind: rules.ActionDelete, Key: "o1"}}
 		if got := marshal(t, command); got != `{"caller":{"subject":"alice"},"now":1,"action":{"kind":"delete","key":"o1"}}` {
@@ -120,6 +138,9 @@ func TestContractJSON(t *testing.T) {
 			{rules.Answer{Kind: rules.ReadKindSpec, Spec: &rules.TypeSpec{Name: "Ticket", Fields: []rules.FieldSpec{{Name: "title", Type: "string"}, {Name: "visitAt", Type: "Temporal.DateTime", DateTime: true}}}}, `{"spec":{"name":"Ticket","fields":[{"name":"title","type":"string"},{"name":"visitAt","type":"Temporal.DateTime","dateTime":true}]}}`},
 			{rules.Answer{Kind: rules.ReadKindSubRows}, `{"subRows":[]}`},
 			{rules.Answer{Kind: rules.ReadKindSubRows, SubRows: []rules.SubRow{{Key: "idle"}, {Key: "respond", Values: map[string]json.RawMessage{"dueAt": json.RawMessage(`2500`), "fired": json.RawMessage(`false`)}}}}, `{"subRows":[{"key":"idle","values":{}},{"key":"respond","values":{"dueAt":2500,"fired":false}}]}`},
+			{rules.Answer{Kind: rules.ReadKindLinked}, `{"linked":{"rows":[],"more":false}}`},
+			{rules.Answer{Kind: rules.ReadKindLinked, Linked: &rules.LinkedRows{Rows: []rules.KeyedRow{{Key: "t1", Row: rules.Row{Own: map[string]json.RawMessage{"projectId": json.RawMessage(`"p1"`)}, Version: 3}}}, More: true}}, `{"linked":{"rows":[{"key":"t1","row":{"own":{"projectId":"p1"},"version":3}}],"more":true}}`},
+			{rules.Answer{Kind: rules.ReadKindSpec, Spec: &rules.TypeSpec{Name: "Task", Fields: []rules.FieldSpec{{Name: "projectId", Type: "Identity.UUID", Relation: &rules.RelationSpec{Name: "project", Type: "Project"}}}}}, `{"spec":{"name":"Task","fields":[{"name":"projectId","type":"Identity.UUID","relation":{"name":"project","type":"Project"}}]}}`},
 		}
 		for _, c := range cases {
 			got := marshal(t, c.answer)
@@ -141,6 +162,19 @@ func TestContractJSON(t *testing.T) {
 		subRows := rules.ReadRequest{Kind: rules.ReadKindSubRows, Type: "Ticket", Key: "t1", UseID: "Timers", Table: "deadlines"}
 		if got := marshal(t, subRows); got != `{"kind":"subRows","type":"Ticket","key":"t1","useId":"Timers","table":"deadlines"}` {
 			t.Errorf("a read of sub-table rows = %s", got)
+		}
+		for _, text := range []string{
+			`{"kind":"linked","type":"Task","field":"projectId","key":"p1","limit":500}`,
+			`{"kind":"linked","type":"Task","field":"projectId","key":"p1","after":"t9","limit":500}`,
+			`{"kind":"linked","type":"Task","field":"projectId","key":"p1","limit":0}`,
+		} {
+			var linked rules.ReadRequest
+			if err := json.Unmarshal([]byte(text), &linked); err != nil {
+				t.Fatal(err)
+			}
+			if got := marshal(t, linked); got != text {
+				t.Errorf("a linked read reads back as %s, want %s", got, text)
+			}
 		}
 	})
 
@@ -239,6 +273,13 @@ func TestContractJSON(t *testing.T) {
 		var touch rules.RowWrite
 		if err := json.Unmarshal([]byte(`{"kind":"touch","type":"Order","key":"o1"}`), &touch); err != nil || touch.Kind != "touch" || string(touch.Raw) != `{"kind":"touch","type":"Order","key":"o1"}` {
 			t.Errorf("a write of another kind = %+v, %v", touch, err)
+		}
+		var gone rules.RowWrite
+		if err := json.Unmarshal([]byte(`{"kind":"gone","type":"Task","key":"t1"}`), &gone); err != nil || gone.Kind != rules.RowGone || gone.Type != "Task" || *gone.Key != "t1" {
+			t.Errorf("a gone row = %+v, %v", gone, err)
+		}
+		if got := marshal(t, gone); got != `{"kind":"gone","type":"Task","key":"t1"}` {
+			t.Errorf("a gone row writes %s", got)
 		}
 	})
 }

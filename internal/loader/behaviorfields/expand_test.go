@@ -143,3 +143,76 @@ func TestASubTableNamesItsRowApartFromItsFields(t *testing.T) {
 		}
 	}
 }
+
+// projects is a DB schema whose Project's Reactions hears its Tasks through
+// task.project (D103).
+func projects() *ir.Schema {
+	schema := ir.NewSchema("projects", ir.SchemaKindDB)
+	schema.Types["Project"] = &ir.TypeDef{
+		Name: "Project",
+		Role: ir.RoleDBTable,
+		Behaviors: []ir.BehaviorRef{
+			{Name: "Reactions", Implements: true, Config: json.RawMessage(`{"rules":[{"then":{"transition":"paid"},"when":{"allTerminal":{"link":"project","schema":"Task"}}}]}`)},
+			workflowOn("status"),
+		},
+		Fields: []*ir.FieldDef{{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Key: true, Required: true}},
+	}
+	schema.Types["Task"] = &ir.TypeDef{
+		Name:      "Task",
+		Role:      ir.RoleDBTable,
+		Behaviors: []ir.BehaviorRef{workflowOn("status")},
+		Fields: []*ir.FieldDef{
+			{Name: "id", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Key: true, Required: true},
+			{Name: "project", TypeRef: ir.TypeRef{Name: "Project"}, Required: true, Relation: &ir.RelationDef{Type: "Project"}},
+		},
+	}
+	return schema
+}
+
+// A table whose writes are heard gets its change queue: by a behavior of
+// its own that hears changes (Project's Reactions), or by another table's
+// through a relation of it (Task, heard by Project), whose marker names
+// who hears it; a table nothing hears gets none, and a second pass keeps
+// the queue (D103).
+func TestExpandChangeQueues(t *testing.T) {
+	reg := registry.New(naming.Default())
+	schema := projects()
+	if heard := HeardBy(schema); len(heard) != 1 || strings.Join(heard["Task"], ",") != "Project" {
+		t.Errorf("HeardBy = %v, want Task heard by Project", heard)
+	}
+	if hearing := Hearing(schema.Types["Project"], reg); strings.Join(hearing, ",") != "Reactions" {
+		t.Errorf("Hearing(Project) = %v", hearing)
+	}
+	if _, err := Expand(schema, reg); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []ir.BehaviorQueue{
+		{Row: "Project", Kind: ir.BehaviorQueueChanges, Behaviors: []string{"Reactions"}},
+		{Row: "Task", Kind: ir.BehaviorQueueChanges, HeardBy: []string{"Project"}},
+	} {
+		queue := schema.Types[want.Row+"Change"]
+		if queue == nil || !queue.BehaviorQueue.Same(&want) || queue.Queue == nil || queue.Queue.Key != "rowKey" || !queue.Queue.Serialize {
+			t.Errorf("%s's change queue = %+v", want.Row, queue)
+		}
+	}
+	if _, err := Expand(schema, reg); err != nil || len(schema.Types) != 4 {
+		t.Errorf("a second pass = %v, types %d, want the 4 kept", err, len(schema.Types))
+	}
+
+	quiet := orders(workflowOn("status"))
+	if _, err := Expand(quiet, reg); err != nil || quiet.Types["OrderChange"] != nil {
+		t.Errorf("a table nothing hears got a change queue: %v", err)
+	}
+
+	taken := projects()
+	taken.Types["TaskChange"] = &ir.TypeDef{Name: "TaskChange", Queue: &ir.QueueDef{}}
+	if _, err := Expand(taken, reg); err == nil || err.Error() != "type Task: its writes are heard (Project's Reactions), whose queue the build adds as TaskChange, which the schema also declares" {
+		t.Errorf("Expand of a taken queue name = %v", err)
+	}
+	keys := projects()
+	keys.Types["Task"].Fields = append(keys.Types["Task"].Fields, &ir.FieldDef{Name: "code", TypeRef: ir.TypeRef{Name: "string"}, Key: true})
+	keys.Types["Task"].Fields[0].Key = true
+	if _, err := Expand(keys, reg); err == nil || err.Error() != "type Task: its writes are heard (Project's Reactions), and it has no single key field" {
+		t.Errorf("Expand of a table with two key fields = %v", err)
+	}
+}

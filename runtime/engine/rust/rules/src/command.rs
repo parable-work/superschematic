@@ -1,18 +1,18 @@
 //! What the core is asked to run (D103): a create, an update, a delete, an
-//! operation of one use, a deadline that fell due, or the define and
-//! publish checks of a type's configs. Every command carries its caller,
+//! operation of one use, a deadline that fell due, a write of a row the
+//! outbox hands it, or the define and publish checks of a type's configs. Every command carries its caller,
 //! the time it runs at, in epoch milliseconds, since the core reads no
 //! clock, and the host's id for the request, which the keys a behavior
 //! makes are derived from, since the core makes no id; a create carries
 //! the id the host will write.
 //!
-//! The list of actions is open: an event from the outbox joins it with the
-//! behaviors that react to one (D103's order of the work, step 3), so a
-//! host matches it with a fallback arm.
+//! The list of actions is open (a behavior's own outbox events may join it),
+//! so a host matches it with a fallback arm.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::changes::RowChange;
 use crate::spec::TypeSpec;
 
 /// Who makes the call: a subject and the permissions it holds. A service
@@ -161,6 +161,14 @@ pub enum Action {
         #[serde(default)]
         payload: Value,
     },
+    /// A write of a row that the outbox hands the core (D103): the row's
+    /// key and the change. The core runs the uses that hear the row's
+    /// writes on the row as it is now, and the listeners of other types the
+    /// row's relations reach.
+    Change {
+        key: String,
+        change: RowChange,
+    },
 }
 
 fn empty_object() -> Value {
@@ -169,7 +177,8 @@ fn empty_object() -> Value {
 
 impl Action {
     /// What a refusal names as refused: `define`, `publish`, `create`,
-    /// `update`, `delete`, the operation's name or the deadline's.
+    /// `update`, `delete`, the operation's name, the deadline's, or
+    /// `change`.
     pub fn name(&self) -> &str {
         match self {
             Action::Define => "define",
@@ -179,6 +188,7 @@ impl Action {
             Action::Delete { .. } => "delete",
             Action::Operation { operation, .. } => operation,
             Action::Deadline { name, .. } => name,
+            Action::Change { .. } => "change",
         }
     }
 
@@ -192,7 +202,8 @@ impl Action {
             Action::Update { key, .. }
             | Action::Delete { key }
             | Action::Operation { key, .. }
-            | Action::Deadline { key, .. } => Some(key),
+            | Action::Deadline { key, .. }
+            | Action::Change { key, .. } => Some(key),
         }
     }
 }
@@ -220,6 +231,25 @@ mod tests {
         );
         let due: Action = serde_json::from_value(json!({"kind": "deadline", "key": "o1", "useId": "Timers", "name": "expire", "at": 5000})).unwrap();
         assert_eq!(due.name(), "expire");
+
+        let change: Action = serde_json::from_value(json!({"kind": "change", "key": "t1", "change": {
+            "write": "update", "at": 1001000,
+            "before": {"own": {"title": "t1", "projectId": "p1"}, "owned": {"Workflow": {"status": "todo", "enteredAt": 1000000}}},
+            "after":  {"own": {"title": "t1", "projectId": "p1"}, "owned": {"Workflow": {"status": "doing", "enteredAt": 1001000}}}}}))
+        .unwrap();
+        assert_eq!(change.name(), "change");
+        assert_eq!(change.key(), Some("t1"));
+        let Action::Change {
+            change: written, ..
+        } = &change
+        else {
+            panic!("a change");
+        };
+        assert_eq!(written.write, crate::changes::WriteKind::Update);
+        assert_eq!(
+            serde_json::to_value(&change).unwrap()["change"]["after"]["owned"],
+            json!({"Workflow": {"status": "doing", "enteredAt": 1001000}})
+        );
 
         let create: Action =
             serde_json::from_value(json!({"kind": "create", "own": {"title": "Desk"}})).unwrap();

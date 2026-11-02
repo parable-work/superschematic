@@ -178,14 +178,17 @@ var update = flag.Bool("update", false, "rewrite testdata/*.layout.json")
 // second of its two Workflows (D103).
 const timersFixture = "../../loader/tsreader/testdata/services/fixture-timers-db"
 
-// The layout document of a table that implements Timers holds every table
-// use with its member, the use's sub-table with its row's column, its key
-// and its fields, the table's deadline queue, and the spec's own fields,
-// a date-time marked; testdata/fixture-timers-db.layout.json is the
-// document the adapters of every language are written against.
-func TestOfTimers(t *testing.T) {
+// reactionsFixture is the DB service whose Project's Reactions hears its
+// Tasks through task.project, and whose Task's Reactions moves its project
+// (D103).
+const reactionsFixture = "../../loader/tsreader/testdata/services/fixture-reactions-db"
+
+// layoutOfFixture loads the DB service at dir and holds its layout document
+// to testdata/<name>.layout.json, which -update rewrites.
+func layoutOfFixture(t *testing.T, dir, name string) *behaviorlayout.Layout {
+	t.Helper()
 	reg := registry.New(naming.Default())
-	schema, err := loader.LoadService(filepath.FromSlash(timersFixture), loader.WithRegistry(reg))
+	schema, err := loader.LoadService(filepath.FromSlash(dir), loader.WithRegistry(reg))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +201,7 @@ func TestOfTimers(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = append(got, '\n')
-	golden := filepath.Join("testdata", "fixture-timers-db.layout.json")
+	golden := filepath.Join("testdata", name+".layout.json")
 	if *update {
 		if err := os.MkdirAll(filepath.Dir(golden), 0o755); err != nil {
 			t.Fatal(err)
@@ -212,8 +215,19 @@ func TestOfTimers(t *testing.T) {
 		t.Fatalf("missing golden (run with -update): %v", err)
 	}
 	if string(got) != string(want) {
-		t.Errorf("the layout of fixture-timers-db differs from %s (run with -update and review the diff):\n%s", golden, got)
+		t.Errorf("the layout of %s differs from %s (run with -update and review the diff):\n%s", name, golden, got)
 	}
+	return layout
+}
+
+// The layout document of a table that implements Timers holds every table
+// use with its member, the use's sub-table with its row's column, its key
+// and its fields, the table's deadline queue and its change queue, Timers
+// hearing its writes, and the spec's own fields, a date-time marked;
+// testdata/fixture-timers-db.layout.json is the document the adapters of
+// every language are written against.
+func TestOfTimers(t *testing.T) {
+	layout := layoutOfFixture(t, timersFixture, "fixture-timers-db")
 
 	ticket := layout.Types["Ticket"]
 	if ticket == nil || len(ticket.Uses) != 2 {
@@ -234,12 +248,61 @@ func TestOfTimers(t *testing.T) {
 	if d := ticket.Deadlines; d == nil || *d != *want2 {
 		t.Errorf("Ticket's deadlines queue = %+v, want %+v", d, want2)
 	}
+	changes := &behaviorlayout.Changes{Queue: "TicketChange", Table: "ticket_change_queue", RowKey: "row_key", Write: "write", At: "at", Before: "before", After: "after"}
+	if c := ticket.Changes; c == nil || *c != *changes {
+		t.Errorf("Ticket's change queue = %+v, want %+v", c, changes)
+	}
 	fields, _ := json.Marshal(ticket.Spec.Fields)
 	if string(fields) != `[{"name":"title","type":"string"},{"name":"visitAt","type":"Temporal.DateTime","dateTime":true}]` {
 		t.Errorf("Ticket's spec fields = %s", fields)
 	}
 	if anchor, _ := json.Marshal(ticket.Spec.Uses[0].Anchor); string(anchor) != `"type"` {
 		t.Errorf("Ticket's Timers anchor = %s, want \"type\"", anchor)
+	}
+}
+
+// The layout document of tables whose Reactions hear their writes names
+// each table's change queue, and the spec's field of a to-one relation its
+// relation, by which the core finds the listeners of the table the relation
+// points at; testdata/fixture-reactions-db.layout.json is the document.
+func TestOfReactions(t *testing.T) {
+	layout := layoutOfFixture(t, reactionsFixture, "fixture-reactions-db")
+	project, task := layout.Types["Project"], layout.Types["Task"]
+	if project == nil || task == nil {
+		t.Fatalf("the layout's types = %v, want Project and Task", layout.Types)
+	}
+	for _, table := range []*behaviorlayout.Table{project, task} {
+		want := &behaviorlayout.Changes{Queue: table.Type + "Change", Table: strings.ToLower(table.Type) + "_change_queue", RowKey: "row_key", Write: "write", At: "at", Before: "before", After: "after"}
+		if c := table.Changes; c == nil || *c != *want || table.Deadlines != nil {
+			t.Errorf("%s's queues = changes %+v and deadlines %+v, want %+v and none", table.Type, c, table.Deadlines, want)
+		}
+		if len(table.Uses) != 2 || table.Uses[0].Behavior != "Reactions" || table.Uses[0].Member != "reactions" || len(table.Uses[0].Operations) != 0 {
+			t.Errorf("%s's uses = %+v, want Reactions with no operation, then its status", table.Type, table.Uses)
+		}
+	}
+	fields, _ := json.Marshal(task.Spec.Fields)
+	if string(fields) != `[{"name":"title","type":"string"},{"name":"priority","type":"string"},{"name":"projectId","type":"Identity.UUID","relation":{"name":"project","type":"Project"}}]` {
+		t.Errorf("Task's spec fields = %s", fields)
+	}
+}
+
+// The image a change trigger writes is the layout's own columns and each
+// use's owned columns: no key, no _version, no audit column.
+func TestImageColumns(t *testing.T) {
+	reg := registry.New(naming.Default())
+	schema, err := loader.LoadService(filepath.FromSlash(reactionsFixture), loader.WithRegistry(reg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(behaviorlayout.ImageColumns(schema, schema.Types["Task"]), ","); got != "title,priority,project_id,status,status_entered_at" {
+		t.Errorf("Task's image = %s", got)
+	}
+	timers, err := loader.LoadService(filepath.FromSlash(timersFixture), loader.WithRegistry(reg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(behaviorlayout.ImageColumns(timers, timers.Types["Invoice"]), ","); got != "number,status,status_entered_at,payment,payment_entered_at" {
+		t.Errorf("Invoice's image = %s", got)
 	}
 }
 

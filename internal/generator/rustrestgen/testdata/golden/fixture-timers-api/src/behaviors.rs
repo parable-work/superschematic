@@ -7,13 +7,15 @@
 //! pool, as the request's caller. No implementation method serves them: the
 //! router's handler of each calls `run_operation`.
 //!
-//! The behavior worker TicketTimers of fixture-timers-api (D103): Ticket's deadlines,
-//! each claimed from fixture-timers-db's queue TicketDeadline as it falls due
-//! and run through the behaviors' core by superschematic-rules-adapter on a
-//! transaction of the pool, as the worker, its message completed in the same
-//! commit. Its main runs `ticket_timers_deadlines` with `run_ticket_timers_deadline`
-//! as the handler in the HTTP runtime's claim loop; no implementation method
-//! serves it.
+//! The behavior worker TicketTimers of fixture-timers-api (D103): Ticket's
+//! behavior queues, its deadlines and the writes of its rows its behaviors
+//! hear, each message claimed from fixture-timers-db's queues TicketDeadline
+//! and TicketChange as it falls due and run through the behaviors' core by
+//! superschematic-rules-adapter on a transaction of the pool, as the worker,
+//! its message completed in the same commit. Its main runs
+//! `ticket_timers_deadlines` with `run_ticket_timers_deadline` and
+//! `ticket_timers_changes` with `run_ticket_timers_change` as the handlers in
+//! the HTTP runtime's claim loop; no implementation method serves it.
 
 use std::sync::OnceLock;
 
@@ -26,10 +28,12 @@ use superschematic_http_runtime::queue::{PostgresQueue, QueueDefinition};
 use superschematic_http_runtime::worker::{Claimed, SelfCompleting};
 use superschematic_http_runtime::{ApiError, BoxError, RequestContext};
 use superschematic_rules_adapter::{
-    postgres, Caller, Claim, Core, Deadline, DeadlineRun, Error, Host, Layout, Refusal,
+    postgres, Caller, Claim, Core, Deadline, DeadlineRun, Error, Host, Layout, Refusal, TableChange,
 };
 
-use crate::database_types::{TicketDeadline, TICKET_DEADLINE_QUEUE};
+use crate::database_types::{
+    TicketChange, TicketDeadline, TICKET_CHANGE_QUEUE, TICKET_DEADLINE_QUEUE,
+};
 
 /// The layout document of fixture-timers-db's tables that compose
 /// behaviors (internal/generator/behaviorlayout), as the Go ORM's RulesLayout
@@ -194,6 +198,15 @@ pub const RULES_LAYOUT: &str = r#"{
         "name": "name",
         "at": "at",
         "payload": "payload"
+      },
+      "changes": {
+        "queue": "InvoiceChange",
+        "table": "invoice_change_queue",
+        "rowKey": "row_key",
+        "write": "write",
+        "at": "at",
+        "before": "before",
+        "after": "after"
       },
       "spec": {
         "name": "Invoice",
@@ -412,6 +425,15 @@ pub const RULES_LAYOUT: &str = r#"{
         "name": "name",
         "at": "at",
         "payload": "payload"
+      },
+      "changes": {
+        "queue": "TicketChange",
+        "table": "ticket_change_queue",
+        "rowKey": "row_key",
+        "write": "write",
+        "at": "at",
+        "before": "before",
+        "after": "after"
       },
       "spec": {
         "name": "Ticket",
@@ -669,7 +691,8 @@ pub fn ticket_timers_deadlines(
 /// transaction of the pool, as the worker, at the later of now and the time
 /// it was armed to fall due at, its message's completion in the same commit
 /// (D103). A deadline armed or cleared since the claim, or of a row or a use
-/// that is gone, runs nothing, which it logs; a refusal or a failure of the
+/// that is gone, runs nothing, and a fire a guard vetoes is released, due
+/// again in a minute, each of which it logs; a refusal or a failure of the
 /// database rolls the transaction back and fails the message, which the
 /// queue retries after its backoff.
 pub async fn run_ticket_timers_deadline(
@@ -704,6 +727,57 @@ pub async fn run_ticket_timers_deadline(
     Ok(())
 }
 
+/// The change queue of the behavior worker TicketTimers (D103),
+/// fixture-timers-db's TicketChange, on `pool`, a pool of fixture-timers-db:
+/// a queue whose handler, `run_ticket_timers_change`, completes each message
+/// itself, which `worker::run_worker` runs.
+pub fn ticket_timers_changes(
+    pool: &Pool,
+) -> Result<SelfCompleting<PostgresQueue<TicketChange>>, BoxError> {
+    let definition = QueueDefinition::parse(TICKET_CHANGE_QUEUE)?;
+    let queue = PostgresQueue::new(pool.clone(), definition);
+    Ok(SelfCompleting::new(queue))
+}
+
+/// Runs a claimed change of Ticket through the behaviors' core on a
+/// transaction of the pool, as the worker, its message's completion in the
+/// same commit (D103): the uses that hear the row's writes, on the row as it
+/// is now, and the listeners its relations reach. A claim lost runs nothing,
+/// which it logs; a refusal or a failure of the database rolls the
+/// transaction back and fails the message, which the queue retries after its
+/// backoff.
+pub async fn run_ticket_timers_change(
+    pool: &Pool,
+    claimed: Claimed<TicketChange>,
+) -> Result<(), BoxError> {
+    let change = change_of(&claimed.message)?;
+    let claim = Claim {
+        id: claimed.id.clone(),
+        token: claimed.token.clone(),
+    };
+    let mut client = pool.get().await?;
+    let tx = client.transaction().await?;
+    let host = Host::new(core(), layout());
+    let run = postgres::run_change(
+        &host,
+        &*tx,
+        "Ticket",
+        &change,
+        ticket_timers_caller(),
+        Some(&claim),
+    )
+    .await?;
+    tx.commit().await?;
+    if !run.ran() {
+        tracing::info!(
+            message = claimed.id.as_str(),
+            why = run.why(),
+            "change ran nothing"
+        );
+    }
+    Ok(())
+}
+
 /// The deadline a message of a deadline queue holds (D103): its row's key
 /// in its wire form, the use, the deadline's name, the time it was armed to
 /// fall due at and its payload, null when it has none.
@@ -729,5 +803,34 @@ fn deadline_of<M: Serialize>(message: &M) -> Result<Deadline, BoxError> {
         name,
         at,
         payload: fields.remove("payload").unwrap_or(Value::Null),
+    })
+}
+
+/// The change a message of a change queue holds (D103), as the table's
+/// trigger wrote it: its row's key in its wire form, the write, its time in
+/// epoch milliseconds, and the row's columns before and after it, each
+/// null when absent.
+fn change_of<M: Serialize>(message: &M) -> Result<TableChange, BoxError> {
+    let Value::Object(mut fields) = serde_json::to_value(message)? else {
+        return Err("a change's message is no object".into());
+    };
+    let mut text = |name: &str| -> Result<String, BoxError> {
+        match fields.remove(name) {
+            Some(Value::String(text)) => Ok(text),
+            Some(other) if !other.is_null() => Ok(other.to_string()),
+            _ => Err(format!("a change's message has no {name}").into()),
+        }
+    };
+    let (key, write) = (text("rowKey")?, text("write")?);
+    let at = fields
+        .get("at")
+        .and_then(Value::as_i64)
+        .ok_or("a change's message has no at")?;
+    Ok(TableChange {
+        key,
+        write,
+        at,
+        before: fields.remove("before").unwrap_or(Value::Null),
+        after: fields.remove("after").unwrap_or(Value::Null),
     })
 }

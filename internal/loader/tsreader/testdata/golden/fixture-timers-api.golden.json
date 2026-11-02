@@ -31,7 +31,7 @@
   "workers": [
     {
       "name": "TicketTimers",
-      "comment": "Runs Ticket's deadlines as they fall due (D103): the worker\nfixture-timers-api-ticket-timers.",
+      "comment": "Runs Ticket's deadlines as they fall due, and the writes of its rows that\nTimers hears (D103): the worker\nfixture-timers-api-ticket-timers.",
       "concurrency": 2,
       "behaviorWorker": {
         "type": "Ticket"

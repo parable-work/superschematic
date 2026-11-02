@@ -14,7 +14,7 @@ postgresQueue, both from the runtime's ./postgres entry. Delivery is at
 least once.
 */
 
-import type { InvoiceDeadline, TicketDeadline } from './types';
+import type { InvoiceChange, InvoiceDeadline, TicketChange, TicketDeadline } from './types';
 
 /** A field of a queue's message and the column it writes. */
 export interface QueueField {
@@ -91,6 +91,68 @@ export interface QueueDefinition<M> {
 }
 
 /**
+ * InvoiceChange: a message whose handler fails is due again after 30s, doubled
+ * for each attempt before, up to 3600s, and is dead after 5 such retries; a
+ * claim holds it for 60s unless extended. A done message is deleted as it completes.
+ *
+ * The writes of Invoice's rows its behaviors hear, one message per write, whoever makes it, which a trigger of the table writes and a behavior worker runs (D103).
+ */
+export const invoiceChangeQueue: QueueDefinition<InvoiceChange> = {
+  name: "InvoiceChange",
+  table: "invoice_change_queue",
+  retries: 5,
+  backoffSeconds: 30,
+  maxBackoffSeconds: 3600,
+  leaseSeconds: 60,
+  retainSeconds: 0,
+  fields: [
+    { name: "rowKey", column: "row_key", uuid: true },
+    { name: "write", column: "write" },
+    { name: "at", column: "at" },
+    { name: "before", column: "before", json: true },
+    { name: "after", column: "\"after\"", json: true },
+  ],
+  statements: {
+    insert: `INSERT INTO invoice_change_queue`,
+    expire: `UPDATE invoice_change_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
+  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
+WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
+    claim: `WITH due AS (
+  SELECT m.id FROM invoice_change_queue AS m
+  WHERE ((m.state = 'ready' AND m.due_at <= now()) OR (m.state = 'claimed' AND m.claim_expires_at <= now()))
+    AND NOT EXISTS (SELECT 1 FROM invoice_change_queue AS o WHERE o.row_key = m.row_key AND o.id <> m.id
+      AND (o.state = 'claimed' OR (m.state = 'ready' AND o.state = 'ready' AND (o.created_at, o.id) < (m.created_at, m.id))))
+  ORDER BY m.due_at, m.id
+  LIMIT $1
+  FOR UPDATE OF m SKIP LOCKED
+)
+UPDATE invoice_change_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),
+  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()
+FROM due WHERE q.id = due.id
+RETURNING q.id::text, q.claim_token::text, q.attempts, q.row_key, q.write, q.at, q.before, q."after"`,
+    complete: `DELETE FROM invoice_change_queue
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+    fail: `UPDATE invoice_change_queue SET
+  state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,
+  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => LEAST($4 * power(2, LEAST(attempts - 1, 40)), $6)) END,
+  last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'
+RETURNING state`,
+    extend: `UPDATE invoice_change_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+    release: `UPDATE invoice_change_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+    prune: `DELETE FROM invoice_change_queue WHERE id IN (
+  SELECT id FROM invoice_change_queue
+  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)
+  ORDER BY updated_at
+  LIMIT $2
+  FOR UPDATE SKIP LOCKED
+)`,
+  },
+};
+
+/**
  * InvoiceDeadline: a message whose handler fails is due again after 30s, doubled
  * for each attempt before, up to 3600s, and is dead after 5 such retries; a
  * claim holds it for 60s unless extended. A done message is deleted as it completes.
@@ -142,6 +204,68 @@ WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
 WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
     prune: `DELETE FROM invoice_deadline_queue WHERE id IN (
   SELECT id FROM invoice_deadline_queue
+  WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)
+  ORDER BY updated_at
+  LIMIT $2
+  FOR UPDATE SKIP LOCKED
+)`,
+  },
+};
+
+/**
+ * TicketChange: a message whose handler fails is due again after 30s, doubled
+ * for each attempt before, up to 3600s, and is dead after 5 such retries; a
+ * claim holds it for 60s unless extended. A done message is deleted as it completes.
+ *
+ * The writes of Ticket's rows its behaviors hear, one message per write, whoever makes it, which a trigger of the table writes and a behavior worker runs (D103).
+ */
+export const ticketChangeQueue: QueueDefinition<TicketChange> = {
+  name: "TicketChange",
+  table: "ticket_change_queue",
+  retries: 5,
+  backoffSeconds: 30,
+  maxBackoffSeconds: 3600,
+  leaseSeconds: 60,
+  retainSeconds: 0,
+  fields: [
+    { name: "rowKey", column: "row_key", uuid: true },
+    { name: "write", column: "write" },
+    { name: "at", column: "at" },
+    { name: "before", column: "before", json: true },
+    { name: "after", column: "\"after\"", json: true },
+  ],
+  statements: {
+    insert: `INSERT INTO ticket_change_queue`,
+    expire: `UPDATE ticket_change_queue SET state = 'dead', claim_token = NULL, claim_expires_at = NULL,
+  last_error = 'the claim of its last attempt expired before its handler finished', updated_at = now()
+WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
+    claim: `WITH due AS (
+  SELECT m.id FROM ticket_change_queue AS m
+  WHERE ((m.state = 'ready' AND m.due_at <= now()) OR (m.state = 'claimed' AND m.claim_expires_at <= now()))
+    AND NOT EXISTS (SELECT 1 FROM ticket_change_queue AS o WHERE o.row_key = m.row_key AND o.id <> m.id
+      AND (o.state = 'claimed' OR (m.state = 'ready' AND o.state = 'ready' AND (o.created_at, o.id) < (m.created_at, m.id))))
+  ORDER BY m.due_at, m.id
+  LIMIT $1
+  FOR UPDATE OF m SKIP LOCKED
+)
+UPDATE ticket_change_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),
+  claim_expires_at = now() + make_interval(secs => $2), updated_at = now()
+FROM due WHERE q.id = due.id
+RETURNING q.id::text, q.claim_token::text, q.attempts, q.row_key, q.write, q.at, q.before, q."after"`,
+    complete: `DELETE FROM ticket_change_queue
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+    fail: `UPDATE ticket_change_queue SET
+  state = CASE WHEN attempts > $3 THEN 'dead' ELSE 'ready' END,
+  due_at = CASE WHEN attempts > $3 THEN due_at ELSE now() + make_interval(secs => LEAST($4 * power(2, LEAST(attempts - 1, 40)), $6)) END,
+  last_error = $5, claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'
+RETURNING state`,
+    extend: `UPDATE ticket_change_queue SET claim_expires_at = now() + make_interval(secs => $3), updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+    release: `UPDATE ticket_change_queue SET state = 'ready', attempts = GREATEST(attempts - 1, 0), claim_token = NULL, claim_expires_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
+    prune: `DELETE FROM ticket_change_queue WHERE id IN (
+  SELECT id FROM ticket_change_queue
   WHERE state = 'done' AND updated_at <= now() - make_interval(secs => $1)
   ORDER BY updated_at
   LIMIT $2

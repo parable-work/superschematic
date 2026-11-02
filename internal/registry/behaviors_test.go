@@ -745,4 +745,15 @@ func TestRegisterBehaviorTables(t *testing.T) {
 	if !ok || deadlines.Key != "name" || !timers.ArmsDeadlines || len(deadlines.Fields) != 7 {
 		t.Errorf("Timers = tables %+v, armsDeadlines %v", timers.Tables, timers.ArmsDeadlines)
 	}
+	// Timers and Reactions hear their table's writes (D103), and no other
+	// core behavior does.
+	var hearing []string
+	for _, name := range core.BehaviorNames() {
+		if b, _ := core.Behavior(name); b.HearsChanges {
+			hearing = append(hearing, name)
+		}
+	}
+	if strings.Join(hearing, ",") != "Reactions,Timers" {
+		t.Errorf("the behaviors that hear changes = %v, want Reactions and Timers", hearing)
+	}
 }

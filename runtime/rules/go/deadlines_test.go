@@ -723,16 +723,16 @@ func TestRunDeadlineOfAGoneRowSpendsItsMessage(t *testing.T) {
 			t.Errorf("run = %+v, %v, want nothing run, the use gone", run, err)
 		}
 
-		// Any other refusal is the run's error, its message left claimed
-		// for the worker to fail.
+		// Any other refusal but a veto is the run's error, its message left
+		// claimed for the worker to fail.
 		insertMessage(t, db, messageID, uuidColumn, "respond", 5000, claimToken)
-		vetoed := `{"done":{"refused":{"code":"vetoed","status":409,"class":"BehaviorVetoError","message":"held"}}}`
-		err = inTx(t, db, deadlineHost(script(t, vetoed), layout), nil, func(host rules.Host, _ *rulestest.Tx) error {
+		forbidden := `{"done":{"refused":{"code":"forbidden","status":403,"class":"PermissionError","message":"no"}}}`
+		err = inTx(t, db, deadlineHost(script(t, forbidden), layout), nil, func(host rules.Host, _ *rulestest.Tx) error {
 			_, err := rules.RunDeadline(context.Background(), host, "Ticket", respondDue, rules.Caller{Subject: "w"}, &rules.Claim{ID: messageID, Token: claimToken}, nil)
 			return err
 		})
-		if refusal := refusalOf(t, err); refusal.Code != rules.CodeVetoed {
-			t.Errorf("refusal = %+v, want vetoed", *refusal)
+		if refusal := refusalOf(t, err); refusal.Code != rules.CodeForbidden {
+			t.Errorf("refusal = %+v, want forbidden", *refusal)
 		}
 		if got := messages(t, db, uuidColumn); len(got) != 1 || got[0].State != "claimed" {
 			t.Errorf("the messages = %+v, want respond's still claimed", got)
@@ -784,6 +784,94 @@ func TestADeadlineCommandWithoutAClaimRunsOnlyWhileArmed(t *testing.T) {
 		}})
 		if got := messages(t, db, uuidColumn); len(got) != 1 || got[0].At != 9000 {
 			t.Errorf("the messages = %+v, want respond armed again at 9000 alone", got)
+		}
+	})
+}
+
+// heldFire is the core's veto of a fire a guard holds, as a behavior Hold
+// whose guard vetoes fireTimer refuses it.
+const heldFire = `{"done":{"refused":{"code":"vetoed","status":409,"class":"BehaviorVetoError","message":"behavior Hold vetoed fireTimer of Ticket t1: held","details":{"behavior":"Hold"}}}}`
+
+func TestRunDeadlineReleasesAVetoedFire(t *testing.T) {
+	rulestest.Each(t, func(t *testing.T, db *rulestest.DB) {
+		createTickets(t, db)
+		insertTicket(t, db, uuidColumn, "Printer")
+		db.Exec(t, fmt.Sprintf(`INSERT INTO "ticket_timers_deadlines" (ticket_id, name, armed_from, fired) VALUES (%s, 'respond', '1000', %s)`, db.P(1), db.P(2)),
+			uuidColumn, map[rules.Dialect]any{rules.DialectPostgres: false, rules.DialectSQLite: int64(0)}[db.Dialect])
+		// The worker's claim counted an attempt, its third.
+		insertMessage(t, db, messageID, uuidColumn, "respond", 5000, claimToken)
+		db.Exec(t, `UPDATE "ticket_deadline_queue" SET attempts = 3, claim_expires_at = due_at`)
+		layout := ticketLayout(false)
+		before := subRows(t, db, layout, uuidKey)
+		release := func() (*rules.DeadlineRun, error) {
+			var run *rules.DeadlineRun
+			err := inTx(t, db, deadlineHost(script(t, heldFire), layout), nil, func(host rules.Host, _ *rulestest.Tx) error {
+				var err error
+				run, err = rules.RunDeadline(context.Background(), host, "Ticket", respondDue, rules.Caller{Subject: "w"}, &rules.Claim{ID: messageID, Token: claimToken}, nil)
+				return err
+			})
+			return run, err
+		}
+		run, err := release()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run.Ran || run.Why != rules.WhyVetoed || run.Refusal == nil || run.Refusal.Code != rules.CodeVetoed || run.Refusal.Message != "behavior Hold vetoed fireTimer of Ticket t1: held" {
+			t.Fatalf("run = %+v, want nothing run, the fire vetoed with the core's refusal", run)
+		}
+		now := db.Now(t)
+		rows := db.Rows(t, fmt.Sprintf(`SELECT state, attempts, claim_token, claim_expires_at, due_at FROM "ticket_deadline_queue" WHERE id = %s`, db.P(1)), messageID)
+		if len(rows) != 1 {
+			t.Fatalf("the message's rows = %v, want the message kept", rows)
+		}
+		row := rows[0]
+		if state := fmt.Sprint(row[0]); state != "ready" {
+			t.Errorf("the message is %s, want ready", state)
+		}
+		if attempts := fmt.Sprint(row[1]); attempts != "2" {
+			t.Errorf("the message's attempts = %s, want 2, the vetoed claim's not counted", attempts)
+		}
+		if row[2] != nil || row[3] != nil {
+			t.Errorf("the message keeps its claim: token %v, expiry %v", row[2], row[3])
+		}
+		var due time.Time
+		switch v := row[4].(type) {
+		case time.Time:
+			due = v
+		default:
+			due, err = time.Parse(time.RFC3339Nano, fmt.Sprint(v))
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if wait := due.Sub(now); wait < 59*time.Second || wait > 61*time.Second {
+			t.Errorf("the message falls due %v after the database's now, want a minute (%d s)", wait, rules.VetoedRetrySeconds)
+		}
+		if got := subRows(t, db, layout, uuidKey); got != before {
+			t.Errorf("the sub-table rows = %s, want them as they were, %s", got, before)
+		}
+		if got := ticketVersion(t, db, uuidColumn); got != 1 {
+			t.Errorf("the version = %d, want 1: nothing of the fire written", got)
+		}
+
+		// The claim is released: a second release of it finds nothing.
+		run, err = release()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run.Ran || run.Why != rules.WhyClaimLost {
+			t.Errorf("run = %+v, want the claim lost", run)
+		}
+
+		// Without a claim, a veto is the run's refusal, as a transcript's
+		// vetoed fire is.
+		db.Exec(t, `UPDATE "ticket_deadline_queue" SET due_at = created_at`)
+		err = inTx(t, db, deadlineHost(script(t, heldFire), layout), nil, func(host rules.Host, _ *rulestest.Tx) error {
+			_, err := rules.RunDeadline(context.Background(), host, "Ticket", respondDue, rules.Caller{Subject: "w"}, nil, nil)
+			return err
+		})
+		if refusal := refusalOf(t, err); refusal.Code != rules.CodeVetoed {
+			t.Errorf("refusal = %+v, want vetoed", *refusal)
 		}
 	})
 }

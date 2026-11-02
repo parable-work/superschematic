@@ -40,7 +40,8 @@ Each module has the same functions: `execute` (a command the caller built),
 `run_operation`, `run_create`, `run_update`, `run_delete`, `prepare_create`
 (a create run to its change set and applied nowhere, for an upsert's
 insert), `read_row`, `read_sub_rows` (a use's sub-table rows of a row, in
-key order) and `run_deadline` (a due deadline, below).
+key order), `run_deadline` (a due deadline, below) and `run_change` (a write
+from the table's change queue, below).
 
 ```rust
 use axum::{extract::{Path, State}, Json};
@@ -122,17 +123,27 @@ brief:
    row, and on a hard delete its sub-table rows. A `subRows` read is
    answered from the layout's columns in key order (`COLLATE "C"` on
    Postgres); on SQLite one made while the command holds a lock is refused
-   as `internal`, since the unit has no check of it yet. An outbox event is
-   `internal` until the outbox has a table of its own (D103's order of the
-   work, step 3).
+   as `internal`, since the unit has no check of it yet. A `linked` read is
+   answered from the layout's own column of the field, the key column
+   first, live rows alone, after a key when given, in key order, `LIMIT
+   limit + 1`, `more` set when the extra row comes back; a type the layout
+   lacks answers an empty page, a field that is no own field of it is
+   `internal`, and on SQLite one made under a lock is `internal`. A row a
+   change command found gone (`RowWrite::Gone`) is applied in the row
+   writes' place with two `NOT EXISTS` deletes: its deadline messages
+   unless a live row of the key exists, then its sub-table rows unless any
+   row of the key does. An outbox event of a behavior's own is `internal`:
+   a table's change queue holds its writes, and the event stream comes
+   later (D103).
 
 ## Deadlines
 
 `run_deadline(host, client | conn, type, &Deadline, caller, Option<&Claim>)`
 runs a due deadline (`Deadline { key, use_id, name, at, payload }`, the key
 in the core's form) at the later of the host's clock and `at`, and returns
-a `DeadlineRun`: `Ran(Executed)`, `ClaimLost` or `Gone(Refusal)`, whose
-`why()` is `""`, `claim lost` or `gone` as every adapter words it. With a
+a `DeadlineRun`: `Ran(Executed)`, `ClaimLost`, `Gone(Refusal)` or
+`Vetoed(Refusal)`, whose `why()` is `""`, `claim lost`, `gone` or `vetoed`
+as every adapter words it. With a
 worker's claim (`Claim { id, token }`), the unit deletes the claimed message
 by its id and token, held to one row, right after the command's own row
 write and before the change set's deadline changes; when the unit does not
@@ -142,11 +153,37 @@ arming is read before each run (none at `at` is `not_found`, `at` after the
 command's time `invalid_argument`, in the reference host's words) and the
 unit spends the live message armed at `at`; `execute` of a deadline command
 takes this path, as the transcript does. A core `not_found` (the row or the
-use is gone) spends the arming in a unit of its own and is `Gone`. Whether
-a deadline is still armed is the adapter's check, never the core's (the
-core's README, "The adapter"). A generated Rust API crate's behavior worker
+use is gone) spends the arming in a unit of its own and is `Gone`. With a
+claim, a guard's veto (`vetoed`) releases the message: ready again, due in
+`VETOED_RETRY_SECONDS` (60), its claim cleared and the attempt the claim
+counted given back, nothing of the run applied, and the run is `Vetoed`
+(or `ClaimLost` when the release finds the claim gone), so a fire a guard
+keeps holding comes back every minute with its sub-table row pending;
+without a claim the veto is refused as before. Whether a deadline is still
+armed is the adapter's check, never the core's (the core's README, "The
+adapter"). A generated Rust API crate's behavior worker
 runs each claimed message so on a transaction of the pool, which it commits
 with the message's completion.
+
+## Changes
+
+`run_change(host, client | conn, type, &TableChange { key, write, at, before,
+after }, caller, Option<&Claim>)` runs one message of a table's change
+queue, as its trigger wrote it, as the core's change command (D103). The
+key is taken in either form, the core's or its column's (a UUID's base62
+or hyphenated text). The write is `insert`, `update` or `delete`, anything
+else `internal`. Each image is mapped by the layout, an own column to an
+own field and a use's owned column to its field by declared name, other
+members ignored, each value converted as a row read converts that column:
+on Postgres as its `jsonb` value, on SQLite as its storage class, SQLite's
+JSON text parsed first; a null is absent. With a claim, the unit deletes
+the message by its id and token, held to one row, after the row writes and
+before the sub-table rows and deadlines; the result is
+`ChangeRun::Ran(Executed)` or `ClaimLost`, whose `why()` is `""` or `claim
+lost`, and a row that moved runs again. Without a claim nothing is spent.
+A refusal comes back whole, nothing applied, for the worker to fail the
+message. A change of a row that is gone writes `RowWrite::Gone`, applied as
+above. The layout's `changes` is `Table.changes: Option<Changes>`.
 
 `ExecuteOptions::own_columns` binds a server's own encoding of the command's
 own row (its audit stamps among them) in place of the change set's own
@@ -187,7 +224,8 @@ crate that serves a table's behavior operations (an API's
 `superschematic-rules-behaviors` once per process, and runs each
 operation with `postgres::run_operation` on a transaction of the
 database's deadpool, which it commits on success, and each due deadline of
-a `@behaviorWorker` with `postgres::run_deadline`. The naming file's
+a `@behaviorWorker` with `postgres::run_deadline` and each change of its
+table's change queue with `postgres::run_change`. The naming file's
 `[paths] rules_adapter_rust` and `rules_behaviors_rust` name the two
 crates, and the build refuses such an API while either is unset.
 
@@ -209,13 +247,24 @@ value as `rules.test.ts` holds TypeScript's; `src/sqlite.rs` and
 store that moves the row under it through the same transaction (a moved
 row, a moved read made under a lock, a soft delete made under a command).
 `tests/store.rs` runs the public functions on both databases, a deadline's
-claim and its arming among them, and `tests/transcript.rs` replays the
-transcripts in `runtime/engine/testdata/rules` on rusqlite and on Postgres:
-`core-workflow.transcript.json`, 16 scenarios, 96 steps (34 commands, 61
-checks, 1 raw write), held to a floor of 96, with the 62 steps it leaves
-out for its own reasons; and `core-timers.transcript.json`, 18 scenarios,
-101 steps (51 commands, 11 of them deadlines, and 50 checks), held to a
-floor of 101, with 322 left out; 0 mismatches each.
+claim and its arming among them; `Probe`, a table with the change trigger
+and queue sqlgen writes, with Timers and a toy `Echo` behavior that records
+what it heard (a raw insert heard, with a Postgres timestamp at +05:30,
+SQLite's 1 and 0 and JSON text, and a hyphenated UUID; Timers arming a
+create deadline from the write's time; the message spent; a claim lost; a
+soft-deleted, a hard-deleted and a returned row; a refused change leaving
+its message claimed); and `Held`, Timers with a toy `Hold` whose guard
+vetoes `fireTimer`, which holds the vetoed release
+(`a_vetoed_fire_is_released_counting_no_attempt`). `tests/transcript.rs`
+replays the transcripts in `runtime/engine/testdata/rules` on rusqlite and
+on Postgres, each command over a layout of every type of its database:
+`core-workflow.transcript.json`, 96 steps (34 commands, 61 checks, 1 raw
+write); `core-timers.transcript.json`, 125 steps (75 commands, 10 of them
+deadlines and 25 changes, and 50 checks); `core-reactions.transcript.json`,
+586 steps (476 commands, 252 of them changes, and 110 checks); and
+`core-reactions-changes.transcript.json`, 60 steps (48 commands, 24 of them
+changes, and 12 checks); each held to a floor of its step count, its
+`expect.others` compared on every command step, 0 mismatches each.
 
 The Postgres cases read `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL`, each in a
 schema of its own (`rules_rs_<pid>_<nanos>_<n>`, dropped after), and are

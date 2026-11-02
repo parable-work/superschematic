@@ -30,8 +30,8 @@ import (
 // runs the command again from fresh state with the same request id, up to
 // MaxAttempts runs, and then refuses it as busy. A kind of read, step or
 // write it does not know (the core's enums are open) refuses the command as
-// internal, and so do outbox events until the outbox has a table (D103's
-// order of the work, step 3).
+// internal, and so do outbox events of a behavior's own (Cx::emit) until
+// the event stream gives them a table (D103, Left for later).
 //
 // A change set's sub-table rows are rows of the tables the layout names
 // for each use's declared tables, and its deadlines messages of the
@@ -46,15 +46,21 @@ import (
 // queue message is the only record of an arming, so the host, not the
 // core, checks that a deadline is still armed.
 //
+// A change command runs the uses that hear a write of a row, whoever made
+// it, as the table's change queue hands it over (RunChange): its unit
+// spends the claimed message after the row writes, as a deadline's does,
+// and a row the core found gone deletes what no row of its key keeps.
+//
 // A generated repository calls it: each use's operations run
 // RunOperation, and a table that composes behaviors creates, updates and
 // deletes its rows through the core (RunCreate, RunUpdate, RunDelete) so
 // its uses' initializers, guards and validation run, and binds in an
 // upsert's insert the owned fields the core's create of each row gives it
 // (PrepareCreate). A behavior worker's handler runs each due deadline with
-// RunDeadline. A hand-written server runs Execute on a store of its own
-// transaction. The owned columns and the sub-tables are read-only in a
-// repository's inputs; a raw SQL write of one is never refused (D103).
+// RunDeadline and each change of its table with RunChange. A hand-written
+// server runs Execute on a store of its own transaction. The owned columns
+// and the sub-tables are read-only in a repository's inputs; a raw SQL
+// write of one is never refused (D103), and the change queue hears it.
 
 const (
 	// MaxAttempts is how many times Execute runs a command whose row moved
@@ -217,6 +223,20 @@ func execute(ctx context.Context, host Host, typeName string, command Command, o
 	if deadline && table.Deadlines == nil {
 		return nil, Internal("a deadline %s.%s of %s ran, and the behaviors' layout gives %s no deadline queue", run.Action.UseID, run.Action.Name, typeName, typeName)
 	}
+	change := run.Action.Kind == ActionChange
+	if change && claim != nil && table.Changes == nil {
+		return nil, Internal("a change of %s ran for a claim of its change queue, and the behaviors' layout gives %s no change queue", typeName, typeName)
+	}
+	// claimed is the queue whose message claim is: the deadline queue's
+	// for a deadline command, the change queue's for a change command.
+	claimed := ""
+	switch {
+	case claim == nil:
+	case deadline:
+		claimed = table.Deadlines.Table
+	case change:
+		claimed = table.Changes.Table
+	}
 	for attempt := 1; attempt <= MaxAttempts; attempt++ {
 		if deadline && claim == nil {
 			if err := stillArmed(ctx, host.Store, table, run); err != nil {
@@ -246,12 +266,13 @@ func execute(ctx context.Context, host Host, typeName string, command Command, o
 			}
 			return &Result{Changes: *changes, Result: result, Key: keyOfCommand(run), Attempts: attempt}, nil
 		}
-		if deadline && claim != nil {
+		if claimed != "" {
 			// The unit moved: a fenced row, or the claim's completion found
 			// its message gone. A claim the worker no longer holds is a
-			// deadline another command moved, cleared or ran: nothing of it
+			// deadline another command moved, cleared or ran, or a message
+			// another claim took after the lease ran out: nothing of it
 			// runs.
-			held, err := claimHeld(ctx, host.Store, table, claim)
+			held, err := claimHeld(ctx, host.Store, claimed, claim)
 			if err != nil {
 				return nil, busyOr(err, typeName, run, attempt)
 			}
@@ -405,24 +426,7 @@ func ReadRow(ctx context.Context, host Host, typeName, key string) (*Row, error)
 
 func readRow(ctx context.Context, store Store, table *Table, key string) (*Row, error) {
 	dialect := store.Dialect()
-	selected := make([]string, 0, len(table.Own)+1)
-	at := 0
-	alias := func(column string) {
-		// Each column under an alias of its place, so no two columns'
-		// names meet in the row.
-		selected = append(selected, fmt.Sprintf("%s AS c%d", quote(column), at))
-		at++
-	}
-	for _, column := range table.Own {
-		alias(column.Column)
-	}
-	for _, use := range table.Uses {
-		for _, field := range use.Fields {
-			alias(field.Column.Column)
-		}
-	}
-	selected = append(selected, quote(table.Version)+" AS v")
-	text := fmt.Sprintf("SELECT %s FROM %s WHERE %s = %s%s", strings.Join(selected, ", "), quote(table.Table), quote(table.Key.Column), placeholder(dialect, 1), live(table))
+	text := fmt.Sprintf("SELECT %s FROM %s WHERE %s = %s%s", strings.Join(rowSelect(table), ", "), quote(table.Table), quote(table.Key.Column), placeholder(dialect, 1), live(table))
 	bound, err := keyValue(table, key)
 	if err != nil {
 		return nil, err
@@ -434,12 +438,43 @@ func readRow(ctx context.Context, store Store, table *Table, key string) (*Row, 
 	if len(rows) == 0 {
 		return nil, nil
 	}
-	values := rows[0]
-	if len(values) != at+1 {
-		return nil, Internal("a read of %s selected %d columns and the store gave %d", table.Type, at+1, len(values))
+	return rowOf(table, rows[0], key)
+}
+
+// rowSelect is a row read's select list: each own column, each use's owned
+// column, each under an alias of its place so no two columns' names meet in
+// the row, and the version.
+func rowSelect(table *Table) []string {
+	selected := make([]string, 0, len(table.Own)+1)
+	at := 0
+	alias := func(column string) {
+		selected = append(selected, fmt.Sprintf("%s AS c%d", quote(column), at))
+		at++
+	}
+	for _, column := range table.Own {
+		alias(column.Column)
+	}
+	for _, use := range table.Uses {
+		for _, field := range use.Fields {
+			alias(field.Column.Column)
+		}
+	}
+	return append(selected, quote(table.Version)+" AS v")
+}
+
+// rowOf is the row of key as the core reads it from the values of
+// rowSelect's columns: its own and owned fields, each column with no value
+// absent, and its version.
+func rowOf(table *Table, values []any, key string) (*Row, error) {
+	want := len(table.Own) + 1
+	for _, use := range table.Uses {
+		want += len(use.Fields)
+	}
+	if len(values) != want {
+		return nil, Internal("a read of %s selected %d columns and the store gave %d", table.Type, want, len(values))
 	}
 	row := &Row{Own: map[string]json.RawMessage{}, Owned: map[string]map[string]json.RawMessage{}}
-	at = 0
+	at := 0
 	for _, column := range table.Own {
 		value, present, err := fromColumn(values[at], column, table)
 		if err != nil {
@@ -573,7 +608,7 @@ func keyOfCommand(command Command) string {
 	switch command.Action.Kind {
 	case ActionCreate:
 		return command.Action.ID
-	case ActionUpdate, ActionDelete, ActionOperation, ActionDeadline:
+	case ActionUpdate, ActionDelete, ActionOperation, ActionDeadline, ActionChange:
 		return command.Action.Key
 	}
 	return ""
@@ -712,8 +747,8 @@ func contains(list []string, item string) bool {
 // answerOf is the answer to one of the core's reads, through the store,
 // made while the command holds held locks; a kind of read the adapter does
 // not take refuses the command as internal, and so does a read of
-// sub-table rows under a lock on a store whose locks are fenced, which its
-// unit has no check of yet.
+// sub-table rows or of the rows that link to a row under a lock on a store
+// whose locks are fenced, which its unit has no check of yet.
 func answerOf(ctx context.Context, host Host, request ReadRequest, held int) (Answer, error) {
 	switch request.Kind {
 	case ReadKindRow:
@@ -760,6 +795,19 @@ func answerOf(ctx context.Context, host Host, request ReadRequest, held int) (An
 			return Answer{}, err
 		}
 		return Answer{Kind: ReadKindSubRows, SubRows: rows}, nil
+	case ReadKindLinked:
+		if held > 0 && host.Store.Locks() == LocksFenced {
+			return Answer{}, Internal("a read of the rows that link to a row under a lock has no check on SQLite or D1 yet (D103)")
+		}
+		table := host.Layout.Types[request.Type]
+		if table == nil {
+			return Answer{Kind: ReadKindLinked, Linked: &LinkedRows{Rows: []KeyedRow{}}}, nil
+		}
+		linked, err := readLinked(ctx, host.Store, table, request)
+		if err != nil {
+			return Answer{}, err
+		}
+		return Answer{Kind: ReadKindLinked, Linked: linked}, nil
 	default:
 		return Answer{}, Internal("the adapter answers no read of this kind: %s", jsonText(request))
 	}
@@ -830,10 +878,12 @@ func live(table *Table) string {
 // columns and the next version where the row is live and at the version
 // expected, a delete where the row is live and at the version expected (a
 // soft delete's set of opts.SoftDelete for the command's own row), each
-// fenced to change one row. Then a deadline command's spend of its arming
-// (claim's message, or the message armed at the time it names); the
-// sub-table row writes; the deadline changes; and for each row deleted its
-// deadline messages and, hard, its sub-table rows. A sub-table row write
+// fenced to change one row, and a gone row's deletes of what no row of its
+// key keeps (goneStatements). Then a deadline command's spend of its
+// arming (claim's message, or the message armed at the time it names), or
+// a change command's of claim's message; the sub-table row writes; the
+// deadline changes; and for each row deleted its deadline messages and,
+// hard, its sub-table rows. A sub-table row write
 // or a deadline change of a row the change set deletes is left out, and
 // each sub-table row write is held to change one row. The command's own
 // row binds its own columns from opts.OwnColumns when the caller encoded
@@ -842,7 +892,7 @@ func live(table *Table) string {
 // command as internal.
 func statementsOf(ctx context.Context, host Host, typeName string, command Command, changes *ChangeSet, opts *ExecuteOptions, claim *Claim) ([]Statement, error) {
 	if len(changes.Events) > 0 {
-		return nil, Internal("%s of %s writes outbox events, which the adapter takes once the outbox has a table (D103's order of the work, step 3)", command.Action.name(), typeName)
+		return nil, Internal("%s of %s writes outbox events of a behavior's own, which the adapter does not take yet: a table's change queue holds its writes, and the event stream comes later (D103)", command.Action.name(), typeName)
 	}
 	dialect := host.Store.Dialect()
 	commandKey := keyOfCommand(command)
@@ -960,6 +1010,15 @@ func statementsOf(ctx context.Context, host Host, typeName string, command Comma
 				Expect: 1,
 			})
 			deleted = append(deleted, deletedRow{table: table, key: *write.Key, hard: true})
+		case RowGone:
+			if write.Key == nil {
+				return nil, Internal("a gone row of %s reached the adapter without a key", write.Type)
+			}
+			gone, err := goneStatements(table, dialect, *write.Key)
+			if err != nil {
+				return nil, err
+			}
+			statements = append(statements, gone...)
 		default:
 			return nil, Internal("the adapter takes no row write of this kind: %s", rawOrJSON(write))
 		}
@@ -973,7 +1032,8 @@ func statementsOf(ctx context.Context, host Host, typeName string, command Comma
 		return false
 	}
 
-	if command.Action.Kind == ActionDeadline {
+	switch {
+	case command.Action.Kind == ActionDeadline:
 		table, err := host.Layout.table(typeName)
 		if err != nil {
 			return nil, err
@@ -983,6 +1043,15 @@ func statementsOf(ctx context.Context, host Host, typeName string, command Comma
 			return nil, err
 		}
 		statements = append(statements, spend)
+	case command.Action.Kind == ActionChange && claim != nil:
+		table, err := host.Layout.table(typeName)
+		if err != nil {
+			return nil, err
+		}
+		if table.Changes == nil {
+			return nil, Internal("a change of %s ran for a claim of its change queue, and the behaviors' layout gives %s no change queue", typeName, typeName)
+		}
+		statements = append(statements, claimSpend(dialect, table.Changes.Table, claim))
 	}
 
 	for _, write := range changes.SubRows {

@@ -8,12 +8,15 @@ import { beforeAll, expect, test } from 'bun:test';
 import {
   init,
   RulesError,
+  type Answered,
   type Answers,
   type BehaviorDeclaration,
   type Caller,
   type Command,
+  type ReadRequest,
   type Refusal,
   type Row,
+  type RowChange,
   type RulesCore,
   type Step,
   type TypeSpec,
@@ -140,9 +143,75 @@ test('a delete is held to the version read', () => {
   expect(core.run(order, { ...transition('paid'), action: { kind: 'delete', key: 'o1' } }, answered)).toEqual(deleted);
 });
 
+test('a change of a row whose uses hear none of its writes writes nothing, and a change of a row that is gone writes gone', () => {
+  const change: RowChange = { write: 'update', at: 2000, before: { own: { title: 'Desk' } }, after: { own: { title: 'Chair' } } };
+  const command: Command = { caller: alice, now: 2000, request: 'r3', action: { kind: 'change', key: 'o1', change } };
+  const read: Step = { read: [{ kind: 'row', type: 'Order', key: 'o1' }] };
+  expect(core.run(order, command)).toEqual(read);
+  const nothing: Step = { done: { changed: { rows: [], subRows: [], events: [], deadlines: [], result: null } } };
+  expect(core.run(order, command, answered)).toEqual(nothing);
+  const missing: Answers = { reads: [{ request: { kind: 'row', type: 'Order', key: 'o1' }, answer: { row: null } }] };
+  const gone: Step = { done: { changed: { rows: [{ kind: 'gone', type: 'Order', key: 'o1' }], subRows: [], events: [], deadlines: [], result: null } } };
+  expect(core.run(order, command, missing)).toEqual(gone);
+});
+
+test("a change of a task is heard by its project's allTerminal through task.project, which reads the tasks that link to it", () => {
+  const states = ['todo', 'done'];
+  const taskFlow = { states, transitions: [{ from: 'todo', to: 'done' }], outcomes: { done: 'success' } };
+  const projectFlow = { states: ['active', 'done'], transitions: [{ from: 'active', to: 'done' }], outcomes: { done: 'success' } };
+  const task: TypeSpec = {
+    name: 'Task',
+    uses: [{ behavior: 'Workflow', config: taskFlow, anchor: { field: 'status' } }],
+    fields: [{ name: 'projectId', type: 'string', relation: { name: 'project', type: 'Project' } }],
+  };
+  const project: TypeSpec = {
+    name: 'Project',
+    uses: [
+      { behavior: 'Workflow', config: projectFlow, anchor: { field: 'status' } },
+      { behavior: 'Reactions', config: { rules: [{ when: { allTerminal: { schema: 'Task', link: 'project' } }, then: { transition: 'done' } }] } },
+    ],
+  };
+  const done: Row = { own: { projectId: 'p1' }, owned: { status: { status: 'done', enteredAt: 2000 } }, version: 2 };
+  const change: RowChange = {
+    write: 'update',
+    at: 2000,
+    before: { own: { projectId: 'p1' }, owned: { status: { status: 'todo', enteredAt: 1000 } } },
+    after: { own: { projectId: 'p1' }, owned: { status: { status: 'done', enteredAt: 2000 } } },
+  };
+  const command: Command = { caller: alice, now: 2000, request: 'r4', action: { kind: 'change', key: 't1', change } };
+  // A host loop over fixed answers: the task, the project, their specs and
+  // the one task that links to the project.
+  const answer = (request: ReadRequest): Answered => {
+    switch (request.kind) {
+      case 'row':
+        return { request, answer: { row: request.type === 'Task' ? done : { own: {}, owned: { status: { status: 'active', enteredAt: 1000 } }, version: 1 } } };
+      case 'spec':
+        return { request, answer: { spec: request.type === 'Project' ? project : request.type === 'Task' ? task : null } };
+      case 'linked':
+        return { request, answer: { linked: { rows: [{ key: 't1', row: done }], more: false } } };
+      default:
+        throw new Error(`a read the test does not answer: ${JSON.stringify(request)}`);
+    }
+  };
+  const reads: Answered[] = [];
+  const asked: ReadRequest[] = [];
+  let step = core.run(task, command, { reads });
+  for (let round = 0; 'read' in step && round < 16; round++) {
+    for (const request of step.read) {
+      asked.push(request);
+      reads.push(answer(request));
+    }
+    step = core.run(task, command, { reads });
+  }
+  expect(asked).toContainEqual({ kind: 'linked', type: 'Task', field: 'projectId', key: 'p1', limit: 500 });
+  expect('done' in step && 'changed' in step.done ? step.done.changed.rows : step).toEqual([
+    { kind: 'update', type: 'Project', key: 'p1', expectedVersion: 1, own: {}, owned: { status: { status: 'done', enteredAt: 2000 } } },
+  ]);
+});
+
 test('declarations are the registered files, each field typed and the value field named', () => {
   const declarations: BehaviorDeclaration[] = core.declarations();
-  expect(declarations.map(d => d.name)).toEqual(['Workflow', 'Timers']);
+  expect(declarations.map(d => d.name)).toEqual(['Workflow', 'Reactions', 'Timers']);
   const workflow = declarations[0]!;
   expect(workflow.value).toBe('status');
   expect(workflow.fields?.map(f => ({ name: f.name, type: f.type }))).toEqual([
@@ -151,9 +220,16 @@ test('declarations are the registered files, each field typed and the value fiel
   ]);
   expect(workflow.operations?.find(o => o.name === 'transition')?.writes).toBe(true);
   expect(workflow.tables).toBeUndefined();
-  // Timers keeps its deadlines in a sub-table of the row and arms each (D103).
-  const timers = declarations[1]!;
+  // Reactions hears its row's writes, and keeps nothing of its own (D103).
+  const reactions = declarations[1]!;
+  expect(reactions.hearsChanges).toBe(true);
+  expect(reactions.tables).toBeUndefined();
+  expect(reactions.operations ?? []).toEqual([]);
+  // Timers keeps its deadlines in a sub-table of the row, arms each, and
+  // hears its row's writes, which reconcile them (D103).
+  const timers = declarations[2]!;
   expect(timers.armsDeadlines).toBe(true);
+  expect(timers.hearsChanges).toBe(true);
   expect(timers.tables?.map(t => ({ name: t.name, key: t.key, fields: t.fields.map(f => `${f.name}: ${f.type}`) }))).toEqual([
     {
       name: 'deadlines',

@@ -14,8 +14,8 @@ import (
 // TestTimersRoundTrip (D103): a table that implements Timers is written in
 // every format as its use, `implements Timers<Ticket, { ... }>` in
 // TypeScript and `{ name, implements: true, config }` in the data forms,
-// without the sub-table, the deadline queue and the @optimistic the loader
-// adds for it, and reads back to the same IR.
+// without the sub-table, the deadline queue, the change queue and the
+// @optimistic the loader adds for it, and reads back to the same IR.
 func TestTimersRoundTrip(t *testing.T) {
 	schema, err := loader.LoadService(tsFixtures + "/fixture-timers-db")
 	if err != nil {
@@ -40,7 +40,7 @@ func TestTimersRoundTrip(t *testing.T) {
 					t.Errorf("written %s lacks %q:\n%s", format, want, source)
 				}
 			}
-			for _, added := range []string{"TicketTimersDeadlines", "TicketDeadline", "behaviorTable", "behaviorQueue", "optimistic", "timersDeadlines"} {
+			for _, added := range []string{"TicketTimersDeadlines", "TicketDeadline", "TicketChange", "behaviorTable", "behaviorQueue", "optimistic", "timersDeadlines"} {
 				if strings.Contains(source, added) {
 					t.Errorf("written %s carries the loader's %s:\n%s", format, added, source)
 				}
@@ -54,7 +54,7 @@ func TestTimersRoundTrip(t *testing.T) {
 
 // TestBehaviorWorkerRoundTrip (D103): fixture-timers-api's @behaviorWorker
 // is written in every format with its table and options and without the
-// queue the loader gives it, and reads back over its database to the same
+// queues the loader gives it, and reads back over its database to the same
 // expanded IR.
 func TestBehaviorWorkerRoundTrip(t *testing.T) {
 	schema, err := loader.LoadService(tsFixtures + "/fixture-timers-api")
@@ -96,7 +96,7 @@ func TestBehaviorWorkerRoundTrip(t *testing.T) {
 					t.Errorf("written %s lacks %q:\n%s", format, want, source)
 				}
 			}
-			for _, added := range []string{"TicketDeadline", "timersFireTimer", "\"origin\"", "queue:"} {
+			for _, added := range []string{"TicketDeadline", "TicketChange", "timersFireTimer", "\"origin\"", "queue:", "queues"} {
 				if strings.Contains(source, added) {
 					t.Errorf("written %s carries the loader's %s:\n%s", format, added, source)
 				}
@@ -113,6 +113,47 @@ func TestBehaviorWorkerRoundTrip(t *testing.T) {
 			}
 			if got := normalizeIR(t, reloaded); got != want {
 				t.Errorf("IR mismatch after writing %s\nwant:\n%s\ngot:\n%s", format, want, got)
+			}
+		})
+	}
+}
+
+// TestReactionsRoundTrip (D103): tables that implement Reactions are
+// written in every format as their uses, `implements Reactions<Project, {
+// ... }>` in TypeScript and `{ name, implements: true, config }` in the data
+// forms, without the change queues and the @optimistic the loader adds for
+// them, and read back to the same IR.
+func TestReactionsRoundTrip(t *testing.T) {
+	schema, err := loader.LoadService(tsFixtures + "/fixture-reactions-db")
+	if err != nil {
+		t.Fatalf("loading fixture: %v", err)
+	}
+	schema.Description = ""
+	want := normalizeIR(t, schema)
+	contains := map[Format][]string{
+		FormatTS: {
+			`import { AutoGenerate, Reactions, Relation, Workflow, key } from "@superschematic/db";`,
+			`export abstract class Project implements Reactions<Project, { rules: [{ then: { transition: "done" }; when: { allTerminal: { link: "project"; outcomes: ["success"]; schema: "Task" } } }, { then: { transition: "failed" }; when: { anyTerminal: { link: "project"; outcomes: ["failure"]; schema: "Task" } } }] }> {`,
+			`export abstract class Task implements Reactions<Task, { rules: [{ then: { link: "project"; transition: "active" }; when: { enters: "doing" } }, { then: { transition: "doing" }; when: { changes: { field: "priority"; to: "urgent" } } }] }> {`,
+		},
+		FormatJSON: {`"implements": true`, `"name": "Reactions"`},
+		FormatYAML: {"implements: true", "name: Reactions"},
+	}
+	for _, format := range []Format{FormatTS, FormatJSON, FormatYAML} {
+		t.Run(string(format), func(t *testing.T) {
+			source := writtenSource(t, schema, format)
+			for _, want := range contains[format] {
+				if !strings.Contains(source, want) {
+					t.Errorf("written %s lacks %q:\n%s", format, want, source)
+				}
+			}
+			for _, added := range []string{"ProjectChange", "TaskChange", "behaviorQueue", "optimistic", "heardBy"} {
+				if strings.Contains(source, added) {
+					t.Errorf("written %s carries the loader's %s:\n%s", format, added, source)
+				}
+			}
+			if got := normalizeIR(t, writeAndReload(t, schema, format)); got != want {
+				t.Errorf("IR mismatch after the %s round trip\nwant:\n%s\ngot:\n%s", format, want, got)
 			}
 		})
 	}

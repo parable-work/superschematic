@@ -18,6 +18,7 @@ store.go             Store, the caller's transaction: Dialect, LockMode, Stateme
 adapter.go           Host, Execute, RunOperation, RunCreate, RunUpdate, RunDelete, PrepareCreate, ReadRow
 subtables.go         a use's sub-table rows: the subRows read, the change set's writes, ReadSubRows
 deadlines.go         a table's deadline queue: arms and clears, the spend, RunDeadline, Deadline, Claim, ReadDeadlines
+changes.go           a table's change queue: RunChange, Change, ChangeRun, the trigger's images converted, the linked read, a gone row's deletes
 convert.go           core JSON to column values and back, the UUID base62 codec (D79), TimeOfMillis
 refusal.go           Refusal, Code, AsRefusal, IsNotFound, Internal, BusyRefusal
 postgres/            package postgres: a Store over a pgx transaction
@@ -83,9 +84,13 @@ commands with.
   rows alone, each column converted to the core's JSON, a NULL absent),
   `hasRows` from the table, `spec` from the layout, and `subRows` from the
   use's sub-table in the layout (`Use.Tables`), in key order, each
-  recording the locks held when it was made; it takes each lock once. On
-  SQLite (fenced locks) a `subRows` read made under a lock is refused as
-  `internal`: the unit has no check of it yet.
+  recording the locks held when it was made; it takes each lock once. It
+  answers a `linked` read with one page of a type's rows whose own field
+  holds a key, in key order, live rows alone, `LIMIT limit + 1` for
+  `more`, a type the layout lacks answering none and a field that is no
+  own field of it refused as `internal`. On SQLite (fenced locks) a
+  `subRows` or `linked` read made under a lock is refused as `internal`:
+  the unit has no check of it yet.
 - It applies a change set as one unit (`Store.Apply`): a create's insert
   after a check that the table holds no row of the key (`conflict`), an
   update's set and `_version = _version + 1`, a delete, each held to its
@@ -93,17 +98,22 @@ commands with.
   table, the row's being live. A unit that finds a row moved applies
   nothing, and the command runs again from fresh state, `MaxAttempts` (8)
   times, before it is refused as `busy`. After the row writes come a
-  deadline command's spend of its arming, the sub-table rows (an insert
+  deadline command's spend of its arming or a change command's of its
+  claimed message (deleted after the row writes), the sub-table rows (an insert
   `ON CONFLICT (row, key) DO NOTHING`, an update and a delete, each held to
   one row), the deadline changes, messages of the layout's
   `Table.Deadlines` (an arm deletes the key's messages, a dead one among
   them, and inserts one due at its time; a clear deletes them), and, for a row
   the change set deletes, every message of the row and, on a hard delete,
   its sub-table rows; a deleted row's sub-table writes and deadline
-  changes are skipped. A run still asking after `MaxRounds` (256) is
-  `internal`, as are a kind of read, step, outcome or write the adapter
-  does not know, a type the layout lacks, and outbox events until the
-  outbox has a table of its own (D103's order of the work, step 3).
+  changes are skipped. A row a change command found gone (`RowGone`) is
+  applied in the row writes' place with two `NOT EXISTS` deletes: its
+  deadline messages unless a live row of the key exists, and its sub-table
+  rows unless any row of the key does. A run still asking after
+  `MaxRounds` (256) is `internal`, as are a kind of read, step, outcome or
+  write the adapter does not know, a type the layout lacks, and outbox
+  events of a behavior's own (`Cx::emit`), which the event stream will take
+  (D103).
 
 Every refusal, the core's or the adapter's, is a `*Refusal` (`Code`,
 `Status`, `Class`, `Message`, `Details`), in TypeScript's adapter's words
@@ -130,7 +140,7 @@ the core's form) at the later of the host's clock and `At`, so a worker
 whose clock lags the database's never runs one before it falls due, its
 row write stamped as the options say (nil for none), and returns a
 `*DeadlineRun`: `Ran` with its `Result`, or nothing run, `Why` saying why
-(`WhyClaimLost`, `WhyGone`). With a worker's claim (`Claim{ID, Token}`),
+(`WhyClaimLost`, `WhyGone`, `WhyVetoed`). With a worker's claim (`Claim{ID, Token}`),
 the unit deletes the claimed message by its id and token, held to one row,
 right after the command's row write and before its deadline changes, so an
 arming the fired command makes again survives the spend. A unit that does
@@ -144,13 +154,51 @@ live message armed at `At`. A core `not_found` whose row or use is gone
 (the table holds no live row of the key, or the layout no such use) spends
 the arming in a unit of its own and is `gone`, with the core's refusal;
 any other refusal, a `not_found` of something else a rule reached among
-them, is the error, nothing applied. Whether a
-deadline is still armed is this check, never the core's. A generated Go
+them, is the error, nothing applied. With a claim, a `vetoed` refusal (a
+guard holding the fire) releases the message instead: ready again, due in
+`VetoedRetrySeconds` (60), its claim cleared and the attempt the claim
+counted given back, in the store's transaction, nothing of the run
+applied; the run is `WhyVetoed` with the refusal, or `claim lost` when the
+release changes no row. A fire a guard keeps holding so comes back every
+minute, and its sub-table row stays pending; without a claim the veto is
+the error. Whether a deadline is still armed is this check, never the
+core's. A generated Go
 ORM's repository wraps it as `RunDeadline(ctx, message, claim)` in its
 transaction, and a generated API's behavior worker calls that for each
 claimed message. Values passed as
 `any` are what `encoding/json` writes: a date-time as epoch milliseconds,
 a UUID as its base62 wire form; `TimeOfMillis` reads a date-time back.
+
+## Changes
+
+`RunChange(ctx, host, type, Change, caller, *Claim, *ExecuteOptions)` runs
+a message of a table's change queue, as its trigger wrote it, through the
+core's change command (D103), at the host's clock. `Change{Key, Write, At,
+Before, After}` holds the row's key, in the core's form or its column's (a
+UUID's base62 or hyphenated text), the write (`insert`, `update` or
+`delete`; anything else is refused as `internal`), its time in epoch
+milliseconds, and the row's columns before and after it, each a JSON object
+by column or null. Each image is mapped by the layout: an own column to the
+core's own field, each use's owned column to that use's field by declared
+name, other members ignored, each value converted as a row read converts
+the column (on Postgres as `jsonb_build_object` wrote it, a timestamp with
+the session's offset among them; on SQLite TEXT, INTEGER, REAL and a
+boolean's 0 or 1, and an image the driver hands back as TEXT parsed first),
+a null absent. It returns a `*ChangeRun`: `Ran` with its `Result`, or
+nothing run with `Why` `claim lost`. A row that is gone completes its
+message: the core writes `RowGone`, whose deletes take its deadline
+messages, and its sub-table rows on a hard delete. With a worker's claim
+the unit deletes the claimed message of the table's change queue
+(`Table.Changes`) by its id and token, held to one row, after the fenced row
+writes and before the sub-table rows and deadlines; a unit that does not
+apply because the claim no longer holds the message is `claim lost`, and
+one that does not apply for a row that moved runs again. Without a claim
+nothing is spent. A refusal, or a failure of the database, is the error,
+nothing applied, for the worker to fail the message (D68's backoff, then
+dead). A generated Go ORM's repository of a table whose layout has
+`changes` wraps it as `RunChange(ctx, message, claim)` in its transaction,
+and a generated API's behavior worker calls that for each claimed message
+of its table's change queue, beside its deadline queue.
 
 ## The stores
 
@@ -227,12 +275,24 @@ core's JSON; the adapter's tests (`rules.test.ts`'s and
 the archive's core and over cores a test scripts; each store's tests hold
 its unit, checks and lock to the statements it sends; `deadlines_test.go`
 holds the arm, the clear, the spend with and without a claim, a lost claim,
-a moved row and a gone one. `transcript_test.go` replays both transcripts
+a moved row and a gone one, and the vetoed release
+(`TestRunDeadlineReleasesAVetoedFire`, over a scripted core whose deadline
+command is vetoed); `changes_test.go` holds the trigger's images converted
+(a Postgres timestamp with an offset, SQLite's 0 and 1, SQLite's JSON
+text, a hyphenated UUID, null and absent), the linked read (paging, live
+rows, a type the layout lacks), a gone row's deletes (a soft-deleted row
+keeps its sub-table rows, a row that came back keeps everything) and
+`RunChange` with a claim (ran, claim lost, a refusal leaving the message
+claimed) and without one. `transcript_test.go` replays the four transcripts
 in `runtime/engine/testdata/rules` on SQLite and on Postgres, as the
-TypeScript adapter does: `core-workflow.transcript.json`, 16 scenarios, 96
-steps (34 commands, 61 checks, one raw write), held to a floor of 96, with
-the 62 steps it leaves out for its own reasons; and
-`core-timers.transcript.json`, 18 scenarios, 101 steps (51 commands, 11 of
-them deadlines, and 50 checks), held to a floor of 101, with 322 left out;
-0 mismatches each. The Postgres cases read `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL`,
+TypeScript adapter does: `core-workflow.transcript.json`, 96 steps (34
+commands, 61 checks, one raw write); `core-timers.transcript.json`, 125
+steps (75 commands, 10 of them deadlines and 25 changes, and 50 checks);
+`core-reactions.transcript.json`, 586 steps (476 commands, 252 of them
+changes, and 110 checks); and `core-reactions-changes.transcript.json`, 60
+steps (48 commands, 24 of them changes, and 12 checks); each held to a
+floor of its step count, its `expect.others` compared on every command
+step, with 0 mismatches each. Each command runs over a layout of every
+type live in its database, each at the version the scenario last made
+live, since a step names its own type's version alone. The Postgres cases read `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL`,
 each in a schema of its own, and skip without it, saying so.

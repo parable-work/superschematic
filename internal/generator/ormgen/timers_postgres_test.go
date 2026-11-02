@@ -13,8 +13,8 @@ import (
 
 // timersORMCases are the cases the generated module's test runs over
 // fixture-timers-db, by name: the repository's share of the cases every
-// language's Timers end-to-end test holds (D103), and RunDeadline's, which
-// a behavior worker's handler calls.
+// language's Timers end-to-end test holds (D103), and RunDeadline's and
+// RunChange's, which a behavior worker's handlers call.
 var timersORMCases = []string{
 	"a create arms the deadline: its sub-table row and its queue message with its due time",
 	"a status that leaves the state cancels the deadline by until",
@@ -24,6 +24,9 @@ var timersORMCases = []string{
 	"RunDeadline without a claim runs the deadline armed at the time it names, and nothing for another",
 	"RunDeadline on a claim another command moved runs nothing",
 	"RunDeadline of a row a raw delete removed completes its message as gone",
+	"RunChange of a raw write of a field start arms its deadline again and completes its message",
+	"RunChange of a raw delete clears the row's deadline messages",
+	"a change message that failed holds its row's later messages until it runs",
 	"deleting the row removes its deadlines",
 }
 
@@ -468,6 +471,142 @@ func TestTimersTablesOnPostgres(t *testing.T) {
 		if got := all(t, "ticket_deadline_queue", id); got != 0 {
 			t.Fatalf("the row has %d messages, want its claimed one completed", got)
 		}
+	})
+
+	// runChanges runs the row's messages of Ticket's change queue, as its
+	// worker's handler does, each with its claim, in the order the queue
+	// gives them, the head of the row's line first; it gives back every
+	// other row's message the claim took. A run that runs nothing fails
+	// the test, and so does a run of the claim it spent.
+	runChanges := func(t *testing.T, id types.IdentityUUID) {
+		t.Helper()
+		for round := 0; round < 20 && all(t, "ticket_change_queue", id) > 0; round++ {
+			claims, err := db.TicketChangeQueue().Claim(ctx, 10, time.Minute)
+			if err != nil {
+				t.Fatalf("claim: %v", err)
+			}
+			for _, c := range claims {
+				if c.Message.RowKey != id {
+					if err := db.TicketChangeQueue().Release(ctx, c.ID, c.Token); err != nil {
+						t.Fatal(err)
+					}
+					continue
+				}
+				run, err := db.Ticket.RunChange(worker, c.Message, &rules.Claim{ID: c.ID, Token: c.Token})
+				if err != nil || !run.Ran {
+					t.Fatalf("RunChange of %s's %s = %+v, %v, want run", id, c.Message.Write, run, err)
+				}
+				again, err := db.Ticket.RunChange(worker, c.Message, &rules.Claim{ID: c.ID, Token: c.Token})
+				if err != nil || again.Ran || again.Why != rules.WhyClaimLost {
+					t.Fatalf("RunChange of a spent claim = %+v, %v, want nothing run, the claim lost", again, err)
+				}
+			}
+		}
+		if n := all(t, "ticket_change_queue", id); n != 0 {
+			t.Fatalf("the row keeps %d change messages, want them run", n)
+		}
+	}
+
+	t.Run("RunChange of a raw write of a field start arms its deadline again and completes its message", func(t *testing.T) {
+		visit := time.Now().Add(48 * time.Hour).Truncate(time.Millisecond)
+		at := types.TemporalDateTime(visit)
+		id := create(t, &TicketCreate{Title: "Visit", VisitAt: &at})
+		before := subRows(t, "ticket_timers_deadlines", "ticket", id)["remind"]
+		if before.dueAt != visit.UnixMilli()-86400000 {
+			t.Fatalf("remind = %+v, want due a day before the visit", before)
+		}
+		// The create's own write, heard, arms nothing again.
+		runChanges(t, id)
+		if after := subRows(t, "ticket_timers_deadlines", "ticket", id)["remind"]; after != before {
+			t.Fatalf("remind = %+v after the create was heard, want it as the create left it, %+v", after, before)
+		}
+		later := visit.Add(24 * time.Hour)
+		if _, err := pool.Exec(ctx, "UPDATE ticket SET visit_at = $2 WHERE id = $1", id.ToUUID().String(), later); err != nil {
+			t.Fatal(err)
+		}
+		if n := all(t, "ticket_change_queue", id); n != 1 {
+			t.Fatalf("the raw write left %d change messages, want its one", n)
+		}
+		runChanges(t, id)
+		want := later.UnixMilli() - 86400000
+		if remind := subRows(t, "ticket_timers_deadlines", "ticket", id)["remind"]; remind.dueAt != want || remind.fired {
+			t.Fatalf("remind = %+v, want due a day before the new visit, %d", remind, want)
+		}
+		if messages := live(t, "ticket_deadline_queue", id); messages["remind"] != (message{at: want, dueAt: want}) {
+			t.Fatalf("the live messages are %+v, want remind's at and due at %d", messages, want)
+		}
+	})
+
+	t.Run("RunChange of a raw delete clears the row's deadline messages", func(t *testing.T) {
+		visit := types.TemporalDateTime(time.Now().Add(96 * time.Hour).Truncate(time.Millisecond))
+		id := create(t, &TicketCreate{Title: "Gone", VisitAt: &visit})
+		if got := all(t, "ticket_deadline_queue", id); got != 2 {
+			t.Fatalf("the row has %d deadline messages, want respond's and remind's", got)
+		}
+		if _, err := pool.Exec(ctx, "DELETE FROM ticket WHERE id = $1", id.ToUUID().String()); err != nil {
+			t.Fatal(err)
+		}
+		runChanges(t, id)
+		if got := all(t, "ticket_deadline_queue", id); got != 0 {
+			t.Fatalf("the deleted row keeps %d deadline messages, want none", got)
+		}
+	})
+
+	t.Run("a change message that failed holds its row's later messages until it runs", func(t *testing.T) {
+		id := create(t, &TicketCreate{Title: "Order"})
+		runChanges(t, id)
+		for _, title := range []string{"First", "Second"} {
+			if _, err := pool.Exec(ctx, "UPDATE ticket SET title = $2 WHERE id = $1", id.ToUUID().String(), title); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// mine claims the row's messages the queue gives, and gives back
+		// every other row's.
+		mine := func(t *testing.T) []TicketChangeClaim {
+			t.Helper()
+			claims, err := db.TicketChangeQueue().Claim(ctx, 10, time.Minute)
+			if err != nil {
+				t.Fatalf("claim: %v", err)
+			}
+			var out []TicketChangeClaim
+			for _, c := range claims {
+				if c.Message.RowKey != id {
+					if err := db.TicketChangeQueue().Release(ctx, c.ID, c.Token); err != nil {
+						t.Fatal(err)
+					}
+					continue
+				}
+				out = append(out, c)
+			}
+			return out
+		}
+		var first string
+		if err := pool.QueryRow(ctx, "SELECT id::text FROM ticket_change_queue WHERE row_key = $1 ORDER BY created_at LIMIT 1", id.ToUUID().String()).Scan(&first); err != nil {
+			t.Fatal(err)
+		}
+		head := mine(t)
+		if len(head) != 1 || head[0].ID != first {
+			t.Fatalf("the claim took %d of the row's messages, want its first written, %s, alone", len(head), first)
+		}
+		if dead, err := db.TicketChangeQueue().Fail(ctx, head[0].ID, head[0].Token, "a failure"); err != nil || dead {
+			t.Fatalf("fail = %v, %v, want it ready again after its backoff", dead, err)
+		}
+		// The failed message waits its backoff, and the row's later one,
+		// due, waits behind it.
+		if claimed := mine(t); len(claimed) != 0 {
+			t.Fatalf("the claim took %d of the row's messages while its first waits its backoff, want none", len(claimed))
+		}
+		if _, err := pool.Exec(ctx, "UPDATE ticket_change_queue SET due_at = now() WHERE id = $1::uuid", first); err != nil {
+			t.Fatal(err)
+		}
+		again := mine(t)
+		if len(again) != 1 || again[0].ID != first {
+			t.Fatalf("the claim took %d of the row's messages once the first fell due, want the first alone", len(again))
+		}
+		if err := db.TicketChangeQueue().Release(ctx, again[0].ID, again[0].Token); err != nil {
+			t.Fatal(err)
+		}
+		runChanges(t, id)
 	})
 
 	t.Run("deleting the row removes its deadlines", func(t *testing.T) {

@@ -3,6 +3,7 @@
   "source": "runtime/engine/testdata/scenarios/core-workflow.json",
   "behaviors": [
     "Workflow",
+    "Reactions",
     "Timers"
   ],
   "scenarios": [
@@ -452,7 +453,7 @@
         {
           "step": 11,
           "call": "events.read",
-          "reason": "a read of the change log, which the outbox the build-time trigger writes holds once it comes (D103's order of the work, step 3)"
+          "reason": "a read of the engine's event log, which a table has no counterpart of: its writes are heard through its change queue (D103), and the event stream comes later"
         }
       ]
     },
@@ -768,7 +769,7 @@
         {
           "step": 7,
           "call": "events.read",
-          "reason": "a read of the change log, which the outbox the build-time trigger writes holds once it comes (D103's order of the work, step 3)"
+          "reason": "a read of the engine's event log, which a table has no counterpart of: its writes are heard through its change queue (D103), and the event stream comes later"
         }
       ]
     },

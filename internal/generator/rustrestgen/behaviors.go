@@ -25,10 +25,12 @@ import (
 // Its behavior workers (@behaviorWorker, D103) run a table's behavior
 // queues the same way: src/behaviors.rs opens each queue on a pool of the
 // database, as a queue that its handler completes itself, and its handler
-// runs each claimed deadline through the adapter's run_deadline on a
-// transaction of the pool, as the worker, with the claim spent in the same
-// commit. The worker's main hands both to the HTTP runtime's claim loop;
-// the Workers trait and the scaffold have no method for it.
+// runs each claimed message through the adapter on a transaction of the
+// pool, as the worker, with the claim spent in the same commit: a deadline
+// of the table's deadline queue through run_deadline, a write of its
+// change queue through run_change. The worker's main hands each queue and
+// its handler to the HTTP runtime's claim loop; the Workers trait and the
+// scaffold have no method for it.
 
 // The crates src/behaviors.rs runs the operations with, which the API
 // crate depends on by path: they are unpublished, so a Rust server with
@@ -247,7 +249,13 @@ func (o *APIOutput) BehaviorUses() []string {
 		runtime = append(runtime, "ApiError", "RequestContext")
 	}
 	if len(o.BehaviorWorkers) > 0 {
-		adapter = append(adapter, "Claim", "Deadline", "DeadlineRun")
+		adapter = append(adapter, "Claim")
+		if o.HasDeadlineQueues() {
+			adapter = append(adapter, "Deadline", "DeadlineRun")
+		}
+		if o.HasChangeQueues() {
+			adapter = append(adapter, "TableChange")
+		}
 		runtime = append(runtime, "BoxError")
 		for _, w := range o.BehaviorWorkers {
 			for _, q := range w.BehaviorQueues {
@@ -281,13 +289,38 @@ func (o *APIOutput) BehaviorUses() []string {
 			}
 			return strings.Compare(a, b)
 		})
-		line := "use crate::" + DatabaseTypesModule + "::" + types[0] + ";"
-		if len(types) > 1 {
-			line = "use crate::" + DatabaseTypesModule + "::{" + strings.Join(types, ", ") + "};"
-		}
-		uses = append(uses, "\n"+line)
+		uses = append(uses, "\n"+bracedUse("crate::"+DatabaseTypesModule, types))
 	}
 	return uses
+}
+
+// bracedUse is the use declaration of items of path in their order, as
+// rustfmt lays it out: one item bare; a braced list on the use's line up to
+// 98 columns; else each row of items, indented, up to 100 columns, on lines
+// of their own.
+func bracedUse(path string, items []string) string {
+	if len(items) == 1 {
+		return "use " + path + "::" + items[0] + ";"
+	}
+	if line := "use " + path + "::{" + strings.Join(items, ", ") + "};"; len(line) <= 98 {
+		return line
+	}
+	var b strings.Builder
+	b.WriteString("use " + path + "::{\n")
+	row := ""
+	for _, item := range items {
+		next := item + ","
+		if row != "" && 4+len(row)+1+len(next) > 100 {
+			b.WriteString("    " + row + "\n")
+			row = ""
+		}
+		if row != "" {
+			row += " "
+		}
+		row += next
+	}
+	b.WriteString("    " + row + "\n};")
+	return b.String()
 }
 
 // BehaviorWorkerCaller is the body of a behavior worker's caller function:
@@ -309,6 +342,106 @@ func (w WorkerInfo) BehaviorWorkerCaller() string {
 func (w WorkerInfo) RunDeadlineCall() string {
 	args := []string{"&host", "&*tx", rustString(w.Behavior.Table), "&deadline", w.CallerFunc() + "()", "Some(&claim)"}
 	return rustCall("    ", "let run = postgres::run_deadline", args, ".await?;")
+}
+
+// RunChangeCall is the handler's call of the adapter's run_change for the
+// worker's table, as rustfmt lays it out.
+func (w WorkerInfo) RunChangeCall() string {
+	args := []string{"&host", "&*tx", rustString(w.Behavior.Table), "&change", w.CallerFunc() + "()", "Some(&claim)"}
+	return rustCall("    ", "let run = postgres::run_change", args, ".await?;")
+}
+
+// ModuleDoc is the paragraph of src/behaviors.rs's module doc that says
+// what the behavior worker runs and how (D103), its lines of "//! " text
+// wrapped at 80 columns: the table's deadlines and the writes of its rows
+// its behaviors hear, each queue's function and handler, which its main
+// hands to the HTTP runtime's claim loop.
+func (w WorkerInfo) ModuleDoc(schemaName, database string) string {
+	var runs, queues, handlers []string
+	for _, q := range w.BehaviorQueues {
+		queues = append(queues, q.Queue)
+		handlers = append(handlers, "`"+q.Func+"` with `"+q.Handler+"`")
+		if q.Changes() {
+			runs = append(runs, "the writes of its rows "+w.hearers()+" hear")
+		} else {
+			runs = append(runs, "its deadlines")
+		}
+	}
+	queue := "queue " + queues[0]
+	if len(queues) > 1 {
+		queue = "queues " + andList(queues)
+	}
+	handler := "the handler"
+	if len(handlers) > 1 {
+		handler = "the handlers"
+	}
+	text := fmt.Sprintf("The behavior worker %s of %s (D103): %s's behavior queues, %s, each message claimed from %s's %s as it falls due and run through the behaviors' core by superschematic-rules-adapter on a transaction of the pool, as the worker, its message completed in the same commit. Its main runs %s as %s in the HTTP runtime's claim loop; no implementation method serves it.",
+		w.Name, schemaName, w.Behavior.Table, andList(runs), database, queue, andList(handlers), handler)
+	return docLines("//!", text, 80)
+}
+
+// hearers names whose behaviors hear the writes of the worker's table:
+// its own ("its behaviors"), the tables' that listen through a relation of
+// it ("Project's behaviors"), or both ("its behaviors and Project's").
+func (w WorkerInfo) hearers() string {
+	var listening []string
+	for _, table := range w.Behavior.HeardBy {
+		listening = append(listening, table+"'s")
+	}
+	switch {
+	case len(listening) == 0:
+		return "its behaviors"
+	case len(w.Behavior.Hearing) == 0:
+		return andList(listening) + " behaviors"
+	}
+	return "its behaviors and " + andList(listening)
+}
+
+// andList joins words as a sentence lists them: "a", "a and b", "a, b and
+// c".
+func andList(words []string) string {
+	if len(words) < 2 {
+		return strings.Join(words, "")
+	}
+	return strings.Join(words[:len(words)-1], ", ") + " and " + words[len(words)-1]
+}
+
+// docLines wraps text into lines of prefix and words, each at most width
+// columns unless one word is longer.
+func docLines(prefix, text string, width int) string {
+	var lines []string
+	line := prefix
+	for _, word := range strings.Fields(text) {
+		if len(line)+1+len(word) > width && line != prefix {
+			lines = append(lines, line)
+			line = prefix
+		}
+		line += " " + word
+	}
+	return strings.Join(append(lines, line), "\n")
+}
+
+// HasDeadlineQueues reports whether a behavior worker runs a table's
+// deadline queue, whose messages src/behaviors.rs reads with deadline_of.
+func (o *APIOutput) HasDeadlineQueues() bool {
+	return o.hasBehaviorQueue(false)
+}
+
+// HasChangeQueues reports whether a behavior worker runs a table's change
+// queue, whose messages src/behaviors.rs reads with change_of (D103).
+func (o *APIOutput) HasChangeQueues() bool {
+	return o.hasBehaviorQueue(true)
+}
+
+func (o *APIOutput) hasBehaviorQueue(changes bool) bool {
+	for _, w := range o.BehaviorWorkers {
+		for _, q := range w.BehaviorQueues {
+			if q.Changes() == changes {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // FuncSignature is the signature of the function that opens the queue,

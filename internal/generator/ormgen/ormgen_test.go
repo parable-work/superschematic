@@ -28,6 +28,11 @@ const workflowFixture = "fixture-workflow-db"
 // arms them on its deadline queue.
 const timersFixture = "fixture-timers-db"
 
+// reactionsFixture is the DB fixture whose Project and Task implement
+// Reactions (D103): Project hears Task's writes through task.project, and
+// each table keeps a change queue its trigger writes.
+const reactionsFixture = "fixture-reactions-db"
+
 var update = flag.Bool("update", false, "rewrite golden files")
 
 const fixturesDir = "../../loader/tsreader/testdata/services"
@@ -42,10 +47,10 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 
 	// fixture-workflow-db's tables' fields are behaviors (D103), which the
 	// loader adds the owned fields of and the generator renders from the
-	// core's registry.
+	// core's registry; so are the Timers and Reactions fixtures' tables.
 	var loadOpts []loader.Option
 	var reg *registry.Registry
-	if svc == workflowFixture || svc == timersFixture {
+	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture {
 		reg = registry.New(naming.Default())
 		loadOpts = append(loadOpts, loader.WithRegistry(reg))
 	}
@@ -74,9 +79,9 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 }
 
 // TestWriteORMGolden generates the ORM module for the fixture-db,
-// fixture-nested-arrays-db, fixture-version-graph-db, fixture-optimistic-db
-// and fixture-user-model-db services and compares every emitted file
-// against its golden copy. Regenerate with:
+// fixture-nested-arrays-db, fixture-version-graph-db, fixture-optimistic-db,
+// fixture-user-model-db and the behaviors' services and compares every
+// emitted file against its golden copy. Regenerate with:
 // go test ./internal/generator/ormgen -run TestWriteORMGolden -update
 func TestWriteORMGolden(t *testing.T) {
 	common := []string{
@@ -124,6 +129,9 @@ func TestWriteORMGolden(t *testing.T) {
 		// Timers(), RunDeadline, no upsert, no repository of a sub-table,
 		// and the deadline queues.
 		{timersFixture, []string{"repository_ticket.go", "repository_invoice.go", "rules.go", "queues.go"}},
+		// Tables whose writes Reactions hear (D103): RunChange, the change
+		// queues, and a relation's column in the core's spec.
+		{reactionsFixture, []string{"repository_project.go", "repository_task.go", "rules.go", "queues.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)

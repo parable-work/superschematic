@@ -3,7 +3,7 @@ import { currentCaller } from './caller.js';
 import { FieldEncryptionError, newRowKey, parseFieldKeys, type FieldCell, type FieldKeyring, type FieldKeys } from './fieldcrypt.js';
 import { columnKey, decodeRow, decodeValue, encodeParam, postgresTypeParsers, withTypeParsers, type RowField } from './pgcodec.js';
 import { queriesOf, type QueryDefinition } from './queries.js';
-import { execute, postgresRulesStore, prepareCreate, runCreate, runDeadline, runDelete, runUpdate, RulesRefusal, type CoreCaller, type DeadlineRun, type RulesCallOptions, type RulesCore, type RulesColumn, type RulesHost, type RulesLayout, type RulesTable, type RunDeadlineOptions } from './rules.js';
+import { execute, postgresRulesStore, prepareCreate, runChange, runCreate, runDeadline, runDelete, runUpdate, RulesRefusal, type ChangeRun, type CoreCaller, type DeadlineRun, type RulesCallOptions, type RulesCore, type RulesColumn, type RulesHost, type RulesLayout, type RulesTable, type RunChangeOptions, type RunDeadlineOptions } from './rules.js';
 import { parseArray } from './queue.js';
 import { likePattern, searchTerms } from './search.js';
 import { SecretValue, revealed } from './secret.js';
@@ -115,8 +115,14 @@ behaviors keep sub-tables or arm deadlines has no upserts: an upsert's
 insert applies no change set, and the core's create of such a row writes
 its sub-table rows and arms its deadlines. Its repository's runDeadline
 runs a due deadline, as a behavior worker claimed it, through the core in
-a transaction (./rules, runDeadline). A raw SQL write of an owned column
-or a sub-table row is never refused, and arms or clears nothing (D103).
+a transaction (./rules, runDeadline). A table whose writes its behaviors
+hear keeps a change queue its trigger writes on every write of a row, the
+repositories' own and updateMany's, deleteMany's and hardDeleteOne's
+among them, and its repository's runChange runs one, as a behavior worker
+claimed it, through the core in a transaction (./rules, runChange): so a
+bulk or hard write, and a raw SQL write, arms and clears its deadlines
+after its commit, when the worker runs its change. A raw SQL write of an
+owned column or a sub-table row is never refused (D103).
 
 The @versioned history readers are the Go ORM's alone for now.
 */
@@ -2410,13 +2416,29 @@ class TableRepository {
   }
 
   /**
+   * Runs a change of a row, a message of the table's change queue as its
+   * trigger wrote it, through the core, in a transaction (this
+   * repository's, or one it opens), as options.caller or the acting user,
+   * stamping updatedAt and updatedBy on the row it writes: a behavior
+   * worker's handler, with its claim, which the unit that applies the
+   * change set completes (D103).
+   */
+  async runChange(change: { readonly rowKey: unknown; readonly write: string; readonly at: number | string; readonly before?: unknown; readonly after?: unknown }, options: RunChangeOptions = {}): Promise<ChangeRun> {
+    return this.atomically(async repo => {
+      const message = { key: repo.wireKey(change.rowKey), write: change.write, at: change.at, before: change.before, after: change.after };
+      return runChange(repo.rulesHost(), repo.def.name, message, options.caller ?? repo.caller(), { claim: options.claim, ownColumns: repo.operationColumns() });
+    });
+  }
+
+  /**
    * The members the table's uses add (D103): under each use's member, its
    * field or the behavior's for a use the table implements, its
-   * operations. A use whose member is one the repository has throws, which
-   * the build refuses first.
+   * operations; a use with none (Reactions) adds none. A use whose member
+   * is one the repository has throws, which the build refuses first.
    */
   bindUses(): void {
     for (const use of this.behaviors?.uses ?? []) {
+      if (use.operations.length === 0) continue;
       const member = use.member ?? use.id;
       if (member in this) throw new Error(`orm: ${this.def.name}'s behavior ${use.behavior} on ${member} would be the repository's own member ${member}`);
       const operations: Record<string, (key: unknown, params: unknown, options?: RulesCallOptions) => Promise<unknown>> = {};

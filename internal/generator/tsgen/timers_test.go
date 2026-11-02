@@ -24,10 +24,12 @@ const timersFixture = "fixture-timers-db"
 // a use the table implements has its operations under the behavior's
 // member, typed from its declaration as the config narrows it (the
 // deadlines' names, a fire's outcome); a table whose behaviors arm
-// deadlines runs a due one and has no upserts; and a behavior's sub-table
-// has no repository.
+// deadlines runs a due one and has no upserts; one whose writes they hear
+// runs a message of its change queue (D103); and a behavior's sub-table has
+// no repository.
 const timersCheck = `import type { FixtureTimersDbOrm, TicketRow, InvoiceRow } from './orm';
 import { fixtureTimersDbRules } from './orm';
+import type { TicketChange } from './types';
 
 export async function fire(orm: FixtureTimersDbOrm, id: TicketRow['id']): Promise<boolean> {
   const fired = await orm.ticket.timers.fireTimer(id, { deadline: 'respond' });
@@ -51,17 +53,24 @@ export async function due(orm: FixtureTimersDbOrm, id: TicketRow['id']): Promise
   return run.ran;
 }
 
+export async function heard(orm: FixtureTimersDbOrm, change: TicketChange): Promise<boolean> {
+  const run = await orm.ticket.runChange(change, { claim: { id: 'm', token: 't' }, caller: { subject: 'fixture-timers-api/TicketTimers' } });
+  return run.ran || run.why === 'claim lost';
+}
+
 // @ts-expect-error A table whose behaviors arm deadlines has no upserts.
 export const upsert = (orm: FixtureTimersDbOrm) => orm.ticket.upsertOne;
 // @ts-expect-error A behavior's sub-table has no repository.
 export const subTable = (orm: FixtureTimersDbOrm) => orm.ticketTimersDeadlines;
 export const queue: string = fixtureTimersDbRules.types.Ticket.deadlines!.table;
+export const changes: string = fixtureTimersDbRules.types.Ticket.changes!.table;
 `
 
 // timersCases are the cases timers.test.ts runs on each dialect, by name
 // without the dialect's suffix: cases 1, 3 and 7 of D103's Timers
-// scenario, which the servers run too, and runDeadline with and without a
-// claim, a lost claim, and a deleted row's message completed as gone.
+// scenario, which the servers run too, runDeadline with and without a
+// claim, a lost claim, a deleted row's message completed as gone, and a
+// raw write the table's change trigger hears, whose message runChange runs.
 var timersCases = []string{
 	"a create arms the deadline: its sub-table row and its queue message with its due time",
 	"a status that leaves the state cancels the deadline by until",
@@ -69,6 +78,7 @@ var timersCases = []string{
 	"a deadline a worker claimed runs, and its unit completes the message",
 	"a claim a status change cancelled is lost: the deadline never fires on its old arming",
 	"a row deleted past the repository leaves a message the run completes as gone",
+	"a raw SQL write of a field start is heard: its trigger's message, run through runChange with a claim, re-arms the deadline",
 	"deleting the row removes its deadlines",
 }
 

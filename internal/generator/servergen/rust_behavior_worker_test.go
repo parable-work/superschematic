@@ -146,8 +146,9 @@ func behaviorWorkerInput(t *testing.T, repoRoot, out string, paths naming.LocalP
 
 // TestRustBehaviorWorkerEntrypoint: the entrypoint of a behavior worker
 // (D103), fixture-timers-api's TicketTimers, opens a pool on the API's
-// database and runs Ticket's deadline queue with the handler the API
-// crate's behaviors module holds, in the HTTP runtime's claim loop; it
+// database and runs Ticket's deadline queue and its change queue, each with
+// the handler the API crate's behaviors module holds, in a claim loop of
+// the HTTP runtime's of its own, together; it
 // builds no Deps, calls no create_workers and depends on no
 // implementation, and its image's context takes in the Cargo workspace of
 // the rules crates the API crate depends on by path. Its main.rs passes
@@ -198,10 +199,16 @@ func TestRustBehaviorWorkerEntrypoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if got := s.Worker.QueueNames(); got != "TicketDeadline, TicketChange" {
+		t.Errorf("TicketTimers runs %s, want Ticket's deadline queue and then its change queue", got)
+	}
 	for _, want := range []string{
 		"fixture_timers_api_api::behaviors::ticket_timers_deadlines(&fixture_timers_db_pool)?",
 		"fixture_timers_api_api::behaviors::run_ticket_timers_deadline(&pool, claimed).await",
-		"worker::run_worker(deadlines, run_deadlines, options, shutdown).await?;",
+		"fixture_timers_api_api::behaviors::ticket_timers_changes(&fixture_timers_db_pool)?",
+		"fixture_timers_api_api::behaviors::run_ticket_timers_change(&pool, claimed).await",
+		"worker::run_worker(deadlines, run_deadlines, options, shutdown.clone()),",
+		"worker::run_worker(changes, run_changes, options, shutdown.clone()),",
 	} {
 		if !strings.Contains(string(main), want) {
 			t.Errorf("main.rs does not contain %q:\n%s", want, main)

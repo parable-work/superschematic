@@ -51,7 +51,7 @@ func TestTimersTablesOnPostgres(t *testing.T) {
 
 	execScript(t, ctx, conn, "drop.sql", readSQL(t, "drop.sql"))
 	var tables int
-	if err := conn.QueryRow(ctx, `SELECT count(*) FROM pg_tables WHERE tablename IN ('ticket', 'ticket_timers_deadlines', 'ticket_deadline_queue', 'invoice', 'invoice_timers_deadlines', 'invoice_deadline_queue')`).Scan(&tables); err != nil || tables != 0 {
+	if err := conn.QueryRow(ctx, `SELECT count(*) FROM pg_tables WHERE tablename IN ('ticket', 'ticket_timers_deadlines', 'ticket_deadline_queue', 'ticket_change_queue', 'invoice', 'invoice_timers_deadlines', 'invoice_deadline_queue', 'invoice_change_queue')`).Scan(&tables); err != nil || tables != 0 {
 		t.Fatalf("drop.sql left %d tables: %v", tables, err)
 	}
 }

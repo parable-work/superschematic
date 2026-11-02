@@ -13,14 +13,16 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll, Waker};
 
 use serde_json::{json, Map, Value};
-use superschematic_rules::{Behavior, ConfigError, ConfigTarget, Cx, Declaration, Hook, UseSpec};
+use superschematic_rules::{
+    Behavior, ConfigError, ConfigTarget, Cx, Declaration, Heard, Hook, RowWrite, UseSpec,
+};
 
 use crate::convert::{iso_of_millis, Bind, Cell};
 use crate::run::{self, Dialect, Statement, Store};
 use crate::{
-    Action, Caller, Claim, Code, Column, Command, Convert, Core, CreateOptions, Deadline,
-    DeadlineRun, Deadlines, Error, ExecuteOptions, Host, Layout, Operation, OwnedField, Refusal,
-    SubTable, Table, TypeSpec, Use, MAX_ATTEMPTS,
+    Action, Caller, ChangeRun, Changes, Claim, Code, Column, Command, Convert, Core, CreateOptions,
+    Deadline, DeadlineRun, Deadlines, Error, ExecuteOptions, Host, Layout, Live, Operation,
+    OwnedField, Refusal, SubTable, Table, TableChange, TypeSpec, Use, MAX_ATTEMPTS,
 };
 
 /// A UUID key in its two forms: base62 on the wire and in the core,
@@ -81,6 +83,7 @@ pub(crate) fn order_table() -> Table {
             tables: Vec::new(),
         }],
         deadlines: None,
+        changes: None,
         spec: TypeSpec::new("Order").with(UseSpec::on_field("status", "Workflow", flow())),
     }
 }
@@ -138,6 +141,8 @@ impl Behavior for Toy {
             .field("seen")
             .table("notes")
             .arms_deadlines()
+            .hears_changes()
+            .operation("linked", false)
             .operation("reserve", true)
             .operation("fence", true)
             .operation("ask", false)
@@ -252,8 +257,32 @@ impl Behavior for Toy {
                 cx.set("seen", key.clone())?;
                 Ok(Value::from(key))
             }
+            // A page of the rows of params' type whose field holds its
+            // key, after its after, under the lock Stock/s1 with its lock.
+            "linked" => {
+                if params.get("lock") == Some(&Value::Bool(true)) {
+                    cx.lock("Stock/s1")?;
+                }
+                let param = |name: &str| params.get(name).and_then(Value::as_str);
+                let page = cx.read_linked(
+                    param("type").unwrap_or_default(),
+                    param("field").unwrap_or_default(),
+                    param("key").unwrap_or_default(),
+                    param("after"),
+                )?;
+                Ok(serde_json::to_value(page).unwrap_or_default())
+            }
             _ => Err(cx.defect(format!("no operation {name}"))),
         }
+    }
+
+    // A write of its own row it hears marks the row with the change as the
+    // core got it, as JSON.
+    fn heard(&self, cx: &Cx<'_, Value>, heard: &Heard<'_>) -> Hook<()> {
+        if let Heard::Own { change } = heard {
+            cx.set("seen", serde_json::to_string(change).unwrap_or_default())?;
+        }
+        Ok(())
     }
 
     // A deadline marks the row with its name, and one armed with
@@ -1135,7 +1164,7 @@ fn an_outbox_event_the_adapter_does_not_take_yet_and_a_run_that_never_settles_re
     };
     assert_eq!(
         refused_by("emit"),
-        Refusal::internal("rules: emit of Order writes outbox events, which the adapter takes once the outbox has a table of its own (D103's order of the work, step 3)")
+        Refusal::internal("rules: emit of Order writes outbox events of a behavior's own, which the adapter does not take yet: a table's change queue holds its writes, and the event stream comes later (D103)")
     );
     assert_eq!(
         refused_by("walk").message,
@@ -2044,4 +2073,446 @@ pub(crate) fn db_layout() -> Layout {
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub(crate) fn both() -> Core {
     workflow().with(Toy)
+}
+
+// ---- the change command (D103) ----
+
+/// Probe: a soft-deletable table of a column of each kind the adapter
+/// converts (a title, a timestamp, a UUID, a boolean and JSON) under the
+/// toy, its sub-table `probe_toy_notes`, its deadline queue and its change
+/// queue, as the generator writes a table its behaviors hear.
+fn probe_table() -> Table {
+    Table {
+        type_name: "Probe".into(),
+        table: "probe".into(),
+        key: Column::new("id", "id", "Identity.UUID"),
+        version: "_version".into(),
+        live: Some(Live {
+            column: "deleted_at".into(),
+        }),
+        own: vec![
+            Column::new("title", "title", "string"),
+            Column::new("at", "at", "Temporal.DateTime").converted(Convert::EpochMillis),
+            Column::new("ownerId", "owner_id", "Identity.UUID"),
+            Column::new("done", "done", "boolean"),
+            Column::new("data", "data", "Generic.JSON"),
+        ],
+        uses: vec![Use {
+            id: "Toy".into(),
+            behavior: "Toy".into(),
+            member: "toy".into(),
+            anchor: None,
+            fields: vec![owned_field("seen", "toySeen", "toy_seen", "string")],
+            operations: Vec::new(),
+            tables: vec![SubTable {
+                name: "notes".into(),
+                table: "probe_toy_notes".into(),
+                row: "probe_id".into(),
+                key: owned_field("key", "key", "key", "string"),
+                fields: Vec::new(),
+            }],
+        }],
+        deadlines: Some(Deadlines {
+            queue: "ProbeDeadline".into(),
+            table: "probe_deadline_queue".into(),
+            row_key: "row_key".into(),
+            use_id: "use_id".into(),
+            name: "name".into(),
+            at: "at".into(),
+            payload: "payload".into(),
+        }),
+        changes: Some(Changes {
+            queue: "ProbeChange".into(),
+            table: "probe_change_queue".into(),
+            row_key: "row_key".into(),
+            write: "write".into(),
+            at: "at".into(),
+            before: "before".into(),
+            after: "after".into(),
+        }),
+        spec: TypeSpec::new("Probe").with(UseSpec::on_type("Toy", None)),
+    }
+}
+
+/// Probe's row as Postgres reads it: Desk, no time, no owner, not done,
+/// no data, no mark, at version 1.
+fn probe_row() -> Vec<Cell> {
+    vec![
+        Cell::Json(json!("Desk")),
+        Cell::Null,
+        Cell::Null,
+        Cell::Json(json!(false)),
+        Cell::Null,
+        Cell::Null,
+        Cell::Int(1),
+    ]
+}
+
+/// A change of Probe's row, as its trigger wrote it.
+fn probe_change(write: &str, before: Value, after: Value) -> TableChange {
+    TableChange {
+        key: KEY_COLUMN.into(),
+        write: write.into(),
+        at: 5000,
+        before,
+        after,
+    }
+}
+
+/// Runs a change of Probe through the loop on a store and returns what it
+/// came to.
+fn run_probe_change(
+    store: &MemoryStore,
+    change: &TableChange,
+    claim: Option<&Claim>,
+) -> Result<ChangeRun, Error> {
+    let core = toy();
+    let layout = Layout::new([toy_table(), probe_table()]);
+    let host = Host::new(&core, &layout).with_clock(|| 6000);
+    block(run::run_change(
+        &host,
+        store,
+        "Probe",
+        change,
+        Caller::new("api/ProbeWorker", Vec::<String>::new()),
+        claim,
+    ))
+}
+
+/// The change the toy heard, from the mark its unit set on the row (its
+/// first statement's first value).
+fn heard_of(store: &MemoryStore) -> Value {
+    let applied = store.applied();
+    let Some(Bind::Text(mark)) = applied[0][0].values.first() else {
+        panic!("no mark: {applied:?}");
+    };
+    serde_json::from_str(mark).expect("the mark is JSON")
+}
+
+#[test]
+fn a_change_maps_its_images_by_the_layout_converting_each_column_as_its_dialect_reads_it() {
+    // Postgres: each value as jsonb_build_object wrote it, a timestamp with
+    // the session's offset and a UUID hyphenated; a null, and a column the
+    // layout does not map, left out.
+    let store = MemoryStore::new(Dialect::Postgres, Some(probe_row()));
+    let change = probe_change(
+        "update",
+        json!({"title": "Desk", "at": "1970-01-01T05:30:01.234+05:30", "owner_id": KEY_COLUMN, "done": false, "data": {"a": [1]}, "toy_seen": null, "_version": 1}),
+        json!({"title": "Lamp", "at": null, "owner_id": KEY_COLUMN, "done": true, "data": null, "toy_seen": "x"}),
+    );
+    let run = run_probe_change(&store, &change, None).expect("ran");
+    assert_eq!((run.ran(), run.why()), (true, ""));
+    let ChangeRun::Ran(executed) = run else {
+        panic!("not run");
+    };
+    assert_eq!(executed.key.as_deref(), Some(KEY));
+    assert_eq!(
+        heard_of(&store),
+        json!({
+            "write": "update",
+            "at": 5000,
+            "before": {"own": {"title": "Desk", "at": 1234, "ownerId": KEY, "done": false, "data": {"a": [1]}}, "owned": {}},
+            "after": {"own": {"title": "Lamp", "ownerId": KEY, "done": true}, "owned": {"Toy": {"seen": "x"}}}
+        })
+    );
+    // The row's write is held to its version, and nothing is spent.
+    let applied = store.applied();
+    assert_eq!(applied.len(), 1);
+    assert_eq!(
+        applied[0][0].text,
+        r#"UPDATE "probe" SET "toy_seen" = $1, "_version" = "_version" + 1 WHERE "id" = $2 AND "_version" = $3 AND "deleted_at" IS NULL"#
+    );
+    assert_eq!(applied[0].len(), 1);
+
+    // SQLite: an image is the text json_object wrote, each value its
+    // storage class's: a boolean 0 or 1, a JSON column its text; an insert
+    // has no before.
+    let store = MemoryStore::new(
+        Dialect::Sqlite,
+        Some(vec![
+            Cell::Text("Desk".into()),
+            Cell::Null,
+            Cell::Null,
+            Cell::Int(1),
+            Cell::Null,
+            Cell::Null,
+            Cell::Int(1),
+        ]),
+    );
+    let after = json!({"title": "Desk", "at": "1970-01-01T00:00:01.234Z", "owner_id": KEY_COLUMN, "done": 1, "data": "{\"a\":1}", "toy_seen": null});
+    let change = probe_change("insert", Value::Null, Value::String(after.to_string()));
+    run_probe_change(&store, &change, None).expect("ran");
+    assert_eq!(
+        heard_of(&store),
+        json!({
+            "write": "insert",
+            "at": 5000,
+            "after": {"own": {"title": "Desk", "at": 1234, "ownerId": KEY, "done": true, "data": {"a": 1}}, "owned": {}}
+        })
+    );
+
+    // A write the trigger never writes, and an image that is no object,
+    // are the adapter's internal refusals, nothing applied.
+    let store = MemoryStore::new(Dialect::Postgres, Some(probe_row()));
+    let refused = refusal(run_probe_change(
+        &store,
+        &probe_change("upsert", Value::Null, json!({})),
+        None,
+    ));
+    assert_eq!(
+        refused,
+        Refusal::internal(format!("rules: Probe's change of {KEY} is a write of upsert, which is no insert, update or delete"))
+    );
+    let refused = refusal(run_probe_change(
+        &store,
+        &probe_change("update", json!([1]), json!({})),
+        None,
+    ));
+    assert_eq!(
+        refused,
+        Refusal::internal("rules: Probe's change holds an image that is no object: [1]")
+    );
+    assert!(store.applied().is_empty());
+}
+
+/// The spend of Probe's claimed change, by its id and token, held to one
+/// row.
+fn change_spend() -> Statement {
+    write(
+        r#"DELETE FROM "probe_change_queue" WHERE "id" = $1::uuid AND "claim_token" = $2::uuid AND "state" = 'claimed'"#,
+        vec![text(&claim().id), text(&claim().token)],
+    )
+}
+
+#[test]
+fn a_claimed_change_spends_its_message_after_the_row_writes_and_one_whose_claim_is_lost_runs_nothing(
+) {
+    let change = probe_change("update", json!({"title": "Desk"}), json!({"title": "Lamp"}));
+    let store = MemoryStore::new(Dialect::Postgres, Some(probe_row()));
+    let run = run_probe_change(&store, &change, Some(&claim())).expect("ran");
+    assert!(run.ran(), "{run:?}");
+    let applied = store.applied();
+    assert_eq!(applied.len(), 1);
+    assert!(applied[0][0].text.starts_with(r#"UPDATE "probe""#));
+    assert_eq!(applied[0][1], change_spend());
+    assert_eq!(applied[0].len(), 2);
+
+    // A unit that did not apply reads the claim, and one that is gone ran
+    // nothing.
+    let held = r#"SELECT 1 FROM "probe_change_queue" WHERE "id" = $1::uuid AND "claim_token" = $2::uuid AND "state" = 'claimed'"#;
+    let lost = MemoryStore::new(Dialect::Postgres, Some(probe_row()))
+        .applying(&[false])
+        .responding(held, Vec::new());
+    let run = run_probe_change(&lost, &change, Some(&claim())).expect("ran nothing");
+    assert!(matches!(run, ChangeRun::ClaimLost), "{run:?}");
+    assert_eq!(run.why(), "claim lost");
+    assert!(lost.queries().contains(&(
+        held.to_owned(),
+        vec![text(&claim().id), text(&claim().token)]
+    )));
+
+    // One still held when its row moved runs again from fresh state.
+    let moved = MemoryStore::new(Dialect::Postgres, Some(probe_row()))
+        .applying(&[false, true])
+        .responding(held, vec![vec![Cell::Int(1)]]);
+    let ChangeRun::Ran(executed) = run_probe_change(&moved, &change, Some(&claim())).expect("ran")
+    else {
+        panic!("not run");
+    };
+    assert_eq!(executed.attempts, 2);
+
+    // A change whose hooks write nothing spends its message alone; on
+    // SQLite by its id and token as they are.
+    let core = workflow();
+    let layout = Layout::new([Table {
+        changes: probe_table().changes,
+        ..order_table()
+    }]);
+    let host = Host::new(&core, &layout);
+    let store = MemoryStore::new(Dialect::Sqlite, Some(draft_row()));
+    let run = block(run::run_change(
+        &host,
+        &store,
+        "Order",
+        &probe_change("update", json!({}), json!({})),
+        alice(),
+        Some(&claim()),
+    ))
+    .expect("ran");
+    let ChangeRun::Ran(executed) = run else {
+        panic!("not run");
+    };
+    assert!(executed.changes.rows.is_empty());
+    assert_eq!(
+        store.applied(),
+        [[write(
+            r#"DELETE FROM "probe_change_queue" WHERE "id" = ?1 AND "claim_token" = ?2 AND "state" = 'claimed'"#,
+            vec![text(&claim().id), text(&claim().token)]
+        )]]
+    );
+
+    // A claimed change of a table the layout gives no change queue is
+    // internal.
+    let bare = Layout::new([order_table()]);
+    let refused = refusal(block(run::run_change(
+        &Host::new(&core, &bare),
+        &MemoryStore::new(Dialect::Postgres, Some(draft_row())),
+        "Order",
+        &probe_change("update", json!({}), json!({})),
+        alice(),
+        Some(&claim()),
+    )));
+    assert_eq!(
+        refused,
+        Refusal::internal("rules: a change of Order ran with a claim of its message, and the behaviors' layout gives Order no change queue")
+    );
+}
+
+#[test]
+fn a_row_a_change_finds_gone_has_its_deadlines_and_sub_table_rows_deleted_unless_a_row_of_its_key_is_there(
+) {
+    let store = MemoryStore::new(Dialect::Postgres, None);
+    let change = probe_change("delete", json!({"title": "Desk"}), Value::Null);
+    let ChangeRun::Ran(executed) = run_probe_change(&store, &change, Some(&claim())).expect("ran")
+    else {
+        panic!("not run");
+    };
+    assert_eq!(
+        executed.changes.rows,
+        [RowWrite::Gone {
+            type_name: "Probe".into(),
+            key: KEY.into()
+        }]
+    );
+    let any = |text: &str| Statement {
+        text: text.into(),
+        values: vec![self::text(KEY_COLUMN)],
+        expect: None,
+        check: false,
+    };
+    assert_eq!(
+        store.applied(),
+        [[
+            any(
+                r#"DELETE FROM "probe_deadline_queue" WHERE "row_key" = $1 AND NOT EXISTS (SELECT 1 FROM "probe" WHERE "id" = $1 AND "deleted_at" IS NULL)"#
+            ),
+            any(
+                r#"DELETE FROM "probe_toy_notes" WHERE "probe_id" = $1 AND NOT EXISTS (SELECT 1 FROM "probe" WHERE "id" = $1)"#
+            ),
+            change_spend(),
+        ]]
+    );
+
+    // On SQLite, by ?1.
+    let store = MemoryStore::new(Dialect::Sqlite, None);
+    run_probe_change(&store, &change, None).expect("ran");
+    assert_eq!(
+        store.applied()[0][0].text,
+        r#"DELETE FROM "probe_deadline_queue" WHERE "row_key" = ?1 AND NOT EXISTS (SELECT 1 FROM "probe" WHERE "id" = ?1 AND "deleted_at" IS NULL)"#
+    );
+}
+
+/// The Postgres read of a page of Probe's rows whose owner is the key.
+const LINKED: &str = r#"SELECT to_jsonb("id") AS k, to_jsonb("title") AS c0, to_jsonb("at") AS c1, to_jsonb("owner_id") AS c2, to_jsonb("done") AS c3, to_jsonb("data") AS c4, to_jsonb("toy_seen") AS c5, "_version" AS v FROM "probe" WHERE "owner_id" = $1 AND "deleted_at" IS NULL"#;
+
+/// A row of Probe's as the linked read reads it: its key hyphenated, then
+/// its row.
+fn linked_row(n: u128) -> Vec<Cell> {
+    let mut cells = vec![Cell::Json(json!(crate::convert::hyphenate(n)))];
+    cells.extend(probe_row());
+    cells
+}
+
+/// Runs the toy's linked read of Probe from Order's row with `params`.
+fn linked(store: &MemoryStore, params: Value) -> Result<Value, Error> {
+    let core = toy();
+    let layout = Layout::new([toy_table(), probe_table()]);
+    let host = Host::new(&core, &layout);
+    block(run::execute(
+        &host,
+        store,
+        "Order",
+        toy_op("linked", params),
+        &ExecuteOptions::default(),
+    ))
+    .map(|executed| executed.result)
+}
+
+#[test]
+fn a_linked_read_selects_a_page_of_the_live_rows_whose_field_holds_the_key_in_key_order_and_whether_more_follow(
+) {
+    let store = MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy()))
+        .responding(LINKED, vec![linked_row(1), linked_row(2)]);
+    let page = linked(
+        &store,
+        json!({"type": "Probe", "field": "ownerId", "key": KEY}),
+    )
+    .expect("read");
+    let row = json!({"own": {"title": "Desk", "done": false}, "owned": {}, "version": 1});
+    assert_eq!(
+        page,
+        json!({"rows": [{"key": "1", "row": row}, {"key": "2", "row": row}], "more": false})
+    );
+    assert!(store.queries().contains(&(
+        format!(r#"{LINKED} ORDER BY "id" LIMIT 501"#),
+        vec![text(KEY_COLUMN)]
+    )));
+
+    // After a key, bound as the key column binds one; a page of 500 of the
+    // 501 rows the read gives, and more follow.
+    let rows = (1..=501).map(linked_row).collect();
+    let store =
+        MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy())).responding(LINKED, rows);
+    let page = linked(
+        &store,
+        json!({"type": "Probe", "field": "ownerId", "key": KEY, "after": "1"}),
+    )
+    .expect("read");
+    assert_eq!(page["rows"].as_array().map(Vec::len), Some(500));
+    assert_eq!(page["more"], json!(true));
+    assert!(store.queries().contains(&(
+        format!(r#"{LINKED} AND "id" > $2 ORDER BY "id" LIMIT 501"#),
+        vec![
+            text(KEY_COLUMN),
+            text("00000000-0000-0000-0000-000000000001")
+        ]
+    )));
+
+    // SQLite selects each column as it is stored.
+    let store = MemoryStore::new(Dialect::Sqlite, Some(draft_row_of_toy()))
+        .responding(r#"SELECT "id" AS k"#, Vec::new());
+    linked(
+        &store,
+        json!({"type": "Probe", "field": "ownerId", "key": KEY}),
+    )
+    .expect("read");
+    assert!(store.queries().iter().any(|(text, _)| text
+        == r#"SELECT "id" AS k, "title" AS c0, "at" AS c1, "owner_id" AS c2, "done" AS c3, "data" AS c4, "toy_seen" AS c5, "_version" AS v FROM "probe" WHERE "owner_id" = ?1 AND "deleted_at" IS NULL ORDER BY "id" LIMIT 501"#));
+
+    // A type the layout lacks has no rows; a field it has no own column for
+    // is internal, and so is a linked read under a lock a store fences.
+    let store = MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy()));
+    assert_eq!(
+        linked(
+            &store,
+            json!({"type": "Ghost", "field": "ownerId", "key": KEY})
+        )
+        .expect("read"),
+        json!({"rows": [], "more": false})
+    );
+    assert_eq!(
+        refusal(linked(
+            &store,
+            json!({"type": "Probe", "field": "nope", "key": KEY})
+        )),
+        Refusal::internal("rules: Probe has no own field nope in the behaviors' layout")
+    );
+    let fenced = MemoryStore::new(Dialect::Sqlite, Some(draft_row_of_toy())).fenced();
+    assert_eq!(
+        refusal(linked(
+            &fenced,
+            json!({"type": "Probe", "field": "ownerId", "key": KEY, "lock": true})
+        )),
+        Refusal::internal("rules: a read of the rows that link to a row under a lock has no check on SQLite or D1 yet (D103)")
+    );
 }

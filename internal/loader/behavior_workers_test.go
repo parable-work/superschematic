@@ -51,7 +51,8 @@ const timersAPIConfig = `{"name": "fixture-timers-api", "kind": "API", "dependen
 
 // TestBehaviorWorkerFromTheDataForms: a JSON API's worker with
 // behaviorWorker and no queue loads as the TypeScript form's does, an
-// ordinary worker of its table's deadline queue (D103).
+// ordinary worker of its table's deadline queue and change queue,
+// deadlines first (D103).
 func TestBehaviorWorkerFromTheDataForms(t *testing.T) {
 	dir, load := timersAPIDataService(t, timersAPIConfig, `{
   "imports": [{"package": "@schemas/fixture-timers-db", "types": ["Ticket"]}],
@@ -62,7 +63,7 @@ func TestBehaviorWorkerFromTheDataForms(t *testing.T) {
 		t.Fatal(err)
 	}
 	worker := schema.Worker("TicketTimers")
-	if worker == nil || worker.Queue != "TicketDeadline" || worker.Origin != ir.OriginBehavior || worker.Concurrency != 2 || len(worker.BehaviorWorker.Permissions) != 1 {
+	if worker == nil || worker.Queue != "TicketDeadline" || strings.Join(worker.Queues, ",") != "TicketDeadline,TicketChange" || worker.Origin != ir.OriginBehavior || worker.Concurrency != 2 || len(worker.BehaviorWorker.Permissions) != 1 {
 		t.Errorf("TicketTimers = %+v", worker)
 	}
 }
@@ -71,7 +72,8 @@ func TestBehaviorWorkerFromTheDataForms(t *testing.T) {
 // these words, outside an API, with a queue of its own, on an API with no
 // one database, over a table the API does not import from it, that it
 // does not declare, that is no table, an engine type or a table whose
-// behaviors arm no deadlines, and beside a second worker of its table.
+// behaviors arm no deadlines and hear no writes, and beside a second
+// worker of its table.
 func TestBehaviorWorkerRefusals(t *testing.T) {
 	const imports = `"imports": [{"package": "@schemas/fixture-timers-db", "types": ["Ticket"]}]`
 	worker := func(name string) string {
@@ -99,10 +101,11 @@ func TestBehaviorWorkerRefusals(t *testing.T) {
 			"TicketTimers: @behaviorWorker names Ticket, which is not a table of fixture-timers-db: a behavior worker runs a table's behaviors (D103)"},
 		{"an engine type", timersAPIConfig, `{` + imports + `, "workers": [` + worker("TicketTimers") + `]}`, func(db *ir.Schema) { db.Types["Ticket"].Behaviors = []ir.BehaviorRef{{Name: "Comments"}} },
 			"TicketTimers: @behaviorWorker names Ticket, an engine type of fixture-timers-db (D58), whose engine runs its timed work; a behavior worker runs a table's behaviors (D103)"},
-		{"no deadlines", timersAPIConfig, `{` + imports + `, "workers": [` + worker("TicketTimers") + `]}`, func(db *ir.Schema) {
+		{"no deadlines and no changes", timersAPIConfig, `{` + imports + `, "workers": [` + worker("TicketTimers") + `]}`, func(db *ir.Schema) {
 			db.Types["Ticket"].Behaviors = db.Types["Ticket"].FieldBehaviors()
 			delete(db.Types, "TicketDeadline")
-		}, "TicketTimers: @behaviorWorker names Ticket, whose behaviors arm no deadlines, so the worker has nothing to run (D103)"},
+			delete(db.Types, "TicketChange")
+		}, "TicketTimers: @behaviorWorker names Ticket, whose behaviors arm no deadlines and hear no writes, so the worker has nothing to run (D103)"},
 		{"a second worker", timersAPIConfig, `{` + imports + `, "workers": [` + worker("TicketTimers") + `, ` + worker("OtherTimers") + `]}`, nil,
 			"OtherTimers: @behaviorWorker names Ticket, which TicketTimers names too: an API runs a table's behaviors from one worker"},
 	} {
@@ -129,10 +132,11 @@ func TestBehaviorWorkerRefusals(t *testing.T) {
 }
 
 // TestDeadlinesNoWorkerRunsAreAWarning (D103): an API that serves a
-// table's behavior operations, whose behaviors arm deadlines, and runs no
-// @behaviorWorker of it loads, with a warning that names the set, the
-// table, the behaviors and the database; a table whose deadlines nothing
-// runs is the author's to choose.
+// table's behavior operations, whose behaviors arm deadlines and hear its
+// writes, and runs no @behaviorWorker of it loads, with a warning that
+// names the set, the table, the behaviors that keep each queue and the
+// database; a table whose queues nothing runs is the author's to choose,
+// and their messages wait.
 func TestDeadlinesNoWorkerRunsAreAWarning(t *testing.T) {
 	dir, load := timersAPIDataService(t, timersAPIConfig, `{
   "imports": [{"package": "@schemas/fixture-timers-db", "types": ["Ticket"]}],
@@ -146,9 +150,106 @@ func TestDeadlinesNoWorkerRunsAreAWarning(t *testing.T) {
 	if len(schema.OperationSets[0].Operations) != 4 {
 		t.Errorf("TicketActions has %d operations, want 4", len(schema.OperationSets[0].Operations))
 	}
-	want := "TicketActions: Ticket's behaviors arm deadlines (Timers), and fixture-timers-api declares no @behaviorWorker(Ticket) to run them: they fall due and nothing runs them until a worker does; declare one on this API or another over fixture-timers-db (D103)"
+	want := "TicketActions: Ticket's behaviors keep deadlines (Timers) and changes (Timers) for a worker to run, and fixture-timers-api declares no @behaviorWorker(Ticket): nothing runs them until a worker does; declare one on this API or another over fixture-timers-db (D103)"
 	data, _ := json.Marshal(warnings)
 	if len(warnings) != 1 || warnings[0] != want {
 		t.Errorf("warnings = %s, want %q", data, want)
+	}
+}
+
+// reactionsDB loads fixture-reactions-db afresh, for a case to edit.
+func reactionsDB(t *testing.T) *ir.Schema {
+	t.Helper()
+	db, err := LoadService(filepath.FromSlash(reactionsDBFixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return db
+}
+
+const reactionsAPIConfig = `{"name": "fixture-reactions-api", "kind": "API", "dependencies": [{"name": "fixture-reactions-db", "kind": "DB"}], "outputs": {}}`
+
+// TestChangesNoWorkerRunsAreAWarning (D103): the warning names a table's
+// change queue by the behaviors of its own that hear its writes and the
+// tables that hear them through a relation, and a table heard by another
+// alone by those; a worker of a table with a change queue and no deadlines
+// runs that queue alone.
+func TestChangesNoWorkerRunsAreAWarning(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		db         func(*ir.Schema)
+		want       string
+	}{
+		{"own and heard by", `{
+  "imports": [{"package": "@schemas/fixture-reactions-db", "types": ["Task"]}],
+  "operationSets": [{"name": "TaskActions", "operations": [], "behaviorOperations": {"type": "Task"}}]
+}`, nil, "TaskActions: Task's behaviors keep changes (Reactions; heard by Project) for a worker to run, and fixture-reactions-api declares no @behaviorWorker(Task): nothing runs them until a worker does; declare one on this API or another over fixture-reactions-db (D103)"},
+		{"heard by alone", `{
+  "imports": [{"package": "@schemas/fixture-reactions-db", "types": ["Task"]}],
+  "operationSets": [{"name": "TaskActions", "operations": [], "behaviorOperations": {"type": "Task"}}]
+}`, func(db *ir.Schema) { db.Types["TaskChange"].BehaviorQueue.Behaviors = nil },
+			"TaskActions: Task's behaviors keep changes (heard by Project) for a worker to run, and fixture-reactions-api declares no @behaviorWorker(Task): nothing runs them until a worker does; declare one on this API or another over fixture-reactions-db (D103)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := reactionsDB(t)
+			if tc.db != nil {
+				tc.db(db)
+			}
+			dir, load := timersAPIDataService(t, reactionsAPIConfig, tc.body, db)
+			var warnings []string
+			if _, err := LoadService(dir, load, WithWarnings(func(d *verify.Diagnostic) { warnings = append(warnings, d.Msg) })); err != nil {
+				t.Fatal(err)
+			}
+			data, _ := json.Marshal(warnings)
+			if len(warnings) != 1 || warnings[0] != tc.want {
+				t.Errorf("warnings = %s, want %q", data, tc.want)
+			}
+		})
+	}
+
+	dir, load := timersAPIDataService(t, reactionsAPIConfig, `{
+  "imports": [{"package": "@schemas/fixture-reactions-db", "types": ["Task"]}],
+  "workers": [{"name": "TaskReactions", "behaviorWorker": {"type": "Task"}}]
+}`, reactionsDB(t))
+	schema, err := LoadService(dir, load)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if worker := schema.Worker("TaskReactions"); worker == nil || worker.Queue != "TaskChange" || strings.Join(worker.Queues, ",") != "TaskChange" {
+		t.Errorf("TaskReactions = %+v, want a worker of TaskChange alone", worker)
+	}
+}
+
+// TestListenedTableNoWorkerRunsIsAWarning (D103): an API that serves a
+// table whose Reactions hear another table's writes through a relation of
+// it, and runs that table's worker but no @behaviorWorker of the other,
+// whose change queue carries those writes, loads with a warning naming the
+// set, both tables, the link and the database; with a worker of the other
+// table, it loads with none.
+func TestListenedTableNoWorkerRunsIsAWarning(t *testing.T) {
+	for _, tc := range []struct {
+		name, workers string
+		want          []string
+	}{
+		{"no worker of the heard table", `[{"name": "ProjectReactions", "behaviorWorker": {"type": "Project"}}]`, []string{
+			"ProjectActions: Project's Reactions hear Task's writes through Task.project, which Task's change queue carries, and fixture-reactions-api declares no @behaviorWorker(Task): Project's rules over Task do not run until a worker of Task does; declare one on this API or another over fixture-reactions-db (D103)",
+		}},
+		{"a worker of each", `[{"name": "ProjectReactions", "behaviorWorker": {"type": "Project"}}, {"name": "TaskReactions", "behaviorWorker": {"type": "Task"}}]`, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir, load := timersAPIDataService(t, reactionsAPIConfig, `{
+  "imports": [{"package": "@schemas/fixture-reactions-db", "types": ["Project", "Task"]}],
+  "operationSets": [{"name": "ProjectActions", "operations": [], "behaviorOperations": {"type": "Project"}}],
+  "workers": `+tc.workers+`
+}`, reactionsDB(t))
+			var warnings []string
+			if _, err := LoadService(dir, load, WithWarnings(func(d *verify.Diagnostic) { warnings = append(warnings, d.Msg) })); err != nil {
+				t.Fatal(err)
+			}
+			data, _ := json.Marshal(warnings)
+			if strings.Join(warnings, "\n") != strings.Join(tc.want, "\n") {
+				t.Errorf("warnings = %s, want %q", data, tc.want)
+			}
+		})
 	}
 }

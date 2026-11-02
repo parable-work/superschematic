@@ -14,7 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	types "{{ .TypesModule }}"
-{{- if .HasDeadlines }}
+{{- if .HasBehaviorQueues }}
 	rules "{{ .Naming.RulesGoModule }}"
 {{- end }}
 )
@@ -75,6 +75,9 @@ type {{ .TypeName }}RepositoryInterface interface {
 	{{- end }}
 	{{- if .DeadlineQueue }}
 	RunDeadline(ctx context.Context, deadline types.{{ .DeadlineQueue }}, claim *rules.Claim) (*rules.DeadlineRun, error)
+	{{- end }}
+	{{- if .ChangeQueue }}
+	RunChange(ctx context.Context, change types.{{ .ChangeQueue }}, claim *rules.Claim) (*rules.ChangeRun, error)
 	{{- end }}
 }
 {{- end }}
@@ -300,6 +303,14 @@ func (r *NoOp{{ .Name }}) UpsertMany(_ context.Context, inputs []*{{ .TypeName }
 // RunDeadline runs no deadline: the no-op repository holds no row.
 func (r *NoOp{{ .Name }}) RunDeadline(_ context.Context, _ types.{{ .DeadlineQueue }}, _ *rules.Claim) (*rules.DeadlineRun, error) {
 	return &rules.DeadlineRun{Why: rules.WhyGone}, nil
+}
+{{- end }}
+{{- if .ChangeQueue }}
+
+// RunChange runs nothing: the no-op repository holds no row, so a change
+// finds its row gone, which leaves it nothing to write.
+func (r *NoOp{{ .Name }}) RunChange(_ context.Context, _ types.{{ .ChangeQueue }}, _ *rules.Claim) (*rules.ChangeRun, error) {
+	return &rules.ChangeRun{Ran: true, Result: &rules.Result{}}, nil
 }
 {{- end }}
 {{- else }}

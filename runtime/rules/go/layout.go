@@ -93,6 +93,29 @@ type Table struct {
 	// Deadlines is the queue the deadlines its uses arm are messages of;
 	// nil for a table whose behaviors arm none.
 	Deadlines *Deadlines `json:"deadlines,omitempty"`
+	// Changes is the queue the table's change trigger writes a message of
+	// for each write its behaviors hear (D103); nil for a table nothing
+	// hears.
+	Changes *Changes `json:"changes,omitempty"`
+}
+
+// Changes is a hearing table's change queue (D103): one message per write
+// of a row, whoever makes it, which the table's trigger writes and a
+// behavior worker claims and runs (RunChange). Each member but Queue is a
+// column, unquoted.
+type Changes struct {
+	// Queue is the queue's type (TicketChange), Table its table.
+	Queue string `json:"queue"`
+	Table string `json:"table"`
+	// RowKey holds the row's key, as the row table's key column holds it;
+	// Write the write (insert, update or delete); At its time in epoch
+	// milliseconds by the database's clock; Before and After the row's
+	// columns before and after it, a JSON object by column or NULL.
+	RowKey string `json:"rowKey"`
+	Write  string `json:"write"`
+	At     string `json:"at"`
+	Before string `json:"before"`
+	After  string `json:"after"`
 }
 
 // Deadlines is a table's deadline queue (D103): one live message per row,

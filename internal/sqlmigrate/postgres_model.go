@@ -114,6 +114,17 @@ func (postgresDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, er
 		}
 		m.Triggers = append(m.Triggers, trigger)
 	}
+	// A hearing table's change trigger (D103), which the planner creates
+	// after the queue's table, replaces in place and drops as it does
+	// @enqueueOnChange's; it has no backfill.
+	for _, c := range out.ChangeTriggers {
+		m.Functions = append(m.Functions, &Function{Name: c.FunctionName, Definition: c.FunctionSQL(), Origin: c.Origin})
+		trigger, err := modelTrigger(c.Trigger(), c.Origin)
+		if err != nil {
+			return nil, err
+		}
+		m.Triggers = append(m.Triggers, trigger)
+	}
 
 	schemas := map[string]bool{}
 	for _, view := range out.Projections {

@@ -382,7 +382,8 @@ describe('the host loop on any core', () => {
       code: 'internal',
       status: 500,
       class: 'Error',
-      message: "rules: transition of Order writes outbox events, which the adapter takes once the outbox has a table of its own (D103's order of the work, step 3)",
+      message:
+        "rules: transition of Order writes outbox events of a behavior's own, which the adapter does not take yet: a table's change queue holds its writes, and the event stream comes later (D103)",
     });
     const ref = { type: 'Order', key };
     expect((await refusalOf([changed({ subRows: [{ row: ref, useId: 'status', table: 'notes', key: 'n', change: { kind: 'delete' } }] })])).message).toBe(

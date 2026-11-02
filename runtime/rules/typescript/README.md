@@ -42,16 +42,25 @@ const step = core.run(order, { caller: { subject: 'sam' }, now: Date.now(), requ
 - `run(spec, command, answers?)` returns one step: `{ read }`, `{ lock }`
   or `{ done: { refused } | { changed } }`. A refusal is a step, not an
   error. A read is a row (`row`), whether a table has rows (`hasRows`), a
-  type's spec (`spec`) or a use's sub-table rows of a row (`subRows`:
+  type's spec (`spec`), a use's sub-table rows of a row (`subRows`:
   `{ kind: 'subRows', type, key, useId, table }`, answered `{ subRows:
   SubRow[] }`, each `{ key, values }` in key order, the key's field left
-  out and a NULL column absent). A spec may list the type's own fields
-  (`TypeSpec.fields`, each a `FieldSpec`: `name`, `type` and `dateTime`),
-  which a config that names a field is held to.
+  out and a NULL column absent) or one page of a type's rows whose own
+  field holds a key (`linked`: `{ kind: 'linked', type, field, key, after?,
+  limit }`, answered `{ linked: { rows, more } }`, each row `{ key, row }`).
+  A spec may list the type's own fields (`TypeSpec.fields`, each a
+  `FieldSpec`: `name`, `type`, `dateTime` and, for a to-one relation's,
+  `relation`: `{ name, type }`), which a config that names a field is held
+  to and the core follows from a change of the row to the listeners of
+  its target. A command's action may be a change of a row from its table's
+  change queue (`{ kind: 'change', key, change: { write, at, before?,
+  after? } }`, D103), and a change set may write a row gone (`{ kind:
+  'gone', type, key }`).
 - `declarations()` returns each registered behavior's declaration file,
   each field's column type and the value field among them, its sub-tables
-  (`tables`: each its name, key and typed fields) and whether it arms
-  deadlines (`armsDeadlines`).
+  (`tables`: each its name, key and typed fields), whether it arms
+  deadlines (`armsDeadlines`) and whether it hears its row's writes
+  (`hearsChanges`), in the order Workflow, Reactions, Timers.
 - `check(specs, { caller, now }?)` returns each spec's define check: null,
   or its refusal.
 - An input the module cannot read throws `RulesError` (`invalid_json`,

@@ -5,6 +5,13 @@
 //! number and no schema document, so where the engine's message names them
 //! the host writes it from the refusal's details, as the core's README
 //! says a host does.
+//!
+//! The engine's Links is a to-one relation on a table (D103): a document
+//! that composes Links has each link with one target read as an own field
+//! `<link>Id` holding the target's key, whose [`FieldSpec`] names the
+//! relation and its target type, and no Links use. A record and an event
+//! show the field as the engine's `Links.targets.<link>`, `{ schema, id }`,
+//! and not among the row's own fields.
 
 use std::collections::BTreeMap;
 
@@ -13,6 +20,9 @@ use serde_json::{json, Map, Value};
 use superschematic_rules::{
     Action, Code, ConfigIssueKind, Core, FieldSpec, Refusal, SubRow, TypeSpec, UseSpec,
 };
+
+/// The engine's behavior whose links the replay reads as relations.
+pub const LINKS: &str = "Links";
 
 use crate::host::{Logged, StoredRow};
 
@@ -42,13 +52,24 @@ pub struct FieldDef {
 pub struct Defined {
     pub spec: TypeSpec,
     pub fields: Vec<FieldDef>,
+    /// Whether the document composes the engine's Links, whose links the
+    /// spec holds as relations.
+    pub links: bool,
+    /// Why its Links cannot be a table's relations: a link that holds a
+    /// list of targets or pins one; `None` when each link maps.
+    pub unmapped: Option<String>,
 }
+
+/// Why a scenario stops at a define whose Links a relation cannot hold.
+pub const UNMAPPED_LINKS: &str = "a link that holds a list of targets, or pins a revision or a release, which a to-one relation cannot hold";
 
 /// Reads a schema document: its instance type (the type named as the
 /// schema, else its first), its behaviors in list order, each a use on the
 /// type with its config as the document gives it (none where it gives
 /// none), and its own fields, which the type's spec lists too, each by its
-/// `typeRef`'s name and whether its values are instants.
+/// `typeRef`'s name and whether its values are instants. Links is no use:
+/// each link with one target is an own field `<link>Id`, a string, that
+/// holds the target's key, after the document's own fields.
 pub fn read_document(document: &Value) -> Result<Defined, String> {
     let name = document
         .get("name")
@@ -64,6 +85,9 @@ pub fn read_document(document: &Value) -> Result<Defined, String> {
         .and_then(Value::as_object)
         .ok_or("a schema document holds a type")?;
     let mut spec = TypeSpec::new(name);
+    let mut links = false;
+    let mut unmapped = None;
+    let mut related: Vec<(String, String)> = Vec::new();
     for entry in shape
         .get("behaviors")
         .and_then(Value::as_array)
@@ -74,11 +98,35 @@ pub fn read_document(document: &Value) -> Result<Defined, String> {
             .get("name")
             .and_then(Value::as_str)
             .ok_or("a behavior entry names its behavior")?;
+        if behavior == LINKS {
+            links = true;
+            for (name, link) in entry
+                .get("config")
+                .and_then(|config| config.get("links"))
+                .and_then(Value::as_object)
+                .into_iter()
+                .flatten()
+            {
+                let many = link.get("many") == Some(&Value::Bool(true));
+                let pinned = link
+                    .get("pinned")
+                    .is_some_and(|pinned| !pinned.is_null() && pinned != &Value::Bool(false));
+                if many || pinned {
+                    unmapped = Some(UNMAPPED_LINKS.to_owned());
+                }
+                let target = link
+                    .get("schema")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                related.push((name.clone(), target.to_owned()));
+            }
+            continue;
+        }
         // A config left out is none: the core checks it as {} and refuses
         // it for a behavior that needs one, as the meta-schema did.
         spec = spec.with(UseSpec::on_type(behavior, entry.get("config").cloned()));
     }
-    let fields: Vec<FieldDef> = shape
+    let mut fields: Vec<FieldDef> = shape
         .get("fields")
         .and_then(Value::as_array)
         .into_iter()
@@ -94,13 +142,73 @@ pub fn read_document(document: &Value) -> Result<Defined, String> {
         })
         .collect();
     for field in &fields {
-        spec = spec.with_field(FieldSpec {
-            name: field.name.clone(),
-            type_name: field.type_name.clone(),
-            date_time: field.date_time,
+        let mut own = FieldSpec::new(&field.name, &field.type_name);
+        own.date_time = field.date_time;
+        spec = spec.with_field(own);
+    }
+    for (link, target) in related {
+        let field = link_field(&link);
+        spec = spec.with_field(FieldSpec::relation(&field, "string", &link, &target));
+        fields.push(FieldDef {
+            name: field,
+            required: false,
+            json_type: "string".to_owned(),
+            type_name: "string".to_owned(),
+            date_time: false,
         });
     }
-    Ok(Defined { spec, fields })
+    Ok(Defined {
+        spec,
+        fields,
+        links,
+        unmapped,
+    })
+}
+
+/// The own field a link's key is held in: `<link>Id`.
+pub fn link_field(link: &str) -> String {
+    format!("{link}Id")
+}
+
+/// A row's own fields without the ones its links' keys are held in.
+pub fn without_links(spec: &TypeSpec, own: &Map<String, Value>) -> Map<String, Value> {
+    own.iter()
+        .filter(|(name, _)| {
+            spec.field(name)
+                .is_none_or(|field| field.relation.is_none())
+        })
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect()
+}
+
+/// A row's links as the engine's Links field: `{ targets: { <link>: {
+/// schema, id } } }`, `{}` when it holds none; `None` for a type whose
+/// document composed no Links, which has no relation.
+pub fn links_of(spec: &TypeSpec, own: &Map<String, Value>) -> Option<Value> {
+    let relations: Vec<&FieldSpec> = spec
+        .fields
+        .iter()
+        .filter(|field| field.relation.is_some())
+        .collect();
+    if relations.is_empty() {
+        return None;
+    }
+    let mut targets = Map::new();
+    for field in relations {
+        let (Some(relation), Some(Value::String(id))) = (&field.relation, own.get(&field.name))
+        else {
+            continue;
+        };
+        targets.insert(
+            relation.name.clone(),
+            json!({ "schema": relation.type_name, "id": id }),
+        );
+    }
+    Some(if targets.is_empty() {
+        json!({})
+    } else {
+        json!({ "targets": targets })
+    })
 }
 
 // type_name is a field's typeRef's name; empty for a field with none.
@@ -432,7 +540,8 @@ fn snake(field: &str) -> String {
 /// use id, for each use whose behavior declares fields, a field with no
 /// value left out, with the fields the behavior computes on a read
 /// ([`Core::read_fields`], from the row and its sub-table rows, by use id
-/// and table).
+/// and table), and its links as the engine's `Links` field, their keys
+/// left out of its own fields.
 pub fn record(
     core: &Core,
     spec: &TypeSpec,
@@ -471,11 +580,14 @@ pub fn record(
         fields.extend(computed);
         behaviors.insert(entry.id().to_owned(), Value::Object(fields));
     }
+    if let Some(links) = links_of(spec, &row.own) {
+        behaviors.insert(LINKS.to_owned(), links);
+    }
     json!({
         "namespace": NAMESPACE,
         "schema": spec.name,
         "id": key,
-        "data": row.own,
+        "data": without_links(spec, &row.own),
         "behaviors": behaviors,
     })
 }
@@ -487,14 +599,26 @@ pub fn record(
 /// (the own fields it wrote) and `behaviors` (the owned ones it changed),
 /// each left out when the write set none.
 pub fn event(spec: Option<&TypeSpec>, logged: &Logged) -> Value {
-    let owned = owned_object(logged);
-    let own = logged.own();
+    let mut owned = owned_object(logged);
+    let written = logged.own();
+    let own = match spec {
+        Some(spec) => without_links(spec, &written),
+        None => written.clone(),
+    };
     let mut patch = Map::new();
     if !own.is_empty() {
         patch.insert("data".into(), Value::Object(own.clone()));
     }
     if owned.as_object().is_some_and(|owned| !owned.is_empty()) {
         patch.insert("behaviors".into(), owned.clone());
+    }
+    if let (Action::Create { .. }, Some(links)) = (
+        &logged.command.action,
+        spec.and_then(|spec| links_of(spec, &written)),
+    ) {
+        if let Some(owned) = owned.as_object_mut() {
+            owned.insert(LINKS.to_owned(), links);
+        }
     }
     let change = match &logged.command.action {
         Action::Create { .. } => json!({ "data": own, "behaviors": owned }),

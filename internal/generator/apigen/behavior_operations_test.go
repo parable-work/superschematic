@@ -29,13 +29,15 @@ const (
 )
 
 // behaviorFixtures are an API that serves a table's behaviors and its one
-// DB dependency (D103): fixture-workflow-api over fixture-workflow-db, or
-// fixture-timers-api over fixture-timers-db.
+// DB dependency (D103): fixture-workflow-api over fixture-workflow-db,
+// fixture-timers-api over fixture-timers-db, or fixture-reactions-api over
+// fixture-reactions-db.
 type behaviorFixtures struct{ api, db string }
 
 var (
-	workflowFixtures = behaviorFixtures{behaviorAPI, behaviorDB}
-	timersFixtures   = behaviorFixtures{"fixture-timers-api", "fixture-timers-db"}
+	workflowFixtures  = behaviorFixtures{behaviorAPI, behaviorDB}
+	timersFixtures    = behaviorFixtures{"fixture-timers-api", "fixture-timers-db"}
+	reactionsFixtures = behaviorFixtures{"fixture-reactions-api", "fixture-reactions-db"}
 )
 
 // loadBehaviorFixtures loads fixture-workflow-api, with its behavior

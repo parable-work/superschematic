@@ -153,8 +153,8 @@ Default: `github.com/parable-work/superschematic/runtime/rules/go`
 Go module path of the behaviors' core's Go binding and adapter (D103). A
 generated Go ORM requires it when its schema has a table that composes
 behaviors, on its fields or by `implements`: its repositories run their
-creates, updates, deletes, each use's operations and each due deadline
-through the core. The module links the core's static
+creates, updates, deletes, each use's operations, each due deadline and
+each change of a table's change queue through the core. The module links the core's static
 archive through cgo: a release's archives tarball holds it and its header
 (`CGO_LDFLAGS=-L<dir>/lib`), and in a checkout `scripts/rules-archive.sh`
 builds it where cargo is (D82).
@@ -497,7 +497,7 @@ generated Go ORM whose schema has a table that composes behaviors
 replaces the module with the checkout, where the module links the archive
 `scripts/rules-archive.sh` stages under its `lib/<goos>_<goarch>`, and so
 do a Go API over such a database and the server, job or worker that
-serves it, a `@behaviorWorker` that runs its deadlines among them. A Go
+serves it, a `@behaviorWorker` that runs its deadlines and changes among them. A Go
 server's image then builds the archive in a `rules` stage, from the
 engine's Cargo workspace of the checkout the module lies
 in (its `runtime/engine/rust`), and generated CI stages it with the
@@ -600,7 +600,7 @@ Directory of the behaviors' adapter for a Rust server,
 `superschematic-rules-adapter` (D103). A generated Rust API crate that
 serves a table's behavior operations
 ([A table's behavior operations](/superschematic/guides/api-routes/#a-tables-behavior-operations))
-or runs a table's deadlines from a `@behaviorWorker`
+or runs a table's deadlines and changes from a `@behaviorWorker`
 ([The worker](/superschematic/guides/api-routes/#the-worker))
 depends on it by path, with its `postgres` feature, and the image of its
 server and of the worker holds the adapter's Cargo workspace. The crate

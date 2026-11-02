@@ -41,8 +41,10 @@ type Claim struct{ ID, Token string }
 // DeadlineRun is what running a due deadline came to: run, with its
 // Result, or nothing run, Why saying why: "claim lost" (another command
 // moved, cleared or ran the deadline, or a lease ran out and another claim
-// holds the message) or "gone" (the row or the use is gone, its Refusal
-// the core's, and the arming spent).
+// holds the message), "gone" (the row or the use is gone, its Refusal
+// the core's, and the arming spent) or "vetoed" (a guard vetoed the fire,
+// its Refusal the core's, and the claimed message released to fall due
+// again in VetoedRetrySeconds).
 type DeadlineRun struct {
 	Ran     bool
 	Why     string
@@ -54,7 +56,16 @@ type DeadlineRun struct {
 const (
 	WhyClaimLost = "claim lost"
 	WhyGone      = "gone"
+	// WhyVetoed is why a deadline ran nothing when a guard vetoed its fire
+	// and the claimed message was released, due again in
+	// VetoedRetrySeconds.
+	WhyVetoed = "vetoed"
 )
+
+// VetoedRetrySeconds is how long a vetoed fire waits before it falls due
+// again (D103): a fire a guard keeps vetoing comes back every minute, as
+// the engine's sweep tried it at every run.
+const VetoedRetrySeconds = 60
 
 // RunDeadline runs a due deadline of a type through the core in the
 // store's transaction, as caller (a behavior worker's subject, D103), at
@@ -71,9 +82,13 @@ const (
 // adapter's refuse them. A refusal of not_found by the core whose row or
 // use is gone (the table holds no live row of the key, or the layout no
 // such use) spends the arming in a unit of its own and runs nothing
-// ("gone"); any other refusal, a not_found of something else a rule
-// reached among them, is returned as the error, nothing of it applied, as
-// is a failure of the database.
+// ("gone"). With a claim, a vetoed refusal (a guard holding the fire)
+// releases the claimed message, due again in VetoedRetrySeconds and
+// counting no attempt, and runs nothing ("vetoed"), its sub-table row
+// still pending, so the deadline stays armed while its row is; without
+// one, it is the error. Any other refusal, a not_found of something else a
+// rule reached among them, is returned as the error, nothing of it
+// applied, as is a failure of the database.
 func RunDeadline(ctx context.Context, host Host, typeName string, deadline Deadline, caller Caller, claim *Claim, opts *ExecuteOptions) (*DeadlineRun, error) {
 	if err := host.check(); err != nil {
 		return nil, err
@@ -91,6 +106,9 @@ func RunDeadline(ctx context.Context, host Host, typeName string, deadline Deadl
 		return &DeadlineRun{Why: WhyClaimLost}, nil
 	}
 	refusal, ok := AsRefusal(runErr)
+	if ok && refusal.Code == CodeVetoed && claim != nil {
+		return releaseVetoed(ctx, host, typeName, refusal, claim)
+	}
 	if !ok || refusal.Code != CodeNotFound {
 		return nil, runErr
 	}
@@ -124,6 +142,39 @@ func RunDeadline(ctx context.Context, host Host, typeName string, deadline Deadl
 	return &DeadlineRun{Why: WhyClaimLost}, nil
 }
 
+// releaseVetoed releases the claimed message of a fire a guard vetoed
+// (D103): ready again, due in VetoedRetrySeconds by the database's clock,
+// its attempt not counted, its claim gone, in the store's transaction, held
+// to change one row. A message the claim no longer holds is a claim lost.
+func releaseVetoed(ctx context.Context, host Host, typeName string, refusal *Refusal, claim *Claim) (*DeadlineRun, error) {
+	table, err := host.Layout.table(typeName)
+	if err != nil {
+		return nil, err
+	}
+	if table.Deadlines == nil {
+		return nil, Internal("a deadline of %s ran, and the behaviors' layout gives %s no deadline queue", typeName, typeName)
+	}
+	dialect := host.Store.Dialect()
+	var text string
+	if dialect == DialectPostgres {
+		text = `UPDATE %s SET "state" = 'ready', "attempts" = GREATEST("attempts" - 1, 0), "claim_token" = NULL, "claim_expires_at" = NULL, "due_at" = now() + make_interval(secs => $3), "updated_at" = now() WHERE "id" = $1::uuid AND "claim_token" = $2::uuid AND "state" = 'claimed'`
+	} else {
+		text = `UPDATE %s SET "state" = 'ready', "attempts" = MAX("attempts" - 1, 0), "claim_token" = NULL, "claim_expires_at" = NULL, "due_at" = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now', '+' || (?3) || ' seconds'), "updated_at" = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now') WHERE "id" = ?1 AND "claim_token" = ?2 AND "state" = 'claimed'`
+	}
+	applied, err := host.Store.Apply(ctx, []Statement{{
+		Text:   fmt.Sprintf(text, quote(table.Deadlines.Table)),
+		Values: []any{claim.ID, claim.Token, int64(VetoedRetrySeconds)},
+		Expect: 1,
+	}})
+	if err != nil {
+		return nil, err
+	}
+	if !applied {
+		return &DeadlineRun{Why: WhyClaimLost}, nil
+	}
+	return &DeadlineRun{Why: WhyVetoed, Refusal: refusal}, nil
+}
+
 // deadlineGone reports whether a deadline command's row or use is gone:
 // the layout lists no such use of the table, or the table holds no live
 // row of the key. A not_found the core gave while both are there is of
@@ -149,11 +200,7 @@ func spendOf(dialect Dialect, table *Table, action Action, claim *Claim) (Statem
 		return Statement{}, Internal("a deadline %s.%s of %s ran, and the behaviors' layout gives %s no deadline queue", action.UseID, action.Name, table.Type, table.Type)
 	}
 	if claim != nil {
-		return Statement{
-			Text:   fmt.Sprintf(`DELETE FROM %s WHERE "id" = %s AND "claim_token" = %s AND "state" = 'claimed'`, quote(queue.Table), uuidPlaceholder(dialect, 1), uuidPlaceholder(dialect, 2)),
-			Values: []any{claim.ID, claim.Token},
-			Expect: 1,
-		}, nil
+		return claimSpend(dialect, queue.Table, claim), nil
 	}
 	key, err := keyValue(table, action.Key)
 	if err != nil {
@@ -168,6 +215,17 @@ func spendOf(dialect Dialect, table *Table, action Action, claim *Claim) (Statem
 	}, nil
 }
 
+// claimSpend is the statement that completes a claimed message of the
+// queue table queue by its id and claim token, deleting it, held to delete
+// one row: a message the claim no longer holds moves the unit.
+func claimSpend(dialect Dialect, queue string, claim *Claim) Statement {
+	return Statement{
+		Text:   fmt.Sprintf(`DELETE FROM %s WHERE "id" = %s AND "claim_token" = %s AND "state" = 'claimed'`, quote(queue), uuidPlaceholder(dialect, 1), uuidPlaceholder(dialect, 2)),
+		Values: []any{claim.ID, claim.Token},
+		Expect: 1,
+	}
+}
+
 // uuidPlaceholder is the nth placeholder of a UUID column's value bound as
 // text: cast on Postgres.
 func uuidPlaceholder(dialect Dialect, n int) string {
@@ -178,10 +236,11 @@ func uuidPlaceholder(dialect Dialect, n int) string {
 }
 
 // claimHeld reports whether the worker still holds its claim of the
-// message: the message is there, claimed, with the claim's token.
-func claimHeld(ctx context.Context, store Store, table *Table, claim *Claim) (bool, error) {
+// message of the queue table queue: the message is there, claimed, with
+// the claim's token.
+func claimHeld(ctx context.Context, store Store, queue string, claim *Claim) (bool, error) {
 	dialect := store.Dialect()
-	rows, err := store.Query(ctx, fmt.Sprintf(`SELECT 1 FROM %s WHERE "id" = %s AND "claim_token" = %s AND "state" = 'claimed'`, quote(table.Deadlines.Table), uuidPlaceholder(dialect, 1), uuidPlaceholder(dialect, 2)), claim.ID, claim.Token)
+	rows, err := store.Query(ctx, fmt.Sprintf(`SELECT 1 FROM %s WHERE "id" = %s AND "claim_token" = %s AND "state" = 'claimed'`, quote(queue), uuidPlaceholder(dialect, 1), uuidPlaceholder(dialect, 2)), claim.ID, claim.Token)
 	if err != nil {
 		return false, err
 	}

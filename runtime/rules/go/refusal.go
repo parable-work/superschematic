@@ -75,7 +75,7 @@ func BusyRefusal(typeName string, command Command, attempts int) *Refusal {
 	action := command.Action
 	key := ""
 	switch action.Kind {
-	case ActionUpdate, ActionDelete, ActionOperation, ActionDeadline:
+	case ActionUpdate, ActionDelete, ActionOperation, ActionDeadline, ActionChange:
 		key = " " + action.Key
 	case ActionCreate:
 		if action.ID != "" {

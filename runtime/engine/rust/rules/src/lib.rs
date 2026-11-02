@@ -58,6 +58,13 @@
 //! into a Rust type, and the hooks it needs, which read through a
 //! [`View`] or a [`Cx`] and stop the run with a [`Stop`] when they need a
 //! read, a lock, or refuse.
+//!
+//! A write of a row, whoever made it, comes back to the core from the
+//! table's outbox as a change command ([`Action::Change`]): the uses whose
+//! declaration hears changes run [`Behavior::heard`] on the row as it is
+//! now, and so do the uses of another type that listen to the row's type
+//! through one of its to-one relations ([`Behavior::listens`]), on the row
+//! the relation points at.
 
 mod behavior;
 mod changes;
@@ -73,20 +80,24 @@ mod run;
 mod spec;
 
 pub use behavior::{
-    Behavior, Change, ConfigError, ConfigTarget, Declaration, GuardRequest, Hook, OperationDecl,
-    Stop, TableDecl, ValidationRequest,
+    Behavior, Change, ConfigError, ConfigTarget, Declaration, GuardRequest, Heard, Hook, Listen,
+    OperationDecl, Stop, TableDecl, ValidationRequest,
 };
 pub use changes::{
-    ChangeSet, DeadlineChange, OutboxEvent, RowRef, RowWrite, SubRowChange, SubRowWrite,
+    ChangeSet, DeadlineChange, OutboxEvent, RowChange, RowImage, RowRef, RowWrite, SubRowChange,
+    SubRowWrite, WriteKind,
 };
 pub use command::{Action, Caller, Command};
 pub use context::{ConfigCx, Cx, View};
 pub use core::{Core, Outcome, Source, Step, MAX_ROUNDS};
 pub use patch::merge_patch;
 pub use permissions::{covers, has_any_permission, DottedPermissions, PermissionMatcher};
-pub use reads::{Answer, Answered, Answers, LockKey, ReadRequest, Row, SubRow};
+pub use reads::{
+    key_of, Answer, Answered, Answers, KeyedRow, LinkedRows, LockKey, ReadRequest, Row, SubRow,
+    LINKED_PAGE,
+};
 pub use refusal::{
     Code, ConfigIssue, ConfigIssueKind, Refusal, SchemaChange, SchemaIssue, ValidationIssue, Veto,
 };
 pub use run::MAX_CALL_DEPTH;
-pub use spec::{Anchor, FieldSpec, TypeSpec, UseSpec};
+pub use spec::{Anchor, FieldSpec, RelationSpec, TypeSpec, UseSpec};

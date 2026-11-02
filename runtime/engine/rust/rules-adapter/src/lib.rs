@@ -31,9 +31,13 @@
 //! of the table's deadline queue, and a row that moved runs the command
 //! again from fresh state, up to [`MAX_ATTEMPTS`] runs, before it is
 //! refused as `busy`. A due deadline runs through `run_deadline`, which
-//! spends its arming (a worker's claim of its message) in the same unit
-//! (D103). A raw SQL write of an owned column or a sub-table row is never
-//! refused: the core reads what was written.
+//! spends its arming (a worker's claim of its message) in the same unit,
+//! and releases a fire a guard vetoes to fall due again a minute on; a
+//! write of a row its table's change trigger wrote to the change queue,
+//! whoever made it, runs through `run_change` as the core's change
+//! command, which spends its message in the same unit (D103). A raw SQL
+//! write of an owned column or a sub-table row is never refused: the core
+//! reads what was written, and the change queue hears it.
 //!
 //! ```ignore
 //! use superschematic_rules_adapter::{postgres, Caller, Host, Layout};
@@ -70,7 +74,7 @@ use serde_json::{Map, Value};
 
 pub use host::Host;
 pub use layout::{
-    Column, Convert, Deadlines, Layout, Live, Operation, OwnedField, SubTable, Table, Use,
+    Changes, Column, Convert, Deadlines, Layout, Live, Operation, OwnedField, SubTable, Table, Use,
 };
 pub use superschematic_rules::{
     Action, Caller, ChangeSet, Code, Command, Core, Refusal, Row, SubRow, TypeSpec,
@@ -166,7 +170,18 @@ pub enum DeadlineRun {
     /// Nothing ran: the row or the use is gone (the core's `not_found`,
     /// carried here), and the arming was spent.
     Gone(Box<Refusal>),
+    /// Nothing ran: a guard vetoed the fire (the core's `vetoed`, carried
+    /// here), and the claimed message was released, due again in
+    /// [`VETOED_RETRY_SECONDS`], counting no attempt. Its sub-table row
+    /// stays pending, so the fire comes back for as long as the guard holds
+    /// it.
+    Vetoed(Box<Refusal>),
 }
+
+/// How long a fire a guard vetoed waits before its message falls due again
+/// (D103): a minute, the claim's attempt given back, so a guard that holds
+/// a fire never sends its message dead.
+pub const VETOED_RETRY_SECONDS: i64 = 60;
 
 impl DeadlineRun {
     /// Whether the deadline ran.
@@ -174,13 +189,55 @@ impl DeadlineRun {
         matches!(self, DeadlineRun::Ran(_))
     }
 
-    /// Why nothing ran, as every adapter words it: `claim lost` or `gone`;
-    /// empty for a deadline that ran.
+    /// Why nothing ran, as every adapter words it: `claim lost`, `gone` or
+    /// `vetoed`; empty for a deadline that ran.
     pub fn why(&self) -> &'static str {
         match self {
             DeadlineRun::Ran(_) => "",
             DeadlineRun::ClaimLost => "claim lost",
             DeadlineRun::Gone(_) => "gone",
+            DeadlineRun::Vetoed(_) => "vetoed",
+        }
+    }
+}
+
+/// A message of a table's change queue as its trigger wrote it (D103): the
+/// row's key in its wire form or its column's (a UUID's base62 or
+/// hyphenated text), the write (`insert`, `update` or `delete`), its time
+/// in epoch milliseconds by the database's clock, and the row's columns
+/// before and after it, each a JSON object by column (on SQLite its text)
+/// or null.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TableChange {
+    pub key: String,
+    pub write: String,
+    pub at: i64,
+    pub before: Value,
+    pub after: Value,
+}
+
+/// What running a change came to (D103).
+#[derive(Debug)]
+pub enum ChangeRun {
+    /// The change ran, its change set applied with its message spent.
+    Ran(Box<Executed>),
+    /// Nothing ran: the claim's message was gone, or claimed again after
+    /// its lease, before the unit could spend it.
+    ClaimLost,
+}
+
+impl ChangeRun {
+    /// Whether the change ran.
+    pub fn ran(&self) -> bool {
+        matches!(self, ChangeRun::Ran(_))
+    }
+
+    /// Why nothing ran, as every adapter words it: `claim lost`; empty for
+    /// a change that ran.
+    pub fn why(&self) -> &'static str {
+        match self {
+            ChangeRun::Ran(_) => "",
+            ChangeRun::ClaimLost => "claim lost",
         }
     }
 }

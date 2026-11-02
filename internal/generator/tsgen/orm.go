@@ -98,6 +98,20 @@ type ORMInfo struct {
 	RulesConst string
 }
 
+// HearsChanges reports whether a table of the layout keeps a change queue
+// (D103), which orm.ts's comment then describes.
+func (o *ORMInfo) HearsChanges() bool {
+	if o == nil || o.Rules == nil {
+		return false
+	}
+	for _, table := range o.Rules.Types {
+		if table != nil && table.Changes != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // ORMSystemActor is outputs.sql.systemActor as orm.ts writes it.
 type ORMSystemActor struct {
 	ID   string
@@ -171,6 +185,10 @@ type ORMTable struct {
 	// create of such a row writes more than the row.
 	Deadlines bool
 	NoUpserts bool
+
+	// Changes is a table whose writes its behaviors hear (D103), whose
+	// repository runs a change its trigger wrote (runChange).
+	Changes bool
 }
 
 // ORMRelation is a to-one relation as orm.ts writes it: Field, the
@@ -408,6 +426,7 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 			table.Uses = rules.uses[t.Type]
 			if layout := rules.layout.Types[t.Type]; layout != nil {
 				table.Deadlines = layout.Deadlines != nil
+				table.Changes = layout.Changes != nil
 				table.NoUpserts = table.Deadlines
 				for _, use := range layout.Uses {
 					if len(use.Tables) > 0 {
@@ -818,6 +837,9 @@ func (o *ORMInfo) RuntimeTypes() []string {
 		}
 		if t.Deadlines {
 			used["BehaviorDeadlines"] = true
+		}
+		if t.Changes {
+			used["BehaviorChanges"] = true
 		}
 		if t.NoUpserts {
 			used["WithoutUpserts"] = true

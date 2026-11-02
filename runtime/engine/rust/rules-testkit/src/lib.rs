@@ -7,7 +7,9 @@
 //! [`MemoryHost`] is the host: a [`superschematic_rules::Core`] and the
 //! [`Store`] it answers from and applies to, the store keeping each type's
 //! defined and published versions, its rows, their sub-table rows, the
-//! outbox, the armed deadlines and the change log. It knows no behavior.
+//! outbox, the armed deadlines, the change log and the changes a hearing
+//! type's trigger queues, which the host runs as change commands. It knows
+//! no behavior.
 //!
 //! [`transcript`] writes a recording out as the core's commands and what
 //! each must answer, which every language's adapter replays against real
@@ -58,14 +60,14 @@ mod symbols;
 pub mod transcript;
 
 pub use host::{
-    Applied, ApplyError, Armed, DeadlineKey, Logged, MemoryHost, Outboxed, Store, StoredRow,
-    SubRowKey, TypeVersions, MAX_ATTEMPTS,
+    Applied, ApplyError, Armed, DeadlineKey, Logged, MemoryHost, Outboxed, QueuedChange, Store,
+    StoredRow, SubRowKey, TypeVersions, MAX_ATTEMPTS, MAX_CHANGES,
 };
 pub use replay::{replay, replay_path, scenario_path, Mismatch, Report, ScenarioReport, Skipped};
 pub use transcript::{
     transcript, transcript_path, Transcript, TranscriptClock, TranscriptDeadline, TranscriptExpect,
-    TranscriptField, TranscriptRow, TranscriptScenario, TranscriptSkip, TranscriptStep,
-    TranscriptType,
+    TranscriptField, TranscriptOther, TranscriptRow, TranscriptScenario, TranscriptSkip,
+    TranscriptStep, TranscriptType,
 };
 
 use superschematic_rules::Core;

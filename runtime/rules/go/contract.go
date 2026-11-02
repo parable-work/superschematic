@@ -82,6 +82,17 @@ type FieldSpec struct {
 	// DateTime is true for a field whose values are instants: epoch
 	// milliseconds from a table's adapter.
 	DateTime bool `json:"dateTime,omitempty"`
+	// Relation is the to-one relation whose target's key the field holds
+	// (projectId, the relation project to Project); nil for any other
+	// field (D103).
+	Relation *RelationSpec `json:"relation,omitempty"`
+}
+
+// RelationSpec is a to-one relation an own field holds the key of, as the
+// core's spec names it: the relation field's name and its target type.
+type RelationSpec struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
 }
 
 // Caller is who makes a call: a subject and the permissions it holds;
@@ -104,6 +115,9 @@ const (
 	ActionDelete    ActionKind = "delete"
 	ActionOperation ActionKind = "operation"
 	ActionDeadline  ActionKind = "deadline"
+	// ActionChange is a change command (D103): a write of a row, whoever
+	// made it, that the table's change queue hands the core.
+	ActionChange ActionKind = "change"
 )
 
 // Action is what a command does. MarshalJSON writes exactly its kind's
@@ -134,10 +148,44 @@ type Action struct {
 	Name    string
 	At      int64
 	Payload json.RawMessage
+	// Change is a change command's write of the row Key names:
+	// {"kind","key","change"}.
+	Change *RowChange
+}
+
+// RowChange is a write of a row as the core takes it (D103): what it did
+// (insert, update or delete), when, in epoch milliseconds by the database's
+// clock, and the row before it (nil for an insert) and after it (nil for a
+// delete).
+type RowChange struct {
+	Write  string    `json:"write"`
+	At     int64     `json:"at"`
+	Before *RowImage `json:"before,omitempty"`
+	After  *RowImage `json:"after,omitempty"`
+}
+
+// RowImage is a row's fields as a write found or left them, by the core's
+// logical names: its own fields by name and its uses' owned fields by use
+// id and declared name, a field with no value absent.
+type RowImage struct {
+	Own   map[string]json.RawMessage            `json:"own"`
+	Owned map[string]map[string]json.RawMessage `json:"owned"`
+}
+
+// MarshalJSON writes the image with its own and owned fields, {} when nil.
+func (i RowImage) MarshalJSON() ([]byte, error) {
+	owned := i.Owned
+	if owned == nil {
+		owned = map[string]map[string]json.RawMessage{}
+	}
+	return json.Marshal(struct {
+		Own   map[string]json.RawMessage            `json:"own"`
+		Owned map[string]map[string]json.RawMessage `json:"owned"`
+	}{objectOf(i.Own), owned})
 }
 
 // name is what a refusal names as refused: the operation's name, a
-// deadline's, else the kind.
+// deadline's, else the kind (change for a change command).
 func (a Action) name() string {
 	switch a.Kind {
 	case ActionOperation:
@@ -219,6 +267,15 @@ func (a Action) MarshalJSON() ([]byte, error) {
 			At      int64           `json:"at"`
 			Payload json.RawMessage `json:"payload"`
 		}{a.Kind, a.Key, a.UseID, a.Name, a.At, rawOr(a.Payload, json.RawMessage(`null`))})
+	case ActionChange:
+		if a.Change == nil {
+			return nil, fmt.Errorf("rules: a change of %s holds no write", a.Key)
+		}
+		return json.Marshal(struct {
+			Kind   ActionKind `json:"kind"`
+			Key    string     `json:"key"`
+			Change *RowChange `json:"change"`
+		}{a.Kind, a.Key, a.Change})
 	default:
 		return nil, fmt.Errorf("rules: no action of kind %q", a.Kind)
 	}
@@ -239,6 +296,7 @@ func (a *Action) UnmarshalJSON(data []byte) error {
 		Name      string                     `json:"name"`
 		At        int64                      `json:"at"`
 		Payload   json.RawMessage            `json:"payload"`
+		Change    *RowChange                 `json:"change"`
 	}
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
@@ -261,6 +319,11 @@ func (a *Action) UnmarshalJSON(data []byte) error {
 		out.Key, out.UseID, out.Operation, out.Params = wire.Key, wire.UseID, wire.Operation, wire.Params
 	case ActionDeadline:
 		out.Key, out.UseID, out.Name, out.At, out.Payload = wire.Key, wire.UseID, wire.Name, wire.At, wire.Payload
+	case ActionChange:
+		if wire.Change == nil {
+			return fmt.Errorf("rules: a change of %s holds no write", wire.Key)
+		}
+		out.Key, out.Change = wire.Key, wire.Change
 	default:
 		return fmt.Errorf("rules: no action of kind %q", wire.Kind)
 	}
@@ -287,17 +350,50 @@ const (
 	ReadKindHasRows ReadKind = "hasRows"
 	ReadKindSpec    ReadKind = "spec"
 	ReadKindSubRows ReadKind = "subRows"
+	// ReadKindLinked is the rows of a type whose own field holds a key
+	// (D103): what a rule over the rows that link to a row reads.
+	ReadKindLinked ReadKind = "linked"
 )
 
+// LinkedPage is how many rows a linked read asks for at a time, the core's
+// LINKED_PAGE.
+const LinkedPage = 500
+
 // ReadRequest is what the core asks the host to read: a row of a type by
-// its key, whether a type has rows, a type's spec, or the rows of one
-// sub-table of one use on one row (UseID and Table name it).
+// its key, whether a type has rows, a type's spec, the rows of one
+// sub-table of one use on one row (UseID and Table name it), or one page of
+// the rows of a type whose own field Field holds Key, in key order, at
+// most Limit, after the key After when it is not "".
 type ReadRequest struct {
 	Kind  ReadKind `json:"kind"`
 	Type  string   `json:"type"`
 	Key   string   `json:"key,omitempty"`
 	UseID string   `json:"useId,omitempty"`
 	Table string   `json:"table,omitempty"`
+	Field string   `json:"field,omitempty"`
+	After string   `json:"after,omitempty"`
+	Limit int      `json:"limit,omitempty"`
+}
+
+// MarshalJSON writes the request with its kind's members: a linked read's
+// limit always, any other kind's members as they are set.
+func (r ReadRequest) MarshalJSON() ([]byte, error) {
+	if r.Kind == ReadKindLinked {
+		var after *string
+		if r.After != "" {
+			after = &r.After
+		}
+		return json.Marshal(struct {
+			Kind  ReadKind `json:"kind"`
+			Type  string   `json:"type"`
+			Field string   `json:"field"`
+			Key   string   `json:"key"`
+			After *string  `json:"after,omitempty"`
+			Limit int      `json:"limit"`
+		}{r.Kind, r.Type, r.Field, r.Key, after, r.Limit})
+	}
+	type plain ReadRequest
+	return json.Marshal(plain(r))
 }
 
 // Row is one row as the host read it: its own fields, its owned fields by
@@ -324,15 +420,30 @@ func (r SubRow) MarshalJSON() ([]byte, error) {
 	}{r.Key, objectOf(r.Values)})
 }
 
+// LinkedRows are the rows a linked read asks for, each by its key, and
+// whether more follow the page.
+type LinkedRows struct {
+	Rows []KeyedRow `json:"rows"`
+	More bool       `json:"more"`
+}
+
+// KeyedRow is a row of a linked read: its key in the core's form and the
+// row as a row read gives it.
+type KeyedRow struct {
+	Key string `json:"key"`
+	Row Row    `json:"row"`
+}
+
 // Answer is the host's answer to one request, of its kind:
-// {"row": Row|null}, {"hasRows": bool}, {"spec": TypeSpec|null} or
-// {"subRows": [SubRow]}.
+// {"row": Row|null}, {"hasRows": bool}, {"spec": TypeSpec|null},
+// {"subRows": [SubRow]} or {"linked": LinkedRows}.
 type Answer struct {
 	Kind    ReadKind
 	Row     *Row
 	HasRows bool
 	Spec    *TypeSpec
 	SubRows []SubRow
+	Linked  *LinkedRows
 }
 
 // MarshalJSON writes the answer as the variant its kind names.
@@ -358,6 +469,17 @@ func (a Answer) MarshalJSON() ([]byte, error) {
 		return json.Marshal(struct {
 			SubRows []SubRow `json:"subRows"`
 		}{rows})
+	case ReadKindLinked:
+		linked := LinkedRows{Rows: []KeyedRow{}}
+		if a.Linked != nil {
+			linked.More = a.Linked.More
+			if a.Linked.Rows != nil {
+				linked.Rows = a.Linked.Rows
+			}
+		}
+		return json.Marshal(struct {
+			Linked LinkedRows `json:"linked"`
+		}{linked})
 	default:
 		return nil, fmt.Errorf("rules: no answer of kind %q", a.Kind)
 	}
@@ -385,6 +507,8 @@ func (a *Answer) UnmarshalJSON(data []byte) error {
 			err = json.Unmarshal(value, &out.Spec)
 		case ReadKindSubRows:
 			err = json.Unmarshal(value, &out.SubRows)
+		case ReadKindLinked:
+			err = json.Unmarshal(value, &out.Linked)
 		default:
 			err = fmt.Errorf("rules: no answer of kind %q", variant)
 		}
@@ -550,11 +674,16 @@ const (
 	RowCreate RowWriteKind = "create"
 	RowUpdate RowWriteKind = "update"
 	RowDelete RowWriteKind = "delete"
+	// RowGone is a row a change command found gone (D103): no write of the
+	// row; its deadlines go, and its sub-table rows when no row of the key
+	// is left at all.
+	RowGone RowWriteKind = "gone"
 )
 
 // RowWrite is the write of one row a change set holds: a create of a key
 // with its own and owned fields, an update of a row held to the version
-// the host read it at, or a delete held alike.
+// the host read it at, a delete held alike, or a row a change command found
+// gone.
 type RowWrite struct {
 	Kind RowWriteKind `json:"kind"`
 	Type string       `json:"type"`
@@ -725,8 +854,9 @@ func (c *DeadlineChange) UnmarshalJSON(data []byte) error {
 
 // ChangeSet is everything one command changes: its row writes, its
 // sub-table rows and deadlines, which the adapter applies by the layout,
-// and its outbox events, which stay raw until batch 6 gives the outbox a
-// table; the adapter refuses a change set holding any.
+// and its outbox events of a behavior's own, which stay raw until the
+// event stream gives them a table; the adapter refuses a change set
+// holding any (D103).
 type ChangeSet struct {
 	Rows      []RowWrite        `json:"rows"`
 	SubRows   []SubRowWrite     `json:"subRows"`

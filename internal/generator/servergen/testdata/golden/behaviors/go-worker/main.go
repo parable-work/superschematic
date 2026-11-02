@@ -6,13 +6,14 @@
 //
 // It reads its configuration from the environment, as the API's server does,
 // and opens fixture-timers-db and its ORM. It builds no Deps and calls no
-// implementation: it runs the queues of fixture-timers-db's Ticket that
-// fixture-timers-api's generated TicketTimersQueues returns, claiming each message as
+// implementation: it runs fixture-timers-db's Ticket's behavior queues, TicketDeadline and TicketChange,
+// which fixture-timers-api's generated TicketTimersQueues returns, claiming each message as
 // it falls due and running it through the behaviors' core as fixture-timers-api/TicketTimers,
 // in one transaction with the message's completion. WORKER_CONCURRENCY,
 // which the platform sets, says how many messages of each queue it handles
 // at a time: 2 unless it says otherwise. A message whose run fails is
-// failed, and retried after the queue's backoff until it is dead. As it starts
+// failed, and retried after the queue's backoff until it is dead; a deadline
+// whose fire a guard vetoes is released, due again in a minute. As it starts
 // and every five minutes it prunes each queue's done messages. On SIGTERM or
 // SIGINT it claims no more, lets the running handlers finish for 8s,
 // cancels the rest and gives their messages back, and exits 0. When the

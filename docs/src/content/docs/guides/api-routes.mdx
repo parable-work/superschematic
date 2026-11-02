@@ -680,11 +680,13 @@ The three runtimes run the same vectors
 
 A DB table may type a field as a behavior, `status: Workflow<{ ... }>`, or
 implement a behavior of the whole table, `implements Timers<Ticket, { ...
-}>` ([A table's deadlines](#a-tables-deadlines-timers-and-its-worker))
-(D103). The table stays a table: the behavior's fields are its columns
-(`status`, `status_entered_at`), the generated repositories read them and
-leave them out of their create, update and upsert inputs, and only the
-behavior's operations change them.
+}>` ([A table's deadlines](#a-tables-deadlines-timers-and-its-worker)) or
+`implements Reactions<Project, { ... }>` ([A table's
+reactions](#a-tables-reactions-and-its-change-queue)) (D103). The table
+stays a table: the behavior's fields are its columns (`status`,
+`status_entered_at`), the generated repositories read them and leave them
+out of their create, update and upsert inputs, and only the behavior's
+operations change them.
 
 ```ts
 // shop-db
@@ -873,12 +875,13 @@ The build adds, beside the table:
 | --- | --- |
 | A sub-table | `ticket_timers_deadlines` (`TicketTimersDeadlines`), one row per deadline started on a ticket: `base_at` (what it starts from), `armed_from`, `due_at` (empty once cancelled), `fired`, `fired_at` and `outcome` (`moved`, `skipped`, `vetoed` or `forbidden`), with a foreign key to the ticket, deleted with it |
 | A deadline queue | `ticket_deadline_queue` (`TicketDeadline`), one waiting message per ticket and deadline, due when the deadline falls due |
+| A change queue | `ticket_change_queue` (`TicketChange`), one message per insert, update and delete of a ticket, whoever makes it, which a trigger on `ticket` writes ([The change queue](#the-change-queue)) |
 | Operations | `timers.fireTimer`, `timers.resetTimer` and `timers.snoozeTimer`, which a `@behaviorOperations` set serves as it serves a field's |
 | A column | `_version`, the version every write through the behaviors' core holds the row to |
 
-Migrations plan both tables as any other. The repositories have no table
-or write path of their own for the sub-table: SQL, reports and projections
-may read it. A table whose behaviors keep sub-tables or arm deadlines has
+Migrations plan the tables and the trigger as any other. The repositories
+have no table or write path of their own for the sub-table: SQL, reports
+and projections may read it. A table whose behaviors keep sub-tables or arm deadlines has
 no upserts in its repositories, since an upsert applies none of a
 behavior's rules.
 
@@ -886,20 +889,25 @@ A create, an update and a delete through the repositories, and each
 behavior operation, arm and clear the row's deadlines in the same
 transaction: a ticket's create arms `respond`, a move to `waiting` cancels
 it by its `until` and arms `idle`, and a delete removes every message of
-the row. A raw SQL write arms and clears nothing yet, and nor do the
-repositories' bulk and hard writes, which bypass the core: TypeScript's
-`updateMany`, `deleteMany` and `hardDeleteOne` and Go's `UpdateMany`,
-`DeleteMany` and `HardDeleteOne`. D103's outbox trigger will hear them.
-Until then a ticket whose `visitAt` an `updateMany` moved keeps `remind`
-armed at its old time, and a deadline whose row such a delete removed
-falls due, finds nothing and is dropped. Write a Timers table's rows one
-at a time, through `updateOne` and `deleteOne`.
+the row. Every other write is heard after it commits, through the table's
+change queue: a raw SQL write (`UPDATE ticket SET visit_at = ...`, `DELETE
+FROM ticket ...`, from a script or psql) and the repositories' bulk and
+hard writes, which bypass the core (TypeScript's `updateMany`, `deleteMany`
+and `hardDeleteOne`, Go's `UpdateMany`, `DeleteMany` and `HardDeleteOne`).
+When the worker runs the write's change, Timers reconciles the row: a
+`visitAt` an `updateMany` moved re-arms `remind` at its new time, a raw
+insert arms `respond` from the insert's time, and a raw delete removes the
+row's deadline messages. Until the worker runs it, the old arming stands;
+a deadline that falls due first reconciles its row before it fires, so it
+is armed again at its new time rather than fired on its old arming. A write
+through the core is heard too, and changes nothing more: its deadlines are
+already as it left them.
 
 ### The worker
 
-An API runs a table's deadlines with a class with no members, marked
-`@behaviorWorker` with the table, imported from its database as
-`@behaviorOperations` imports it:
+An API runs a table's deadlines and its change queue with a class with no
+members, marked `@behaviorWorker` with the table, imported from its
+database as `@behaviorOperations` imports it:
 
 ```ts
 // support-api
@@ -920,9 +928,10 @@ deployable of kind worker named after the API and the class,
 `support-api-ticket-timers`, with a worker's settings, `stack dev`
 process, image and gcp worker pool. Its handler is generated, so your
 implementation has no method for it and the API's `Workers` lists none: it
-claims each message of the table's deadline queue as it falls due and runs
-the deadline through the behaviors' core in one transaction with the
-message's completion. It runs as the worker, the subject
+claims each message of the table's deadline queue as it falls due, and each
+message of its change queue, and runs it through the behaviors' core in one
+transaction with the message's completion, one claim loop per queue, the
+deadlines first. It runs as the worker, the subject
 `support-api/TicketTimers`, not as a user, holding the permissions the
 decorator gives it:
 
@@ -936,20 +945,26 @@ A deadline re-armed or cancelled while the worker holds its message never
 fires on its old arming: the worker finds its claim gone, runs nothing and
 logs `deadline ran nothing` with why, `claim lost`. A deadline the fired
 command arms again, a status that re-enters `waiting`, survives the
-message's completion. A fire that a guard of the table's behaviors
-refuses, or that fails otherwise, fails the message: it is due again
-after the queue's backoff (30 seconds, doubling to an hour) and dead after
-its sixth attempt, for `stack queue dead|retry|drop <env>
-support-db.TicketDeadline`. Nothing arms a dead deadline again: its
-sub-table row stays pending, unfired, until you retry the message, a
-caller with the config's `permission` resets or snoozes it, or what it
-starts from moves. A newer arming or a cancel of the same deadline deletes
+message's completion. A fire that a guard of the table's behaviors vetoes
+is released, not failed: the worker logs `deadline ran nothing` with why,
+`vetoed`, and the message is due again a minute later, counting no
+attempt, for as long as the guard holds it, its sub-table row pending all
+the while. A fire that fails otherwise (`busy`, a failure of the database)
+fails the message: it is due again after the queue's backoff (30 seconds,
+doubling to an hour) and dead after its sixth attempt, for `stack queue
+dead|retry|drop <env> support-db.TicketDeadline`. Nothing arms a dead
+deadline again: its sub-table row stays pending, unfired, until you retry
+the message, a caller with the config's `permission` resets or snoozes it,
+or what it starts from moves. A newer arming or a cancel of the same deadline deletes
 its dead message, so a retry of every dead message never meets a waiting
 one of the same deadline.
 
-One class runs a table's deadlines per API. Nothing refuses a table whose
-deadlines no worker runs: they fall due and wait for one. An API that
-serves `@behaviorOperations(Ticket)` and declares no `@behaviorWorker(Ticket)`
+One class runs a table's queues per API, and the build refuses one over a
+table whose behaviors arm no deadlines and hear no writes, which has
+nothing to run. Nothing refuses a table whose queues no worker runs: its
+deadlines fall due and its changes wait for one, and nothing that hears
+them runs until a worker does. An API that serves
+`@behaviorOperations(Ticket)` and declares no `@behaviorWorker(Ticket)`
 gets a warning; declare one on that API or on another over the same
 database. The worker claims on Postgres, as every worker does. A
 TypeScript one over a database that lists `sqlite` first is refused, as
@@ -981,6 +996,134 @@ the three, `fireTimer` too, though `fireTimer` never checks it: a caller
 needs it only to reset or snooze. A `dueAt` is epoch milliseconds, as the declaration has it,
 not a date-time. No route, SDK method or tool reads a row's deadlines yet;
 the operations' results and the sub-table are what there is.
+
+## A table's reactions and its change queue
+
+A table implements `Reactions` to move Workflow statuses when its rows, or
+the rows that point at it, are written (D103): a project that becomes
+active when a task starts, done once every task is done, failed once one
+fails, a task that starts when it is marked urgent. Each rule is one `when`
+and one `then`:
+
+```ts
+// projects-db
+import { Identity } from "superscalar";
+import { AutoGenerate, Reactions, Relation, Workflow, key } from "@superschematic/db";
+import { projectFlow, taskFlow } from "./flows";
+
+export abstract class Project implements Reactions<Project, {
+  rules: [
+    { when: { allTerminal: { schema: "Task"; link: "project"; outcomes: ["success"] } }; then: { transition: "done" } },
+    { when: { anyTerminal: { schema: "Task"; link: "project"; outcomes: ["failure"] } }; then: { transition: "failed" } }
+  ];
+}> {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  name: string;
+  status: Workflow<typeof projectFlow>;
+}
+
+export abstract class Task implements Reactions<Task, {
+  rules: [
+    { when: { enters: "doing" }; then: { link: "project"; transition: "active" } },
+    { when: { changes: { field: "priority"; to: "urgent" } }; then: { transition: "doing" } }
+  ];
+}> {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  priority?: string;
+  project: Relation<Project>;
+  status: Workflow<typeof taskFlow>;
+}
+```
+
+`projectFlow` and `taskFlow` are Workflow configs declared `as const`,
+whose terminal states each name an `outcome` (`success`, `failure` or
+`neutral`), which `allTerminal` and `anyTerminal` read.
+
+| `when` | Fires when |
+| --- | --- |
+| `{ enters: "doing" }` | the write moved the row's status into the state: a create or insert that leaves it there, or an update that left it in another state (or in the same one entered again) |
+| `{ changes: { field, to?, from? } }` | the write moved the field's value, to `to` and from `from` when given; an insert moves a field from empty, and a delete moves nothing. `field` names a field of the table: an own field, a to-one relation (`project`), or a field typed as a behavior (`status`), whose value it hears |
+| `{ allTerminal: { schema, link, outcomes? } }` | a write of a row of `schema`, the table whose to-one relation `link` points at this one, left every such row pointing here in a terminal state, at least one, each with an outcome the list holds (any outcome without one) |
+| `{ anyTerminal: { schema, link, outcomes } }` | a row of `schema` that points here through `link` entered a terminal state whose outcome the list holds, or was pointed here while in one |
+
+`then: { transition }` moves the row's own status to the state, and `then: {
+link, transition }` the status of the row its to-one relation `link` points
+at, through Workflow's `transition`, whose guards and permissions run. A
+rule acts only where it can: a target already in the state, one with no
+transition from where it is to the state, one whose guards veto the move,
+one that is gone, and a row that has moved on from the state its rule
+entered (or the value its `changes` rule named) are left as they are, and
+the write it heard is not refused. A move refused because the worker lacks
+a transition's permission fails the change's message, which the worker
+tries again after the queue's backoff. `status` names the Workflow field
+the rules read and move when the table has several (`status: "payment"`);
+with one, it is implied. A table may hold any number of rules; the build
+checks each against the table, its relations and the tables they name
+(`schema` a table of the same database, `link` its to-one relation to this
+one, each with one Workflow, a `then`'s state one of its target's), and
+the rest of the config (a state the Workflow lacks, a transition that
+cannot lead there, rules that move a row round its states for ever) is
+the core's to refuse at the first command on the table. `holds` and
+`revised`, which the engine's Reactions takes, are refused on a table until
+Rollups, Revisions and Branches come to it, and so are a dotted field
+name, a binary, vector or geometric field (a `Geo.Location`, which a
+write's image leaves out), and Workflow's `statusEnteredAt`, which every
+move of the status moves. Reactions has no operations: no route, SDK
+method or tool comes from it.
+
+### The change queue
+
+A table whose writes a behavior hears gets a change queue in its database:
+a table that implements `Timers` or `Reactions`, and a table another
+table's Reactions names in `allTerminal` or `anyTerminal` (`Task`, which
+`Project`'s rules hear through `task.project`).
+
+| | For `Task` |
+| --- | --- |
+| A change queue | `task_change_queue` (`TaskChange`), keyed by the row's key and claimed one message of a row at a time, in the order they were written: `row_key`, `write` (`insert`, `update` or `delete`), `at` (epoch milliseconds, the database's clock), and the row's columns `before` and `after` the write, as JSON |
+| A trigger | on `task`, after each insert, update and delete of a row, whoever makes it: the repositories, a raw SQL write, a script, psql. An update that changes none of the columns the behaviors read (`updated_at` alone, say) writes no message; a soft delete or a restore, which changes `deleted_at` alone, writes one |
+
+The trigger never refuses a write. The table's `@behaviorWorker` runs the
+queue beside its deadline queue, with no other decorator: a change of a
+`Task` runs `Task`'s own rules, then `Project`'s `allTerminal` and
+`anyTerminal` on the project the task points at, now, after the write and
+before it. So declare a worker for each table with a change queue, even
+one that only another table's rules hear; the build warns an API that
+serves `Project`'s operations and declares no worker of `Task`:
+
+```ts
+// projects-api
+@behaviorWorker(Project)
+export abstract class ProjectReactions {}
+
+@behaviorWorker(Task, { concurrency: 2 })
+export abstract class TaskReactions {}
+```
+
+A rule runs after the write commits, when the worker claims its change: a
+raw `UPDATE task SET status = 'doing'` moves the task's project to
+`active` as a move through the API does, a moment later. A rule that moves
+another table's row runs as the worker of the table whose write it heard
+(`TaskReactions` moves a project), with that worker's `permissions`. A
+change of a row that is gone completes its message, and the change of a
+row a repository already wrote changes nothing that write did not set off.
+A soft delete is heard as the row going: its deadlines go, and the rules
+that read the rows pointing at a project no longer count it. A change
+refused for any other reason, or a failure of the database, fails its
+message, which is due again after the queue's backoff and dead after its
+last attempt (about fifteen minutes); the row's later changes wait behind
+it, so one row's changes always run in the order they were written. Nothing
+refuses a table whose change queue no worker runs: its messages wait, and
+no rule runs and no raw write's deadline moves until a worker claims them.
+On a database that lists `sqlite` first, and on D1, no behavior worker
+claims yet, so a hearing table's change queue grows by a message per
+write, each holding the row's columns, until one does; an operator may
+delete them, and the writes they held then go unheard. A table's rows
+written before its trigger existed have no messages; their deadlines
+reconcile at their next write.
 
 ## OpenAPI
 

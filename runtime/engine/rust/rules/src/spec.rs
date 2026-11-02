@@ -14,7 +14,12 @@
 //! whether its values are instants ([`FieldSpec`]): what a config that
 //! names a field is held to (a Timers deadline that starts from a field's
 //! time), since a config that names a field is typed by the type it sits
-//! on (D103). A host that gives none gives a type with no own fields.
+//! on (D103). A host that gives none gives a type with no own fields. An
+//! own field that holds the key of a row of another type, a to-one
+//! relation's column (`projectId` of `project: Relation<Project>`), names
+//! the relation and its target ([`RelationSpec`]): what the core follows
+//! from a write of the row to the listeners of the type it points at
+//! (Reactions' allTerminal over `task.project`).
 
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
@@ -105,8 +110,8 @@ impl UseSpec {
     }
 }
 
-/// One own field of a type: its name, its IR type's name and whether its
-/// values are instants.
+/// One own field of a type: its name, its IR type's name, whether its
+/// values are instants, and the to-one relation whose key it holds.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FieldSpec {
@@ -118,6 +123,22 @@ pub struct FieldSpec {
     /// adapter, or the ISO 8601 text an engine schema's date-time holds.
     #[serde(default, skip_serializing_if = "is_false")]
     pub date_time: bool,
+    /// The to-one relation whose target's key the field holds; `None` for
+    /// a field that holds no key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relation: Option<RelationSpec>,
+}
+
+/// A to-one relation an own field holds the key of, as the core's spec
+/// names it: the relation field's name and its target type.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelationSpec {
+    /// The relation field's name (`project`).
+    pub name: String,
+    /// The type it points at (`Project`).
+    #[serde(rename = "type")]
+    pub type_name: String,
 }
 
 fn is_false(flag: &bool) -> bool {
@@ -131,6 +152,25 @@ impl FieldSpec {
             name: name.into(),
             type_name: type_name.into(),
             date_time: false,
+            relation: None,
+        }
+    }
+
+    /// A field that holds the key of a to-one relation's target: its name
+    /// and IR type (`projectId`, `Identity.UUID`), the relation's name and
+    /// the type it points at (`project`, `Project`).
+    pub fn relation(
+        name: impl Into<String>,
+        type_name: impl Into<String>,
+        relation_name: impl Into<String>,
+        target: impl Into<String>,
+    ) -> Self {
+        FieldSpec {
+            relation: Some(RelationSpec {
+                name: relation_name.into(),
+                type_name: target.into(),
+            }),
+            ..FieldSpec::new(name, type_name)
         }
     }
 
@@ -183,6 +223,17 @@ impl TypeSpec {
     /// The own field with a name.
     pub fn field(&self, name: &str) -> Option<&FieldSpec> {
         self.fields.iter().find(|field| field.name == name)
+    }
+
+    /// The own field that holds the key of the to-one relation with a name
+    /// (`projectId` for `project`).
+    pub fn relation(&self, name: &str) -> Option<&FieldSpec> {
+        self.fields.iter().find(|field| {
+            field
+                .relation
+                .as_ref()
+                .is_some_and(|relation| relation.name == name)
+        })
     }
 
     /// The use with an id, and its position in the list.
@@ -268,5 +319,29 @@ mod tests {
             serde_json::to_value(TypeSpec::new("Note")).unwrap(),
             json!({"name": "Note", "uses": []})
         );
+    }
+
+    #[test]
+    fn a_relations_field_names_the_relation_and_its_target() {
+        let spec = TypeSpec::new("Task")
+            .with_field(FieldSpec::new("title", "string"))
+            .with_field(FieldSpec::relation(
+                "projectId",
+                "Identity.UUID",
+                "project",
+                "Project",
+            ));
+        let written = serde_json::to_value(&spec).unwrap();
+        assert_eq!(
+            written["fields"][1],
+            json!({"name": "projectId", "type": "Identity.UUID", "relation": {"name": "project", "type": "Project"}})
+        );
+        assert_eq!(serde_json::from_value::<TypeSpec>(written).unwrap(), spec);
+        assert_eq!(
+            spec.relation("project").map(|field| field.name.as_str()),
+            Some("projectId")
+        );
+        assert!(spec.relation("title").is_none());
+        assert!(spec.relation("projectId").is_none());
     }
 }

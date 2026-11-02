@@ -6,7 +6,9 @@
 //! before them, deadlines, a call on another type's row and a create of
 //! one, the keys a behavior makes, a use's sub-table rows as the run reads
 //! them, an operation that writes nothing, the fields a read of a row
-//! computes, and the defects the core holds a behavior to.
+//! computes, the defects the core holds a behavior to, and the change
+//! command a write from the outbox runs: the uses that hear it, the
+//! listeners a relation reaches, a row found gone and the linked read.
 
 use std::collections::BTreeMap;
 
@@ -14,10 +16,11 @@ use serde_json::{json, Map, Value};
 
 use superschematic_rules::{
     Action, Answer, Answers, Behavior, Caller, Change, Code, Command, ConfigCx, ConfigError,
-    ConfigIssueKind, ConfigTarget, Cx, DeadlineChange, Declaration, GuardRequest, Hook, LockKey,
-    Outcome, PermissionMatcher, ReadRequest, Refusal, Row, RowRef, RowWrite, SchemaIssue, Source,
-    Step, Stop, SubRow, SubRowChange, TableDecl, TypeSpec, UseSpec, ValidationIssue,
-    ValidationRequest, Veto, View,
+    ConfigIssueKind, ConfigTarget, Cx, DeadlineChange, Declaration, FieldSpec, GuardRequest, Heard,
+    Hook, KeyedRow, LinkedRows, Listen, LockKey, Outcome, PermissionMatcher, ReadRequest, Refusal,
+    Row, RowChange, RowImage, RowRef, RowWrite, SchemaIssue, Source, Step, Stop, SubRow,
+    SubRowChange, TableDecl, TypeSpec, UseSpec, ValidationIssue, ValidationRequest, Veto, View,
+    WriteKind, LINKED_PAGE,
 };
 
 const NOW: i64 = 1_000_000;
@@ -831,6 +834,36 @@ impl Source for Memory {
                 Ok(Answer::SubRows(
                     self.sub_rows.get(&at).cloned().unwrap_or_default(),
                 ))
+            }
+            ReadRequest::Linked {
+                type_name,
+                field,
+                key,
+                after,
+                limit,
+            } => {
+                self.log.push(format!(
+                    "linked {type_name} {field} {key} after {}",
+                    after.as_deref().unwrap_or("-")
+                ));
+                // In key order, after `after`, one page and whether more
+                // follow it.
+                let mut rows: Vec<KeyedRow> = self
+                    .rows
+                    .iter()
+                    .filter(|((name, row_key), row)| {
+                        name == type_name
+                            && row.own.get(field).and_then(Value::as_str) == Some(key.as_str())
+                            && after.as_ref().is_none_or(|after| row_key > after)
+                    })
+                    .map(|((_, row_key), row)| KeyedRow {
+                        key: row_key.clone(),
+                        row: row.clone(),
+                    })
+                    .collect();
+                let more = rows.len() > *limit;
+                rows.truncate(*limit);
+                Ok(Answer::Linked(LinkedRows { rows, more }))
             }
             other => Err(Refusal::internal(format!("an unexpected read: {other:?}"))),
         }
@@ -2430,4 +2463,410 @@ fn a_core_is_shared_across_threads() {
     shared::<superschematic_rules::Core>();
     shared::<superschematic_rules::TypeSpec>();
     shared::<superschematic_rules::Step>();
+}
+
+// ---- the change command ----
+
+// Echo hears its row's writes: it keeps the last write it heard and how
+// many it has, and keeps nothing when its config says quiet. Its
+// after-change hook keeps the kind of the last change it ran on.
+struct Echo;
+
+impl Behavior for Echo {
+    type Config = bool;
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Echo")
+            .field("seen")
+            .field("heard")
+            .field("after")
+            .hears_changes()
+    }
+
+    fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<bool, ConfigError> {
+        Ok(raw.get("quiet") == Some(&Value::Bool(true)))
+    }
+
+    fn heard(&self, cx: &Cx<'_, bool>, heard: &Heard<'_>) -> Hook<()> {
+        let Heard::Own { change } = heard else {
+            return Err(cx.defect("it listens to no other type"));
+        };
+        if *cx.config() {
+            return Ok(());
+        }
+        let count = cx.get("heard").and_then(|v| v.as_i64()).unwrap_or(0);
+        cx.set("seen", change.write.as_str())?;
+        cx.set("heard", count + 1)
+    }
+
+    fn after_change(&self, cx: &Cx<'_, bool>, change: &Change<'_>) -> Hook<()> {
+        if matches!(change, Change::Heard) {
+            cx.set("after", change.kind())?;
+        }
+        Ok(())
+    }
+}
+
+// Tally, on a parent, listens to its config's child type through the
+// child's relation to it: a write of a child it hears counts the children
+// that link to the parent now, a page at a time, and keeps the count and
+// the key of the child heard.
+struct Tally;
+
+impl Behavior for Tally {
+    type Config = (String, String, String);
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Tally").field("children").field("last")
+    }
+
+    fn parse_config(
+        &self,
+        raw: &Value,
+        _target: &ConfigTarget<'_>,
+    ) -> Result<(String, String, String), ConfigError> {
+        let text = |key: &str| raw.get(key).and_then(Value::as_str).unwrap_or_default();
+        Ok((
+            text("child").into(),
+            text("link").into(),
+            text("field").into(),
+        ))
+    }
+
+    fn listens(&self, config: &(String, String, String)) -> Vec<Listen> {
+        // Listed twice, heard once.
+        vec![
+            Listen::new(&config.0, &config.1),
+            Listen::new(&config.0, &config.1),
+        ]
+    }
+
+    fn heard(&self, cx: &Cx<'_, (String, String, String)>, heard: &Heard<'_>) -> Hook<()> {
+        let Heard::Linked { key, .. } = heard else {
+            return Ok(());
+        };
+        let (child, _, field) = cx.config();
+        let parent = cx.key().unwrap_or_default().to_owned();
+        let mut count = 0;
+        let mut after: Option<String> = None;
+        loop {
+            let page = cx.read_linked(child, field, &parent, after.as_deref())?;
+            count += page.rows.len();
+            if !page.more {
+                break;
+            }
+            after = page.rows.last().map(|row| row.key.clone());
+        }
+        cx.set("children", count)?;
+        cx.set("last", *key)
+    }
+}
+
+fn hearing_core() -> superschematic_rules::Core {
+    superschematic_rules::Core::new().with(Echo).with(Tally)
+}
+
+// A child with Echo whose parentId holds a Parent's key; a Parent with
+// Tally over the child's parent relation.
+fn child_spec(echo: Value) -> TypeSpec {
+    TypeSpec::new("Child")
+        .with(UseSpec::on_type("Echo", echo))
+        .with_field(FieldSpec::new("title", "string"))
+        .with_field(FieldSpec::relation(
+            "parentId", "string", "parent", "Parent",
+        ))
+}
+
+fn parent_spec() -> TypeSpec {
+    TypeSpec::new("Parent").with(UseSpec::on_type(
+        "Tally",
+        json!({"child": "Child", "link": "parent", "field": "parentId"}),
+    ))
+}
+
+fn image(own: Value, owned: Value) -> RowImage {
+    serde_json::from_value(json!({"own": own, "owned": owned})).expect("an image")
+}
+
+fn change(key: &str, change: RowChange) -> Command {
+    command(
+        Caller::new("worker", Vec::<String>::new()),
+        Action::Change {
+            key: key.into(),
+            change,
+        },
+    )
+}
+
+fn update_of(before: Value, after: Value) -> RowChange {
+    RowChange {
+        write: WriteKind::Update,
+        at: NOW,
+        before: Some(image(before, json!({}))),
+        after: Some(image(after, json!({}))),
+    }
+}
+
+/// A change command runs the row's uses that hear its writes, on the row as
+/// it is now, and holds what they wrote to the version it read, with the
+/// row's after-change hooks run for the change.
+#[test]
+fn a_change_runs_the_hearing_uses_on_the_row_as_it_is() {
+    let mut memory = Memory::default().with(
+        "Child",
+        "c1",
+        row(json!({"title": "c1"}), json!({"Echo": {"heard": 2}}), 7),
+    );
+    let outcome = hearing_core().drive(
+        &child_spec(json!({})),
+        &change(
+            "c1",
+            update_of(json!({"title": "c0"}), json!({"title": "c1"})),
+        ),
+        &mut memory,
+    );
+    let changes = changed(outcome);
+    assert_eq!(
+        changes.rows,
+        vec![RowWrite::Update {
+            type_name: "Child".into(),
+            key: "c1".into(),
+            expected_version: 7,
+            own: Map::new(),
+            owned: [(
+                "Echo".to_owned(),
+                object(json!({"seen": "update", "heard": 3, "after": "heard"}))
+            )]
+            .into_iter()
+            .collect(),
+        }]
+    );
+    assert_eq!(changes.result, Value::Null);
+    // The row has no parent, so no listener is reached.
+    assert_eq!(memory.log, ["row Child c1"]);
+}
+
+/// A change command whose hooks write nothing writes no row, so applying it
+/// moves no version.
+#[test]
+fn a_change_that_writes_nothing_writes_no_row() {
+    let mut memory =
+        Memory::default().with("Child", "c1", row(json!({"title": "c1"}), json!({}), 1));
+    let changes = changed(hearing_core().drive(
+        &child_spec(json!({"quiet": true})),
+        &change(
+            "c1",
+            update_of(json!({"title": "c0"}), json!({"title": "c1"})),
+        ),
+        &mut memory,
+    ));
+    assert!(changes.rows.is_empty());
+    assert!(changes.sub_rows.is_empty() && changes.deadlines.is_empty());
+}
+
+/// A change of a row the host does not have runs no use of it and writes
+/// Gone, which a host applies by taking the row's deadlines and, when no
+/// row of the key is left, its sub-table rows.
+#[test]
+fn a_gone_row_writes_gone_and_runs_no_use_of_it() {
+    let mut memory = Memory::default();
+    let delete = RowChange {
+        write: WriteKind::Delete,
+        at: NOW,
+        before: Some(image(json!({"title": "c1"}), json!({}))),
+        after: None,
+    };
+    let changes =
+        changed(hearing_core().drive(&child_spec(json!({})), &change("c1", delete), &mut memory));
+    assert_eq!(
+        changes.rows,
+        vec![RowWrite::Gone {
+            type_name: "Child".into(),
+            key: "c1".into()
+        }]
+    );
+    assert_eq!(
+        serde_json::to_value(&changes.rows[0]).unwrap(),
+        json!({"kind": "gone", "type": "Child", "key": "c1"})
+    );
+}
+
+/// A listener of another type is reached through the row's relation: on
+/// the row the relation holds now, then the one it held after the write and
+/// the one before it, each once; a target the host does not have is passed
+/// over, and so is a type no spec names.
+#[test]
+fn a_listener_is_reached_by_the_row_now_after_and_before() {
+    let parent = |key: &str| row(json!({"name": key}), json!({}), 1);
+    let mut memory = Memory::default()
+        .with_spec(parent_spec())
+        .with(
+            "Child",
+            "c1",
+            row(json!({"title": "c1", "parentId": "p3"}), json!({}), 4),
+        )
+        .with("Child", "c2", row(json!({"parentId": "p1"}), json!({}), 1))
+        .with("Parent", "p1", parent("p1"))
+        .with("Parent", "p3", parent("p3"));
+    let changes = changed(hearing_core().drive(
+        &child_spec(json!({"quiet": true})),
+        &change(
+            "c1",
+            update_of(json!({"parentId": "p1"}), json!({"parentId": "p2"})),
+        ),
+        &mut memory,
+    ));
+    // p3 (now), p2 (after: gone, passed over), p1 (before), in that order.
+    let written: Vec<(String, Value)> = changes
+        .rows
+        .iter()
+        .map(|write| {
+            (
+                write.key().unwrap_or_default().to_owned(),
+                write
+                    .owned("Tally", "children")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+            )
+        })
+        .collect();
+    assert_eq!(
+        written,
+        [("p3".to_owned(), json!(1)), ("p1".to_owned(), json!(1))]
+    );
+    for write in &changes.rows {
+        assert_eq!(write.expected_version(), Some(1));
+        assert_eq!(write.owned("Tally", "last"), Some(&json!("c1")));
+    }
+    assert!(memory.log.contains(&"row Parent p2".to_owned()));
+    assert!(memory
+        .log
+        .contains(&"linked Child parentId p3 after -".to_owned()));
+
+    // A parent type the host does not have is passed over.
+    let mut memory =
+        Memory::default().with("Child", "c1", row(json!({"parentId": "p1"}), json!({}), 1));
+    let changes = changed(hearing_core().drive(
+        &child_spec(json!({"quiet": true})),
+        &change(
+            "c1",
+            update_of(json!({"parentId": "p1"}), json!({"parentId": "p1"})),
+        ),
+        &mut memory,
+    ));
+    assert!(changes.rows.is_empty());
+    assert_eq!(memory.log, ["row Child c1", "spec Parent"]);
+}
+
+/// A listener reached from a row found gone hears it through the key its
+/// relation held before the write.
+#[test]
+fn a_listener_hears_a_gone_row_through_the_key_it_held() {
+    let mut memory = Memory::default()
+        .with_spec(parent_spec())
+        .with("Parent", "p1", row(json!({}), json!({}), 2))
+        .with("Child", "c2", row(json!({"parentId": "p1"}), json!({}), 1));
+    let delete = RowChange {
+        write: WriteKind::Delete,
+        at: NOW,
+        before: Some(image(json!({"parentId": "p1"}), json!({}))),
+        after: None,
+    };
+    let changes =
+        changed(hearing_core().drive(&child_spec(json!({})), &change("c1", delete), &mut memory));
+    assert_eq!(changes.rows.len(), 2);
+    assert!(matches!(&changes.rows[0], RowWrite::Gone { key, .. } if key == "c1"));
+    assert_eq!(changes.rows[1].owned("Tally", "children"), Some(&json!(1)));
+}
+
+/// A linked read pages by key: a listener that reads every row linking to
+/// its row asks for the page after the last key it got until no more
+/// follow.
+#[test]
+fn a_linked_read_pages_by_key() {
+    let mut memory = Memory::default().with_spec(parent_spec()).with(
+        "Parent",
+        "p1",
+        row(json!({}), json!({}), 1),
+    );
+    for n in 0..=LINKED_PAGE {
+        memory = memory.with(
+            "Child",
+            &format!("c{n:04}"),
+            row(json!({"parentId": "p1"}), json!({}), 1),
+        );
+    }
+    let changes = changed(hearing_core().drive(
+        &child_spec(json!({"quiet": true})),
+        &change(
+            "c0000",
+            update_of(json!({"parentId": "p1"}), json!({"parentId": "p1"})),
+        ),
+        &mut memory,
+    ));
+    assert_eq!(
+        changes.rows[0].owned("Tally", "children"),
+        Some(&json!(LINKED_PAGE + 1))
+    );
+    let linked: Vec<&String> = memory
+        .log
+        .iter()
+        .filter(|line| line.starts_with("linked"))
+        .collect();
+    assert_eq!(
+        linked,
+        [
+            "linked Child parentId p1 after -",
+            &format!("linked Child parentId p1 after c{:04}", LINKED_PAGE - 1)
+        ]
+    );
+}
+
+/// What a type's uses listen to, each once, and a type whose configs the
+/// define check refuses is refused so.
+#[test]
+fn listeners_are_each_uses_listens_once() {
+    let core = hearing_core();
+    assert_eq!(
+        core.listeners(&parent_spec()).expect("its listeners"),
+        [Listen::new("Child", "parent")]
+    );
+    assert!(core
+        .listeners(&child_spec(json!({})))
+        .expect("none")
+        .is_empty());
+    let refused = core
+        .listeners(&TypeSpec::new("Parent").with(UseSpec::on_type("Nope", None)))
+        .expect_err("refused");
+    assert_eq!(refused.code, Code::InvalidSchema);
+}
+
+/// The change command, the linked read and Gone read and write as the JSON
+/// every binding takes.
+#[test]
+fn the_change_command_reads_as_json() {
+    let core = hearing_core();
+    let command: Command = serde_json::from_value(json!({
+        "caller": {"subject": "worker"}, "now": NOW,
+        "action": {"kind": "change", "key": "c1", "change": {"write": "insert", "at": NOW, "after": {"own": {"parentId": "p1"}}}}
+    }))
+    .unwrap();
+    assert_eq!(
+        serde_json::to_value(core.run(&child_spec(json!({})), &command, &Answers::new())).unwrap(),
+        json!({"read": [{"kind": "row", "type": "Child", "key": "c1"}]})
+    );
+    let answers = Answers::new()
+        .with(ReadRequest::row("Child", "c1"), Answer::Row(None))
+        .with(
+            ReadRequest::spec("Parent"),
+            Answer::Spec(Some(parent_spec())),
+        )
+        .with(
+            ReadRequest::row("Parent", "p1"),
+            Answer::Row(Some(Row::default())),
+        );
+    assert_eq!(
+        serde_json::to_value(core.run(&child_spec(json!({})), &command, &answers)).unwrap(),
+        json!({"read": [{"kind": "linked", "type": "Child", "field": "parentId", "key": "p1", "limit": 500}]})
+    );
 }

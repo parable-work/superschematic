@@ -1013,3 +1013,28 @@ func TestRulesBehaviorsAreTheTranscripts(t *testing.T) {
 		}
 	}
 }
+
+// BehaviorListens reads the tables a Reactions use hears through a relation
+// of theirs, in rule order, each once: an allTerminal and an anyTerminal
+// rule over one link are one listen; any other behavior, and a config that
+// does not read, listens to none (D103).
+func TestBehaviorListens(t *testing.T) {
+	config := json.RawMessage(`{"rules": [
+		{"when": {"allTerminal": {"schema": "Task", "link": "project", "outcomes": ["success"]}}, "then": {"transition": "done"}},
+		{"when": {"enters": "active"}, "then": {"transition": "done"}},
+		{"when": {"anyTerminal": {"schema": "Task", "link": "project", "outcomes": ["failure"]}}, "then": {"transition": "failed"}},
+		{"when": {"anyTerminal": {"schema": "Milestone", "link": "owner", "outcomes": ["failure"]}}, "then": {"transition": "failed"}}
+	]}`)
+	want := []BehaviorListen{{Type: "Task", Link: "project"}, {Type: "Milestone", Link: "owner"}}
+	if got := BehaviorListens("Reactions", config); !slices.Equal(got, want) {
+		t.Errorf("BehaviorListens = %+v, want %+v", got, want)
+	}
+	for _, tc := range []struct {
+		name   string
+		config string
+	}{{"Timers", `{"deadlines": {}}`}, {"Reactions", ``}, {"Reactions", `[1]`}, {"Reactions", `{"rules": [{"when": {"enters": "a"}}]}`}} {
+		if got := BehaviorListens(tc.name, json.RawMessage(tc.config)); len(got) != 0 {
+			t.Errorf("BehaviorListens(%s, %s) = %+v, want none", tc.name, tc.config, got)
+		}
+	}
+}

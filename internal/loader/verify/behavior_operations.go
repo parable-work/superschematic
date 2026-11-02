@@ -173,27 +173,85 @@ func checkBehaviorOperations(schema *ir.Schema, in Input, r *Result) {
 			continue
 		}
 		planned = append(planned, plannedSet{set: set, td: td, plan: plan})
-		warnDeadlinesUnrun(schema, set, td, in.Database, reg, r)
+		warnQueuesUnrun(schema, set, td, in.Database, reg, r)
+		warnListensUnrun(schema, set, td, in.Database, r)
 	}
 	checkBehaviorOperationNames(schema, planned, r)
 }
 
-// warnDeadlinesUnrun warns when set serves td, whose behaviors arm
-// deadlines, and the API declares no @behaviorWorker of td to run them
+// warnQueuesUnrun warns when set serves td, whose behaviors keep
+// deadlines or whose writes are heard (its change queue's marker names who
+// hears them), and the API declares no @behaviorWorker of td to run them
 // (D103). It is a warning, not a refusal: another API over the database
-// may run them, and a table whose deadlines nothing runs is the author's
-// to choose; the docs and the agent skill say why not to.
-func warnDeadlinesUnrun(schema *ir.Schema, set *ir.OperationSet, td *ir.TypeDef, db *ir.Schema, reg *registry.Registry, r *Result) {
-	arming := armingBehaviors(td, reg)
-	if len(arming) == 0 {
+// may run them, and a table whose queues nothing runs is the author's to
+// choose, whose messages wait; the docs and the agent skill say why not to.
+func warnQueuesUnrun(schema *ir.Schema, set *ir.OperationSet, td *ir.TypeDef, db *ir.Schema, reg *registry.Registry, r *Result) {
+	var kept []string
+	if arming := armingBehaviors(td, reg); len(arming) > 0 {
+		kept = append(kept, "deadlines ("+strings.Join(arming, ", ")+")")
+	}
+	if queue := db.BehaviorQueueOf(td.Name, ir.BehaviorQueueChanges); queue != nil {
+		var who []string
+		if hearing := queue.BehaviorQueue.Behaviors; len(hearing) > 0 {
+			who = append(who, strings.Join(hearing, ", "))
+		}
+		if heardBy := queue.BehaviorQueue.HeardBy; len(heardBy) > 0 {
+			who = append(who, "heard by "+strings.Join(heardBy, ", "))
+		}
+		kept = append(kept, "changes ("+strings.Join(who, "; ")+")")
+	}
+	if len(kept) == 0 || behaviorWorkerOf(schema, td.Name) {
 		return
 	}
-	for _, worker := range schema.Workers {
-		if worker != nil && worker.BehaviorWorker != nil && worker.BehaviorWorker.Type == td.Name {
-			return
+	r.warnf("", "%s: %s's behaviors keep %s for a worker to run, and %s declares no @behaviorWorker(%s): nothing runs them until a worker does; declare one on this API or another over %s (D103)", set.Name, td.Name, strings.Join(kept, " and "), schema.Name, td.Name, db.Name)
+}
+
+// warnListensUnrun warns when set serves td, whose uses hear another
+// table's writes through a relation of it (registry.BehaviorListens:
+// Reactions' allTerminal and anyTerminal), and the API declares no
+// @behaviorWorker of that table, whose change queue carries those writes
+// (D103): td's rules over it do not run until a worker of that table does.
+// It names each such table once, with its links, and is a warning for the
+// reasons warnQueuesUnrun's is. A table td hears through a relation of its
+// own is warnQueuesUnrun's.
+func warnListensUnrun(schema *ir.Schema, set *ir.OperationSet, td *ir.TypeDef, db *ir.Schema, r *Result) {
+	var heard []string
+	behaviors := map[string][]string{}
+	links := map[string][]string{}
+	for _, ref := range td.TableBehaviors() {
+		for _, listen := range registry.BehaviorListens(ref.Name, ref.Config) {
+			if listen.Type == td.Name || db.BehaviorQueueOf(listen.Type, ir.BehaviorQueueChanges) == nil {
+				continue
+			}
+			if !slices.Contains(heard, listen.Type) {
+				heard = append(heard, listen.Type)
+			}
+			if !slices.Contains(behaviors[listen.Type], ref.Name) {
+				behaviors[listen.Type] = append(behaviors[listen.Type], ref.Name)
+			}
+			if link := listen.Type + "." + listen.Link; !slices.Contains(links[listen.Type], link) {
+				links[listen.Type] = append(links[listen.Type], link)
+			}
 		}
 	}
-	r.warnf("", "%s: %s's behaviors arm deadlines (%s), and %s declares no @behaviorWorker(%s) to run them: they fall due and nothing runs them until a worker does; declare one on this API or another over %s (D103)", set.Name, td.Name, strings.Join(arming, ", "), schema.Name, td.Name, db.Name)
+	for _, other := range heard {
+		if behaviorWorkerOf(schema, other) {
+			continue
+		}
+		r.warnf("", "%s: %s's %s hear %s's writes through %s, which %s's change queue carries, and %s declares no @behaviorWorker(%s): %s's rules over %s do not run until a worker of %s does; declare one on this API or another over %s (D103)",
+			set.Name, td.Name, strings.Join(behaviors[other], ", "), other, strings.Join(links[other], ", "), other, schema.Name, other, td.Name, other, other, db.Name)
+	}
+}
+
+// behaviorWorkerOf reports whether schema declares a @behaviorWorker of
+// the table typeName.
+func behaviorWorkerOf(schema *ir.Schema, typeName string) bool {
+	for _, worker := range schema.Workers {
+		if worker != nil && worker.BehaviorWorker != nil && worker.BehaviorWorker.Type == typeName {
+			return true
+		}
+	}
+	return false
 }
 
 // armingBehaviors are the behaviors of td's table uses that arm deadlines,

@@ -28,9 +28,15 @@
 // its row. A table whose behaviors arm deadlines gets one plain queue
 // (ir.TypeDef.BehaviorQueue, TicketDeadline, ticket_deadline_queue), each
 // live message a deadline armed on a row, which a @behaviorWorker of an API
-// over the database runs (D53). Both are ordinary types from here on:
-// sqlgen writes them, D27 plans them, and the generators that read a
-// table's behaviors know them by their markers.
+// over the database runs (D53). A table whose writes are heard, by a
+// behavior of its own that hears changes (Timers, Reactions) or by another
+// table's through a relation of it (Reactions' allTerminal over
+// task.project), gets its change queue (TicketChange,
+// ticket_change_queue): a D80 queue keyed by the row's key and serialized,
+// one message per write of a row, whoever makes it, which sqlgen's change
+// trigger writes and the same worker runs. All are ordinary types from
+// here on: sqlgen writes them, D27 plans them, and the generators that
+// read a table's behaviors know them by their markers.
 package behaviorfields
 
 import (
@@ -59,18 +65,21 @@ var builtins = []string{"string", "number", "boolean"}
 // every row it creates, and every other field is optional, absent until a
 // behavior sets it. Each such table is given @optimistic's _version unless
 // it is @versioned, the version the core's change sets hold each row to.
-// Each use's declared sub-tables join the schema as tables, and a table
-// whose behaviors arm deadlines gets its deadline queue. Expand returns
-// the scalars the added fields name, which the loader hydrates from the
+// Each use's declared sub-tables join the schema as tables, a table
+// whose behaviors arm deadlines gets its deadline queue, and a table whose
+// writes are heard gets its change queue after it. Expand returns the
+// scalars the added fields name, which the loader hydrates from the
 // registry.
 //
 // The behaviors' checks have held what Expand relies on
 // (verify.CheckBehaviors, checkTableUses among them): each behavior is
 // registered, names its value field and types its fields, no added field
 // or column is one the table already has, no added type's name is taken,
-// and a table that keeps sub-tables or arms deadlines has one key field. A
-// field or type already added, as an IR read back holds it, is kept, so
-// Expand may run again on its own output.
+// a table that keeps sub-tables, arms deadlines or whose writes are heard
+// has one key field, and a listen's relation is a to-one relation of the
+// table heard to the listening one (checkReactionsConfig). A field or type
+// already added, as an IR read back holds it, is kept, so Expand may run
+// again on its own output.
 func Expand(schema *ir.Schema, reg *registry.Registry) ([]string, error) {
 	if schema == nil || schema.Kind != ir.SchemaKindDB {
 		return nil, nil
@@ -80,21 +89,28 @@ func Expand(schema *ir.Schema, reg *registry.Registry) ([]string, error) {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	heardBy := HeardBy(schema)
 	var scalars []string
 	for _, name := range names {
 		td := schema.Types[name]
-		if td == nil || td.Role != ir.RoleDBTable || len(td.TableBehaviors()) == 0 {
+		if td == nil || td.Role != ir.RoleDBTable || (len(td.TableBehaviors()) == 0 && len(heardBy[name]) == 0) {
 			continue
 		}
-		used, err := expandType(td, reg)
+		var used, added []string
+		if len(td.TableBehaviors()) > 0 {
+			var err error
+			if used, err = expandType(td, reg); err != nil {
+				return nil, err
+			}
+			if added, err = expandStorage(schema, td, reg); err != nil {
+				return nil, err
+			}
+		}
+		heard, err := expandChanges(schema, td, reg, heardBy[name])
 		if err != nil {
 			return nil, err
 		}
-		added, err := expandStorage(schema, td, reg)
-		if err != nil {
-			return nil, err
-		}
-		for _, scalar := range append(used, added...) {
+		for _, scalar := range slices.Concat(used, added, heard) {
 			if !slices.Contains(scalars, scalar) {
 				scalars = append(scalars, scalar)
 			}
@@ -245,6 +261,126 @@ func expandStorage(schema *ir.Schema, td *ir.TypeDef, reg *registry.Registry) ([
 		note(fd.TypeRef.Name)
 	}
 	return scalars, nil
+}
+
+// HeardBy are, for each DB table of schema whose writes another table's
+// behaviors hear through a relation of it (registry.BehaviorListens: a
+// Reactions use's allTerminal and anyTerminal), the tables that hear them,
+// sorted by name, each once (D103): Task's are [Project] when Project's
+// Reactions reads task.project. A use of a table that composes behaviors as
+// a table alone listens; a listen that names no table of schema is left
+// out, which the verification pass refuses.
+func HeardBy(schema *ir.Schema) map[string][]string {
+	if schema == nil {
+		return nil
+	}
+	out := map[string][]string{}
+	for _, name := range sortedNames(schema.Types) {
+		td := schema.Types[name]
+		if td == nil || td.Role != ir.RoleDBTable {
+			continue
+		}
+		for _, use := range td.TableBehaviors() {
+			for _, listen := range registry.BehaviorListens(use.Name, use.Config) {
+				if heard := schema.Types[listen.Type]; heard == nil || heard.Role != ir.RoleDBTable {
+					continue
+				}
+				if !slices.Contains(out[listen.Type], td.Name) {
+					out[listen.Type] = append(out[listen.Type], td.Name)
+				}
+			}
+		}
+	}
+	for name := range out {
+		sort.Strings(out[name])
+	}
+	return out
+}
+
+// Hearing are the behaviors of td's table uses whose declarations hear the
+// table's writes (registry.BehaviorDeclaration.HearsChanges), each once in
+// list order (D103): what its change queue's marker names beside the
+// tables that hear it through a relation.
+func Hearing(td *ir.TypeDef, reg *registry.Registry) []string {
+	var out []string
+	for _, use := range td.TableBehaviors() {
+		if behavior, ok := reg.Behavior(use.Name); ok && behavior.HearsChanges && !slices.Contains(out, use.Name) {
+			out = append(out, use.Name)
+		}
+	}
+	return out
+}
+
+// expandChanges adds td's change queue to schema's types when its writes
+// are heard: by its own behaviors (Hearing) or by the tables heardBy, which
+// listen through a relation of it. It returns the scalars the queue's
+// fields name. A queue already added for the same marker is kept.
+func expandChanges(schema *ir.Schema, td *ir.TypeDef, reg *registry.Registry, heardBy []string) ([]string, error) {
+	hearing := Hearing(td, reg)
+	if len(hearing) == 0 && len(heardBy) == 0 {
+		return nil, nil
+	}
+	who := slices.Clone(hearing)
+	for _, table := range heardBy {
+		who = append(who, table+"'s Reactions")
+	}
+	key := keyField(td)
+	if key == nil {
+		return nil, fmt.Errorf("type %s: its writes are heard (%s), and it has no single key field", td.Name, strings.Join(who, ", "))
+	}
+	queue := changeQueue(td, key, hearing, heardBy)
+	if existing := schema.Types[queue.Name]; existing != nil {
+		if !existing.BehaviorQueue.Same(queue.BehaviorQueue) {
+			return nil, fmt.Errorf("type %s: its writes are heard (%s), whose queue the build adds as %s, which the schema also declares", td.Name, strings.Join(who, ", "), queue.Name)
+		}
+		return nil, nil
+	}
+	schema.Types[queue.Name] = queue
+	var scalars []string
+	for _, fd := range queue.Fields {
+		if !slices.Contains(builtins, fd.TypeRef.Name) && !slices.Contains(scalars, fd.TypeRef.Name) {
+			scalars = append(scalars, fd.TypeRef.Name)
+		}
+	}
+	return scalars, nil
+}
+
+// changeQueue is the queue of the writes of td's rows its behaviors hear,
+// or other tables' through a relation of it (D103): a D80 queue keyed by
+// the row's key and serialized, so one row's messages are claimed one at a
+// time, the head of its line first, its line kept in the order written
+// (sqlutil.QueueSpec.InOrder, which a change queue's statements take from
+// its BehaviorQueue's kind), appended (a write is never folded into
+// another), and pruned at once, its work done. sqlgen's change trigger
+// writes one message per insert, update and delete of a row, whoever makes
+// it; a behavior worker runs it.
+func changeQueue(td *ir.TypeDef, key *ir.FieldDef, hearing, heardBy []string) *ir.TypeDef {
+	return &ir.TypeDef{
+		Name:          behaviorlayout.ChangeQueueTypeName(td.Name),
+		Owner:         td.Owner,
+		Comment:       "The writes of " + td.Name + "'s rows its behaviors hear, one message per write, whoever makes it, which a trigger of the table writes and a behavior worker runs (D103).",
+		Role:          ir.RoleEmbeddedStruct,
+		Origin:        ir.OriginBehavior,
+		BehaviorQueue: &ir.BehaviorQueue{Row: td.Name, Kind: ir.BehaviorQueueChanges, Behaviors: slices.Clone(hearing), HeardBy: slices.Clone(heardBy)},
+		Queue:         &ir.QueueDef{Key: behaviorlayout.ChangeRowKeyField, Serialize: true, Retain: "0s"},
+		Fields: []*ir.FieldDef{
+			{Name: behaviorlayout.ChangeRowKeyField, Description: "The key of the " + td.Name + " row written.", TypeRef: ir.TypeRef{Name: key.TypeRef.Name}, Required: true},
+			{Name: behaviorlayout.ChangeWriteField, Description: "What the write did: insert, update or delete.", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+			{Name: behaviorlayout.ChangeAtField, Description: "When the write was made, in epoch milliseconds, by the database's clock.", TypeRef: ir.TypeRef{Name: "Generic.Int64"}, Required: true},
+			{Name: behaviorlayout.ChangeBeforeField, Description: "The row's columns before the write, by column, as JSON; null for an insert.", TypeRef: ir.TypeRef{Name: "Generic.JSON"}},
+			{Name: behaviorlayout.ChangeAfterField, Description: "The row's columns after the write, by column, as JSON; null for a delete.", TypeRef: ir.TypeRef{Name: "Generic.JSON"}},
+		},
+	}
+}
+
+// sortedNames are types' names, sorted.
+func sortedNames(types map[string]*ir.TypeDef) []string {
+	names := make([]string, 0, len(types))
+	for name := range types {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // subTable is the type of the sub-table table that the use keeps on the

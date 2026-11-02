@@ -3,6 +3,7 @@ package verify
 import (
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -21,8 +22,8 @@ func CheckBehaviorWorkers(schema *ir.Schema, in Input) *Result {
 // each is in an API, names no queue of its own, and names a table of the
 // API's database (its authDb, or its one DB dependency, in.Database) that
 // the API imports from it, which is a table and no engine type, and whose
-// behaviors arm deadlines, so the database holds the queue the worker
-// runs; and an API runs a table's behaviors from one worker. Run runs it
+// behaviors arm deadlines or hear its writes, so the database holds a queue
+// the worker runs; and an API runs a table's behaviors from one worker. Run runs it
 // again after the loader filled each worker's queue, which it does not
 // refuse.
 func checkBehaviorWorkers(schema *ir.Schema, in Input, r *Result) {
@@ -88,8 +89,8 @@ func checkBehaviorWorkers(schema *ir.Schema, in Input, r *Result) {
 		case td.IsEngineType():
 			r.errorf("", "%s: @behaviorWorker names %s, an engine type of %s (D58), whose engine runs its timed work; a behavior worker runs a table's behaviors (D103)", worker.Name, typeName, in.Database.Name)
 			continue
-		case len(armingBehaviors(td, reg)) == 0 || in.Database.BehaviorQueueOf(typeName, ir.BehaviorQueueDeadlines) == nil:
-			r.errorf("", "%s: @behaviorWorker names %s, whose behaviors arm no deadlines, so the worker has nothing to run (D103)", worker.Name, typeName)
+		case !runsDeadlines(td, in.Database, reg) && in.Database.BehaviorQueueOf(typeName, ir.BehaviorQueueChanges) == nil:
+			r.errorf("", "%s: @behaviorWorker names %s, whose behaviors arm no deadlines and hear no writes, so the worker has nothing to run (D103)", worker.Name, typeName)
 			continue
 		}
 		if other, taken := run[typeName]; taken {
@@ -98,6 +99,12 @@ func checkBehaviorWorkers(schema *ir.Schema, in Input, r *Result) {
 		}
 		run[typeName] = worker.Name
 	}
+}
+
+// runsDeadlines reports whether td's behaviors arm deadlines and db holds
+// their queue.
+func runsDeadlines(td *ir.TypeDef, db *ir.Schema, reg *registry.Registry) bool {
+	return len(armingBehaviors(td, reg)) > 0 && db.BehaviorQueueOf(td.Name, ir.BehaviorQueueDeadlines) != nil
 }
 
 // workerTableImportedFrom reports whether the API imports worker's table

@@ -13619,7 +13619,7 @@ This entry records the design before any of it is built.
 |----------|------------------------|
 | A behavior's fields are columns of the type's table (`status`, `status_entered_at`); its collections are sub-tables with a foreign key to the row; its indexes and constraints are DDL (D83). sqlgen writes them, D27 plans them, both ORMs read them, and reports and projections may read them. | Storage the engine creates when a schema is published (D16, D58), outside the migration plan |
 | A behavior's operations are the API's operations: routes, SDK methods and MCP tools the API generators write from the declaration, each handler a call to the adapter. They are authorized as the API's other operations are (D37, D50), and a permission a behavior's config names is one the API's permissions list. D11's invocation policy and D70's confirmed operations carry over. A read that is a query is a declared query (D86); one that applies rules, as `findAvailability` does, is a call of the core that only reads. | The engine's routes mounted beside the API's, with a policy of their own |
-| A trigger the build writes on each table that composes a behavior writes an outbox row per change, whoever makes it, as D80's `@enqueueOnChange` writes a message. Reactions, Rollups and the event stream read the outbox after the commit, and so does the arming of the deadlines a raw write moves, so a raw write is heard, not refused. Since step 3, a write through the core arms and clears its deadlines in the writer's own transaction, from its change set. | Events only from the core's own writes, which an ORM write or a raw one would skip |
+| A trigger the build writes on each table that composes a behavior writes an outbox row per change, whoever makes it, as D80's `@enqueueOnChange` writes a message. Reactions, Rollups and the event stream read the outbox after the commit, and so does the arming of the deadlines a raw write moves, so a raw write is heard, not refused. Since step 3, a write through the core arms and clears its deadlines in the writer's own transaction, from its change set; the outbox is the table's change queue, a D80 queue of its database keyed by the row's key and serialized, and the trigger is on each table whose writes a behavior hears: one that composes a behavior whose declaration hears changes (Timers, Reactions), or that another table's Reactions hears through a to-one relation of it. A table whose behaviors hear nothing (Workflow alone) has none. | Events only from the core's own writes, which an ORM write or a raw one would skip |
 | Deadlines and expiring holds are messages of the table's deadline queue, one per row, use and deadline, which a worker of the API runs (D53); a behavior keeps its state of them in a sub-table of its own (Timers' `deadlines`). Since step 3 the queue, not a sub-table, holds the deadlines: a claim and its completion are a queue's. | `<db>-engine-runner`, a deployable that exists only for the engine; deadlines as rows of a sub-table a worker or a job sweeps (D52), which needs a claim of its own |
 
 ### A runtime project
@@ -13678,9 +13678,12 @@ and Rust's, the TypeScript and Go repositories over them, and the API
 generators' operations of a table whose fields are behaviors. Step 3's
 first half built: deadlines on a table, run by a worker of the API, with
 Timers, and the `implements` form pulled forward from step 5 for the
-core's behaviors alone. Step 3's second half (the outbox trigger, the
-outbox command and Reactions) and steps 4 to 7 are not built. The names
-and rules are reversible until the first release.
+core's behaviors alone. Step 3's second half built: the outbox trigger
+and the change queue it writes, the core's change command and its
+listeners, deadlines that follow a raw write, the worker running both
+queues, a vetoed fire released, and Reactions on the core. Steps 4 to 7
+are not built. The names and rules are reversible until the first
+release.
 - **The core.** `runtime/engine/rust/rules` (`superschematic-rules`)
   depends on serde and serde_json alone and builds for
   wasm32-unknown-unknown. `Core::run(type, command, answers)` returns
@@ -14124,11 +14127,13 @@ and rules are reversible until the first release.
   them. The verification pass refuses a
   worker outside an API, over no database or a table the API's database
   does not declare or the API imports from elsewhere, of an engine type,
-  of a table that arms no deadlines, a second of one table, and `queue`
-  beside it. A table whose deadlines no worker runs is not refused: an API
-  that serves `@behaviorOperations(T)` of a table that arms deadlines and
-  declares no `@behaviorWorker(T)` is warned, and the documentation and the
-  agent skill say why it matters. A worker's image takes the core as its
+  of a table whose behaviors arm no deadlines and hear no writes (since
+  step 3's second half; a table that arms no deadlines before it), a
+  second of one table, and `queue` beside it. A table whose deadlines no
+  worker runs is not refused: an API that serves `@behaviorOperations(T)`
+  of a table with a deadline queue or a change queue and declares no
+  `@behaviorWorker(T)` is warned, and the documentation and the agent
+  skill say why it matters. A worker's image takes the core as its
   API's server does (the rules archive in Go, `@superschematic/rules` in
   TypeScript, the Rust crates by `[paths]`, through the API crate), and
   generated CI stages the archive and builds the package before a
@@ -14152,9 +14157,10 @@ and rules are reversible until the first release.
   first deadline that breaks a rule. Deadlines arm in the core's hooks, for every write through the
   core: the repositories' creates and their updates and deletes of one row
   by its key, the operations and the deadlines. Their bulk and hard writes
-  go around the core and arm nothing (`updateMany`, `deleteMany` and
-  `hardDeleteOne` in TypeScript, `UpdateMany`, `DeleteMany` and
-  `HardDeleteOne` in Go). A config change writes no row, since a build-time
+  go around the core (`updateMany`, `deleteMany` and `hardDeleteOne` in
+  TypeScript, `UpdateMany`, `DeleteMany` and `HardDeleteOne` in Go), and
+  since step 3's second half the table's change queue hears them (below).
+  A config change writes no row, since a build-time
   project's change is a build and the core has no publish hook that writes
   rows: each row's deadlines reconcile at its next write through the core.
   `fireTimer`, `resetTimer` and `snoozeTimer` stay operations.
@@ -14232,18 +14238,325 @@ and rules are reversible until the first release.
   `TestTimersTablesEndToEnd` the TypeScript layout and DDL on bun:sqlite
   and the repository on Postgres. Each language's servergen test plans
   `TicketTimers`' main, holds it to a golden and compiles it.
+- **Step 3, second half: the outbox.** A table whose writes a behavior
+  hears gets a queue in its database, its change queue
+  (`TypeDef.BehaviorQueue` of kind `changes`, `<Type>Change`,
+  `ticket_change_queue`): one message per insert, update and delete of a
+  row, `rowKey`, `write` (`insert`, `update` or `delete`), `at` (epoch
+  milliseconds by the database's clock) and the row's columns `before` and
+  `after` the write as JSON, a D80 queue keyed by `rowKey` with `serialize`
+  and append, so one row's messages are claimed one at a time, and a done
+  message kept no time. Its claim keeps a key's line in the order written
+  (`sqlutil.QueueSpec.InOrder`, a change queue's alone): a key's head is
+  its first written ready message, by `created_at` and ID, due or not, so a
+  message that waits a failure's backoff holds the row's later ones until
+  it runs or is dead, where D80's line takes the first due. A table hears when one of its
+  uses' declarations says `"hearsChanges": true` (Timers and Reactions,
+  each declaration changed by that member alone, and Reactions' by
+  `configSchema.properties.status` too; the engine's parser takes and
+  shifts it out, as it does `armsDeadlines`), or when another table's use
+  listens to it through a to-one relation of it (`registry.BehaviorListens`:
+  Reactions' `allTerminal` and `anyTerminal`), which the queue records as
+  `HeardBy`. sqlgen writes a trigger on the table (`sqlgen/changes.go`), as
+  D80's `@enqueueOnChange` trigger is written: on Postgres a plpgsql
+  function `<table>_changes` and `trg_<table>_changes`, `AFTER INSERT OR
+  UPDATE OR DELETE ... FOR EACH ROW`, each message created and due at one
+  read of `clock_timestamp()`, which its `at` is taken from too, so one
+  row's writes of one transaction keep their order; on SQLite and D1 one
+  trigger per write,
+  `trg_<table>_changes_insert`, `_update` and `_delete`. The image is the
+  columns the layout maps for the core, the own columns and each use's
+  owned columns, a binary, vector or geometric column left out
+  (`behaviorlayout.ImageColumns`; a POINT, GEOGRAPHY or GEOMETRY has no
+  equality on Postgres, so the trigger's comparison of one would fail every
+  write of the table), built with `jsonb_build_object` in calls of at most
+  50 columns joined with `||` on Postgres and `json_object` in calls of at
+  most 16 nested in `json_patch` on SQLite, since D1 caps a function at 32
+  arguments, a BLOB a raw write stored in a column of the image written as
+  its hex, which `json_object` refuses. An insert and a delete always write
+  a message; an update writes one when it moves a column of the image or a
+  soft-deletable table's live column, `deleted_at`
+  (`behaviorlayout.LiveColumn`, which the image leaves out; `IS DISTINCT
+  FROM`, `IS NOT`), so a soft delete and a restore are each heard as an
+  update, the core reading the row as gone or back, while a bump of
+  `_version`, an update of the other audit columns alone or a fire that
+  writes only sub-table rows writes none. The trigger never refuses a
+  write. The migration planner creates, replaces and drops it as
+  it does D80's (the plan cases `add-change-trigger`, `change-change-trigger`
+  and `drop-change-trigger`, in both dialects, with a Postgres check of the
+  trigger's images), and writes no message for the rows already there.
+  The layout names the queue's columns (`changes`) and a to-one relation's
+  own field its relation (`spec.fields[].relation`), and the IR's
+  `Worker.Queues` lists a behavior worker's queues, deadlines first.
+- **The change command.** The core takes a change from the outbox as an
+  action (`Action::Change { key, change }`, `RowChange { write, at,
+  before, after }`, each image a `RowImage` of own fields by name and
+  owned fields by use id and declared name). It runs on the row as it is
+  now: a row that is gone runs no hook and writes `RowWrite::Gone`, which
+  every adapter applies by deleting its deadline messages unless a live row
+  of its key exists and its sub-table rows unless any does; on a row that
+  is there, each use whose declaration hears changes runs `heard`
+  (`Heard::Own`). Then, for each own field that holds a to-one relation
+  (`FieldSpec.relation`), the uses of the target type whose `listens`
+  names the relation run `heard` (`Heard::Linked`) on the rows it holds the
+  key of now, after the write and before it, each once, a target not found
+  passed over. A row a hook writes is fenced to the version read and gets
+  its after-change hooks with `Change::Heard`; a change whose hooks write
+  nothing writes no row. The core gains a read of the rows of a type whose
+  own field holds a key (`ReadRequest::Linked`, a page of `LINKED_PAGE`,
+  500, in key order, live rows alone), which allTerminal pages, and
+  `View::row_of`, `Core::listeners` and `ConfigTarget::declaration`. Every
+  hearing rule is idempotent against a write the core already applied, so
+  a write through the core, heard after its commit as every write is,
+  changes nothing more than the rules it sets off. A key a relation's field
+  holds is read as a command names a row (`key_of`): a string, or a whole
+  number's decimal text, so a relation to a table keyed by a number is
+  heard and moved as one keyed by a UUID. `tests/core.rs` has 44 cases.
+- **Deadlines from raw writes.** Timers hears its row's writes: a heard
+  write runs the reconcile its after-change hook runs (arm each deadline
+  whose fact moved, cancel by `until`, clear one the config no longer
+  names), a raw insert arming a create deadline from the insert's `at`;
+  and a deadline that falls due reconciles its row before it fires, so one
+  whose fact a raw write moved before the write's change ran is armed again
+  at its new time rather than fired on its old arming. A raw SQL write and
+  the repositories' bulk, hard and soft deletes are heard: their deadlines
+  reconcile after the commit, when the worker runs the change, a soft
+  delete's as the row's going. A write through the core lags nothing; it
+  arms and clears in its own transaction. A table whose change queue no worker runs keeps its
+  messages ready, and nothing refuses them. `tests/timers.rs` has 18
+  cases.
+- **The worker runs both queues.** A `@behaviorWorker(T)` runs its table's
+  deadline queue and its change queue, each when the table has it,
+  deadlines first, with no new decorator: Go's generated `<Worker>Queues`
+  returns both for `worker.RunAll`, TypeScript's `<worker>Queues` both for
+  `runWorker`, and Rust's `<stem>_changes` and `run_<stem>_change` sit
+  beside `<stem>_deadlines` and `run_<stem>_deadline`, each run by
+  `worker::run_worker`. Each change handler claims a message and runs the
+  repository's `runChange` (`RunChange(ctx, message, claim)` in Go,
+  `postgres::run_change` in Rust) with the claim, as the worker's caller,
+  in one transaction with the message's completion: the unit deletes the
+  claimed message by its id and token after the fenced row writes. A claim
+  lost runs nothing and logs `change ran nothing`; a refusal or a failure
+  of the database fails the message (D68's backoff, then dead). A table
+  may now have a change queue and no deadlines (`Project` in
+  `fixture-reactions-db`). The verification pass refuses a worker of a
+  table with neither queue (`@behaviorWorker names <T>, whose behaviors
+  arm no deadlines and hear no writes, so the worker has nothing to run`),
+  and warns an API that serves `@behaviorOperations(T)` of a table with
+  either and declares no `@behaviorWorker(T)`, naming what it keeps
+  (`deadlines (Timers) and changes (Timers)`, `changes (Reactions; heard
+  by Project)`), and one that serves `T` whose Reactions hear another table
+  `S` through a relation of it and declares no `@behaviorWorker(S)`, whose
+  change queue carries those writes (`ProjectActions: Project's Reactions
+  hear Task's writes through Task.project, which Task's change queue
+  carries, and ... declares no @behaviorWorker(Task)`). Nothing refuses a table whose change queue no worker runs;
+  its messages wait, as the documentation and the agent skill say.
+  `apigen.BehaviorWorkerOf` is the worker info apigen, tsrestgen and
+  rustrestgen share, and the generators' refusals name what a worker runs
+  by its `Runs`.
+- **A vetoed fire.** With a claim, a deadline command refused `vetoed` (a
+  guard holding the fire) releases the claimed message instead of failing
+  it: ready again, due in `VETOED_RETRY_SECONDS` (60), its claim cleared
+  and the attempt the claim counted given back, nothing of the run
+  applied, in each adapter's deadline run (`RunDeadline`, `runDeadline`,
+  `run_deadline`), which reports it (`vetoed`, with the refusal; `claim
+  lost` when the release finds the claim gone). Its sub-table row stays
+  pending, so Timers' invariant holds, and a fire a guard keeps holding
+  comes back every minute, as the engine's sweep tried it at every run.
+  Without a claim the veto comes back as it is. Each adapter tests it on
+  SQLite and Postgres with a core that vetoes a fire
+  (`TestRunDeadlineReleasesAVetoedFire`, `a vetoed fire is released, due
+  again in a minute, counting no attempt`,
+  `a_vetoed_fire_is_released_counting_no_attempt`).
+- **Reactions on the core.** `rules-behaviors/src/reactions.rs` ports
+  Reactions with the engine's wording, held to D103's test of a behavior in
+  its module doc: it has no state of its own and moves Workflow's through
+  `transition` (`Cx::call` on the row, `Cx::call_on` on another); it has
+  rules over how that state changes, one `when` and one `then` each,
+  acting only where they can; and it recurs, a project done when its tasks
+  are, an escalation when a field moves. A table says `implements
+  Reactions<Project, { rules: [...] }>` (`@superschematic/db`'s carrier,
+  typed by the table; `registry.RulesBehaviors` is Workflow, Reactions,
+  Timers, the core's order and every transcript's). Its whens: `enters`;
+  `changes`, a field of the table by its name (an own field, a relation by
+  its name, a field anchor whose value field it hears), the engine's
+  qualified form taken by the core for the recorded scenarios; and
+  `allTerminal` and `anyTerminal`, whose `schema` names the linking table
+  and `link` its to-one relation to this one (the engine's Links link
+  becomes that relation, `listens`). Its `then` moves this row's Workflow,
+  or with `link` the row a to-one relation of this table holds; a target
+  already in the state, with no transition to it, whose guards veto the
+  move, or gone, and a row whose state or field has moved on, are left as
+  they are, with no refusal. A move refused otherwise (`forbidden`)
+  refuses the change command, which fails its message. `status` names the
+  Workflow it reads where a table has several. Its config checks are
+  hand-written in the engine's words and held to the declaration's
+  configSchema by a test; the cycle check stays; `holds` and `revised` are
+  refused, naming the rule and step 4. The build holds a table's config to
+  the IR (`verify/behaviors_reactions.go`): the fields, the relations, the
+  linking table and the target and their Workflows, a dotted field, a
+  binary, vector or geometric field, Workflow's `enteredAt`. Reactions reads what
+  moved from the write's images, not an event's patch, so a raw SQL write
+  sets a rule off as any write does, and a failure fails one message where
+  the engine halted the subscription. It has no operations: no route, SDK
+  member or MCP tool comes from it, and no repository member (the
+  repositories put none for a use with no operations). `tests/reactions.rs`
+  has 16 cases, a relation to a type keyed by a number among them.
+- **The Reactions replay.** The reference host keeps the outbox: every
+  write of a type whose writes are heard, the core's and a raw one, queues
+  a change, and the replay's `runner.runDue` drains the changes through the
+  core, runs the due deadlines and drains again. An engine Links link with
+  one target maps to a to-one relation field (`<link>Id`), its link and
+  unlink to updates of it; what a table cannot express (a link that holds
+  a list or pins, `holds` and `revised`, the value store, a runner's
+  `maxDepth`, a test's own access policy) is skipped, each with its reason,
+  and so are a define the engine's `requires` check refused, a read of the
+  event log whose log holds a change's write, and every step after a
+  `runDue` whose recording failed (the engine halted that subscription).
+  `core-reactions.json` replays 443 of its 601 steps, 158 skipped, and
+  `core-reactions-changes.json` 65 of its 151, 86 skipped, 0 mismatches,
+  each refusal compared in full, floors 443 and 65;
+  `core-reactions-holds-revised.json` waits for step 4. `core-timers.json`
+  stays at 324 now that Timers hears changes. They are written out as
+  `core-reactions.transcript.json`, 586 steps (110 checks and 476
+  commands, 252 of them changes) in 26 scenarios, and
+  `core-reactions-changes.transcript.json`, 60 steps (12 checks and 48
+  commands, 24 of them changes) in 4, each held to its step count by the
+  stale test; `core-timers.transcript.json` was written again with the
+  changes its sweeps ran, 125 steps (50 checks and 75 commands, 25 of them
+  changes and 10 deadlines, a write heard before a deadline fell due
+  having cancelled one the engine's sweep cancelled as it fired), and
+  `core-workflow.transcript.json` keeps its 96. A change is a command step
+  whose action is `change`, under the step of the `runDue` that ran it,
+  and `expect.others` holds the other rows a change set wrote, which every
+  adapter compares. TypeScript replays the four on bun:sqlite and on
+  Postgres, Go on SQLite and on Postgres, and Rust on rusqlite and on
+  Postgres, each at the four step counts with 0 mismatches.
+- **Reactions' end-to-end tests.** `fixture-reactions-db` holds a `Project`
+  whose status is a Workflow and whose Reactions moves it to done when its
+  tasks are all done with success and to failed when one fails, and a
+  `Task` with `project: Relation<Project>`, a Workflow whose terminal
+  states have outcomes, and Reactions that moves its project to active
+  when it starts and starts it when it is marked urgent.
+  `fixture-reactions-api` serves both tables' operations and runs both
+  tables' workers, each over its change queue alone. Each language's test
+  runs, on Postgres, the generated server through its SDK and both
+  workers' queues in process, through six cases: a task that starts
+  moves its project to active; a project whose tasks are all done moves
+  to done; a task that fails moves its project to failed; a raw SQL write
+  of a task's status is heard and moves its project; a raw SQL write of a
+  task's priority to urgent starts it (its changes rule), which moves its
+  project; and a then whose target has no transition to its state leaves
+  the target as it is and completes the message
+  (`TestReactionsGoServerAndWorkerOnPostgres`,
+  `TestGeneratedReactionsEndToEnd`,
+  `TestRustReactionsOperationsAndWorkerOnPostgres`). Timers' tests gain
+  three: a raw SQL update of a field start re-arms its deadline, a raw SQL
+  delete of a ticket clears its deadline messages, and a repository's bulk
+  update of a field start re-arms its deadline (`updateMany`,
+  `UpdateMany`; Rust, with no repository, the statement one makes); and
+  the Go ORM's `TestTimersTablesOnPostgres` holds a change message that
+  failed holding its row's later one until it runs. The change trigger's
+  Postgres check (`TestChangeTriggerOnPostgres`) holds a soft delete and a
+  restore heard, a POINT column left out of the image, every write of the
+  table with one passing, and one row's messages created in the order
+  written within a transaction.
+  `fixture-timers-db`'s goldens change by its change queues and triggers,
+  and `fixture-workflow-db`'s, whose behaviors hear nothing, stay byte for
+  byte. Each adapter's tests hold the trigger's images converted, the
+  linked read, `Gone` and `runChange` with and without a claim, on SQLite
+  and on Postgres.
 - **Left for later steps.**
   - Refusing writes made in a delete's after-change hooks, which are
     dropped today.
   - `requires` in a declaration.
-  - The outbox trigger, the outbox command, outbox events of a behavior's
-    own and `Reactions` (step 3's second half). Until then a raw SQL
-    write, and the repositories' bulk and hard writes (TypeScript's
-    `updateMany`, `deleteMany` and `hardDeleteOne`, Go's `UpdateMany`,
-    `DeleteMany` and `HardDeleteOne`), arm and clear no deadline: a
-    deadline whose fact such an update moved stays armed at its old time,
-    and a delete of that kind leaves its rows' messages, each of which
-    falls due into `not_found` and is spent as `gone`.
+  - Outbox events of a behavior's own (`Cx::emit`), which the adapters
+    still refuse as internal, and the event stream.
+  - `holds` and `revised` (step 4: Rollups, Revisions and Branches on the
+    core); the build and the core refuse them on a table, and
+    `core-reactions-holds-revised.json` is not replayed.
+  - A member path below a field in a table's changes rule (a JSON field's
+    member, `Timers.deadlines.<name>.fired`): the build takes a field's
+    name alone, and the core the engine's qualified form for the corpus,
+    refusing a field a behavior computes at a read (core-timers' Reactions
+    scenario stops at that define).
+  - A link that holds a list of targets: a Reactions rule reads a to-one
+    relation.
+  - Reactions' declaration still describes `then.link` and
+    `allTerminal.link` as links of the engine's Links; its text is
+    unchanged so the recorded declarations change by new members alone.
+  - A chain of moves across rows that the config's cycle check cannot see
+    (a rule on a project moving its task, whose rule moves the project)
+    runs until a move finds no transition; the engine's runner stopped a
+    chain at its `maxDepth`.
+  - Within one change command a listener reads the linking rows as the
+    host has them, not with the run's own writes; a write the run makes is
+    heard by its own change after the commit. So a task's first change can
+    settle its project when later writes in the queue already finished the
+    task, as the engine's allTerminal read instances as they were.
+  - A listener's move runs as the worker of the table whose write it heard
+    (`TaskReactions` moves a Project), holding that worker's permissions.
+  - On SQLite two writes of one row within a millisecond are claimed in
+    either order: a message's `created_at` is to the millisecond there, and
+    its ID breaks a tie. A message that fails holds its row's later ones
+    until it runs or is dead (D68's retries, about fifteen minutes); once it
+    is dead they run, and an operator's retry of it runs it after them, its
+    `then.link` rules acting on its write's images then.
+  - An update that changes a row's key is heard as an update of its new
+    key; the old key's deadlines stay, each falling due into `gone`. A
+    `TRUNCATE` fires no row trigger and is not heard. A raw write of a
+    sub-table row is not heard (the trigger is on the row's table).
+  - A binary, vector or geometric (POINT, GEOGRAPHY, GEOMETRY) column is
+    left out of a write's image and of the trigger's comparison; the build
+    refuses a changes rule on one, and a write that moves one alone is not
+    heard. SQLite and D1 build an image in
+    `json_object` calls of at most 16 columns nested in `json_patch`,
+    since D1 caps a function at 32 arguments, where Postgres's calls hold
+    50: a null member of the second chunk or a later one is left out of the
+    image, and the adapters read null and absent alike.
+  - The trigger hears writes after it exists: the plan that adds it writes
+    no message for the rows already there, whose deadlines reconcile at
+    their next write.
+  - A restore of a soft-deleted row (its `deleted_at` cleared) is heard as
+    an update of a row that is there, and Timers' reconcile arms a deadline
+    only when its fact moved: the deadlines the soft delete cleared are not
+    armed again until a fact moves or a `resetTimer` arms one, though their
+    sub-table rows stay pending. Re-arming needs the core to know the write
+    restored the row, which the images do not say.
+  - The Postgres trigger function runs with the writer's rights and finds
+    the change queue through the writer's `search_path`, as D80's
+    `@enqueueOnChange` function does: a role that may write the table but
+    not insert into its change queue, or a session whose `search_path` does
+    not reach the queue's schema, has its write refused by the trigger.
+    `SECURITY DEFINER` with the function's `search_path` set, or a
+    schema-qualified queue, would close it for both triggers.
+  - A Reactions target, or a linking table, with several Workflows: a rule
+    moves and reads a type's one Workflow.
+  - A linked read under a lock on SQLite and D1 is refused as `internal`,
+    as a sub-rows read is.
+  - A transcript names the version of the command's own type alone; each
+    adapter's replay runs a command over every type its database has live,
+    each at the version the scenario last made live (a check whose spec
+    equals one of its versions, or a command on it). A recording that
+    publishes a new version of a listener's type with no step on it before
+    a change would replay against the older one; recording each type's
+    live version per step would close it.
+  - The reference host replays a change command at the wall clock's next
+    instant when a scenario's clock is the wall's, as the engine's runner
+    read its clock per event, and the replay skips an `events.read` whose
+    rows' log holds a change's write (core-timers' `until` added by a
+    publish: the writes queued before it are heard under the new version
+    and cancel a deadline before it falls due, where the engine's sweep
+    cancelled it as it fired; the end state matches).
+  - Under `openSqlite` (Bun's `stack dev`) a write's `meta.changes` counts
+    the rows its statement's triggers write, a hearing table's change
+    message and SQLite's `_version` bump among them, so code that reads it
+    after a write of such a table should not expect 1; whether D1's own
+    `meta.changes` does the same is unchecked. The adapters' fences use
+    SQL `changes()`, which counts the statement's own rows.
+  - A generated Rust worker reads a message's `at` as a JSON integer, as
+    the Rust types write `Generic.Int64` today; `deadline_of` and
+    `change_of` would need to take text if that changed.
   - A read under a lock of a kind other than a row or whether a table has
     rows (a sub-table's rows by a condition, a count). A `subRows` read made
     under a lock is refused as `internal` on SQLite and D1, whose batch has
@@ -14255,9 +14568,11 @@ and rules are reversible until the first release.
   - The layout holds only tables that compose a behavior, so
     `Cx::create_row` and `Cx::call_on` reach those tables alone.
   - Typed operations (`behaviortypes.Narrow`), the field types and
-    carriers in `@superschematic/db` (`Workflow<C>`, `Timers<T, C>`) and the
-    build's check of Timers' config against the table
-    (`verify/behaviors_timers.go`) are per-behavior code, as D58's are,
+    carriers in `@superschematic/db` (`Workflow<C>`, `Timers<T, C>`,
+    `Reactions<T, C>`), the build's checks of Timers' and Reactions'
+    configs against the table (`verify/behaviors_timers.go`,
+    `verify/behaviors_reactions.go`) and the listener computation
+    (`registry.BehaviorListens`) are per-behavior code, as D58's are,
     until step 5 derives them from a behavior's class declaration. Until
     then an extension's field behavior has the data forms alone, and the
     build checks Timers' rules that read the IR alone: its other rules
@@ -14274,12 +14589,19 @@ and rules are reversible until the first release.
     The Go ORM leaves out the exported upserts alone, and still writes
     their unexported helpers.
   - A check across a stack that some deployed worker runs each placed
-    table's deadlines: only the API's warning exists.
+    table's deadlines and change queue: only the API's warning exists, and
+    the messages wait.
   - Behavior workers over a database that lists `sqlite` first: a
     TypeScript one is refused, and Go's and Rust's claim on Postgres
     alone (D53). A TypeScript behavior worker an environment places on
     Cloudflare Workers is refused too, since `drain.ts` runs a `@worker`'s
-    handler alone.
+    handler alone. So on SQLite and D1 a hearing table's change queue
+    grows by a message per write, each holding the row's images, that
+    nothing claims or prunes, unbounded where the deadline queue keeps one
+    live message per row, use and deadline (D1 caps a database's size): an
+    operator may delete them, and the writes they held go unheard. The
+    trigger stays there so that a SQLite claim, when it comes, hears every
+    write from the first.
   - A Timers config change rewrites no row: each row's deadlines reconcile
     at its next write through the core, and a pending one keeps the due
     time it was armed with until then, though a new `afterMs` would move
@@ -14294,17 +14616,11 @@ and rules are reversible until the first release.
     deadline's row write as an operation's, `updatedAt`, and `updatedBy`
     only when the ORM or the context has a user, which a worker's has not;
     Rust's stamps none, as its handlers stamp none.
-  - A fire that keeps being refused (a guard's veto, `busy`, a failure of
-    the database) fails its message, which falls due again after D68's
-    backoff and is dead after its last attempt, about fifteen minutes in
-    all. Nothing arms it again: its sub-table row stays pending, so
-    `Timers.deadlines` reports it armed and the core's invariant that a
-    deadline is armed exactly while its row is pending no longer holds,
-    until an operator retries the message (`stack queue retry`) or a
-    caller with the config's permission resets or snoozes it, or its fact
-    moves. The engine's sweep tried a refused fire again at every run. A
-    veto is no failure, and a release of the message with a delay that
-    counts no attempt would keep it armed.
+  - A fire refused for `busy` or a failure of the database fails its
+    message, which falls due again after D68's backoff and is dead after
+    its last attempt; its sub-table row stays pending until an operator
+    retries it or its fact moves. A veto is released (step 3's second half)
+    and comes back every minute for as long as the guard vetoes it.
   - `snoozeTimer`'s `dueAt` is held to an integer of 0 or more, as
     Timers' paramsSchema declares it, with no maximum: one past what an
     adapter stores (JavaScript's 8.64e15 milliseconds, Postgres's
@@ -14318,10 +14634,11 @@ and rules are reversible until the first release.
     claimed) as every D53 queue's, as the queue clients do. A layout that
     keeps deadlines elsewhere than in a D53 queue, a runtime project's
     among them, would name those too.
-  - The engine's own check of a config takes Timers' `status` and ignores
-    it, since the declaration it parses declares it for tables: only the
-    build refuses it on an engine type, so a type the engine defines at run
-    time keeps it unread, until step 7 removes engine types.
+  - The engine's own check of a config takes Timers' and Reactions'
+    `status` and ignores it, since the declaration it parses declares it
+    for tables: only the build refuses it on an engine type, so a type the
+    engine defines at run time keeps it unread, until step 7 removes
+    engine types.
   - The permission catalog lists a use's config permission under each of
     its operations (`tickets.timers` under `fireTimer` too), though only
     `resetTimer` and `snoozeTimer` check it, as the item on the catalog

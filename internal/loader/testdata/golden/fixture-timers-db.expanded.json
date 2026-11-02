@@ -213,6 +213,65 @@
       ],
       "optimistic": true
     },
+    "InvoiceChange": {
+      "name": "InvoiceChange",
+      "owner": "src/tickets.schema.ts",
+      "comment": "The writes of Invoice's rows its behaviors hear, one message per write, whoever makes it, which a trigger of the table writes and a behavior worker runs (D103).",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "rowKey",
+          "description": "The key of the Invoice row written.",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "write",
+          "description": "What the write did: insert, update or delete.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "at",
+          "description": "When the write was made, in epoch milliseconds, by the database's clock.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true
+        },
+        {
+          "name": "before",
+          "description": "The row's columns before the write, by column, as JSON; null for an insert.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          }
+        },
+        {
+          "name": "after",
+          "description": "The row's columns after the write, by column, as JSON; null for a delete.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          }
+        }
+      ],
+      "origin": "behavior",
+      "behaviorQueue": {
+        "row": "Invoice",
+        "kind": "changes",
+        "behaviors": [
+          "Timers"
+        ]
+      },
+      "queue": {
+        "retain": "0s",
+        "key": "rowKey",
+        "serialize": true
+      }
+    },
     "InvoiceDeadline": {
       "name": "InvoiceDeadline",
       "owner": "src/tickets.schema.ts",
@@ -510,6 +569,65 @@
         }
       ],
       "optimistic": true
+    },
+    "TicketChange": {
+      "name": "TicketChange",
+      "owner": "src/tickets.schema.ts",
+      "comment": "The writes of Ticket's rows its behaviors hear, one message per write, whoever makes it, which a trigger of the table writes and a behavior worker runs (D103).",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "rowKey",
+          "description": "The key of the Ticket row written.",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "write",
+          "description": "What the write did: insert, update or delete.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "at",
+          "description": "When the write was made, in epoch milliseconds, by the database's clock.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true
+        },
+        {
+          "name": "before",
+          "description": "The row's columns before the write, by column, as JSON; null for an insert.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          }
+        },
+        {
+          "name": "after",
+          "description": "The row's columns after the write, by column, as JSON; null for a delete.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          }
+        }
+      ],
+      "origin": "behavior",
+      "behaviorQueue": {
+        "row": "Ticket",
+        "kind": "changes",
+        "behaviors": [
+          "Timers"
+        ]
+      },
+      "queue": {
+        "retain": "0s",
+        "key": "rowKey",
+        "serialize": true
+      }
     },
     "TicketDeadline": {
       "name": "TicketDeadline",

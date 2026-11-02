@@ -2,16 +2,22 @@
 
 /*
 The behavior workers of {{ .SchemaName }} (D103): each runs a table's behavior
-queues, whose messages its table's behaviors arm, through the behaviors' core.
-A deadline is claimed from the table's deadline queue as it falls due and run
-through the table's repository (runDeadline) in one transaction with its
-message's completion, as the worker, not as a user, so a deadline re-armed or
-cleared while the worker holds its claim never fires on its old arming, and
-one the fired command arms again survives the completion. The worker's main
-runs each queue with runWorker; the queue's complete does nothing, since the
-handler completes the message in the transaction that runs it. A message the
-handler fails is due again after the queue's backoff, and dead once its
-retries are spent.
+queues through the behaviors' core, as the worker, not as a user: its
+deadline queue, whose messages its table's behaviors arm, and its change
+queue, whose messages its table's trigger writes for each write of a row its
+behaviors hear, whoever makes it. A deadline is claimed as it falls due and
+run through the table's repository (runDeadline) in one transaction with its
+message's completion, so a deadline re-armed or cleared while the worker
+holds its claim never fires on its old arming, one the fired command arms
+again survives the completion, and a fire a guard vetoes releases its
+message, due again a minute on. A change is claimed, one row's in the order
+they were written, and run through the repository (runChange) the same way:
+the core runs the behaviors that hear the write on the row as it is now, so
+a raw SQL write, or a repository's bulk or hard write, is heard after its
+commit. The worker's main runs each queue with runWorker; the queue's
+complete does nothing, since the handler completes the message in the
+transaction that runs it. A message the handler fails is due again after
+the queue's backoff, and dead once its retries are spent.
 */
 
 import type { Pool } from 'pg';
@@ -27,13 +33,19 @@ const {{ .CallerConst }}: CoreCaller = { subject: {{ tsString .Behavior.Subject 
 
 /**
  * The queues of the behavior worker {{ .Name }} (D103): {{ $.Deps.Database }}'s
- * {{ .Behavior.Table }}'s deadlines, each run through the behaviors' core in one
- * transaction with its message's completion, as {{ .CallerConst }}. The
- * worker's main runs each with runWorker.
+ * {{ .Behavior.Table }}'s {{ .QueueKinds }}{{ if and .DeadlineQueueConst .ChangeQueueConst }}, deadlines first{{ end }}, each run through the
+ * behaviors' core in one transaction with its message's completion, as
+ * {{ .CallerConst }}. The worker's main runs each with runWorker.
  */
 export function {{ .QueuesFunc }}(pool: Pool, orm: {{ $.Deps.ORM }}, logger?: Logger): WorkerQueue[] {
+{{- if .DeadlineQueueConst }}
   const deadlines = postgresQueue(pool, {{ .DeadlineQueueConst }});
+{{- end }}
+{{- if .ChangeQueueConst }}
+  const changes = postgresQueue(pool, {{ .ChangeQueueConst }});
+{{- end }}
   return [
+{{- if .DeadlineQueueConst }}
     {
       name: deadlines.name,
       leaseSeconds: deadlines.leaseSeconds,
@@ -54,6 +66,29 @@ export function {{ .QueuesFunc }}(pool: Pool, orm: {{ $.Deps.ORM }}, logger?: Lo
       release: (id, token) => deadlines.release(id, token),
       prune: limit => deadlines.prune(limit),
     },
+{{- end }}
+{{- if .ChangeQueueConst }}
+    {
+      name: changes.name,
+      leaseSeconds: changes.leaseSeconds,
+      claim: async (n, leaseSeconds) =>
+        (await changes.claim(n, leaseSeconds)).map(claim => ({
+          id: claim.id,
+          token: claim.token,
+          attempt: claim.attempt,
+          handle: async () => {
+            const run = await orm.transaction(tx => tx.{{ .Repository }}.runChange(claim.message, { claim: { id: claim.id, token: claim.token }, caller: {{ .CallerConst }} }));
+            if (!run.ran) logger?.info('change ran nothing', { message: claim.id, why: run.why });
+          },
+        })),
+      extend: (id, token, leaseSeconds) => changes.extend(id, token, leaseSeconds),
+      // The handler completes its message in the transaction that runs it.
+      complete: async () => {},
+      fail: (id, token, cause) => changes.fail(id, token, cause),
+      release: (id, token) => changes.release(id, token),
+      prune: limit => changes.prune(limit),
+    },
+{{- end }}
   ];
 }
 {{- end }}

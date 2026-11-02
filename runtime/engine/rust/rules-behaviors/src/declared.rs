@@ -1,9 +1,11 @@
 //! A behavior's declaration as the core reads it (D103), from the file the
 //! compiler registers and the engine embeds
 //! (`runtime/engine/rust/behaviors/declarations`): its name, the fields it
-//! owns and the one that holds a field anchor's value (`value`), its
-//! sub-tables (`tables`: each one's name, key and fields) and whether it
-//! arms deadlines (`armsDeadlines`), its operations and whether each
+//! owns and the one that holds a field anchor's value (`value`), the ones it
+//! computes at a read (a field with no `type`, which no column holds, or a
+//! `volatile` one), its sub-tables (`tables`: each one's name, key and
+//! fields), whether it arms deadlines (`armsDeadlines`) and whether it hears
+//! its row's writes (`hearsChanges`), its operations and whether each
 //! writes, its veto codes, and whether a create gives it parameters (a
 //! createParamsSchema). The file stays the one declaration; the core reads
 //! only what it holds a behavior to, and the rest (descriptions, schemas,
@@ -22,6 +24,12 @@ pub(crate) fn declaration(text: &str) -> Declaration {
     for field in listed(&file, "fields") {
         if let Some(name) = field.get("name").and_then(Value::as_str) {
             declaration = declaration.field(name);
+            // A field no column holds, or one that moves at a read, is one
+            // the behavior computes, which a write of the row does not carry.
+            let volatile = field.get("volatile") == Some(&Value::Bool(true));
+            if field.get("type").is_none() || volatile {
+                declaration = declaration.computed(name);
+            }
         }
     }
     if let Some(value) = file.get("value").and_then(Value::as_str) {
@@ -42,6 +50,10 @@ pub(crate) fn declaration(text: &str) -> Declaration {
     // A behavior arms deadlines only when its file says so.
     if file.get("armsDeadlines") == Some(&Value::Bool(true)) {
         declaration = declaration.arms_deadlines();
+    }
+    // And hears its row's writes only when its file says so.
+    if file.get("hearsChanges") == Some(&Value::Bool(true)) {
+        declaration = declaration.hears_changes();
     }
     for operation in listed(&file, "operations") {
         if let Some(name) = operation.get("name").and_then(Value::as_str) {
@@ -83,7 +95,7 @@ mod tests {
     fn a_file_declares_its_name_fields_operations_and_vetoes() {
         let declared = declaration(
             r#"{"name": "Tally", "description": "x",
-                "fields": [{"name": "count"}, {"description": "no name"}],
+                "fields": [{"name": "count", "type": "integer"}, {"description": "no name"}],
                 "operations": [{"name": "add", "writes": true}, {"name": "peek"}, {"name": "odd", "writes": "yes"}],
                 "vetoes": [{"code": "over_max"}],
                 "createParamsSchema": {"type": "object"}}"#,
@@ -100,8 +112,9 @@ mod tests {
         );
         assert!(!declaration(r#"{"name": "Tally", "createParamsSchema": null}"#).create_params);
         // A file that names its value field declares it.
-        let valued =
-            declaration(r#"{"name": "Tally", "fields": [{"name": "count"}], "value": "count"}"#);
+        let valued = declaration(
+            r#"{"name": "Tally", "fields": [{"name": "count", "type": "integer"}], "value": "count"}"#,
+        );
         assert_eq!(valued, Declaration::new("Tally").value("count"));
         assert_eq!(valued.fields, ["count"]);
         // A file that declares sub-tables and arms deadlines says so.
@@ -117,6 +130,22 @@ mod tests {
                 .arms_deadlines()
         );
         assert!(!declaration(r#"{"name": "Tally", "armsDeadlines": "yes"}"#).arms_deadlines);
+        // A field with no type, or a volatile one, is computed; a file that
+        // hears its row's writes says so.
+        let heard = declaration(
+            r#"{"name": "Tally",
+                "fields": [{"name": "total"}, {"name": "age", "type": "integer", "volatile": true}, {"name": "count", "type": "integer"}],
+                "hearsChanges": true}"#,
+        );
+        assert_eq!(
+            heard,
+            Declaration::new("Tally")
+                .computed("total")
+                .computed("age")
+                .field("count")
+                .hears_changes()
+        );
+        assert!(!declaration(r#"{"name": "Tally", "hearsChanges": 1}"#).hears_changes);
     }
 
     #[test]

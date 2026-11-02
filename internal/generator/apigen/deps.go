@@ -177,9 +177,15 @@ type BehaviorWorkerInfo struct {
 	// Table is the table whose behaviors the worker runs: Ticket.
 	Table string
 
-	// Queues are the table's behavior queues, deadlines first: in batch 5
-	// the deadline queue alone (TicketDeadline).
+	// Queues are the table's behavior queues, deadlines first: its deadline
+	// queue (TicketDeadline) and its change queue (TicketChange), each when
+	// the table has it.
 	Queues []string
+
+	// DeadlineQueue is the deadline queue, "" when its behaviors arm none;
+	// ChangeQueue the change queue, "" when nothing hears its writes.
+	DeadlineQueue string
+	ChangeQueue   string
 
 	// Subject is the subject the worker's commands run as,
 	// ir.BehaviorWorkerSubject(api, worker).
@@ -188,11 +194,80 @@ type BehaviorWorkerInfo struct {
 	// Permissions are the permissions the worker's commands hold.
 	Permissions []string
 
-	// Behaviors are the behaviors whose queues it runs, those of the
-	// table's uses that arm deadlines (Timers), which a generator's
-	// refusal of the worker names; empty when the API's database is not
-	// among the generator's dependencies.
+	// Behaviors are those of the table's uses that arm deadlines (Timers),
+	// which a generator's refusal of the worker names; empty when the
+	// API's database is not among the generator's dependencies.
 	Behaviors []string
+
+	// Hearing are those of the table's uses that hear its writes (Timers,
+	// Reactions), and HeardBy the tables whose behaviors hear them through
+	// a relation (Project), from the change queue's marker; empty when
+	// deps lacks the database.
+	Hearing []string
+	HeardBy []string
+}
+
+// BehaviorWorkerOf is what the @behaviorWorker w of the API schema runs
+// (D103): its table's queues as the loader filled them (w.Queues, else
+// w.Queue), each named a deadline or a change queue by its table
+// (behaviorlayout.DeadlineQueueTypeName, ChangeQueueTypeName, whose rule
+// behaviorQueueName repeats, since the registry imports apigen), the subject
+// and permissions its commands run with, and from its database among deps
+// the behaviors that arm, hear and listen. Nil for a worker that is no
+// behavior worker. apigen, tsrestgen and rustrestgen build their worker
+// info with it.
+func BehaviorWorkerOf(schema *ir.Schema, deps map[string]*ir.Schema, w *ir.Worker) *BehaviorWorkerInfo {
+	if w == nil || w.BehaviorWorker == nil {
+		return nil
+	}
+	bw := w.BehaviorWorker
+	info := &BehaviorWorkerInfo{
+		Table:       bw.Type,
+		Queues:      slices.Clone(w.Queues),
+		Subject:     ir.BehaviorWorkerSubject(schema.Name, w.Name),
+		Permissions: slices.Clone(bw.Permissions),
+	}
+	if len(info.Queues) == 0 && w.Queue != "" {
+		info.Queues = []string{w.Queue}
+	}
+	for _, queue := range info.Queues {
+		switch queue {
+		case behaviorQueueName(bw.Type, ir.BehaviorQueueDeadlines):
+			info.DeadlineQueue = queue
+		case behaviorQueueName(bw.Type, ir.BehaviorQueueChanges):
+			info.ChangeQueue = queue
+		}
+	}
+	info.Behaviors = ArmingBehaviors(schema, deps, bw.Type)
+	if db, _, ok := schema.Database(); ok {
+		if queue := deps[db].BehaviorQueueOf(bw.Type, ir.BehaviorQueueChanges); queue != nil {
+			info.Hearing = slices.Clone(queue.BehaviorQueue.Behaviors)
+			info.HeardBy = slices.Clone(queue.BehaviorQueue.HeardBy)
+		}
+	}
+	return info
+}
+
+// behaviorQueueName is the name of the behavior queue of kind the loader
+// adds for table (D103): behaviorlayout.DeadlineQueueTypeName's
+// TicketDeadline, ChangeQueueTypeName's TicketChange.
+func behaviorQueueName(table, kind string) string {
+	if kind == ir.BehaviorQueueChanges {
+		return table + "Change"
+	}
+	return table + "Deadline"
+}
+
+// Runs names what the worker runs for a generator's refusal: Deadlines()
+// alone, "<Table>'s changes" alone, or "<Table>'s deadlines and changes".
+func (b *BehaviorWorkerInfo) Runs() string {
+	switch {
+	case b.ChangeQueue == "":
+		return b.Deadlines()
+	case b.DeadlineQueue == "":
+		return b.Table + "'s changes"
+	}
+	return b.Table + "'s deadlines and changes"
 }
 
 // Deadlines names the deadlines the worker runs for a generator's
@@ -224,9 +299,9 @@ func ArmingBehaviors(schema *ir.Schema, deps map[string]*ir.Schema, table string
 }
 
 // workersOf reads the API's workers, sorted by name: a behavior worker
-// with its table, its queues (the deadline queue the loader filled), the
-// subject its commands run as and their permissions, the behaviors that
-// arm its deadlines, and no method.
+// with what it runs (BehaviorWorkerOf: its table, its queues as the loader
+// filled them, the subject its commands run as and their permissions, the
+// behaviors that arm and hear) and no method.
 func workersOf(schema *ir.Schema, deps map[string]*ir.Schema) []WorkerInfo {
 	var workers []WorkerInfo
 	for _, worker := range schema.Workers {
@@ -238,15 +313,9 @@ func workersOf(schema *ir.Schema, deps map[string]*ir.Schema) []WorkerInfo {
 			concurrency = ir.DefaultWorkerConcurrency
 		}
 		info := WorkerInfo{Name: worker.Name, Method: goutil.GoPublicIdentifier(worker.Name), Queue: worker.Queue, Concurrency: concurrency}
-		if bw := worker.BehaviorWorker; bw != nil {
+		if worker.BehaviorWorker != nil {
 			info.Method = ""
-			info.Behavior = &BehaviorWorkerInfo{
-				Table:       bw.Type,
-				Queues:      []string{worker.Queue},
-				Subject:     ir.BehaviorWorkerSubject(schema.Name, worker.Name),
-				Permissions: slices.Clone(bw.Permissions),
-				Behaviors:   ArmingBehaviors(schema, deps, bw.Type),
-			}
+			info.Behavior = BehaviorWorkerOf(schema, deps, worker)
 		}
 		workers = append(workers, info)
 	}
@@ -266,8 +335,15 @@ func (w WorkerInfo) QueuesDoc(database string) string {
 	if w.Behavior == nil {
 		return ""
 	}
-	text := fmt.Sprintf("%s are the queues of the behavior worker %s (D103): %s's %s's deadlines, each claimed as it falls due and run through the behaviors' core as the worker, %s, in one transaction with its message's completion. Its main runs them with worker.RunAll; logger, nil for none, logs a message spent with nothing run, its claim lost or its row gone.",
-		w.QueuesFunc(), w.Name, database, w.Behavior.Table, w.Behavior.Subject)
+	kinds := "deadlines"
+	switch {
+	case w.Behavior.ChangeQueue != "" && w.Behavior.DeadlineQueue != "":
+		kinds = "deadlines and changes"
+	case w.Behavior.ChangeQueue != "":
+		kinds = "changes"
+	}
+	text := fmt.Sprintf("%s are the queues of the behavior worker %s (D103): %s's %s's %s, each claimed as it falls due and run through the behaviors' core as the worker, %s, in one transaction with its message's completion. Its main runs them with worker.RunAll; logger, nil for none, logs a message spent with nothing run: its claim lost, its row gone, or its fire vetoed and released.",
+		w.QueuesFunc(), w.Name, database, w.Behavior.Table, kinds, w.Behavior.Subject)
 	var lines []string
 	line := "//"
 	for _, word := range strings.Fields(text) {

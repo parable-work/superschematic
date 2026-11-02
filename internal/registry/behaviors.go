@@ -109,6 +109,11 @@ type BehaviorDeclaration struct {
 	// (superschematic_rules::Cx::arm): a table that composes it gets a
 	// deadline queue, which a @behaviorWorker runs (D103).
 	ArmsDeadlines bool `json:"armsDeadlines,omitempty"`
+	// HearsChanges is true for a behavior that hears the writes of its
+	// table's rows, whoever makes them (superschematic_rules::Behavior::heard):
+	// a table that composes it gets a change queue, which its change
+	// trigger writes and a @behaviorWorker runs (D103).
+	HearsChanges bool `json:"hearsChanges,omitempty"`
 	// Operations are the operations the behavior adds to a type, beside
 	// the create, get, list, update and delete every schema has.
 	Operations []BehaviorOperation `json:"operations,omitempty"`

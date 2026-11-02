@@ -9,7 +9,8 @@ use std::collections::BTreeMap;
 use serde_json::{Map, Value};
 
 use crate::behavior::{
-    Behavior, Change, ConfigError, ConfigTarget, Declaration, GuardRequest, Hook, ValidationRequest,
+    Behavior, Change, ConfigError, ConfigTarget, Declaration, GuardRequest, Heard, Hook, Listen,
+    ValidationRequest,
 };
 use crate::context::{ConfigCx, Cx, View};
 use crate::reads::{Row, SubRow};
@@ -63,6 +64,8 @@ pub(crate) trait Erased: Send + Sync {
     fn operation(&self, scope: Scope<'_>, name: &str, params: &Value) -> Hook<Value>;
     fn deadline(&self, scope: Scope<'_>, name: &str, payload: &Value) -> Hook<()>;
     fn after_change(&self, scope: Scope<'_>, change: &Change<'_>) -> Hook<()>;
+    fn listens(&self, config: &(dyn Any + Send + Sync)) -> Option<Vec<Listen>>;
+    fn heard(&self, scope: Scope<'_>, heard: &Heard<'_>) -> Hook<()>;
     fn read_fields(
         &self,
         config: &(dyn Any + Send + Sync),
@@ -189,6 +192,15 @@ impl<B: Behavior> Erased for Typed<B> {
 
     fn after_change(&self, scope: Scope<'_>, change: &Change<'_>) -> Hook<()> {
         self.0.after_change(&self.cx(scope)?, change)
+    }
+
+    fn listens(&self, config: &(dyn Any + Send + Sync)) -> Option<Vec<Listen>> {
+        let config = config.downcast_ref::<B::Config>()?;
+        Some(self.0.listens(config))
+    }
+
+    fn heard(&self, scope: Scope<'_>, heard: &Heard<'_>) -> Hook<()> {
+        self.0.heard(&self.cx(scope)?, heard)
     }
 
     fn read_fields(

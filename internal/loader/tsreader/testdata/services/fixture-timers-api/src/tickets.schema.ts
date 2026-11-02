@@ -8,7 +8,8 @@ import { Ticket } from "@schemas/fixture-timers-db";
 @requirePermission(["tickets.write"])
 export abstract class TicketActions {}
 
-// Runs Ticket's deadlines as they fall due (D103): the worker
+// Runs Ticket's deadlines as they fall due, and the writes of its rows that
+// Timers hears (D103): the worker
 // fixture-timers-api-ticket-timers.
 @behaviorWorker(Ticket, { concurrency: 2 })
 export abstract class TicketTimers {}

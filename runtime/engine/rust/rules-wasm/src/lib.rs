@@ -22,17 +22,23 @@
 //!   that names a field is held to; a read asks for a row, whether a type
 //!   has rows, a type's live version, or one sub-table's rows of a row
 //!   (`{"kind": "subRows", "type", "key", "useId", "table"}`, answered
-//!   `{"subRows": [{"key", "values"}]}` in key order); and a deadline
-//!   command (`{"kind": "deadline", ...}`) runs only while the host holds
-//!   the deadline armed at its `at`, which the host checks, never the core
-//!   (D103).
+//!   `{"subRows": [{"key", "values"}]}` in key order), or one page of the
+//!   rows of a type whose own field holds a key (`{"kind": "linked", "type",
+//!   "field", "key", "after"?, "limit"}`, answered `{"linked": {"rows":
+//!   [{"key", "row"}], "more"}}` in key order); a deadline command (`{"kind":
+//!   "deadline", ...}`) runs only while the host holds the deadline armed at
+//!   its `at`, which the host checks, never the core (D103); and a change
+//!   command (`{"kind": "change", "key", "change": {"write", "at",
+//!   "before"?, "after"?}}`) runs a write of a row the table's change queue
+//!   holds, whose change set may write the row `{"kind": "gone"}`.
 //! - `declarations`: no input (an empty document, or any), to the
 //!   declaration file of each behavior the core registers, in its order
 //!   (`superschematic_rules_behaviors::DECLARATIONS`): a JSON array of the
 //!   documents the compiler registers, each field's column type, the value
 //!   field, the sub-tables (`tables`: each one's name, key and typed
-//!   fields) and whether it arms deadlines (`armsDeadlines`) among them,
-//!   which a host's tables and deadline queue are made from.
+//!   fields), whether it arms deadlines (`armsDeadlines`) and whether it
+//!   hears its row's writes (`hearsChanges`) among them, which a host's
+//!   tables, deadline queue and change queue are made from.
 //! - `check`: `{"specs": [TypeSpec], "caller"?: Caller, "now"?: number}`, to
 //!   the define check of each spec, in order: a JSON array whose entry is
 //!   null for a spec the core takes and the [`Refusal`] for one it refuses.
@@ -208,13 +214,72 @@ mod tests {
         assert_eq!(files[0]["name"], "Workflow");
         assert_eq!(files[0]["value"], "status");
         assert_eq!(files[0]["fields"][1]["type"], "Temporal.DateTime");
-        assert_eq!(files[1]["name"], "Timers");
-        assert_eq!(files[1]["armsDeadlines"], true);
-        assert_eq!(files[1]["tables"][0]["name"], "deadlines");
-        assert_eq!(files[1]["tables"][0]["key"], "name");
+        assert_eq!(files[1]["name"], "Reactions");
+        assert_eq!(files[1]["hearsChanges"], true);
+        assert_eq!(files[2]["name"], "Timers");
+        assert_eq!(files[2]["armsDeadlines"], true);
+        assert_eq!(files[2]["hearsChanges"], true);
+        assert_eq!(files[2]["tables"][0]["name"], "deadlines");
+        assert_eq!(files[2]["tables"][0]["key"], "name");
         assert_eq!(
-            files[1]["tables"][0]["fields"][3]["type"],
+            files[2]["tables"][0]["fields"][3]["type"],
             "Temporal.DateTime"
+        );
+    }
+
+    // A task whose project field holds a Project's key, and a project whose
+    // Reactions hears its tasks through it.
+    fn task() -> Value {
+        json!({
+            "name": "Task",
+            "uses": [{"behavior": "Workflow", "config": flow(), "anchor": {"field": "status"}}],
+            "fields": [{"name": "projectId", "type": "Identity.UUID", "relation": {"name": "project", "type": "Project"}}]
+        })
+    }
+
+    #[test]
+    fn a_change_of_a_row_asks_for_its_listeners_and_their_linked_rows() {
+        let project = json!({
+            "name": "Project",
+            "uses": [
+                {"behavior": "Workflow", "config": flow(), "anchor": {"field": "status"}},
+                {"behavior": "Reactions", "config": {"rules": [{"when": {"allTerminal": {"schema": "Task", "link": "project"}}, "then": {"transition": "paid"}}]}, "anchor": "type"}
+            ]
+        });
+        let input = json!({
+            "spec": task(),
+            "command": {"caller": {"subject": "worker"}, "now": 2000, "request": "r1",
+                "action": {"kind": "change", "key": "t1", "change": {"write": "update", "at": 2000,
+                    "before": {"own": {"projectId": "p1"}, "owned": {"status": {"status": "draft"}}},
+                    "after": {"own": {"projectId": "p1"}, "owned": {"status": {"status": "paid"}}}}}},
+            "answers": {"reads": [
+                {"request": {"kind": "row", "type": "Task", "key": "t1"},
+                 "answer": {"row": {"own": {"projectId": "p1"}, "owned": {"status": {"status": "paid"}}, "version": 2}}},
+                {"request": {"kind": "spec", "type": "Project"}, "answer": {"spec": project}},
+                {"request": {"kind": "row", "type": "Project", "key": "p1"},
+                 "answer": {"row": {"own": {}, "owned": {"status": {"status": "draft"}}, "version": 1}}}
+            ]}
+        });
+        let (out, ok) = run_json(Op::Run, input.to_string().as_bytes());
+        assert!(ok, "{out}");
+        let step: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            step,
+            json!({"read": [{"kind": "linked", "type": "Task", "field": "projectId", "key": "p1", "limit": 500}]})
+        );
+        // A change of a row that is gone writes it gone.
+        let input = json!({
+            "spec": task(),
+            "command": {"caller": {"subject": "worker"}, "now": 2000, "request": "r1",
+                "action": {"kind": "change", "key": "t2", "change": {"write": "delete", "at": 2000, "before": {}}}},
+            "answers": {"reads": [{"request": {"kind": "row", "type": "Task", "key": "t2"}, "answer": {"row": null}}]}
+        });
+        let (out, ok) = run_json(Op::Run, input.to_string().as_bytes());
+        assert!(ok, "{out}");
+        let step: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            step["done"]["changed"]["rows"],
+            json!([{"kind": "gone", "type": "Task", "key": "t2"}])
         );
     }
 

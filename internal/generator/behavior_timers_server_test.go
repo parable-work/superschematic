@@ -32,6 +32,9 @@ var behaviorTimersCases = []string{
 	"resetTimer and snoozeTimer are refused without the config's permission and run with it",
 	"fireTimer through the SDK fires a due deadline and spends its message",
 	"deleting the row removes its deadlines",
+	"a raw SQL update of a Timers field start re-arms its deadline",
+	"a raw SQL delete of a ticket clears its deadline messages",
+	"a repository's bulk update of a field start re-arms its deadline",
 }
 
 // TestTimersGoServerAndWorkerOnPostgres builds fixture-timers-db and
@@ -41,8 +44,12 @@ var behaviorTimersCases = []string{
 // ORM of fixture-timers-db, called through the generated Go SDK with a test
 // authenticator in front of the routes, as runBehaviorServerTest calls
 // fixture-workflow-api's; and the queues of the generated behavior worker
-// TicketTimers, run in process with worker.RunAll as its main runs them,
-// on the Postgres behaviorServerDatabaseEnv names. It then plans the
+// TicketTimers, its deadline queue and its change queue, run in process
+// with worker.RunAll as its main runs them, on the Postgres
+// behaviorServerDatabaseEnv names: a raw SQL write and a repository's bulk
+// update of a field start are heard through Ticket's change queue, whose
+// trigger create.sql holds, and re-arm the deadline when the worker runs
+// them, and a raw delete clears the row's deadline messages. It then plans the
 // worker's entrypoint over the generated modules and vets it. The module
 // links the core's static archive, which scripts/rules-archive.sh stages;
 // the test skips without it, without the database, and in -short mode.
@@ -118,13 +125,13 @@ func TestTimersGoServerAndWorkerOnPostgres(t *testing.T) {
 		}
 	}
 
-	vetTimersWorkerEntrypoint(t, outputRoot, paths, apiSchema, dbSchema, env)
+	vetBehaviorWorkerEntrypoint(t, outputRoot, paths, apiSchema, dbSchema, env, "timers-stack", "TicketTimers")
 }
 
-// vetTimersWorkerEntrypoint plans the entrypoint of fixture-timers-api's
-// behavior worker TicketTimers over the modules the build wrote under
+// vetBehaviorWorkerEntrypoint plans the entrypoint of api's behavior
+// worker of the class name in stack over the modules the build wrote under
 // outputRoot, as a stack's build plans it, writes it, and vets it.
-func vetTimersWorkerEntrypoint(t *testing.T, outputRoot string, paths naming.LocalPaths, api, db *ir.Schema, env []string) {
+func vetBehaviorWorkerEntrypoint(t *testing.T, outputRoot string, paths naming.LocalPaths, api, db *ir.Schema, env []string, stack, name string) {
 	t.Helper()
 	n := naming.Default()
 	output, err := apigen.Generate(api, apigen.Options{
@@ -141,30 +148,36 @@ func vetTimersWorkerEntrypoint(t *testing.T, outputRoot string, paths naming.Loc
 	output.EnvConfig = &envgen.ConfigOutput{
 		SchemaName: api.Name,
 		EnvConfig:  true,
-		Derived:    []envgen.DerivedField{{Key: "FIXTURE_TIMERS_DB_DATABASE", GoName: "FixtureTimersDbDatabase", Kind: ir.EdgeSQL, Service: db.Name}},
+		Derived: []envgen.DerivedField{{
+			Key:    strings.ToUpper(strings.ReplaceAll(db.Name, "-", "_")) + "_DATABASE",
+			GoName: codegen.ToPascalCase(db.Name) + "Database",
+			Kind:   ir.EdgeSQL, Service: db.Name,
+		}},
 	}
 	implDir := filepath.Join(t.TempDir(), "impl")
 	if err := os.MkdirAll(implDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(implDir, "go.mod"), []byte("module example.com/services/fixture-timers-api/go\n\ngo 1.25\n"), 0o644); err != nil {
+	impl := "example.com/services/" + api.Name + "/go"
+	if err := os.WriteFile(filepath.Join(implDir, "go.mod"), []byte("module "+impl+"\n\ngo 1.25\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	dir := servergen.ServerDir(outputRoot, "timers-stack", "fixture-timers-api-ticket-timers")
+	server := api.Name + "-" + codegen.ToKebabCase(name)
+	dir := servergen.ServerDir(outputRoot, stack, server)
 	in := servergen.Input{
-		Stack:  "timers-stack",
-		Server: "fixture-timers-api-ticket-timers",
+		Stack:  stack,
+		Server: server,
 		Dir:    dir,
 		APIs: []servergen.APIInput{{
 			Output: output,
 			Implementation: servergen.Implementation{
 				Dir:       implDir,
-				Import:    "example.com/services/fixture-timers-api/go",
-				Module:    "example.com/services/fixture-timers-api/go",
+				Import:    impl,
+				Module:    impl,
 				ModuleDir: implDir,
 			},
 		}},
-		Worker: &servergen.WorkerInput{Name: "TicketTimers", GraceSeconds: 8},
+		Worker: &servergen.WorkerInput{Name: name, GraceSeconds: 8},
 		Modules: []servergen.Module{
 			{Path: output.ModulePath, Dir: APIDir(outputRoot, api.Name), Direct: true},
 			{Path: output.TypesModule, Dir: TypesDir(outputRoot, "go", api.Name)},
@@ -175,7 +188,7 @@ func vetTimersWorkerEntrypoint(t *testing.T, outputRoot string, paths naming.Loc
 			{Path: n.SchemaRuntimeGoModule, Dir: paths.SchemaRuntimeGo},
 			{Path: n.SchemaIRGoModule, Dir: paths.SchemaIR},
 			{Path: n.RulesGoModule, Dir: paths.RulesGo},
-			{Path: "example.com/services/fixture-timers-api/go", Dir: implDir, Direct: true},
+			{Path: impl, Dir: implDir, Direct: true},
 		},
 		Naming:         n,
 		RepositoryRoot: testpaths.RepoRoot(t),
@@ -187,7 +200,7 @@ func vetTimersWorkerEntrypoint(t *testing.T, outputRoot string, paths naming.Loc
 		t.Fatalf("plan the worker: %v", err)
 	}
 	if !s.BehaviorWorker() {
-		t.Fatalf("the plan of TicketTimers is no behavior worker's: %+v", s.Worker)
+		t.Fatalf("the plan of %s is no behavior worker's: %+v", name, s.Worker)
 	}
 	if err := servergen.Write(s, dir); err != nil {
 		t.Fatal(err)
@@ -232,6 +245,7 @@ import (
 	orm "example.com/schemas/orm/fixture-timers-db"
 	sdk "example.com/schemas/sdk/go/fixture-timers-api"
 	types "example.com/schemas/types/go/fixture-timers-api"
+	dbtypes "example.com/schemas/types/go/fixture-timers-db"
 )
 
 // authenticate is the test's authenticator, in place of the auth an API
@@ -410,6 +424,24 @@ func TestTimers(t *testing.T) {
 		}
 		return s
 	}
+	// drive runs the worker's queues in process, as its main does, until
+	// done holds or ten seconds pass, polling every 100 ms.
+	drive := func(t *testing.T, done func() bool) {
+		t.Helper()
+		running, stop := context.WithCancel(ctx)
+		stopped := make(chan error, 1)
+		go func() {
+			stopped <- worker.RunAll(running, api.TicketTimersQueues(db, zap.NewNop()), worker.Options{Concurrency: 2, Idle: 100 * time.Millisecond})
+		}()
+		deadline := time.Now().Add(10 * time.Second)
+		for !done() && time.Now().Before(deadline) {
+			time.Sleep(100 * time.Millisecond)
+		}
+		stop()
+		if err := <-stopped; err != nil {
+			t.Fatalf("the worker: %v", err)
+		}
+	}
 
 	_, firstColumn := create(t, "Printer")
 
@@ -427,19 +459,10 @@ func TestTimers(t *testing.T) {
 	})
 
 	t.Run("a due deadline the worker runs moves the status and records the outcome", func(t *testing.T) {
-		running, stop := context.WithCancel(ctx)
-		stopped := make(chan error, 1)
-		go func() {
-			stopped <- worker.RunAll(running, api.TicketTimersQueues(db, zap.NewNop()), worker.Options{Concurrency: 2, Idle: 100 * time.Millisecond})
-		}()
-		deadline := time.Now().Add(10 * time.Second)
-		for status(t, firstColumn) != "escalated" && time.Now().Before(deadline) {
-			time.Sleep(100 * time.Millisecond)
+		if queues := api.TicketTimersQueues(db, zap.NewNop()); len(queues) != 2 || queues[0].Name != "TicketDeadline" || queues[1].Name != "TicketChange" {
+			t.Fatalf("the worker's queues are %d, want TicketDeadline and TicketChange", len(queues))
 		}
-		stop()
-		if err := <-stopped; err != nil {
-			t.Fatalf("the worker: %v", err)
-		}
+		drive(t, func() bool { return status(t, firstColumn) == "escalated" })
 		if got := status(t, firstColumn); got != "escalated" {
 			t.Fatalf("status = %s, want escalated within ten seconds", got)
 		}
@@ -586,6 +609,90 @@ func TestTimers(t *testing.T) {
 		}
 		if rows != 0 || messages != 0 {
 			t.Fatalf("the row left %d sub-table rows and %d messages, want none", rows, messages)
+		}
+	})
+
+	// visiting creates a ticket through the repository whose visit is at
+	// visit, and returns its key in its wire form and in its column's.
+	visiting := func(t *testing.T, title string, visit time.Time) (string, string) {
+		t.Helper()
+		at := dbtypes.TemporalDateTime(visit)
+		row, err := db.GetTicketRepository().CreateOne(ctx, &orm.TicketCreate{Title: title, VisitAt: &at})
+		if err != nil {
+			t.Fatalf("create a ticket: %v", err)
+		}
+		return row.Id.String(), row.Id.ToUUID().String()
+	}
+	// rearmed reports whether remind is armed a day before visit: its
+	// sub-table row due then, and its one live message armed at it.
+	rearmed := func(t *testing.T, column string, visit time.Time) bool {
+		t.Helper()
+		due := visit.UnixMilli() - 86400000
+		remind := read(t, column, "remind")
+		return remind.held && remind.dueAt == due && !remind.fired && live(t, column)["remind"] == [2]int64{due, due}
+	}
+
+	t.Run("a raw SQL update of a Timers field start re-arms its deadline", func(t *testing.T) {
+		visit := time.Now().Add(48 * time.Hour).Truncate(time.Millisecond)
+		_, column := visiting(t, "Visit", visit)
+		if !rearmed(t, column, visit) {
+			t.Fatalf("remind = %+v, %v, want armed a day before the visit at the create", read(t, column, "remind"), live(t, column))
+		}
+		later := visit.Add(24 * time.Hour)
+		if _, err := pool.Exec(ctx, "UPDATE ticket SET visit_at = $2 WHERE id = $1", column, later); err != nil {
+			t.Fatal(err)
+		}
+		drive(t, func() bool { return rearmed(t, column, later) })
+		if !rearmed(t, column, later) {
+			t.Fatalf("remind = %+v, %v, want armed a day before the new visit, %d", read(t, column, "remind"), live(t, column), later.UnixMilli()-86400000)
+		}
+	})
+
+	t.Run("a raw SQL delete of a ticket clears its deadline messages", func(t *testing.T) {
+		visit := time.Now().Add(96 * time.Hour).Truncate(time.Millisecond)
+		_, column := visiting(t, "Gone", visit)
+		messages := func() int {
+			var n int
+			if err := pool.QueryRow(ctx, "SELECT count(*) FROM ticket_deadline_queue WHERE row_key = $1", column).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			return n
+		}
+		if n := messages(); n != 2 {
+			t.Fatalf("the ticket has %d deadline messages, want respond's and remind's", n)
+		}
+		if _, err := pool.Exec(ctx, "DELETE FROM ticket WHERE id = $1", column); err != nil {
+			t.Fatal(err)
+		}
+		drive(t, func() bool { return messages() == 0 })
+		if n := messages(); n != 0 {
+			t.Fatalf("the deleted ticket keeps %d deadline messages, want none", n)
+		}
+	})
+
+	t.Run("a repository's bulk update of a field start re-arms its deadline", func(t *testing.T) {
+		visit := time.Now().Add(48 * time.Hour).Truncate(time.Millisecond)
+		a, aColumn := visiting(t, "Visit A", visit)
+		b, bColumn := visiting(t, "Visit B", visit)
+		var ids []dbtypes.IdentityUUID
+		for _, key := range []string{a, b} {
+			id, err := dbtypes.ParseIdentityUUID(key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ids = append(ids, id)
+		}
+		later := dbtypes.TemporalDateTime(visit.Add(24 * time.Hour))
+		n, err := db.GetTicketRepository().UpdateMany(ctx, &orm.TicketFilter{Id: &orm.UUIDFilter{In: ids}}, &orm.TicketUpdate{VisitAt: &later})
+		if err != nil || n != 2 {
+			t.Fatalf("UpdateMany = %d, %v, want the two tickets", n, err)
+		}
+		at := time.Time(later)
+		drive(t, func() bool { return rearmed(t, aColumn, at) && rearmed(t, bColumn, at) })
+		for _, column := range []string{aColumn, bColumn} {
+			if !rearmed(t, column, at) {
+				t.Fatalf("remind of %s = %+v, %v, want armed a day before the new visit", column, read(t, column, "remind"), live(t, column))
+			}
 		}
 	})
 }

@@ -1,6 +1,7 @@
 package sqlgen
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/pgtest"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // runPGCheck copies testdata/pgcheck to a temporary module and runs its
@@ -170,6 +172,44 @@ func TestTimersTablesCreateSQLOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	runPGCheck(t, "TestTimersTablesOnPostgres",
+		"PGCHECK_DATABASE_URL="+dsn,
+		"PGCHECK_SQL_DIR="+sqlDir,
+	)
+}
+
+// TestChangeTriggerCreateSQLOnPostgres applies the create.sql and drop.sql
+// generated for fixture-reactions-db, whose tables' writes their behaviors
+// hear (D103), with Task given an updatedAt audit field, a deletedAt one
+// that makes it soft-deletable, a location stored as a POINT and sixty
+// more own fields, so its change trigger's image passes one
+// jsonb_build_object call, to a real Postgres; testdata/pgcheck's
+// TestChangeTriggerOnPostgres holds the checks. Set
+// SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL as for
+// TestProjectionMigrationsOnPostgres.
+func TestChangeTriggerCreateSQLOnPostgres(t *testing.T) {
+	dsn := os.Getenv("SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set SUPERSCHEMATIC_SQLGEN_TEST_DATABASE_URL to apply fixture-reactions-db's create.sql and drop.sql against Postgres")
+	}
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-reactions-db"))
+	if err != nil {
+		t.Fatalf("load fixture-reactions-db: %v", err)
+	}
+	withSoftDeleteAndPoint(schema)
+	task := schema.Types["Task"]
+	task.Fields = append(task.Fields, &ir.FieldDef{Name: "updatedAt", TypeRef: ir.TypeRef{Name: "Temporal.DateTime"}})
+	for i := 1; i <= 60; i++ {
+		task.Fields = append(task.Fields, &ir.FieldDef{Name: fmt.Sprintf("extra%02d", i), SQLName: fmt.Sprintf("extra_%02d", i), TypeRef: ir.TypeRef{Name: "string"}})
+	}
+	output, err := Generate(schema, Options{SchemaName: "fixture-reactions-db"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDir := t.TempDir()
+	if err := WriteDDL(output, sqlDir); err != nil {
+		t.Fatal(err)
+	}
+	runPGCheck(t, "TestChangeTriggerOnPostgres",
 		"PGCHECK_DATABASE_URL="+dsn,
 		"PGCHECK_SQL_DIR="+sqlDir,
 	)

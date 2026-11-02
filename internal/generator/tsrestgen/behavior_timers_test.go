@@ -23,7 +23,7 @@ import (
 // timersAPI is the API that serves fixture-timers-db's Ticket (D103): its
 // status's and its Timers' operations under TicketActions, which needs
 // tickets.write, and the behavior worker TicketTimers, which runs its
-// deadlines.
+// deadlines and its changes.
 const timersAPI = "fixture-timers-api"
 
 // timersDB is fixture-timers-api's database, its one DB dependency.
@@ -109,10 +109,11 @@ func TestWriteAPIGoldenBehaviorTimers(t *testing.T) {
 
 // TestGenerateBehaviorWorker: a behavior worker (D103) is the generator's,
 // not the implementation's. It has no method of Workers and no queue
-// deps.ts imports; its handler is behavior-workers.ts's, which builds its
-// queues over the database's repositories as the worker's subject. A
-// type-anchored use's operations call the repository under the behavior's
-// member, ticket.timers.fireTimer.
+// deps.ts imports; its handlers are behavior-workers.ts's, which builds its
+// queues, the table's deadline queue and its change queue (Timers hears
+// Ticket's writes), over the database's repositories as the worker's
+// subject. A type-anchored use's operations call the repository under the
+// behavior's member, ticket.timers.fireTimer.
 func TestGenerateBehaviorWorker(t *testing.T) {
 	output := generateTimersFixture(t)
 	if !output.TableBehaviors || !output.HasBehaviors() || !output.HasBehaviorWorkers() || output.HasWorkers() {
@@ -123,12 +124,19 @@ func TestGenerateBehaviorWorker(t *testing.T) {
 		t.Fatalf("behavior workers = %+v", workers)
 	}
 	w := workers[0]
-	want := apigen.BehaviorWorkerInfo{Table: "Ticket", Queues: []string{"TicketDeadline"}, Subject: "fixture-timers-api/TicketTimers"}
-	if w.Name != "TicketTimers" || w.Method != "" || w.Queue != "TicketDeadline" || w.Concurrency != 2 || w.Behavior.Table != want.Table || !slices.Equal(w.Behavior.Queues, want.Queues) || w.Behavior.Subject != want.Subject || len(w.Behavior.Permissions) != 0 {
-		t.Errorf("TicketTimers = %+v, behavior %+v", w, *w.Behavior)
+	want := apigen.BehaviorWorkerInfo{Table: "Ticket", Queues: []string{"TicketDeadline", "TicketChange"}, DeadlineQueue: "TicketDeadline", ChangeQueue: "TicketChange", Subject: "fixture-timers-api/TicketTimers"}
+	b := w.Behavior
+	if w.Name != "TicketTimers" || w.Method != "" || w.Queue != "TicketDeadline" || w.Concurrency != 2 || b.Table != want.Table || !slices.Equal(b.Queues, want.Queues) || b.DeadlineQueue != want.DeadlineQueue || b.ChangeQueue != want.ChangeQueue || b.Subject != want.Subject || len(b.Permissions) != 0 {
+		t.Errorf("TicketTimers = %+v, behavior %+v", w, *b)
 	}
-	if w.QueuesFunc() != "ticketTimersQueues" || w.CallerConst() != "ticketTimersCaller" || w.Repository() != "ticket" || w.DeadlineQueueConst() != "ticketDeadlineQueue" {
-		t.Errorf("TicketTimers' names: %s, %s, %s, %s", w.QueuesFunc(), w.CallerConst(), w.Repository(), w.DeadlineQueueConst())
+	if !slices.Equal(b.Behaviors, []string{"Timers"}) || !slices.Equal(b.Hearing, []string{"Timers"}) || len(b.HeardBy) != 0 {
+		t.Errorf("TicketTimers' behaviors: arming %v, hearing %v, heard by %v", b.Behaviors, b.Hearing, b.HeardBy)
+	}
+	if w.QueuesFunc() != "ticketTimersQueues" || w.CallerConst() != "ticketTimersCaller" || w.Repository() != "ticket" || w.DeadlineQueueConst() != "ticketDeadlineQueue" || w.ChangeQueueConst() != "ticketChangeQueue" || w.QueueKinds() != "deadlines and changes" {
+		t.Errorf("TicketTimers' names: %s, %s, %s, %s, %s, %s", w.QueuesFunc(), w.CallerConst(), w.Repository(), w.DeadlineQueueConst(), w.ChangeQueueConst(), w.QueueKinds())
+	}
+	if consts := output.BehaviorQueueConsts(); !slices.Equal(consts, []string{"ticketChangeQueue", "ticketDeadlineQueue"}) {
+		t.Errorf("behavior-workers.ts imports %v", consts)
 	}
 	if queues := output.WorkerQueues(); len(queues) != 0 {
 		t.Errorf("deps.ts imports the queues %v, which no @worker handles", queues)
@@ -177,10 +185,9 @@ func TestGenerateBehaviorWorker(t *testing.T) {
 }
 
 // TestBehaviorWorkerNeedsTheRepositories: a behavior worker runs its
-// table's deadlines through Deps.orm, on Postgres, so Deps over a
-// database that lists sqlite first, or without the repositories, is
-// refused, naming the worker, the table and the behaviors that arm its
-// deadlines, as the database's load marked its deadline queue.
+// table's deadlines and changes through Deps.orm, on Postgres, so Deps
+// over a database that lists sqlite first, or without the repositories, is
+// refused, naming the worker, the table and what it runs.
 func TestBehaviorWorkerNeedsTheRepositories(t *testing.T) {
 	for name, tc := range map[string]struct {
 		deps DepsInfo
@@ -188,11 +195,11 @@ func TestBehaviorWorkerNeedsTheRepositories(t *testing.T) {
 	}{
 		"sqlite first": {
 			DepsInfo{Database: timersDB, Dialect: SQLiteDialect, ORM: "FixtureTimersDbOrm", DatabaseTypesPackage: "@schemas/fixture-timers-db-types"},
-			"tsrestgen: worker TicketTimers runs Ticket's deadlines, which Timers arms, and fixture-timers-db lists sqlite first: the TypeScript repositories run behaviors on Postgres alone (D103)",
+			"tsrestgen: worker TicketTimers runs Ticket's deadlines and changes, and fixture-timers-db lists sqlite first: the TypeScript repositories run behaviors on Postgres alone (D103)",
 		},
 		"no TypeScript types": {
 			DepsInfo{Database: timersDB, Dialect: "postgres"},
-			"tsrestgen: worker TicketTimers runs Ticket's deadlines, which Timers arms, through the repositories fixture-timers-db's TypeScript types export for Postgres (D103); enable outputs.types.typescript in fixture-timers-db's config",
+			"tsrestgen: worker TicketTimers runs Ticket's deadlines and changes, through the repositories fixture-timers-db's TypeScript types export for Postgres (D103); enable outputs.types.typescript in fixture-timers-db's config",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -243,7 +250,9 @@ func TestGeneratedTimersAPICompiles(t *testing.T) {
 
 // timersCases are the cases behavior_timers_runtime.test.ts runs, by
 // name: D103's Timers scenario, which the Go and Rust servers and workers
-// run too, and the MCP endpoint's, which only the TypeScript server serves.
+// run too, with the writes past the core its change queue hears (cases 6
+// to 8 of D103's end-to-end tests), and the MCP endpoint's, which only the
+// TypeScript server serves.
 var timersCases = []string{
 	"a create arms the deadline: its sub-table row and its queue message with its due time",
 	"a due deadline the worker runs moves the status and records the outcome",
@@ -251,6 +260,9 @@ var timersCases = []string{
 	"a re-armed deadline does not fire on its old arming",
 	"resetTimer and snoozeTimer are refused without the config's permission and run with it",
 	"fireTimer through the SDK fires a due deadline and spends its message",
+	"a raw SQL update of a Timers field start re-arms its deadline",
+	"a raw SQL delete of a ticket clears its deadline messages",
+	"a repository's bulk update of a field start re-arms its deadline",
 	"deleting the row removes its deadlines",
 	"the MCP tool ticket_timers_fire_timer is listed with its schema, and calling it runs the operation",
 }

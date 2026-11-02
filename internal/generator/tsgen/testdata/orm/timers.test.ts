@@ -15,9 +15,12 @@
 // status that leaves the state cancels it; a due deadline runs through
 // runDeadline, with a worker's claim, which its unit completes, or without
 // one; a claim a re-arm or a clear took is lost; a row deleted past the
-// repository leaves a message the run completes as gone; and deleting the
-// row removes its deadlines. No case waits for a deadline: runDeadline runs
-// one at the time it was armed to fall due at when the clock is behind it.
+// repository leaves a message the run completes as gone; deleting the row
+// removes its deadlines; and a raw SQL write of visitAt is heard: the
+// table's trigger writes a message of its change queue, in each dialect's
+// JSON, which runChange runs with a worker's claim, re-arming remind (D103).
+// No case waits for a deadline: runDeadline runs one at the time it was
+// armed to fall due at when the clock is behind it.
 import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -29,9 +32,11 @@ import {
   readRow,
   readSubRows,
   runCreate,
+  runChange,
   runDeadline,
   runDelete,
   sqliteRulesStore,
+  type ChangeRun,
   type CoreCaller,
   type CoreSubRow,
   type DeadlineClaim,
@@ -44,6 +49,7 @@ import { alice, database, dsn } from './harness';
 
 const ticket = layout.types.Ticket!;
 const deadlines = ticket.deadlines!;
+const changes = ticket.changes!;
 const subTable = ticket.uses.find(use => use.id === 'Timers')!.tables!.find(sub => sub.name === 'deadlines')!;
 
 /** A message of a ticket's deadlines as a case reads it, every state: its name, the time it was armed at, its state and its due time in epoch milliseconds. */
@@ -56,6 +62,16 @@ interface Message {
 }
 
 const millis = (value: unknown): number => (value instanceof Date ? value.getTime() : typeof value === 'number' ? value : Date.parse(String(value)));
+
+/** A message of a ticket's change queue as its trigger wrote it. */
+interface ChangeMessage {
+  readonly id: string;
+  readonly rowKey: string;
+  readonly write: string;
+  readonly at: number | string;
+  readonly before: unknown;
+  readonly after: unknown;
+}
 
 /** What a case runs through: on Postgres the generated repository, on bun:sqlite the adapter over the generated layout. */
 interface Tables {
@@ -73,9 +89,22 @@ interface Tables {
   messages(key: string): Promise<Message[]>;
   /** Claims the ticket's ready message of a deadline as a worker's claim does: claimed, under a new token. */
   claim(key: string, name: string): Promise<DeadlineClaim>;
+  /** Runs a message of the change queue, as a worker's handler does. */
+  runChange(message: ChangeMessage, claim?: DeadlineClaim): Promise<ChangeRun>;
   /** A write past the repository and the adapter, its placeholders $1, $2, ... */
   raw(text: string, values: readonly unknown[]): Promise<number>;
+  /** A read past the repository and the adapter, its placeholders $1, $2, ... */
+  query(text: string, values: readonly unknown[]): Promise<Record<string, unknown>[]>;
   close(): Promise<void>;
+}
+
+/** The ticket's change messages, every state, from a query of a dialect. */
+async function changesOf(query: (text: string, values: readonly unknown[]) => Promise<Record<string, unknown>[]>, rowKey: string): Promise<ChangeMessage[]> {
+  const rows = await query(
+    `SELECT id, "${changes.rowKey}" AS row_key, "${changes.write}" AS write, "${changes.at}" AS at, "${changes.before}" AS before, "${changes.after}" AS after FROM "${changes.table}" WHERE "${changes.rowKey}" = $1`,
+    [rowKey]
+  );
+  return rows.map(row => ({ id: String(row.id), rowKey: String(row.row_key), write: String(row.write), at: row.at as number | string, before: row.before, after: row.after }));
 }
 
 /** The ticket's messages, from a query of a dialect. */
@@ -110,6 +139,7 @@ async function sqliteTables(): Promise<Tables> {
     },
     delete: key => runDelete(host, 'Ticket', key, caller),
     runDeadline: (key, message, claim) => runDeadline(host, 'Ticket', { key, useId: 'Timers', name: message.name, at: message.at, payload: null }, caller, { claim }),
+    runChange: (message, claim) => runChange(host, 'Ticket', { key: message.rowKey, write: message.write, at: message.at, before: message.before, after: message.after }, caller, { claim }),
     subRows: key => readSubRows(host, 'Ticket', key, 'Timers', 'deadlines'),
     messages: key => messagesOf(query, rowKey(key)),
     async claim(key, name) {
@@ -119,8 +149,13 @@ async function sqliteTables(): Promise<Tables> {
       return { id: String(row!.id), token };
     },
     async raw(text, values) {
-      return (await db.prepare(sql(text)).bind(...(values as never[])).run()).meta.changes;
+      await db.prepare(sql(text)).bind(...(values as never[])).run();
+      // The rows the statement itself changed, which SQLite's changes()
+      // counts without its triggers' (the change queue's insert, D103).
+      const [row] = (await db.prepare('SELECT changes() AS n').all()).results;
+      return Number(row!.n);
     },
+    query,
     async close() {
       db.close();
       rmSync(dir, { recursive: true, force: true });
@@ -144,6 +179,7 @@ async function postgresTables(): Promise<Tables> {
     operate: (key, use, operation, params, caller) => (orm.ticket as any)[use][operation](key, params, caller ? { caller } : undefined),
     delete: key => orm.ticket.deleteOne(key),
     runDeadline: (key, message, claim) => orm.ticket.runDeadline({ rowKey: key, useId: 'Timers', name: message.name, at: message.at, payload: null }, { claim }),
+    runChange: (message, claim) => orm.ticket.runChange({ rowKey: message.rowKey as never, write: message.write, at: message.at, before: message.before, after: message.after }, { claim }),
     async subRows(key) {
       // No repository reads a sub-table (D103): SQL does.
       const rows = await query(`SELECT * FROM "${subTable.table}" WHERE "${subTable.row}" = $1 ORDER BY "${subTable.key.column}"`, [uuidText(key)]);
@@ -167,6 +203,7 @@ async function postgresTables(): Promise<Tables> {
     async raw(text, values) {
       return (await db.pool.query(text, [...values])).rowCount ?? 0;
     },
+    query,
     close: () => db.drop(),
   };
 }
@@ -188,6 +225,8 @@ const dialects: { readonly name: string; readonly skip: boolean; readonly open: 
 
 /** The live messages of a ticket: ready or claimed. */
 const live = (messages: Message[]) => messages.filter(message => message.state === 'ready' || message.state === 'claimed');
+
+const DAY = 86_400_000;
 
 for (const dialect of dialects) {
   describe.skipIf(dialect.skip)(dialect.name, () => {
@@ -266,6 +305,35 @@ for (const dialect of dialects) {
       const run = await t.runDeadline(key, message!, claim);
       expect(run).toMatchObject({ ran: false, why: 'gone', refusal: { code: 'not_found' } });
       expect(await t.messages(key)).toEqual([]);
+    });
+
+    test(`a raw SQL write of a field start is heard: its trigger's message, run through runChange with a claim, re-arms the deadline, on ${dialect.name}`, async () => {
+      const key = await t.create({ title: 'Boiler' });
+      const visit = Date.now() + 2 * DAY;
+      const at = t.dialect === 'Postgres' ? new Date(visit) : new Date(visit).toISOString();
+      expect(await t.raw(`UPDATE ticket SET visit_at = $2 WHERE id = $1`, [uuidText(key), at])).toBe(1);
+      const written = await changesOf(t.query, uuidText(key));
+      expect(written.map(message => message.write).sort()).toEqual(['insert', 'update']);
+      const insert = written.find(message => message.write === 'insert')!;
+      const update = written.find(message => message.write === 'update')!;
+      // The raw write's, claimed as a worker claims it: remind is armed a day
+      // before the visit, and the unit completes the message.
+      const token = crypto.randomUUID();
+      expect(await t.raw(`UPDATE "${changes.table}" SET state = 'claimed', claim_token = $1, attempts = attempts + 1 WHERE id = $2`, [token, update.id])).toBe(1);
+      expect((await t.runChange(update, { id: update.id, token })).ran).toBe(true);
+      const rows = Object.fromEntries((await t.subRows(key)).map(row => [row.key, row.values ?? {}]));
+      expect(rows.remind).toMatchObject({ dueAt: visit - DAY, fired: false });
+      const armed = [
+        ['remind', visit - DAY],
+        ['respond', rows.respond!.dueAt as number],
+      ];
+      expect(live(await t.messages(key)).map(message => [message.name, message.at])).toEqual(armed);
+      // The create's, the core's own write heard after the row moved on, is
+      // run on the row as it is now, which the reconcile has already met.
+      expect((await t.runChange(insert)).ran).toBe(true);
+      expect(Object.fromEntries((await t.subRows(key)).map(row => [row.key, row.values ?? {}]))).toEqual(rows);
+      expect(live(await t.messages(key)).map(message => [message.name, message.at])).toEqual(armed);
+      expect((await changesOf(t.query, uuidText(key))).map(message => message.id)).not.toContain(update.id);
     });
 
     test(`deleting the row removes its deadlines, on ${dialect.name}`, async () => {

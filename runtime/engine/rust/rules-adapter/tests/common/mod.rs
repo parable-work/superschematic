@@ -9,10 +9,12 @@
 
 use serde_json::{json, Value};
 use superschematic_rules::{
-    Behavior, ConfigError, ConfigTarget, Cx, Declaration, Hook, Refusal, UseSpec,
+    Behavior, ConfigError, ConfigTarget, Cx, Declaration, GuardRequest, Heard, Hook, Refusal,
+    UseSpec, Veto, View,
 };
 use superschematic_rules_adapter::{
-    Column, Convert, Deadlines, Layout, Operation, OwnedField, Table, TypeSpec, Use,
+    Changes, Column, Convert, Deadlines, Layout, Live, Operation, OwnedField, SubTable, Table,
+    TypeSpec, Use,
 };
 
 /// The variable that names the Postgres the tests run against; the
@@ -198,6 +200,92 @@ pub fn deadline_queue_ddl(postgres: bool, table: &str, row_key_type: &str) -> Ve
     ]
 }
 
+/// A change queue's table in a dialect (D103), as sqlgen writes the queue
+/// the loader adds for a table its behaviors hear: its message's columns
+/// (`row_key` of `row_key_type`, the row table's key's), the queue's own,
+/// and an `id` with the dialect's UUID default, since the trigger's insert
+/// names none.
+pub fn change_queue_ddl(postgres: bool, table: &str, row_key_type: &str) -> Vec<String> {
+    let t = column_types(postgres);
+    let (uuid, now) = if postgres {
+        ("UUID DEFAULT gen_random_uuid()", "CURRENT_TIMESTAMP")
+    } else {
+        (
+            "TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+            "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+        )
+    };
+    let token = if postgres { "UUID" } else { "TEXT" };
+    vec![
+        format!(
+            "CREATE TABLE \"{table}\" (id {uuid} NOT NULL PRIMARY KEY, row_key {row_key_type} NOT NULL, \"write\" TEXT NOT NULL, at BIGINT NOT NULL, \"before\" {json}, \"after\" {json}, state TEXT DEFAULT 'ready' NOT NULL, attempts INTEGER DEFAULT 0 NOT NULL, due_at {timestamp} DEFAULT {now} NOT NULL, claim_expires_at {timestamp}, claim_token {token}, last_error TEXT, created_at {timestamp} DEFAULT {now} NOT NULL, updated_at {timestamp} DEFAULT {now} NOT NULL)",
+            json = t.json,
+            timestamp = t.timestamp,
+        ),
+        format!("CREATE INDEX \"{table}_row\" ON \"{table}\" (row_key)"),
+    ]
+}
+
+/// A table's change trigger in a dialect (D103), as the contract of sqlgen
+/// writes it: on Postgres a function and an AFTER INSERT OR UPDATE OR
+/// DELETE trigger, on SQLite a trigger per write, each inserting a message
+/// of the queue with the write, the database's clock in epoch milliseconds
+/// and the row's image before and after it, JSON by column of `image`; an
+/// update that moves no column of the image writes none.
+pub fn change_trigger_ddl(postgres: bool, table: &str, queue: &str, image: &[&str]) -> Vec<String> {
+    let object = |row: &str| {
+        let members: Vec<String> = image
+            .iter()
+            .map(|column| format!("'{column}', {row}.\"{column}\""))
+            .collect();
+        let call = if postgres {
+            "jsonb_build_object"
+        } else {
+            "json_object"
+        };
+        format!("{call}({})", members.join(", "))
+    };
+    let moved = |not: &str| {
+        image
+            .iter()
+            .map(|column| format!("OLD.\"{column}\" {not} NEW.\"{column}\""))
+            .collect::<Vec<_>>()
+            .join(" OR ")
+    };
+    let columns = "(\"row_key\", \"write\", \"at\", \"before\", \"after\"";
+    if postgres {
+        let at = "floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint";
+        return vec![
+            format!(
+                "CREATE OR REPLACE FUNCTION \"{table}_changes\"() RETURNS trigger AS $$\nBEGIN\n  IF TG_OP = 'UPDATE' AND NOT ({moved}) THEN\n    RETURN NULL;\n  END IF;\n  IF TG_OP = 'INSERT' THEN\n    INSERT INTO \"{queue}\" {columns}, \"due_at\")\n    VALUES (NEW.\"id\", 'insert', {at}, NULL, {new}, clock_timestamp());\n  ELSIF TG_OP = 'UPDATE' THEN\n    INSERT INTO \"{queue}\" {columns}, \"due_at\")\n    VALUES (NEW.\"id\", 'update', {at}, {old}, {new}, clock_timestamp());\n  ELSE\n    INSERT INTO \"{queue}\" {columns}, \"due_at\")\n    VALUES (OLD.\"id\", 'delete', {at}, {old}, NULL, clock_timestamp());\n  END IF;\n  RETURN NULL;\nEND;\n$$ LANGUAGE plpgsql",
+                moved = moved("IS DISTINCT FROM"),
+                new = object("NEW"),
+                old = object("OLD"),
+            ),
+            format!(
+                "CREATE TRIGGER \"trg_{table}_changes\" AFTER INSERT OR UPDATE OR DELETE ON \"{table}\" FOR EACH ROW EXECUTE FUNCTION \"{table}_changes\"()"
+            ),
+        ];
+    }
+    let at = "(CAST(strftime('%s', 'now') AS INTEGER) * 1000 + CAST(substr(strftime('%f', 'now'), 4) AS INTEGER))";
+    vec![
+        format!(
+            "CREATE TRIGGER \"trg_{table}_changes_insert\" AFTER INSERT ON \"{table}\" FOR EACH ROW\nBEGIN\n  INSERT INTO \"{queue}\" {columns})\n  VALUES (NEW.\"id\", 'insert', {at}, NULL, {new});\nEND",
+            new = object("NEW"),
+        ),
+        format!(
+            "CREATE TRIGGER \"trg_{table}_changes_update\" AFTER UPDATE ON \"{table}\" FOR EACH ROW\nWHEN {moved}\nBEGIN\n  INSERT INTO \"{queue}\" {columns})\n  VALUES (NEW.\"id\", 'update', {at}, {old}, {new});\nEND",
+            moved = moved("IS NOT"),
+            new = object("NEW"),
+            old = object("OLD"),
+        ),
+        format!(
+            "CREATE TRIGGER \"trg_{table}_changes_delete\" AFTER DELETE ON \"{table}\" FOR EACH ROW\nBEGIN\n  INSERT INTO \"{queue}\" {columns})\n  VALUES (OLD.\"id\", 'delete', {at}, {old}, NULL);\nEND",
+            old = object("OLD"),
+        ),
+    ]
+}
+
 /// The nth placeholder in a dialect.
 pub fn p(postgres: bool, n: usize) -> String {
     if postgres {
@@ -260,8 +348,75 @@ pub fn order_table(type_name: &str, table: &str) -> Table {
             tables: Vec::new(),
         }],
         deadlines: None,
+        changes: None,
         spec: TypeSpec::new(type_name).with(UseSpec::on_field("status", "Workflow", flow())),
     }
+}
+
+/// A deadline queue's layout on a table (D103): `<table>_deadline_queue`,
+/// its columns as behaviorlayout names them.
+pub fn deadlines_of(type_name: &str, table: &str) -> Deadlines {
+    Deadlines {
+        queue: format!("{type_name}Deadline"),
+        table: format!("{table}_deadline_queue"),
+        row_key: "row_key".into(),
+        use_id: "use_id".into(),
+        name: "name".into(),
+        at: "at".into(),
+        payload: "payload".into(),
+    }
+}
+
+/// Timers implemented on a table (D103), as behaviorlayout writes the use:
+/// no owned column, its three operations, and its sub-table
+/// `<table>_timers_deadlines` keyed by the row's `<type>_id` and the
+/// deadline's name.
+pub fn timers_use(table: &str, row: &str) -> Use {
+    let at = |name: &str| OwnedField {
+        name: name.into(),
+        column: Column::new(name, snake(name), "Temporal.DateTime").converted(Convert::EpochMillis),
+        value: false,
+    };
+    let plain = |name: &str, type_name: &str| owned(name, name, &snake(name), type_name, false);
+    Use {
+        id: "Timers".into(),
+        behavior: "Timers".into(),
+        member: "timers".into(),
+        anchor: None,
+        fields: Vec::new(),
+        operations: ["fireTimer", "resetTimer", "snoozeTimer"]
+            .into_iter()
+            .map(|name| Operation {
+                name: name.into(),
+                writes: true,
+            })
+            .collect(),
+        tables: vec![SubTable {
+            name: "deadlines".into(),
+            table: format!("{table}_timers_deadlines"),
+            row: row.into(),
+            key: plain("name", "string"),
+            fields: vec![
+                at("baseAt"),
+                plain("armedFrom", "string"),
+                at("dueAt"),
+                plain("fired", "boolean"),
+                at("firedAt"),
+                plain("outcome", "string"),
+            ],
+        }],
+    }
+}
+
+/// Timers' sub-table `<table>_timers_deadlines` in a dialect, its rows
+/// deleted with the row's.
+pub fn timers_deadlines_ddl(postgres: bool, table: &str, row: &str) -> String {
+    let t = column_types(postgres);
+    format!(
+        "CREATE TABLE \"{table}_timers_deadlines\" ({row} TEXT NOT NULL REFERENCES \"{table}\" (id) ON DELETE CASCADE, name TEXT NOT NULL, base_at {ts}, armed_from TEXT, due_at {ts}, fired {boolean}, fired_at {ts}, outcome TEXT, PRIMARY KEY ({row}, name))",
+        ts = t.timestamp,
+        boolean = t.boolean,
+    )
 }
 
 /// A room key no other layout's toy locks: `Room/r1/<pid>/<nanos>/<n>`. An
@@ -311,6 +466,7 @@ pub fn store_layout_in(room: &str) -> Layout {
         own: Vec::new(),
         uses: Vec::new(),
         deadlines: None,
+        changes: None,
         spec: TypeSpec::new("Booking").with(UseSpec::on_type("OneRoom", json!({"room": room}))),
     };
     let loud = Table {
@@ -322,16 +478,32 @@ pub fn store_layout_in(room: &str) -> Layout {
     let timed = Table {
         type_name: "Timed".into(),
         table: "timed".into(),
-        deadlines: Some(Deadlines {
-            queue: "TimedDeadline".into(),
-            table: "timed_deadline_queue".into(),
-            row_key: "row_key".into(),
-            use_id: "use_id".into(),
-            name: "name".into(),
-            at: "at".into(),
-            payload: "payload".into(),
-        }),
+        deadlines: Some(deadlines_of("Timed", "timed")),
         spec: TypeSpec::new("Timed").with(UseSpec::on_type("OneRoom", json!({"arm": true}))),
+        ..booking.clone()
+    };
+    let held = Table {
+        type_name: "Held".into(),
+        table: "held".into(),
+        uses: vec![
+            timers_use("held", "held_id"),
+            Use {
+                id: "Hold".into(),
+                behavior: "Hold".into(),
+                member: "hold".into(),
+                anchor: None,
+                fields: Vec::new(),
+                operations: Vec::new(),
+                tables: Vec::new(),
+            },
+        ],
+        deadlines: Some(deadlines_of("Held", "held")),
+        spec: TypeSpec::new("Held")
+            .with(UseSpec::on_type(
+                "Timers",
+                json!({"deadlines": {"expire": {"start": {"create": true}, "afterMs": 1000}}}),
+            ))
+            .with(UseSpec::on_type("Hold", json!({}))),
         ..booking.clone()
     };
     Layout::new([
@@ -341,7 +513,65 @@ pub fn store_layout_in(room: &str) -> Layout {
         booking,
         loud,
         timed,
+        held,
+        probe_table(),
     ])
+}
+
+/// The columns of Probe's change trigger's image (D103): its own columns,
+/// then Echo's owned column, the key, `_version` and `deleted_at` left out.
+pub const PROBE_IMAGE: [&str; 6] = ["title", "due", "owner_id", "done", "data", "echo_heard"];
+
+/// Probe (D103): a soft-deletable table its behaviors hear, its key a UUID
+/// in a TEXT column, an own column of each kind a change's image converts
+/// (text, a timestamp, a UUID, a boolean and JSON), Echo's mark and Timers'
+/// create deadline `expire` a second after a row's create, its deadline
+/// queue and its change queue, which its trigger writes.
+pub fn probe_table() -> Table {
+    Table {
+        type_name: "Probe".into(),
+        table: "probe".into(),
+        key: Column::new("id", "id", "Identity.UUID"),
+        version: "_version".into(),
+        live: Some(Live {
+            column: "deleted_at".into(),
+        }),
+        own: vec![
+            Column::new("title", "title", "string"),
+            Column::new("due", "due", "Temporal.DateTime").converted(Convert::EpochMillis),
+            Column::new("ownerId", "owner_id", "Identity.UUID"),
+            Column::new("done", "done", "boolean"),
+            Column::new("data", "data", "Generic.JSON"),
+        ],
+        uses: vec![
+            Use {
+                id: "Echo".into(),
+                behavior: "Echo".into(),
+                member: "echo".into(),
+                anchor: None,
+                fields: vec![owned("heard", "echoHeard", "echo_heard", "string", false)],
+                operations: Vec::new(),
+                tables: Vec::new(),
+            },
+            timers_use("probe", "probe_id"),
+        ],
+        deadlines: Some(deadlines_of("Probe", "probe")),
+        changes: Some(Changes {
+            queue: "ProbeChange".into(),
+            table: "probe_change_queue".into(),
+            row_key: "row_key".into(),
+            write: "write".into(),
+            at: "at".into(),
+            before: "before".into(),
+            after: "after".into(),
+        }),
+        spec: TypeSpec::new("Probe")
+            .with(UseSpec::on_type("Echo", json!({})))
+            .with(UseSpec::on_type(
+                "Timers",
+                json!({"deadlines": {"expire": {"start": {"create": true}, "afterMs": 1000}}}),
+            )),
+    }
 }
 
 /// The tables of [`store_layout`] in a dialect, each with its trigger.
@@ -363,13 +593,15 @@ pub fn store_ddl(postgres: bool) -> Vec<String> {
             t.key, t.text, t.text, t.timestamp, t.version
         ));
     }
-    for table in ["booking", "loud", "timed"] {
+    for table in ["booking", "loud", "timed", "held"] {
         ddl.push(format!(
             "CREATE TABLE \"{table}\" (id {}, _version {})",
             t.key, t.version
         ));
     }
-    for table in ["order", "ticket", "item", "booking", "loud", "timed"] {
+    for table in [
+        "order", "ticket", "item", "booking", "loud", "timed", "held",
+    ] {
         if postgres {
             ddl.extend(postgres_bump(table));
         } else {
@@ -377,6 +609,33 @@ pub fn store_ddl(postgres: bool) -> Vec<String> {
         }
     }
     ddl.extend(deadline_queue_ddl(postgres, "timed_deadline_queue", "TEXT"));
+    ddl.push(timers_deadlines_ddl(postgres, "held", "held_id"));
+    ddl.extend(deadline_queue_ddl(postgres, "held_deadline_queue", "TEXT"));
+    let uuid = if postgres { "UUID" } else { "TEXT" };
+    ddl.push(format!(
+        "CREATE TABLE \"probe\" (id {}, title {} NOT NULL, due {ts}, owner_id {uuid}, done {}, data {}, echo_heard {}, deleted_at {ts}, _version {})",
+        t.key,
+        t.text,
+        t.boolean,
+        t.json,
+        t.text,
+        t.version,
+        ts = t.timestamp,
+    ));
+    if postgres {
+        ddl.extend(postgres_bump("probe"));
+    } else {
+        ddl.push(sqlite_bump("probe"));
+    }
+    ddl.push(timers_deadlines_ddl(postgres, "probe", "probe_id"));
+    ddl.extend(deadline_queue_ddl(postgres, "probe_deadline_queue", "TEXT"));
+    ddl.extend(change_queue_ddl(postgres, "probe_change_queue", "TEXT"));
+    ddl.extend(change_trigger_ddl(
+        postgres,
+        "probe",
+        "probe_change_queue",
+        &PROBE_IMAGE,
+    ));
     ddl
 }
 
@@ -432,9 +691,70 @@ impl Behavior for OneRoom {
     }
 }
 
-/// Workflow, and the toy.
+/// A behavior of the tests' own whose guard holds every fire of Timers on
+/// its row (D103): it vetoes `fireTimer` with its declared code `held`, as
+/// a lease another principal holds would, which no behavior the core
+/// registers does of a deadline's fire.
+pub struct Hold;
+
+impl Behavior for Hold {
+    type Config = Value;
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Hold").veto("held")
+    }
+
+    fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<Value, ConfigError> {
+        Ok(raw.clone())
+    }
+
+    fn guard(&self, _view: &View<'_, Value>, request: &GuardRequest<'_>) -> Hook<Option<Veto>> {
+        Ok(request
+            .operation_of("Timers", "fireTimer")
+            .is_some()
+            .then(|| Veto::new("the fire is held").with_code("held")))
+    }
+}
+
+/// A behavior of the tests' own that hears its row's writes (D103) and
+/// marks the row with each it hears, as the core got it: its owned field
+/// `heard` holds the change's JSON. An update that moved none of the row's
+/// own fields (its own mark's) it passes over, so it hears its own write
+/// and writes nothing more.
+pub struct Echo;
+
+impl Behavior for Echo {
+    type Config = Value;
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Echo").field("heard").hears_changes()
+    }
+
+    fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<Value, ConfigError> {
+        Ok(raw.clone())
+    }
+
+    fn heard(&self, cx: &Cx<'_, Value>, heard: &Heard<'_>) -> Hook<()> {
+        let Heard::Own { change } = heard else {
+            return Ok(());
+        };
+        let moved = match (&change.before, &change.after) {
+            (Some(before), Some(after)) => before.own != after.own,
+            _ => true,
+        };
+        if moved {
+            cx.set("heard", serde_json::to_string(change).unwrap_or_default())?;
+        }
+        Ok(())
+    }
+}
+
+/// Workflow, Timers and the toys.
 pub fn core() -> superschematic_rules::Core {
-    superschematic_rules_behaviors::core().with(OneRoom)
+    superschematic_rules_behaviors::core()
+        .with(OneRoom)
+        .with(Hold)
+        .with(Echo)
 }
 
 #[cfg(feature = "sqlite")]

@@ -21,6 +21,17 @@
 //! after-change hooks in a frame of its own, so a row of any type is held to
 //! its own type's rules. Every row the run writes is in the change set,
 //! each held to its own version.
+//!
+//! A change command ([`Action::Change`]) runs on a write of a row the outbox
+//! hands the core (D103): the uses of the row's type whose declaration hears
+//! changes, on the row as it is now, and then each listener a relation of
+//! the row reaches: for each own field that holds the key of a to-one
+//! relation's target, the uses of the target's type that listen to the row's
+//! type through that relation ([`crate::Behavior::listens`]), on the row the
+//! field holds now, held after the write and held before it. A row the
+//! command finds gone runs no hook of its own type and comes out as a
+//! [`RowWrite::Gone`], which takes its deadlines and, when no row of the key
+//! is left, its sub-table rows.
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
@@ -28,18 +39,18 @@ use std::collections::BTreeMap;
 use serde_json::{Map, Value};
 
 use crate::behavior::{
-    Change, ConfigError, ConfigTarget, Declaration, GuardRequest, Hook, OperationDecl, Stop,
-    ValidationRequest,
+    Change, ConfigError, ConfigTarget, Declaration, GuardRequest, Heard, Hook, Listen,
+    OperationDecl, Stop, ValidationRequest,
 };
 use crate::changes::{
-    ChangeSet, DeadlineChange, OutboxEvent, RowRef, RowWrite, SubRowChange, SubRowWrite,
+    ChangeSet, DeadlineChange, OutboxEvent, RowChange, RowRef, RowWrite, SubRowChange, SubRowWrite,
 };
 use crate::command::{Action, Command};
 use crate::context::{listed, ConfigCx};
 use crate::core::{Core, Outcome, Registered, Step};
 use crate::erased::{AnyConfig, Scope};
 use crate::patch::merge_patch;
-use crate::reads::{Answer, Answers, LockKey, ReadRequest, Row, SubRow};
+use crate::reads::{key_of, Answer, Answers, LinkedRows, LockKey, ReadRequest, Row, SubRow};
 use crate::refusal::{
     Code, ConfigIssue, ConfigIssueKind, Refusal, SchemaChange, SchemaIssue, ValidationIssue, Veto,
 };
@@ -84,7 +95,12 @@ pub(crate) enum Write {
     /// An update, with the merge patch of its own fields.
     Update(Map<String, Value>),
     Delete,
+    /// A change command's row the host does not have.
+    Gone,
 }
+
+/// The action a change command's hooks run under, as a veto names it.
+const CHANGE: &str = "change";
 
 /// A row the run reached: what the host read (or the create's own fields),
 /// with the run's writes, and what the change set writes of it.
@@ -126,6 +142,22 @@ impl Touched {
         }
     }
 
+    fn gone(type_name: &str, key: &str) -> Self {
+        Touched {
+            type_name: type_name.to_owned(),
+            key: Some(key.to_owned()),
+            own: Map::new(),
+            owned: BTreeMap::new(),
+            version: None,
+            write: Write::Gone,
+            set: BTreeMap::new(),
+        }
+    }
+
+    fn row_ref(&self) -> RowRef {
+        RowRef::new(&self.type_name, self.key.as_deref())
+    }
+
     // into_write is the row's write in the change set; `None` for a row the
     // run only read. Only a create's row may have no key, and only a row
     // the run read has a version.
@@ -150,6 +182,10 @@ impl Touched {
                 type_name: self.type_name,
                 key: self.key.unwrap_or_default(),
                 expected_version,
+            }),
+            Write::Gone => Some(RowWrite::Gone {
+                type_name: self.type_name,
+                key: self.key.unwrap_or_default(),
             }),
         }
     }
@@ -271,7 +307,7 @@ impl<'a> Run<'a> {
                     continue;
                 }
             }
-            match parse_use(registered, spec, index) {
+            match parse_use(core, registered, spec, index) {
                 Parsed::Config(config) => bound.push(Bound {
                     spec: entry,
                     registered,
@@ -405,6 +441,32 @@ impl<'a> Run<'a> {
             Answer::Row(row) => Ok(row.as_ref()),
             _ => Err(mismatched(request)),
         }
+    }
+
+    pub fn read_linked(&self, request: &ReadRequest) -> Hook<&'a LinkedRows> {
+        match self.read(request)? {
+            Answer::Linked(rows) => Ok(rows),
+            _ => Err(mismatched(request)),
+        }
+    }
+
+    /// A row of any type as the run has it: the one the run reached, its
+    /// writes applied, else the host's; `None` when the type has none of the
+    /// key, or the run deleted it or found it gone.
+    pub fn row_of(&self, type_name: &str, key: &str) -> Hook<Option<Row>> {
+        if let Some(at) = self.find_row(type_name, key) {
+            let rows = self.rows.borrow();
+            let touched = &rows[at];
+            if matches!(touched.write, Write::Delete | Write::Gone) {
+                return Ok(None);
+            }
+            return Ok(Some(Row {
+                own: touched.own.clone(),
+                owned: touched.owned.clone(),
+                version: touched.version.unwrap_or_default(),
+            }));
+        }
+        Ok(self.read_row(&ReadRequest::row(type_name, key))?.cloned())
     }
 
     pub fn read_sub_rows(&self, request: &ReadRequest) -> Hook<&'a [SubRow]> {
@@ -885,7 +947,7 @@ impl<'a> Run<'a> {
         let gone =
             || -> Stop { Refusal::not_found(format!("{type_name} {key} does not exist")).into() };
         if let Some(at) = self.find_row(type_name, key) {
-            if self.rows.borrow()[at].write == Write::Delete {
+            if matches!(self.rows.borrow()[at].write, Write::Delete | Write::Gone) {
                 return Err(gone());
             }
             return Ok(at);
@@ -934,6 +996,7 @@ impl<'a> Run<'a> {
                 payload,
                 ..
             } => self.deadline(key, use_id, name, payload),
+            Action::Change { key, change } => self.change(key, change),
         }
     }
 
@@ -1048,6 +1111,160 @@ impl<'a> Run<'a> {
         Ok(self.changes(Value::Null))
     }
 
+    // change runs a write of a row the outbox handed the core: the uses of
+    // the row's type that hear its writes, on the row as it is now, then the
+    // listeners its relations reach. A row the host does not have runs no
+    // hook of its own type, and its write is Gone.
+    fn change(&self, key: &str, change: &RowChange) -> Hook<ChangeSet> {
+        let type_name = self.top.spec.name.as_str();
+        let present = match self.read_row(&ReadRequest::row(type_name, key))? {
+            Some(row) => {
+                self.touch(Touched::read(type_name, key, row));
+                true
+            }
+            None => {
+                self.touch(Touched::gone(type_name, key));
+                false
+            }
+        };
+        if present {
+            let heard = Heard::Own { change };
+            let before = self.writes_of(self.top.row);
+            for (index, bound) in self.top.uses.iter().enumerate() {
+                if bound.registered.declaration.hears_changes {
+                    bound
+                        .registered
+                        .behavior
+                        .heard(self.scope(self.top, index, CHANGE, true), &heard)?;
+                }
+            }
+            self.settle_heard(self.top, &before)?;
+        }
+        for field in &self.top.spec.fields {
+            let Some(relation) = &field.relation else {
+                continue;
+            };
+            let targets = self.linked_keys(&field.name, change);
+            if targets.is_empty() || self.read_spec(&relation.type_name)?.is_none() {
+                continue;
+            }
+            let listen = Listen::new(type_name, &relation.name);
+            let heard = Heard::Linked {
+                type_name,
+                key,
+                link: &relation.name,
+                change,
+            };
+            self.on_type(&relation.type_name, |spec, uses| {
+                for (index, bound) in uses.iter().enumerate() {
+                    let listens = bound
+                        .registered
+                        .behavior
+                        .listens(&*bound.config)
+                        .ok_or_else(|| {
+                            Stop::from(Refusal::defect(
+                                &bound.spec.behavior,
+                                CONFIG_OF_ANOTHER_TYPE,
+                            ))
+                        })?;
+                    if !listens.contains(&listen) {
+                        continue;
+                    }
+                    for target in &targets {
+                        let row = match self.reach(&relation.type_name, target) {
+                            Ok(row) => row,
+                            Err(Stop::Refuse(refusal)) if refusal.code == Code::NotFound => {
+                                continue
+                            }
+                            Err(stop) => return Err(stop),
+                        };
+                        let frame = Frame {
+                            spec,
+                            uses,
+                            row,
+                            key: Some(target),
+                        };
+                        let before = self.writes_of(row);
+                        bound
+                            .registered
+                            .behavior
+                            .heard(self.scope(frame, index, CHANGE, true), &heard)?;
+                        self.settle_heard(frame, &before)?;
+                    }
+                }
+                Ok(())
+            })?;
+        }
+        Ok(self.changes(Value::Null))
+    }
+
+    // linked_keys is the keys an own field of the command's row holds, each
+    // once and in this order: on the row now, after the write and before it,
+    // each a string or a whole number's text (key_of), a null passed over.
+    fn linked_keys(&self, field: &str, change: &RowChange) -> Vec<String> {
+        let now = self.rows.borrow()[self.top.row].own.get(field).cloned();
+        let after = change
+            .after
+            .as_ref()
+            .and_then(|image| image.own_field(field))
+            .cloned();
+        let before = change
+            .before
+            .as_ref()
+            .and_then(|image| image.own_field(field))
+            .cloned();
+        let mut keys: Vec<String> = Vec::new();
+        for value in [now, after, before].into_iter().flatten() {
+            if let Some(key) = key_of(&value) {
+                if !keys.contains(&key) {
+                    keys.push(key);
+                }
+            }
+        }
+        keys
+    }
+
+    // writes_of is what the run has written of a row so far: its owned
+    // fields set, and how many sub-table rows, events and deadlines name it.
+    fn writes_of(&self, row: usize) -> (BTreeMap<String, Map<String, Value>>, usize) {
+        let (set, at) = {
+            let rows = self.rows.borrow();
+            (rows[row].set.clone(), rows[row].row_ref())
+        };
+        let pending = self.pending.borrow();
+        let named = pending
+            .sub_rows
+            .iter()
+            .filter(|write| write.row == at)
+            .count()
+            + pending
+                .events
+                .iter()
+                .filter(|event| event.row == at)
+                .count()
+            + pending
+                .deadlines
+                .iter()
+                .filter(|change| change.row() == &at)
+                .count();
+        (set, named)
+    }
+
+    // settle_heard holds a row a hearing hook wrote to the version the run
+    // read it at and runs its after-change hooks; a row it left as it was
+    // stays unwritten.
+    fn settle_heard(
+        &self,
+        frame: Frame<'_>,
+        before: &(BTreeMap<String, Map<String, Value>>, usize),
+    ) -> Hook<()> {
+        if self.writes_of(frame.row) == *before {
+            return Ok(());
+        }
+        self.mark_updated(frame.row);
+        self.after_change(frame, &Change::Heard, CHANGE)
+    }
+
     // changes is the run's change set: each row it writes, in the order it
     // reached them, the command's own first, and the rest it built.
     fn changes(&self, result: Value) -> ChangeSet {
@@ -1098,7 +1315,7 @@ impl<'a> Run<'a> {
                             entry.behavior
                         ),
                     };
-                    let reason = match parse_use(bound.registered, before, at) {
+                    let reason = match parse_use(self.core, bound.registered, before, at) {
                         Parsed::Config(old) => self.reason(
                             index,
                             bound.registered.behavior.config_change(
@@ -1153,7 +1370,7 @@ impl<'a> Run<'a> {
             let path = format!("{type_name}.behaviors.{}", earlier.id());
             let reason = match self.core.find(&earlier.behavior) {
                 None => Some("no implementation is registered to allow it".to_owned()),
-                Some(registered) => match parse_use(registered, before, at) {
+                Some(registered) => match parse_use(self.core, registered, before, at) {
                     Parsed::Config(old) => {
                         let cx = ConfigCx {
                             run: self,
@@ -1499,9 +1716,15 @@ impl Parsed {
 
 /// Parses the config of the use at a position of a type's list: the one
 /// it gives, or `{}` when it gives none, which a behavior that refuses its
-/// shape needs a config for.
-pub(crate) fn parse_use(registered: &Registered, spec: &TypeSpec, index: usize) -> Parsed {
-    let target = ConfigTarget::new(spec, index);
+/// shape needs a config for. The target knows the core's behaviors, so a
+/// config that names another use's field reads its declaration.
+pub(crate) fn parse_use(
+    core: &Core,
+    registered: &Registered,
+    spec: &TypeSpec,
+    index: usize,
+) -> Parsed {
+    let target = ConfigTarget::of_core(core, spec, index);
     let given = spec.uses.get(index).and_then(|entry| entry.config.as_ref());
     let parsed = match given {
         Some(raw) => registered.behavior.parse(raw, &target),
