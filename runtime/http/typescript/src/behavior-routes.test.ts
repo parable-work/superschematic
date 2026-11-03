@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
-import { behaviorCaller, behaviorOperation } from './behavior-routes';
+import { behaviorCaller, behaviorOperation, behaviorParams } from './behavior-routes';
 import { mountOperation } from './hono';
 import { HttpProblem, type OperationSpec, type RequestContext } from './index';
 import { NotFoundError } from './orm';
@@ -8,7 +8,8 @@ import { RulesRefusal, type CoreRefusal } from './rules';
 
 // The helpers a generated router's behavior operations run through (D103):
 // the caller the core checks a behavior's permissions against, built from
-// the route's principal or calling service, and each refusal of the core's
+// the route's principal or calling service, the input with each optional
+// member that is null left out (D104), and each refusal of the core's
 // answered as the problem of its status, code, message and details, a
 // refusal of status 500 as the server's own internal error.
 
@@ -74,6 +75,25 @@ describe('behaviorCaller', () => {
 
   test('no one on a route without a caller', () => {
     expect(behaviorCaller(context(null))).toEqual({ subject: '' });
+  });
+});
+
+describe('behaviorParams', () => {
+  test('an optional member that is null is left out, as its absence', () => {
+    expect(behaviorParams({ to: 'paid', from: null }, ['from'])).toEqual({ to: 'paid' });
+    expect('from' in (behaviorParams({ to: 'paid', from: null }, ['from']) as object)).toBe(false);
+  });
+
+  test('an input with no null optional member is handed on as it is', () => {
+    const input = { to: 'paid', from: 'draft' };
+    expect(behaviorParams(input, ['from'])).toBe(input);
+    expect(behaviorParams({ to: 'paid' }, ['from'])).toEqual({ to: 'paid' });
+  });
+
+  test('a null of a member that is not optional, and an input that is no object, stay as they are', () => {
+    expect(behaviorParams({ to: null, from: null }, ['from'])).toEqual({ to: null });
+    expect(behaviorParams(null, ['from'])).toBeNull();
+    expect(behaviorParams([null], ['from'])).toEqual([null]);
   });
 });
 

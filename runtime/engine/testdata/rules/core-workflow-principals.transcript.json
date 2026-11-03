@@ -1,0 +1,6726 @@
+{
+  "file": "core-workflow-principals",
+  "source": "runtime/engine/testdata/rules/scenarios/core-workflow-principals.json",
+  "behaviors": [
+    "Workflow",
+    "Reactions",
+    "Timers"
+  ],
+  "scenarios": [
+    {
+      "name": "Workflow principals > by names the fields whose subject makes a transition: the subject one holds moves the row, another caller is not_principal, and a field with no value names no one",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Question",
+          "fields": [
+            {
+              "name": "prompt",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "askedOf",
+              "type": "string"
+            },
+            {
+              "name": "createdBy",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Question",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "open",
+                      "answered",
+                      "withdrawn",
+                      "closed"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "open",
+                        "to": "answered",
+                        "by": [
+                          "askedOf"
+                        ]
+                      },
+                      {
+                        "from": "open",
+                        "to": "withdrawn",
+                        "by": [
+                          "createdBy"
+                        ]
+                      },
+                      {
+                        "from": "answered",
+                        "to": "closed",
+                        "by": [
+                          "askedOf",
+                          "createdBy"
+                        ],
+                        "permission": "questions.close"
+                      },
+                      {
+                        "from": "answered",
+                        "to": "open"
+                      }
+                    ],
+                    "overridePermission": "questions.moderate",
+                    "repeat": "unchanged"
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "prompt",
+                  "type": "string"
+                },
+                {
+                  "name": "askedOf",
+                  "type": "string"
+                },
+                {
+                  "name": "createdBy",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        "askedOf"
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        "askedOf"
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "q1",
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "q1",
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "answered"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Question q1: carol may not move Question q1 from open to answered: the transition is made by the subject askedOf holds",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "carol may not move Question q1 from open to answered: the transition is made by the subject askedOf holds",
+                "vetoCode": "not_principal",
+                "vetoDetails": {
+                  "from": "open",
+                  "to": "answered",
+                  "by": [
+                    "askedOf"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "answered"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Question q1: alice may not move Question q1 from open to answered: the transition is made by the subject askedOf holds",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "alice may not move Question q1 from open to answered: the transition is made by the subject askedOf holds",
+                "vetoCode": "not_principal",
+                "vetoDetails": {
+                  "from": "open",
+                  "to": "answered",
+                  "by": [
+                    "askedOf"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": []
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "answered"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "from": "open",
+              "to": "answered"
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "answered",
+                  "enteredAt": 1005000
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "create",
+              "id": "q2",
+              "own": {
+                "prompt": "Which chair?",
+                "createdBy": "alice"
+              },
+              "params": {}
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "key": "q2",
+            "row": {
+              "own": {
+                "prompt": "Which chair?",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1005000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "create",
+              "id": "q3",
+              "own": {
+                "prompt": "Which lamp?",
+                "askedOf": null,
+                "createdBy": "alice"
+              },
+              "params": {}
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "key": "q3",
+            "row": {
+              "own": {
+                "prompt": "Which lamp?",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1005000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "create",
+              "id": "q4",
+              "own": {
+                "prompt": "Which rug?",
+                "askedOf": "",
+                "createdBy": "alice"
+              },
+              "params": {}
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "key": "q4",
+            "row": {
+              "own": {
+                "prompt": "Which rug?",
+                "askedOf": "",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1005000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": []
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "operation",
+              "key": "q2",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "answered"
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Question q2: bob may not move Question q2 from open to answered: the transition is made by the subject askedOf holds",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "bob may not move Question q2 from open to answered: the transition is made by the subject askedOf holds",
+                "vetoCode": "not_principal",
+                "vetoDetails": {
+                  "from": "open",
+                  "to": "answered",
+                  "by": [
+                    "askedOf"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "prompt": "Which chair?",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1005000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": []
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "operation",
+              "key": "q3",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "answered"
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Question q3: bob may not move Question q3 from open to answered: the transition is made by the subject askedOf holds",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "bob may not move Question q3 from open to answered: the transition is made by the subject askedOf holds",
+                "vetoCode": "not_principal",
+                "vetoDetails": {
+                  "from": "open",
+                  "to": "answered",
+                  "by": [
+                    "askedOf"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "prompt": "Which lamp?",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1005000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 14,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": []
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "operation",
+              "key": "q4",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "answered"
+              }
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Question q4: bob may not move Question q4 from open to answered: the transition is made by the subject askedOf holds",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "bob may not move Question q4 from open to answered: the transition is made by the subject askedOf holds",
+                "vetoCode": "not_principal",
+                "vetoDetails": {
+                  "from": "open",
+                  "to": "answered",
+                  "by": [
+                    "askedOf"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "prompt": "Which rug?",
+                "askedOf": "",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1005000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 15,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "",
+              "permissions": []
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "operation",
+              "key": "q4",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "answered"
+              }
+            },
+            "request": "request-11"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Question q4: a caller with no subject may not move Question q4 from open to answered: the transition is made by the subject askedOf holds",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "a caller with no subject may not move Question q4 from open to answered: the transition is made by the subject askedOf holds",
+                "vetoCode": "not_principal",
+                "vetoDetails": {
+                  "from": "open",
+                  "to": "answered",
+                  "by": [
+                    "askedOf"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "prompt": "Which rug?",
+                "askedOf": "",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1005000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 16,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": []
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "open"
+              }
+            },
+            "request": "request-12"
+          },
+          "expect": {
+            "result": {
+              "from": "answered",
+              "to": "open"
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1005000
+                }
+              }
+            },
+            "version": 3
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 8,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Workflow principals > by on createdBy: the row's creator makes the transition, and no one else",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Question",
+          "fields": [
+            {
+              "name": "prompt",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "askedOf",
+              "type": "string"
+            },
+            {
+              "name": "createdBy",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Question",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "open",
+                      "answered",
+                      "withdrawn",
+                      "closed"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "open",
+                        "to": "answered",
+                        "by": [
+                          "askedOf"
+                        ]
+                      },
+                      {
+                        "from": "open",
+                        "to": "withdrawn",
+                        "by": [
+                          "createdBy"
+                        ]
+                      },
+                      {
+                        "from": "answered",
+                        "to": "closed",
+                        "by": [
+                          "askedOf",
+                          "createdBy"
+                        ],
+                        "permission": "questions.close"
+                      },
+                      {
+                        "from": "answered",
+                        "to": "open"
+                      }
+                    ],
+                    "overridePermission": "questions.moderate",
+                    "repeat": "unchanged"
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "prompt",
+                  "type": "string"
+                },
+                {
+                  "name": "askedOf",
+                  "type": "string"
+                },
+                {
+                  "name": "createdBy",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        "askedOf"
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        "askedOf"
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "q1",
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "q1",
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "withdrawn"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Question q1: bob may not move Question q1 from open to withdrawn: the transition is made by the subject createdBy holds",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "bob may not move Question q1 from open to withdrawn: the transition is made by the subject createdBy holds",
+                "vetoCode": "not_principal",
+                "vetoDetails": {
+                  "from": "open",
+                  "to": "withdrawn",
+                  "by": [
+                    "createdBy"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "withdrawn"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Question q1: carol may not move Question q1 from open to withdrawn: the transition is made by the subject createdBy holds",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "carol may not move Question q1 from open to withdrawn: the transition is made by the subject createdBy holds",
+                "vetoCode": "not_principal",
+                "vetoDetails": {
+                  "from": "open",
+                  "to": "withdrawn",
+                  "by": [
+                    "createdBy"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "withdrawn"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "from": "open",
+              "to": "withdrawn"
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "withdrawn",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 2
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 8,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Workflow principals > a transition with by and a permission needs a caller by names who holds the permission",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Question",
+          "fields": [
+            {
+              "name": "prompt",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "askedOf",
+              "type": "string"
+            },
+            {
+              "name": "createdBy",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Question",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "open",
+                      "answered",
+                      "withdrawn",
+                      "closed"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "open",
+                        "to": "answered",
+                        "by": [
+                          "askedOf"
+                        ]
+                      },
+                      {
+                        "from": "open",
+                        "to": "withdrawn",
+                        "by": [
+                          "createdBy"
+                        ]
+                      },
+                      {
+                        "from": "answered",
+                        "to": "closed",
+                        "by": [
+                          "askedOf",
+                          "createdBy"
+                        ],
+                        "permission": "questions.close"
+                      },
+                      {
+                        "from": "answered",
+                        "to": "open"
+                      }
+                    ],
+                    "overridePermission": "questions.moderate",
+                    "repeat": "unchanged"
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "prompt",
+                  "type": "string"
+                },
+                {
+                  "name": "askedOf",
+                  "type": "string"
+                },
+                {
+                  "name": "createdBy",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        "askedOf"
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        "askedOf"
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "q1",
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "q1",
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "answered"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "from": "open",
+              "to": "answered"
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "answered",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "closed"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "refused": {
+              "code": "forbidden",
+              "status": 403,
+              "class": "EngineError",
+              "message": "bob may not move Question q1 from answered to closed: the transition needs permission questions.close"
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "answered",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": [
+                "questions.close"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "closed"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Question q1: carol may not move Question q1 from answered to closed: the transition is made by the subject askedOf or createdBy holds",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "carol may not move Question q1 from answered to closed: the transition is made by the subject askedOf or createdBy holds",
+                "vetoCode": "not_principal",
+                "vetoDetails": {
+                  "from": "answered",
+                  "to": "closed",
+                  "by": [
+                    "askedOf",
+                    "createdBy"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "answered",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "questions.close"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "closed"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "from": "answered",
+              "to": "closed"
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "closed",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 3
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 9,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Workflow principals > overridePermission moves a row past by, and the transition's own permission is still needed",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Question",
+          "fields": [
+            {
+              "name": "prompt",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "askedOf",
+              "type": "string"
+            },
+            {
+              "name": "createdBy",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Question",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "open",
+                      "answered",
+                      "withdrawn",
+                      "closed"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "open",
+                        "to": "answered",
+                        "by": [
+                          "askedOf"
+                        ]
+                      },
+                      {
+                        "from": "open",
+                        "to": "withdrawn",
+                        "by": [
+                          "createdBy"
+                        ]
+                      },
+                      {
+                        "from": "answered",
+                        "to": "closed",
+                        "by": [
+                          "askedOf",
+                          "createdBy"
+                        ],
+                        "permission": "questions.close"
+                      },
+                      {
+                        "from": "answered",
+                        "to": "open"
+                      }
+                    ],
+                    "overridePermission": "questions.moderate",
+                    "repeat": "unchanged"
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "prompt",
+                  "type": "string"
+                },
+                {
+                  "name": "askedOf",
+                  "type": "string"
+                },
+                {
+                  "name": "createdBy",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        "askedOf"
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        "askedOf"
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "q1",
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "q1",
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "mod",
+              "permissions": [
+                "questions.moderate"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "answered"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "from": "open",
+              "to": "answered"
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "answered",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "mod",
+              "permissions": [
+                "questions.moderate"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "closed"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "refused": {
+              "code": "forbidden",
+              "status": 403,
+              "class": "EngineError",
+              "message": "mod may not move Question q1 from answered to closed: the transition needs permission questions.close"
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "answered",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "mod",
+              "permissions": [
+                "questions.moderate",
+                "questions.close"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "closed"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "from": "answered",
+              "to": "closed"
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "closed",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "q2",
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "params": {}
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "key": "q2",
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "mod",
+              "permissions": [
+                "questions.moderate"
+              ]
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "q2",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "withdrawn"
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "result": {
+              "from": "open",
+              "to": "withdrawn"
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "withdrawn",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 2
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        }
+      ]
+    },
+    {
+      "name": "Workflow principals > repeat unchanged: a move to the state the row is in answers unchanged, writes nothing and checks no by",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Question",
+          "fields": [
+            {
+              "name": "prompt",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "askedOf",
+              "type": "string"
+            },
+            {
+              "name": "createdBy",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Question",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "open",
+                      "answered",
+                      "withdrawn",
+                      "closed"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "open",
+                        "to": "answered",
+                        "by": [
+                          "askedOf"
+                        ]
+                      },
+                      {
+                        "from": "open",
+                        "to": "withdrawn",
+                        "by": [
+                          "createdBy"
+                        ]
+                      },
+                      {
+                        "from": "answered",
+                        "to": "closed",
+                        "by": [
+                          "askedOf",
+                          "createdBy"
+                        ],
+                        "permission": "questions.close"
+                      },
+                      {
+                        "from": "answered",
+                        "to": "open"
+                      }
+                    ],
+                    "overridePermission": "questions.moderate",
+                    "repeat": "unchanged"
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "prompt",
+                  "type": "string"
+                },
+                {
+                  "name": "askedOf",
+                  "type": "string"
+                },
+                {
+                  "name": "createdBy",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        "askedOf"
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        "askedOf"
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "q1",
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "q1",
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": []
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "answered"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "from": "open",
+              "to": "answered"
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "answered",
+                  "enteredAt": 1005000
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": []
+            },
+            "now": 1010000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "answered"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "from": "answered",
+              "to": "answered",
+              "unchanged": true
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "answered",
+                  "enteredAt": 1005000
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": []
+            },
+            "now": 1011000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "answered"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "from": "answered",
+              "to": "answered",
+              "unchanged": true
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "answered",
+                  "enteredAt": 1005000
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "",
+              "permissions": []
+            },
+            "now": 1011000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "answered"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "from": "answered",
+              "to": "answered",
+              "unchanged": true
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "answered",
+                  "enteredAt": 1005000
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": [
+                "questions.close"
+              ]
+            },
+            "now": 1012000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "closed"
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "result": {
+              "from": "answered",
+              "to": "closed"
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "closed",
+                  "enteredAt": 1012000
+                }
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": []
+            },
+            "now": 1013000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "closed"
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "result": {
+              "from": "closed",
+              "to": "closed",
+              "unchanged": true
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "closed",
+                  "enteredAt": 1012000
+                }
+              }
+            },
+            "version": 3
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 9,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 10,
+          "call": "events.read",
+          "reason": "a read of the engine's event log, which a table has no counterpart of: its writes are heard through its change queue (D103), and the event stream comes later"
+        },
+        {
+          "step": 13,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Workflow principals > a repeat asks no other behavior's guard, and without repeat a gate refuses a move that is no move",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [],
+      "steps": [],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it composes test behaviors (test.Gate), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 2,
+          "call": "schemas.define",
+          "reason": "it composes test behaviors (test.Gate), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 3,
+          "call": "schemas.publish",
+          "reason": "it composes test behaviors (test.Gate), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 4,
+          "call": "instances.create",
+          "reason": "it composes test behaviors (test.Gate), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 5,
+          "call": "instances.invoke",
+          "reason": "it composes test behaviors (test.Gate), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 6,
+          "call": "instances.invoke",
+          "reason": "it composes test behaviors (test.Gate), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 7,
+          "call": "instances.invoke",
+          "reason": "it composes test behaviors (test.Gate), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 8,
+          "call": "schemas.define",
+          "reason": "it composes test behaviors (test.Gate), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 9,
+          "call": "schemas.publish",
+          "reason": "it composes test behaviors (test.Gate), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 10,
+          "call": "instances.create",
+          "reason": "it composes test behaviors (test.Gate), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 11,
+          "call": "instances.invoke",
+          "reason": "it composes test behaviors (test.Gate), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 12,
+          "call": "instances.invoke",
+          "reason": "it composes test behaviors (test.Gate), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        }
+      ]
+    },
+    {
+      "name": "Workflow principals > without repeat, a move to the state the row is in stays the veto already_in_state",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Request",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "assignee",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Request",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "open",
+                      "done"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "open",
+                        "to": "done",
+                        "by": [
+                          "assignee"
+                        ]
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "assignee",
+                  "type": "Identity.UUID"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Request",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "done"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "done",
+                      "by": [
+                        "assignee"
+                      ]
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "assignee",
+                "type": "Identity.UUID"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Request",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "done"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "done",
+                      "by": [
+                        "assignee"
+                      ]
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "assignee",
+                "type": "Identity.UUID"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Request",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "r1",
+              "own": {
+                "title": "Desk",
+                "assignee": "0f8fad5b-d9cb-469f-a165-70867728950e"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "r1",
+            "row": {
+              "own": {
+                "title": "Desk",
+                "assignee": "0f8fad5b-d9cb-469f-a165-70867728950e"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Request",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "r1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "open"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Request r1: Request r1 is already open",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "Request r1 is already open",
+                "vetoCode": "already_in_state",
+                "vetoDetails": {
+                  "from": "open",
+                  "to": "open"
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Desk",
+                "assignee": "0f8fad5b-d9cb-469f-a165-70867728950e"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Request",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "TMXp8QPR6yGvKuV2GZQ10",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "r1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "open"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Request r1: Request r1 is already open",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "Request r1 is already open",
+                "vetoCode": "already_in_state",
+                "vetoDetails": {
+                  "from": "open",
+                  "to": "open"
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Desk",
+                "assignee": "0f8fad5b-d9cb-469f-a165-70867728950e"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 7,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Workflow principals > from: a read that is not the row's state is stale before anything else, and a retry that landed is stale with the state it moved to",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Question",
+          "fields": [
+            {
+              "name": "prompt",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "askedOf",
+              "type": "string"
+            },
+            {
+              "name": "createdBy",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Question",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "open",
+                      "answered",
+                      "withdrawn",
+                      "closed"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "open",
+                        "to": "answered",
+                        "by": [
+                          "askedOf"
+                        ]
+                      },
+                      {
+                        "from": "open",
+                        "to": "withdrawn",
+                        "by": [
+                          "createdBy"
+                        ]
+                      },
+                      {
+                        "from": "answered",
+                        "to": "closed",
+                        "by": [
+                          "askedOf",
+                          "createdBy"
+                        ],
+                        "permission": "questions.close"
+                      },
+                      {
+                        "from": "answered",
+                        "to": "open"
+                      }
+                    ],
+                    "overridePermission": "questions.moderate",
+                    "repeat": "unchanged"
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "prompt",
+                  "type": "string"
+                },
+                {
+                  "name": "askedOf",
+                  "type": "string"
+                },
+                {
+                  "name": "createdBy",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Request",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "assignee",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Request",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "open",
+                      "done"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "open",
+                        "to": "done",
+                        "by": [
+                          "assignee"
+                        ]
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "assignee",
+                  "type": "Identity.UUID"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        "askedOf"
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        "askedOf"
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 4,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Request",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "done"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "done",
+                      "by": [
+                        "assignee"
+                      ]
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "assignee",
+                "type": "Identity.UUID"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 5,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Request",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "done"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "done",
+                      "by": [
+                        "assignee"
+                      ]
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "assignee",
+                "type": "Identity.UUID"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "q1",
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "q1",
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "answered",
+                "from": "answered"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Question q1: Question q1 is open, not answered",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "Question q1 is open, not answered",
+                "vetoCode": "stale",
+                "vetoDetails": {
+                  "from": "answered",
+                  "status": "open"
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "answered",
+                "from": "answered"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Question q1: Question q1 is open, not answered",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "Question q1 is open, not answered",
+                "vetoCode": "stale",
+                "vetoDetails": {
+                  "from": "answered",
+                  "status": "open"
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "carol",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "answered",
+                "from": "open"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Question q1: carol may not move Question q1 from open to answered: the transition is made by the subject askedOf holds",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "carol may not move Question q1 from open to answered: the transition is made by the subject askedOf holds",
+                "vetoCode": "not_principal",
+                "vetoDetails": {
+                  "from": "open",
+                  "to": "answered",
+                  "by": [
+                    "askedOf"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "answered",
+                "from": "lost"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "OperationParamsError",
+              "message": "operation transition of behavior Workflow: /from: \"lost\" is not a state of Question (open, answered, withdrawn, closed)",
+              "details": {
+                "issues": [
+                  {
+                    "path": "/from",
+                    "message": "\"lost\" is not a state of Question (open, answered, withdrawn, closed)"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "answered",
+                "from": ""
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_argument",
+              "status": 400,
+              "class": "OperationParamsError",
+              "message": "operation transition of behavior Workflow: /from: must NOT have fewer than 1 characters",
+              "details": {
+                "issues": [
+                  {
+                    "path": "/from",
+                    "message": "must NOT have fewer than 1 characters"
+                  }
+                ]
+              }
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": []
+            },
+            "now": 1005000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "answered",
+                "from": "open"
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "result": {
+              "from": "open",
+              "to": "answered"
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "answered",
+                  "enteredAt": 1005000
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": []
+            },
+            "now": 1006000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "answered",
+                "from": "open"
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Question q1: Question q1 is answered, not open",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "Question q1 is answered, not open",
+                "vetoCode": "stale",
+                "vetoDetails": {
+                  "from": "open",
+                  "status": "answered"
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "answered",
+                  "enteredAt": 1005000
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 14,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "bob",
+              "permissions": []
+            },
+            "now": 1006000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "answered",
+                "from": "answered"
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "result": {
+              "from": "answered",
+              "to": "answered",
+              "unchanged": true
+            },
+            "row": {
+              "own": {
+                "prompt": "Which table?",
+                "askedOf": "bob",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "answered",
+                  "enteredAt": 1005000
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 16,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Request",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1006000,
+            "action": {
+              "kind": "create",
+              "id": "r1",
+              "own": {
+                "title": "Desk",
+                "assignee": "0f8fad5b-d9cb-469f-a165-70867728950e"
+              },
+              "params": {}
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "key": "r1",
+            "row": {
+              "own": {
+                "title": "Desk",
+                "assignee": "0f8fad5b-d9cb-469f-a165-70867728950e"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1006000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 17,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Request",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "TMXp8QPR6yGvKuV2GZQ10",
+              "permissions": []
+            },
+            "now": 1007000,
+            "action": {
+              "kind": "operation",
+              "key": "r1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "done",
+                "from": "open"
+              }
+            },
+            "request": "request-11"
+          },
+          "expect": {
+            "result": {
+              "from": "open",
+              "to": "done"
+            },
+            "row": {
+              "own": {
+                "title": "Desk",
+                "assignee": "0f8fad5b-d9cb-469f-a165-70867728950e"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "done",
+                  "enteredAt": 1007000
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 18,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Request",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "TMXp8QPR6yGvKuV2GZQ10",
+              "permissions": []
+            },
+            "now": 1007000,
+            "action": {
+              "kind": "operation",
+              "key": "r1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "done",
+                "from": "open"
+              }
+            },
+            "request": "request-12"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Request r1: Request r1 is done, not open",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "Request r1 is done, not open",
+                "vetoCode": "stale",
+                "vetoDetails": {
+                  "from": "open",
+                  "status": "done"
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Desk",
+                "assignee": "0f8fad5b-d9cb-469f-a165-70867728950e"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "done",
+                  "enteredAt": 1007000
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 19,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Request",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "TMXp8QPR6yGvKuV2GZQ10",
+              "permissions": []
+            },
+            "now": 1007000,
+            "action": {
+              "kind": "operation",
+              "key": "r1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "done"
+              }
+            },
+            "request": "request-13"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Request r1: Request r1 is already done",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "Request r1 is already done",
+                "vetoCode": "already_in_state",
+                "vetoDetails": {
+                  "from": "done",
+                  "to": "done"
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Desk",
+                "assignee": "0f8fad5b-d9cb-469f-a165-70867728950e"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "done",
+                  "enteredAt": 1007000
+                }
+              }
+            },
+            "version": 2
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 15,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 20,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Workflow principals > a by field of a UUID type names its subject in either form, and a string field compares the text",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Request",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "assignee",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Request",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "open",
+                      "done"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "open",
+                        "to": "done",
+                        "by": [
+                          "assignee"
+                        ]
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "assignee",
+                  "type": "Identity.UUID"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Question",
+          "fields": [
+            {
+              "name": "prompt",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "askedOf",
+              "type": "string"
+            },
+            {
+              "name": "createdBy",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Question",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "open",
+                      "answered",
+                      "withdrawn",
+                      "closed"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "open",
+                        "to": "answered",
+                        "by": [
+                          "askedOf"
+                        ]
+                      },
+                      {
+                        "from": "open",
+                        "to": "withdrawn",
+                        "by": [
+                          "createdBy"
+                        ]
+                      },
+                      {
+                        "from": "answered",
+                        "to": "closed",
+                        "by": [
+                          "askedOf",
+                          "createdBy"
+                        ],
+                        "permission": "questions.close"
+                      },
+                      {
+                        "from": "answered",
+                        "to": "open"
+                      }
+                    ],
+                    "overridePermission": "questions.moderate",
+                    "repeat": "unchanged"
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "prompt",
+                  "type": "string"
+                },
+                {
+                  "name": "askedOf",
+                  "type": "string"
+                },
+                {
+                  "name": "createdBy",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Request",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "done"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "done",
+                      "by": [
+                        "assignee"
+                      ]
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "assignee",
+                "type": "Identity.UUID"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Request",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "done"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "done",
+                      "by": [
+                        "assignee"
+                      ]
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "assignee",
+                "type": "Identity.UUID"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 4,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        "askedOf"
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 5,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        "askedOf"
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Request",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "r1",
+              "own": {
+                "title": "Desk",
+                "assignee": "0f8fad5b-d9cb-469f-a165-70867728950e"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "r1",
+            "row": {
+              "own": {
+                "title": "Desk",
+                "assignee": "0f8fad5b-d9cb-469f-a165-70867728950e"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Request",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "3n9R8RlRyqVJBUQUv6toL1",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "r1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "done"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Request r1: 3n9R8RlRyqVJBUQUv6toL1 may not move Request r1 from open to done: the transition is made by the subject assignee holds",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "3n9R8RlRyqVJBUQUv6toL1 may not move Request r1 from open to done: the transition is made by the subject assignee holds",
+                "vetoCode": "not_principal",
+                "vetoDetails": {
+                  "from": "open",
+                  "to": "done",
+                  "by": [
+                    "assignee"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "title": "Desk",
+                "assignee": "0f8fad5b-d9cb-469f-a165-70867728950e"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Request",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "TMXp8QPR6yGvKuV2GZQ10",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "r1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "done"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "from": "open",
+              "to": "done"
+            },
+            "row": {
+              "own": {
+                "title": "Desk",
+                "assignee": "0f8fad5b-d9cb-469f-a165-70867728950e"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "done",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Request",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "r2",
+              "own": {
+                "title": "Chair",
+                "assignee": "TMXp8QPR6yGvKuV2GZQ10"
+              },
+              "params": {}
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "key": "r2",
+            "row": {
+              "own": {
+                "title": "Chair",
+                "assignee": "TMXp8QPR6yGvKuV2GZQ10"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Request",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "0f8fad5b-d9cb-469f-a165-70867728950e",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "r2",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "done"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "from": "open",
+              "to": "done"
+            },
+            "row": {
+              "own": {
+                "title": "Chair",
+                "assignee": "TMXp8QPR6yGvKuV2GZQ10"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "done",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "q1",
+              "own": {
+                "prompt": "Which desk?",
+                "askedOf": "0f8fad5b-d9cb-469f-a165-70867728950e",
+                "createdBy": "alice"
+              },
+              "params": {}
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "key": "q1",
+            "row": {
+              "own": {
+                "prompt": "Which desk?",
+                "askedOf": "0f8fad5b-d9cb-469f-a165-70867728950e",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "TMXp8QPR6yGvKuV2GZQ10",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "answered"
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Workflow vetoes transition of Question q1: TMXp8QPR6yGvKuV2GZQ10 may not move Question q1 from open to answered: the transition is made by the subject askedOf holds",
+              "details": {
+                "behavior": "Workflow",
+                "action": "transition",
+                "reason": "TMXp8QPR6yGvKuV2GZQ10 may not move Question q1 from open to answered: the transition is made by the subject askedOf holds",
+                "vetoCode": "not_principal",
+                "vetoDetails": {
+                  "from": "open",
+                  "to": "answered",
+                  "by": [
+                    "askedOf"
+                  ]
+                }
+              }
+            },
+            "row": {
+              "own": {
+                "prompt": "Which desk?",
+                "askedOf": "0f8fad5b-d9cb-469f-a165-70867728950e",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "open",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Question",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "0f8fad5b-d9cb-469f-a165-70867728950e",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "q1",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "answered"
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "result": {
+              "from": "open",
+              "to": "answered"
+            },
+            "row": {
+              "own": {
+                "prompt": "Which desk?",
+                "askedOf": "0f8fad5b-d9cb-469f-a165-70867728950e",
+                "createdBy": "alice"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "answered",
+                  "enteredAt": 1000000
+                }
+              }
+            },
+            "version": 2
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        }
+      ]
+    },
+    {
+      "name": "Workflow principals > define refuses a by the type cannot hold, a seat, and members its schema refuses",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Question",
+          "fields": [
+            {
+              "name": "prompt",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "askedOf",
+              "type": "string"
+            },
+            {
+              "name": "createdBy",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Question",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "open",
+                      "answered",
+                      "withdrawn",
+                      "closed"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "open",
+                        "to": "answered",
+                        "by": [
+                          "askedOf"
+                        ]
+                      },
+                      {
+                        "from": "open",
+                        "to": "withdrawn",
+                        "by": [
+                          "createdBy"
+                        ]
+                      },
+                      {
+                        "from": "answered",
+                        "to": "closed",
+                        "by": [
+                          "askedOf",
+                          "createdBy"
+                        ],
+                        "permission": "questions.close"
+                      },
+                      {
+                        "from": "answered",
+                        "to": "open"
+                      }
+                    ],
+                    "overridePermission": "questions.moderate",
+                    "repeat": "unchanged"
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "prompt",
+                  "type": "string"
+                },
+                {
+                  "name": "askedOf",
+                  "type": "string"
+                },
+                {
+                  "name": "createdBy",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        "seat:reviewer"
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Question: behavior Workflow config: the transition from \"open\" to \"answered\" names \"seat:reviewer\" in by, a seat of Seats, which the core does not run yet (D104, step 3)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Question: behavior Workflow config: the transition from \"open\" to \"answered\" names \"seat:reviewer\" in by, a seat of Seats, which the core does not run yet (D104, step 3)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        "askee"
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Question: behavior Workflow config: the transition from \"open\" to \"answered\" names \"askee\" in by, which is not a field of Question (its fields: prompt, askedOf, createdBy)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Question: behavior Workflow config: the transition from \"open\" to \"answered\" names \"askee\" in by, which is not a field of Question (its fields: prompt, askedOf, createdBy)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 4,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        "priority"
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              },
+              {
+                "name": "priority",
+                "type": "number"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Question: behavior Workflow config: the transition from \"open\" to \"answered\" names \"priority\" in by, a number field of Question: by names a field that holds a subject (string, Identity.UUID or Identity.UserID)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Question: behavior Workflow config: the transition from \"open\" to \"answered\" names \"priority\" in by, a number field of Question: by names a field that holds a subject (string, Identity.UUID or Identity.UserID)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 5,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        "dueAt"
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              },
+              {
+                "name": "dueAt",
+                "type": "Temporal.DateTime",
+                "dateTime": true
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Question: behavior Workflow config: the transition from \"open\" to \"answered\" names \"dueAt\" in by, a Temporal.DateTime field of Question: by names a field that holds a subject (string, Identity.UUID or Identity.UserID)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "rule",
+                    "path": "/config",
+                    "message": "type Question: behavior Workflow config: the transition from \"open\" to \"answered\" names \"dueAt\" in by, a Temporal.DateTime field of Question: by names a field that holds a subject (string, Identity.UUID or Identity.UserID)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 6,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        "askedOf"
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "always"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Question: behavior Workflow config: /repeat: must be one of \"unchanged\"",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "schema",
+                    "path": "/config/repeat",
+                    "message": "must be one of \"unchanged\""
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 7,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        "askedOf"
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Question: behavior Workflow config: /overridePermission: must NOT have fewer than 1 characters",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "schema",
+                    "path": "/config/overridePermission",
+                    "message": "must NOT have fewer than 1 characters"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 8,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        "askedOf"
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": 5,
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Question: behavior Workflow config: /overridePermission: must be string",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "schema",
+                    "path": "/config/overridePermission",
+                    "message": "must be string"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 9,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": []
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Question: behavior Workflow config: /transitions/0/by: must NOT have fewer than 1 items",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "schema",
+                    "path": "/config/transitions/0/by",
+                    "message": "must NOT have fewer than 1 items"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 10,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": "askedOf"
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Question: behavior Workflow config: /transitions/0/by: must be array",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "schema",
+                    "path": "/config/transitions/0/by",
+                    "message": "must be array"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 11,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        "askedOf",
+                        "askedOf"
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Question: behavior Workflow config: /transitions/0/by: must NOT have duplicate items (items ## 1 and 0 are identical)",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "schema",
+                    "path": "/config/transitions/0/by",
+                    "message": "must NOT have duplicate items (items ## 1 and 0 are identical)"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 12,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        ""
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Question: behavior Workflow config: /transitions/0/by/0: must NOT have fewer than 1 characters",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "schema",
+                    "path": "/config/transitions/0/by/0",
+                    "message": "must NOT have fewer than 1 characters"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 13,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        5
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Question: behavior Workflow config: /transitions/0/by/0: must be string",
+              "details": {
+                "issues": [
+                  {
+                    "use": "Workflow",
+                    "index": 0,
+                    "behavior": "Workflow",
+                    "kind": "schema",
+                    "path": "/config/transitions/0/by/0",
+                    "message": "must be string"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 14,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        "askedOf"
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 15,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Question",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "open",
+                    "answered",
+                    "withdrawn",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "open",
+                      "to": "answered",
+                      "by": [
+                        "askedOf"
+                      ]
+                    },
+                    {
+                      "from": "open",
+                      "to": "withdrawn",
+                      "by": [
+                        "createdBy"
+                      ]
+                    },
+                    {
+                      "from": "answered",
+                      "to": "closed",
+                      "by": [
+                        "askedOf",
+                        "createdBy"
+                      ],
+                      "permission": "questions.close"
+                    },
+                    {
+                      "from": "answered",
+                      "to": "open"
+                    }
+                  ],
+                  "overridePermission": "questions.moderate",
+                  "repeat": "unchanged"
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "prompt",
+                "type": "string"
+              },
+              {
+                "name": "askedOf",
+                "type": "string"
+              },
+              {
+                "name": "createdBy",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        }
+      ]
+    }
+  ]
+}

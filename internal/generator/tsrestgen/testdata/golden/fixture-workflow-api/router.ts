@@ -11,10 +11,12 @@
 // runs it through options.orm, the database's repositories, which run it
 // through the behaviors' core in a transaction of its own, as the request's
 // caller, and answers a refusal of the core's as the problem of its status,
-// code and message.
+// code and message. An optional member of an operation's input that is
+// null is its absence: the handler leaves it out of the repository's
+// parameters, which take no null for it (D104).
 
 import { Hono, type Env } from 'hono';
-import { behaviorCaller, behaviorOperation, type OperationSpec } from '@superschematic/http-runtime';
+import { behaviorCaller, behaviorOperation, behaviorParams, type OperationSpec } from '@superschematic/http-runtime';
 import {
   mountOperation,
   type RouterRuntimeOptions,
@@ -143,8 +145,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       behaviorOperation(() =>
         options.orm.order.status.transition(
           request.path['id'] as IdentityUUID,
-          // The repository's parameters: the wire values of OrderStatusTransitionInput.
-          request.input as never,
+          // The repository's parameters: the wire values of OrderStatusTransitionInput,
+          // each optional member that is null left out (D104).
+          behaviorParams(request.input, ['from']) as never,
           { caller: behaviorCaller(ctx) }
         )
       ) as Promise<OrderStatusTransitionResult>,
@@ -183,8 +186,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       behaviorOperation(() =>
         options.orm.shipment.paymentStatus.transition(
           request.path['id'] as IdentityUUID,
-          // The repository's parameters: the wire values of ShipmentPaymentStatusTransitionInput.
-          request.input as never,
+          // The repository's parameters: the wire values of ShipmentPaymentStatusTransitionInput,
+          // each optional member that is null left out (D104).
+          behaviorParams(request.input, ['from']) as never,
           { caller: behaviorCaller(ctx) }
         )
       ) as Promise<ShipmentPaymentStatusTransitionResult>,
@@ -206,8 +210,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       behaviorOperation(() =>
         options.orm.shipment.status.transition(
           request.path['id'] as IdentityUUID,
-          // The repository's parameters: the wire values of ShipmentStatusTransitionInput.
-          request.input as never,
+          // The repository's parameters: the wire values of ShipmentStatusTransitionInput,
+          // each optional member that is null left out (D104).
+          behaviorParams(request.input, ['from']) as never,
           { caller: behaviorCaller(ctx) }
         )
       ) as Promise<ShipmentStatusTransitionResult>,

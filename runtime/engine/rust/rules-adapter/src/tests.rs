@@ -14,7 +14,7 @@ use std::task::{Context, Poll, Waker};
 
 use serde_json::{json, Map, Value};
 use superschematic_rules::{
-    Behavior, ConfigError, ConfigTarget, Cx, Declaration, Heard, Hook, RowWrite, UseSpec,
+    Behavior, ConfigError, ConfigTarget, Cx, Declaration, FieldSpec, Heard, Hook, RowWrite, UseSpec,
 };
 
 use crate::convert::{iso_of_millis, Bind, Cell};
@@ -70,6 +70,7 @@ pub(crate) fn order_table() -> Table {
         version: "_version".into(),
         live: None,
         own: vec![Column::new("title", "title", "string")],
+        audit: Vec::new(),
         uses: vec![Use {
             id: "status".into(),
             behavior: "Workflow".into(),
@@ -765,6 +766,153 @@ fn an_update_that_names_an_owned_field_is_refused_the_anchor_in_the_cores_words_
         })
     );
     assert!(store.applied().is_empty());
+}
+
+/// Order with `createdBy` among its audit fields (D104), a UUID in
+/// `created_by`, its status a Workflow whose move to paid is made by the
+/// row's creator and whose repeat answers unchanged.
+fn audited_table() -> Table {
+    let flow = json!({
+        "states": ["draft", "paid", "shipped"],
+        "initial": "draft",
+        "transitions": [
+            {"from": "draft", "to": "paid", "by": ["createdBy"]},
+            {"from": "paid", "to": "shipped"}
+        ],
+        "repeat": "unchanged"
+    });
+    Table {
+        audit: vec![Column::new("createdBy", "created_by", "Identity.UUID")],
+        spec: TypeSpec::new("Order")
+            .with(UseSpec::on_field("status", "Workflow", flow))
+            .with_field(FieldSpec::new("title", "string"))
+            .with_field(FieldSpec::new("createdBy", "Identity.UUID")),
+        ..order_table()
+    }
+}
+
+/// The audited Order's draft row as Postgres reads it, created by the
+/// subject whose UUID is the row's key's.
+fn audited_row() -> Vec<Cell> {
+    vec![
+        Cell::Json(json!("Desk")),
+        Cell::Json(json!(KEY_COLUMN)),
+        Cell::Json(json!("draft")),
+        Cell::Json(json!("1970-01-01T00:00:01+00:00")),
+        Cell::Int(1),
+    ]
+}
+
+#[test]
+fn a_row_read_selects_the_audit_columns_after_the_own_ones_into_its_own_fields_and_a_write_of_one_is_internal(
+) {
+    let core = workflow();
+    let layout = Layout::new([audited_table()]);
+    let host = Host::new(&core, &layout);
+    let store = MemoryStore::new(Dialect::Postgres, Some(audited_row()));
+    let row = block(run::read_row(&host, &store, "Order", KEY))
+        .expect("read")
+        .expect("a row");
+    assert_eq!(
+        serde_json::to_value(&row).expect("json"),
+        json!({"own": {"title": "Desk", "createdBy": KEY}, "owned": {"status": {"status": "draft", "enteredAt": 1000}}, "version": 1})
+    );
+    assert_eq!(
+        store.queries(),
+        [(
+            r#"SELECT to_jsonb("title") AS c0, to_jsonb("created_by") AS c1, to_jsonb("status") AS c2, to_jsonb("status_entered_at") AS c3, "_version" AS v FROM "order" WHERE "id" = $1"#.to_owned(),
+            vec![text(KEY_COLUMN)]
+        )]
+    );
+    // A null created_by is absent, as a NULL own column is.
+    let unstamped = MemoryStore::new(
+        Dialect::Sqlite,
+        Some(vec![
+            Cell::Text("Desk".into()),
+            Cell::Null,
+            Cell::Text("draft".into()),
+            Cell::Text("1970-01-01T00:00:01.000Z".into()),
+            Cell::Int(1),
+        ]),
+    );
+    let row = block(run::read_row(&host, &unstamped, "Order", KEY))
+        .expect("read")
+        .expect("a row");
+    assert_eq!(
+        serde_json::to_value(&row.own).expect("json"),
+        json!({"title": "Desk"})
+    );
+    // No command writes one: an update that names it is the layout's
+    // internal refusal of a field it has no own column for.
+    let refused = refusal(block(run::run_update(
+        &host,
+        &store,
+        "Order",
+        KEY,
+        own(json!({"createdBy": KEY})),
+        alice(),
+        &ExecuteOptions::default(),
+    )));
+    assert_eq!(
+        (refused.code, refused.message.as_str()),
+        (
+            Code::Internal,
+            "rules: Order has no own field createdBy in the behaviors' layout"
+        )
+    );
+    assert!(store.applied().is_empty());
+}
+
+#[test]
+fn a_transition_by_the_subject_an_audit_field_holds_moves_the_row_and_a_repeat_applies_an_empty_unit(
+) {
+    let core = workflow();
+    let layout = Layout::new([audited_table()]);
+    let host = Host::new(&core, &layout);
+    let move_as = |subject: &str, to: &str, row: Vec<Cell>| {
+        let store = MemoryStore::new(Dialect::Postgres, Some(row));
+        let command = Command::new(
+            Caller::new(subject, Vec::<String>::new()),
+            2000,
+            invoke("transition", json!({ "to": to })),
+        )
+        .with_request("r2");
+        let executed = block(run::execute(
+            &host,
+            &store,
+            "Order",
+            command,
+            &ExecuteOptions::default(),
+        ));
+        (executed, store.applied())
+    };
+    // The creator, in the subject's base62 form, makes the move by; anyone
+    // else is not_principal and nothing is applied.
+    let (moved, applied) = move_as(KEY, "paid", audited_row());
+    assert_eq!(
+        moved.expect("applied").result,
+        json!({"from": "draft", "to": "paid"})
+    );
+    assert_eq!(applied.len(), 1);
+    let (refused, applied) = move_as("bob", "paid", audited_row());
+    assert_eq!(
+        refusal(refused)
+            .details
+            .as_ref()
+            .map(|details| details["vetoCode"].clone()),
+        Some(json!("not_principal"))
+    );
+    assert!(applied.is_empty());
+    // A move to the state the row is in answers unchanged through an empty
+    // unit: no row write, so its version and enteredAt stay as they are.
+    let (repeated, applied) = move_as("bob", "draft", audited_row());
+    let repeated = repeated.expect("answered");
+    assert_eq!(
+        repeated.result,
+        json!({"from": "draft", "to": "draft", "unchanged": true})
+    );
+    assert!(repeated.changes.rows.is_empty() && repeated.changes.sub_rows.is_empty());
+    assert_eq!(applied, [Vec::<Statement>::new()]);
 }
 
 #[test]
@@ -2097,6 +2245,7 @@ fn probe_table() -> Table {
             Column::new("done", "done", "boolean"),
             Column::new("data", "data", "Generic.JSON"),
         ],
+        audit: Vec::new(),
         uses: vec![Use {
             id: "Toy".into(),
             behavior: "Toy".into(),

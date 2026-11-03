@@ -15,7 +15,8 @@ whose permission the caller lacks and a key no row holds are refused with
 the core's status, code and message; a caller without the route's
 permission is refused by the API's auth before the core runs; a table's
 two Workflows move apart; and the MCP endpoint lists the operation's tool
-and runs a call of it through its route.
+and runs a call of it through its route, a null from (D104) left out as
+its absence.
 */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -193,13 +194,16 @@ describe('the MCP endpoint of fixture-workflow-api', () => {
     const { tools } = (await mcp(KIM, 'tools/list')).result;
     const tool = tools.find((t: { name: string }) => t.name === 'order_status_transition');
     expect(tool).toBeDefined();
-    expect(Object.keys(tool.inputSchema.properties).sort()).toEqual(['id', 'to']);
+    // from, the state the caller read, is optional (D104).
+    expect(Object.keys(tool.inputSchema.properties).sort()).toEqual(['from', 'id', 'to']);
     expect(tool.inputSchema.properties.to.enum).toEqual(['draft', 'paid', 'shipped']);
     expect([...tool.inputSchema.required].sort()).toEqual(['id', 'to']);
     expect(tool.annotations).toEqual({ readOnlyHint: false });
 
     const order = (await orm.order.createOne({ title: 'by tool' })).id;
-    const called = (await mcp(KIM, 'tools/call', { name: 'order_status_transition', arguments: { id: order, to: 'paid' } })).result;
+    // A null from, which the tool's schema takes as every optional member's
+    // absence, is left out of the operation's parameters (D104).
+    const called = (await mcp(KIM, 'tools/call', { name: 'order_status_transition', arguments: { id: order, to: 'paid', from: null } })).result;
     expect(called.isError).toBeFalsy();
     expect(called.structuredContent).toEqual({ from: 'draft', to: 'paid' });
     expect(await orm.order.getOne(order)).toMatchObject({ status: 'paid', _version: 2 });

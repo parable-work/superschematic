@@ -49,6 +49,54 @@ const ticketLayout: RulesLayout = {
   types: { Ticket: { ...layout.types.Order!, type: 'Ticket', table: 'ticket', live: { column: 'deleted_at' }, spec: { ...layout.types.Order!.spec, name: 'Ticket' } } },
 };
 
+/**
+ * A table whose own fields hold subjects (D104): asked_of, an own UUID
+ * column, and created_by, the audit column the repositories stamp (D87),
+ * which the layout lists apart from the own columns, a row read holds among
+ * the own fields and no change set writes; withdrawing a question is made
+ * by the subject its createdBy holds.
+ */
+const questionLayout: RulesLayout = {
+  types: {
+    Question: {
+      type: 'Question',
+      table: 'question',
+      key: { field: 'id', column: 'id', type: 'string' },
+      version: '_version',
+      own: [
+        { field: 'prompt', column: 'prompt', type: 'string' },
+        { field: 'askedOf', column: 'asked_of', type: 'Identity.UUID' },
+      ],
+      audit: [{ field: 'createdBy', column: 'created_by', type: 'Identity.UUID' }],
+      uses: [
+        {
+          id: 'status',
+          behavior: 'Workflow',
+          anchor: 'status',
+          fields: [
+            { name: 'status', field: 'status', column: 'status', type: 'string', value: true },
+            { name: 'enteredAt', field: 'statusEnteredAt', column: 'status_entered_at', type: 'Temporal.DateTime', convert: 'epochMillis' },
+          ],
+          operations: [{ name: 'transition', writes: true }],
+        },
+      ],
+      spec: {
+        name: 'Question',
+        uses: [{ behavior: 'Workflow', config: { states: ['open', 'withdrawn'], transitions: [{ from: 'open', to: 'withdrawn', by: ['createdBy'] }] }, anchor: { field: 'status' } }],
+        fields: [
+          { name: 'prompt', type: 'string' },
+          { name: 'askedOf', type: 'Identity.UUID' },
+          { name: 'createdBy', type: 'Identity.UUID' },
+        ],
+      },
+    },
+  },
+};
+
+/** A UUID's two forms, its column's hyphenated text and its base62 wire form: dana's, and erin's. */
+const DANA = { column: '0f8fad5b-d9cb-469f-a165-70867728950e', wire: 'TMXp8QPR6yGvKuV2GZQ10' };
+const ERIN = { column: '7c9e6679-7425-40de-944b-e07fc1f90ae7', wire: '3n9R8RlRyqVJBUQUv6toL1' };
+
 /** A table a rule across rows writes, which composes no behavior. */
 const bookingLayout: RulesLayout = {
   types: { Booking: { type: 'Booking', table: 'booking', key: { field: 'id', column: 'id', type: 'string' }, version: '_version', own: [], uses: [], spec: { name: 'Booking', uses: [] } } },
@@ -107,6 +155,17 @@ for (const dialect of dialects) {
 )`);
       if (db.dialect === 'postgres') for (const ddl of bumpVersion('ticket')) await db.exec(ddl);
       await db.exec(`CREATE TABLE booking (id ${t.key}, _version ${t.version})`);
+      const uuid = db.dialect === 'postgres' ? 'UUID' : 'TEXT';
+      await db.exec(`CREATE TABLE question (
+  id ${t.key},
+  prompt ${t.text} NOT NULL,
+  asked_of ${uuid},
+  created_by ${uuid},
+  status ${t.text},
+  status_entered_at ${t.timestamp},
+  _version ${t.version}
+)`);
+      if (db.dialect === 'postgres') for (const ddl of bumpVersion('question')) await db.exec(ddl);
     });
     afterAll(async () => db?.close());
 
@@ -286,6 +345,35 @@ for (const dialect of dialects) {
         expect(outcomes).toEqual(['conflict', 'applied after 1']);
         expect(rows).toEqual([{ id: 'b2' }]);
       }
+    });
+
+    test('a row read holds the audit fields the layout names among its own fields, a UUID in base62', async () => {
+      const onQuestions = (store: RulesStore): RulesHost => ({ core: core(), layout: questionLayout, store, now: () => clock });
+      // Written past the adapter, as the repositories' create stamps
+      // created_by with its hyphenated text.
+      await db.exec(`INSERT INTO question (id, prompt, asked_of, created_by, status) VALUES (${p(1)}, ${p(2)}, ${p(3)}, ${p(4)}, 'open')`, ['q1', 'Which table?', ERIN.column, DANA.column]);
+      await db.exec(`INSERT INTO question (id, prompt, status) VALUES (${p(1)}, ${p(2)}, 'open')`, ['q2', 'Which chair?']);
+      expect(await db.transaction(store => readRow(onQuestions(store), 'Question', 'q1'))).toEqual({
+        own: { prompt: 'Which table?', askedOf: ERIN.wire, createdBy: DANA.wire },
+        owned: { status: { status: 'open' } },
+        version: 1,
+      });
+      // A NULL audit column is absent, as any column with no value is.
+      expect(await db.transaction(store => readRow(onQuestions(store), 'Question', 'q2'))).toEqual({ own: { prompt: 'Which chair?' }, owned: { status: { status: 'open' } }, version: 1 });
+    });
+
+    test('a by that names createdBy moves the row for the subject its audit column holds, refuses another, and its write leaves the audit column as it was', async () => {
+      const onQuestions = (store: RulesStore): RulesHost => ({ core: core(), layout: questionLayout, store, now: () => clock });
+      const withdraw = (caller: CoreCaller) => db.transaction(store => runOperation(onQuestions(store), 'Question', 'q1', 'status', 'transition', { to: 'withdrawn' }, caller));
+      await expect(withdraw({ subject: ERIN.wire, permissions: [] })).rejects.toMatchObject({
+        status: 409,
+        code: 'vetoed',
+        details: { vetoCode: 'not_principal', vetoDetails: { from: 'open', to: 'withdrawn', by: ['createdBy'] } },
+      });
+      // The caller's subject in either of a UUID's forms is the one the column holds.
+      expect(await withdraw({ subject: DANA.column, permissions: [] })).toEqual({ from: 'open', to: 'withdrawn' });
+      const [row] = await db.rows(`SELECT created_by, status, _version FROM question WHERE id = ${p(1)}`, ['q1']);
+      expect({ createdBy: String(row!.created_by), status: row!.status, version: Number(row!._version) }).toEqual({ createdBy: DANA.column, status: 'withdrawn', version: 2 });
     });
 
     if (dialect.name === 'Postgres') {

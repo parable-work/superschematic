@@ -1,0 +1,381 @@
+{
+  "name": "fixture-workflow-principals-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-workflow-principals-db",
+      "types": [
+        "Question"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-workflow-principals-db",
+      "kind": "DB"
+    }
+  ],
+  "scalars": {
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "IdentityUUID",
+        "json_schema": "string",
+        "python": "uuid.UUID",
+        "rust": "uuid::Uuid",
+        "sql": "UUID",
+        "typescript": "string"
+      },
+      "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+      "hasCustomParse": true
+    }
+  },
+  "types": {
+    "QuestionAssignment": {
+      "name": "QuestionAssignment",
+      "owner": "src/questions.schema.ts",
+      "comment": "Who a question is asked of, as reassignQuestion takes it: a view of the\ntable that carries askedOf, which status's Workflow names in by, so the\nbuild warns that a caller who may reassign a question may then answer it.",
+      "role": "APIView",
+      "source": {
+        "target": "fixture-workflow-principals-db.Question",
+        "omittedFromSource": [
+          "id",
+          "prompt",
+          "createdBy",
+          "status",
+          "statusEnteredAt",
+          "review",
+          "reviewEnteredAt"
+        ]
+      },
+      "fields": [
+        {
+          "name": "askedOf",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        }
+      ]
+    },
+    "QuestionReviewTransitionInput": {
+      "name": "QuestionReviewTransitionInput",
+      "owner": "fixture-workflow-principals-api",
+      "comment": "The parameters of Question's review transition.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
+          "typeRef": {
+            "name": "QuestionReviewState"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state to move to.",
+          "typeRef": {
+            "name": "QuestionReviewState"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "QuestionReviewTransitionResult": {
+      "name": "QuestionReviewTransitionResult",
+      "owner": "fixture-workflow-principals-api",
+      "comment": "What Question's review transition returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the instance was in.",
+          "typeRef": {
+            "name": "QuestionReviewState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state it is in now.",
+          "typeRef": {
+            "name": "QuestionReviewState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "unchanged",
+          "comment": "True when the instance was already in to and the config's repeat is unchanged, so nothing was written; absent otherwise.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "QuestionStatusTransitionInput": {
+      "name": "QuestionStatusTransitionInput",
+      "owner": "fixture-workflow-principals-api",
+      "comment": "The parameters of Question's status transition.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
+          "typeRef": {
+            "name": "QuestionStatusState"
+          },
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state to move to.",
+          "typeRef": {
+            "name": "QuestionStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "QuestionStatusTransitionResult": {
+      "name": "QuestionStatusTransitionResult",
+      "owner": "fixture-workflow-principals-api",
+      "comment": "What Question's status transition returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the instance was in.",
+          "typeRef": {
+            "name": "QuestionStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state it is in now.",
+          "typeRef": {
+            "name": "QuestionStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "unchanged",
+          "comment": "True when the instance was already in to and the config's repeat is unchanged, so nothing was written; absent otherwise.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    }
+  },
+  "enums": {
+    "QuestionReviewState": {
+      "name": "QuestionReviewState",
+      "owner": "fixture-workflow-principals-api",
+      "comment": "A state of Question's review Workflow.",
+      "values": [
+        {
+          "name": "Pending",
+          "serializedAs": "pending"
+        },
+        {
+          "name": "Reviewed",
+          "serializedAs": "reviewed"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "QuestionStatusState": {
+      "name": "QuestionStatusState",
+      "owner": "fixture-workflow-principals-api",
+      "comment": "A state of Question's status Workflow.",
+      "values": [
+        {
+          "name": "Open",
+          "serializedAs": "open"
+        },
+        {
+          "name": "Answered",
+          "serializedAs": "answered"
+        },
+        {
+          "name": "Withdrawn",
+          "serializedAs": "withdrawn"
+        },
+        {
+          "name": "Closed",
+          "serializedAs": "closed"
+        }
+      ],
+      "origin": "behavior"
+    }
+  },
+  "operationSets": [
+    {
+      "name": "QuestionActions",
+      "comment": "A question's status and review operations (D104), for any signed-in\ncaller: the core decides who may make each move from the row itself.",
+      "operations": [
+        {
+          "name": "statusTransition",
+          "comment": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "docs": {
+            "title": "Question status: transition",
+            "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+            "capability": "question.status.transition",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "question_status_transition",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "QuestionStatusTransitionResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Question row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "QuestionStatusTransitionInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-workflow-principals-db",
+            "type": "Question",
+            "key": "id",
+            "use": "status",
+            "behavior": "Workflow",
+            "operation": "transition",
+            "writes": true,
+            "permissions": [
+              "questions.close",
+              "questions.moderate"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "question/{id}/status/transition",
+          "origin": "behavior"
+        },
+        {
+          "name": "reviewTransition",
+          "comment": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "docs": {
+            "title": "Question review: transition",
+            "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+            "capability": "question.review.transition",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "question_review_transition",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "QuestionReviewTransitionResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Question row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "QuestionReviewTransitionInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-workflow-principals-db",
+            "type": "Question",
+            "key": "id",
+            "use": "review",
+            "behavior": "Workflow",
+            "operation": "transition",
+            "writes": true
+          },
+          "httpMethod": "POST",
+          "restPath": "question/{id}/review/transition",
+          "origin": "behavior"
+        }
+      ],
+      "behaviorOperations": {
+        "type": "Question"
+      },
+      "auth": true
+    },
+    {
+      "name": "QuestionAdmin",
+      "comment": "Moderation of questions, for callers who hold questions.moderate.",
+      "operations": [
+        {
+          "name": "reassignQuestion",
+          "typeRef": {
+            "name": "Question"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "QuestionAssignment"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "questions.moderate"
+          ],
+          "httpMethod": "PATCH",
+          "restPath": "questions/{id}/asked-of"
+        }
+      ]
+    }
+  ]
+}

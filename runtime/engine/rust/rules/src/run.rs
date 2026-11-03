@@ -11,7 +11,11 @@
 //! after-change hooks. Every effect lands in one change set; the first
 //! refusal ends the run. The command's own operation may say it writes
 //! nothing (`Cx::unchanged`): its change set then holds no write and no
-//! after-change hook runs.
+//! after-change hook runs. An operation's own use may answer it before any
+//! guard is asked ([`crate::Behavior::settle`], D104), after its parameter
+//! check: the call then runs no guard and no handler and writes nothing,
+//! and the command's own operation's change set holds no write, as an
+//! operation that says it writes nothing.
 //!
 //! A hook runs in a frame: a type, its bound uses and one row. The
 //! command's frame is its own type on its own row; a use reaches another
@@ -189,6 +193,14 @@ impl Touched {
             }),
         }
     }
+}
+
+/// What an invoked operation came to: its result, and whether its use's
+/// settle answered it before any guard, so nothing ran and nothing was
+/// written.
+pub(crate) struct Invoked {
+    pub result: Value,
+    pub settled: bool,
 }
 
 /// The sub-table rows, events and deadlines the run builds, each naming its
@@ -778,7 +790,10 @@ impl<'a> Run<'a> {
             ));
         }
         let caller = from.uses[from_index].spec.id();
-        self.undoing(|| self.invoke(from, index, declared, params, Some(caller), None, writable))
+        self.undoing(|| {
+            self.invoke(from, index, declared, params, Some(caller), None, writable)
+                .map(|invoked| invoked.result)
+        })
     }
 
     /// A call of an operation of a use of another row, of any type: its
@@ -828,7 +843,7 @@ impl<'a> Run<'a> {
                         ),
                     ));
                 }
-                let result = self.invoke(
+                let invoked = self.invoke(
                     frame,
                     index,
                     declared,
@@ -837,7 +852,9 @@ impl<'a> Run<'a> {
                     Some(caller_type),
                     writable,
                 )?;
-                if declared.writes {
+                // A call its use settled wrote nothing: the row is not
+                // written and its after-change hooks do not run.
+                if declared.writes && !invoked.settled {
                     self.unchanged_write(
                         from,
                         from_index,
@@ -854,7 +871,7 @@ impl<'a> Run<'a> {
                         operation,
                     )?;
                 }
-                Ok(result)
+                Ok(invoked.result)
             })
         })
     }
@@ -1078,9 +1095,9 @@ impl<'a> Run<'a> {
     ) -> Hook<ChangeSet> {
         self.load(key)?;
         let (index, declared) = self.find_operation(self.top, use_id, operation)?;
-        let result = self.invoke(self.top, index, declared, params, None, None, true)?;
-        // An operation that said it writes nothing writes no row and runs
-        // no after-change hook.
+        let invoked = self.invoke(self.top, index, declared, params, None, None, true)?;
+        // An operation that said it writes nothing, or that its use settled,
+        // writes no row and runs no after-change hook.
         if declared.writes && !self.unchanged.get() {
             self.mark_updated(self.top.row);
             self.after_change(
@@ -1093,7 +1110,7 @@ impl<'a> Run<'a> {
                 operation,
             )?;
         }
-        Ok(self.changes(result))
+        Ok(self.changes(invoked.result))
     }
 
     fn deadline(&self, key: &str, use_id: &str, name: &str, payload: &Value) -> Hook<ChangeSet> {
@@ -1587,9 +1604,12 @@ impl<'a> Run<'a> {
         Ok(())
     }
 
-    /// Runs an operation: its parameter check, every guard, its handler.
-    /// `caller` names the use of a `call()` or a `call_on()`, and
-    /// `caller_type` the calling use's type for a `call_on()`.
+    /// Runs an operation: its parameter check, its use's settle, every
+    /// guard, its handler. `caller` names the use of a `call()` or a
+    /// `call_on()`, and `caller_type` the calling use's type for a
+    /// `call_on()`. An operation its use settles runs no guard and no
+    /// handler; for the command's own operation the run then writes
+    /// nothing, as after [`crate::Cx::unchanged`].
     #[allow(clippy::too_many_arguments)]
     fn invoke(
         &self,
@@ -1600,7 +1620,7 @@ impl<'a> Run<'a> {
         caller: Option<&str>,
         caller_type: Option<&str>,
         writable: bool,
-    ) -> Hook<Value> {
+    ) -> Hook<Invoked> {
         self.nested(
             frame,
             index,
@@ -1622,6 +1642,22 @@ impl<'a> Run<'a> {
                     )
                     .into());
                 }
+                // The use answers its own operation before any guard is
+                // asked, or goes on to them.
+                let settled = bound.registered.behavior.settle(
+                    self.scope(frame, index, &declared.name, false),
+                    &declared.name,
+                    params,
+                )?;
+                if let Some(result) = settled {
+                    if caller.is_none() {
+                        self.unchanged.set(true);
+                    }
+                    return Ok(Invoked {
+                        result,
+                        settled: true,
+                    });
+                }
                 self.guards(
                     frame,
                     &GuardRequest::Operation {
@@ -1640,10 +1676,14 @@ impl<'a> Run<'a> {
                     own: caller.is_none(),
                     ..self.scope(frame, index, &declared.name, declared.writes && writable)
                 };
-                bound
+                let result = bound
                     .registered
                     .behavior
-                    .operation(scope, &declared.name, params)
+                    .operation(scope, &declared.name, params)?;
+                Ok(Invoked {
+                    result,
+                    settled: false,
+                })
             },
         )
     }

@@ -32,10 +32,37 @@
 //! is the status; another use writes only the fields it declares (the core
 //! holds it to its declaration), so it moves the status by calling
 //! `transition`, whose parameter check, guard and permission gate run for a
-//! call as for a caller. `transition`'s parameter is `to` alone, checked as
-//! its closed paramsSchema has it, so no alias reaches the guard or the
-//! handler. On a field anchor, a refusal names the field (`"packed" is not a
-//! state of Order.status`, `Order o1's fulfilment is already packed`).
+//! call as for a caller. `transition`'s parameters are `to` and, optionally,
+//! `from`, checked as its closed paramsSchema has them, so no alias reaches
+//! the guard or the handler. On a field anchor, a refusal names the field
+//! (`"packed" is not a state of Order.status`, `Order o1's fulfilment is
+//! already packed`).
+//!
+//! A transition may name who makes it (D104): `by` lists fields of the row
+//! that hold a subject (a `string`, `Identity.UUID` or `Identity.UserID`
+//! field, the audit field `createdBy` among them), and only a caller who is
+//! the subject one of them holds makes it, holding the transition's
+//! permission too when it names one; any other caller is vetoed
+//! (`not_principal`, details `{ from, to, by }`). A field with no value
+//! names no one, and a UUID field names its subject in either form
+//! ([`crate::subjects`]). A caller who holds the config's
+//! `overridePermission` passes every transition's `by`, and still needs its
+//! permission. `by` and `overridePermission` hold a `call()` and a
+//! `call_on()` as the permission does: the command's caller is the one
+//! checked. A `seat:` entry names a seat of Seats, which the core does not
+//! run yet (D104, step 3), and is refused at define.
+//!
+//! A move to the state the row is in is the veto `already_in_state` (D16's
+//! amendment), unless the config sets `repeat: "unchanged"`: it then
+//! answers `{ from, to, unchanged: true }` and writes nothing, before any
+//! use's guard is asked ([`Behavior::settle`]), so no other behavior's gate
+//! refuses a move that is no move. A repeat checks no transition's `by` or
+//! permission, since no transition leads from a state to itself.
+//! `transition`'s `from` is the state the caller read: one that is not the
+//! row's state is the veto `stale` (details `{ from, status }`), checked
+//! first, before the repeat and `already_in_state`, so a retry that names
+//! `from` and finds its move made is stale with `status` equal to its `to`:
+//! the retry landed.
 //!
 //! A transition's change set is the row's update with the use's two owned
 //! fields set, and its result is `{ from, to }`. Workflow emits no outbox
@@ -74,11 +101,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use superschematic_rules::{
     Behavior, ConfigCx, ConfigError, ConfigTarget, Cx, Declaration, GuardRequest, Hook, Refusal,
-    Row, SchemaIssue, Veto, View,
+    Row, SchemaIssue, Stop, Veto, View,
 };
 
 use crate::declared;
 use crate::schema::{self, Issues};
+use crate::subjects::{holds_subject, names_subject};
 
 /// The behavior's name, as its declaration has it.
 pub const NAME: &str = "Workflow";
@@ -105,8 +133,24 @@ const STATE_PATTERN: &str = schema::NAME_PATTERN;
 const STATE_MAX_LENGTH: usize = schema::NAME_MAX_LENGTH;
 
 // The members the configSchema's closed objects take.
-const CONFIG_KEYS: [&str; 4] = ["initial", "outcomes", "states", "transitions"];
-const TRANSITION_KEYS: [&str; 3] = ["from", "permission", "to"];
+const CONFIG_KEYS: [&str; 6] = [
+    "initial",
+    "outcomes",
+    "overridePermission",
+    "repeat",
+    "states",
+    "transitions",
+];
+const TRANSITION_KEYS: [&str; 4] = ["by", "from", "permission", "to"];
+
+// The members transition's closed paramsSchema takes.
+const PARAMS_KEYS: [&str; 2] = ["from", "to"];
+
+// What a by entry that names a seat of Seats starts with (D104, step 3).
+const SEAT_PREFIX: &str = "seat:";
+
+// The value of repeat the configSchema's enum takes.
+const REPEAT_UNCHANGED: &str = "unchanged";
 
 // The outcomes, in the order the configSchema's enum lists them.
 const OUTCOMES: [&str; 3] = ["success", "failure", "neutral"];
@@ -121,6 +165,20 @@ pub struct WorkflowTransition {
     /// write the row can.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission: Option<String>,
+    /// The own fields that hold a subject who may make it (D104); empty
+    /// when it names none, and any caller may.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub by: Vec<String>,
+}
+
+/// What a transition to the state a row is in answers (D104).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WorkflowRepeat {
+    /// The veto already_in_state, the default (D16's amendment).
+    #[default]
+    Veto,
+    /// `repeat: "unchanged"`: `{ from, to, unchanged: true }`, nothing written.
+    Unchanged,
 }
 
 /// The outcome of a terminal state: how the work it ends went.
@@ -153,8 +211,8 @@ impl WorkflowOutcome {
     }
 }
 
-/// Workflow's config, parsed: the initial state filled in, and every
-/// terminal state's outcome.
+/// Workflow's config, parsed: the initial state filled in, every terminal
+/// state's outcome, and the type of each field a transition's `by` names.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkflowConfig {
     pub states: Vec<String>,
@@ -162,6 +220,13 @@ pub struct WorkflowConfig {
     pub transitions: Vec<WorkflowTransition>,
     /// The outcome of each terminal state, in the order of `states`.
     pub outcomes: Vec<(String, WorkflowOutcome)>,
+    /// The permission that moves a caller past every transition's by (D104).
+    pub override_permission: Option<String>,
+    pub repeat: WorkflowRepeat,
+    /// Each field a transition's by names, once, in the order the config
+    /// first names it, with its IR type as the type's spec gives it: what
+    /// decides how its value names a subject.
+    pub subject_types: Vec<(String, String)>,
 }
 
 // What the configSchema lets through.
@@ -174,14 +239,20 @@ struct RawConfig {
     transitions: Vec<WorkflowTransition>,
     #[serde(default)]
     outcomes: Option<Map<String, Value>>,
+    #[serde(default, rename = "overridePermission")]
+    override_permission: Option<String>,
+    #[serde(default)]
+    repeat: Option<String>,
 }
 
 impl WorkflowConfig {
-    /// Parses and checks a config as a type gives it: as the declaration's
-    /// configSchema holds it, each issue at its path in the schema loader's
-    /// words, then as a state machine, a rule's reason in the engine's
-    /// words, which the core prefixes with the type and the behavior.
-    pub fn parse(raw: &Value) -> Result<WorkflowConfig, ConfigError> {
+    /// Parses and checks a config as a type gives it, on the type the
+    /// target names: as the declaration's configSchema holds it, each issue
+    /// at its path in the schema loader's words, then as a state machine, a
+    /// rule's reason in the engine's words, which the core prefixes with
+    /// the type and the behavior, and then each transition's `by` against
+    /// the type's fields (D104).
+    pub fn parse(raw: &Value, target: &ConfigTarget<'_>) -> Result<WorkflowConfig, ConfigError> {
         let issues = config_issues(raw);
         if !issues.is_empty() {
             return Err(ConfigError::Schema(issues.into_issues()));
@@ -226,6 +297,12 @@ impl WorkflowConfig {
             initial,
             transitions: raw.transitions,
             outcomes: Vec::new(),
+            override_permission: raw.override_permission,
+            repeat: match raw.repeat.as_deref() {
+                Some(REPEAT_UNCHANGED) => WorkflowRepeat::Unchanged,
+                _ => WorkflowRepeat::Veto,
+            },
+            subject_types: Vec::new(),
         };
         let declared = raw.outcomes.unwrap_or_default();
         for state in declared.keys() {
@@ -254,7 +331,17 @@ impl WorkflowConfig {
                 (state.clone(), named.unwrap_or(WorkflowOutcome::Success))
             })
             .collect();
+        config.subject_types = subject_types(&config.transitions, target)?;
         Ok(config)
+    }
+
+    /// The IR type of a field a transition's by names, as the type's spec
+    /// gives it; `None` for a field no by names.
+    pub fn subject_type(&self, field: &str) -> Option<&str> {
+        self.subject_types
+            .iter()
+            .find(|(name, _)| name == field)
+            .map(|(_, type_name)| type_name.as_str())
     }
 
     /// Whether a state is one of the config's.
@@ -295,6 +382,55 @@ impl WorkflowConfig {
             .map(|transition| transition.to.as_str())
             .collect()
     }
+}
+
+// subject_types holds each transition's by to the type's fields, in
+// config order, each entry in order, refusing the first that breaks: a seat
+// of Seats, which the core does not run yet, a field the type lacks, and a
+// field of a type that holds no subject. It is each field a by names, once,
+// in the order the config first names it, with its IR type.
+fn subject_types(
+    transitions: &[WorkflowTransition],
+    target: &ConfigTarget<'_>,
+) -> Result<Vec<(String, String)>, ConfigError> {
+    let fields = target.fields();
+    let type_name = target.type_name();
+    let mut found: Vec<(String, String)> = Vec::new();
+    for WorkflowTransition { from, to, by, .. } in transitions {
+        for entry in by {
+            let named =
+                format!("the transition from \"{from}\" to \"{to}\" names \"{entry}\" in by");
+            if entry.starts_with(SEAT_PREFIX) {
+                return Err(format!(
+                    "{named}, a seat of Seats, which the core does not run yet (D104, step 3)"
+                )
+                .into());
+            }
+            let Some(field) = fields.iter().find(|field| field.name == *entry) else {
+                let names: Vec<&str> = fields.iter().map(|field| field.name.as_str()).collect();
+                let names = if names.is_empty() {
+                    "none".to_owned()
+                } else {
+                    names.join(", ")
+                };
+                return Err(format!(
+                    "{named}, which is not a field of {type_name} (its fields: {names})"
+                )
+                .into());
+            };
+            if !holds_subject(&field.type_name) {
+                return Err(format!(
+                    "{named}, a {} field of {type_name}: by names a field that holds a subject (string, Identity.UUID or Identity.UserID)",
+                    field.type_name
+                )
+                .into());
+            }
+            if !found.iter().any(|(name, _)| name == entry) {
+                found.push((entry.clone(), field.type_name.clone()));
+            }
+        }
+    }
+    Ok(found)
 }
 
 // The states and transitions of a config as a type holds it.
@@ -361,9 +497,9 @@ impl Behavior for Workflow {
     fn parse_config(
         &self,
         raw: &Value,
-        _target: &ConfigTarget<'_>,
+        target: &ConfigTarget<'_>,
     ) -> Result<WorkflowConfig, ConfigError> {
-        WorkflowConfig::parse(raw)
+        WorkflowConfig::parse(raw, target)
     }
 
     fn config_change(
@@ -413,10 +549,56 @@ impl Behavior for Workflow {
         cx.set(ENTERED_AT, cx.now())
     }
 
+    // settle answers its use's transition before any use's guard is asked
+    // (D104): a state the config lacks, in to or in from, is a bad
+    // parameter; a from that is not the row's status is the veto stale,
+    // before anything else is checked; and with repeat unchanged, a move to
+    // the status the row is in answers unchanged and writes nothing, so no
+    // other use's gate refuses a move that is no move. A row with no status
+    // goes on to the guard, which vetoes it.
+    fn settle(
+        &self,
+        view: &View<'_, WorkflowConfig>,
+        operation: &str,
+        params: &Value,
+    ) -> Hook<Option<Value>> {
+        if operation != TRANSITION {
+            return Ok(None);
+        }
+        let config = view.config();
+        let to = params.get("to").and_then(Value::as_str).unwrap_or_default();
+        if !config.has_state(to) {
+            return Err(not_a_state(view, "/to", to));
+        }
+        let read = params.get("from").and_then(Value::as_str);
+        if let Some(read) = read.filter(|read| !config.has_state(read)) {
+            return Err(not_a_state(view, "/from", read));
+        }
+        let Some(status) = status(view) else {
+            return Ok(None);
+        };
+        if let Some(read) = read.filter(|read| *read != status) {
+            let mut details = Map::new();
+            details.insert("from".into(), Value::from(read));
+            details.insert("status".into(), Value::from(status.as_str()));
+            return Err(view.veto(
+                Veto::new(format!("{} is {status}, not {read}", target(view)))
+                    .with_code("stale")
+                    .with_details(details),
+            ));
+        }
+        if config.repeat == WorkflowRepeat::Unchanged && to == status {
+            return Ok(Some(json!({ "from": status, "to": to, "unchanged": true })));
+        }
+        Ok(None)
+    }
+
     // guard checks every transition request of its own use, a caller's or
-    // another use's call(), before any handler runs: a state the config
-    // lacks is a bad parameter, a move the config does not list a veto,
-    // and a move whose permission the caller lacks forbidden.
+    // another use's call(), before any handler runs and after its settle:
+    // a state the config lacks is a bad parameter, a move the config does
+    // not list a veto, a move whose by names a subject the caller is not,
+    // who holds no overridePermission, a veto too, and a move whose
+    // permission the caller lacks forbidden.
     fn guard(
         &self,
         view: &View<'_, WorkflowConfig>,
@@ -428,20 +610,7 @@ impl Behavior for Workflow {
         let config = view.config();
         let to = params.get("to").and_then(Value::as_str).unwrap_or_default();
         if !config.has_state(to) {
-            return Err(Refusal::operation_params(
-                view.behavior(),
-                view.use_id(),
-                TRANSITION,
-                vec![SchemaIssue::new(
-                    "/to",
-                    format!(
-                        "\"{to}\" is not a state of {} ({})",
-                        subject(view),
-                        config.states.join(", ")
-                    ),
-                )],
-            )
-            .into());
+            return Err(not_a_state(view, "/to", to));
         }
         let Some(from) = status(view) else {
             let missing = view.field().unwrap_or(STATUS);
@@ -488,6 +657,31 @@ impl Behavior for Workflow {
                     .with_details(details),
             ));
         };
+        if !found.by.is_empty() && !is_principal(view, &found.by)? {
+            let who = match view.caller().subject.as_str() {
+                "" => "a caller with no subject".to_owned(),
+                subject => subject.to_owned(),
+            };
+            details.insert(
+                "by".into(),
+                Value::Array(
+                    found
+                        .by
+                        .iter()
+                        .map(|field| Value::from(field.as_str()))
+                        .collect(),
+                ),
+            );
+            return Ok(Some(
+                Veto::new(format!(
+                    "{who} may not move {} from {from} to {to}: the transition is made by the subject {} holds",
+                    target(view),
+                    either(&found.by)
+                ))
+                .with_code("not_principal")
+                .with_details(details),
+            ));
+        }
         if let Some(permission) = &found.permission {
             if !view.can(permission)? {
                 return Err(view.forbidden(format!(
@@ -520,6 +714,54 @@ impl Behavior for Workflow {
         cx.set(ENTERED_AT, cx.now())?;
         Ok(json!({ "from": from, "to": to }))
     }
+}
+
+// is_principal says whether the caller may make a transition whose by names
+// fields: it is the subject one of them holds, or it holds the config's
+// overridePermission (D104).
+fn is_principal(view: &View<'_, WorkflowConfig>, by: &[String]) -> Hook<bool> {
+    let config = view.config();
+    let subject = view.caller().subject.as_str();
+    let named = by.iter().any(|field| {
+        let type_name = config.subject_type(field).unwrap_or("string");
+        names_subject(type_name, view.own_field(field).as_ref(), subject)
+    });
+    if named {
+        return Ok(true);
+    }
+    match &config.override_permission {
+        Some(permission) => view.can(permission),
+        None => Ok(false),
+    }
+}
+
+// either lists the fields a by names as a refusal says them: `askedOf`,
+// `askedOf or createdBy`, `a, b or c`.
+fn either(fields: &[String]) -> String {
+    match fields {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} or {last}", rest.join(", ")),
+    }
+}
+
+// not_a_state refuses a parameter that names a state the config lacks, at
+// its pointer, as an invalid argument.
+fn not_a_state(view: &View<'_, WorkflowConfig>, at: &str, state: &str) -> Stop {
+    Refusal::operation_params(
+        view.behavior(),
+        view.use_id(),
+        TRANSITION,
+        vec![SchemaIssue::new(
+            at,
+            format!(
+                "\"{state}\" is not a state of {} ({})",
+                subject(view),
+                view.config().states.join(", ")
+            ),
+        )],
+    )
+    .into()
 }
 
 // status is the use's status as the run has it; `None` when it has none.
@@ -596,6 +838,19 @@ fn config_issues(raw: &Value) -> Issues {
     if let Some(outcomes) = config.get("outcomes") {
         outcome_issues(outcomes, &mut issues);
     }
+    if let Some(permission) = config.get("overridePermission") {
+        schema::text_issues("/overridePermission", permission, &mut issues);
+    }
+    if config
+        .get("repeat")
+        .is_some_and(|repeat| repeat.as_str() != Some(REPEAT_UNCHANGED))
+    {
+        issues.push(
+            "/repeat",
+            "enum",
+            format!("must be one of {}", schema::quoted(REPEAT_UNCHANGED)),
+        );
+    }
     issues
 }
 
@@ -670,6 +925,31 @@ fn transition_list_issues(transitions: &Value, issues: &mut Issues) {
             Some(Value::String(_)) | None => {}
             Some(_) => issues.push(schema::member(&at, "permission"), "type", "must be string"),
         }
+        if let Some(by) = transition.get("by") {
+            by_issues(&schema::member(&at, "by"), by, issues);
+        }
+    }
+}
+
+// by_issues lists what a transition's by breaks of its schema: a non-empty
+// list of non-empty strings, each once.
+fn by_issues(at: &str, by: &Value, issues: &mut Issues) {
+    let Some(items) = by.as_array() else {
+        issues.push(at, "type", "must be array");
+        return;
+    };
+    if items.is_empty() {
+        issues.push(at, "minItems", "must NOT have fewer than 1 items");
+    }
+    for (j, item) in items.iter().enumerate() {
+        schema::text_issues(&format!("{at}/{j}"), item, issues);
+    }
+    if let Some((j, i)) = schema::duplicate(items) {
+        issues.push(
+            at,
+            "uniqueItems",
+            format!("must NOT have duplicate items (items ## {j} and {i} are identical)"),
+        );
     }
 }
 
@@ -729,7 +1009,10 @@ fn transition_issues(params: &Value) -> Issues {
         issues.push("", "type", "must be object");
         return issues;
     };
-    for key in given.keys().filter(|key| key.as_str() != "to") {
+    for key in given
+        .keys()
+        .filter(|key| !PARAMS_KEYS.contains(&key.as_str()))
+    {
         issues.push(
             "",
             "additionalProperties",
@@ -738,11 +1021,10 @@ fn transition_issues(params: &Value) -> Issues {
     }
     match given.get("to") {
         None => issues.push("", "required", "must have required property 'to'"),
-        Some(Value::String(to)) if schema::length(to) < 1 => {
-            issues.push("/to", "minLength", "must NOT have fewer than 1 characters");
-        }
-        Some(Value::String(_)) => {}
-        Some(_) => issues.push("/to", "type", "must be string"),
+        Some(to) => schema::text_issues("/to", to, &mut issues),
+    }
+    if let Some(from) = given.get("from") {
+        schema::text_issues("/from", from, &mut issues);
     }
     issues
 }
@@ -750,6 +1032,7 @@ fn transition_issues(params: &Value) -> Issues {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use superschematic_rules::{FieldSpec, TypeSpec, UseSpec};
 
     fn order_flow() -> Value {
         json!({
@@ -765,6 +1048,16 @@ mod tests {
 
     fn file() -> Value {
         serde_json::from_str(DECLARATION).expect("the declaration file parses")
+    }
+
+    // parse parses a config on an Order whose own fields are title, a
+    // string, and assignee, a UUID.
+    fn parse(config: &Value) -> Result<WorkflowConfig, ConfigError> {
+        let spec = TypeSpec::new("Order")
+            .with(UseSpec::on_type(NAME, config.clone()))
+            .with_field(FieldSpec::new("title", "string"))
+            .with_field(FieldSpec::new("assignee", "Identity.UUID"));
+        WorkflowConfig::parse(config, &ConfigTarget::new(&spec, 0))
     }
 
     // undescribed is a schema with every description left out, at any
@@ -790,7 +1083,7 @@ mod tests {
         assert!(is_terminal_state(&flow, "cancelled"));
         assert!(!is_terminal_state(&flow, "open"));
         assert!(!is_terminal_state(&flow, "lost"));
-        let config = WorkflowConfig::parse(&flow).expect("a state machine");
+        let config = parse(&flow).expect("a state machine");
         assert!(config.is_terminal("shipped"));
         assert!(!config.is_terminal("draft"));
         assert!(!config.is_terminal("lost"));
@@ -822,7 +1115,7 @@ mod tests {
             Some(WorkflowOutcome::Success)
         );
         // The parsed config agrees, for every terminal state.
-        let config = WorkflowConfig::parse(&flow).expect("a state machine");
+        let config = parse(&flow).expect("a state machine");
         assert_eq!(
             config.outcomes,
             vec![
@@ -835,7 +1128,7 @@ mod tests {
 
     #[test]
     fn a_parsed_config_fills_in_its_initial_state_and_lists_moves() {
-        let config = WorkflowConfig::parse(&order_flow()).expect("a state machine");
+        let config = parse(&order_flow()).expect("a state machine");
         assert_eq!(config.initial, "draft");
         assert_eq!(config.targets("open"), vec!["shipped", "cancelled"]);
         assert_eq!(
@@ -845,12 +1138,7 @@ mod tests {
         assert!(config.moves("shipped").is_empty());
         let mut later = order_flow();
         later["initial"] = json!("open");
-        assert_eq!(
-            WorkflowConfig::parse(&later)
-                .expect("a state machine")
-                .initial,
-            "open"
-        );
+        assert_eq!(parse(&later).expect("a state machine").initial, "open");
     }
 
     #[test]
@@ -880,7 +1168,8 @@ mod tests {
     }
 
     /// The checks this module writes by hand are the declaration's
-    /// configSchema and paramsSchema, keyword for keyword: each schema, its
+    /// configSchema and paramsSchema, keyword for keyword, and what its
+    /// handler and its settle answer is its resultSchema: each schema, its
     /// descriptions left out, is exactly the one they implement, so a
     /// keyword the file gains fails this test until the checks take it.
     #[test]
@@ -907,10 +1196,18 @@ mod tests {
                         "type": "array",
                         "uniqueItems": true
                     },
+                    "overridePermission": {"minLength": 1, "type": "string"},
+                    "repeat": {"enum": [REPEAT_UNCHANGED]},
                     "transitions": {
                         "items": {
                             "additionalProperties": false,
                             "properties": {
+                                "by": {
+                                    "items": {"minLength": 1, "type": "string"},
+                                    "minItems": 1,
+                                    "type": "array",
+                                    "uniqueItems": true
+                                },
                                 "from": {"type": "string"},
                                 "permission": {"minLength": 1, "type": "string"},
                                 "to": {"type": "string"}
@@ -947,8 +1244,33 @@ mod tests {
             undescribed(&operations[0]["paramsSchema"]),
             json!({
                 "additionalProperties": false,
-                "properties": {"to": {"minLength": 1, "type": "string"}},
+                "properties": {
+                    "from": {"minLength": 1, "type": "string"},
+                    "to": {"minLength": 1, "type": "string"}
+                },
                 "required": ["to"],
+                "type": "object"
+            })
+        );
+        let mut params: Vec<&String> = operations[0]["paramsSchema"]["properties"]
+            .as_object()
+            .expect("properties")
+            .keys()
+            .collect();
+        params.sort();
+        assert_eq!(params, PARAMS_KEYS);
+        // The result the handler and the settle answer: from and to, and
+        // unchanged only when a repeat wrote nothing.
+        assert_eq!(
+            undescribed(&operations[0]["resultSchema"]),
+            json!({
+                "additionalProperties": false,
+                "properties": {
+                    "from": {"type": "string"},
+                    "to": {"type": "string"},
+                    "unchanged": {"type": "boolean"}
+                },
+                "required": ["from", "to"],
                 "type": "object"
             })
         );
@@ -967,6 +1289,8 @@ mod tests {
                 .veto("terminal_state")
                 .veto("transition_not_allowed")
                 .veto("no_status")
+                .veto("not_principal")
+                .veto("stale")
         );
     }
 
@@ -987,6 +1311,71 @@ mod tests {
         assert_eq!(reason(json!({"to": 5})), "/to: must be string");
         assert_eq!(reason(json!("open")), "must be object");
         assert_eq!(reason(json!({"to": "open"})), "");
+        // from, the state the caller read, is a non-empty string beside to.
+        assert_eq!(reason(json!({"to": "open", "from": "draft"})), "");
+        assert_eq!(
+            reason(json!({"to": "open", "from": ""})),
+            "/from: must NOT have fewer than 1 characters"
+        );
+        assert_eq!(
+            reason(json!({"to": "open", "from": 5})),
+            "/from: must be string"
+        );
+        // Issues come by pointer, as the engine sorts them.
+        assert_eq!(
+            reason(json!({"status": "open", "from": 5})),
+            "must NOT have additional properties: status; must have required property 'to'; /from: must be string"
+        );
+        assert_eq!(
+            reason(json!({"to": "", "from": ""})),
+            "/from: must NOT have fewer than 1 characters; /to: must NOT have fewer than 1 characters"
+        );
+    }
+
+    #[test]
+    fn a_parsed_config_holds_by_override_permission_repeat_and_the_fields_by_names() {
+        let config = parse(&json!({
+            "states": ["open", "done", "closed"],
+            "transitions": [
+                {"from": "open", "to": "done", "by": ["assignee", "title"]},
+                {"from": "done", "to": "closed", "by": ["assignee"], "permission": "close"}
+            ],
+            "overridePermission": "moderate",
+            "repeat": "unchanged"
+        }))
+        .expect("a state machine");
+        assert_eq!(config.transitions[0].by, ["assignee", "title"]);
+        assert_eq!(config.override_permission.as_deref(), Some("moderate"));
+        assert_eq!(config.repeat, WorkflowRepeat::Unchanged);
+        assert_eq!(
+            config.subject_types,
+            vec![
+                ("assignee".to_owned(), "Identity.UUID".to_owned()),
+                ("title".to_owned(), "string".to_owned())
+            ]
+        );
+        assert_eq!(config.subject_type("title"), Some("string"));
+        assert_eq!(config.subject_type("status"), None);
+        // A config with neither names no by and vetoes a repeat.
+        let plain = parse(&order_flow()).expect("a state machine");
+        assert_eq!(plain.repeat, WorkflowRepeat::Veto);
+        assert!(plain.override_permission.is_none() && plain.subject_types.is_empty());
+        assert!(plain.transitions.iter().all(|t| t.by.is_empty()));
+        // A transition writes by only when it names one.
+        assert_eq!(
+            serde_json::to_value(&plain.transitions[0]).expect("a transition"),
+            json!({"from": "draft", "to": "open"})
+        );
+        assert_eq!(
+            serde_json::to_value(&config.transitions[1]).expect("a transition"),
+            json!({"from": "done", "to": "closed", "permission": "close", "by": ["assignee"]})
+        );
+        assert_eq!(either(&["a".to_owned()]), "a");
+        assert_eq!(either(&["a".to_owned(), "b".to_owned()]), "a or b");
+        assert_eq!(
+            either(&["a".to_owned(), "b".to_owned(), "c".to_owned()]),
+            "a, b or c"
+        );
     }
 
     #[test]

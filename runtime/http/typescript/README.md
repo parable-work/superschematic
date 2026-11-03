@@ -48,7 +48,11 @@ Its entry points:
   status, code, message and details, and a refusal of status 500 as a
   plain error, so the route answers the server's own 500. It knows a
   refusal by its shape and imports neither `pg` nor the adapter, so this
-  entry stays free of them.
+  entry stays free of them. `behaviorParams(input, optional)` gives a
+  behavior route its input with each optional member that is null left
+  out (D104): the API's types and MCP tool schemas take null for an
+  optional member and a behavior's paramsSchema does not (Workflow's
+  `from`), so a caller's `from: null` reaches the core absent.
   `decodeParam` reads a path or query value from its strings; a query
   list accepts repeated keys and comma-separated values.
   `decodeJsonParam` reads every body parameter from its JSON value, with
@@ -141,7 +145,11 @@ Its entry points:
   writes (`claim lost` when it is no longer held), a gone row's deadline
   messages and, deleted for good, its sub-table rows deleted. The adapter
   answers the core's `linked` read (a type's rows whose own field holds a
-  key, a page at a time, in key order). A generated repository whose table
+  key, a page at a time, in key order). Every row read holds the layout's
+  audit fields (`createdBy`, D104) among the row's own fields, converted as
+  an own column is (a UUID to base62, NULL absent); no change set writes
+  one, and a change set with no writes (a Workflow repeat) applies
+  nothing. A generated repository whose table
   arms deadlines runs them with its `runDeadline` (typed
   `BehaviorDeadlines`), and one whose writes are heard runs its changes
   with its `runChange` (typed `BehaviorChanges`), each in its transaction,

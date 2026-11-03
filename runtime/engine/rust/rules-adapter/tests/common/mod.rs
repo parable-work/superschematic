@@ -9,8 +9,8 @@
 
 use serde_json::{json, Value};
 use superschematic_rules::{
-    Behavior, ConfigError, ConfigTarget, Cx, Declaration, GuardRequest, Heard, Hook, Refusal,
-    UseSpec, Veto, View,
+    Behavior, ConfigError, ConfigTarget, Cx, Declaration, FieldSpec, GuardRequest, Heard, Hook,
+    Refusal, UseSpec, Veto, View,
 };
 use superschematic_rules_adapter::{
     Changes, Column, Convert, Deadlines, Layout, Live, Operation, OwnedField, SubTable, Table,
@@ -335,6 +335,7 @@ pub fn order_table(type_name: &str, table: &str) -> Table {
         version: "_version".into(),
         live: None,
         own: vec![Column::new("title", "title", "string")],
+        audit: Vec::new(),
         uses: vec![Use {
             id: "status".into(),
             behavior: "Workflow".into(),
@@ -351,6 +352,76 @@ pub fn order_table(type_name: &str, table: &str) -> Table {
         changes: None,
         spec: TypeSpec::new(type_name).with(UseSpec::on_field("status", "Workflow", flow())),
     }
+}
+
+/// The columns of Question's change trigger's image: its own columns, then
+/// its status's owned columns, the key, `_version` and `created_by` left
+/// out.
+pub const QUESTION_IMAGE: [&str; 4] = ["prompt", "asked_of", "status", "status_entered_at"];
+
+/// Question (D104): Order's shape with the own `prompt` and `askedOf`, a
+/// UUID, `createdBy` among its audit fields, a UUID the repositories stamp,
+/// and its status a Workflow whose answer is made by the subject `askedOf`
+/// holds and whose withdrawal by the one `createdBy` holds, a move to the
+/// state a row is in answered as no change; its change queue, which its
+/// trigger writes, shows that such a move queues no message.
+pub fn question_table() -> Table {
+    let flow = json!({
+        "states": ["open", "answered", "withdrawn"],
+        "initial": "open",
+        "transitions": [
+            {"from": "open", "to": "answered", "by": ["askedOf"]},
+            {"from": "open", "to": "withdrawn", "by": ["createdBy"]}
+        ],
+        "repeat": "unchanged"
+    });
+    Table {
+        own: vec![
+            Column::new("prompt", "prompt", "string"),
+            Column::new("askedOf", "asked_of", "Identity.UUID"),
+        ],
+        audit: vec![Column::new("createdBy", "created_by", "Identity.UUID")],
+        changes: Some(Changes {
+            queue: "QuestionChange".into(),
+            table: "question_change_queue".into(),
+            row_key: "row_key".into(),
+            write: "write".into(),
+            at: "at".into(),
+            before: "before".into(),
+            after: "after".into(),
+        }),
+        spec: TypeSpec::new("Question")
+            .with(UseSpec::on_field("status", "Workflow", flow))
+            .with_field(FieldSpec::new("prompt", "string"))
+            .with_field(FieldSpec::new("askedOf", "Identity.UUID"))
+            .with_field(FieldSpec::new("createdBy", "Identity.UUID")),
+        ..order_table("Question", "question")
+    }
+}
+
+/// [`question_table`]'s table in a dialect, its UUIDs in Postgres's `UUID`
+/// columns and SQLite's text, with its version trigger, its change queue
+/// and its change trigger.
+pub fn question_ddl(postgres: bool) -> Vec<String> {
+    let t = column_types(postgres);
+    let uuid = if postgres { "UUID" } else { "TEXT" };
+    let mut ddl = vec![format!(
+        "CREATE TABLE \"question\" (id {}, prompt {} NOT NULL, asked_of {uuid}, created_by {uuid}, status {}, status_entered_at {}, _version {})",
+        t.key, t.text, t.text, t.timestamp, t.version
+    )];
+    if postgres {
+        ddl.extend(postgres_bump("question"));
+    } else {
+        ddl.push(sqlite_bump("question"));
+    }
+    ddl.extend(change_queue_ddl(postgres, "question_change_queue", "TEXT"));
+    ddl.extend(change_trigger_ddl(
+        postgres,
+        "question",
+        "question_change_queue",
+        &QUESTION_IMAGE,
+    ));
+    ddl
 }
 
 /// A deadline queue's layout on a table (D103): `<table>_deadline_queue`,
@@ -464,6 +535,7 @@ pub fn store_layout_in(room: &str) -> Layout {
         version: "_version".into(),
         live: None,
         own: Vec::new(),
+        audit: Vec::new(),
         uses: Vec::new(),
         deadlines: None,
         changes: None,
@@ -543,6 +615,7 @@ pub fn probe_table() -> Table {
             Column::new("done", "done", "boolean"),
             Column::new("data", "data", "Generic.JSON"),
         ],
+        audit: Vec::new(),
         uses: vec![
             Use {
                 id: "Echo".into(),

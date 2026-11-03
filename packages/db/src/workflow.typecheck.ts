@@ -1,7 +1,8 @@
 // Type-level checks of Workflow<C> (D103). Nothing imports this file:
 // `bun run typecheck`, which `make ts` runs, checks it, and fails on an
 // expected error (@ts-expect-error) that no longer errors.
-import type { Workflow } from "./index";
+import { behavior } from "@superschematic/schema";
+import type { Workflow, WorkflowConfig, WorkflowTransitionOn } from "./index";
 
 type OrderStatus = Workflow<{
   states: ["draft", "paid", "shipped"];
@@ -34,5 +35,42 @@ type NoTo = Workflow<{ states: ["draft"]; transitions: [{ from: "draft" }] }>;
 // @ts-expect-error an outcome is success, failure or neutral
 type BadOutcome = Workflow<{ states: ["draft"]; transitions: []; outcomes: { draft: "lost" } }>;
 
-export const checked: readonly unknown[] = [paid, lost, sent];
-export type Refused = OneState | NoTo | BadOutcome;
+// A table's Workflow names who makes a transition (by), the permission that
+// moves a caller past by (overridePermission), and a move to the state the
+// row is in answered as no change (repeat) (D104).
+type QuestionStatus = Workflow<{
+  states: ["open", "answered", "withdrawn", "closed"];
+  transitions: [
+    { from: "open"; to: "answered"; by: ["askedOf"] },
+    { from: "open"; to: "withdrawn"; by: ["createdBy"] },
+    { from: "answered"; to: "closed"; by: ["askedOf", "createdBy"]; permission: "questions.close" }
+  ];
+  overridePermission: "questions.moderate";
+  repeat: "unchanged";
+}>;
+const answered: QuestionStatus = "answered";
+const withdraw: WorkflowTransitionOn = { from: "open", to: "withdrawn", by: ["createdBy"] };
+const moderated: WorkflowConfig = { states: ["open"], transitions: [], overridePermission: "questions.moderate" };
+
+// by is a list of fields, and repeat is unchanged alone.
+// @ts-expect-error by lists fields
+type OneBy = Workflow<{ states: ["open", "done"]; transitions: [{ from: "open"; to: "done"; by: "assignee" }] }>;
+// @ts-expect-error repeat is "unchanged"
+type AlwaysRepeat = Workflow<{ states: ["open"]; transitions: []; repeat: "always" }>;
+// @ts-expect-error overridePermission is a permission's name
+type NumberOverride = Workflow<{ states: ["open"]; transitions: []; overridePermission: 5 }>;
+
+// An engine type's @behavior("Workflow", ...) takes @superschematic/schema's
+// config, which has none of by, overridePermission and repeat.
+// @ts-expect-error by is a table's Workflow's
+@behavior("Workflow", { states: ["open", "done"], transitions: [{ from: "open", to: "done", by: ["assignee"] }] })
+export abstract class EngineRequest {}
+// @ts-expect-error repeat is a table's Workflow's
+@behavior("Workflow", { states: ["open"], transitions: [], repeat: "unchanged" })
+export abstract class EngineTicket {}
+// @ts-expect-error overridePermission is a table's Workflow's
+@behavior("Workflow", { states: ["open"], transitions: [], overridePermission: "tickets.moderate" })
+export abstract class EngineNote {}
+
+export const checked: readonly unknown[] = [paid, lost, sent, answered, withdraw, moderated];
+export type Refused = OneState | NoTo | BadOutcome | OneBy | AlwaysRepeat | NumberOverride;

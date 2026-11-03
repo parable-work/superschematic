@@ -7,6 +7,7 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "from": {"description":"A OrderStatusState value","enum":["draft","paid","shipped",null],"type":["string","null"]},
           "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
           "to": {"description":"A OrderStatusState value","enum":["draft","paid","shipped"],"type":"string"}
         },
@@ -20,6 +21,7 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "from": {"description":"A ShipmentPaymentStatusState value","enum":["unpaid","paid","refunded",null],"type":["string","null"]},
           "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
           "to": {"description":"A ShipmentPaymentStatusState value","enum":["unpaid","paid","refunded"],"type":"string"}
         },
@@ -33,6 +35,7 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "from": {"description":"A ShipmentStatusState value","enum":["pending","packed","sent",null],"type":["string","null"]},
           "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
           "to": {"description":"A ShipmentStatusState value","enum":["pending","packed","sent"],"type":"string"}
         },

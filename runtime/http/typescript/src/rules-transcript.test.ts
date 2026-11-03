@@ -32,7 +32,12 @@ import { bumpVersion, columnTypes, core, packageCore, postgresDatabase, rulesDsn
 // sub-tables, arm deadlines and hear their rows' writes; and
 // core-reactions' and core-reactions-changes', whose rules hear writes of
 // their own rows and of the rows that link to them through a relation (an
-// engine Links link with one target, mapped to an own field <link>Id). Each
+// engine Links link with one target, mapped to an own field <link>Id); and
+// core-workflow-principals', written by hand in the recorded format
+// (runtime/engine/testdata/rules/scenarios, D104) since the engine recorded
+// no case of a transition's by, overridePermission, repeat or from, whose
+// commands each hold the version of their row after them (expect.version),
+// so a repeat answered unchanged is held to writing nothing. Each
 // scenario gets a table per type and database, its own fields' columns
 // beside the owned columns the layout rule gives each use of any version
 // and _version, and, for a use whose behavior declares tables, each
@@ -42,8 +47,9 @@ import { bumpVersion, columnTypes, core, packageCore, postgresDatabase, rulesDsn
 // over a layout of every type of its database, the command's own at the
 // version live at it and each other at the one its last publish made live,
 // its refusal compared whole and the row it names read back after it and
-// compared, with the row's sub-table rows and armed deadlines, and each
-// other row its change set wrote (others); a deadline is a command whose
+// compared, its version where the step holds one, with the row's
+// sub-table rows and armed deadlines, and each other row its change set
+// wrote (others); a deadline is a command whose
 // action is deadline, which the adapter runs only while its arming is a
 // live message of the queue, and a change one whose action is change, the
 // write the reference host's outbox heard, with its images; and each raw
@@ -67,6 +73,7 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   { file: 'core-timers', floor: 125 },
   { file: 'core-reactions', floor: 586 },
   { file: 'core-reactions-changes', floor: 60 },
+  { file: 'core-workflow-principals', floor: 92 },
 ];
 
 /** A row as the transcript holds it: its own and owned fields, each with no value absent. */
@@ -86,6 +93,8 @@ interface Expect {
   readonly subRows?: Record<string, Record<string, CoreSubRow[]>>;
   /** The row's armed deadlines after the step, by use id then name; absent for none. */
   readonly deadlines?: ArmedDeadline[];
+  /** The row's version after the step, as the reference host held it: a hand-written transcript's commands hold it (D104), a recording's never; absent after a delete. */
+  readonly version?: number;
 }
 
 type Step =
@@ -421,6 +430,9 @@ for (const { file, floor } of TRANSCRIPTS) {
             if (rowKey) {
               const row = await db.transaction(store => readRow(host(store), step.type, rowKey));
               compare(step, 'row', step.expect.row, row === null ? undefined : { own: row.own, owned: row.owned });
+              // The version a hand-written step holds, which a repeat that
+              // writes nothing leaves where the step before it left it.
+              if (step.expect.version !== undefined) compare(step, 'version', step.expect.version, row?.version);
               // The row's sub-table rows, by use id and table, each absent when
               // it has none, and its armed deadlines, absent when none.
               const subRows: Record<string, Record<string, CoreSubRow[]>> = {};

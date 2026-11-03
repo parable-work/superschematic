@@ -7,14 +7,18 @@
 //! version, with rows and without), each refusal worded as the engine
 //! words it. Where the engine's message names a namespace or a version,
 //! the core's leaves them out and a host writes them (the core's README).
+//! Then what only a table's Workflow takes (D104), which the engine
+//! recorded none of: who makes a transition (`by`, and the
+//! `overridePermission` past it), a move to the state a row is in answered
+//! as no change (`repeat`), and the state a caller read (`from`).
 
 use std::collections::BTreeMap;
 
 use serde_json::{json, Map, Value};
 use superschematic_rules::{
     merge_patch, Action, Answer, Behavior, Caller, ChangeSet, Code, Command, ConfigError,
-    ConfigTarget, Core, Cx, Declaration, Hook, Outcome, PermissionMatcher, ReadRequest, Refusal,
-    Row, RowWrite, Source, TypeSpec, UseSpec,
+    ConfigTarget, Core, Cx, Declaration, FieldSpec, GuardRequest, Hook, Outcome, PermissionMatcher,
+    ReadRequest, Refusal, Row, RowWrite, Source, TypeSpec, UseSpec, Veto, View,
 };
 use superschematic_rules_behaviors::{core, Workflow};
 
@@ -1077,4 +1081,820 @@ fn the_core_holds_workflow_to_its_declaration() {
         declaration.find_operation("transition").map(|op| op.writes),
         Some(true)
     );
+}
+
+// ---- who makes a transition, a repeat and a stale read (D104) ----
+
+// A question one person asks another: only the one it is asked of answers
+// it, only its asker withdraws it, closing an answered one needs
+// questions.close beside being one of the two, questions.moderate moves a
+// caller past by, and answering again changes nothing.
+fn question_flow() -> Value {
+    json!({
+        "states": ["open", "answered", "withdrawn", "closed"],
+        "transitions": [
+            {"from": "open", "to": "answered", "by": ["askedOf"]},
+            {"from": "open", "to": "withdrawn", "by": ["createdBy"]},
+            {"from": "answered", "to": "closed", "by": ["askedOf", "createdBy"], "permission": "questions.close"},
+            {"from": "answered", "to": "open"}
+        ],
+        "overridePermission": "questions.moderate",
+        "repeat": "unchanged"
+    })
+}
+
+// question_with is question_flow with members changed, null removing one.
+fn question_with(members: Value) -> Value {
+    let mut flow = question_flow();
+    let config = flow.as_object_mut().expect("an object");
+    for (key, value) in members.as_object().expect("an object") {
+        if value.is_null() {
+            config.shift_remove(key);
+        } else {
+            config.insert(key.clone(), value.clone());
+        }
+    }
+    flow
+}
+
+// A request one subject is assigned, done only by them, with no repeat.
+fn request_flow() -> Value {
+    json!({
+        "states": ["open", "done"],
+        "transitions": [{"from": "open", "to": "done", "by": ["assignee"]}]
+    })
+}
+
+// question is a Question type with its uses and its own fields: a title,
+// who it is asked of and who asked it (strings), an assignee (a UUID), and
+// two fields that hold no subject.
+fn question(uses: &[UseSpec]) -> TypeSpec {
+    uses.iter()
+        .cloned()
+        .fold(TypeSpec::new("Question"), TypeSpec::with)
+        .with_field(FieldSpec::new("title", "string"))
+        .with_field(FieldSpec::new("askedOf", "string"))
+        .with_field(FieldSpec::new("createdBy", "string"))
+        .with_field(FieldSpec::new("assignee", "Identity.UUID"))
+        .with_field(FieldSpec::new("priority", "number"))
+        .with_field(FieldSpec::new("dueAt", "Temporal.DateTime"))
+}
+
+fn workflow(config: Value) -> UseSpec {
+    UseSpec::on_type("Workflow", config)
+}
+
+// asking is a host of one Question type with a core that runs test.Gate and
+// test.Dispatch beside the behaviors.
+fn asking(uses: &[UseSpec]) -> Host {
+    Host::of(core().with(Gate).with(Dispatch), question(uses))
+}
+
+impl Host {
+    // ask creates a row by its key with its own fields, as alice.
+    fn ask(&mut self, key: &str, own: Value) -> ChangeSet {
+        changed(self.run(
+            &alice(),
+            START,
+            Action::Create {
+                id: Some(key.to_owned()),
+                own: object(own),
+                params: Map::new(),
+            },
+        ))
+    }
+
+    // move_row calls an operation of a use of a row, as a caller, at a time.
+    fn move_row(
+        &mut self,
+        caller: &Caller,
+        key: &str,
+        use_id: &str,
+        operation: &str,
+        params: Value,
+        now: i64,
+    ) -> Outcome {
+        self.run(
+            caller,
+            now,
+            Action::Operation {
+                key: key.to_owned(),
+                use_id: use_id.to_owned(),
+                operation: operation.to_owned(),
+                params,
+            },
+        )
+    }
+
+    // to moves a row's Workflow with transition's parameters, at START.
+    fn to(&mut self, caller: &Caller, key: &str, params: Value) -> Outcome {
+        self.move_row(caller, key, "Workflow", "transition", params, START)
+    }
+
+    fn stored(&self, key: &str) -> &Row {
+        self.memory
+            .rows
+            .get(&(self.spec.name.clone(), key.to_owned()))
+            .expect("the row")
+    }
+}
+
+// A question asked of bob by alice.
+fn asked() -> Value {
+    json!({"title": "Which table?", "askedOf": "bob", "createdBy": "alice"})
+}
+
+// vetoed is Workflow's veto of a transition of a Question, as the engine's
+// error JSON.
+fn vetoed(key: &str, reason: &str, code: &str, details: Value) -> Value {
+    json!({
+        "class": "BehaviorVetoError",
+        "code": "vetoed",
+        "message": format!("behavior Workflow vetoes transition of Question {key}: {reason}"),
+        "details": {
+            "behavior": "Workflow",
+            "action": "transition",
+            "reason": reason,
+            "vetoCode": code,
+            "vetoDetails": details
+        }
+    })
+}
+
+// not_principal is the veto of a caller by does not name, for a move whose
+// by names fields.
+fn not_principal(who: &str, key: &str, from: &str, to: &str, by: &[&str]) -> Value {
+    let fields = match by {
+        [one] => (*one).to_owned(),
+        [rest @ .., last] => format!("{} or {last}", rest.join(", ")),
+        [] => String::new(),
+    };
+    vetoed(
+        key,
+        &format!("{who} may not move Question {key} from {from} to {to}: the transition is made by the subject {fields} holds"),
+        "not_principal",
+        json!({"from": from, "to": to, "by": by}),
+    )
+}
+
+fn stale(key: &str, read: &str, status: &str) -> Value {
+    vetoed(
+        key,
+        &format!("Question {key} is {status}, not {read}"),
+        "stale",
+        json!({"from": read, "status": status}),
+    )
+}
+
+fn forbidden_close(subject: &str, key: &str) -> Value {
+    json!({"class": "EngineError", "code": "forbidden", "message": format!("{subject} may not move Question {key} from answered to closed: the transition needs permission questions.close")})
+}
+
+const BOB: &str = "bob";
+const DANA: &str = "TMXp8QPR6yGvKuV2GZQ10";
+const DANA_HYPHENATED: &str = "0f8fad5b-d9cb-469f-a165-70867728950e";
+const ERIN: &str = "3n9R8RlRyqVJBUQUv6toL1";
+
+// Gate: vetoes every Workflow transition of its row, as a gate another
+// behavior keeps (a lease another principal holds) would.
+struct Gate;
+
+impl Behavior for Gate {
+    type Config = ();
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("test.Gate").veto("gated")
+    }
+
+    fn parse_config(&self, _raw: &Value, _target: &ConfigTarget<'_>) -> Result<(), ConfigError> {
+        Ok(())
+    }
+
+    fn guard(&self, _view: &View<'_, ()>, request: &GuardRequest<'_>) -> Hook<Option<Veto>> {
+        Ok(matches!(
+            request,
+            GuardRequest::Operation {
+                behavior: "Workflow",
+                operation: "transition",
+                ..
+            }
+        )
+        .then(|| Veto::new("the gate is closed").with_code("gated")))
+    }
+}
+
+#[test]
+fn by_lets_the_subject_a_field_holds_make_the_transition() {
+    let mut host = asking(&[workflow(question_flow())]);
+    host.ask("q1", asked());
+    let moved = changed(host.move_row(
+        &caller(BOB, &[]),
+        "q1",
+        "Workflow",
+        "transition",
+        json!({"to": "answered"}),
+        START + 5_000,
+    ));
+    assert_eq!(moved.result, json!({"from": "open", "to": "answered"}));
+    assert_eq!(
+        moved.rows,
+        [RowWrite::Update {
+            type_name: "Question".to_owned(),
+            key: "q1".to_owned(),
+            expected_version: 1,
+            own: Map::new(),
+            owned: owned(json!({"Workflow": {"status": "answered", "enteredAt": START + 5_000}})),
+        }]
+    );
+    // createdBy names the asker, who withdraws a question of their own.
+    host.ask("q2", asked());
+    assert_eq!(
+        changed(host.to(&alice(), "q2", json!({"to": "withdrawn"}))).result,
+        json!({"from": "open", "to": "withdrawn"})
+    );
+}
+
+#[test]
+fn by_refuses_any_other_caller_as_not_principal() {
+    let mut host = asking(&[workflow(question_flow())]);
+    host.ask("q1", asked());
+    for who in ["carol", "alice"] {
+        assert_eq!(
+            refused(host.to(&caller(who, &[]), "q1", json!({"to": "answered"}))),
+            not_principal(who, "q1", "open", "answered", &["askedOf"])
+        );
+    }
+    assert_eq!(
+        refused(host.to(&caller(BOB, &[]), "q1", json!({"to": "withdrawn"}))),
+        not_principal(BOB, "q1", "open", "withdrawn", &["createdBy"])
+    );
+    assert_eq!(host.stored("q1").version, 1);
+    // A transition that names no by is any caller's.
+    changed(host.to(&caller(BOB, &[]), "q1", json!({"to": "answered"})));
+    assert_eq!(
+        changed(host.to(&caller("carol", &[]), "q1", json!({"to": "open"}))).result,
+        json!({"from": "answered", "to": "open"})
+    );
+}
+
+#[test]
+fn a_by_field_with_no_value_names_no_one() {
+    let mut host = asking(&[workflow(question_flow())]);
+    host.ask("q2", json!({"title": "Which chair?", "createdBy": "alice"}));
+    host.ask("q3", json!({"title": "Which lamp?", "askedOf": null}));
+    host.ask("q4", json!({"title": "Which rug?", "askedOf": ""}));
+    for key in ["q2", "q3", "q4"] {
+        assert_eq!(
+            refused(host.to(&caller(BOB, &[]), key, json!({"to": "answered"}))),
+            not_principal(BOB, key, "open", "answered", &["askedOf"]),
+            "{key}"
+        );
+    }
+}
+
+#[test]
+fn an_empty_subject_is_no_one_by_names() {
+    let mut host = asking(&[workflow(question_flow())]);
+    host.ask("q1", asked());
+    host.ask("q4", json!({"title": "Which rug?", "askedOf": ""}));
+    for key in ["q1", "q4"] {
+        assert_eq!(
+            refused(host.to(&caller("", &[]), key, json!({"to": "answered"}))),
+            not_principal(
+                "a caller with no subject",
+                key,
+                "open",
+                "answered",
+                &["askedOf"]
+            )
+        );
+    }
+}
+
+#[test]
+fn by_on_a_uuid_field_compares_the_uuid_in_either_form() {
+    let mut host = asking(&[workflow(request_flow())]);
+    host.ask("r1", json!({"title": "Desk", "assignee": DANA_HYPHENATED}));
+    assert_eq!(
+        refused(host.to(&caller(ERIN, &[]), "r1", json!({"to": "done"}))),
+        vetoed(
+            "r1",
+            &format!("{ERIN} may not move Question r1 from open to done: the transition is made by the subject assignee holds"),
+            "not_principal",
+            json!({"from": "open", "to": "done", "by": ["assignee"]})
+        )
+    );
+    changed(host.to(&caller(DANA, &[]), "r1", json!({"to": "done"})));
+    host.ask("r2", json!({"title": "Chair", "assignee": DANA}));
+    changed(host.to(&caller(DANA_HYPHENATED, &[]), "r2", json!({"to": "done"})));
+    host.ask("r3", json!({"title": "Lamp", "assignee": DANA}));
+    changed(host.to(
+        &caller(&DANA_HYPHENATED.to_uppercase(), &[]),
+        "r3",
+        json!({"to": "done"}),
+    ));
+    // A string field compares the text: the base62 form of the UUID it
+    // holds is another text.
+    let mut host = asking(&[workflow(question_flow())]);
+    host.ask("q1", json!({"title": "Desk", "askedOf": DANA_HYPHENATED}));
+    assert_eq!(
+        refused(host.to(&caller(DANA, &[]), "q1", json!({"to": "answered"}))),
+        not_principal(DANA, "q1", "open", "answered", &["askedOf"])
+    );
+    changed(host.to(
+        &caller(DANA_HYPHENATED, &[]),
+        "q1",
+        json!({"to": "answered"}),
+    ));
+}
+
+#[test]
+fn by_and_a_permission_both_hold_a_transition() {
+    let mut host = asking(&[workflow(question_flow())]);
+    host.ask("q1", asked());
+    changed(host.to(&caller(BOB, &[]), "q1", json!({"to": "answered"})));
+    assert_eq!(
+        refused(host.to(&caller(BOB, &[]), "q1", json!({"to": "closed"}))),
+        forbidden_close(BOB, "q1")
+    );
+    // by is checked before the permission.
+    assert_eq!(
+        refused(host.to(
+            &caller("carol", &["questions.close"]),
+            "q1",
+            json!({"to": "closed"})
+        )),
+        not_principal(
+            "carol",
+            "q1",
+            "answered",
+            "closed",
+            &["askedOf", "createdBy"]
+        )
+    );
+    assert_eq!(
+        changed(host.to(
+            &caller("alice", &["questions.close"]),
+            "q1",
+            json!({"to": "closed"})
+        ))
+        .result,
+        json!({"from": "answered", "to": "closed"})
+    );
+}
+
+#[test]
+fn override_permission_passes_by_and_not_the_transitions_permission() {
+    let mut host = asking(&[workflow(question_flow())]);
+    host.ask("q1", asked());
+    let moderator = caller("mod", &["questions.moderate"]);
+    assert_eq!(
+        changed(host.to(&moderator, "q1", json!({"to": "answered"}))).result,
+        json!({"from": "open", "to": "answered"})
+    );
+    assert_eq!(
+        refused(host.to(&moderator, "q1", json!({"to": "closed"}))),
+        forbidden_close("mod", "q1")
+    );
+    changed(host.to(
+        &caller("mod", &["questions.moderate", "questions.close"]),
+        "q1",
+        json!({"to": "closed"}),
+    ));
+    // A permission covers every permission nested under it.
+    host.ask("q2", asked());
+    changed(host.to(
+        &caller("root", &["questions"]),
+        "q2",
+        json!({"to": "answered"}),
+    ));
+    // Without overridePermission, no permission moves a caller past by.
+    let mut host = asking(&[workflow(question_with(json!({"overridePermission": null})))]);
+    host.ask("q1", asked());
+    assert_eq!(
+        refused(host.to(&moderator, "q1", json!({"to": "answered"}))),
+        not_principal("mod", "q1", "open", "answered", &["askedOf"])
+    );
+}
+
+#[test]
+fn a_call_from_another_use_is_held_to_by_as_a_callers_is() {
+    let dispatch = UseSpec::on_type("test.Dispatch", json!({}));
+    let mut host = asking(&[workflow(question_flow()), dispatch]);
+    host.ask("q1", asked());
+    let call = |host: &mut Host, who: &Caller| {
+        host.move_row(
+            who,
+            "q1",
+            "test.Dispatch",
+            "dispatch",
+            json!({"to": "answered"}),
+            START,
+        )
+    };
+    // The command's caller is the one checked, through the call.
+    assert_eq!(
+        refused(call(&mut host, &alice())),
+        not_principal("alice", "q1", "open", "answered", &["askedOf"])
+    );
+    assert_eq!(
+        changed(call(&mut host, &caller(BOB, &[]))).result,
+        json!({"from": "open", "to": "answered"})
+    );
+    host.ask("q2", asked());
+    let moved = changed(host.move_row(
+        &caller("mod", &["questions.moderate"]),
+        "q2",
+        "test.Dispatch",
+        "dispatch",
+        json!({"to": "answered"}),
+        START,
+    ));
+    assert_eq!(moved.result, json!({"from": "open", "to": "answered"}));
+}
+
+#[test]
+fn repeat_unchanged_answers_and_writes_nothing() {
+    let mut host = asking(&[workflow(question_flow())]);
+    host.ask("q1", asked());
+    changed(host.move_row(
+        &caller(BOB, &[]),
+        "q1",
+        "Workflow",
+        "transition",
+        json!({"to": "answered"}),
+        START + 5_000,
+    ));
+    let again = changed(host.move_row(
+        &caller(BOB, &[]),
+        "q1",
+        "Workflow",
+        "transition",
+        json!({"to": "answered"}),
+        START + 10_000,
+    ));
+    assert_eq!(
+        again.result,
+        json!({"from": "answered", "to": "answered", "unchanged": true})
+    );
+    assert!(again.rows.is_empty() && again.events.is_empty() && again.sub_rows.is_empty());
+    assert!(again.deadlines.is_empty());
+    // The row's version and when its status was entered stay as they were.
+    let row = host.stored("q1");
+    assert_eq!(row.version, 2);
+    assert_eq!(
+        row.owned["Workflow"],
+        object(json!({"status": "answered", "enteredAt": START + 5_000}))
+    );
+    // It is answered before any use's guard is asked: a gate first in list
+    // order, which vetoes every transition, is not asked.
+    let gated = question_with(json!({"initial": "answered"}));
+    let mut host = asking(&[UseSpec::on_type("test.Gate", json!({})), workflow(gated)]);
+    host.ask("q1", asked());
+    assert_eq!(
+        changed(host.to(&caller(BOB, &[]), "q1", json!({"to": "answered"}))).result,
+        json!({"from": "answered", "to": "answered", "unchanged": true})
+    );
+    let refusal = refused(host.to(&caller("carol", &[]), "q1", json!({"to": "open"})));
+    assert_eq!(
+        refusal["message"],
+        json!("behavior test.Gate vetoes transition of Question q1: the gate is closed")
+    );
+    assert_eq!(refusal["details"]["vetoCode"], json!("gated"));
+}
+
+#[test]
+fn repeat_checks_no_by_and_no_permission() {
+    let mut host = asking(&[workflow(question_flow())]);
+    host.ask("q1", asked());
+    changed(host.to(&caller(BOB, &[]), "q1", json!({"to": "answered"})));
+    // No transition leads from a state to itself, so none's by or
+    // permission applies to a repeat: any caller's answers unchanged.
+    for who in [caller("carol", &[]), caller("", &[])] {
+        assert_eq!(
+            changed(host.to(&who, "q1", json!({"to": "answered"}))).result,
+            json!({"from": "answered", "to": "answered", "unchanged": true})
+        );
+    }
+    changed(host.to(
+        &caller("alice", &["questions.close"]),
+        "q1",
+        json!({"to": "closed"}),
+    ));
+    let closed = changed(host.to(&caller(BOB, &[]), "q1", json!({"to": "closed"})));
+    assert_eq!(
+        closed.result,
+        json!({"from": "closed", "to": "closed", "unchanged": true})
+    );
+    assert!(closed.rows.is_empty());
+}
+
+#[test]
+fn without_repeat_a_move_to_the_current_state_is_already_in_state() {
+    let mut host = asking(&[workflow(question_with(json!({"repeat": null})))]);
+    host.ask("q1", asked());
+    changed(host.to(&caller(BOB, &[]), "q1", json!({"to": "answered"})));
+    assert_eq!(
+        refused(host.to(&caller(BOB, &[]), "q1", json!({"to": "answered"}))),
+        vetoed(
+            "q1",
+            "Question q1 is already answered",
+            "already_in_state",
+            json!({"from": "answered", "to": "answered"})
+        )
+    );
+    assert_eq!(host.stored("q1").version, 2);
+    // So a gate before it in list order refuses a move that is no move, as
+    // D16's amendment says.
+    let mut host = asking(&[
+        UseSpec::on_type("test.Gate", json!({})),
+        workflow(request_flow()),
+    ]);
+    host.ask("r1", json!({"title": "Desk", "assignee": DANA}));
+    assert_eq!(
+        refused(host.to(&caller(DANA, &[]), "r1", json!({"to": "open"})))["details"]["vetoCode"],
+        json!("gated")
+    );
+}
+
+#[test]
+fn from_that_is_not_the_rows_state_is_stale_before_anything_else() {
+    let mut host = asking(&[workflow(question_flow())]);
+    host.ask("q1", asked());
+    let stale_read = json!({"to": "answered", "from": "answered"});
+    assert_eq!(
+        refused(host.to(&caller(BOB, &[]), "q1", stale_read.clone())),
+        stale("q1", "answered", "open")
+    );
+    // Before by, and before the repeat.
+    assert_eq!(
+        refused(host.to(&caller("carol", &[]), "q1", stale_read.clone())),
+        stale("q1", "answered", "open")
+    );
+    assert_eq!(
+        refused(host.to(
+            &caller("carol", &[]),
+            "q1",
+            json!({"to": "answered", "from": "open"})
+        )),
+        not_principal("carol", "q1", "open", "answered", &["askedOf"])
+    );
+    assert_eq!(
+        refused(host.to(
+            &caller(BOB, &[]),
+            "q1",
+            json!({"to": "open", "from": "answered"})
+        )),
+        stale("q1", "answered", "open")
+    );
+    // Before any use's guard: a gate first in list order is not asked.
+    let mut host = asking(&[
+        UseSpec::on_type("test.Gate", json!({})),
+        workflow(question_flow()),
+    ]);
+    host.ask("q1", asked());
+    assert_eq!(
+        refused(host.to(&caller(BOB, &[]), "q1", stale_read)),
+        stale("q1", "answered", "open")
+    );
+    // A from that is the row's state goes on to the gate.
+    assert_eq!(
+        refused(host.to(
+            &caller(BOB, &[]),
+            "q1",
+            json!({"to": "answered", "from": "open"})
+        ))["details"]["vetoCode"],
+        json!("gated")
+    );
+    // On a field anchor, the refusal names the field.
+    let spec = TypeSpec::new("Question")
+        .with(UseSpec::on_field("status", "Workflow", question_flow()))
+        .with_field(FieldSpec::new("askedOf", "string"))
+        .with_field(FieldSpec::new("createdBy", "string"));
+    let mut host = Host::of(core(), spec);
+    host.ask("q1", json!({"askedOf": "bob"}));
+    let refusal = refused(host.move_row(
+        &caller(BOB, &[]),
+        "q1",
+        "status",
+        "transition",
+        json!({"to": "answered", "from": "answered"}),
+        START,
+    ));
+    assert_eq!(
+        refusal["details"]["reason"],
+        json!("Question q1's status is open, not answered")
+    );
+    assert_eq!(refusal["details"]["use"], json!("status"));
+}
+
+#[test]
+fn a_retry_that_landed_is_stale_with_the_state_it_moved_to() {
+    let mut host = asking(&[workflow(question_flow())]);
+    host.ask("q1", asked());
+    let read_open = json!({"to": "answered", "from": "open"});
+    assert_eq!(
+        changed(host.to(&caller(BOB, &[]), "q1", read_open.clone())).result,
+        json!({"from": "open", "to": "answered"})
+    );
+    // The retry finds its move made: stale, with the status it moved to.
+    assert_eq!(
+        refused(host.to(&caller(BOB, &[]), "q1", read_open)),
+        stale("q1", "open", "answered")
+    );
+    assert_eq!(
+        changed(host.to(
+            &caller(BOB, &[]),
+            "q1",
+            json!({"to": "answered", "from": "answered"})
+        ))
+        .result,
+        json!({"from": "answered", "to": "answered", "unchanged": true})
+    );
+    // Without repeat, the same, and a move to the state it is in stays the
+    // veto already_in_state, before terminal_state.
+    let mut host = asking(&[workflow(request_flow())]);
+    host.ask("r1", json!({"title": "Desk", "assignee": DANA_HYPHENATED}));
+    let read_open = json!({"to": "done", "from": "open"});
+    changed(host.to(&caller(DANA, &[]), "r1", read_open.clone()));
+    assert_eq!(
+        refused(host.to(&caller(DANA, &[]), "r1", read_open)),
+        stale("r1", "open", "done")
+    );
+    assert_eq!(
+        refused(host.to(&caller(DANA, &[]), "r1", json!({"to": "done"})))["details"]["vetoCode"],
+        json!("already_in_state")
+    );
+}
+
+#[test]
+fn from_that_is_no_state_is_an_invalid_argument() {
+    let mut host = asking(&[workflow(question_flow())]);
+    host.ask("q1", asked());
+    let issue = |host: &mut Host, params: Value| {
+        let refusal = refused(host.to(&caller(BOB, &[]), "q1", params));
+        assert_eq!(
+            (refusal["class"].clone(), refusal["code"].clone()),
+            (json!("OperationParamsError"), json!("invalid_argument"))
+        );
+        refusal["message"].as_str().unwrap_or_default().to_owned()
+    };
+    let all = "(open, answered, withdrawn, closed)";
+    assert_eq!(
+        issue(&mut host, json!({"to": "answered", "from": "lost"})),
+        format!("operation transition of behavior Workflow: /from: \"lost\" is not a state of Question {all}")
+    );
+    assert_eq!(
+        issue(&mut host, json!({"to": "answered", "from": ""})),
+        "operation transition of behavior Workflow: /from: must NOT have fewer than 1 characters"
+    );
+    assert_eq!(
+        issue(&mut host, json!({"to": "answered", "from": 5})),
+        "operation transition of behavior Workflow: /from: must be string"
+    );
+    // to is checked first.
+    assert_eq!(
+        issue(&mut host, json!({"to": "lost", "from": "lost"})),
+        format!("operation transition of behavior Workflow: /to: \"lost\" is not a state of Question {all}")
+    );
+    assert_eq!(host.stored("q1").version, 1);
+}
+
+#[test]
+fn the_config_checks_refuse_a_seat_a_missing_field_and_a_field_that_holds_no_subject() {
+    let prefix = "type Question: behavior Workflow config: ";
+    let by = |entries: Value| {
+        let mut flow = question_flow();
+        flow["transitions"][0]["by"] = entries;
+        flow
+    };
+    let named = "the transition from \"open\" to \"answered\" names";
+    let rules = [
+        (
+            by(json!(["seat:reviewer"])),
+            format!("{named} \"seat:reviewer\" in by, a seat of Seats, which the core does not run yet (D104, step 3)"),
+        ),
+        (
+            by(json!(["askee"])),
+            format!("{named} \"askee\" in by, which is not a field of Question (its fields: title, askedOf, createdBy, assignee, priority, dueAt)"),
+        ),
+        (
+            by(json!(["priority"])),
+            format!("{named} \"priority\" in by, a number field of Question: by names a field that holds a subject (string, Identity.UUID or Identity.UserID)"),
+        ),
+        (
+            by(json!(["dueAt"])),
+            format!("{named} \"dueAt\" in by, a Temporal.DateTime field of Question: by names a field that holds a subject (string, Identity.UUID or Identity.UserID)"),
+        ),
+        // The first entry that breaks, in config order.
+        (
+            by(json!(["askedOf", "seat:reviewer", "askee"])),
+            format!("{named} \"seat:reviewer\" in by, a seat of Seats, which the core does not run yet (D104, step 3)"),
+        ),
+    ];
+    for (config, reason) in rules {
+        let issues = define_issues(question(&[workflow(config.clone())]));
+        assert_eq!(
+            issues,
+            vec![(
+                "rule".to_owned(),
+                "/config".to_owned(),
+                format!("{prefix}{reason}")
+            )],
+            "{config}"
+        );
+    }
+    // A type that gives no fields has none for a by to name.
+    let bare = TypeSpec::new("Question").with(workflow(question_flow()));
+    assert_eq!(
+        define_issues(bare)[0].2,
+        format!("{prefix}{named} \"askedOf\" in by, which is not a field of Question (its fields: none)")
+    );
+    // On a field anchor, the field is named.
+    let anchored = TypeSpec::new("Question")
+        .with(UseSpec::on_field(
+            "status",
+            "Workflow",
+            by(json!(["seat:reviewer"])),
+        ))
+        .with_field(FieldSpec::new("askedOf", "string"));
+    assert_eq!(
+        define_issues(anchored)[0].2,
+        format!("type Question: field status: behavior Workflow config: {named} \"seat:reviewer\" in by, a seat of Seats, which the core does not run yet (D104, step 3)")
+    );
+    // What the configSchema refuses, in the schema loader's words.
+    let shapes: Vec<(Value, Vec<(&str, &str)>)> = vec![
+        (
+            question_with(json!({"repeat": "always"})),
+            vec![("/config/repeat", "must be one of \"unchanged\"")],
+        ),
+        (
+            question_with(json!({"repeat": true})),
+            vec![("/config/repeat", "must be one of \"unchanged\"")],
+        ),
+        (
+            question_with(json!({"overridePermission": ""})),
+            vec![(
+                "/config/overridePermission",
+                "must NOT have fewer than 1 characters",
+            )],
+        ),
+        (
+            question_with(json!({"overridePermission": 5})),
+            vec![("/config/overridePermission", "must be string")],
+        ),
+        (
+            by(json!([])),
+            vec![(
+                "/config/transitions/0/by",
+                "must NOT have fewer than 1 items",
+            )],
+        ),
+        (
+            by(json!("askedOf")),
+            vec![("/config/transitions/0/by", "must be array")],
+        ),
+        (
+            by(json!(["askedOf", "askedOf"])),
+            vec![(
+                "/config/transitions/0/by",
+                "must NOT have duplicate items (items ## 1 and 0 are identical)",
+            )],
+        ),
+        (
+            by(json!([""])),
+            vec![(
+                "/config/transitions/0/by/0",
+                "must NOT have fewer than 1 characters",
+            )],
+        ),
+        (
+            by(json!([5])),
+            vec![("/config/transitions/0/by/0", "must be string")],
+        ),
+    ];
+    for (config, expected) in shapes {
+        let expected: Vec<(String, String, String)> = expected
+            .into_iter()
+            .map(|(path, message)| ("schema".to_owned(), path.to_owned(), message.to_owned()))
+            .collect();
+        assert_eq!(
+            define_issues(question(&[workflow(config.clone())])),
+            expected,
+            "{config}"
+        );
+    }
+    // overridePermission with no by anywhere is taken, and so is the flow.
+    let command = Command::new(alice(), START, Action::Define);
+    for config in [
+        question_flow(),
+        json!({"states": ["open", "done"], "transitions": [{"from": "open", "to": "done"}], "overridePermission": "moderate"}),
+    ] {
+        let outcome = core().drive(
+            &question(&[workflow(config)]),
+            &command,
+            &mut Memory::default(),
+        );
+        assert_eq!(changed(outcome), ChangeSet::default());
+    }
 }

@@ -14749,7 +14749,8 @@ release.
     that is a query, as a declared query (D86) and a `GET`, comes with the
     first behavior that declares one.
   - A config's permissions are attributed to every operation of its use:
-    the catalog lists each string under a key `permission` under each,
+    the catalog lists each string under a key `permission`, or since D104
+    one ending in `Permission` (Workflow's `overridePermission`), under each,
     until step 5 derives which operation checks which from the class
     declaration.
   - The TypeScript SDK's typed states are the API's enum
@@ -14858,7 +14859,7 @@ checks every state with it.
 
 | Decision | Alternatives not taken |
 |----------|------------------------|
-| Workflow's config may set `repeat: "unchanged"`. A transition into the state the row is in then answers `{ from, to, unchanged: true }` and writes nothing (`Cx::unchanged()`), before any other use's guard runs: the core reads the status before it asks a guard, so no gate can refuse a move that is no move. Without it the veto stays. | Unchanged success for every type, which D16 turned down for the stale read it hides; a veto each app's handlers catch and answer as success, in every language |
+| Workflow's config may set `repeat: "unchanged"`. A transition into the state the row is in then answers `{ from, to, unchanged: true }` and writes nothing, as an operation that says `Cx::unchanged()` does, before any other use's guard runs: the core asks the operation's own use to settle it (`Behavior::settle`) before it asks a guard, and Workflow reads the status there, so no gate can refuse a move that is no move. Without it the veto stays. (Amended when step 1 was built: `Cx::unchanged()` is said by a handler, which runs after every guard has allowed the call.) | Unchanged success for every type, which D16 turned down for the stale read it hides; a veto each app's handlers catch and answer as success, in every language |
 | `transition` takes an optional `from`, the state the caller read. One that is not the row's state is `vetoed` (`stale`, details `{ from, status }`), so a caller that wants the stale read the veto gave asks for it. | Reading a stale read off `already_in_state`, which only a repeat of the same move shows |
 
 ### A sign-off pins what was read (D56 amended)
@@ -15039,4 +15040,212 @@ takes `oneWay`.
 4. Barrier, Mailbox and Assignment as bundles with step 5, and the
    `caller` operand of its declarative conditions.
 
-Status: not built.
+Status: step 1 built: `by`, `overridePermission`, `repeat` and `from` on
+the Workflow the core runs, its cases written by hand in the recorded
+format and replayed by every adapter, a table's Workflow fields taking
+them in each language's repositories, API and SDK, and the engine
+refusing each. Steps 2 to 4 are not built. The names and configs are
+reversible until the first release.
+- **The core addition.** `Behavior::settle(view, operation, params)` is a
+  hook a use answers about an operation of its own before any use's guard
+  is asked. The core asks it after the parameter check, for a caller's
+  operation, a `call()` and a `call_on()` alike. `Some(result)` ends the
+  call: no guard, no handler and no after-change hook runs, and nothing is
+  written. For the command's own operation the change set holds `result`
+  alone, as after `Cx::unchanged()`, which every adapter already applied by
+  writing nothing (Timers' `fireTimer` of a deadline not due): no row
+  write, so `_version`, `enteredAt` and the audit stamps stay and the
+  change trigger writes no message (`rules-adapter`'s store test holds a
+  repeat on a table with its change trigger, on both dialects). A settled `call_on` neither marks the
+  other row written nor runs its hooks. It may refuse instead, a veto
+  among them, before any guard. `tests/core.rs` has 47 cases, three of
+  them its own.
+- **Workflow's members.** The declaration
+  (`internal/registry/behaviors/workflow.behavior.json`, which the core and
+  the engine read in place) gains by new members alone: a transition's
+  `by`, the config's `overridePermission` and `repeat`, `transition`'s
+  `from`, its result's `unchanged` (present only when true, so a move
+  answers `{ from, to }` as before) and the vetoes `not_principal` and
+  `stale`. `rules-behaviors` checks them in the order the rows above give:
+  `settle` refuses a `to` or `from` the config has no state of
+  (`invalid_argument`), vetoes a `from` that is not the row's status
+  (`stale`, `{ from, status }`, checked before anything else), and with
+  `repeat` answers a move to the status `{ from, to, unchanged: true }`;
+  the guard then keeps `already_in_state`, `terminal_state` and
+  `transition_not_allowed`, vetoes a caller the transition's `by` does not
+  name who holds no `overridePermission` (`not_principal`, `{ from, to, by
+  }`), and refuses a missing transition permission (`forbidden`), so `by`
+  comes before the permission. `by` and `overridePermission` hold a
+  `call()` and a `call_on()` as the permission does: the command's caller
+  is the one checked. A repeat checks no `by` and no permission, since the
+  config refuses a transition from a state to itself. The config check
+  holds the new members to the configSchema in the schema loader's words
+  and each `by` entry to the type: a `seat:` entry, a field the type
+  lacks and a field whose type holds no subject are refused, naming the
+  transition and the entry. `tests/workflow.rs` has 34 cases.
+- **Subjects.** `rules-behaviors`' `subjects` module says which fields
+  hold a subject (`string`, `Identity.UUID`, `Identity.UserID`) and
+  whether a value names the caller: a `string` field by its exact text, a
+  UUID field by value in either form, hyphenated or base62, so the base62
+  every adapter reads a UUID column as matches a subject an authenticator
+  gives hyphenated, with no adapter normalizing the caller; an absent,
+  null or empty value, or an empty subject, names no one.
+- **The layout's audit fields.** `behaviorlayout`'s `Table` gains `audit`:
+  `createdBy`, when the table has it as a plain scalar column and a
+  Workflow transition's `by` names it, listed in `spec.fields` after the
+  own fields, so a table no `by` reads it of converts none in its row reads
+  (`AuditFields`, the list the build checks a `by` against, lists it
+  either way). Each adapter reads it in every row read, the linked read
+  and a change command's included, into the row's own fields converted as
+  an own column (a UUID to base62, NULL absent), and never writes it: a
+  change set naming it is the existing `internal` refusal, and a write's
+  image leaves it out. Each adapter's store test holds it on both
+  dialects. No existing fixture's layout changes.
+- **The engine.** It shares the declaration, so its describe and MCP
+  documents and its recorded declarations list the new members, and it
+  refuses each rather than ignore it, since a runtime schema defined over
+  HTTP or MCP passes no build's check: a define naming `by`,
+  `overridePermission` or `repeat` is refused with a reason naming the
+  table form (`status: Workflow<{ ... }> on a DB table`), and a `from` is
+  `invalid_argument` at `/from`. It never answers `unchanged`,
+  `not_principal` or `stale`. `testkit/tests/core_workflow_table_members.rs`
+  holds it on SQLite and Postgres. The scenario corpus (`registry.json`'s
+  metaSchema and six recordings' declarations), the HTTP corpus and the
+  work queue's three files were recorded again and change by the new
+  members alone.
+- **The surface.** `@superschematic/db`'s `WorkflowConfig` is the schema
+  package's config with `transitions` of `WorkflowTransitionOn` (its `by`),
+  `overridePermission` and `repeat`; `@superschematic/schema` does not
+  change, so each is an excess property on an engine type's
+  `@behavior("Workflow", ...)` (`workflow.typecheck.ts`). The build holds a
+  table's `by` to the IR (`verify/behaviors_workflow.go`): beside the
+  core's three refusals, in the core's words, it refuses a relation by its
+  name (pointing at `<relation>Id`), an audit field other than `createdBy`,
+  a list or a map and a field encrypted at rest; and it refuses each of
+  `by`, `overridePermission` and `repeat` on an engine type, one error per
+  member. `ConfigPermissions` takes a key ending in `Permission` as it
+  takes `permission`, so the catalog lists `overridePermission` under the
+  use's operations. `behaviortypes.Narrow` types `from` as the config's
+  states on a table and drops `from`, `unchanged` and the vetoes
+  `not_principal` and `stale` (its `Vetoes`) for an engine type, whose
+  clients offer none of them.
+- **The writable by field.** The build warns, and never refuses, when an
+  operation of an API, in any set but a `@behaviorOperations` one, updates
+  a row of a table (a `PUT` or a `PATCH`, or another method but `GET` that
+  takes the table's key) and takes a `@source` view of it that carries a
+  field a `by` names, naming the API, the set and the operation, the field,
+  the moves and the fix (keep the field out of the input, or freeze it
+  once StateRules or Constants run on the core). The table is the
+  `@source` target as the TypeScript compiler resolves it, with its
+  behaviors' configs, or the API's database when the loader read it, so an
+  API that serves none of the table's operations warns too
+  (`TestWritableByWarnsWithoutTheTablesOperations`). A create, which takes
+  no key, is not warned of: whoever creates the row names whom its fields
+  hold. `createdBy` is never warned of: no input carries it. The build also
+  warns when every permission a `@behaviorOperations` set requires covers a
+  Workflow's `overridePermission`, which the core matches as any
+  permission (`questions` covers `questions.moderate`): every caller the
+  routes admit then passes `by`. The build's subject types are held to the
+  core's `SUBJECT_TYPES` (`TestSubjectTypesAreTheCores`).
+- **A null `from`.** The API's types, its OpenAPI document and its MCP
+  tools take null for an optional member, and the core refuses a null
+  `from` as `invalid_argument`. Every server reads one as none: the
+  TypeScript router drops a behavior route's null optional members
+  (`behaviorParams`, from tsrestgen's `BehaviorRoute.Optional`), Go's
+  `InputField` decodes it to the ORM's nil pointer, sent with `omitempty`,
+  and Rust's `Option` to `None`, skipped when serialized. An SDK leaves an
+  unset `from` out of the body.
+- **The specification.** `runtime/engine/testdata/rules/scenarios/core-workflow-principals.json`
+  is written by hand in the recorded format, since the engine recorded
+  none of these cases, and is never re-recorded (its `README.md`): 10
+  scenarios, 122 steps, of `by` on a string field and on `createdBy`, a
+  field with no value, an empty subject, a UUID field in either form,
+  `by` with a permission, `overridePermission` with and without the
+  transition's, a repeat answered unchanged with the row's `enteredAt`
+  and the event log unmoved, `already_in_state` without `repeat`, a stale
+  `from`, a landed retry, a matching `from`, the config checks' refusals,
+  and a test behavior `test.Gate` whose guard vetoes every transition and
+  is not asked on a repeat. `rules-testkit` replays it on the reference
+  host, 122 steps checked, floor 122, 0 mismatches, and writes it out as
+  `core-workflow-principals.transcript.json` (`hand_written_transcript`):
+  92 steps (58 commands, five of them repeats answered unchanged, and 34
+  checks, twelve of them refused defines) in 9 scenarios, test.Gate's
+  left out, floor 92. A hand-written transcript's commands carry the row's
+  version after the step (`expect.version`), and a repeat holds the
+  version of its row's previous command. TypeScript replays it on
+  bun:sqlite and Postgres, Go on SQLite and Postgres and Rust on rusqlite
+  and Postgres, each comparing `expect.version` with the version it reads
+  back, at 92 steps and 0 mismatches, beside the four other transcripts,
+  which stay byte for byte and at their floors.
+- **Fixtures and end-to-end tests.** `fixture-workflow-principals-db`
+  holds a `Question` with `askedOf` and `createdBy` (`Identity.UUID`), a
+  `status` Workflow whose transitions name `askedOf`, `createdBy`, and
+  both beside `questions.close`, with `overridePermission:
+  "questions.moderate"` and `repeat: "unchanged"`, and a `review` Workflow
+  without `repeat`. `fixture-workflow-principals-api` serves its
+  operations (`@behaviorOperations(Question) @auth`) and has
+  `QuestionAdmin.reassignQuestion`, a `PATCH` taking a `@source(Question)`
+  view with `askedOf`, so the warning fires (`TestWorkflowPrincipalsFixturesLoad`
+  asserts its text) and the API still builds. Each language's test runs,
+  on Postgres, the generated server through its SDK with base62 subjects
+  through eight cases: the subject `askedOf` holds answers; another caller
+  is 409 `not_principal`; the creator withdraws, by `createdBy`; a caller
+  holding the override permission answers; a repeat answers 200
+  `unchanged` with the row's `_version` and `status_entered_at` unmoved; a
+  repeat on `review` is 409 `already_in_state`; a `from` that is not the
+  row's state is 409 `stale`; and a matching `from` moves it, its retry
+  then `stale` with the state it moved to
+  (`TestWorkflowPrincipalsGoServerOnPostgres`,
+  `TestGeneratedWorkflowPrincipalsEndToEnd`,
+  `TestRustWorkflowPrincipalsOnPostgres`). The Go and TypeScript tests
+  create questions through the ORM acting as the asker, which stamps
+  `createdBy`; Rust's, with no repository, by SQL. The existing fixtures'
+  goldens change by `from` and `unchanged` alone (and the TypeScript
+  routers by the `behaviorParams` call); the engine clients do not change.
+- **Left for later steps.**
+  - `seat:<name>` entries in `by`, refused at define and by the build until
+    Seats (step 3).
+  - StateRules' `by` (step 2) and the `caller` operand (step 4).
+  - A `by` naming a to-one relation by its name (the build points at
+    `<relation>Id`), `updatedBy`, `deletedBy` or an audit time, and a
+    `createdBy` that is a relation or a list: the layout's `audit` holds a
+    plain scalar `createdBy` alone.
+  - The writable-by warning sees only a `@source(T)` argument of an
+    operation that updates a row: an input of a plain type, code that
+    calls the repository's update, raw SQL, and an API in a data format
+    (JSON, YAML) that reads no database, whose `@source` targets nothing
+    resolves, go unseen, and the docs and the agent skill say so.
+    Freezing a `by` field waits for StateRules or Constants on the core.
+  - Every server reads a behavior operation's null optional member as
+    absent (TypeScript's `behaviorParams`, Go's nil pointer, Rust's
+    `Option`), which suits `from`, whose paramsSchema takes no null. A
+    behavior whose optional parameter gives null a meaning of its own
+    (Calendar's `setOpeningHours`, whose null `hours` is "the config's")
+    needs a member that tells null from absent in all three languages,
+    which its port decides.
+  - A `createdBy` column whose text is no UUID (a raw SQL repair) fails
+    each command on its row as `internal` on a table whose `by` names
+    `createdBy`, since every adapter converts it as an own UUID column; a
+    table no `by` reads it of does not read it.
+  - A repeat and a stale `from` are answered to any caller the route
+    admits, `by` unasked, telling it the row's state as a read would.
+  - `by` holds a deadline's and a change's calls with their worker as the
+    caller, so a Timers `then` or a Reactions rule into a `by` transition
+    is vetoed (and left as it is) unless the worker holds the
+    `overridePermission`.
+  - The engine advertises the four members, through its one shared
+    declaration, and refuses each, until engine types go at D103's step
+    7; the members' descriptions say "A table's alone: an engine type
+    refuses it", which table-facing generated text (the OpenAPI document,
+    the Rust SDK's input schemas) repeats.
+  - The layout's `audit` is never in a write's image, so no hearing rule
+    hears `createdBy`; Rust's handlers stamp no `createdBy` (D103), so on a
+    Rust server a `by` on it names whoever the application's own create
+    set.
+  - Only a hand-written transcript holds each command's row version; a
+    UUID own field in a transcript is text, so the audit read is held by
+    the store and end-to-end tests alone, and test.Gate's scenario runs on
+    the reference host alone (`rules-behaviors`' tests hold the repeat
+    before a gate too).
+  - `transition`'s parameter issues sort by pointer, as the engine sorts
+    its validator's, so `/from` comes before `/to`.

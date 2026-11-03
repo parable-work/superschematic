@@ -12,6 +12,7 @@ import type {
  */
 
 export interface TicketStatusTransitionParams {
+  from?: TicketStatusState;
   id: string;
   to: TicketStatusState;
 }
@@ -196,11 +197,12 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:a9a844ca78ee53897aa21e72e3f42a3f6865be9d6c6ec8ce7359b847a47e8a31',
+    inputSchemaDigest: 'sha256:4b2c8f9e996d2c288cbbbea5be6e55016663910a322f0fe0e6a6b875c1da5a4d',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
+        from: {"description":"A TicketStatusState value","enum":["open","waiting","escalated","closed",null],"type":["string","null"]},
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
         to: {"description":"A TicketStatusState value","enum":["open","waiting","escalated","closed"],"type":"string"},
       },
@@ -346,6 +348,7 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
+        from: {"description":"A TicketStatusState value","enum":["open","waiting","escalated","closed",null],"type":["string","null"]},
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
         to: {"description":"A TicketStatusState value","enum":["open","waiting","escalated","closed"],"type":"string"},
       },
@@ -406,6 +409,7 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
+        from: {"description":"A TicketStatusState value","enum":["open","waiting","escalated","closed",null],"type":["string","null"]},
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
         to: {"description":"A TicketStatusState value","enum":["open","waiting","escalated","closed"],"type":"string"},
       },
@@ -488,7 +492,7 @@ export async function invokeTool<T extends ToolName>(
 ): Promise<unknown> {
   switch (toolName) {
     case TICKET_STATUS_TRANSITION:
-      return sdk.ticket.status.transition((params as TicketStatusTransitionParams).id, { to: (params as TicketStatusTransitionParams).to });
+      return sdk.ticket.status.transition((params as TicketStatusTransitionParams).id, { from: (params as TicketStatusTransitionParams).from, to: (params as TicketStatusTransitionParams).to });
     case TICKET_TIMERS_FIRE_TIMER:
       return sdk.ticket.timers.fireTimer((params as TicketTimersFireTimerParams).id, { deadline: (params as TicketTimersFireTimerParams).deadline });
     case TICKET_TIMERS_RESET_TIMER:

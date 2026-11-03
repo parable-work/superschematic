@@ -709,6 +709,26 @@ pub trait Behavior: Send + Sync + 'static {
         Vec::new()
     }
 
+    /// Answers an operation of the use's own before any use's guard is asked
+    /// (D104): `Some(result)` ends the call with that result, writing nothing
+    /// and running no handler and no after-change hook, as an operation that
+    /// says [`Cx::unchanged`] does, so no guard refuses a call that changes
+    /// nothing; `None` goes on to the guards and the handler. It may refuse
+    /// the call before any guard, a veto ([`View::veto`]) among them: a check
+    /// of the caller's own read of the row, which no other use's gate should
+    /// answer first. It runs after the parameter check, for a caller's
+    /// operation, a `call()` and a `call_on()` alike, and reads through a
+    /// view. None by default.
+    fn settle(
+        &self,
+        view: &View<'_, Self::Config>,
+        operation: &str,
+        params: &Value,
+    ) -> Hook<Option<Value>> {
+        let _ = (view, operation, params);
+        Ok(None)
+    }
+
     /// Sets up the use's state on a new row, once every guard allowed the
     /// create: its owned fields from the config and its entry of the
     /// create's parameters (`{}` when the create gives none).

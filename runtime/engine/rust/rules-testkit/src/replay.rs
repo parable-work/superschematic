@@ -293,17 +293,18 @@ pub fn replay_path(path: &Path, make_core: &dyn Fn() -> Core) -> Result<Report, 
 /// each engine a scenario opens, with the test behaviors a scenario names
 /// added from [`fixtures`].
 pub fn replay(file: &ScenarioFile, make_core: &dyn Fn() -> Core) -> Report {
-    replay_recording(file, make_core, false).0
+    replay_recording(file, make_core, None).0
 }
 
 /// Replays a file as [`replay`] does and, when `record` is set, records
 /// for each scenario, in order, what a transcript holds of it: the
 /// commands, checks and raw writes the replay made on the host and what
-/// the host answered ([`Recorded`]).
+/// the host answered ([`Recorded`]), each command's row version with them
+/// when it is `Some(true)`, as a hand-written file's transcript holds it.
 pub(crate) fn replay_recording(
     file: &ScenarioFile,
     make_core: &dyn Fn() -> Core,
-    record: bool,
+    record: Option<bool>,
 ) -> (Report, Vec<Recorded>) {
     let runs = make_core().names();
     let mut report = Report {
@@ -318,7 +319,7 @@ pub(crate) fn replay_recording(
             .cloned()
             .unwrap_or_default();
         let mut run = Run::new(&file.name, scenario, make_core, steps.len());
-        run.recorded = record.then(Recorded::default);
+        run.recorded = record.map(Recorded::new);
         match skip_reason(&file.name, scenario, &runs) {
             Some(reason) => {
                 for (index, step) in steps.iter().enumerate() {

@@ -68,7 +68,10 @@
 // another table's do through a relation of it, names its change queue's
 // table and columns in changes, and its spec's fields name each to-one
 // relation an own field holds the key of
-// (testdata/fixture-reactions-db.layout.json).
+// (testdata/fixture-reactions-db.layout.json); and a table with a scalar
+// createdBy that a Workflow transition's by names names it in audit, which
+// a row read holds among its own fields and its spec's fields list after
+// them (testdata/fixture-workflow-principals-db.layout.json).
 package behaviorlayout
 
 import (
@@ -169,6 +172,16 @@ type Table struct {
 	// relation's column is its target's key, which Field names as a
 	// generated row holds it, <field>Id, typed as the target's key.
 	Own []Column `json:"own"`
+
+	// Audit are the audit fields of the table the core reads beside its own
+	// fields and no command writes: createdBy (D87), a scalar column the
+	// repositories stamp with an operation's caller, when a Workflow
+	// transition's by names it (D104). A row read holds each in its own
+	// fields by Field; a create's own fields, an update's patch and a change
+	// set never carry one, and a write's image (ImageColumns) leaves it out.
+	// Absent for a table without a scalar createdBy, and for one no by
+	// names it of.
+	Audit []Column `json:"audit,omitempty"`
 
 	// Uses are the type's table uses, implements and field uses, in the
 	// type's list order.
@@ -341,8 +354,9 @@ type Operation struct {
 
 // TypeSpec is the type as the core runs it: superschematic_rules::TypeSpec
 // in its JSON shape, which serde writes in camelCase. Uses are in the
-// type's list order, and Fields are its own fields ([OwnFields]), what a
-// config that names a field is held to (a Timers field start).
+// type's list order, and Fields are its own fields ([OwnFields]) and then
+// its audit fields ([AuditFields]), what a config that names a field is
+// held to (a Timers field start, a Workflow transition's by).
 type TypeSpec struct {
 	Name   string      `json:"name"`
 	Uses   []UseSpec   `json:"uses"`
@@ -574,7 +588,7 @@ func tableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel, reg
 		return nil, fmt.Errorf("behaviorlayout: table %s composes behaviors and keeps no %s column, which the loader gives it", td.Name, VersionColumn)
 	}
 	own, relations := ownColumnsOf(schema, model)
-	t := &Table{Type: td.Name, Table: model.Name, Version: VersionColumn, Own: own, Uses: []Use{}}
+	t := &Table{Type: td.Name, Table: model.Name, Version: VersionColumn, Own: own, Audit: readAudit(td, model), Uses: []Use{}}
 	if deletedAt := model.AuditColumn(sqlutil.AuditDeletedAt); model.SoftDelete && deletedAt != nil {
 		t.Live = &Live{Column: deletedAt.Name}
 	}
@@ -588,6 +602,9 @@ func tableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel, reg
 		return nil, fmt.Errorf("behaviorlayout: table %s has no key column", td.Name)
 	}
 	t.Spec = TypeSpec{Name: td.Name, Uses: []UseSpec{}, Fields: fieldSpecs(t.Own, relations)}
+	for _, c := range t.Audit {
+		t.Spec.Fields = append(t.Spec.Fields, FieldSpec{Name: c.Field, Type: c.Type, DateTime: c.Convert == ConvertEpochMillis})
+	}
 	armsDeadlines := false
 	for _, ref := range td.TableBehaviors() {
 		where := fmt.Sprintf("behaviorlayout: table %s: field %s", td.Name, ref.Field)
@@ -720,6 +737,62 @@ func OwnFields(schema *ir.Schema, td *ir.TypeDef) []Column {
 		}
 	}
 	return nil
+}
+
+// auditColumns are the audit fields of the table model holds that the core
+// reads (D104): its createdBy, when it is a scalar column of the type's own
+// (no relation, no list, no map), which the repositories stamp with an
+// operation's caller (D87). updatedBy, deletedBy and the audit times are
+// not among them.
+func auditColumns(model *sqlutil.TableModel) []Column {
+	c := model.AuditColumn(sqlutil.AuditCreatedBy)
+	if c == nil || c.Def == nil || c.Relation != "" || c.Def.TypeRef.IsArray || c.Def.TypeRef.IsMap {
+		return nil
+	}
+	return []Column{{Field: sqlutil.AuditCreatedBy, Column: c.Name, Type: c.Def.TypeRef.Name, Convert: convertOfRef(c.Def.TypeRef)}}
+}
+
+// readAudit are the audit columns of the table model holds that the
+// layout's audit names (D104): auditColumns when a Workflow transition's
+// by on td names createdBy, and none otherwise, so a table whose behaviors
+// read no audit field converts none in its row reads.
+func readAudit(td *ir.TypeDef, model *sqlutil.TableModel) []Column {
+	for _, ref := range td.FieldBehaviors() {
+		if ref.Name != "Workflow" || len(ref.Config) == 0 {
+			continue
+		}
+		var config struct {
+			Transitions []struct {
+				By []string `json:"by"`
+			} `json:"transitions"`
+		}
+		if json.Unmarshal(ref.Config, &config) != nil {
+			continue
+		}
+		for _, transition := range config.Transitions {
+			for _, entry := range transition.By {
+				if entry == sqlutil.AuditCreatedBy {
+					return auditColumns(model)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// AuditFields are td's audit fields, a table of schema, that a Workflow
+// transition's by may name (D104): its createdBy, when it is a scalar
+// column, which the layout's audit names when a by does. A by is held to
+// them beside [OwnFields], by the core at a command (the spec's fields) and
+// by the loader's checks before it, so both list the same names. It is nil
+// for a table without one, and when schema's tables cannot be modelled,
+// which the build reports elsewhere.
+func AuditFields(schema *ir.Schema, td *ir.TypeDef) []Column {
+	model := modelOf(schema, td)
+	if model == nil {
+		return nil
+	}
+	return auditColumns(model)
 }
 
 // fieldSpecs are own's columns as the core's spec holds the type's own

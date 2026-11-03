@@ -1,7 +1,10 @@
 //! The recorded scenarios are the specification (D103): the transcripts
 //! `superschematic-rules-testkit` writes from `core-workflow.json`,
 //! `core-timers.json`, `core-reactions.json` and
-//! `core-reactions-changes.json`
+//! `core-reactions-changes.json`, and from the scenarios written by hand in
+//! their format where the engine recorded none, `core-workflow-principals.json`
+//! (D104: a transition's `by`, `overridePermission`, `repeat` and `from`),
+//! whose transcript holds each command's row version too
 //! (`runtime/engine/testdata/rules/<name>.transcript.json`, whose format its
 //! `transcript` module states) replayed through this adapter on rusqlite
 //! and on Postgres, as the HTTP runtime's `src/rules-transcript.test.ts`
@@ -18,8 +21,10 @@
 //! only while it is armed at its time and its message spent with it, and a
 //! write a type's change trigger queued, run as written), its refusal
 //! compared whole and the row it names read back after it and compared,
-//! with that row's sub-table rows and its armed deadlines and the other
-//! rows its change set wrote; and each raw step writes owned columns with
+//! with its version when the transcript holds one (so a repeat answered
+//! unchanged is held to writing nothing), that row's sub-table rows and its
+//! armed deadlines and the other rows its change set wrote; and each raw
+//! step writes owned columns with
 //! SQL past the adapter. The Postgres replay is skipped without
 //! `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL`.
 //!
@@ -50,11 +55,12 @@ use common::{camel, column_types, p, snake, storage_key, Param};
 /// The transcripts every dialect replays, each with the steps it holds,
 /// the testkit's floor (`tests/transcript.rs`): each dialect replays every
 /// one, so a regression cannot pass by skipping.
-const TRANSCRIPTS: [(&str, usize); 4] = [
+const TRANSCRIPTS: [(&str, usize); 5] = [
     ("core-workflow", 96),
     ("core-timers", TIMERS_FLOOR),
     ("core-reactions", REACTIONS_FLOOR),
     ("core-reactions-changes", REACTIONS_CHANGES_FLOOR),
+    ("core-workflow-principals", WORKFLOW_PRINCIPALS_FLOOR),
 ];
 
 /// core-timers' floor, as the core's milestone states it: 125 steps, 75
@@ -69,6 +75,13 @@ const REACTIONS_FLOOR: usize = 586;
 /// core-reactions-changes' floor, as the core's milestone states it: 60
 /// steps, 48 commands (24 of them changes) and 12 checks.
 const REACTIONS_CHANGES_FLOOR: usize = 60;
+
+/// core-workflow-principals' floor, as the core's milestone states it: 92
+/// steps of the scenarios written by hand (D104), 58 commands, each holding
+/// its row's version, and 34 checks. What the transcript leaves out, with
+/// its reasons, is the scenario whose gate is a test behavior of the
+/// reference host's, and the opens and reads.
+const WORKFLOW_PRINCIPALS_FLOOR: usize = 92;
 
 /// How many runs a check makes before the test calls it unsettled.
 const CHECK_ROUNDS: usize = 16;
@@ -554,6 +567,7 @@ impl<'s> Scenario<'s> {
                         .collect()
                 })
                 .unwrap_or_default(),
+            audit: Vec::new(),
             uses,
             deadlines,
             changes: None,
@@ -828,8 +842,14 @@ impl<'s> Scenario<'s> {
         };
         if let Some(row_key) = row_key.filter(|key| !key.is_empty()) {
             let row = db.read_row(&host, type_name, &row_key).await;
+            let version = row.as_ref().map(|row| row.version);
             let actual = row.map(|row| json!({"own": row.own, "owned": row.owned}));
             self.compare(*at, call, "row", json!(expect.row), json!(actual));
+            // The version a hand-written step holds (D104), which a repeat
+            // that writes nothing leaves where the step before it left it.
+            if let Some(held) = expect.version {
+                self.compare(*at, call, "version", json!(held), json!(version));
+            }
             // The row's sub-table rows and its armed deadlines, each absent
             // when it has none.
             let expected = serde_json::to_value(expect).expect("an expectation of JSON");

@@ -338,7 +338,7 @@ func TestCoreBehaviors(t *testing.T) {
 		behavior Behavior
 		codes    []string
 	}{
-		{workflow, []string{"already_in_state", "terminal_state", "transition_not_allowed", "no_status"}},
+		{workflow, []string{"already_in_state", "terminal_state", "transition_not_allowed", "no_status", "not_principal", "stale"}},
 		{comments, []string{"no_message", "not_a_thread", "not_in_thread", "deleted", "composing", "not_composing", "not_author", "edit_window_passed", "too_many_edits",
 			"already_reacted", "not_reacted", "too_many_reactions", "already_pinned", "not_pinned", "already_resolved", "not_resolved", "block_not_allowed", "ref_not_found",
 			"attachment_not_allowed", "no_block", "not_code", "anchor_unchanged", "not_idle", "too_many_drafts", "draft_too_long", "not_configured", "unknown_delivery", "token_stale", "not_claimed"}},

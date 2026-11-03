@@ -13,6 +13,9 @@ file of the engine's suite, or, as `workqueue-<file>.json`, of the work
 queue's (below); each scenario in it is one test, the calls the
 test made on the engines it opened and what each call returned or threw.
 `../http` holds the same for the HTTP routes, the event stream and MCP.
+Cases of the behaviors' core that the engine recorded none of are written
+by hand in this format in `../rules/scenarios` (D104), and are never
+re-recorded.
 
 The files are written by the recorder, `typescript/test/recorder.ts`, never
 by hand. With `ENGINE_RECORD=<dir>` set, every engine a test opens through

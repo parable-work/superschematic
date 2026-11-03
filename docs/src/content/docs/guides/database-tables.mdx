@@ -1059,3 +1059,82 @@ the messages after the commit, one row's in the order they were written.
 No behavior worker claims on SQLite or D1 yet, where the messages
 accumulate until one does. Such a table has no upserts when its behaviors
 keep sub-tables or arm deadlines.
+
+### Who may move a Workflow field's row
+
+A Workflow field's transition may name who makes it, its config may name
+the permission that moves a caller past that, and a move to the state the
+row is in may change nothing (D104):
+
+```ts
+// questions-db
+export abstract class Question {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  prompt: string;
+  askedOf: Identity.UUID;
+  createdBy: Identity.UUID;
+  status: Workflow<{
+    states: ["open", "answered", "withdrawn", "closed"];
+    transitions: [
+      { from: "open"; to: "answered"; by: ["askedOf"] },
+      { from: "open"; to: "withdrawn"; by: ["createdBy"] },
+      { from: "answered"; to: "closed"; by: ["askedOf", "createdBy"]; permission: "questions.close" },
+      { from: "answered"; to: "open" }
+    ];
+    overridePermission: "questions.moderate";
+    repeat: "unchanged";
+  }>;
+}
+```
+
+- `by` lists the row's fields that hold a subject: an own field of type
+  `string`, `Identity.UUID` or `Identity.UserID`, a to-one relation's key
+  field of such a type (`ownerId` for a relation `owner`, not `owner`
+  itself), and
+  `createdBy`, which the repositories stamp with the caller of the
+  operation that created the row ([Who wrote a row](#who-wrote-a-row)).
+  Only a caller whose subject one of them holds makes the move, and it
+  needs the transition's `permission` too when it names one; any other is
+  vetoed, `not_principal`, details `{ from, to, by }`. A field with no
+  value names no one. A UUID field names its subject in either form, base62
+  or hyphenated; a `string` field names the subject that is its exact text.
+- `overridePermission` moves a caller who holds it past every transition's
+  `by`. It does not stand in for a transition's own `permission`: a
+  moderator closing an answered question above needs `questions.close`
+  too. It is matched as any permission is, so a caller holding a parent of
+  it (`questions`) holds it too.
+- `repeat: "unchanged"` answers a transition to the state the row is in
+  with `{ from, to, unchanged: true }` and writes nothing: the row's
+  `_version` and `status_entered_at` stay, no audit stamp is written and
+  no change message is queued. It is answered before any other behavior's
+  rule is asked, so no other gate refuses a move that is no move, and it
+  checks no `by` or permission, since no transition leads from a state to
+  itself. Without it, the move is vetoed `already_in_state`, as before; a
+  table may set it on one Workflow field and not another.
+- `transition` takes an optional `from`, the state the caller read. A row
+  in another state vetoes the move, `stale`, details `{ from, status }`,
+  before anything else is checked, `repeat` and `by` among them. A retry
+  that names `from` and finds its move already made is therefore `stale`
+  with `status` equal to its `to`: the retry landed. A `from` the config
+  has no state of is an invalid argument.
+
+The build refuses a `by` that names a field the table lacks, one that
+holds no subject (a number, a date-time, a list), one encrypted at rest,
+whose value the core never reads, a relation by its name, an audit field other than `createdBy`, or a
+`seat:<name>` entry, a seat of the Seats behavior, which is not built yet.
+A type that composes Workflow with `@behavior("Workflow", ...)` is an
+engine type: its config has none of `by`, `overridePermission` and
+`repeat`, its `transition` takes no `from`, and the build and the engine
+refuse each.
+
+`by` is only as strong as its field. A caller who may write `askedOf`
+(through an update operation of an API, code that calls the repository's
+update, or a raw SQL write) may set it to itself and then make the move.
+Keep a field that `by` names out of every input a caller who should not
+make the move can write, or freeze it once StateRules or Constants run on
+the core. No input carries `createdBy`, which the repositories stamp. The
+build warns of an API operation that updates a row and takes such a field
+in a `@source` view of the table
+([Who may move a row](/superschematic/guides/api-routes/#who-may-move-a-row-and-a-move-that-changes-nothing)),
+and sees no other write.

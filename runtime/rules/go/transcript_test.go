@@ -18,7 +18,10 @@ import (
 
 // The recorded scenarios are the specification (D103): the transcripts
 // superschematic-rules-testkit writes from core-workflow.json,
-// core-timers.json, core-reactions.json and core-reactions-changes.json
+// core-timers.json, core-reactions.json and core-reactions-changes.json,
+// and from the scenarios written by hand in their format where the engine
+// recorded none, core-workflow-principals.json (D104), whose transcript
+// holds each command's row version too
 // (runtime/engine/testdata/rules/*.transcript.json, whose format its
 // transcript module states) replayed through this adapter on SQLite and on
 // Postgres, as the TypeScript adapter replays them
@@ -35,8 +38,10 @@ import (
 // them, which reads its arming and spends it, and a change the runner
 // drained, whose listeners write rows of other types), its refusal compared
 // whole and the row it names read back after it and compared, with its
-// sub-table rows, its armed deadlines and the other rows its change set
-// wrote; and each raw step writes owned columns with SQL past the adapter.
+// version when the transcript holds it (so a repeat is held to writing
+// nothing), its sub-table rows, its armed deadlines and the other rows its
+// change set wrote; and each raw step writes owned columns with SQL past
+// the adapter.
 // The Postgres replay skips without SUPERSCHEMATIC_RULES_TEST_DATABASE_URL.
 //
 // The tables here follow the layout rule as the core's README states it,
@@ -59,6 +64,7 @@ var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-timers.transcript.json", 125},
 	{"../../engine/testdata/rules/core-reactions.transcript.json", 586},
 	{"../../engine/testdata/rules/core-reactions-changes.transcript.json", 60},
+	{"../../engine/testdata/rules/core-workflow-principals.transcript.json", 92},
 }
 
 type transcript struct {
@@ -109,6 +115,11 @@ type transcriptStep struct {
 		// Others are the rows other than the command's own its change set
 		// wrote, each read back after the step.
 		Others json.RawMessage `json:"others"`
+		// Version is the row's version after the step, which a
+		// hand-written transcript's commands hold (D104) and a
+		// recording's do not: compared, when present, with the version
+		// read back.
+		Version *int64 `json:"version"`
 	} `json:"expect"`
 }
 
@@ -592,6 +603,13 @@ func replayTranscript(t *testing.T, db *rulestest.DB, file transcriptFile) {
 							actualRow = jsonOf(t, map[string]any{"own": row.Own, "owned": row.Owned})
 						}
 						compare(step, "row", step.Expect.Row, actualRow)
+						if step.Expect.Version != nil {
+							actualVersion := json.RawMessage("null")
+							if row != nil {
+								actualVersion = jsonOf(t, row.Version)
+							}
+							compare(step, "version", jsonOf(t, *step.Expect.Version), actualVersion)
+						}
 						subRows, deadlines := subStateOf(t, db, layout, step.Type, rowKey)
 						compare(step, "subRows", step.Expect.SubRows, subRows)
 						compare(step, "deadlines", step.Expect.Deadlines, deadlines)

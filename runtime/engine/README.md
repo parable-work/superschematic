@@ -3099,9 +3099,9 @@ A state machine on the instance's `status`.
 
 | | |
 | --- | --- |
-| Config | `states` (one or more names: a letter, then letters, digits, `_` and `-`), `initial` (the first state when absent), `transitions`: `{ from, to, permission? }`, `outcomes`: by terminal state, `success`, `failure` or `neutral`, optional |
+| Config | `states` (one or more names: a letter, then letters, digits, `_` and `-`), `initial` (the first state when absent), `transitions`: `{ from, to, permission? }`, `outcomes`: by terminal state, `success`, `failure` or `neutral`, optional. A table's Workflow's members, which the declaration the engine shares lists (D104), are refused at define, each naming the table form: a transition's `by`, `overridePermission` and `repeat` |
 | Fields | `status`, which a read returns as `behaviors.Workflow.status` and a list filters on (`where: { 'Workflow.status': 'doing' }`), through an index on its column (migration 2); `enteredAt`, when the status last changed, in epoch milliseconds (migration 3) |
-| Operations | `transition({ to })` -> `{ from, to }`, writes |
+| Operations | `transition({ to })` -> `{ from, to }`, writes; a table's `from` is refused as `invalid_argument` at `/from`, and the engine never answers a table's `unchanged`, `not_principal` or `stale` |
 | Guards | its own `transition`, whoever asks: `to` not a state is `invalid_argument`; the state the instance is in (`already_in_state`), a transition the config does not list (`transition_not_allowed`, details `{ from, to, allowed }`) and a move out of a terminal state (`terminal_state`) are `vetoed`, as is an instance without a status (`no_status`); a transition that names a permission the caller lacks (`can`) is `forbidden` |
 | Events | `transition`'s operation event, `patch: { behaviors: { Workflow: { status, enteredAt } } }` |
 | `configChange` | every old state stays while the schema has instances, and with none a state may go; transitions, permissions, `initial` and `outcomes` may change. Not added to or removed from a schema with instances |

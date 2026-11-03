@@ -113,9 +113,10 @@ func words(name string) string {
 }
 
 // ConfigPermissions are the permissions a use's config names: every string
-// under a key named permission, at any depth, sorted and each once (a
-// Workflow transition's). Until a behavior's class declaration says which
-// operation checks which, each operation of the use lists them all.
+// under a key named permission or ending in Permission, at any depth,
+// sorted and each once (a Workflow transition's, and the Workflow's
+// overridePermission, D104). Until a behavior's class declaration says
+// which operation checks which, each operation of the use lists them all.
 func ConfigPermissions(config []byte) []string {
 	if len(config) == 0 {
 		return nil
@@ -130,7 +131,7 @@ func ConfigPermissions(config []byte) []string {
 		switch v := node.(type) {
 		case map[string]any:
 			for key, value := range v {
-				if text, ok := value.(string); ok && key == "permission" && text != "" {
+				if text, ok := value.(string); ok && (key == "permission" || strings.HasSuffix(key, "Permission")) && text != "" {
 					if !slices.Contains(out, text) {
 						out = append(out, text)
 					}

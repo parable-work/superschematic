@@ -723,7 +723,7 @@ its fields, in field order:
 | | `Order`'s `status`, `transition` |
 | --- | --- |
 | Route | `POST /api/order/{id}/status/transition`: the row's key in the path, the operation's parameters as the body, `{ "to": "paid" }` |
-| Types | `OrderStatusTransitionInput` (`to`) and `OrderStatusTransitionResult` (`from`, `to`), typed by the enum of the config's states, `OrderStatusState` |
+| Types | `OrderStatusTransitionInput` (`to`, and an optional `from`) and `OrderStatusTransitionResult` (`from`, `to`, and an optional `unchanged`), typed by the enum of the config's states, `OrderStatusState` |
 | SDK | `sdk.order.status.transition(id, { to: OrderStatusState.Paid })` ([Client SDKs](/superschematic/guides/client-sdks/#a-tables-behavior-operations)) |
 | MCP tool | `order_status_transition`, with the behavior's invocation policy ([MCP tools](/superschematic/reference/mcp-tools/#a-tables-behavior-operations)) |
 | Handler | generated: it runs the operation through the database's repositories and the behaviors' core, in one transaction |
@@ -775,7 +775,7 @@ A refusal of the core is the problem every route answers
 | --- | --- | --- |
 | 403 | `forbidden` | the caller lacks a permission the config names: `sam may not move Order <id>'s status from paid to shipped: the transition needs permission orders.ship` |
 | 404 | `not_found` | no row holds the key: `Order <id> does not exist` |
-| 409 | `vetoed` | the behavior refuses the change, a move no transition leads to, say; `details.vetoCode` names the rule (`transition_not_allowed`) |
+| 409 | `vetoed` | the behavior refuses the change, a move no transition leads to, say; `details.vetoCode` names the rule (`transition_not_allowed`; `not_principal` and `stale`, [below](#who-may-move-a-row-and-a-move-that-changes-nothing)) |
 | 409 | `conflict` | a row the operation would write collides with one that exists |
 | 422 | `invalid_instance` | the behavior's validation refuses the fields the operation would store |
 | 503 | `busy` | the row kept changing while the operation ran again, and it gave up; try again |
@@ -807,6 +807,72 @@ TypeScript repositories run on Postgres alone, so a database that lists
 A raw SQL write of an owned column is never refused, so an operator can
 repair a row, but it skips the behavior's rules: move a state through its
 operation.
+
+### Who may move a row, and a move that changes nothing
+
+A Workflow field's transition may name who makes it (`by`), its config the
+permission that moves a caller past that (`overridePermission`), and a
+move to the state the row is in may answer as no change (`repeat:
+"unchanged"`) (D104,
+[Who may move a Workflow field's row](/superschematic/guides/database-tables/#who-may-move-a-workflow-fields-row)).
+The route serves them as it serves the rest, the core answering from the
+row itself, so an `@auth` set admits any signed-in caller and the row
+decides who moves it:
+
+```ts
+// questions-api
+@behaviorOperations(Question)
+@auth
+export abstract class QuestionActions {}
+```
+
+| Call | Answer |
+| --- | --- |
+| the subject `askedOf` holds, `{ "to": "answered" }` | 200 `{ "from": "open", "to": "answered" }` |
+| another caller, the same body | 409 `vetoed`, `details.vetoCode` `not_principal`, `details.vetoDetails` `{ "from": "open", "to": "answered", "by": ["askedOf"] }`: `behavior Workflow vetoes transition of Question <id>: <subject> may not move Question <id>'s status from open to answered: the transition is made by the subject askedOf holds` |
+| a caller holding `questions.moderate`, the same body | 200, as the subject's |
+| the same move again, with `repeat: "unchanged"` | 200 `{ "from": "answered", "to": "answered", "unchanged": true }`, nothing written: the row's `_version` and `status_entered_at` stay |
+| the same move again, without `repeat` | 409 `vetoed`, `already_in_state` |
+| `{ "to": "answered", "from": "answered" }` on an open row | 409 `vetoed`, `stale`, `details.vetoDetails` `{ "from": "answered", "status": "open" }` |
+| `{ "to": "answered", "from": "open" }` | 200 when the row is open; once that move is made, the same call again is `stale` with `status` `answered`: the retry landed |
+
+`from` is checked first, before `repeat`, `by` and the permission, and a
+repeat checks no `by` or permission, so both answer any caller the route
+admits, as a read of the row would. An SDK leaves an unset `from` out of
+the body, and every server reads `"from": null` (which the OpenAPI
+document and the MCP tools allow, as for any optional member) as no
+`from`. The permission catalog lists `overridePermission` under each of
+the field's operations, beside the transitions' permissions.
+
+`by` is only as strong as its field: a caller who may write `askedOf` may
+set it to itself and then make the move. The build warns when an API, one
+that serves the table's behavior operations or any other, has an operation
+that updates a row of the table (a `PUT` or a `PATCH`, or another method
+but `GET` that takes the table's key, as `questions/{id}/...` does) and
+takes a `@source` view of the table carrying a field a `by` names, naming
+the API, the operation, the field, the moves and the fix:
+
+```
+questions-api: QuestionAdmin.reassignQuestion takes Question.askedOf (QuestionAssignment is @source(Question)), and the Workflow on Question.status names askedOf in by for open to answered and answered to closed: a caller who may call reassignQuestion can set askedOf to itself and then make that move. Keep askedOf out of the operation's input, or freeze it once StateRules or Constants run on the core (D104)
+```
+
+It is a warning, not a refusal, and it sees only that: an input of a
+plain type, code that calls the repository's update, and an API written in
+a data format (JSON or YAML) that reads no database, since it serves no
+behavior operations and runs no behavior worker, are yours to keep the
+field out of. A create, which takes no key, is not warned of: whoever
+creates the row names whom its fields hold. `createdBy`, which the
+repositories stamp, is never warned of.
+
+`overridePermission` is matched as any permission is, a held permission
+covering itself and each one nested under it, so `questions` overrides
+`by` where `questions.moderate` is the override. The build warns when
+every permission a set of the table's behavior operations requires covers
+the override, since every caller its routes admit then passes `by`:
+
+```
+QuestionActions: every caller its routes admit holds questions, which covers questions.moderate, the overridePermission of the Workflow on Question.status, so each moves its rows past every transition's by, which names no one for them; require a permission that does not cover questions.moderate, or name another overridePermission (D104)
+```
 
 ## A table's deadlines: Timers and its worker
 

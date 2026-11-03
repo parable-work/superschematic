@@ -1,4 +1,4 @@
-import type { BehaviorConfigs, TimersDeadline, WorkflowOutcome } from "@superschematic/schema";
+import type { BehaviorConfigs, TimersDeadline, WorkflowOutcome, WorkflowTransition } from "@superschematic/schema";
 
 // FK ON DELETE actions expressible on a relation. SET NULL clears the
 // reference instead of deleting the row, so it needs a nullable foreign key
@@ -27,10 +27,32 @@ export type JsonField<T> = T & { readonly __jsonField: true };
 // a read holds it as a SecretValue. It has no filter, index or default.
 export type Encrypted<T extends string> = T & { readonly __encrypted: true };
 
-// Workflow's config, as @behavior("Workflow", ...) takes it: the BehaviorConfigs
-// entry of @superschematic/schema itself, so a field's config and a
-// decorator's cannot drift.
-export type WorkflowConfig = BehaviorConfigs["Workflow"];
+// Workflow's config on a table (D103, D104): @superschematic/schema's
+// WorkflowConfig, whose transitions may name who makes them (by), with the
+// permission that moves a row past by (overridePermission) and a move to the
+// state the row is in answered as no change (repeat). An engine type's
+// @behavior("Workflow", ...) takes the schema package's config, which has
+// none of the three, and the build refuses them on it.
+export interface WorkflowConfig extends Omit<BehaviorConfigs["Workflow"], "transitions"> {
+  /** The moves the status may make. A state that no transition leaves is terminal. */
+  readonly transitions: readonly WorkflowTransitionOn[];
+  /** The permission that moves a caller past every transition's by; a transition's own permission is still needed. */
+  readonly overridePermission?: string;
+  /** "unchanged": a transition to the state the row is in answers { from, to, unchanged: true } and writes nothing; absent, it is the veto already_in_state. */
+  readonly repeat?: "unchanged";
+}
+
+/** One move a table's Workflow may make: @superschematic/schema's WorkflowTransition, and who may make it. */
+export interface WorkflowTransitionOn extends WorkflowTransition {
+  /**
+   * The row's own fields that hold a subject (string, Identity.UUID or
+   * Identity.UserID), createdBy among them: only a caller who is the
+   * subject one of them holds makes the transition, with its permission too
+   * when it names one. A field is only as strong as its writes: keep it out
+   * of any input a caller who should not make the move may write.
+   */
+  readonly by?: readonly string[];
+}
 // A state machine on the field (D103):
 // `status: Workflow<{ states: ["draft", "paid"]; transitions: [{ from: "draft"; to: "paid" }] }>`.
 // The config is a type argument of literal types, or `typeof` a constant

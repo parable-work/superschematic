@@ -70,6 +70,10 @@ func TestWriteTypesGolden(t *testing.T) {
 		// queues, and a relation the layout's spec names, which Project's
 		// rules hear Task through.
 		{service: "fixture-reactions-db", behaviors: true},
+		// Workflows whose transitions name who makes them (D104): the
+		// layout's audit createdBy beside the own fields, and transition's
+		// optional from and unchanged.
+		{service: "fixture-workflow-principals-db", behaviors: true},
 	}
 
 	for _, tc := range cases {

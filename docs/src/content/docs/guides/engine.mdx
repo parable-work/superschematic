@@ -613,6 +613,15 @@ A transition the config does not list is 409 `vetoed`, with
 for a client to branch on, and a state it does not name is 400
 `invalid_argument`.
 
+Workflow's declaration also lists what only a DB table's Workflow takes
+(D104): a transition's `by`, the fields whose subject makes it, the
+config's `overridePermission` and `repeat`, and `transition`'s `from`
+([Who may move a Workflow field's row](/superschematic/guides/database-tables/#who-may-move-a-workflow-fields-row)).
+The engine refuses each rather than ignore it: a define that names `by`,
+`overridePermission` or `repeat` is refused with a reason that names the
+table form (`status: Workflow<{ ... }> on a DB table`), and a `from` is
+400 `invalid_argument` at `/from`.
+
 ### Comments
 
 ```sh

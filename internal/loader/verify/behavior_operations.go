@@ -175,6 +175,7 @@ func checkBehaviorOperations(schema *ir.Schema, in Input, r *Result) {
 		planned = append(planned, plannedSet{set: set, td: td, plan: plan})
 		warnQueuesUnrun(schema, set, td, in.Database, reg, r)
 		warnListensUnrun(schema, set, td, in.Database, r)
+		warnOverrideCovered(set, td, r)
 	}
 	checkBehaviorOperationNames(schema, planned, r)
 }

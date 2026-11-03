@@ -17,7 +17,7 @@ use serde_json::{json, Map, Value};
 use superschematic_rules::Code;
 use superschematic_rules_adapter::{
     Caller, ChangeRun, Claim, CreateOptions, Deadline, DeadlineRun, Error, ExecuteOptions, Host,
-    Owned, Refusal, Row, SubRow, TableChange,
+    Layout, Owned, Refusal, Row, SubRow, TableChange,
 };
 
 use common::{iso, p, Param};
@@ -213,11 +213,22 @@ impl Db {
         own: Value,
         id: Option<&str>,
     ) -> Result<String, Error> {
-        let own = object(own);
         let options = CreateOptions {
             id: id.map(str::to_owned),
             ..CreateOptions::default()
         };
+        self.create_with(host, type_name, own, &options).await
+    }
+
+    /// A create as alice with what it takes beside its own fields.
+    async fn create_with(
+        &mut self,
+        host: &Host<'_>,
+        type_name: &str,
+        own: Value,
+        options: &CreateOptions,
+    ) -> Result<String, Error> {
+        let own = object(own);
         in_transaction!(
             self,
             |tx| superschematic_rules_adapter::sqlite::run_create(
@@ -226,7 +237,7 @@ impl Db {
                 type_name,
                 own,
                 alice(),
-                &options
+                options
             ),
             superschematic_rules_adapter::postgres::run_create(
                 host,
@@ -234,7 +245,7 @@ impl Db {
                 type_name,
                 own,
                 alice(),
-                &options
+                options
             )
             .await
         )
@@ -469,6 +480,33 @@ impl Db {
                 .expect("the read runs")
                 .iter()
                 .map(|row| (row.get(0), row.get(1), row.get(2)))
+                .collect(),
+        }
+    }
+
+    /// The writes a row's messages of a change queue's table name, sorted:
+    /// what the table's change trigger heard of it.
+    async fn heard(&mut self, table: &str, row_key: &str) -> Vec<String> {
+        let text = format!(
+            "SELECT \"write\" FROM \"{table}\" WHERE row_key = {} ORDER BY \"write\"",
+            p(self.postgres(), 1)
+        );
+        match self {
+            #[cfg(feature = "sqlite")]
+            Db::Sqlite(conn) => {
+                let mut statement = conn.prepare(&text).expect("the read prepares");
+                let rows = statement
+                    .query_map([row_key], |row| row.get(0))
+                    .expect("the read runs");
+                rows.collect::<Result<_, _>>().expect("the messages read")
+            }
+            #[cfg(feature = "postgres")]
+            Db::Postgres(client) => client
+                .query(&text, &[&row_key])
+                .await
+                .expect("the read runs")
+                .iter()
+                .map(|row| row.get(0))
                 .collect(),
         }
     }
@@ -812,6 +850,7 @@ on_each_dialect!(a_refused_command_leaves_the_callers_transaction_going_on);
 on_each_dialect!(a_create_with_no_id_gets_a_uuid_key_and_a_type_the_layout_lacks_is_internal);
 on_each_dialect!(soft_deletable_rows);
 on_each_dialect!(rules_across_rows_and_writes_taken_later);
+on_each_dialect!(a_row_read_holds_the_audit_fields);
 
 /// Creates Order o1, titled Desk, at `at`.
 async fn desk(
@@ -1003,6 +1042,169 @@ async fn a_refused_command_leaves_the_callers_transaction_going_on(mut db: Db) {
             .as_deref(),
         Some("paid")
     );
+}
+
+/// A UUID subject in its two forms: base62, a principal's subject and the
+/// core's value of a UUID field, and hyphenated, as its column holds it.
+const DANA: (&str, &str) = (
+    "TMXp8QPR6yGvKuV2GZQ10",
+    "0f8fad5b-d9cb-469f-a165-70867728950e",
+);
+const ERIN: (&str, &str) = (
+    "3n9R8RlRyqVJBUQUv6toL1",
+    "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+);
+
+/// A row read holds the audit fields the layout names among its own fields
+/// (D104), a UUID in base62 as an own UUID column is and a NULL one absent,
+/// and no command writes one: a Workflow transition whose by names
+/// createdBy is made by the subject the repository stamped it with and
+/// refused to any other as not_principal, one whose by names an own field
+/// by the subject it holds, and a repeat answered unchanged leaves the row
+/// as it was, its version and when its status was entered, and queues no
+/// change message.
+async fn a_row_read_holds_the_audit_fields(mut db: Db) {
+    let postgres = db.postgres();
+    for ddl in common::question_ddl(postgres) {
+        db.exec(&ddl, &[]).await;
+    }
+    let core = common::core();
+    let layout = Layout::new([common::question_table()]);
+    let host = Host::new(&core, &layout).with_clock(|| 1_001_000);
+    ask_stamped_and_unstamped(&mut db, &host).await;
+    let host = Host::new(&core, &layout).with_clock(|| 1_002_000);
+    moved_by_the_subject_a_field_holds(&mut db, &host).await;
+    let later = Host::new(&core, &layout).with_clock(|| 1_003_000);
+    a_repeat_writes_nothing(&mut db, &later).await;
+
+    // An update that names the audit field is refused, as one of a field
+    // the layout has no own column for, and the stamp stays.
+    let refused = refusal(
+        db.update(&host, "Question", "q1", json!({"createdBy": ERIN.0}))
+            .await,
+    );
+    assert_eq!(
+        (refused.code, refused.message.as_str()),
+        (
+            Code::Internal,
+            "rules: Question has no own field createdBy in the behaviors' layout"
+        )
+    );
+    let row = read_question(&mut db, &host, "q1").await;
+    assert_eq!(row.own.get("createdBy"), Some(&json!(DANA.0)));
+}
+
+/// A question by its key, which the table holds.
+async fn read_question(db: &mut Db, host: &Host<'_>, key: &str) -> Row {
+    db.read(host, "Question", key)
+        .await
+        .expect("read")
+        .expect("a row")
+}
+
+/// Creates q1, which a repository's create stamps with its caller beside
+/// the own columns it encodes, and q2, which nothing stamps: q1's read
+/// holds createdBy in base62 among its own fields, and q2's none.
+async fn ask_stamped_and_unstamped(db: &mut Db, host: &Host<'_>) {
+    let stamped = CreateOptions {
+        id: Some("q1".into()),
+        execute: ExecuteOptions {
+            own_columns: Some(object(json!({
+                "prompt": "Which table?",
+                "asked_of": ERIN.1,
+                "created_by": DANA.1
+            }))),
+            soft_delete: None,
+        },
+        ..CreateOptions::default()
+    };
+    let asked = json!({"prompt": "Which table?", "askedOf": ERIN.0});
+    db.create_with(host, "Question", asked.clone(), &stamped)
+        .await
+        .expect("created");
+    let row = read_question(db, host, "q1").await;
+    assert_eq!(
+        serde_json::to_value(&row.own).expect("json"),
+        json!({"prompt": "Which table?", "askedOf": ERIN.0, "createdBy": DANA.0})
+    );
+    db.create(host, "Question", asked, Some("q2"))
+        .await
+        .expect("created");
+    let unstamped = read_question(db, host, "q2").await;
+    assert_eq!(
+        serde_json::to_value(&unstamped.own).expect("json"),
+        json!({"prompt": "Which table?", "askedOf": ERIN.0})
+    );
+}
+
+fn subject(subject: &str) -> Caller {
+    Caller::new(subject, Vec::<String>::new())
+}
+
+/// The veto code of a vetoed command.
+fn veto_code<T: std::fmt::Debug>(result: Result<T, Error>) -> Option<Value> {
+    let refused = refusal(result);
+    assert_eq!(refused.code, Code::Vetoed, "{refused:?}");
+    refused
+        .details
+        .as_ref()
+        .and_then(|details| details.get("vetoCode"))
+        .cloned()
+}
+
+/// q1's withdrawal is made by the subject its createdBy holds alone, and
+/// q2, which holds none, is withdrawn by no one; q2's answer is made by the
+/// subject its askedOf holds.
+async fn moved_by_the_subject_a_field_holds(db: &mut Db, host: &Host<'_>) {
+    let not_principal = Some(json!("not_principal"));
+    let refused = db
+        .transition(host, "Question", "q1", "withdrawn", subject(ERIN.0))
+        .await;
+    assert_eq!(veto_code(refused), not_principal);
+    // A field with no value names no one.
+    let refused = db
+        .transition(host, "Question", "q2", "withdrawn", subject(DANA.0))
+        .await;
+    assert_eq!(veto_code(refused), not_principal);
+    let withdrawn = db
+        .transition(host, "Question", "q1", "withdrawn", subject(DANA.0))
+        .await
+        .expect("moved");
+    assert_eq!(withdrawn, json!({"from": "open", "to": "withdrawn"}));
+    let answered = db
+        .transition(host, "Question", "q2", "answered", subject(ERIN.0))
+        .await
+        .expect("moved");
+    assert_eq!(answered, json!({"from": "open", "to": "answered"}));
+}
+
+/// A move of q2 to the state it is in, by any caller, answers unchanged
+/// and writes nothing: its version and enteredAt stay, and the table's
+/// change trigger, which heard its create and its answer, hears nothing
+/// more.
+async fn a_repeat_writes_nothing(db: &mut Db, host: &Host<'_>) {
+    let before = read_question(db, host, "q2").await;
+    assert_eq!(before.version, 2);
+    let heard = db.heard("question_change_queue", "q2").await;
+    assert_eq!(heard, ["insert", "update"]);
+    let repeated = db
+        .transition(host, "Question", "q2", "answered", subject(DANA.0))
+        .await
+        .expect("answered");
+    assert_eq!(
+        repeated,
+        json!({"from": "answered", "to": "answered", "unchanged": true})
+    );
+    let after = read_question(db, host, "q2").await;
+    assert_eq!(
+        (after.version, &after.owned),
+        (before.version, &before.owned)
+    );
+    assert_eq!(
+        serde_json::to_value(&after.owned).expect("json"),
+        json!({"status": {"status": "answered", "enteredAt": 1_002_000}})
+    );
+    assert_eq!(db.heard("question_change_queue", "q2").await, heard);
 }
 
 /// A create with no id of a UUID-keyed table gets a UUID's wire form, which

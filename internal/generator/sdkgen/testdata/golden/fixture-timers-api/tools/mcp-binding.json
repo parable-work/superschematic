@@ -19,6 +19,12 @@
           "target": "path.id"
         },
         {
+          "toolParameter": "from",
+          "required": false,
+          "kind": "input",
+          "target": "input.from"
+        },
+        {
           "toolParameter": "to",
           "required": true,
           "kind": "input",
@@ -36,7 +42,7 @@
           "position": 1,
           "kind": "input",
           "target": "input",
-          "sources": ["to"]
+          "sources": ["from", "to"]
         }
       ]
     },

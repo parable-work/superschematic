@@ -16,16 +16,19 @@ export interface OrderGetOrderParams {
 }
 
 export interface OrderStatusTransitionParams {
+  from?: OrderStatusState;
   id: string;
   to: OrderStatusState;
 }
 
 export interface ShipmentPaymentStatusTransitionParams {
+  from?: ShipmentPaymentStatusState;
   id: string;
   to: ShipmentPaymentStatusState;
 }
 
 export interface ShipmentStatusTransitionParams {
+  from?: ShipmentStatusState;
   id: string;
   to: ShipmentStatusState;
 }
@@ -226,11 +229,12 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:f1bdaa3b33dc62022166a0d06291a16a7cc7e3611fe15aa607b2dac2199c8f9b',
+    inputSchemaDigest: 'sha256:08e8008d33fe0d192c4d87cf1b1ea29926ea68b2a0138b98b60b5d6c8d4f61b7',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
+        from: {"description":"A OrderStatusState value","enum":["draft","paid","shipped",null],"type":["string","null"]},
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
         to: {"description":"A OrderStatusState value","enum":["draft","paid","shipped"],"type":"string"},
       },
@@ -266,11 +270,12 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:012214fc1ff58eefa2e573e2d0c5f4405116b690a96219eb6afa7dc58e4d3116',
+    inputSchemaDigest: 'sha256:f3d3ace53eb006834482b8ead35d3967786269125029308776bbe37abcc6b37b',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
+        from: {"description":"A ShipmentPaymentStatusState value","enum":["unpaid","paid","refunded",null],"type":["string","null"]},
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
         to: {"description":"A ShipmentPaymentStatusState value","enum":["unpaid","paid","refunded"],"type":"string"},
       },
@@ -306,11 +311,12 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:8d57b465cd848f24e773fd391f72ee7606615da08133eaf1e53482529ba9aeda',
+    inputSchemaDigest: 'sha256:dad26f1c838b96f7dd255bfd453718af403672a2a8e53267dc0d5bbb807edda7',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
+        from: {"description":"A ShipmentStatusState value","enum":["pending","packed","sent",null],"type":["string","null"]},
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
         to: {"description":"A ShipmentStatusState value","enum":["pending","packed","sent"],"type":"string"},
       },
@@ -347,6 +353,7 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
+        from: {"description":"A OrderStatusState value","enum":["draft","paid","shipped",null],"type":["string","null"]},
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
         to: {"description":"A OrderStatusState value","enum":["draft","paid","shipped"],"type":"string"},
       },
@@ -360,6 +367,7 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
+        from: {"description":"A ShipmentPaymentStatusState value","enum":["unpaid","paid","refunded",null],"type":["string","null"]},
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
         to: {"description":"A ShipmentPaymentStatusState value","enum":["unpaid","paid","refunded"],"type":"string"},
       },
@@ -373,6 +381,7 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
+        from: {"description":"A ShipmentStatusState value","enum":["pending","packed","sent",null],"type":["string","null"]},
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
         to: {"description":"A ShipmentStatusState value","enum":["pending","packed","sent"],"type":"string"},
       },
@@ -405,6 +414,7 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
+        from: {"description":"A OrderStatusState value","enum":["draft","paid","shipped",null],"type":["string","null"]},
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
         to: {"description":"A OrderStatusState value","enum":["draft","paid","shipped"],"type":"string"},
       },
@@ -418,6 +428,7 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
+        from: {"description":"A ShipmentPaymentStatusState value","enum":["unpaid","paid","refunded",null],"type":["string","null"]},
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
         to: {"description":"A ShipmentPaymentStatusState value","enum":["unpaid","paid","refunded"],"type":"string"},
       },
@@ -431,6 +442,7 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
+        from: {"description":"A ShipmentStatusState value","enum":["pending","packed","sent",null],"type":["string","null"]},
         id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
         to: {"description":"A ShipmentStatusState value","enum":["pending","packed","sent"],"type":"string"},
       },
@@ -475,11 +487,11 @@ export async function invokeTool<T extends ToolName>(
     case ORDER_GET_ORDER:
       return sdk.order.getOrder((params as OrderGetOrderParams).id);
     case ORDER_STATUS_TRANSITION:
-      return sdk.order.status.transition((params as OrderStatusTransitionParams).id, { to: (params as OrderStatusTransitionParams).to });
+      return sdk.order.status.transition((params as OrderStatusTransitionParams).id, { from: (params as OrderStatusTransitionParams).from, to: (params as OrderStatusTransitionParams).to });
     case SHIPMENT_PAYMENT_STATUS_TRANSITION:
-      return sdk.shipment.paymentStatus.transition((params as ShipmentPaymentStatusTransitionParams).id, { to: (params as ShipmentPaymentStatusTransitionParams).to });
+      return sdk.shipment.paymentStatus.transition((params as ShipmentPaymentStatusTransitionParams).id, { from: (params as ShipmentPaymentStatusTransitionParams).from, to: (params as ShipmentPaymentStatusTransitionParams).to });
     case SHIPMENT_STATUS_TRANSITION:
-      return sdk.shipment.status.transition((params as ShipmentStatusTransitionParams).id, { to: (params as ShipmentStatusTransitionParams).to });
+      return sdk.shipment.status.transition((params as ShipmentStatusTransitionParams).id, { from: (params as ShipmentStatusTransitionParams).from, to: (params as ShipmentStatusTransitionParams).to });
     default:
       throw new Error(`Unknown tool: ${toolName}`);
   }

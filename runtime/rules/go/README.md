@@ -81,7 +81,9 @@ commands with.
   its IR name (`invalid_instance`, rule `owned`), and leaves the anchor
   field to the core, which refuses it in its own words.
 - It answers a `row` read with `ReadRow` (a soft-deletable table's live
-  rows alone, each column converted to the core's JSON, a NULL absent),
+  rows alone, each column converted to the core's JSON, a NULL absent, the
+  layout's `audit` fields, `createdBy` (D104), among the row's own fields,
+  each converted as an own column is, which no write sets),
   `hasRows` from the table, `spec` from the layout, and `subRows` from the
   use's sub-table in the layout (`Use.Tables`), in key order, each
   recording the locks held when it was made; it takes each lock once. It
@@ -283,16 +285,24 @@ text, a hyphenated UUID, null and absent), the linked read (paging, live
 rows, a type the layout lacks), a gone row's deletes (a soft-deleted row
 keeps its sub-table rows, a row that came back keeps everything) and
 `RunChange` with a claim (ran, claim lost, a refusal leaving the message
-claimed) and without one. `transcript_test.go` replays the four transcripts
+claimed) and without one; `audit_test.go` holds the audit read
+(`TestReadRowHoldsTheAuditFields`: the select list's order, a UUID in
+base62, a NULL absent, the core's row and linked reads holding `createdBy`,
+and a write that names it refused) and an operation the core answers with
+no write writing nothing (`TestAnOperationTheCoreAnswersWithNoWriteWritesNothing`:
+no statement, no stamp, `_version` and `enteredAt` unmoved), on SQLite and
+on Postgres. `transcript_test.go` replays the five transcripts
 in `runtime/engine/testdata/rules` on SQLite and on Postgres, as the
 TypeScript adapter does: `core-workflow.transcript.json`, 96 steps (34
 commands, 61 checks, one raw write); `core-timers.transcript.json`, 125
 steps (75 commands, 10 of them deadlines and 25 changes, and 50 checks);
 `core-reactions.transcript.json`, 586 steps (476 commands, 252 of them
-changes, and 110 checks); and `core-reactions-changes.transcript.json`, 60
-steps (48 commands, 24 of them changes, and 12 checks); each held to a
-floor of its step count, its `expect.others` compared on every command
-step, with 0 mismatches each. Each command runs over a layout of every
+changes, and 110 checks); `core-reactions-changes.transcript.json`, 60
+steps (48 commands, 24 of them changes, and 12 checks); and the
+hand-written `core-workflow-principals.transcript.json` (D104), 92 steps
+(58 commands, each compared with its row's `expect.version`, and 34
+checks); each held to a floor of its step count, its `expect.others`
+compared on every command step, with 0 mismatches each. Each command runs over a layout of every
 type live in its database, each at the version the scenario last made
 live, since a step names its own type's version alone. The Postgres cases read `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL`,
 each in a schema of its own, and skip without it, saying so.

@@ -408,6 +408,21 @@ and the hooks it needs, each with a default:
   params)`: issues by JSON pointer, before any guard, as a createParamsSchema
   and a paramsSchema would. The core asks `check_create_params` only of a
   behavior whose declaration takes create parameters.
+- `settle(view, operation, params)`: an answer to an operation of the
+  use's own before any use's guard is asked (D104). The core asks it after
+  the parameter check, for a caller's operation, a `call()` and a
+  `call_on()` alike. `Some(result)` ends the call with that result: no
+  guard and no handler runs, nothing is written and no after-change hook
+  runs, so no other use's gate refuses a call that changes nothing. For the
+  command's own operation the change set then holds no row, sub-table row,
+  event or deadline, only `result`, which every host applies as a unit
+  that writes nothing (the version, `enteredAt` and the audit stamps stay,
+  and the change queue hears nothing); a settled `call_on` neither marks
+  the other row written nor runs its after-change hooks. It may refuse
+  instead, a veto among them, before any guard: a check of the caller's
+  own read of the row. `None`, the default, goes on to the guards and the
+  handler. Workflow's settle answers a repeat (`repeat: "unchanged"`) and
+  refuses a stale `from`.
 - `initialize(cx, params)`: the use's owned fields on a new row, from the
   config and its entry of the create's parameters (`{}` without one).
 - `guard(view, request)`: `Some(Veto)` refuses a `GuardRequest` (`Create`,
@@ -465,7 +480,9 @@ runs, as the engine's `unchanged()` kept an idempotent call out of the log
 (Timers' `fireTimer` of a deadline not due). It is honored for the
 command's own operation and does nothing in a call, a deadline, an
 initializer or an after-change hook; a write in the same run, before it or
-after it, is a defect (`unchanged() and a write in one run: <what>`).
+after it, is a defect (`unchanged() and a write in one run: <what>`). A
+handler says it after every guard allowed the call; a use that answers its
+own operation as no change before any guard is asked says so in `settle`.
 
 `new_key(label)` derives a key from the command's request id, the use, the
 label and a count (`r1:Comments:comment:1`), so every key a run makes is new
@@ -479,16 +496,29 @@ permission nested under it and there is no root permission; a deployment's
 own with `Core::with_matcher`. A caller standing in for an end user holds
 none.
 
+A field that holds a subject names the caller by its value
+(`superschematic_rules_behaviors::subjects`, D104), as Workflow's `by`
+reads one: a field of type `string`, `Identity.UUID` or `Identity.UserID`
+(`SUBJECT_TYPES`) holds a subject. A `string` field names the caller whose
+subject is its text, exactly. A UUID field names the caller whose subject
+is the same UUID by value, in either of its forms, hyphenated (either case)
+or base62, so the base62 every adapter reads a UUID column as matches a
+subject a custom authenticator gives hyphenated, with no adapter
+normalizing the caller; a text that is no UUID compares as text. An absent,
+null, empty or non-string value names no one, and an empty subject is
+named by no field.
+
 A use writes only its own state. It changes another use's state only
 through that use's operations: `cx.call(use_id, operation, params)` runs the
-operation's parameter check, every use's guard in list order (each told the
-call is the calling use's) and its handler, and merges its effects into the
-run's change set. `cx.call_on(type, key, use_id, operation, params)` does the
+operation's parameter check, its use's `settle`, every use's guard in list
+order (each told the call is the calling use's) and its handler, and merges
+its effects into the run's change set. `cx.call_on(type, key, use_id, operation, params)` does the
 same on another row of any type, as a Holds use calls Supply on a stock row:
 the core binds that row's type (`ReadRequest::Spec`, unless it is the
-command's), reads the row, runs that type's parameter check, guards (told
-the calling use and its type), handler and, for a writing operation, its
-after-change hooks, and writes the row's update held to the version it read;
+command's), reads the row, runs that type's parameter check, settle, guards
+(told the calling use and its type), handler and, for a writing operation
+its use did not settle, its after-change hooks, and writes the row's update
+held to the version it read;
 a second call on the row sees the first's writes. `cx.create_row(type, key,
 own, params)` creates a row of any type as a caller's create runs, its type's
 create parameters, validation, guards, initializers and after-change hooks;
@@ -531,6 +561,10 @@ the declarations, so a behavior adds no code to any of them (D103):
   `ticket_deadline_queue`), whose `row_key`, `use_id`, `name`, `at` (epoch
   milliseconds) and `payload` columns name it and whose `due_at` is `at`, one
   live message (ready or claimed) per row, use and name;
+- the audit field `createdBy` (D87), when the table has one that is a
+  plain scalar column, to that column, which a row read holds among the
+  row's own fields and no command writes (the layout's `audit`, D104): a
+  Workflow transition's `by` may name it;
 - a row's writes to messages of the table's change queue, `<row's
   type>Change` (`TicketChange`, table `ticket_change_queue`), which a
   trigger on the table writes for every insert, update and delete, whoever
@@ -577,8 +611,10 @@ writes. For each command:
    with no key of any other type (`invalid_argument`), since the change set
    names every row it writes by its key.
 2. It runs the core. For a `row` read it selects the row by its key: its
-   own columns, as the core's own fields, and each use's owned columns, as
-   that use's owned fields by declared name, each converted to the core's
+   own columns, as the core's own fields, then its audit columns (the
+   layout's `audit`, D104) among the own fields by their field names, and
+   each use's owned columns, as that use's owned fields by declared name,
+   each converted to the core's
    JSON (a timestamp to epoch milliseconds), a NULL column absent, and its
    version. For `hasRows` it asks whether the table has a row; for `spec`
    it answers the layout's spec of the type, or none for a type the layout
@@ -636,6 +672,10 @@ writes. For each command:
    row keeps its sub-table rows and a row that came back keeps everything.
    An outbox event of a behavior's own it refuses as `internal`: a table's
    change queue holds its writes, and the event stream comes later (D103).
+   No change set writes an audit column: one that names `createdBy` among
+   a write's own fields is refused as `internal`, as any field the layout
+   holds no own column for is. A change set with no writes, an operation
+   its use settled or one that said `unchanged()`, applies nothing.
 6. It returns `changes.result`.
 
 For a `subRows` read it selects the use's sub-table rows of the row by the
@@ -727,7 +767,10 @@ applied, and the worker's claim loop fails the message (D68).
 
 Every adapter replays the recorded scenarios as transcripts:
 `superschematic-rules-testkit` writes `core-workflow.json`,
-`core-timers.json`, `core-reactions.json` and `core-reactions-changes.json`
+`core-timers.json`, `core-reactions.json` and `core-reactions-changes.json`,
+and the hand-written `core-workflow-principals.json`
+(`runtime/engine/testdata/rules/scenarios`, D104: cases the engine
+recorded none of, written in the recorded format and never re-recorded),
 out as `runtime/engine/testdata/rules/<name>.transcript.json` (its
 `transcript` module is the format), the core's commands and what each must
 answer, through the replayer's own mapping, and an adapter's tests replay
@@ -740,7 +783,13 @@ one raw write, in the 14 scenarios a core with no test fixtures runs;
 and 25 changes a runner ran, in 12 scenarios; `core-reactions` to 586
 steps, 110 checks and 476 commands, 252 of them changes, in 26 scenarios;
 and `core-reactions-changes` to 60 steps, 12 checks and 48 commands, 24 of
-them changes, in 4 scenarios. A change a runner's sweep ran is a command
+them changes, in 4 scenarios; and `core-workflow-principals` to 92 steps,
+34 define and publish checks, twelve of them refused, and 58 commands, five
+of them repeats answered unchanged, in 9 scenarios (its tenth, test.Gate's,
+runs on the reference host alone). A hand-written file's transcript holds
+each command's row version after the step (`expect.version`), which an
+adapter compares with the version it reads back, so a repeat is held to
+writing nothing; a recording's holds none. A change a runner's sweep ran is a command
 step whose action is `change`, under the step of the `runner.runDue` that
 ran it. A transcript's `expect` holds the command's row's sub-table rows
 (`subRows`, by use id and table, each table's rows in key order), its armed
@@ -758,7 +807,7 @@ TypeScript's replay is the HTTP runtime's `src/rules-transcript.test.ts`,
 held to the same floors on bun:sqlite and on Postgres; Go's is
 `runtime/rules/go`'s `transcript_test.go`, on SQLite and on Postgres, and
 Rust's `../rules-adapter/tests/transcript.rs`, on rusqlite and on Postgres,
-each replaying the four files. A change step runs as the transcript writes
+each replaying the five files. A change step runs as the transcript writes
 it, never from an adapter's own change queue.
 
 ## The layout document
@@ -858,6 +907,23 @@ and a to-one relation's own field names its relation in `spec.fields`:
 { "name": "projectId", "type": "Identity.UUID", "relation": { "name": "project", "type": "Project" } }
 ```
 
+A table with a `createdBy` that is a plain scalar column (D87) has it in
+`audit`, after `own`, and listed in `spec.fields` after the own fields, so
+a Workflow transition's `by` may name it (D104):
+
+```json
+"audit": [{ "field": "createdBy", "column": "created_by", "type": "Identity.UUID" }]
+```
+
+An adapter reads each audit column into a row's own fields under its
+field, converted as an own column is (a UUID to base62, NULL absent), in
+every row read, the linked read and a change command's included, and never
+writes one: a create's own fields, an update's patch and a change set carry
+none, and a write's image (`ImageColumns`) leaves it out, so no hearing
+rule hears it. `behaviorlayout.AuditFields` is the Go form. A relation, a
+list or another audit field (`updatedBy`, `deletedBy`, the audit times) is
+not in it.
+
 A layout of a table with neither is as it was. A sub-table's `row` is the
 column holding the row's key, which binds as the row table's key binds; its
 `fields` leave the key out. `spec.fields` lists
@@ -873,7 +939,8 @@ declaration's `value` names the field that takes the anchor field's own
 name and column.
 
 The own columns are the table's columns but its key, its version, its
-owned fields, its audit fields and its internal metadata; a to-one
+owned fields, its audit fields (`createdBy` is read as `audit`, above) and
+its internal metadata; a to-one
 relation's column holds its target's key and is named as a generated row
 holds it, `<field>Id`, with the target key's type. The generated `orm.ts`
 embeds the document as `<database>Rules` and passes it to the HTTP
@@ -896,7 +963,7 @@ cargo build -p superschematic-rules-wasm --target wasm32-unknown-unknown
 ```
 
 with `RUSTUP_TOOLCHAIN` set to the toolchain `tools.env` pins.
-`tests/core.rs` (44 cases) runs the core through its public API with toy behaviors: the
+`tests/core.rs` (47 cases) runs the core through its public API with toy behaviors: the
 read exchange, vetoes, a call between two behaviors, two uses of one
 behavior on two fields and the own writes their fields refuse, a field
 anchor on a behavior with no value field, a config change that reads
@@ -912,9 +979,14 @@ the hearing uses on the row as it is, a gone row's `Gone` with no hook run,
 a listener reached through a relation by the row now, after and before, a
 gone target passed over, a linked read paging by key, a heard write fenced
 with its after-change hooks, a change that writes nothing, `Core::listeners`
-and the JSON of the action, the read and `Gone`. `rules-behaviors`'
-`tests/workflow.rs` (19), `tests/timers.rs` (18) and `tests/reactions.rs`
-(15) hold each behavior to its declaration's schemas and its rules: Timers'
+and the JSON of the action, the read and `Gone`; and `settle` answering an
+operation before any guard with nothing written, refusing before any
+guard, and a settled `call_on` writing nothing on the other row.
+`rules-behaviors`' `tests/workflow.rs` (34), `tests/timers.rs` (18) and
+`tests/reactions.rs` (16) hold each behavior to its declaration's schemas
+and its rules: Workflow's `by` on a string, a UUID in either form and a
+field with no value, `by` with a permission, `overridePermission`, a call
+held to `by`, `repeat` and `from`, and its config checks; Timers'
 starts, its `then`'s four outcomes, `until` in both forms, reset, snooze,
 the Workflow it reads (implied, named, several, none), a field start as a
 number and as text, a heard write the core applied changing nothing, a raw
@@ -930,7 +1002,11 @@ cycle check and `listens`.
 and `core-reactions.json` and `core-reactions-changes.json` on Workflow,
 Reactions and Timers through the reference host, and fail on any step that
 answers otherwise than the engine, or when fewer steps are checked than
-their floors (154, 324, 443 and 65). The reference host keeps the outbox:
+their floors (154, 324, 443 and 65). `tests/workflow_principals_scenarios.rs`
+replays the hand-written `core-workflow-principals.json`
+(`runtime/engine/testdata/rules/scenarios`, D104) on Workflow and the test
+behavior `test.Gate`, whose guard vetoes every Workflow transition, with a
+floor of 122 steps, its opens and reads among them. The reference host keeps the outbox:
 every write of a type whose writes are heard, the core's and a raw one,
 queues a change, and the replay's `runner.runDue` drains the changes through
 the core, runs the due deadlines and drains again. An engine Links link with

@@ -13,7 +13,10 @@
 //!
 //! [`transcript`] writes a recording out as the core's commands and what
 //! each must answer, which every language's adapter replays against real
-//! tables ([`Transcript`], whose module is the format).
+//! tables ([`Transcript`], whose module is the format);
+//! [`hand_written_transcript`] writes a hand-written scenario file out the
+//! same way, for what the engine recorded none of (D104,
+//! [`hand_written_path`]).
 //!
 //! [`replay`] maps a recording's engine calls onto a host and compares what
 //! the core and its behaviors decide: a record's own and behavior fields,
@@ -65,9 +68,9 @@ pub use host::{
 };
 pub use replay::{replay, replay_path, scenario_path, Mismatch, Report, ScenarioReport, Skipped};
 pub use transcript::{
-    transcript, transcript_path, Transcript, TranscriptClock, TranscriptDeadline, TranscriptExpect,
-    TranscriptField, TranscriptOther, TranscriptRow, TranscriptScenario, TranscriptSkip,
-    TranscriptStep, TranscriptType,
+    hand_written_path, hand_written_transcript, transcript, transcript_path, Transcript,
+    TranscriptClock, TranscriptDeadline, TranscriptExpect, TranscriptField, TranscriptOther,
+    TranscriptRow, TranscriptScenario, TranscriptSkip, TranscriptStep, TranscriptType,
 };
 
 use superschematic_rules::Core;

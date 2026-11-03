@@ -39,6 +39,10 @@
 // through the behaviors' core in a transaction of its own, as the request's
 // caller, and answers a refusal of the core's as the problem of its status,
 // code and message.
+{{- if .BehaviorsTakeOptional }} An optional member of an operation's input that is
+// null is its absence: the handler leaves it out of the repository's
+// parameters, which take no null for it (D104).
+{{- end }}
 {{- end }}
 {{- if .Identity }}
 //
@@ -345,7 +349,11 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       behaviorOperation(() =>
         options.orm.{{ .Behavior.Method }}(
           request.path[{{ tsString .Behavior.Key.Name }}] as {{ .Behavior.Key.TSType }},
-{{- if .HasInput }}
+{{- if and .HasInput .Behavior.Optional }}
+          // The repository's parameters: the wire values of {{ .InputType }},
+          // each optional member that is null left out (D104).
+          behaviorParams(request.input, {{ .Behavior.OptionalList }}) as never,
+{{- else if .HasInput }}
           // The repository's parameters: the wire values of {{ .InputType }}.
           request.input as never,
 {{- else }}

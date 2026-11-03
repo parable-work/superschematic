@@ -200,6 +200,10 @@ func TestStatusTransition(t *testing.T) {
 	if method != http.MethodPost || path != "/api/order/"+id+"/status/transition" || body["to"] != "paid" {
 		t.Errorf("request = %s %s %v", method, path, body)
 	}
+	// An unset from is left out of the body, never null (D104).
+	if _, sent := body["from"]; sent || len(body) != 1 {
+		t.Errorf("body = %v, want to alone", body)
+	}
 	if result.From != types.OrderStatusState_Draft || result.To != types.OrderStatusState_Paid {
 		t.Errorf("result = %+v", result)
 	}

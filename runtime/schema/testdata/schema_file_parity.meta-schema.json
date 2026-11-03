@@ -3283,6 +3283,17 @@
                     },
                     "type": "object"
                   },
+                  "overridePermission": {
+                    "description": "The permission that lets a caller make a transition its by does not name them for; the transition's own permission is still needed. A table's alone: an engine type refuses it.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "repeat": {
+                    "description": "unchanged: a transition to the state the instance is in answers { from, to, unchanged: true } and writes nothing, before any other behavior's guard is asked. Absent, it is the veto already_in_state. A table's alone: an engine type refuses it.",
+                    "enum": [
+                      "unchanged"
+                    ]
+                  },
                   "states": {
                     "description": "Every state an instance can be in.",
                     "items": {
@@ -3299,6 +3310,16 @@
                     "items": {
                       "additionalProperties": false,
                       "properties": {
+                        "by": {
+                          "description": "Who may make this transition: fields of the instance that hold a subject, createdBy among them. Only a caller who is the subject one of them holds may, and it needs the transition's permission too when it names one; a field with no value names no one. A caller holding the config's overridePermission may whatever the fields hold. A table's alone: an engine type refuses it.",
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "minItems": 1,
+                          "type": "array",
+                          "uniqueItems": true
+                        },
                         "from": {
                           "description": "The state the instance is in.",
                           "type": "string"

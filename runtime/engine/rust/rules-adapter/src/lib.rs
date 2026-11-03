@@ -19,11 +19,13 @@
 //! key, a UUID's text for a string key). It runs the core and answers its
 //! reads through the transaction: a row by its key, its own and owned
 //! columns converted to the core's JSON (a timestamp to epoch
-//! milliseconds, a UUID to base62), a NULL column absent; whether a table
-//! has rows; a type's spec from the layout; a row's rows of a use's
-//! sub-table, in key order. A soft-deletable table's reads and writes see
-//! its live rows alone. A lock is a transaction's advisory lock on
-//! Postgres; SQLite takes none, and the unit that writes begins with a
+//! milliseconds, a UUID to base62), a NULL column absent, and the audit
+//! columns the layout names (`createdBy`, which a Workflow transition's
+//! `by` may name, D104) among its own fields, which no command writes;
+//! whether a table has rows; a type's spec from the layout; a row's rows of
+//! a use's sub-table, in key order. A soft-deletable table's reads and
+//! writes see its live rows alone. A lock is a transaction's advisory lock
+//! on Postgres; SQLite takes none, and the unit that writes begins with a
 //! check of each read made under one. A refusal is returned whole
 //! ([`Error::Refused`]); a change set is applied as one unit in a
 //! savepoint, every row fenced on the version it was read at, its

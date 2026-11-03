@@ -228,3 +228,73 @@ func TestCommentsPostedBlocksAndFor(t *testing.T) {
 		t.Errorf("resolved: %v", err)
 	}
 }
+
+// A table's Workflow types the state its transition's caller read (from)
+// as the config's states, as it types to, and keeps unchanged, the
+// result's boolean, as declared (D104).
+func TestNarrowWorkflowTypesFromAsAState(t *testing.T) {
+	reg := registry.New(naming.Default())
+	declaration, _ := reg.Behavior("Workflow")
+	table := &ir.TypeDef{Name: "Question", Behaviors: []ir.BehaviorRef{{Name: "Workflow", Field: "status"}}}
+	target := Target{Schema: "questions", Base: "QuestionStatus", Document: ir.NewSchema("questions", ir.SchemaKindDB), Instance: table}
+	n, err := Narrow(declaration, json.RawMessage(`{"states": ["open", "answered"], "transitions": [{"from": "open", "to": "answered", "by": ["askedOf"]}], "repeat": "unchanged"}`), target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"to", "from"} {
+		property, err := at(n.Params["transition"], "properties", name)
+		if err != nil || property[RefKey] != "QuestionStatusState" {
+			t.Errorf("transition's %s = %v (%v), want QuestionStatusState", name, property, err)
+		}
+	}
+	if required, _ := n.Params["transition"].(map[string]any)["required"].([]any); len(required) != 1 || required[0] != "to" {
+		t.Errorf("transition's required = %v, want to alone", required)
+	}
+	from, _ := at(n.Params["transition"], "properties", "from")
+	if description, _ := from["description"].(string); description == "" {
+		t.Errorf("transition's from has lost its description: %v", from)
+	}
+	unchanged, err := at(n.Results["transition"], "properties", "unchanged")
+	if err != nil || unchanged["type"] != "boolean" {
+		t.Errorf("transition's result unchanged = %v (%v), want the declared boolean", unchanged, err)
+	}
+	if !slices.Contains(n.Vetoes, "not_principal") || !slices.Contains(n.Vetoes, "stale") {
+		t.Errorf("a table's Workflow vetoes = %v, want not_principal and stale among them", n.Vetoes)
+	}
+}
+
+// An engine type's Workflow refuses from and never answers unchanged,
+// not_principal or stale (D104), so its narrowing has none of them, and its
+// generated clients offer none.
+func TestNarrowWorkflowOfAnEngineTypeHasNoFromOrUnchanged(t *testing.T) {
+	reg := registry.New(naming.Default())
+	declaration, _ := reg.Behavior("Workflow")
+	engine := &ir.TypeDef{Name: "Order", Behaviors: []ir.BehaviorRef{{Name: "Workflow"}}}
+	for _, instance := range []*ir.TypeDef{engine, nil} {
+		target := Target{Schema: "orders", Base: "Order", Document: ir.NewSchema("orders", ir.SchemaKindGeneral), Instance: instance}
+		n, err := Narrow(declaration, json.RawMessage(`{"states": ["draft", "paid"], "transitions": [{"from": "draft", "to": "paid"}]}`), target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		params, _ := at(n.Params["transition"], "properties")
+		results, _ := at(n.Results["transition"], "properties")
+		if got := slices.Sorted(maps.Keys(params)); !slices.Equal(got, []string{"to"}) {
+			t.Errorf("instance %v: transition's parameters = %v, want to alone", instance, got)
+		}
+		if got := slices.Sorted(maps.Keys(results)); !slices.Equal(got, []string{"from", "to"}) {
+			t.Errorf("instance %v: transition's result = %v, want from and to", instance, got)
+		}
+		if want := []string{"already_in_state", "terminal_state", "transition_not_allowed", "no_status"}; !slices.Equal(n.Vetoes, want) {
+			t.Errorf("instance %v: vetoes = %v, want %v", instance, n.Vetoes, want)
+		}
+	}
+	// Narrow leaves the declaration as it was.
+	again := Target{Schema: "orders", Base: "Order", Document: ir.NewSchema("orders", ir.SchemaKindGeneral), Instance: &ir.TypeDef{Name: "Order", Behaviors: []ir.BehaviorRef{{Name: "Workflow", Field: "status"}}}}
+	n, err := Narrow(declaration, json.RawMessage(`{"states": ["draft"], "transitions": []}`), again)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := at(n.Params["transition"], "properties", "from"); err != nil {
+		t.Errorf("a table's transition after an engine type's has no from: %v", err)
+	}
+}

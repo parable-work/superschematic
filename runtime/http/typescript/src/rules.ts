@@ -38,6 +38,14 @@ MAX_ATTEMPTS runs, and then refuses it as busy. A kind of read, write or
 change it does not know (the core's enums are open) refuses the command as
 internal, and so do a behavior's own outbox events (Cx::emit), which no
 ported behavior emits and the event stream comes later to carry (D103).
+An operation the core answers as no change (a Workflow repeat, D104, which
+its use settles before any guard) is a change set that writes nothing and
+carries its result: its unit is empty, so no version moves, no stamp is
+written and no change trigger fires.
+
+A row read holds a table's audit fields (the layout's audit, createdBy,
+D104) among its own fields, which a Workflow transition's by may name; no
+change set writes one.
 
 A use's sub-tables are child tables of its row (the layout's tables), whose
 rows the core reads (subRows) and the change set inserts, updates and
@@ -454,6 +462,16 @@ export interface RulesTable {
   readonly live?: RulesLive;
   /** The own fields the core reads (a row's own) and a create and an update write, in column order. */
   readonly own: readonly RulesColumn[];
+  /**
+   * The audit fields the core reads beside the own fields and no command
+   * writes (D104): createdBy (D87), a column the repositories stamp with
+   * an operation's caller, which a Workflow transition's by may name. A row
+   * read holds each among its own fields, converted as an own column is (a
+   * UUID's base62); a change set that names one is refused as internal, as
+   * any field the layout has no own column for, and a change message's
+   * image leaves it out. Absent for none.
+   */
+  readonly audit?: readonly RulesColumn[];
   /** The uses, in the type's list order: each one the table implements, then each field's. */
   readonly uses: readonly RulesUse[];
   /** The queue the table's armed deadlines are messages of; absent when no behavior of it arms any. */
@@ -1029,7 +1047,7 @@ export async function prepareCreate(host: RulesHost, type: string, own: Readonly
   return write.owned ?? {};
 }
 
-/** Reads a row of a type by its key as the core reads it: its own fields and owned fields, each column with no value absent, and its version; null when the table has no such row, or none that is live. */
+/** Reads a row of a type by its key as the core reads it: its own fields, the audit fields the layout names among them (D104), and its owned fields, each column with no value absent, and its version; null when the table has no such row, or none that is live. */
 export async function readRow(host: RulesHost, type: string, key: string): Promise<CoreRow | null> {
   const table = tableOf(host.layout, type);
   const text = `SELECT ${rowList(table)} FROM ${quote(table.table)} WHERE ${quote(table.key.column)} = ${placeholder(host.store.dialect, 1)}${live(table)}`;
@@ -1039,24 +1057,31 @@ export async function readRow(host: RulesHost, type: string, key: string): Promi
 }
 
 /**
- * The select list of a row read: each own and owned column under an alias
- * of its place, so no two columns' names meet in the row and none needs
- * its case kept, and the version.
+ * The select list of a row read: each own column, each audit column and
+ * each owned column, in that order, under an alias of its place, so no two
+ * columns' names meet in the row and none needs its case kept, and the
+ * version.
  */
 function rowList(table: RulesTable): string {
-  const selected = [...table.own, ...table.uses.flatMap(use => use.fields)];
+  const selected = [...ownRead(table), ...table.uses.flatMap(use => use.fields)];
   return [...selected.map((column, i) => `${quote(column.column)} AS c${i}`), `${quote(table.version)} AS v`].join(', ');
+}
+
+/** The columns a row read holds among a row's own fields: the own columns, then the audit columns (D104). */
+function ownRead(table: RulesTable): readonly RulesColumn[] {
+  return table.audit === undefined || table.audit.length === 0 ? table.own : [...table.own, ...table.audit];
 }
 
 /** A row read by rowList's select list as the core reads it: each column converted, one with no value absent, and a use with none absent. */
 function rowFrom(table: RulesTable, row: Readonly<Record<string, unknown>>): CoreRow {
   const own: Record<string, unknown> = {};
-  table.own.forEach((column, i) => {
+  const read = ownRead(table);
+  read.forEach((column, i) => {
     const value = fromColumn(row[`c${i}`], column, table);
     if (value !== undefined) own[column.field] = value;
   });
   const fields: Record<string, Record<string, unknown>> = {};
-  let at = table.own.length;
+  let at = read.length;
   for (const use of table.uses) {
     const values: Record<string, unknown> = {};
     for (const field of use.fields) {

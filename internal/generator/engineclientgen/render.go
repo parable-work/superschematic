@@ -635,9 +635,11 @@ func (m *module) vetoes(s *schemaModel) error {
 	m.doc("", fmt.Sprintf("The codes the vetoes of %s's behaviors carry, by behavior: what a refused call's details.code holds.", behaviortypes.An(s.base)))
 	m.line("export type %s = {", name)
 	for _, behavior := range s.behaviors {
-		codes := make([]string, 0, len(behavior.Declaration.Vetoes))
-		for _, veto := range behavior.Declaration.Vetoes {
-			codes = append(codes, behaviortypes.TSQuote(veto.Code))
+		// The codes the type's form answers (D104): an engine type's
+		// Workflow answers no not_principal or stale.
+		codes := make([]string, 0, len(behavior.Narrowed.Vetoes))
+		for _, code := range behavior.Narrowed.Vetoes {
+			codes = append(codes, behaviortypes.TSQuote(code))
 		}
 		m.line("  %s: %s;", behaviortypes.TSPropertyKey(behavior.Declaration.Name), behaviortypes.TSUnion(codes))
 	}

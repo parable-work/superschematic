@@ -15,7 +15,10 @@
 //! [`Timers`] and [`Reactions`], in step 3: Timers' deadlines a table keeps
 //! in a sub-table and arms through the core, and both hear their row's
 //! writes, whoever makes them, from the table's change queue, Reactions the
-//! writes of the rows that point at its row too. The engine's behaviors
+//! writes of the rows that point at its row too. Workflow's transitions name
+//! who makes them, and a move to the state a row is in may answer as no
+//! change, in step 1 of D104's ([`subjects`] is how a field names a
+//! subject). The engine's behaviors
 //! (`superschematic-engine-behaviors`) stay beside these until each is
 //! ported and the engine goes.
 //!
@@ -42,6 +45,7 @@
 mod declared;
 pub mod reactions;
 mod schema;
+pub mod subjects;
 pub mod timers;
 pub mod workflow;
 
@@ -55,7 +59,7 @@ pub use timers::{
 };
 pub use workflow::{
     entered_at_of, is_terminal_state, state_outcome, status_of, Workflow, WorkflowConfig,
-    WorkflowOutcome, WorkflowTransition,
+    WorkflowOutcome, WorkflowRepeat, WorkflowTransition,
 };
 
 use superschematic_rules::Core;

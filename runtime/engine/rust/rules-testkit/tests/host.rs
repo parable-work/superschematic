@@ -4,15 +4,16 @@
 //! busy, a refusal that applies nothing, a change set applied whole, one
 //! that writes two rows held to both versions, events written whatever
 //! rows a change set writes, the request ids keys are made from, a
-//! deadline that falls due and one cleared or moved before it does, and
-//! the define and publish checks.
+//! deadline that falls due and one cleared or moved before it does, the
+//! define and publish checks, and a repeat answered as no change, which
+//! writes nothing a host keeps.
 
 use serde_json::{json, Map, Value};
 
 use superschematic_rules::{
     Action, Answer, Answers, Behavior, Caller, Change, ChangeSet, Code, Command, ConfigError,
-    ConfigTarget, Core, Cx, Declaration, GuardRequest, Hook, LockKey, OutboxEvent, ReadRequest,
-    Refusal, RowRef, SchemaIssue, Step, TypeSpec, UseSpec, Veto, View,
+    ConfigTarget, Core, Cx, Declaration, FieldSpec, GuardRequest, Hook, LockKey, OutboxEvent,
+    ReadRequest, Refusal, RowRef, SchemaIssue, Step, TypeSpec, UseSpec, Veto, View,
 };
 use superschematic_rules_testkit::{ApplyError, MemoryHost, Store, MAX_ATTEMPTS};
 
@@ -691,4 +692,73 @@ fn a_deadline_cleared_or_moved_before_it_falls_due_does_not() {
     let applied = host.execute("Counter", due(NOW + 2_000)).unwrap();
     assert_eq!(applied.attempts, 1);
     assert_eq!(count(&host, "c1"), Some(json!(1)));
+}
+
+/// A Workflow transition to the state its row is in, with repeat unchanged
+/// (D104), applies a change set that writes no row: the row's version stays
+/// where it was, the change log gains no entry, and the change trigger of a
+/// type whose writes Timers hears queues no change, so no worker hears a
+/// write that was never made.
+#[test]
+fn a_repeat_writes_no_row_logs_no_change_and_queues_no_change() {
+    let mut host = MemoryHost::new(superschematic_rules_behaviors::core());
+    let spec = TypeSpec::new("Ticket")
+        .with(UseSpec::on_field(
+            "status",
+            "Workflow",
+            json!({
+                "states": ["open", "done"],
+                "transitions": [{"from": "open", "to": "done"}],
+                "repeat": "unchanged"
+            }),
+        ))
+        .with(UseSpec::on_type(
+            "Timers",
+            json!({"deadlines": {"respond": {"start": {"create": true}, "afterMs": 3_600_000}}}),
+        ))
+        .with_field(FieldSpec::new("title", "string"));
+    host.define(spec, &alice(), NOW).unwrap();
+    host.publish("Ticket", &alice(), NOW).unwrap();
+    assert!(host.store().hears("Ticket"));
+    host.execute("Ticket", create("t1", json!({"title": "Desk"})))
+        .unwrap();
+    let to_done = || {
+        command(Action::Operation {
+            key: "t1".to_owned(),
+            use_id: "status".to_owned(),
+            operation: "transition".to_owned(),
+            params: json!({"to": "done"}),
+        })
+    };
+    let moved = host.execute("Ticket", to_done()).unwrap();
+    assert_eq!(moved.version, Some(2));
+    let store = host.store();
+    let before = (
+        store.row("Ticket", "t1").cloned(),
+        store.log().len(),
+        store.changes().len(),
+        store.deadlines().clone(),
+    );
+    let repeat = host.execute("Ticket", to_done()).unwrap();
+    assert_eq!(
+        repeat.result(),
+        &json!({"from": "done", "to": "done", "unchanged": true})
+    );
+    assert_eq!(repeat.version, None);
+    assert_eq!(
+        repeat.changes,
+        ChangeSet {
+            result: json!({"from": "done", "to": "done", "unchanged": true}),
+            ..ChangeSet::default()
+        }
+    );
+    let store = host.store();
+    let after = (
+        store.row("Ticket", "t1").cloned(),
+        store.log().len(),
+        store.changes().len(),
+        store.deadlines().clone(),
+    );
+    assert_eq!(after, before);
+    assert_eq!(after.0.map(|row| row.version), Some(2));
 }

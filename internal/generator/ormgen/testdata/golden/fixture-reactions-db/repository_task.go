@@ -63,6 +63,11 @@ const (
 
 // TaskStatusTransitionParams are the parameters of status's transition.
 type TaskStatusTransitionParams struct {
+	// From is the state the caller read the instance in. An instance in another
+	// state refuses the move as the veto stale, before anything else is checked,
+	// so a retry that finds its move made is stale with the state it moved to. A
+	// table's alone: an engine type refuses it.
+	From *TaskStatusState `json:"from,omitempty"`
 	// To is the state to move to.
 	To TaskStatusState `json:"to"`
 }
@@ -73,6 +78,9 @@ type TaskStatusTransitionResult struct {
 	From TaskStatusState `json:"from"`
 	// To is the state it is in now.
 	To TaskStatusState `json:"to"`
+	// Unchanged is true when the instance was already in to and the config's
+	// repeat is unchanged, so nothing was written; absent otherwise.
+	Unchanged *bool `json:"unchanged,omitempty"`
 }
 
 // TaskStatusOperations are the operations of Task's status, a Workflow

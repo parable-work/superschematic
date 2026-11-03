@@ -1141,9 +1141,10 @@ async fn answer_of<S: Store>(
     }
 }
 
-/// A row by its key: its own columns as the core's own fields and each
-/// use's owned columns as that use's owned fields, each converted and a
-/// NULL column absent, a use with no value absent, and its version.
+/// A row by its key: its own columns and its audit columns as the core's
+/// own fields and each use's owned columns as that use's owned fields, each
+/// converted and a NULL column absent, a use with no value absent, and its
+/// version.
 async fn read_row_of<S: Store>(store: &S, table: &Table, key: &str) -> Result<Option<Row>, Error> {
     let dialect = store.dialect();
     let text = format!(
@@ -1161,9 +1162,9 @@ async fn read_row_of<S: Store>(store: &S, table: &Table, key: &str) -> Result<Op
     Ok(Some(row_of(cells.into_iter(), table, key)?))
 }
 
-/// The select list of a row read: each own column, then each use's owned
-/// columns, each under an alias of its place, so no two columns' names
-/// meet in the row, and the version last.
+/// The select list of a row read: each own column, then each audit
+/// column (D104), then each use's owned columns, each under an alias of its
+/// place, so no two columns' names meet in the row, and the version last.
 fn row_list(dialect: Dialect, table: &Table) -> Vec<String> {
     let owned = table
         .uses
@@ -1172,6 +1173,7 @@ fn row_list(dialect: Dialect, table: &Table) -> Vec<String> {
     let mut list: Vec<String> = table
         .own
         .iter()
+        .chain(&table.audit)
         .chain(owned)
         .enumerate()
         .map(|(i, column)| format!("{} AS c{i}", selected(dialect, &column.column)))
@@ -1180,11 +1182,12 @@ fn row_list(dialect: Dialect, table: &Table) -> Vec<String> {
     list
 }
 
-/// A row from the cells of [`row_list`], in its order.
+/// A row from the cells of [`row_list`], in its order: an audit column
+/// among the own fields, by its field.
 fn row_of(mut cells: impl Iterator<Item = Cell>, table: &Table, key: &str) -> Result<Row, Error> {
     let mut next = |column: &Column| from_cell(cells.next().unwrap_or(Cell::Null), column, table);
     let mut row = Row::default();
-    for column in &table.own {
+    for column in table.own.iter().chain(&table.audit) {
         if let Some(value) = next(column)? {
             row.own.insert(column.field.clone(), value);
         }

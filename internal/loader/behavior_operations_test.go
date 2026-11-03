@@ -127,13 +127,17 @@ func TestBehaviorOperationsExpand(t *testing.T) {
 			t.Errorf("%s's input or result was not added", tc.typeName)
 			continue
 		}
-		if input.Role != ir.RoleAPIInput || input.Origin != ir.OriginBehavior || input.Owner != "fixture-workflow-api" || len(input.Fields) != 1 ||
-			input.Fields[0].Name != "to" || input.Fields[0].TypeRef.Name != tc.state || !input.Fields[0].Required || input.Fields[0].Origin != ir.OriginBehavior ||
-			input.Fields[0].Comment != "The state to move to." {
+		// A table's transition takes the state its caller read, optional,
+		// and answers unchanged, an optional boolean (D104).
+		if input.Role != ir.RoleAPIInput || input.Origin != ir.OriginBehavior || input.Owner != "fixture-workflow-api" || len(input.Fields) != 2 ||
+			input.Fields[0].Name != "from" || input.Fields[0].TypeRef.Name != tc.state || input.Fields[0].Required ||
+			input.Fields[1].Name != "to" || input.Fields[1].TypeRef.Name != tc.state || !input.Fields[1].Required || input.Fields[1].Origin != ir.OriginBehavior ||
+			input.Fields[1].Comment != "The state to move to." {
 			t.Errorf("%s = %s", input.Name, marshal(t, input))
 		}
-		if result.Role != ir.RoleEmbeddedStruct || result.Origin != ir.OriginBehavior || len(result.Fields) != 2 ||
-			result.Fields[0].Name != "from" || result.Fields[1].Name != "to" || result.Fields[0].TypeRef.Name != tc.state || !result.Fields[1].Required {
+		if result.Role != ir.RoleEmbeddedStruct || result.Origin != ir.OriginBehavior || len(result.Fields) != 3 ||
+			result.Fields[0].Name != "from" || result.Fields[1].Name != "to" || result.Fields[0].TypeRef.Name != tc.state || !result.Fields[1].Required ||
+			result.Fields[2].Name != "unchanged" || result.Fields[2].TypeRef.Name != "boolean" || result.Fields[2].Required {
 			t.Errorf("%s = %s", result.Name, marshal(t, result))
 		}
 	}
