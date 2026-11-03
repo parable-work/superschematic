@@ -1334,6 +1334,9 @@ export type TaskCommentMessage = {
 /** A link of a Task, by name. */
 export type TaskLinkName = 'parent' | 'project' | 'related' | 'spec';
 
+/** A deadline of a Task's Timers. */
+export type TaskDeadline = 'overdue' | 'stuck';
+
 /** The parameters a Task's create gives its behaviors, by behavior name. */
 export type TaskCreateParams = {
   Dependencies?: {
@@ -1822,7 +1825,7 @@ export type TaskAssignNumberResult = {
 /** The parameters of Timers' fireTimer: Fires a deadline that is due and has not fired: marks it fired and moves the status by its then, recording the outcome; a veto or a missing permission the move meets leaves the status as it is and the deadline fired. A deadline whose until holds is cancelled instead. On a deadline not due, fired already or not started it changes nothing. Any principal who may write the instance may call it; the engine's runner calls it on every due deadline, every sweepMs. */
 export type TaskFireTimerParams = {
   /** The deadline's name. */
-  deadline: 'overdue' | 'stuck';
+  deadline: TaskDeadline;
 };
 
 /** What Timers' fireTimer returns. */
@@ -1836,7 +1839,7 @@ export type TaskFireTimerResult = {
 /** The parameters of Timers' resetTimer: Starts a deadline again from what it starts from now, the create, the status's entry into its state or its field's value, so it is due afterMs after it and not fired: a snooze or a fire is undone. Needs the config's permission; refused for a deadline with nothing to start from now, or whose until holds. */
 export type TaskResetTimerParams = {
   /** The deadline's name. */
-  deadline: 'overdue' | 'stuck';
+  deadline: TaskDeadline;
 };
 
 /** What Timers' resetTimer returns. */
@@ -1848,7 +1851,7 @@ export type TaskResetTimerResult = {
 /** The parameters of Timers' snoozeTimer: Moves a started deadline's due time to dueAt, and a fired one fires again then. A later write keeps it, until what the deadline starts from changes. Needs the config's permission; refused for a deadline not started, cancelled, or whose until holds. */
 export type TaskSnoozeTimerParams = {
   /** The deadline's name. */
-  deadline: 'overdue' | 'stuck';
+  deadline: TaskDeadline;
   /** When it is due, in epoch milliseconds. */
   dueAt: number;
 };

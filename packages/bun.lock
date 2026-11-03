@@ -15,6 +15,9 @@
     "db": {
       "name": "@superschematic/db",
       "version": "0.0.0",
+      "peerDependencies": {
+        "@superschematic/schema": "*",
+      },
     },
     "memory-store": {
       "name": "@superschematic/memory-store",

@@ -10,9 +10,12 @@ import (
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/behaviortypes/behaviortypestest"
+	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/registry"
+	"github.com/parable-work/superschematic/internal/sqlmigrate"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -328,4 +331,148 @@ func refuseImportedEngineTypesOf(t *testing.T, schema *ir.Schema, cfg *schemacon
 	}
 	r, _ := newRun(schema, cfg, outputs, Options{OutputRoot: t.TempDir(), Registry: reg, LoadDependency: load}, reg)
 	return r.refuseImportedEngineTypes(reg.Pipeline(string(ir.SchemaKindAPI)))
+}
+
+// fieldBehaviorsDB is the DB service whose Order's status is a Workflow and
+// whose Shipment has two (D103), loaded as a build loads it, with the
+// fields the behaviors own added to the tables.
+func fieldBehaviorsDB(t *testing.T) *ir.Schema {
+	t.Helper()
+	schema, err := loader.LoadService(filepath.Join("..", "loader", "tsreader", "testdata", "services", "fixture-workflow-fields-db"), loader.WithRegistry(CoreRegistry(naming.Default())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return schema
+}
+
+// A table whose fields are behaviors stays a table (D103): no engine type,
+// so no engine document and nothing for refuseEngineTypes. sql, types and
+// the Go ORM render what its behaviors add
+// (GeneratorSpec.RendersFieldBehaviors), so the DB pipeline runs: the ORM
+// writes rules.go and each repository's operations. The API generators
+// and the SDKs render it too, and a generator that does not, an
+// extension's, is refused before any generator runs, in today's words for
+// a behavior it does not render. A decorator's engine type is refused and
+// served as it was.
+func TestCoreGeneratorsOnATableWhoseFieldsAreBehaviors(t *testing.T) {
+	schema := fieldBehaviorsDB(t)
+	if engine := codegen.EngineTypes(schema); len(engine) != 0 {
+		t.Fatalf("engine types = %v, want none", engine)
+	}
+	reg := CoreRegistry(naming.Default())
+	cfg := &schemaconfig.SchemaConfig{Name: "fixture-workflow-fields-db", Kind: ir.SchemaKindDB,
+		Outputs: map[string]any{"types": map[string]any{LangTypeScript: map[string]any{"enabled": true}, LangGo: map[string]any{"enabled": true}}}}
+	root := t.TempDir()
+	if _, err := Run(schema, cfg, Options{OutputRoot: root, Registry: reg}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	ormDir := ORMDir(root, "fixture-workflow-fields-db")
+	for _, name := range []string{"rules.go", "repository_order.go", "repository_shipment.go"} {
+		if _, err := os.Stat(filepath.Join(ormDir, name)); err != nil {
+			t.Errorf("the ORM wrote no %s: %v", name, err)
+		}
+	}
+	if source, err := os.ReadFile(filepath.Join(ormDir, "repository_shipment.go")); err != nil || !strings.Contains(string(source), "func (r *ShipmentRepository) PaymentStatus() ShipmentPaymentStatusOperations") {
+		t.Errorf("repository_shipment.go has no PaymentStatus operations (%v)", err)
+	}
+
+	var rendering []registry.GeneratorSpec
+	for _, name := range []string{typesGenerator, "sql", ormGenerator, "api", "sdks", "envConfig", enginedocGenerator, projectengineGenerator} {
+		spec, ok := reg.Generator(name)
+		if !ok || !spec.RendersFieldBehaviors {
+			t.Fatalf("generator %s: registered %v, renders field behaviors %v", name, ok, spec.RendersFieldBehaviors)
+		}
+		rendering = append(rendering, spec)
+	}
+	if err := refuseBehaviors(schema, rendering); err != nil {
+		t.Fatalf("refuseBehaviors with the generators that render field behaviors: %v", err)
+	}
+	extension := registry.GeneratorSpec{Name: "acme-docs"}
+	want := "generator: acme-docs does not render behaviors yet: type Order composes behavior Workflow on its field status (D103)"
+	if err := refuseBehaviors(schema, append(rendering, extension)); err == nil || err.Error() != want {
+		t.Errorf("refuseBehaviors with an extension's generator: %v, want %q", err, want)
+	}
+}
+
+// An API that imports a table of its DB service whose fields are
+// behaviors, or projects one, is rendered by the API generators and the
+// SDKs (D103): its types carry the owned fields, and its
+// @behaviorOperations sets' operations are generated. A generator that
+// does not render such a table, an extension's, is still refused before
+// any generator runs, naming the generator, the table, the field and the
+// behavior.
+func TestAPIGeneratorsRenderAnImportedFieldBehaviorTable(t *testing.T) {
+	deps := map[string]*ir.Schema{"fixture-workflow-fields-db": fieldBehaviorsDB(t)}
+	load := func(name string) (*ir.Schema, error) {
+		if dep := deps[name]; dep != nil {
+			return dep, nil
+		}
+		return nil, errors.New("no such service")
+	}
+	schema := ir.NewSchema("orders-api", ir.SchemaKindAPI)
+	schema.Imports = []ir.Import{{Package: "@schemas/fixture-workflow-fields-db", Types: []string{"Order"}}}
+	cfg := &schemaconfig.SchemaConfig{Name: "orders-api", Kind: ir.SchemaKindAPI,
+		Dependencies: []schemaconfig.ServiceDependency{{Name: "fixture-workflow-fields-db", Kind: ir.SchemaKindDB}}}
+	reg := CoreRegistry(naming.Default())
+	r := run{registry.GenerateContext{Schema: schema, Config: cfg, Registry: reg, LoadDependency: load, Options: registry.Options{LoadDependency: load}}}
+	var enabled []registry.GeneratorSpec
+	for _, name := range []string{typesGenerator, "api", "sdks"} {
+		spec, ok := reg.Generator(name)
+		if !ok || !spec.RendersFieldBehaviors {
+			t.Fatalf("generator %s: registered %v, renders field behaviors %v", name, ok, spec.RendersFieldBehaviors)
+		}
+		enabled = append(enabled, spec)
+	}
+	if err := r.refuseImportedEngineTypes(enabled); err != nil {
+		t.Fatalf("refuseImportedEngineTypes with types, api and sdks: %v", err)
+	}
+	extension := registry.GeneratorSpec{Name: "acme-docs"}
+	want := "generator: acme-docs does not render behaviors yet: orders-api imports fixture-workflow-fields-db.Order, which composes behavior Workflow on its field status (D103)"
+	if err := r.refuseImportedEngineTypes(append(enabled, extension)); err == nil || err.Error() != want {
+		t.Fatalf("refuseImportedEngineTypes with an extension's generator: %v, want %q", err, want)
+	}
+}
+
+// D27 plans a table's fields that are behaviors as any column (D103): from
+// the version of Order before its status was a Workflow, the plan adds
+// status, status_entered_at and @optimistic's _version with the trigger
+// that bumps it, on Postgres and on SQLite.
+func TestMigrationPlansTheColumnsOfFieldBehaviors(t *testing.T) {
+	to := fieldBehaviorsDB(t)
+	from := fieldBehaviorsDB(t)
+	order := from.Types["Order"]
+	order.Behaviors, order.Optimistic = nil, false
+	order.Fields = slices.DeleteFunc(order.Fields, (*ir.FieldDef).Owned)
+	cfg := &schemaconfig.SchemaConfig{Name: "fixture-workflow-fields-db", Kind: ir.SchemaKindDB}
+	outputs, err := ParseOutputs(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dialect := range []sqlmigrate.Dialect{sqlmigrate.Postgres, sqlmigrate.SQLite} {
+		opts := SQLOptions(cfg, outputs, nil, naming.Default())
+		before, err := sqlmigrate.BuildModel(from, opts, dialect)
+		if err != nil {
+			t.Fatalf("%s: %v", dialect, err)
+		}
+		after, err := sqlmigrate.BuildModel(to, opts, dialect)
+		if err != nil {
+			t.Fatalf("%s: %v", dialect, err)
+		}
+		plan, err := sqlmigrate.Diff(before, after, sqlmigrate.Options{})
+		if err != nil {
+			t.Fatalf("%s: Diff: %v", dialect, err)
+		}
+		statements := ""
+		for _, step := range plan.Steps {
+			statements += strings.Join(step.Statements, "\n") + "\n"
+		}
+		for _, want := range []string{"status", "status_entered_at", "_version"} {
+			if !strings.Contains(statements, want) {
+				t.Errorf("%s: the plan never names %s:\n%s", dialect, want, statements)
+			}
+		}
+		if dialect == sqlmigrate.Postgres && !strings.Contains(statements, "order_bump_version") {
+			t.Errorf("postgres: the plan adds no version trigger:\n%s", statements)
+		}
+	}
 }

@@ -632,6 +632,18 @@ beside `bodyLimitBytes`. An operation whose result is a `FileDownload`
 returns `{ body, filename }`, and the router answers the file with its
 `Content-Type` and `Content-Disposition`.
 
+The router's options by operation, `bodyLimits`, `rateLimits`,
+`timeouts` and `manualRoutes`, are keyed by the operation's name, or by
+its namespace and name (`orderStatusTransition`,
+`shipmentStatusTransition`) for an operation whose name another namespace
+shares. An API that serves a table's behavior operations
+([A table's behavior operations](/superschematic/guides/api-routes/#a-tables-behavior-operations))
+takes its database's repositories as `orm`, `createOrm(pool)` from the
+database's types package (`<package>/orm`), and `buildRouter` throws
+without them; `Implementations` has no method for those operations, and
+the router runs each through the repositories with the caller
+`authenticate` returned.
+
 An `@hmacVerified` operation
 ([Webhooks](/superschematic/guides/api-routes/#webhooks)) runs its
 provider's verifier before every other step, a manual one's included.

@@ -144,6 +144,9 @@ export type CheckoutLinkName = 'counter';
 /** A hold of a Checkout's Holds, by name. */
 export type CheckoutHoldName = 'lines' | 'pickup';
 
+/** A deadline of a Checkout's Timers. */
+export type CheckoutDeadline = 'backstop' | 'holdExpiry';
+
 /** The parameters a Checkout's create gives its behaviors, by behavior name. */
 export type CheckoutCreateParams = {
   /** The links the instance holds from its create, by name, each held to link's rules. */
@@ -316,7 +319,7 @@ export type CheckoutListHoldsResult = {
 /** The parameters of Timers' fireTimer: Fires a deadline that is due and has not fired: marks it fired and moves the status by its then, recording the outcome; a veto or a missing permission the move meets leaves the status as it is and the deadline fired. A deadline whose until holds is cancelled instead. On a deadline not due, fired already or not started it changes nothing. Any principal who may write the instance may call it; the engine's runner calls it on every due deadline, every sweepMs. */
 export type CheckoutFireTimerParams = {
   /** The deadline's name. */
-  deadline: 'backstop' | 'holdExpiry';
+  deadline: CheckoutDeadline;
 };
 
 /** What Timers' fireTimer returns. */
@@ -330,7 +333,7 @@ export type CheckoutFireTimerResult = {
 /** The parameters of Timers' resetTimer: Starts a deadline again from what it starts from now, the create, the status's entry into its state or its field's value, so it is due afterMs after it and not fired: a snooze or a fire is undone. Needs the config's permission; refused for a deadline with nothing to start from now, or whose until holds. */
 export type CheckoutResetTimerParams = {
   /** The deadline's name. */
-  deadline: 'backstop' | 'holdExpiry';
+  deadline: CheckoutDeadline;
 };
 
 /** What Timers' resetTimer returns. */
@@ -342,7 +345,7 @@ export type CheckoutResetTimerResult = {
 /** The parameters of Timers' snoozeTimer: Moves a started deadline's due time to dueAt, and a fired one fires again then. A later write keeps it, until what the deadline starts from changes. Needs the config's permission; refused for a deadline not started, cancelled, or whose until holds. */
 export type CheckoutSnoozeTimerParams = {
   /** The deadline's name. */
-  deadline: 'backstop' | 'holdExpiry';
+  deadline: CheckoutDeadline;
   /** When it is due, in epoch milliseconds. */
   dueAt: number;
 };

@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FixtureTimersApiSdk Tool Definitions",
+  "description": "LLM tool calling bindings for fixture-timers-api API",
+  "tools": [
+    {
+      "name": "ticket.status.transition",
+      "operationId": "TicketStatusTransitionHandler",
+      "title": "Ticket status: transition",
+      "mcp": {
+        "hidden": false,
+        "name": "Ticket status: transition",
+        "handle": "ticket_status_transition",
+        "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "ticket.status.transition",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+      "namespace": "ticket",
+      "methodName": "status.transition",
+      "httpMethod": "POST",
+      "httpPath": "/api/ticket/{id}/status/transition",
+      "requiresAuth": true,
+      "requiredPermissions": ["tickets.write"],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:a9a844ca78ee53897aa21e72e3f42a3f6865be9d6c6ec8ce7359b847a47e8a31",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "to": {"description":"A TicketStatusState value","enum":["open","waiting","escalated","closed"],"type":"string"}
+        },
+        "required": ["id", "to"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "TicketStatusTransitionResult object"
+      }
+    },
+    {
+      "name": "ticket.timers.fireTimer",
+      "operationId": "TicketTimersFireTimerHandler",
+      "title": "Ticket timers: fire timer",
+      "mcp": {
+        "hidden": false,
+        "name": "Ticket timers: fire timer",
+        "handle": "ticket_timers_fire_timer",
+        "description": "Fires a deadline that is due and has not fired: marks it fired and moves the status by its then, recording the outcome; a veto or a missing permission the move meets leaves the status as it is and the deadline fired. A deadline whose until holds is cancelled instead. On a deadline not due, fired already or not started it changes nothing. Any principal who may write the instance may call it; the engine's runner calls it on every due deadline, every sweepMs.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "ticket.timers.fire-timer",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Fires a deadline that is due and has not fired: marks it fired and moves the status by its then, recording the outcome; a veto or a missing permission the move meets leaves the status as it is and the deadline fired. A deadline whose until holds is cancelled instead. On a deadline not due, fired already or not started it changes nothing. Any principal who may write the instance may call it; the engine's runner calls it on every due deadline, every sweepMs.",
+      "namespace": "ticket",
+      "methodName": "timers.fire_timer",
+      "httpMethod": "POST",
+      "httpPath": "/api/ticket/{id}/timers/fire-timer",
+      "requiresAuth": true,
+      "requiredPermissions": ["tickets.write"],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:32b4968b15df81c4a7524e4ea44105c816215f2972e62d83f1477efe75d66ba9",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "deadline": {"description":"A TicketTimersDeadline value","enum":["idle","remind","respond"],"type":"string"},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["deadline", "id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "TicketTimersFireTimerResult object"
+      }
+    },
+    {
+      "name": "ticket.timers.resetTimer",
+      "operationId": "TicketTimersResetTimerHandler",
+      "title": "Ticket timers: reset timer",
+      "mcp": {
+        "hidden": false,
+        "name": "Ticket timers: reset timer",
+        "handle": "ticket_timers_reset_timer",
+        "description": "Starts a deadline again from what it starts from now, the create, the status's entry into its state or its field's value, so it is due afterMs after it and not fired: a snooze or a fire is undone. Needs the config's permission; refused for a deadline with nothing to start from now, or whose until holds.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "ticket.timers.reset-timer",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Starts a deadline again from what it starts from now, the create, the status's entry into its state or its field's value, so it is due afterMs after it and not fired: a snooze or a fire is undone. Needs the config's permission; refused for a deadline with nothing to start from now, or whose until holds.",
+      "namespace": "ticket",
+      "methodName": "timers.reset_timer",
+      "httpMethod": "POST",
+      "httpPath": "/api/ticket/{id}/timers/reset-timer",
+      "requiresAuth": true,
+      "requiredPermissions": ["tickets.write"],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:32b4968b15df81c4a7524e4ea44105c816215f2972e62d83f1477efe75d66ba9",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "deadline": {"description":"A TicketTimersDeadline value","enum":["idle","remind","respond"],"type":"string"},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["deadline", "id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "TicketTimersResetTimerResult object"
+      }
+    },
+    {
+      "name": "ticket.timers.snoozeTimer",
+      "operationId": "TicketTimersSnoozeTimerHandler",
+      "title": "Ticket timers: snooze timer",
+      "mcp": {
+        "hidden": false,
+        "name": "Ticket timers: snooze timer",
+        "handle": "ticket_timers_snooze_timer",
+        "description": "Moves a started deadline's due time to dueAt, and a fired one fires again then. A later write keeps it, until what the deadline starts from changes. Needs the config's permission; refused for a deadline not started, cancelled, or whose until holds.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "ticket.timers.snooze-timer",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Moves a started deadline's due time to dueAt, and a fired one fires again then. A later write keeps it, until what the deadline starts from changes. Needs the config's permission; refused for a deadline not started, cancelled, or whose until holds.",
+      "namespace": "ticket",
+      "methodName": "timers.snooze_timer",
+      "httpMethod": "POST",
+      "httpPath": "/api/ticket/{id}/timers/snooze-timer",
+      "requiresAuth": true,
+      "requiredPermissions": ["tickets.write"],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:80151998f4597cec016fa267d9b3daaad93cdbc01f5ffc725ceb230672ff5f5b",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "deadline": {"description":"A TicketTimersDeadline value","enum":["idle","remind","respond"],"type":"string"},
+          "dueAt": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["deadline", "dueAt", "id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "TicketTimersSnoozeTimerResult object"
+      }
+    }
+  ]
+}

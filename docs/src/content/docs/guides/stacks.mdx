@@ -798,6 +798,21 @@ environment runs on Postgres. On gcp a worker is a Cloud Run worker
 pool, scaled by hand to its instances ([Deploy to Google
 Cloud](#deploy-to-google-cloud)).
 
+A `@behaviorWorker(Ticket)` of an API is a worker too, named and settled
+the same way (`support-api-ticket-timers`), whose handler the build
+generates ([The worker](/superschematic/guides/api-routes/#the-worker),
+D103). It runs every behavior queue of its table, one claim loop each:
+the deadline queue a table that implements `Timers` keeps, and the change
+queue of a table whose writes a behavior hears (`Timers`, `Reactions`, or
+another table's `Reactions` through a relation of it), which its trigger
+writes on every write of a row, whoever makes it. `concurrency` applies to
+each queue. A table's change queue that no deployed worker runs keeps its
+messages waiting: no rule runs and no raw write's deadline moves until one
+does, so run a behavior worker for each such table in every environment
+whose writes matter. No behavior worker claims on SQLite or D1 yet, so
+there a hearing table's change queue grows by a message per write until
+one does.
+
 ## The engine's runner
 
 A DB service whose types compose behaviors is an engine database: every
@@ -2484,7 +2499,16 @@ The workflow:
   `schemas/dist/bun.lock` is not committed or no longer matches the
   packages the build wrote, and type-checks each TypeScript server's,
   job's and worker's package and the implementation each imports with
-  `tsc --noEmit`. For a stack with a
+  `tsc --noEmit`. When the naming file's `[paths] rules_go` or
+  `rules_typescript` names a checkout of superschematic, a Go server, job
+  or worker over a database whose tables compose behaviors
+  ([A table's behavior operations](/superschematic/guides/api-routes/#a-tables-behavior-operations)),
+  a `@behaviorWorker` that runs their deadlines and changes among them,
+  first stages the behaviors' core's archive with the checkout's
+  `scripts/rules-archive.sh`, with Rust set up, unless `check` installed
+  a release's archives, which hold it; a TypeScript one builds the
+  checkout's `@superschematic/rules`, with the wasm32 target, before the
+  workspace's install. For a stack with a
   [static site](/superschematic/guides/static-sites/) it installs the same
   workspace and builds each site with its build script, as `stack deploy`
   does, so a site that does not build fails the pull request. Every job

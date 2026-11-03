@@ -146,6 +146,19 @@ the core's static archive through cgo; the
 [Go install page](/superschematic/install/go/#requirements) says how to
 build it.
 
+### `rules_go_module`
+
+Default: `github.com/parable-work/superschematic/runtime/rules/go`
+
+Go module path of the behaviors' core's Go binding and adapter (D103). A
+generated Go ORM requires it when its schema has a table that composes
+behaviors, on its fields or by `implements`: its repositories run their
+creates, updates, deletes, each use's operations, each due deadline and
+each change of a table's change queue through the core. The module links the core's static
+archive through cgo: a release's archives tarball holds it and its header
+(`CGO_LDFLAGS=-L<dir>/lib`), and in a checkout `scripts/rules-archive.sh`
+builds it where cargo is (D82).
+
 ### `versiongraph_rust_crate`
 
 Default: `superschematic-versiongraph-engine`
@@ -185,6 +198,17 @@ build, the engine, its Postgres adapter and the facade base. A generated
 TypeScript types package whose schema declares a version graph imports
 the facade base from its `/facade` entry point and lists the package as a
 dependency ([Use the engine from TypeScript](/superschematic/reference/version-graphs/#use-the-engine-from-typescript)).
+
+### `rules_npm_package`
+
+Default: `@superschematic/rules`
+
+npm package name of the behaviors' core built for WebAssembly (D103). A
+generated TypeScript types package whose database has a table that
+composes behaviors (`status: Workflow<{ ... }>`, `implements Timers<Ticket,
+{ ... }>`) imports its `initSync`
+in `orm.ts`, which passes the core to the HTTP runtime's adapter, and
+lists the package as a dependency.
 
 ### `versiongraph_pypi_dist`
 
@@ -464,6 +488,25 @@ Default: unset. This repository's own file sets `runtime/versiongraph/go`.
 
 Directory of the version-graph core's Go binding module.
 
+### `paths.rules_go`
+
+Default: unset. This repository's own file sets `runtime/rules/go`.
+
+Directory of the behaviors' core's Go module (D103). With this key set, a
+generated Go ORM whose schema has a table that composes behaviors
+replaces the module with the checkout, where the module links the archive
+`scripts/rules-archive.sh` stages under its `lib/<goos>_<goarch>`, and so
+do a Go API over such a database and the server, job or worker that
+serves it, a `@behaviorWorker` that runs its deadlines and changes among them. A Go
+server's image then builds the archive in a `rules` stage, from the
+engine's Cargo workspace of the checkout the module lies
+in (its `runtime/engine/rust`), and generated CI stages it with the
+checkout's `scripts/rules-archive.sh` before it builds the server.
+Unset, each requires the module's pinned version, as a release's build
+does, whose archives tarball holds the archive; a build from a checkout
+(one that sets `scalar_go`) then writes such a server no Dockerfile and
+says why.
+
 ### `paths.versiongraph_typescript`
 
 Default: unset. This repository's own file sets
@@ -548,6 +591,32 @@ project's engine crate's `napi` member expands into the addon a
 TypeScript server loads. Unset, it names the crate's version instead of a
 path.
 
+### `paths.rules_adapter_rust`
+
+Default: unset. This repository's own file sets
+`runtime/engine/rust/rules-adapter`.
+
+Directory of the behaviors' adapter for a Rust server,
+`superschematic-rules-adapter` (D103). A generated Rust API crate that
+serves a table's behavior operations
+([A table's behavior operations](/superschematic/guides/api-routes/#a-tables-behavior-operations))
+or runs a table's deadlines and changes from a `@behaviorWorker`
+([The worker](/superschematic/guides/api-routes/#the-worker))
+depends on it by path, with its `postgres` feature, and the image of its
+server and of the worker holds the adapter's Cargo workspace. The crate
+is unpublished, so the build refuses such an API while this key is
+unset.
+
+### `paths.rules_behaviors_rust`
+
+Default: unset. This repository's own file sets
+`runtime/engine/rust/rules-behaviors`.
+
+Directory of the behaviors ported onto the core,
+`superschematic-rules-behaviors` (D103), whose core the same Rust API
+crate runs its behavior operations on, beside `rules_adapter_rust`.
+Unpublished too: the build refuses such an API while this key is unset.
+
 ### `paths.engine_go`
 
 Default: unset. This repository's own file sets `runtime/engine/go`.
@@ -619,6 +688,25 @@ to the checkout, which the install copies from its `dist/`, so build the
 runtime first (`bun install && bun run build` in
 `runtime/http/typescript`). Unset, the install fetches the package, which
 fails with a 404 until it is published.
+
+### `paths.rules_typescript`
+
+Default: unset. This repository's own file sets
+`runtime/rules/typescript`.
+
+Directory of the behaviors' core's npm package (`package.json`, D103). A
+generated TypeScript types package whose database has a table that
+composes behaviors depends on `@superschematic/rules` with `*`; with this
+key set, the output root's Bun workspace overrides that with a `file:`
+path to the checkout, which the install copies from its `dist/`, so build
+it first (`bun install && bun run build` in `runtime/rules/typescript`,
+which builds the core's wasm module with cargo). A TypeScript server or
+worker that opens such a database's repositories, a `@behaviorWorker`
+among them, needs it for its image, which builds
+the wasm module in a `rules` stage from the engine's Cargo workspace of
+the checkout the package lies in and emits the package's `dist/`;
+unset, the build writes the server no Dockerfile and says why. Generated
+CI builds the package before it checks such a server.
 
 ### `paths.ptr`
 

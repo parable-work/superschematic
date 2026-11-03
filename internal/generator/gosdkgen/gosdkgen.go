@@ -138,6 +138,77 @@ type NamespaceInfo struct {
 	NeedsStringsPkg  bool
 	NeedsRegexpPkg   bool
 	Endpoints        []EndpointInfo
+	// Members are the namespace's fields that hold the operations of a
+	// table's behavior uses (D103), one per use: OrderNamespace.Status.
+	// Their endpoints are not in Endpoints.
+	Members []MemberInfo
+}
+
+// MemberInfo is a namespace's field holding the operations of one
+// behavior use (D103), a struct of its own in the namespace's file.
+type MemberInfo struct {
+	// FieldName is the field, the use's name in PascalCase
+	// (PaymentStatus).
+	FieldName string
+	// StructName is the field's struct (ShipmentPaymentStatusOperations).
+	StructName string
+	// Use, Type and Behavior are the use's id, its table and its
+	// behavior.
+	Use, Type, Behavior string
+	// Endpoints are the use's operations, each method named for its
+	// operation (Transition).
+	Endpoints []EndpointInfo
+}
+
+// AllEndpoints returns the namespace's own endpoints and then each
+// member's.
+func (n NamespaceInfo) AllEndpoints() []EndpointInfo {
+	out := append([]EndpointInfo(nil), n.Endpoints...)
+	for _, member := range n.Members {
+		out = append(out, member.Endpoints...)
+	}
+	return out
+}
+
+// endpoints calls visit with each endpoint of the namespace, its members'
+// included, to change it in place.
+func (n *NamespaceInfo) endpoints(visit func(*EndpointInfo)) {
+	for i := range n.Endpoints {
+		visit(&n.Endpoints[i])
+	}
+	for m := range n.Members {
+		for i := range n.Members[m].Endpoints {
+			visit(&n.Members[m].Endpoints[i])
+		}
+	}
+}
+
+// namespaceTemplateData is the data namespace.tmpl renders a namespace's
+// file from.
+type namespaceTemplateData struct {
+	SDK              *SDKOutput
+	Namespace        NamespaceInfo
+	NeedsFmt         bool
+	NeedsURL         bool
+	NeedsRuntime     bool
+	NeedsTypes       bool
+	NeedsStrings     bool
+	NeedsRegexp      bool
+	NeedsFilterparse bool
+	NeedsIter        bool
+}
+
+// MemberData is the template's data for a member's struct: the namespace
+// with the member's struct and endpoints as its own, unscoped, since a
+// member takes no scope.
+func (d namespaceTemplateData) MemberData(member MemberInfo) namespaceTemplateData {
+	ns := d.Namespace
+	ns.StructName = member.StructName
+	ns.Endpoints = member.Endpoints
+	ns.Members = nil
+	ns.IsScopedNS, ns.ScopeParamName, ns.ScopeFieldName, ns.ScopeFieldGoName = false, "", "", ""
+	d.Namespace = ns
+	return d
 }
 
 // EndpointInfo represents a single API endpoint for the Go SDK.
@@ -373,6 +444,10 @@ func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock
 
 	symbols := scalarSymbols(apiOutput.Scalars)
 	namespaceMap := make(map[string]*NamespaceInfo)
+	// Each namespace's API endpoints, and the converted endpoints of its
+	// behavior operations by handler, which its members hold (D103).
+	apiEndpoints := make(map[string][]apigen.EndpointInfo)
+	behaviorEndpoints := make(map[string]EndpointInfo)
 	for _, endpoint := range apiOutput.Endpoints {
 		if endpoint.IsWebhook {
 			continue
@@ -398,7 +473,18 @@ func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock
 			ns.ScopeFieldGoName = goutil.GoPublicIdentifier(endpoint.ScopeParamName)
 		}
 
-		converted := convertEndpoint(endpoint, ns.IsScopedNS, ns.ScopeParamName, goutil.GoPublicIdentifier(nsName), symbols)
+		// A behavior operation is a method of its use's member, named for
+		// the operation, its structs prefixed by the member's (D103).
+		apiEndpoints[nsName] = append(apiEndpoints[nsName], endpoint)
+		marker := endpoint.BehaviorOperation()
+		prefix := goutil.GoPublicIdentifier(nsName)
+		if marker != nil {
+			prefix += codegen.ToPascalCase(marker.Use)
+		}
+		converted := convertEndpoint(endpoint, ns.IsScopedNS, ns.ScopeParamName, prefix, symbols)
+		if marker != nil {
+			converted.MethodName = codegen.ToPascalCase(marker.Operation)
+		}
 		if endpointUsesTypes(converted) {
 			ns.RequiresTypes = true
 		}
@@ -423,7 +509,31 @@ func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock
 			output.HasPagedEndpoints = true
 			output.HasSortedEndpoints = output.HasSortedEndpoints || converted.Page.Sort != nil
 		}
+		if marker != nil {
+			behaviorEndpoints[endpoint.HandlerName] = converted
+			continue
+		}
 		ns.Endpoints = append(ns.Endpoints, converted)
+	}
+
+	// Each namespace's behavior uses become its members (D103), checked
+	// against its own operations.
+	for nsName, endpoints := range apiEndpoints {
+		members, err := toolsutil.BehaviorMembers(nsName, endpoints)
+		if err != nil {
+			return nil, err
+		}
+		for _, member := range members {
+			info := MemberInfo{
+				FieldName:  codegen.ToPascalCase(member.Use),
+				StructName: goutil.GoPublicIdentifier(nsName) + codegen.ToPascalCase(member.Use) + "Operations",
+				Use:        member.Use, Type: member.Type, Behavior: member.Behavior,
+			}
+			for _, ep := range member.Endpoints {
+				info.Endpoints = append(info.Endpoints, behaviorEndpoints[ep.HandlerName])
+			}
+			namespaceMap[nsName].Members = append(namespaceMap[nsName].Members, info)
+		}
 	}
 
 	namespaces := make([]NamespaceInfo, 0, len(namespaceMap))
@@ -431,7 +541,7 @@ func Generate(apiOutput *apigen.APIOutput, modulePath, packageName string, clock
 		sort.Slice(ns.Endpoints, func(i, j int) bool {
 			return ns.Endpoints[i].MethodName < ns.Endpoints[j].MethodName
 		})
-		for _, ep := range ns.Endpoints {
+		for _, ep := range ns.AllEndpoints() {
 			if ep.HasQueryParams || (ep.HasScalarArgs && ep.HTTPMethod == "GET") || ep.Page != nil {
 				ns.NeedsURLPkg = true
 			}
@@ -743,8 +853,7 @@ func WriteSDKWithToolsProfiled(output *SDKOutput, apiOutput *apigen.APIOutput, o
 		}
 		if len(unionTypes) > 0 {
 			for namespaceIndex := range output.Namespaces {
-				for endpointIndex := range output.Namespaces[namespaceIndex].Endpoints {
-					endpoint := &output.Namespaces[namespaceIndex].Endpoints[endpointIndex]
+				output.Namespaces[namespaceIndex].endpoints(func(endpoint *EndpointInfo) {
 					for argIndex := range endpoint.ScalarArgs {
 						arg := &endpoint.ScalarArgs[argIndex]
 						if _, ok := unionTypes[arg.typeName]; ok {
@@ -754,7 +863,7 @@ func WriteSDKWithToolsProfiled(output *SDKOutput, apiOutput *apigen.APIOutput, o
 					}
 					outputType := normalizeTypeName(endpoint.OutputType)
 					if _, ok := unionTypes[outputType]; !ok {
-						continue
+						return
 					}
 					endpoint.IsUnionOutput = true
 					endpoint.OutputUnionGoType = "types." + outputType
@@ -776,7 +885,7 @@ func WriteSDKWithToolsProfiled(output *SDKOutput, apiOutput *apigen.APIOutput, o
 						// levels and keys.
 						endpoint.OutputUnionWrapperGoType = goMapOrListType(wrapper, endpoint.OutputArrayDepth, endpoint.OutputIsMap)
 					}
-				}
+				})
 			}
 		}
 	}
@@ -822,18 +931,7 @@ func WriteSDKWithToolsProfiled(output *SDKOutput, apiOutput *apigen.APIOutput, o
 
 	for _, ns := range output.Namespaces {
 		needsFmt, needsURL, needsRuntime, needsTypes, needsStrings, needsRegexp, needsFilterparse := namespaceImportFlags(ns)
-		namespaceOutput := struct {
-			SDK              *SDKOutput
-			Namespace        NamespaceInfo
-			NeedsFmt         bool
-			NeedsURL         bool
-			NeedsRuntime     bool
-			NeedsTypes       bool
-			NeedsStrings     bool
-			NeedsRegexp      bool
-			NeedsFilterparse bool
-			NeedsIter        bool
-		}{
+		namespaceOutput := namespaceTemplateData{
 			SDK:              output,
 			Namespace:        ns,
 			NeedsFmt:         needsFmt,
@@ -1023,6 +1121,7 @@ func customTemplateFuncs() template.FuncMap {
 			}
 			return "validateListElement(validationErrors, " + path + ", &" + expr + ")"
 		},
+		"behavior_member_phrase": toolsutil.BehaviorMemberPhrase,
 		"docLine": func(value, fallback string) string {
 			normalized := strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
 			if normalized == "" {
@@ -1164,7 +1263,7 @@ func queryListElemGoType(param apigen.Param, scalarSymbols map[string]string) st
 
 func namespaceImportFlags(ns NamespaceInfo) (needsFmt, needsURL, needsRuntime, needsTypes, needsStrings, needsRegexp, needsFilterparse bool) {
 	needsTypes = ns.RequiresTypes
-	for _, ep := range ns.Endpoints {
+	for _, ep := range ns.AllEndpoints() {
 		if len(ep.PathArgs) > 0 {
 			needsFmt = true
 		}
@@ -1234,7 +1333,7 @@ func namespaceImportFlags(ns NamespaceInfo) (needsFmt, needsURL, needsRuntime, n
 // namespacePages reports whether an endpoint of the namespace pages its
 // list (D60), whose <Method>All returns an iter.Seq2.
 func namespacePages(ns NamespaceInfo) bool {
-	for _, ep := range ns.Endpoints {
+	for _, ep := range ns.AllEndpoints() {
 		if ep.Page != nil {
 			return true
 		}

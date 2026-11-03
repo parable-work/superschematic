@@ -179,10 +179,14 @@ func checkDisplay(schema *ir.Schema, td *ir.TypeDef, reg *registry.Registry, r *
 	// bare holds each behavior field's qualified names by its bare name,
 	// for the hint a summary field named bare gets.
 	bare := map[string][]string{}
+	// A field-anchored use's fields are the type's own columns, which the
+	// loader adds before this check (D103), so own finds them and only a
+	// type-anchored use's sit under its name here.
 	var workflow *ir.BehaviorRef
-	for i, ref := range td.Behaviors {
+	onType := td.TypeBehaviors()
+	for i, ref := range onType {
 		if ref.Name == workflowBehavior {
-			workflow = &td.Behaviors[i]
+			workflow = &onType[i]
 		}
 		if behavior, ok := reg.Behavior(ref.Name); ok {
 			for _, field := range behavior.Fields {

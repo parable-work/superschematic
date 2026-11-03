@@ -290,6 +290,57 @@ type RustWorker struct {
 	// message type and its descriptor constant by, through the API crate.
 	Message    string
 	Descriptor string
+
+	// Behavior is set for a @behaviorWorker (D103): main.rs builds no Deps
+	// and calls no create_workers, and runs each of Queues, the table's
+	// behavior queues, deadlines first, with the handler the API crate's
+	// behaviors module holds, together. Method, Message and Descriptor are
+	// empty then. Nil for an ordinary worker.
+	Behavior *apigen.BehaviorWorkerInfo
+	Queues   []rustrestgen.BehaviorQueue
+
+	// API is the alias main.rs uses the API crate under, which a behavior
+	// worker's queues and handlers are named through.
+	API string
+}
+
+// QueueNames are the behavior worker's queues, as its log names them.
+func (w *RustWorker) QueueNames() string {
+	names := make([]string, len(w.Queues))
+	for i, q := range w.Queues {
+		names[i] = q.Queue
+	}
+	return strings.Join(names, ", ")
+}
+
+// QueueLet is main.rs's statement that opens a behavior queue on the pool
+// of the API's database, the queue's handler completing its messages.
+func (w *RustWorker) QueueLet(q rustrestgen.BehaviorQueue) string {
+	return rustLetCall(w.QueueVar(q), w.API+"::behaviors::"+q.Func, "?", "&"+w.Database.Var)
+}
+
+// HandlerBlock is the async block of a behavior queue's handler, which
+// calls the function the API crate's behaviors module holds, as rustfmt
+// lays it out inside the handler's closure.
+func (w *RustWorker) HandlerBlock(q rustrestgen.BehaviorQueue) string {
+	const indent = "        "
+	call := w.API + "::behaviors::" + q.Handler + "(&pool, claimed).await"
+	if line := indent + "async move { " + call + " }"; len(line) <= rustWidth {
+		return line
+	}
+	return indent + "async move {\n" + indent + "    " + call + "\n" + indent + "}"
+}
+
+// QueueVar is the variable main.rs holds a behavior queue in, named after
+// what it holds: deadlines.
+func (w *RustWorker) QueueVar(q rustrestgen.BehaviorQueue) string {
+	return strings.TrimPrefix(q.Func, rustutil.ToSnakeCase(w.Name)+"_")
+}
+
+// HandlerVar is the variable main.rs holds a behavior queue's handler in:
+// run_deadlines.
+func (w *RustWorker) HandlerVar(q rustrestgen.BehaviorQueue) string {
+	return "run_" + w.QueueVar(q)
 }
 
 // RustDeriver is the deriver a Rust deriver's entrypoint runs (D74): its
@@ -381,6 +432,11 @@ type RustAPI struct {
 
 	// Database is the pool Deps.db holds, nil without one.
 	Database *RustDatabase
+
+	// Behaviors is true when the API serves behavior operations (D103):
+	// Implementations::new then takes Database's pool too, on which the
+	// router's handlers run each through the behaviors' core.
+	Behaviors bool
 
 	// Engine is the engine Deps.engine holds, of the API's engine database
 	// (D58), nil without one.
@@ -638,11 +694,16 @@ func PlanRust(in RustInput) (*RustServer, error) {
 			return nil, fmt.Errorf("stack %s: worker %s runs a worker of %d APIs; a worker belongs to one", in.Stack, in.Server, len(in.APIs))
 		}
 		o := in.APIs[0].Output
-		i := slices.IndexFunc(o.Workers, func(w rustrestgen.WorkerInfo) bool { return w.Name == in.Worker.Name })
-		if i < 0 {
+		named := func(w rustrestgen.WorkerInfo) bool { return w.Name == in.Worker.Name }
+		var w rustrestgen.WorkerInfo
+		if i := slices.IndexFunc(o.Workers, named); i >= 0 {
+			w = o.Workers[i]
+		} else if i := slices.IndexFunc(o.BehaviorWorkers, named); i >= 0 {
+			// A behavior worker runs its table's behavior queues (D103).
+			w = o.BehaviorWorkers[i]
+		} else {
 			return nil, fmt.Errorf("stack %s: worker %s runs %s of %s, which declares no such worker", in.Stack, in.Server, in.Worker.Name, o.SchemaName)
 		}
-		w := o.Workers[i]
 		if o.Deps == nil || o.Deps.Database == "" {
 			return nil, fmt.Errorf("stack %s: worker %s of %s claims queue %s, and %s connects to no database", in.Stack, in.Server, o.SchemaName, w.Queue, o.SchemaName)
 		}
@@ -661,6 +722,8 @@ func PlanRust(in RustInput) (*RustServer, error) {
 			QueueConst:   w.QueueConst,
 			Concurrency:  max(w.Concurrency, 1),
 			GraceSeconds: grace,
+			Behavior:     w.Behavior,
+			Queues:       w.BehaviorQueues,
 		}
 		s.Package = n.RustWorkerCrate(in.Stack, in.Server)
 	case in.Deriver != nil:
@@ -721,6 +784,9 @@ func PlanRust(in RustInput) (*RustServer, error) {
 		s.App.Alias = taken.take(rustStem(in.Server) + "_app")
 	}
 	stores := map[string]*RustMemoryStore{}
+	// A behavior worker opens the API's database alone: it builds no Deps,
+	// so it opens no client, bucket, memory store or engine (D103).
+	behaviorWorker := s.Worker != nil && s.Worker.Behavior != nil
 	for _, a := range in.APIs {
 		o := a.Output
 		stem := rustStem(o.SchemaName)
@@ -796,6 +862,12 @@ func PlanRust(in RustInput) (*RustServer, error) {
 			}
 			api.Database = d
 		}
+		if o.HasBehaviorOperations() {
+			if api.Database == nil || api.Database.Service != o.BehaviorDatabase() {
+				return nil, fmt.Errorf("stack %s: %s %s serves %s, whose behavior operations run on %s (D103), and opens no pool on it", in.Stack, s.Kind, in.Server, o.SchemaName, o.BehaviorDatabase())
+			}
+			api.Behaviors = true
+		}
 		if o.Identity != nil && !background {
 			d := api.Database
 			if d == nil || d.Service != o.Identity.AuthDB {
@@ -811,6 +883,9 @@ func PlanRust(in RustInput) (*RustServer, error) {
 			api.Identity = taken.take(stem + "_identity")
 		}
 		for _, call := range o.Deps.Calls {
+			if behaviorWorker {
+				break
+			}
 			c := clients[call.Service]
 			if c == nil {
 				key, ok := derived[string(ir.EdgeHTTP)+" "+call.Service]
@@ -833,6 +908,9 @@ func PlanRust(in RustInput) (*RustServer, error) {
 			api.Calls = append(api.Calls, RustCall{Field: call.Field, Client: c})
 		}
 		for _, b := range o.Deps.Buckets {
+			if behaviorWorker {
+				break
+			}
 			h := buckets[b.Service]
 			if h == nil {
 				key, ok := derived[string(ir.EdgeBucket)+" "+b.Service]
@@ -851,6 +929,9 @@ func PlanRust(in RustInput) (*RustServer, error) {
 			api.Buckets = append(api.Buckets, RustBucketUse{Field: b.Field, Bucket: h})
 		}
 		for _, m := range o.Deps.MemoryStores {
+			if behaviorWorker {
+				break
+			}
 			h := stores[m.Service]
 			if h == nil {
 				key, ok := derived[string(ir.EdgeMemoryStore)+" "+m.Service]
@@ -879,13 +960,18 @@ func PlanRust(in RustInput) (*RustServer, error) {
 				return nil, fmt.Errorf("stack %s: worker %s of %s opens no pool on %s, whose queue it claims", in.Stack, in.Server, o.SchemaName, o.Deps.Database)
 			}
 			s.Worker.Database = api.Database
-			types := api.Alias + "::" + rustrestgen.DatabaseTypesModule + "::"
-			s.Worker.Message, s.Worker.Descriptor = types+s.Worker.Queue, types+s.Worker.QueueConst
+			s.Worker.API = api.Alias
+			if !behaviorWorker {
+				types := api.Alias + "::" + rustrestgen.DatabaseTypesModule + "::"
+				s.Worker.Message, s.Worker.Descriptor = types+s.Worker.Queue, types+s.Worker.QueueConst
+			}
 		}
 		s.APIs = append(s.APIs, api)
 	}
-	if err := s.planRustEngines(in, taken); err != nil {
-		return nil, err
+	if !behaviorWorker {
+		if err := s.planRustEngines(in, taken); err != nil {
+			return nil, err
+		}
 	}
 	if s.Deriver != nil {
 		if s.APIs[0].Engine == nil {
@@ -1099,6 +1185,11 @@ func (s *RustServer) planManifest(in RustInput, dir string) error {
 		if local[a.Output.CrateName], err = pathDep(a.Dir); err != nil {
 			return err
 		}
+		// A behavior worker builds no Deps and calls no implementation:
+		// its handlers are the API crate's (D103).
+		if s.Worker != nil && s.Worker.Behavior != nil {
+			continue
+		}
 		if local[a.Implementation.Crate], err = pathDep(MirrorDir(in.OutputRoot, a.Output.SchemaName)); err != nil {
 			return err
 		}
@@ -1231,6 +1322,11 @@ func planRustDocker(in RustInput, s *RustServer, dir string) (*RustDocker, strin
 		return nil, why, nil
 	}
 	d.Include = append(d.Include, engines...)
+	behaviors, why := behaviorDockerIncludes(in, rel)
+	if why != "" {
+		return nil, why, nil
+	}
+	d.Include = append(d.Include, behaviors...)
 	if s.App != nil {
 		crates, why, err := appDockerIncludes(in, s, d.Include, rel)
 		if err != nil || why != "" {
@@ -1494,7 +1590,8 @@ func (s *RustServer) backgroundUses(runtime string) []string {
 	if len(s.Databases) > 0 {
 		uses = append(uses, rustutil.UseLine(runtime+"::postgres", []string{"self", "Pool"}))
 	}
-	if s.Worker != nil {
+	if s.Worker != nil && s.Worker.Behavior == nil {
+		// A behavior worker's queues are its API crate's to open (D103).
 		uses = append(uses, rustutil.UseLine(runtime+"::queue", []string{"PostgresQueue", "QueueDefinition"}))
 	}
 	if stackconfig := s.stackconfigUses(); len(stackconfig) > 0 {
@@ -1582,7 +1679,11 @@ func (s *RustServer) stackconfigUses() []string {
 func (s *RustServer) CrateUses() []string {
 	var uses []string
 	for _, a := range s.APIs {
-		uses = append(uses, "use "+crateIdent(a.Crate)+" as "+a.Alias+";", "use "+a.ImplLib+" as "+a.ImplAlias+";")
+		uses = append(uses, "use "+crateIdent(a.Crate)+" as "+a.Alias+";")
+		// A behavior worker calls no implementation (D103).
+		if s.Worker == nil || s.Worker.Behavior == nil {
+			uses = append(uses, "use "+a.ImplLib+" as "+a.ImplAlias+";")
+		}
 	}
 	for _, c := range s.Clients {
 		uses = append(uses, "use "+crateIdent(c.Crate)+" as "+c.Alias+";")
@@ -1599,8 +1700,8 @@ func (s *RustServer) CrateUses() []string {
 
 // ImplementationsArgs are the arguments main.rs builds the API's
 // Implementations with, beside its handlers: the identity runtime's
-// authenticator over its identity service, and its service
-// authenticator.
+// authenticator over its identity service, its service authenticator, and
+// the pool of its database, which its behavior operations run on (D103).
 func (a *RustAPI) ImplementationsArgs() []string {
 	args := []string{a.Handlers}
 	// An API that mounts its engine's routes holds its identity service
@@ -1618,6 +1719,9 @@ func (a *RustAPI) ImplementationsArgs() []string {
 			authenticator = "Arc::clone(&" + a.ServiceAuthenticator + ") as _"
 		}
 		args = append(args, authenticator)
+	}
+	if a.Behaviors {
+		args = append(args, a.Database.Var+".clone()")
 	}
 	return args
 }
@@ -1645,6 +1749,8 @@ func WriteRust(s *RustServer, dir string) error {
 	switch {
 	case s.Job != nil:
 		main = "job.rs.tmpl"
+	case s.Worker != nil && s.Worker.Behavior != nil:
+		main = "behavior_worker.rs.tmpl"
 	case s.Worker != nil:
 		main = "worker.rs.tmpl"
 	case s.Runner != nil:

@@ -1,0 +1,75 @@
+{
+  "name": "fixture-workflow-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-workflow-db",
+      "types": [
+        "Order",
+        "Shipment"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-workflow-db",
+      "kind": "DB"
+    }
+  ],
+  "scalars": {
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "languagePrimitive": "string",
+      "typeMappings": {
+        "sql": "UUID"
+      }
+    }
+  },
+  "operationSets": [
+    {
+      "name": "OrderActions",
+      "comment": "An order's status operations: each transition its Workflow lists, run\nthrough the behaviors' core (D103). The route needs orders.write; a move\nto shipped needs orders.ship too, which the core checks.",
+      "operations": [],
+      "behaviorOperations": {
+        "type": "Order"
+      },
+      "permissions": [
+        "orders.write"
+      ]
+    },
+    {
+      "name": "ShipmentActions",
+      "comment": "A shipment's two Workflows, status and paymentStatus, for any signed-in\ncaller; a refund needs payments.refund, which the core checks.",
+      "operations": [],
+      "behaviorOperations": {
+        "type": "Shipment"
+      },
+      "auth": true
+    },
+    {
+      "name": "OrderQueries",
+      "comment": "An order as its table holds it, the fields its status Workflow owns\namong them.",
+      "operations": [
+        {
+          "name": "getOrder",
+          "typeRef": {
+            "name": "Order"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "httpMethod": "GET",
+          "restPath": "orders/{id}"
+        }
+      ]
+    }
+  ]
+}

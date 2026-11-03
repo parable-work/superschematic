@@ -94,7 +94,7 @@ pub struct {{ toPascalCase . }} {
 impl {{ toPascalCase . }}Implementation for {{ toPascalCase . }} {
 {{- $first := true }}
 {{- range $.Endpoints }}
-{{- if eq .Namespace $namespace }}
+{{- if and (eq .Namespace $namespace) (not .Behavior) }}
 {{- if $first }}{{ $first = false }}{{ else }}
 {{ end }}
 {{- if .Description }}

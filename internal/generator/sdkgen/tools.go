@@ -162,7 +162,7 @@ func GenerateTools(sdkOutput *SDKOutput, apiOutput *apigen.APIOutput, clock code
 			ScopeParam: ns.ScopeParamName,
 		}
 
-		for _, endpoint := range ns.Endpoints {
+		for _, endpoint := range ns.AllEndpoints() {
 			if serviceOnly[endpoint.OperationID] {
 				continue
 			}
@@ -298,7 +298,7 @@ func endpointToTool(
 		ExpectedRevisionPointers: toolsutil.ExpectedRevisionPointers(endpoint.Docs),
 		RequiredPerms:            append([]string(nil), endpoint.RequiredPerms...),
 		APIID:                    apiID,
-		MethodName:               endpoint.Name,
+		MethodName:               endpoint.MethodPath(),
 		HTTPMethod:               endpoint.Method,
 		HTTPPath:                 endpoint.Path,
 		Description:              description,

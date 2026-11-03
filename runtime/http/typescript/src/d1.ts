@@ -26,10 +26,75 @@ on SQLite (queue-sqlite.ts, D53, amended): enqueueStatement, whose
 statement a Worker adds to the batch whose writes caused the message. It
 exports no claims: no worker claims on D1 (PlatformSpec.NoQueueClaims), and
 a Worker is no process that claims until it is stopped.
+
+It exports the behaviors' adapter (rules.ts, D103), which imports nothing
+from node: or a driver either: a Worker, or a server over openSqlite, runs a
+command of a table that composes behaviors on sqliteRulesStore, over the
+layout its database's generated orm.ts embeds.
 */
 
 export type { QueueDefinition, QueueField, QueueStatements } from './queue-core.js';
 export { enqueueSqlite, enqueueStatement } from './queue-sqlite.js';
+export {
+  MAX_ATTEMPTS,
+  RulesRefusal,
+  busyRefusal,
+  execute,
+  lazyCore,
+  prepareCreate,
+  readArmedDeadlines,
+  readLinked,
+  readRow,
+  readSubRows,
+  runChange,
+  runCreate,
+  runDeadline,
+  runDelete,
+  runOperation,
+  runUpdate,
+  sqliteRulesStore,
+  VETOED_RETRY_SECONDS,
+} from './rules.js';
+export type {
+  ArmedDeadline,
+  ChangeOptions,
+  ChangeRun,
+  CoreCaller,
+  CoreChangeSet,
+  CoreCommand,
+  CoreDeadline,
+  CoreFieldSpec,
+  CoreLinkedRows,
+  CoreOwned,
+  CoreRefusal,
+  CoreRelationSpec,
+  CoreRow,
+  CoreRowChange,
+  CoreRowImage,
+  CoreSubRow,
+  CoreTypeSpec,
+  CoreWriteKind,
+  CreateOptions,
+  DeadlineClaim,
+  DeadlineOptions,
+  DeadlineRun,
+  ExecuteOptions,
+  RulesChanges,
+  RulesColumn,
+  RulesCore,
+  RulesDeadlines,
+  RulesHost,
+  RulesLayout,
+  RulesLive,
+  RulesOperation,
+  RulesOwnedField,
+  RulesResult,
+  RulesStore,
+  RulesSubTable,
+  RulesTable,
+  RulesUse,
+  TableChange,
+} from './rules.js';
 
 /**
  * A value a statement binds: what D1 and SQLite store. A boolean binds as 1
