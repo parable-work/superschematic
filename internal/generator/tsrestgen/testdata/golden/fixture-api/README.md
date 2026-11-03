@@ -22,7 +22,10 @@ Generated TypeScript API server for the `fixture-api` schema. Built on
   it calls, and a `logger`), and `Constructor`, the type of the
   implementation's `create`. `AuthenticatorFactory` is the type of its
   `authenticate`, which builds the end-user `Authenticator` from `Deps`.
-- `openapi.json`: the OpenAPI document shared with the Go and Rust generators.
+- `openapi.json`: the OpenAPI document shared with the Go and Rust generators,
+  and `openapi.ts`, the same document as a module: `buildRouter` serves it at
+  `GET /api/openapi.json`, with a RapiDoc page at `GET /api/docs`, unless
+  `serveOpenAPI` is false.
 - `values-schema.json`: the env-var contract, when the schema declares an
   `@envVars` class or its edges derive config fields.
 

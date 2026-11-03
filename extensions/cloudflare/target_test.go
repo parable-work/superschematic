@@ -19,8 +19,9 @@ import (
 // TestTarget: the extension registers the target beside its DNS platform,
 // which is the target's default, with the pulumi provisioner, the pinned
 // account token type and every deploy seam built so far; it places a
-// server on Workers, a bucket on R2, a database on D1, a job on Cron and a
-// site on Workers' static assets, and runs no job on demand.
+// server on Workers, a bucket on R2, a database on D1, or on Hyperdrive when
+// its DB services list postgres first (D92), a job on Cron, a worker on the
+// drainer and a site on Workers' static assets.
 func TestTarget(t *testing.T) {
 	target := newFixture(t).target(t)
 	if target.DNS != cloudflare.DNS || target.Provisioner != "pulumi" {
@@ -32,8 +33,12 @@ func TestTarget(t *testing.T) {
 		ir.DeployableDatabase: cloudflare.D1Platform,
 		ir.DeployableJob:      cloudflare.Cron,
 		ir.DeployableSite:     cloudflare.Sites,
+		ir.DeployableWorker:   cloudflare.Drainer,
 	}; !reflect.DeepEqual(target.Platforms, want) {
 		t.Errorf("the target places %v, want %v", target.Platforms, want)
+	}
+	if want := map[string]string{registry.SQLDialectPostgres: cloudflare.HyperdrivePlatform}; !reflect.DeepEqual(target.DatabasePlatforms, want) {
+		t.Errorf("the target places a database by its dialect on %v, want %v", target.DatabasePlatforms, want)
 	}
 	if target.State == nil || target.Secrets == nil || target.Bootstrap == nil || target.CI == nil || target.Bundles == nil ||
 		target.PreDestroy == nil || target.Migrations == nil || target.Sites == nil || target.Jobs == nil {

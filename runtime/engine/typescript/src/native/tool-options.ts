@@ -143,8 +143,8 @@ export interface ResolvedToolOptions {
 const POLICY_KEY = /^[A-Za-z][A-Za-z0-9_]*$/;
 const POLICY_VALUE = /^[a-z][a-z0-9_-]*$/;
 const OPERATION_NAME = /^[A-Za-z][A-Za-z0-9_]*$/;
-// The keys the mcp record and @mcp already use (ir.ValidateMCPInvocationKey).
-const RESERVED_POLICY_KEYS = ['handle', 'hidden', 'hiddenReason', '_meta', 'name', 'description', 'icon', 'reason'];
+// The keys the mcp record, @mcp and the engine's hidden record already use (ir.ValidateMCPInvocationKey).
+const RESERVED_POLICY_KEYS = ['handle', 'hidden', 'hiddenReason', 'hiddenBy', '_meta', 'name', 'description', 'icon', 'reason'];
 // The keys the core writes at the root of an argument schema.
 const RESERVED_PARAMETER_KEYS = ['type', 'additionalProperties', 'properties', 'required'];
 

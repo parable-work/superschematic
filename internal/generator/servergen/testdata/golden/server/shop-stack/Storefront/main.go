@@ -129,6 +129,14 @@ func run(logger *zap.Logger) error {
 		return fmt.Errorf("bucket shop-media: %w", err)
 	}
 
+	// One store per memory store, shared by every API that lists it
+	// (memorystores.go, D75). Opening never waits for the server: a store
+	// that is down reconnects in the background, and one whose field is
+	// unset, or whose connection it cannot use, is disabled, so every call refuses at once and the
+	// APIs take their paths without it. /readyz never waits for a store.
+	shopCacheStore := openMemoryStore(ctx, logger, "shop-cache", "SHOP_CACHE_MEMORY_STORE", shopOrdersConfig.ShopCacheMemoryStore)
+	defer shopCacheStore.Close()
+
 	// shop-orders: its implementation, built from its Deps, and its routes.
 	shopOrdersLogger := logger.With(zap.String("api", "shop-orders"))
 	shopOrdersDeps := shoporders.Deps{
@@ -136,6 +144,7 @@ func run(logger *zap.Logger) error {
 		DB:        shopDb,
 		ShopApi:   shopApiClient,
 		ShopMedia: shopMediaBucket,
+		ShopCache: shopCacheStore,
 		Logger:    shopOrdersLogger,
 	}
 	shopOrdersImplementations, err := shopordersimpl.New(shopOrdersDeps)
@@ -157,6 +166,7 @@ func run(logger *zap.Logger) error {
 	err = shoporders.RegisterRoutes(shopOrdersRouter, shoporders.Config{
 		PayloadDecryptor: shopOrdersDecryptor,
 		ManualRoutes:     &shopOrdersManualRoutes,
+		RateLimitStore:   shopCacheStore,
 		Logger:           shopOrdersLogger,
 		Implementations:  shopOrdersImplementations,
 	})

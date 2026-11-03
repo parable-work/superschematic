@@ -9,6 +9,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -123,6 +124,12 @@ func (e *emitter) emitType(def *ir.TypeDef) {
 			return
 		}
 		e.emitProjection(def)
+	case ir.RoleQuery:
+		if e.doc.Kind != "" && e.doc.Kind != ir.SchemaKindDB {
+			e.failf("type %s: role Query is only expressible in a DB schema (document kind %s)", def.Name, e.doc.Kind)
+			return
+		}
+		e.emitQuery(def)
 	default:
 		e.failf("type %s: role %s has no TypeScript authoring form", def.Name, def.Role)
 	}
@@ -136,8 +143,8 @@ func (e *emitter) emitTypeAlias(def *ir.TypeDef) {
 	if def.Extends != "" || len(def.Implements) > 0 || def.RawHeritage != nil ||
 		def.User != nil || def.UserRole != nil ||
 		def.IsTrait || def.TraitConfig != nil || def.Source != nil ||
-		len(def.Indexes) > 0 || def.JsonField || def.EnvVars ||
-		def.DenyUnknownFields || def.StrictJSON || len(def.Behaviors) > 0 || def.Display != nil {
+		len(def.Indexes) > 0 || len(def.RawSQL) > 0 || def.JsonField || def.EnvVars || def.SQLName != "" ||
+		def.DenyUnknownFields || def.StrictJSON || def.AllowUnknownFields || len(def.Behaviors) > 0 || def.Display != nil {
 		e.failf("%s: embedded structs in a DB schema render as type aliases and cannot carry heritage or decorators", owner)
 		return
 	}
@@ -194,16 +201,42 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 		for i, k := range idx.Keys {
 			keys[i] = quote(k)
 		}
+		var options []string
+		if idx.Unique {
+			options = append(options, "unique: true")
+		}
+		for _, opt := range []struct{ key, value string }{
+			{"name", idx.Name}, {"method", idx.Method}, {"ops", idx.Ops}, {"where", idx.Where}, {"expression", idx.Expression},
+		} {
+			if opt.value != "" {
+				options = append(options, opt.key+": "+quote(opt.value))
+			}
+		}
+		if idx.Concurrently != nil {
+			options = append(options, fmt.Sprintf("concurrently: %t", *idx.Concurrently))
+		}
+		for _, opt := range []struct {
+			key   string
+			value *int
+		}{{"m", idx.M}, {"efConstruction", idx.EFConstruction}, {"lists", idx.Lists}} {
+			if opt.value != nil {
+				options = append(options, fmt.Sprintf("%s: %d", opt.key, *opt.value))
+			}
+		}
 		opts := ""
 		switch {
-		case idx.Name != "" && idx.Unique:
-			opts = fmt.Sprintf(", { unique: true, name: %s }", quote(idx.Name))
-		case idx.Name != "":
-			opts = fmt.Sprintf(", { name: %s }", quote(idx.Name))
-		case idx.Unique:
+		case len(options) == 1 && idx.Unique:
 			opts = ", true"
+		case len(options) > 0:
+			opts = ", { " + strings.Join(options, ", ") + " }"
 		}
 		fmt.Fprintf(&e.body, "@%s<%s>([%s]%s)\n", e.use("index"), def.Name, strings.Join(keys, ", "), opts)
+	}
+	for _, raw := range def.RawSQL {
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("rawSql"), rawSQLArgs(raw))
+	}
+	if def.SQLName != "" {
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("table"), quote(def.SQLName))
 	}
 	if def.Source != nil {
 		e.emitSourceDecorator(def)
@@ -217,6 +250,9 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 	if def.StrictJSON {
 		fmt.Fprintf(&e.body, "@%s\n", e.use("strictJSON"))
 	}
+	if def.AllowUnknownFields {
+		fmt.Fprintf(&e.body, "@%s\n", e.use("allowUnknownFields"))
+	}
 	if def.Versioned {
 		fmt.Fprintf(&e.body, "@%s%s\n", e.use("versioned"), versionedConfigArgs(def.VersionedConfig))
 	}
@@ -225,6 +261,14 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 	}
 	if def.Queue != nil {
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("queue"), queueArgs(def.Queue))
+	}
+	for _, change := range def.EnqueueOnChange {
+		// The queue may be declared in another file of the schema.
+		e.recordHeritageImports(change.Queue)
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("enqueueOnChange"), enqueueOnChangeArgs(change))
+	}
+	if len(def.SeedRoles) > 0 {
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("seedRoles"), seedRolesArgs(def.SeedRoles))
 	}
 	if def.VersionGraph != nil {
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("versionGraph"), versionGraphArgs(def.VersionGraph))
@@ -235,7 +279,9 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 	if def.EnvVars {
 		fmt.Fprintf(&e.body, "@%s\n", e.use("envVars"))
 	}
-	for _, ref := range def.Behaviors {
+	// A use anchored on a field is written as that field's type, below
+	// (D103).
+	for _, ref := range def.TypeBehaviors() {
 		e.emitBehavior(def.Name, ref)
 	}
 	if def.Display != nil {
@@ -245,7 +291,8 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 
 	// A class with no fields of its own, such as each class of a Stack
 	// schema, closes on its line, as the @job and @worker classes do.
-	if !slices.ContainsFunc(def.Fields, func(fd *ir.FieldDef) bool { return fd.InheritedFrom == "" }) {
+	uses := def.FieldBehaviors()
+	if len(uses) == 0 && !slices.ContainsFunc(def.Fields, func(fd *ir.FieldDef) bool { return fd.InheritedFrom == "" && !fd.Owned() }) {
 		fmt.Fprintf(&e.body, "export abstract class %s%s {}\n", e.ident(def.Name, "type"), e.heritageClause(def))
 		return
 	}
@@ -253,8 +300,9 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 
 	first := true
 	for _, fd := range def.Fields {
-		if fd.InheritedFrom != "" {
-			// Pre-flattened heritage fields re-flatten from the base class.
+		if fd.InheritedFrom != "" || fd.Owned() {
+			// Pre-flattened heritage fields re-flatten from the base class,
+			// and a behavior's fields from the use that adds them (D103).
 			continue
 		}
 		fieldOwner := fmt.Sprintf("%s.%s", def.Name, fd.Name)
@@ -269,7 +317,74 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 		}
 		fmt.Fprintf(&e.body, "  %s: %s;\n", e.ident(fd.Name, "field"), e.fieldTypeExpr(fd, fieldOwner, structField))
 	}
+	for _, ref := range uses {
+		if !first {
+			e.body.WriteString("\n")
+		}
+		first = false
+		fmt.Fprintf(&e.body, "  %s: %s;\n", e.ident(ref.Field, "field"), e.behaviorFieldType(def.Name, ref))
+	}
 	e.body.WriteString("}\n")
+}
+
+// behaviorFieldPackage declares each behavior's field type, under the
+// behavior's name, as the reader knows it (tsreader's behaviorCarrier).
+const behaviorFieldPackage = "@superschematic/db"
+
+// behaviorFieldType renders a use anchored on a field as the field's type
+// (D103), `Workflow<{ states: ["draft", "paid"]; ... }>`: the behavior's
+// field type with its config as a type argument of literal types, which
+// the reader reads back to the same config. The loader adds the
+// behavior's fields after the walk, wherever the anchor sits among the
+// class's own, so it is written after them.
+func (e *emitter) behaviorFieldType(typeName string, ref ir.BehaviorRef) string {
+	owner := fmt.Sprintf("%s.%s", typeName, ref.Field)
+	if !identifierPattern.MatchString(ref.Name) {
+		e.failf("%s: behavior %s has no field type in %s, so the use has no TypeScript authoring form", owner, ref.Name, behaviorFieldPackage)
+		return ref.Name
+	}
+	carrier := ref.Name
+	if e.declares(carrier) {
+		alias := carrier + "Field"
+		for i := 2; e.declares(alias); i++ {
+			alias = fmt.Sprintf("%sField%d", carrier, i)
+		}
+		carrier = e.useAs(behaviorFieldPackage, ref.Name, alias)
+	} else {
+		e.importSymbol(naming.Active().Specifier(behaviorFieldPackage), carrier)
+	}
+	config := any(map[string]any{})
+	if len(ref.Config) > 0 {
+		if err := json.Unmarshal(ref.Config, &config); err != nil {
+			e.failf("%s: behavior %s config: %v", owner, ref.Name, err)
+		}
+	}
+	return carrier + "<" + literalType(config) + ">"
+}
+
+// literalType renders a decoded JSON value as the TypeScript literal type
+// that stands for it: an object as an object type of its members, keys
+// sorted, a list as a tuple, and a string, a number, a boolean or null as
+// its literal type.
+func literalType(value any) string {
+	switch v := value.(type) {
+	case map[string]any:
+		if len(v) == 0 {
+			return "{}"
+		}
+		parts := make([]string, 0, len(v))
+		for _, key := range sortedKeys(v) {
+			parts = append(parts, propertyName(key)+": "+literalType(v[key]))
+		}
+		return "{ " + strings.Join(parts, "; ") + " }"
+	case []any:
+		parts := make([]string, len(v))
+		for i, item := range v {
+			parts[i] = literalType(item)
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	}
+	return valueLiteral(value)
 }
 
 // emitBehavior renders one @behavior(name, config?) line. Several render in
@@ -433,7 +548,9 @@ func (e *emitter) heritageClause(def *ir.TypeDef) string {
 			implements = def.RawHeritage.Implements
 		}
 	}
-	implements = append(e.identityTraits(def), implements...)
+	// A behavior the table implements (D103) comes after extends and
+	// before the traits.
+	implements = append(append(e.implementedBehaviors(def), e.identityTraits(def)...), implements...)
 	// Resolved names drive the imports; the raw text is what renders.
 	e.recordHeritageImports(def.Extends)
 	for _, tr := range def.Implements {
@@ -448,6 +565,39 @@ func (e *emitter) heritageClause(def *ir.TypeDef) string {
 		b.WriteString(" implements " + strings.Join(implements, ", "))
 	}
 	return b.String()
+}
+
+// implementedBehaviors renders the behaviors a table implements (D103),
+// `Timers<Ticket, { deadlines: { ... } }>`: the behavior's carrier from
+// @superschematic/db, the table itself and its config as a type literal,
+// which the reader reads back to the same config.
+func (e *emitter) implementedBehaviors(def *ir.TypeDef) []string {
+	var out []string
+	for _, ref := range def.ImplementsBehaviors() {
+		owner := fmt.Sprintf("type %s implements %s", def.Name, ref.Name)
+		if !identifierPattern.MatchString(ref.Name) {
+			e.failf("%s: behavior %s has no carrier in %s, so the use has no TypeScript authoring form", owner, ref.Name, behaviorFieldPackage)
+			continue
+		}
+		carrier := ref.Name
+		if e.declares(carrier) {
+			alias := carrier + "Behavior"
+			for i := 2; e.declares(alias); i++ {
+				alias = fmt.Sprintf("%sBehavior%d", carrier, i)
+			}
+			carrier = e.useAs(behaviorFieldPackage, ref.Name, alias)
+		} else {
+			e.importSymbol(naming.Active().Specifier(behaviorFieldPackage), carrier)
+		}
+		config := any(map[string]any{})
+		if len(ref.Config) > 0 {
+			if err := json.Unmarshal(ref.Config, &config); err != nil {
+				e.failf("%s: config: %v", owner, err)
+			}
+		}
+		out = append(out, fmt.Sprintf("%s<%s, %s>", carrier, e.ident(def.Name, "type"), literalType(config)))
+	}
+	return out
 }
 
 // identityTraits renders the user model's traits a table carries (D50):
@@ -541,8 +691,8 @@ func (e *emitter) fieldDecorators(fd *ir.FieldDef) []string {
 	if fd.Icon != "" {
 		out = append(out, e.useAs("@superschematic/schema", "icon", "schemaIcon")+fmt.Sprintf("(%s)", quote(fd.Icon)))
 	}
-	if fd.Display != nil && fd.Display.Multiline != nil {
-		out = append(out, e.use("display")+fmt.Sprintf("({ multiline: %t })", *fd.Display.Multiline))
+	if members := fieldDisplayMembers(fd.Display); members != "" {
+		out = append(out, e.use("display")+"({ "+members+" })")
 	}
 	if fd.Key {
 		out = append(out, e.use("key"))
@@ -562,6 +712,12 @@ func (e *emitter) fieldDecorators(fd *ir.FieldDef) []string {
 	if fd.Virtual {
 		out = append(out, e.use("virtual"))
 	}
+	if fd.Decrypted {
+		out = append(out, e.use("decrypted"))
+	}
+	if fd.SQLName != "" {
+		out = append(out, e.use("column")+fmt.Sprintf("(%s)", quote(fd.SQLName)))
+	}
 	if fd.SourceMustProject {
 		out = append(out, e.use("sourceMustProject"))
 	}
@@ -574,6 +730,27 @@ func (e *emitter) fieldDecorators(fd *ir.FieldDef) []string {
 	return out
 }
 
+// fieldDisplayMembers is a field's @display argument's members (D48,
+// amended), in the IR's order: multiline, then currency, a code or
+// { field }; empty for a display that declares neither.
+func fieldDisplayMembers(display *ir.FieldDisplay) string {
+	if display == nil {
+		return ""
+	}
+	var members []string
+	if display.Multiline != nil {
+		members = append(members, fmt.Sprintf("multiline: %t", *display.Multiline))
+	}
+	if c := display.Currency; c != nil {
+		if c.Code != "" {
+			members = append(members, "currency: "+quote(c.Code))
+		} else {
+			members = append(members, "currency: { field: "+quote(c.Field)+" }")
+		}
+	}
+	return strings.Join(members, ", ")
+}
+
 // checkStructField rejects FieldDef metadata that has no authoring form on a
 // data-class property.
 func (e *emitter) checkStructField(fd *ir.FieldDef, owner string) {
@@ -583,18 +760,21 @@ func (e *emitter) checkStructField(fd *ir.FieldDef, owner string) {
 	rest.TypeRef = ir.TypeRef{}
 	rest.Required = false
 	rest.Title, rest.Purpose, rest.Icon = "", "", ""
-	if rest.Display != nil && rest.Display.Multiline != nil {
+	if fieldDisplayMembers(rest.Display) != "" {
 		rest.Display = nil
 	}
 	rest.Default = nil
 	rest.ValidateMin, rest.ValidateMax = nil, nil
 	rest.ValidateUploadMaxBytes = nil
+	rest.FileUpload = nil
 	rest.ValidateMinLength, rest.ValidateMaxLength = nil, nil
 	rest.ValidateListMin, rest.ValidateListMax = nil, nil
 	rest.ValidatePattern = ""
+	rest.ValidatePrecision, rest.ValidateScale, rest.ValidateDimensions = nil, nil, nil
 	rest.Key, rest.Unique, rest.AutoGenerated = false, false, false
 	rest.SearchField, rest.JsonField, rest.Secret = false, false, false
 	rest.UIHidden, rest.Virtual, rest.Encrypted = false, false, false
+	rest.EncryptedAtRest, rest.Decrypted, rest.SQLName = false, false, ""
 	rest.UIControl = ""
 	rest.SourceMustProject = false
 	rest.TemporalFormat = ""
@@ -610,4 +790,30 @@ func (e *emitter) checkStructField(fd *ir.FieldDef, owner string) {
 // isZeroField reports whether a FieldDef has been fully cleared.
 func isZeroField(fd *ir.FieldDef) bool {
 	return reflect.DeepEqual(fd, &ir.FieldDef{})
+}
+
+// rawSQLArgs renders @rawSql's options object, its SQL as template literals
+// when they span lines (D83).
+func rawSQLArgs(raw ir.RawSQLDef) string {
+	sql := func(s string) string {
+		if strings.Contains(s, "\n") && !strings.ContainsAny(s, "`\\") && !strings.Contains(s, "${") {
+			return "`" + s + "`"
+		}
+		return quote(s)
+	}
+	parts := []string{"id: " + quote(raw.ID), "up: " + sql(raw.Up)}
+	if raw.Down != "" {
+		parts = append(parts, "down: "+sql(raw.Down))
+	}
+	if raw.After != "" {
+		parts = append(parts, "after: "+quote(raw.After))
+	}
+	if len(raw.Dialects) > 0 {
+		dialects := make([]string, len(raw.Dialects))
+		for i, d := range raw.Dialects {
+			dialects[i] = quote(d)
+		}
+		parts = append(parts, "dialects: ["+strings.Join(dialects, ", ")+"]")
+	}
+	return "{ " + strings.Join(parts, ", ") + " }"
 }

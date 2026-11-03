@@ -1,0 +1,46 @@
+# Signs users in and out, without registration, and lists the signed-in
+# user's notes, a resource its pages list; its app, Backoffice, serves the
+# console over them, the engine's pages among them.
+name: fixture-app-api
+kind: API
+types:
+  NoteCount:
+    name: NoteCount
+    role: APIView
+    fields:
+      - name: count
+        typeRef: { name: number }
+        required: true
+  NoteTitle:
+    name: NoteTitle
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+      - name: title
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: Account
+    userSessions: {}
+    operations: []
+  - name: Notes
+    operations:
+      - name: noteCount
+        typeRef: { name: NoteCount }
+        required: true
+        auth: true
+        httpMethod: GET
+        restPath: notes/count
+      - name: listNotes
+        typeRef: { name: NoteTitle, isArray: true }
+        required: true
+        auth: true
+        httpMethod: GET
+        restPath: notes
+# The app, a Topcoat app over the API's parts, which its stack runs as a
+# deployable of its own.
+apps:
+  - name: Backoffice
+    extensions: [topcoat]

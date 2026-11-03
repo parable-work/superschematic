@@ -20,7 +20,9 @@ export type IdentityStoreErrorKind =
   /** The login scalar does not parse the login. */
   | 'invalid_login'
   /** The name scalar does not parse a display name the store would write. */
-  | 'invalid_name';
+  | 'invalid_name'
+  /** approveUser found the user not waiting for approval (D81). */
+  | 'not_pending';
 
 export class IdentityStoreError extends Error {
   constructor(
@@ -52,6 +54,8 @@ export interface StoredUser {
   readonly name: string;
   /** The user's credential has disabledAt set. */
   readonly disabled: boolean;
+  /** The user's credential has pendingAt set: they wait for an administrator's approval (D81). */
+  readonly pending: boolean;
   /** The roles the user holds, by name: getUser and listUsers fill them in, other methods leave them empty. */
   readonly roles: readonly StoredRole[];
 }
@@ -87,6 +91,17 @@ export interface NewUser {
   readonly name: string;
   readonly passwordHash: string;
   readonly at: Date;
+  /** Writes pendingAt: the user waits for an administrator's approval (approveUser) before they sign in (D81). */
+  readonly pending?: boolean;
+  /** The names of the roles the user is granted with their row, each created with no permissions when no role has the name (D81). */
+  readonly roles?: readonly string[];
+  /**
+   * When no role grant exists yet, makes the user the database's first
+   * administrator, as identity bootstrap would (D81): never pending, and
+   * granted role, created with permissions when no role has the name,
+   * beside roles. Two users created at once make one administrator.
+   */
+  readonly first?: { readonly role: string; readonly permissions: readonly string[] };
 }
 
 /** A session a store creates. */
@@ -112,8 +127,15 @@ export interface IdentityStore {
   getUser(id: string): Promise<StoredUser>;
   /** Every user with their roles, by login. */
   listUsers(): Promise<StoredUser[]>;
-  /** Creates a user and their credential; the database generates the user's key. */
+  /**
+   * Creates a user and their credential, and grants them NewUser's roles,
+   * in one transaction; the database generates the user's key. The user
+   * it returns holds the roles it granted, and is pending when it wrote
+   * pendingAt. Roles without a UserRole table refuse no_roles.
+   */
   createUser(user: NewUser): Promise<StoredUser>;
+  /** Clears the credential's pendingAt (D81); a user who is not pending refuses not_pending. */
+  approveUser(userId: string): Promise<void>;
 
   /** Writes the user's password hash and passwordChangedAt, and revokes the user's sessions but keepSession (none when empty). */
   setPassword(userId: string, passwordHash: string, at: Date, keepSession: string): Promise<void>;

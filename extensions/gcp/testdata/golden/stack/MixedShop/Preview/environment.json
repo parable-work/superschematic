@@ -3215,7 +3215,7 @@
               "value": "300"
             }
           ],
-          "image": "shop-pricing",
+          "image": "images.fake.test/shop-pricing",
           "language": "typescript",
           "name": {
             "$concat": [
@@ -3411,7 +3411,7 @@
               }
             }
           ],
-          "image": "shop-storefront",
+          "image": "images.fake.test/shop-storefront",
           "language": "typescript",
           "name": {
             "$concat": [

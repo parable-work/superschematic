@@ -1,0 +1,77 @@
+{
+  "dialect": "postgres",
+  "from": "83fb203dfcd654b5a414b5afb557fecb6b76faeffb2272579e0ec7c241819108",
+  "hash": "7a0e6b06664daae9d774fddf811efcb20cc6f902c966e45e0117ca5e4fe055a8",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/catalogItem",
+          "reason": "Table product is renamed to catalogItem, following Product's @table: servers built from the previous version still use the old name.",
+          "subject": "table/catalogItem"
+        }
+      ],
+      "index": 1,
+      "op": "renameTable",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE product RENAME TO \"catalogItem\""
+      ],
+      "subject": "table/catalogItem",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/catalogItem/column/embeddingVector",
+          "reason": "product.embedding is renamed to catalogItem.embeddingVector, following Product.embedding's @column: servers built from the previous version still use the old name.",
+          "subject": "table/catalogItem/column/embeddingVector"
+        }
+      ],
+      "index": 2,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"catalogItem\" RENAME COLUMN embedding TO \"embeddingVector\""
+      ],
+      "subject": "table/catalogItem/column/embeddingVector",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"catalogItem\" RENAME CONSTRAINT product_pkey TO \"catalogItem_pkey\""
+      ],
+      "subject": "table/catalogItem/constraint/catalogItem_pkey",
+      "transactional": true
+    },
+    {
+      "index": 4,
+      "op": "renameIndex",
+      "phase": "expand",
+      "statements": [
+        "ALTER INDEX idx_product_embedding RENAME TO \"idx_catalogItem_embeddingVector\""
+      ],
+      "subject": "table/catalogItem/index/idx_catalogItem_embeddingVector",
+      "transactional": true
+    },
+    {
+      "index": 5,
+      "op": "renameIndex",
+      "phase": "expand",
+      "statements": [
+        "ALTER INDEX idx_product_search_trgm RENAME TO \"idx_catalogItem_search_trgm\""
+      ],
+      "subject": "table/catalogItem/index/idx_catalogItem_search_trgm",
+      "transactional": true
+    }
+  ],
+  "to": "3ff50710b47f0384ed971a27f9d955ffe10bdebe02ee7c0e54b8dfdd94fb4c79",
+  "toModel": null,
+  "version": 1
+}

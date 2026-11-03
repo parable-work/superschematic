@@ -67,7 +67,8 @@ func TestGenerateWebhooksShape(t *testing.T) {
 // throws without a verifier for each provider, a provider's verifier runs
 // before the rate limit, the body limit and the permission check of its
 // routes, the manual one included, the route reads the body the verifier
-// read, and a route that is not a webhook runs no verifier.
+// read, and a route that is not a webhook runs no verifier. The runtime's
+// jwtBodyHashVerifier is a provider's verifier as it is (D81).
 func TestGeneratedWebhooksRouter(t *testing.T) {
 	tree := materializeAPI(t, webhooksFixture(t))
 	tree.typeCheck(t)

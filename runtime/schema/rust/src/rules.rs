@@ -20,6 +20,12 @@ pub enum Rule {
     Max(f64, &'static str),
     ListMin(usize, &'static str),
     ListMax(usize, &'static str),
+    /// A Generic.Decimal's digits before the point, at most (D84).
+    Precision(usize, &'static str),
+    /// A Generic.Decimal's digits after the point, at most (D84).
+    Scale(usize, &'static str),
+    /// An Embedding.Vector's length, exactly (D84).
+    Dimensions(usize, &'static str),
 }
 
 /// Checks the list-size rules (`listMin`, `listMax`) against a list, or a
@@ -36,8 +42,9 @@ pub fn check_list_rules(errors: &mut ValidationErrors, path: &str, len: usize, r
 }
 
 /// Checks the value rules (`minLength`, `maxLength`, `pattern`, `min`,
-/// `max`) on one value at path, in the order the schema declares them. The
-/// list-size rules are skipped.
+/// `max`) on one value at path, in the order the schema declares them, then
+/// the digit rules (`precision`, `scale`, `dimensions`, D84). The list-size
+/// rules are skipped.
 pub fn check_value_rules(errors: &mut ValidationErrors, path: &str, value: &Value, rules: &[Rule]) {
     for rule in rules {
         match *rule {
@@ -66,8 +73,57 @@ pub fn check_value_rules(errors: &mut ValidationErrors, path: &str, value: &Valu
                     errors.add(path, "max", message);
                 }
             }
+            Rule::Precision(max, message) => {
+                if decimal_digits(value).is_some_and(|(whole, _)| whole > max) {
+                    errors.add(path, "precision", message);
+                }
+            }
+            Rule::Scale(max, message) => {
+                if decimal_digits(value).is_some_and(|(_, fraction)| fraction > max) {
+                    errors.add(path, "scale", message);
+                }
+            }
+            Rule::Dimensions(dimensions, message) => {
+                if vector_len(value).is_some_and(|len| len != dimensions) {
+                    errors.add(path, "dimensions", message);
+                }
+            }
             Rule::ListMin(..) | Rule::ListMax(..) => {}
         }
+    }
+}
+
+/// The digits of a Generic.Decimal's canonical form (D84): before the
+/// point, without leading zeros, and after it, without trailing zeros. None
+/// for a value that is no decimal's text, which the scalar reports.
+fn decimal_digits(value: &Value) -> Option<(usize, usize)> {
+    let text = value.as_str()?.trim();
+    let unsigned = text.strip_prefix(['+', '-']).unwrap_or(text);
+    let (whole, fraction) = match unsigned.split_once('.') {
+        Some((whole, fraction)) if !fraction.is_empty() => (whole, fraction),
+        Some(_) => return None,
+        None => (unsigned, ""),
+    };
+    let digits = |part: &str| part.bytes().all(|b| b.is_ascii_digit());
+    if whole.is_empty() || !digits(whole) || !digits(fraction) {
+        return None;
+    }
+    Some((
+        whole.trim_start_matches('0').len(),
+        fraction.trim_end_matches('0').len(),
+    ))
+}
+
+/// The length of an Embedding.Vector: the JSON array, or the array its JSON
+/// text holds. None for any other value, which the scalar reports.
+fn vector_len(value: &Value) -> Option<usize> {
+    match value {
+        Value::Array(items) => Some(items.len()),
+        Value::String(text) if !text.is_empty() => match serde_json::from_str::<Value>(text) {
+            Ok(Value::Array(items)) => Some(items.len()),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -113,6 +169,29 @@ mod tests {
         assert_eq!(validators(&errors, "c"), ["max"]);
         assert_eq!(validators(&errors, "d"), ["min"]);
         assert!(errors.get("e").is_none());
+        assert!(errors.get("f").is_none());
+    }
+
+    static DIGITS: &[Rule] = &[
+        Rule::Precision(3, "must have at most 3 digits before the decimal point"),
+        Rule::Scale(2, "must have at most 2 digits after the decimal point"),
+        Rule::Dimensions(2, "must have exactly 2 dimensions"),
+    ];
+
+    #[test]
+    fn digit_rules_count_the_canonical_form() {
+        let mut errors = ValidationErrors::new();
+        check_value_rules(&mut errors, "a", &json!("+000123.4500"), DIGITS);
+        check_value_rules(&mut errors, "b", &json!("-1234.567"), DIGITS);
+        check_value_rules(&mut errors, "c", &json!("1e3"), DIGITS);
+        check_value_rules(&mut errors, "d", &json!([1, 2, 3]), DIGITS);
+        check_value_rules(&mut errors, "e", &json!("[1]"), DIGITS);
+        check_value_rules(&mut errors, "f", &json!([0.5, 1]), DIGITS);
+        assert!(errors.get("a").is_none());
+        assert_eq!(validators(&errors, "b"), ["precision", "scale"]);
+        assert!(errors.get("c").is_none());
+        assert_eq!(validators(&errors, "d"), ["dimensions"]);
+        assert_eq!(validators(&errors, "e"), ["dimensions"]);
         assert!(errors.get("f").is_none());
     }
 

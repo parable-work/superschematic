@@ -20,10 +20,12 @@ afterEach(cleanup);
 const ENGINE_OWNER = 'engine';
 
 // The indexes and triggers of engine_events that the engine relies on: the
-// instance index a one-instance read names (INDEXED BY), the namespace,
-// schema and publish ranges, and the append-only triggers.
+// instance indexes a one-instance read names (INDEXED BY), by sequence and
+// by cursor, the namespace, schema and publish ranges, and the append-only
+// triggers.
 const EVENT_LOG_OBJECTS = [
   'index engine_events_instance',
+  'index engine_events_instance_cursor',
   'index engine_events_namespace',
   'index engine_events_publish',
   'index engine_events_schema',
@@ -65,13 +67,16 @@ for (const driver of drivers) {
       // The log holds the define's and the publish's events, so its triggers fire.
       assert.throws(() => engine.storage.run('DELETE FROM engine_events'), /engine_events is append-only/);
       assert.throws(() => engine.storage.run("UPDATE engine_events SET actor = 'mallory'"), /engine_events is append-only/);
-      // A define has no instance and no version, and only a define lacks a version.
+      // A define has no instance and no version, and only a define lacks a
+      // version; an instance's event has a sequence, but a beside
+      // operation's (D77).
       const insert = 'INSERT INTO engine_events (kind, namespace, schema, instance_id, seq, version, actor, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
       for (const row of [
         ['define', 'default', 'Order', null, null, 1, 'mallory', 1],
         ['define', 'default', 'Order', 'o9', 1, null, 'mallory', 1],
         ['publish', 'default', 'Order', null, null, null, 'mallory', 1],
         ['create', 'default', 'Order', 'o9', 1, null, 'mallory', 1],
+        ['update', 'default', 'Order', 'o9', null, 1, 'mallory', 1],
       ]) {
         assert.throws(() => engine.storage.run(insert, row), /CHECK constraint failed/, JSON.stringify(row));
       }

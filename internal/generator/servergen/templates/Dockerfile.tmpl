@@ -25,6 +25,10 @@
 {{- if .Engines }} The tarball holds the engine's archive too
 # (D58), which the {{ .Kind }} links to open the engine on an engine database.
 {{- end }}
+{{- if .Docker.LinksRules }} It holds the behaviors' core's archive
+# too (D103), which the ORM of a database whose tables' fields are behaviors
+# links.
+{{- end }}
 {{- else }}
 # The generated code links superscalar's static archive through cgo (D3 in
 # docs/DECISIONS.md), so the {{ .Kind }} cannot build with CGO_ENABLED=0. The
@@ -52,6 +56,12 @@
 # Cargo workspace beside the engine's Go binding, with the crates it reaches
 # by path at their places in the checkout.
 {{- end }}
+{{- end }}
+{{- if .Docker.Rules }}
+# The rules stage does the same for the behaviors' core's archive (D103),
+# which the ORM of a database whose tables' fields are behaviors links: the
+# staticlib of the rules-wasm crate, from the engine's Cargo workspace,
+# with the crates it reaches by path at their places in the checkout.
 {{- end }}
 {{- end }}
 # The build stage links the binary against Debian's glibc, and the image runs
@@ -121,6 +131,18 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     && cp {{ .Docker.Engine.Workspace }}/target/release/libsuperschematic_engine_ffi.a /libsuperschematic_engine.a
 {{- end }}
 {{- end }}
+{{- if .Docker.Rules }}
+
+FROM rust:${RUST_VERSION}-trixie AS rules
+WORKDIR /src
+COPY {{ .Docker.Rules.Workspace }} {{ .Docker.Rules.Workspace }}
+{{- range .Docker.Rules.Crates }}
+COPY {{ . }} {{ . }}
+{{- end }}
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    cargo build --locked --release --manifest-path {{ .Docker.Rules.Manifest }} \
+    && cp {{ .Docker.Rules.Archive }} /libsuperschematic_rules.a
+{{- end }}
 
 FROM golang:${GO_VERSION}-trixie AS build
 ENV GOTOOLCHAIN=local CGO_ENABLED=1
@@ -133,6 +155,9 @@ COPY --from=versiongraph /libsuperschematic_versiongraph.a /archives/
 {{- if .Docker.Engine }}
 COPY --from=engine /libsuperschematic_engine.a /archives/
 {{- end }}
+{{- if .Docker.Rules }}
+COPY --from=rules /libsuperschematic_rules.a /archives/
+{{- end }}
 RUN lib="{{ .Docker.ScalarGo }}/lib/linux_$(go env GOARCH)" \
     && mkdir -p "$lib" && cp /archives/libsuperscalar_ffi.a "$lib/"
 {{- if .Docker.VersionGraphGo }}
@@ -142,6 +167,10 @@ RUN lib="{{ .Docker.VersionGraphGo }}/lib/linux_$(go env GOARCH)" \
 {{- if .Docker.Engine }}
 RUN lib="{{ .Docker.Engine.Go }}/lib/linux_$(go env GOARCH)" \
     && mkdir -p "$lib" && cp /archives/libsuperschematic_engine.a "$lib/"
+{{- end }}
+{{- if .Docker.Rules }}
+RUN lib="{{ .Docker.Rules.Go }}/lib/linux_$(go env GOARCH)" \
+    && mkdir -p "$lib" && cp /archives/libsuperschematic_rules.a "$lib/"
 {{- end }}
 {{- end }}
 WORKDIR /src/{{ .Docker.Context }}

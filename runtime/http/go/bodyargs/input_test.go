@@ -47,3 +47,29 @@ func TestReadInputMakesTheChecksEveryServerMakes(t *testing.T) {
 		t.Fatalf("a declared body: %s, %+v", raw, refusal)
 	}
 }
+
+func TestReadInputDroppingUnknownKeepsOnlyTheDeclaredKeys(t *testing.T) {
+	fields := []string{"webhook_type", "item_id"}
+	for _, tc := range []struct{ body, detail, reason string }{
+		{body: "", detail: BodyRequired},
+		{body: "{nope", detail: BodyNotJSON},
+		{body: "null", detail: BodyMismatch, reason: "expected an object"},
+		{body: `["item_id"]`, detail: BodyMismatch, reason: "expected an object"},
+	} {
+		raw, refusal := ReadInputDroppingUnknown(strings.NewReader(tc.body), fields)
+		if refusal == nil || refusal.Detail != tc.detail || refusal.Reason != tc.reason {
+			t.Errorf("%q: read %s, refusal %+v, want %q / %q", tc.body, raw, refusal, tc.detail, tc.reason)
+		}
+	}
+	for body, want := range map[string]string{
+		`{"environment":"sandbox","webhook_type":"ITEM","Item_Id":"x","item_id":"a","extra":{"n":[1]}}`: `{"webhook_type":"ITEM","item_id":"a"}`,
+		`{"environment":"sandbox"}`:                     `{}`,
+		`{"item_id":"a","item_id":"b"}`:                 `{"item_id":"a","item_id":"b"}`,
+		`{ "item_id" : { "nested" : [1, 2] } , "x":1 }`: `{"item_id":{ "nested" : [1, 2] }}`,
+	} {
+		raw, refusal := ReadInputDroppingUnknown(strings.NewReader(body), fields)
+		if refusal != nil || string(raw) != want {
+			t.Errorf("%s: read %s, %+v, want %s", body, raw, refusal, want)
+		}
+	}
+}

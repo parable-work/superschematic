@@ -34,10 +34,11 @@ CREATE TABLE preference (
   slot_key UUID NOT NULL,
   handle CITEXT NOT NULL,
   value JSONB NOT NULL,
-  revision BIGINT NOT NULL,
+  revision BIGINT DEFAULT 1 NOT NULL,
   tags CITEXT[] DEFAULT '{}' NOT NULL,
   archived_at TIMESTAMPTZ,
-  hidden BOOLEAN NOT NULL
+  hidden BOOLEAN DEFAULT false NOT NULL,
+  CONSTRAINT ck_preference_scope CHECK (scope IN ('app', 'team', 'user'))
 );
 
 COMMENT ON TABLE preference IS 'One stored preference value for a slot, scoped to an app, a team, or a

@@ -4,6 +4,12 @@ import type { ScalarValidationResult, ValidationError } from 'superscalar/valida
 
 import { validateContactEmail as validateContactEmailFromLib, normalizeContactEmail as normalizeContactEmailFromLib } from 'superscalar/scalars';
 
+// The constructors of ContactEmail, the scalar library's own, which the
+// package hands out beside the type: each returns the value as
+// ContactEmail and throws on a value Contact.Email refuses (D25,
+// amended; D100).
+export { parseContactEmailStrict, normalizeContactEmailStrict } from 'superscalar/scalars';
+
 const ContactEmailPattern = new RegExp("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$", "u");
 
 /**

@@ -1,0 +1,346 @@
+{
+  "name": "fixture-reactions-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-reactions-db",
+      "types": [
+        "Project",
+        "Task"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-reactions-db",
+      "kind": "DB"
+    }
+  ],
+  "scalars": {
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "IdentityUUID",
+        "json_schema": "string",
+        "python": "uuid.UUID",
+        "rust": "uuid::Uuid",
+        "sql": "UUID",
+        "typescript": "string"
+      },
+      "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+      "hasCustomParse": true
+    }
+  },
+  "types": {
+    "ProjectStatusTransitionInput": {
+      "name": "ProjectStatusTransitionInput",
+      "owner": "fixture-reactions-api",
+      "comment": "The parameters of Project's status transition.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "to",
+          "comment": "The state to move to.",
+          "typeRef": {
+            "name": "ProjectStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "ProjectStatusTransitionResult": {
+      "name": "ProjectStatusTransitionResult",
+      "owner": "fixture-reactions-api",
+      "comment": "What Project's status transition returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the instance was in.",
+          "typeRef": {
+            "name": "ProjectStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state it is in now.",
+          "typeRef": {
+            "name": "ProjectStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TaskStatusTransitionInput": {
+      "name": "TaskStatusTransitionInput",
+      "owner": "fixture-reactions-api",
+      "comment": "The parameters of Task's status transition.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "to",
+          "comment": "The state to move to.",
+          "typeRef": {
+            "name": "TaskStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TaskStatusTransitionResult": {
+      "name": "TaskStatusTransitionResult",
+      "owner": "fixture-reactions-api",
+      "comment": "What Task's status transition returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "from",
+          "comment": "The state the instance was in.",
+          "typeRef": {
+            "name": "TaskStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "to",
+          "comment": "The state it is in now.",
+          "typeRef": {
+            "name": "TaskStatusState"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    }
+  },
+  "enums": {
+    "ProjectStatusState": {
+      "name": "ProjectStatusState",
+      "owner": "fixture-reactions-api",
+      "comment": "A state of Project's status Workflow.",
+      "values": [
+        {
+          "name": "Planned",
+          "serializedAs": "planned"
+        },
+        {
+          "name": "Active",
+          "serializedAs": "active"
+        },
+        {
+          "name": "Done",
+          "serializedAs": "done"
+        },
+        {
+          "name": "Failed",
+          "serializedAs": "failed"
+        },
+        {
+          "name": "Cancelled",
+          "serializedAs": "cancelled"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TaskStatusState": {
+      "name": "TaskStatusState",
+      "owner": "fixture-reactions-api",
+      "comment": "A state of Task's status Workflow.",
+      "values": [
+        {
+          "name": "Todo",
+          "serializedAs": "todo"
+        },
+        {
+          "name": "Doing",
+          "serializedAs": "doing"
+        },
+        {
+          "name": "Done",
+          "serializedAs": "done"
+        },
+        {
+          "name": "Failed",
+          "serializedAs": "failed"
+        },
+        {
+          "name": "Dropped",
+          "serializedAs": "dropped"
+        }
+      ],
+      "origin": "behavior"
+    }
+  },
+  "operationSets": [
+    {
+      "name": "ProjectActions",
+      "comment": "A project's status operations (D103), for callers who hold projects.write.",
+      "operations": [
+        {
+          "name": "statusTransition",
+          "comment": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "docs": {
+            "title": "Project status: transition",
+            "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+            "capability": "project.status.transition",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "project_status_transition",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "ProjectStatusTransitionResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Project row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "ProjectStatusTransitionInput"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "projects.write"
+          ],
+          "behaviorOperation": {
+            "database": "fixture-reactions-db",
+            "type": "Project",
+            "key": "id",
+            "use": "status",
+            "behavior": "Workflow",
+            "operation": "transition",
+            "writes": true
+          },
+          "httpMethod": "POST",
+          "restPath": "project/{id}/status/transition",
+          "origin": "behavior"
+        }
+      ],
+      "behaviorOperations": {
+        "type": "Project"
+      },
+      "permissions": [
+        "projects.write"
+      ]
+    },
+    {
+      "name": "TaskActions",
+      "comment": "A task's status operations, for callers who hold tasks.write.",
+      "operations": [
+        {
+          "name": "statusTransition",
+          "comment": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "docs": {
+            "title": "Task status: transition",
+            "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+            "capability": "task.status.transition",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "task_status_transition",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TaskStatusTransitionResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Task row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TaskStatusTransitionInput"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "tasks.write"
+          ],
+          "behaviorOperation": {
+            "database": "fixture-reactions-db",
+            "type": "Task",
+            "key": "id",
+            "use": "status",
+            "behavior": "Workflow",
+            "operation": "transition",
+            "writes": true
+          },
+          "httpMethod": "POST",
+          "restPath": "task/{id}/status/transition",
+          "origin": "behavior"
+        }
+      ],
+      "behaviorOperations": {
+        "type": "Task"
+      },
+      "permissions": [
+        "tasks.write"
+      ]
+    }
+  ],
+  "workers": [
+    {
+      "name": "ProjectReactions",
+      "comment": "Runs Project's change queue (D103): the writes of its rows, which its\nReactions hear.",
+      "queue": "ProjectChange",
+      "queues": [
+        "ProjectChange"
+      ],
+      "behaviorWorker": {
+        "type": "Project"
+      },
+      "origin": "behavior"
+    },
+    {
+      "name": "TaskReactions",
+      "comment": "Runs Task's change queue: its own rules, and Project's allTerminal and\nanyTerminal over task.project, which move the project as this worker.",
+      "queue": "TaskChange",
+      "queues": [
+        "TaskChange"
+      ],
+      "concurrency": 2,
+      "behaviorWorker": {
+        "type": "Task"
+      },
+      "origin": "behavior"
+    }
+  ]
+}

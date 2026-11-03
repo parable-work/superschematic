@@ -456,3 +456,20 @@ func runGoAPIModule(t *testing.T, apiDir string) {
 		}
 	}
 }
+
+// TestAColonPathParameterIsRefused (D100): the data forms carry an
+// operation's rest path as it is, which @rest's decorator never read, so
+// the API generator refuses a :name segment too, rather than publish and
+// route it as text.
+func TestAColonPathParameterIsRefused(t *testing.T) {
+	schema := ir.NewSchema("colon-paths", ir.SchemaKindAPI)
+	schema.OperationSets = []*ir.OperationSet{{Name: "BusinessQueries", Operations: []*ir.FieldDef{{
+		Name: "exportBusiness", HTTPMethod: "GET", RestPath: "businesses/:businessId/export", TypeRef: ir.TypeRef{Name: "string"},
+		Arguments: []*ir.ArgumentDef{{Name: "businessId", TypeRef: ir.TypeRef{Name: "string"}, Required: true}},
+	}}}}
+	_, err := apigen.Generate(schema, apigen.Options{Provider: sessionauth.Provider{}, SchemaName: "colon-paths", Clock: goModuleClock})
+	want := `apigen: operation business.exportBusiness: @rest path "businesses/:businessId/export" writes a path parameter as ":businessId", which OpenAPI and the generated routers read as text; write it in braces: "businesses/{businessId}/export"`
+	if err == nil || err.Error() != want {
+		t.Fatalf("Generate = %v, want %s", err, want)
+	}
+}

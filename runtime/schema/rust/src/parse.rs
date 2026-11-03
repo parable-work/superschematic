@@ -70,6 +70,13 @@ pub fn fill_default(
     }
 }
 
+/// Removes the object's keys that known does not list: a type that is
+/// `@allowUnknownFields` drops them whatever the caller's policy (D87), so
+/// what the type decodes holds only the keys it declares.
+pub fn drop_unknown_fields(object: &mut Map<String, Value>, known: &[&str]) {
+    object.retain(|key, _| known.contains(&key.as_str()));
+}
+
 /// Refuses the object's keys that known does not list, when policy refuses
 /// them.
 pub fn check_unknown_fields(
@@ -121,6 +128,14 @@ mod tests {
             other => panic!("unexpected {other:?}"),
         }
         assert!(check_unknown_fields(&object, &["a", "z"], UnknownFields::Refuse).is_ok());
+    }
+
+    #[test]
+    fn unknown_fields_are_dropped_for_a_lenient_type() {
+        let mut object = json!({"z": 1, "a": 2, "Y": 3}).as_object().unwrap().clone();
+        drop_unknown_fields(&mut object, &["a", "y"]);
+        assert_eq!(Value::Object(object.clone()), json!({"a": 2}));
+        assert!(check_unknown_fields(&object, &["a", "y"], UnknownFields::Refuse).is_ok());
     }
 
     #[test]

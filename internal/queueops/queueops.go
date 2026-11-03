@@ -18,6 +18,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // Version is the version of the document and of the result.
@@ -33,6 +34,9 @@ const (
 	Retry Operation = "retry"
 	// Drop deletes them.
 	Drop Operation = "drop"
+	// Backfill enqueues a message for each row of the tables whose
+	// @enqueueOnChange names the queue that meets its conditions (D88).
+	Backfill Operation = "backfill"
 )
 
 // DefaultLimit is how many dead messages a listing shows unless told.
@@ -54,6 +58,20 @@ type Request struct {
 	// (NormalizeID), and All takes every dead message in their place.
 	IDs []string
 	All bool
+
+	// Key is the quoted key column of a queue that keeps one ready message
+	// per key (D80), whose retry leaves each key one ready message; empty
+	// for every other queue.
+	Key string
+
+	// Table is the queue's table, unquoted, as sqlutil.QueueTableName
+	// names it, @table's name among them (D85); empty takes the name of a
+	// queue whose class has no @table.
+	Table string
+
+	// Backfills are the statements Backfill runs, BackfillStatements's,
+	// one or more.
+	Backfills []string
 }
 
 // document is the runner's queue document (migrate.QueueDocument).
@@ -69,12 +87,13 @@ type document struct {
 }
 
 type statements struct {
-	Dead     string `json:"dead"`
-	States   string `json:"states"`
-	Retry    string `json:"retry"`
-	RetryAll string `json:"retryAll"`
-	Drop     string `json:"drop"`
-	DropAll  string `json:"dropAll"`
+	Dead     string   `json:"dead"`
+	States   string   `json:"states"`
+	Retry    string   `json:"retry"`
+	RetryAll string   `json:"retryAll"`
+	Drop     string   `json:"drop"`
+	DropAll  string   `json:"dropAll"`
+	Backfill []string `json:"backfill,omitempty"`
 }
 
 // Document returns the queue document of req, indented, with the
@@ -100,10 +119,24 @@ func Document(req Request) ([]byte, error) {
 				return nil, fmt.Errorf("%q is not a message's ID in lower case", id)
 			}
 		}
+	case Backfill:
+		if req.Limit != 0 || len(req.IDs) > 0 || req.All {
+			return nil, fmt.Errorf("a backfill takes no limit, no IDs and no all")
+		}
+		if len(req.Backfills) == 0 {
+			return nil, fmt.Errorf("no @enqueueOnChange of %s enqueues %s, so there is nothing to backfill it from", req.Service, req.Queue)
+		}
 	default:
-		return nil, fmt.Errorf("operation %q is not dead, retry or drop", req.Operation)
+		return nil, fmt.Errorf("operation %q is not dead, retry, drop or backfill", req.Operation)
 	}
-	s := sqlutil.PostgresQueueOperatorStatements(sqlutil.QuoteIdentifier(sqlgen.QueueTableName(req.Queue)))
+	if req.Operation != Backfill && len(req.Backfills) > 0 {
+		return nil, fmt.Errorf("%s takes no backfill statements", req.Operation)
+	}
+	table := req.Table
+	if table == "" {
+		table = sqlgen.QueueTableName(&ir.TypeDef{Name: req.Queue})
+	}
+	s := sqlutil.PostgresQueueOperatorStatements(sqlutil.QuoteIdentifier(table), req.Key)
 	doc := document{
 		Version:   Version,
 		Service:   req.Service,
@@ -113,6 +146,7 @@ func Document(req Request) ([]byte, error) {
 		All:       req.All,
 		Statements: statements{
 			Dead: s.Dead, States: s.States, Retry: s.Retry, RetryAll: s.RetryAll, Drop: s.Drop, DropAll: s.DropAll,
+			Backfill: req.Backfills,
 		},
 	}
 	if req.Operation == Dead {

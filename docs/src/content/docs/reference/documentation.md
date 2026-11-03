@@ -40,7 +40,7 @@ export class ReturnMutations {
 | --- | --- | --- |
 | `title` | yes | non-empty, no surrounding whitespace |
 | `description` | yes | non-empty |
-| `capability` | yes | a stable dotted identifier with at least two lowercase segments (`[a-z0-9]` words joined by `-`), such as `orders.returns.open` |
+| `capability` | yes | a stable dotted identifier with at least two segments, each lowercase letters and digits (`[a-z0-9]` words joined by `-`, never `_`), such as `orders.returns.open`; an error names the first character it may not hold |
 | `lifecycle` | yes | `draft`, `experimental`, `active`, `deprecated` or `retired` |
 | `visibility` | yes | `public`, `internal` or `preview`; how the operation appears in documentation, not who may call it |
 | `audience` | no | the primary reader; any non-blank string (see [Rules an extension adds](#rules-an-extension-adds)) |
@@ -75,7 +75,7 @@ An operation takes at most one `@docs`. Every value must be a literal. A
 config that breaks a rule fails the load with the decorator's location:
 
 ```
-src/orders.schema.ts:14:9: invalid @docs config: capability "GetNote" must contain at least two dot-separated lowercase segments
+src/orders.schema.ts:14:9: invalid @docs config: capability "GetNote" holds "G" at character 1; a capability is two or more dot-separated segments of lowercase letters, digits and hyphens, such as "orders.returns.create"
 ```
 
 The record is `FieldDef.docs` (`ir.OperationDocs`) in the IR. The JSON and
@@ -86,8 +86,9 @@ YAML forms write the same object under the operation's `docs` key, with
 ### What the generators do with it
 
 The API's OpenAPI document, `openapi.json`, which every server's build
-writes (the Go server embeds it in `openapi.go` and the Rust server in
-`src/openapi.rs`, and both serve it at `GET /api/openapi.json`):
+writes (the Go server embeds it in `openapi.go`, the Rust server in
+`src/openapi.rs` and the TypeScript package in `openapi.ts`, and each
+serves it at `GET /api/openapi.json`):
 
 - `summary` is `title`. Without `@docs` it is the operation name.
 - `description` is the `@docs` description. Without `@docs` it is the
@@ -228,6 +229,57 @@ src/login.schema.ts: type LoginInput: field password takes @display multiline, b
 It is presentation only: no generated type, validator or wire format
 changes, and the OpenAPI document and the tool manifests leave it out.
 
+### `@display({ currency })` on a field
+
+An amount is a whole number of a currency's minor units: 450 for GBP 4.50.
+`@display({ currency })` says which currency a field's amount is in, so
+a UI can show it as money and take it as a decimal. It is a code, or
+another field of the same type that holds one:
+
+```ts
+import { Nullable, display } from "@superschematic/schema";
+import { Finance, Generic } from "superscalar";
+
+export abstract class InvoiceView {
+  @display({ currency: "GBP" })
+  totalCents: Generic.Int64;
+
+  @display({ currency: { field: "currency" } })
+  dueCents: Generic.Int64;
+  currency: Nullable<Finance.Currency>;
+}
+```
+
+| Decorator | Writes | Rule |
+| --- | --- | --- |
+| `@display({ currency })` | `FieldDef.display.currency` (`ir.DisplayCurrency`) | the field holds an integer scalar (`Finance.Money`, `Generic.Int64`) or a list of them, not a map; a code is an active ISO 4217 code in capitals; a `{ field }` names another field of the type, by its name or its JSON key, that holds one `Finance.Currency` or text value |
+
+The JSON and YAML forms write a code as a string and a field as
+`{ field: currency }` under the field's `display`, beside `multiline`. A
+code must be on ISO 4217's active list, as `Finance.Currency` checks it,
+so `usd` and a withdrawn code are refused. The loader refuses the hint in
+every form:
+
+```
+src/price.schema.ts: type Price: field note takes @display currency, which is for an amount in minor units, but it is string
+src/price.schema.ts: type Price: field amount takes @display currency "HRK", which is not an active ISO 4217 currency code
+src/price.schema.ts: type Price: field amount takes @display currency { field: "money" }, which is not a field of the type (fields: cents, currency)
+src/price.schema.ts: type Price: field amount takes @display currency { field: "cents" }, which is Generic.Int64; a currency field holds a single Finance.Currency or text value
+```
+
+A `Finance.Money` field without the hint, in a type with exactly one
+`Finance.Currency` field, is read as in that field's currency; the hint
+wins, and with two currency fields and no hint the amount names none.
+Like `multiline` it is presentation only: no generated type, validator
+or wire format changes. The Topcoat crate shows such an amount as
+`GBP 4.50` and takes it in a decimal control
+([Money](/superschematic/guides/topcoat/#money)). The engine's describe
+document gives an engine type's field its display as the schema holds it,
+a `{ field }` by the other field's JSON key, and leaves the `Finance.Money`
+rule to its reader. The engine's own amounts name their currency in their
+behavior's config, as
+[commerce](/superschematic/guides/commerce/#totals-and-currency) does.
+
 ## A title on an enum member
 
 A member's title is its reader-facing label: what a select's option or a
@@ -265,7 +317,10 @@ so put the member's comment above the tag. The reader reads every
 comment on a member for the tag, and refuses one it would not read as
 the member's whole title: a tag in a `//` or `/* */` comment, a tag that
 is not the first word of its line, a tag on a member with a second
-`/** */` comment, a tag that wraps, an empty tag and a second tag. A word
+`/** */` comment, a tag in a comment a blank line parts from the member,
+which is not the member's comment (see
+[object types](/superschematic/guides/modeling-types/#object-types)), a
+tag that wraps, an empty tag and a second tag. A word
 that only begins with `@title`, such as `@titles` or `@title-case`, is
 comment text. Anywhere but on an enum's member, a `@title` line is
 comment text. These fail the load:
@@ -278,6 +333,7 @@ src/orders.schema.ts: enum OrderStatus member OnHold: @title must fit on its lin
 src/orders.schema.ts: enum OrderStatus member OnHold: @title is read from a JSDoc comment (/** @title … */), not a // or /* */ comment
 src/orders.schema.ts: enum OrderStatus member OnHold: @title must begin a line of the member's JSDoc comment
 src/orders.schema.ts: enum OrderStatus member OnHold: @title is read from the member's only JSDoc comment, and it has more than one
+src/orders.schema.ts: enum OrderStatus member OnHold: @title is read from the member's own comment, and a blank line parts this one from the member
 ```
 
 For example, a title that wraps onto a second line fails, where a reader
@@ -410,7 +466,7 @@ rows and label its add button
 ([Rows without JavaScript](/superschematic/guides/topcoat/#rows-without-javascript)).
 The engine's describe document carries it
 for the schema's instance type, its `icon` included, with each field's
-title and icon
+title, icon and display
 ([Engine behaviors](/superschematic/guides/engine-behaviors/#display)).
 The Topcoat console's nav shows a type's icon beside its link. The OpenAPI
 document and the tool manifests carry no display.

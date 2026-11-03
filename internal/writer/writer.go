@@ -141,6 +141,24 @@ func SplitSchema(schema *ir.Schema) map[string]*schemafile.Document {
 		doc.Types[name] = &copied
 	}
 
+	// A MemoryStore schema's declarations, each in the file that declares
+	// it, less the core's reserved ones, which every load adds again (D75).
+	var unattributed []*ir.MemoryStoreDeclaration
+	for _, decl := range schema.MemoryStoreDeclarations {
+		if decl == nil || decl.Reserved {
+			continue
+		}
+		copied := *decl
+		copied.File = ""
+		base, ok := ownerBase(decl.File)
+		if !ok {
+			unattributed = append(unattributed, &copied)
+			continue
+		}
+		doc := docFor(base)
+		doc.MemoryStoreDeclarations = append(doc.MemoryStoreDeclarations, &copied)
+	}
+
 	// Everything else has no file attribution; it goes in the first document.
 	first := func() *schemafile.Document {
 		keys := sortedKeys(docs)
@@ -203,6 +221,18 @@ func SplitSchema(schema *ir.Schema) map[string]*schemafile.Document {
 	if len(schema.Workers) > 0 {
 		doc := first()
 		doc.Workers = append(doc.Workers, schema.Workers...)
+	}
+	if len(schema.Derivers) > 0 {
+		doc := first()
+		doc.Derivers = append(doc.Derivers, schema.Derivers...)
+	}
+	if len(schema.Apps) > 0 {
+		doc := first()
+		doc.Apps = append(doc.Apps, schema.Apps...)
+	}
+	if len(unattributed) > 0 {
+		doc := first()
+		doc.MemoryStoreDeclarations = append(doc.MemoryStoreDeclarations, unattributed...)
 	}
 
 	// Imports are service-level in the IR; restate them on every document so

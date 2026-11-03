@@ -7,17 +7,21 @@ import (
 )
 
 // renames maps the previous model's names to the new model's for the
-// tables and columns the caller renames (--rename), and for what is named
-// after them: a renamed table's history table and its partition, the join
-// tables it is a side of and their <table>_id columns, and the <table>_id
-// columns @hasMany adds to other tables (D27).
+// tables and columns the caller renames (--rename), for those the schema
+// renames, a table or a column of the same type or field under another
+// name, which @table and @column give (D85), and for what is named after
+// them: a renamed table's history table and its partition, the join tables
+// it is a side of and their <table>_id columns, and the <table>_id columns
+// @hasMany adds to other tables (D27).
 type renames struct {
 	tableTo   map[string]string            // previous table -> new table
 	tableFrom map[string]string            // new table -> previous table
 	columnTo  map[string]map[string]string // previous table -> previous column -> new column
 	colFrom   map[string]map[string]string // new table -> new column -> previous column
-	// because names, for a rename the caller did not pass, the rename it
-	// follows from ("purchase=order").
+	// because names, for a rename the caller did not pass, what it
+	// follows from: the rename it follows ("--rename purchase=order"), or
+	// the schema's name of a type's table or a field's column ("Order's
+	// @table").
 	because map[string]string
 }
 
@@ -157,8 +161,64 @@ func resolveRenames(from, to *Model, given []Rename) (*renames, error) {
 		r.addColumn(prevTable, prevColumn, newTable, newColumn, "")
 	}
 
+	tableRenames = append(tableRenames, r.deriveOriginRenames(from, to)...)
 	r.deriveRenames(from, to, tableRenames)
 	return r, nil
+}
+
+// deriveOriginRenames adds the renames the schema makes (D85): an entity
+// table of the new version whose type the previous version keeps in a
+// table of another name, and a column of a table both versions keep whose
+// field the previous version keeps in a column of another name, which a
+// changed @table or @column gives, when neither name is in both versions
+// and no rename the caller passed names either. A table's origin is its
+// type and a column's its type and field, which no override changes, so
+// the match is by schema identity, never by shape (D27). It returns the
+// table renames, so what is named after them follows.
+func (r *renames) deriveOriginRenames(from, to *Model) []Rename {
+	fromTables, toTables := tablesByName(from), tablesByName(to)
+	byOrigin := map[string]*Table{}
+	for _, t := range from.Tables {
+		if t.Kind == TableEntity && t.Origin != "" {
+			byOrigin[t.Origin] = t
+		}
+	}
+	var tables []Rename
+	for _, tt := range to.Tables {
+		ft := byOrigin[tt.Origin]
+		if tt.Kind != TableEntity || tt.Origin == "" || ft == nil || ft.Name == tt.Name ||
+			toTables[ft.Name] != nil || fromTables[tt.Name] != nil || r.tableTo[ft.Name] != "" || r.tableFrom[tt.Name] != "" {
+			continue
+		}
+		r.addTable(ft.Name, tt.Name, tt.Origin+"'s @table")
+		tables = append(tables, Rename{From: ft.Name, To: tt.Name})
+	}
+	for _, tt := range to.Tables {
+		ft := fromTables[r.prevTable(tt.Name)]
+		if tt.Kind != TableEntity || ft == nil {
+			continue
+		}
+		// A field of the table's own type: the <table>_id column @hasMany
+		// adds, whose origin is the other type's field, follows that
+		// table's name (deriveRenames).
+		own := func(c *Column) bool { return tt.Origin != "" && strings.HasPrefix(c.Origin, tt.Origin+".") }
+		prevByOrigin := map[string]*Column{}
+		for _, c := range ft.Columns {
+			if own(c) {
+				prevByOrigin[c.Origin] = c
+			}
+		}
+		for _, tc := range tt.Columns {
+			fc := prevByOrigin[tc.Origin]
+			if !own(tc) || fc == nil || fc.Name == tc.Name ||
+				columnNamed(tt, fc.Name) != nil || columnNamed(ft, tc.Name) != nil ||
+				r.columnTo[ft.Name][fc.Name] != "" || r.colFrom[tt.Name][tc.Name] != "" {
+				continue
+			}
+			r.addColumn(ft.Name, fc.Name, tt.Name, tc.Name, tc.Origin+"'s @column")
+		}
+	}
+	return tables
 }
 
 // deriveRenames adds the renames that follow from the caller's table
@@ -182,7 +242,7 @@ func (r *renames) deriveRenames(from, to *Model, tableRenames []Rename) {
 	sort.Slice(tableRenames, func(i, j int) bool { return tableRenames[i].From < tableRenames[j].From })
 
 	for _, rn := range tableRenames {
-		because := rn.From + "=" + rn.To
+		because := r.renameOf(rn.From)
 		ft, tt := fromTables[rn.From], toTables[rn.To]
 		// The history table and its partitions.
 		if ft.History != "" && tt.History != "" && freeTable(ft.History, tt.History) {
@@ -234,13 +294,15 @@ func (r *renames) deriveRenames(from, to *Model, tableRenames []Rename) {
 	}
 }
 
-// renameOf returns the "old=new" of the rename table prev takes, or "".
+// renameOf returns what the rename table prev takes follows from: the
+// caller's "--rename old=new", or what it follows (because); "" when prev
+// is not renamed.
 func (r *renames) renameOf(prev string) string {
 	if name, ok := r.tableTo[prev]; ok {
 		if because := r.because["table:"+name]; because != "" {
 			return because
 		}
-		return prev + "=" + name
+		return "--rename " + prev + "=" + name
 	}
 	return ""
 }

@@ -37,6 +37,10 @@
     "./versiongraph": {
       "types": "./versiongraph/index.ts",
       "import": "./versiongraph/index.ts"
+    },
+    "./orm": {
+      "types": "./orm.ts",
+      "import": "./orm.ts"
     }
   },
   "scripts": {
@@ -54,10 +58,20 @@
   "dependencies": {
     "@acme/scalars": "*",
     "js-yaml": "4.1.1",
-    "@acme/versiongraph": "file:../../../vendor/acme-versiongraph-ts"
+    "@acme/versiongraph": "file:../../../vendor/acme-versiongraph-ts",
+    "@acme/http-runtime": "*"
+  },
+  "peerDependencies": {
+    "pg": ">=8.11.0"
+  },
+  "peerDependenciesMeta": {
+    "pg": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/js-yaml": "4.0.9",
+    "@types/pg": "8.23.1",
     "typescript": "5.9.3"
   }
 }

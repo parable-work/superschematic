@@ -22,6 +22,17 @@ use crate::api::runtime::{ApiError, Principal};
 use crate::api::types;
 use topcoat::context::Cx;
 
+/// order.getInvoice (`GET /api/invoices/{number}`): One invoice.
+pub async fn order_get_invoice(cx: &Cx, args: crate::api::OrderGetInvoiceArgs) -> Result<types::Invoice, ApiError> {
+    let caller = can_order_get_invoice(cx).await?;
+    args.check()?;
+    crate::setup(cx)?
+        .implementations
+        .order
+        .get_invoice(operations::ORDER_GET_INVOICE.context(caller), args)
+        .await
+}
+
 /// order.getOrder (`GET /api/orders/{id}`): One order.
 pub async fn order_get_order(cx: &Cx, args: crate::api::OrderGetOrderArgs) -> Result<types::OrderView, ApiError> {
     let caller = can_order_get_order(cx).await?;
@@ -42,6 +53,13 @@ pub async fn order_order_comments(cx: &Cx, args: crate::api::OrderOrderCommentsA
         .order
         .order_comments(operations::ORDER_ORDER_COMMENTS.context(caller), args)
         .await
+}
+
+/// Admits the caller of order.getInvoice as its route does: it needs none, so
+/// `Ok(None)`.
+pub async fn can_order_get_invoice(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    let _ = cx;
+    Ok(None)
 }
 
 /// Admits the caller of order.getOrder as its route does: it needs none, so

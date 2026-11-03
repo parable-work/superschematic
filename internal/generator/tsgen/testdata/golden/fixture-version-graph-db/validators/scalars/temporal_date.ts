@@ -2,6 +2,12 @@
 
 import type { ScalarValidationResult, ValidationError } from 'superscalar/validation';
 
+// The constructors of TemporalDate, the scalar library's own, which the
+// package hands out beside the type: each returns the value as
+// TemporalDate and throws on a value Temporal.Date refuses (D25,
+// amended; D100).
+export { parseTemporalDateStrict, normalizeTemporalDateStrict } from 'superscalar/scalars';
+
 /**
  * Validates a Temporal.Date value
  */

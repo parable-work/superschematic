@@ -60,6 +60,21 @@ resources:
         - ${Orders-account}
         - ${shop-db-instance}
       version: 9.37.1
+  # phase infrastructure; owners memoryStore:Orders->shop-cache
+  Orders-memorystore-shop-cache:
+    name: Orders.memorystore.shop-cache
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      condition:
+        expression: resource.type == "memorystore.googleapis.com/Instance" && resource.name == "projects/acme-staging/locations/us-east1/instances/acme-staging-shop-shop-cache"
+        title: Memorystore instance acme-staging-shop-shop-cache
+      member: ${Orders-account.member}
+      project: acme-staging
+      role: roles/memorystore.dbConnectionUser
+    options:
+      dependsOn:
+        - ${Orders-account}
+      version: 9.37.1
   # phase infrastructure; owners Orders
   Orders-reads-PaymentsSecrets-STRIPE_KEY:
     name: Orders.reads.PaymentsSecrets.STRIPE_KEY
@@ -115,6 +130,14 @@ resources:
                 value: google-id-token
               - name: SHOP_API_SERVICE_URL
                 value: ${shop-api-service.uri}
+              - name: SHOP_CACHE_MEMORY_STORE_AUTH
+                value: iam
+              - name: SHOP_CACHE_MEMORY_STORE_CA
+                value: ${shop-cache-instance.managedServerCas[0].caCerts[0].certificates[0]}
+              - name: SHOP_CACHE_MEMORY_STORE_STORE
+                value: shop-cache
+              - name: SHOP_CACHE_MEMORY_STORE_URL
+                value: rediss://${shop-cache-instance.endpoints[0].connections[0].pscAutoConnection.ipAddress}:${shop-cache-instance.endpoints[0].connections[0].pscAutoConnection.port}
               - name: SHOP_DB_DATABASE_CLOUD_SQL_DATABASE
                 value: ${shop-db-database-shop-db.name}
               - name: SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE
@@ -169,6 +192,7 @@ resources:
         - ${network-subnet}
         - ${secret-PaymentsSecrets-STRIPE_KEY}
         - ${shop-api-service}
+        - ${shop-cache-instance}
         - ${shop-db-database-shop-db}
         - ${shop-db-instance}
       version: 9.37.1
@@ -236,7 +260,7 @@ resources:
       dependsOn:
         - ${shop-web-dns-authorization}
       version: 9.37.1
-  # phase infrastructure; owners Orders, shop-orders-fulfil-orders, shop-orders-ship-orders
+  # phase infrastructure; owners Orders, shop-api, shop-cache, shop-orders-fulfil-orders, shop-orders-ship-orders
   network:
     name: network
     type: gcp:compute/network:Network
@@ -246,7 +270,40 @@ resources:
       project: acme-staging
     options:
       version: 9.37.1
-  # phase infrastructure; owners Orders, shop-orders-fulfil-orders, shop-orders-ship-orders
+  # phase infrastructure; owners shop-cache
+  network-memorystore:
+    name: network.memorystore
+    type: gcp:networkconnectivity/serviceConnectionPolicy:ServiceConnectionPolicy
+    properties:
+      description: Private Service Connect endpoints of the Memorystore instances of stack Shop
+      location: us-east1
+      name: shop-memorystore
+      network: ${network.id}
+      project: acme-staging
+      pscConfig:
+        subnetworks:
+          - ${network-memorystore-subnet.id}
+      serviceClass: gcp-memorystore
+    options:
+      dependsOn:
+        - ${network}
+        - ${network-memorystore-subnet}
+      version: 9.37.1
+  # phase infrastructure; owners shop-cache
+  network-memorystore-subnet:
+    name: network.memorystore-subnet
+    type: gcp:compute/subnetwork:Subnetwork
+    properties:
+      ipCidrRange: 10.8.16.0/24
+      name: shop-memorystore
+      network: ${network.id}
+      project: acme-staging
+      region: us-east1
+    options:
+      dependsOn:
+        - ${network}
+      version: 9.37.1
+  # phase infrastructure; owners Orders, shop-api, shop-cache, shop-orders-fulfil-orders, shop-orders-ship-orders
   network-nat:
     name: network.nat
     type: gcp:compute/routerNat:RouterNat
@@ -261,7 +318,7 @@ resources:
       dependsOn:
         - ${network-router}
       version: 9.37.1
-  # phase infrastructure; owners Orders, shop-orders-fulfil-orders, shop-orders-ship-orders
+  # phase infrastructure; owners Orders, shop-api, shop-cache, shop-orders-fulfil-orders, shop-orders-ship-orders
   network-router:
     name: network.router
     type: gcp:compute/router:Router
@@ -274,7 +331,7 @@ resources:
       dependsOn:
         - ${network}
       version: 9.37.1
-  # phase infrastructure; owners Orders, shop-orders-fulfil-orders, shop-orders-ship-orders
+  # phase infrastructure; owners Orders, shop-api, shop-cache, shop-orders-fulfil-orders, shop-orders-ship-orders
   network-subnet:
     name: network.subnet
     type: gcp:compute/subnetwork:Subnetwork
@@ -477,6 +534,21 @@ resources:
         - ${shop-api-certificate-map-entry}
         - ${shop-api-url-map}
       version: 9.37.1
+  # phase infrastructure; owners memoryStore:shop-api->shop-cache
+  shop-api-memorystore-shop-cache:
+    name: shop-api.memorystore.shop-cache
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      condition:
+        expression: resource.type == "memorystore.googleapis.com/Instance" && resource.name == "projects/acme-staging/locations/us-east1/instances/acme-staging-shop-shop-cache"
+        title: Memorystore instance acme-staging-shop-shop-cache
+      member: ${shop-api-account.member}
+      project: acme-staging
+      role: roles/memorystore.dbConnectionUser
+    options:
+      dependsOn:
+        - ${shop-api-account}
+      version: 9.37.1
   # phase infrastructure; owners shop-api
   shop-api-reads-PaymentsSecrets-STRIPE_KEY:
     name: shop-api.reads.PaymentsSecrets.STRIPE_KEY
@@ -511,6 +583,14 @@ resources:
                 value: info
               - name: SHOP_API_CORS_ORIGINS
                 value: https://shop-web.staging.acme.dev
+              - name: SHOP_CACHE_MEMORY_STORE_AUTH
+                value: iam
+              - name: SHOP_CACHE_MEMORY_STORE_CA
+                value: ${shop-cache-instance.managedServerCas[0].caCerts[0].certificates[0]}
+              - name: SHOP_CACHE_MEMORY_STORE_STORE
+                value: shop-cache
+              - name: SHOP_CACHE_MEMORY_STORE_URL
+                value: rediss://${shop-cache-instance.endpoints[0].connections[0].pscAutoConnection.ipAddress}:${shop-cache-instance.endpoints[0].connections[0].pscAutoConnection.port}
               - name: SHOP_DB_DATABASE_CLOUD_SQL_DATABASE
                 value: ${shop-db-database-shop-db.name}
               - name: SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE
@@ -555,10 +635,18 @@ resources:
               instances:
                 - ${shop-db-instance.connectionName}
             name: cloudsql
+        vpcAccess:
+          egress: ALL_TRAFFIC
+          networkInterfaces:
+            - network: ${network.name}
+              subnetwork: ${network-subnet.name}
     options:
       dependsOn:
+        - ${network}
+        - ${network-subnet}
         - ${secret-PaymentsSecrets-STRIPE_KEY}
         - ${shop-api-account}
+        - ${shop-cache-instance}
         - ${shop-db-database-shop-db}
         - ${shop-db-instance}
         - ${shop-media-bucket}
@@ -599,6 +687,32 @@ resources:
     options:
       dependsOn:
         - ${shop-api-backend}
+      version: 9.37.1
+  # phase infrastructure; owners shop-cache
+  shop-cache-instance:
+    name: shop-cache.instance
+    type: gcp:memorystore/instance:Instance
+    properties:
+      authorizationMode: IAM_AUTH
+      deletionProtectionEnabled: false
+      desiredAutoCreatedEndpoints:
+        - network: ${network.id}
+          projectId: acme-staging
+      engineVersion: VALKEY_8_0
+      instanceId: acme-staging-shop-shop-cache
+      location: us-east1
+      mode: CLUSTER_DISABLED
+      nodeType: SHARED_CORE_NANO
+      persistenceConfig:
+        mode: DISABLED
+      project: acme-staging
+      replicaCount: 1
+      shardCount: 1
+      transitEncryptionMode: SERVER_AUTHENTICATION
+    options:
+      dependsOn:
+        - ${network}
+        - ${network-memorystore}
       version: 9.37.1
   # phase infrastructure; owners shop-db
   shop-db-database-shop-db:
@@ -729,6 +843,21 @@ resources:
         - ${shop-db-instance}
         - ${shop-orders-fulfil-orders-account}
       version: 9.37.1
+  # phase infrastructure; owners memoryStore:shop-orders-fulfil-orders->shop-cache
+  shop-orders-fulfil-orders-memorystore-shop-cache:
+    name: shop-orders-fulfil-orders.memorystore.shop-cache
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      condition:
+        expression: resource.type == "memorystore.googleapis.com/Instance" && resource.name == "projects/acme-staging/locations/us-east1/instances/acme-staging-shop-shop-cache"
+        title: Memorystore instance acme-staging-shop-shop-cache
+      member: ${shop-orders-fulfil-orders-account.member}
+      project: acme-staging
+      role: roles/memorystore.dbConnectionUser
+    options:
+      dependsOn:
+        - ${shop-orders-fulfil-orders-account}
+      version: 9.37.1
   # phase infrastructure; owners shop-orders-fulfil-orders
   shop-orders-fulfil-orders-reads-PaymentsSecrets-STRIPE_KEY:
     name: shop-orders-fulfil-orders.reads.PaymentsSecrets.STRIPE_KEY
@@ -783,6 +912,14 @@ resources:
                 value: google-id-token
               - name: SHOP_API_SERVICE_URL
                 value: ${shop-api-service.uri}
+              - name: SHOP_CACHE_MEMORY_STORE_AUTH
+                value: iam
+              - name: SHOP_CACHE_MEMORY_STORE_CA
+                value: ${shop-cache-instance.managedServerCas[0].caCerts[0].certificates[0]}
+              - name: SHOP_CACHE_MEMORY_STORE_STORE
+                value: shop-cache
+              - name: SHOP_CACHE_MEMORY_STORE_URL
+                value: rediss://${shop-cache-instance.endpoints[0].connections[0].pscAutoConnection.ipAddress}:${shop-cache-instance.endpoints[0].connections[0].pscAutoConnection.port}
               - name: SHOP_DB_DATABASE_CLOUD_SQL_DATABASE
                 value: ${shop-db-database-shop-db.name}
               - name: SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE
@@ -821,6 +958,7 @@ resources:
         - ${network-subnet}
         - ${secret-PaymentsSecrets-STRIPE_KEY}
         - ${shop-api-service}
+        - ${shop-cache-instance}
         - ${shop-db-database-shop-db}
         - ${shop-db-instance}
         - ${shop-orders-fulfil-orders-account}
@@ -904,6 +1042,14 @@ resources:
                   value: google-id-token
                 - name: SHOP_API_SERVICE_URL
                   value: ${shop-api-service.uri}
+                - name: SHOP_CACHE_MEMORY_STORE_AUTH
+                  value: iam
+                - name: SHOP_CACHE_MEMORY_STORE_CA
+                  value: ${shop-cache-instance.managedServerCas[0].caCerts[0].certificates[0]}
+                - name: SHOP_CACHE_MEMORY_STORE_STORE
+                  value: shop-cache
+                - name: SHOP_CACHE_MEMORY_STORE_URL
+                  value: rediss://${shop-cache-instance.endpoints[0].connections[0].pscAutoConnection.ipAddress}:${shop-cache-instance.endpoints[0].connections[0].pscAutoConnection.port}
                 - name: SHOP_DB_DATABASE_CLOUD_SQL_DATABASE
                   value: ${shop-db-database-shop-db.name}
                 - name: SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE
@@ -942,8 +1088,24 @@ resources:
         - ${network-subnet}
         - ${secret-PaymentsSecrets-STRIPE_KEY}
         - ${shop-api-service}
+        - ${shop-cache-instance}
         - ${shop-db-database-shop-db}
         - ${shop-db-instance}
+        - ${shop-orders-ship-orders-account}
+      version: 9.37.1
+  # phase infrastructure; owners memoryStore:shop-orders-ship-orders->shop-cache
+  shop-orders-ship-orders-memorystore-shop-cache:
+    name: shop-orders-ship-orders.memorystore.shop-cache
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      condition:
+        expression: resource.type == "memorystore.googleapis.com/Instance" && resource.name == "projects/acme-staging/locations/us-east1/instances/acme-staging-shop-shop-cache"
+        title: Memorystore instance acme-staging-shop-shop-cache
+      member: ${shop-orders-ship-orders-account.member}
+      project: acme-staging
+      role: roles/memorystore.dbConnectionUser
+    options:
+      dependsOn:
         - ${shop-orders-ship-orders-account}
       version: 9.37.1
   # phase infrastructure; owners shop-orders-ship-orders
@@ -1210,6 +1372,7 @@ outputs:
   Orders.cloudsql-client.shop-db.id: ${Orders-cloudsql-client-shop-db.id}
   Orders.cloudsql-login.shop-db.id: ${Orders-cloudsql-login-shop-db.id}
   Orders.database-user.shop-db.id: ${Orders-database-user-shop-db.id}
+  Orders.memorystore.shop-cache.id: ${Orders-memorystore-shop-cache.id}
   Orders.reads.PaymentsSecrets.STRIPE_KEY.id: ${Orders-reads-PaymentsSecrets-STRIPE_KEY.id}
   Orders.run-invoker.shop-api.id: ${Orders-run-invoker-shop-api.id}
   Orders.service.id: ${Orders-service.id}
@@ -1219,6 +1382,8 @@ outputs:
   dns.shop-web.a.id: ${dns-shop-web-a.id}
   dns.shop-web.cname.id: ${dns-shop-web-cname.id}
   network.id: ${network.id}
+  network.memorystore-subnet.id: ${network-memorystore-subnet.id}
+  network.memorystore.id: ${network-memorystore.id}
   network.name: ${network.name}
   network.nat.id: ${network-nat.id}
   network.router.id: ${network-router.id}
@@ -1246,6 +1411,7 @@ outputs:
   shop-api.endpoint-group.id: ${shop-api-endpoint-group.id}
   shop-api.forwarding-rule.id: ${shop-api-forwarding-rule.id}
   shop-api.https-proxy.id: ${shop-api-https-proxy.id}
+  shop-api.memorystore.shop-cache.id: ${shop-api-memorystore-shop-cache.id}
   shop-api.reads.PaymentsSecrets.STRIPE_KEY.id: ${shop-api-reads-PaymentsSecrets-STRIPE_KEY.id}
   shop-api.service.id: ${shop-api-service.id}
   shop-api.service.name: ${shop-api-service.name}
@@ -1253,6 +1419,10 @@ outputs:
   shop-api.sign-as-self.id: ${shop-api-sign-as-self.id}
   shop-api.storage.shop-media.id: ${shop-api-storage-shop-media.id}
   shop-api.url-map.id: ${shop-api-url-map.id}
+  shop-cache.instance.endpoints[0].connections[0].pscAutoConnection.ipAddress: ${shop-cache-instance.endpoints[0].connections[0].pscAutoConnection.ipAddress}
+  shop-cache.instance.endpoints[0].connections[0].pscAutoConnection.port: ${shop-cache-instance.endpoints[0].connections[0].pscAutoConnection.port}
+  shop-cache.instance.id: ${shop-cache-instance.id}
+  shop-cache.instance.managedServerCas[0].caCerts[0].certificates[0]: ${shop-cache-instance.managedServerCas[0].caCerts[0].certificates[0]}
   shop-db.database.shop-db.id: ${shop-db-database-shop-db.id}
   shop-db.database.shop-db.name: ${shop-db-database-shop-db.name}
   shop-db.instance.connectionName: ${shop-db-instance.connectionName}
@@ -1267,6 +1437,7 @@ outputs:
   shop-orders-fulfil-orders.cloudsql-client.shop-db.id: ${shop-orders-fulfil-orders-cloudsql-client-shop-db.id}
   shop-orders-fulfil-orders.cloudsql-login.shop-db.id: ${shop-orders-fulfil-orders-cloudsql-login-shop-db.id}
   shop-orders-fulfil-orders.database-user.shop-db.id: ${shop-orders-fulfil-orders-database-user-shop-db.id}
+  shop-orders-fulfil-orders.memorystore.shop-cache.id: ${shop-orders-fulfil-orders-memorystore-shop-cache.id}
   shop-orders-fulfil-orders.reads.PaymentsSecrets.STRIPE_KEY.id: ${shop-orders-fulfil-orders-reads-PaymentsSecrets-STRIPE_KEY.id}
   shop-orders-fulfil-orders.run-invoker.shop-api.id: ${shop-orders-fulfil-orders-run-invoker-shop-api.id}
   shop-orders-fulfil-orders.worker-pool.id: ${shop-orders-fulfil-orders-worker-pool.id}
@@ -1278,6 +1449,7 @@ outputs:
   shop-orders-ship-orders.database-user.shop-db.id: ${shop-orders-ship-orders-database-user-shop-db.id}
   shop-orders-ship-orders.job.id: ${shop-orders-ship-orders-job.id}
   shop-orders-ship-orders.job.name: ${shop-orders-ship-orders-job.name}
+  shop-orders-ship-orders.memorystore.shop-cache.id: ${shop-orders-ship-orders-memorystore-shop-cache.id}
   shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY.id: ${shop-orders-ship-orders-reads-PaymentsSecrets-STRIPE_KEY.id}
   shop-orders-ship-orders.run-invoker.shop-api.id: ${shop-orders-ship-orders-run-invoker-shop-api.id}
   shop-orders-ship-orders.schedule-invoker.id: ${shop-orders-ship-orders-schedule-invoker.id}

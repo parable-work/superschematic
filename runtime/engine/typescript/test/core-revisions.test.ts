@@ -276,7 +276,7 @@ for (const driver of drivers) {
 
     test('an operation that changes no own field records no revision; one that does, through update(), records it', () => {
       const engine = published([{ name: 'Revisions', config: review }, { name: 'Comments' }]);
-      engine.instances.invoke(alice, 'Document', 'd1', 'comment', { body: 'Nice.' });
+      engine.instances.invoke(alice, 'Document', 'd1', 'post', { body: 'Nice.' });
       assert.equal(revisionsOf(engine).length, 1);
       propose(engine, { body: 'Proposed.' });
       engine.instances.invoke(reviewer, 'Document', 'd1', 'approve', { proposal: 1 });

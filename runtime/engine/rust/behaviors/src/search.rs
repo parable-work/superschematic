@@ -226,7 +226,7 @@ fn texts(config: &SearchConfig, data: &Map<String, Value>) -> Vec<Option<String>
 // is_js_space is a character JavaScript's trim() and \s take: its
 // WhiteSpace and LineTerminator, which differ from Unicode's White_Space
 // in U+FEFF (JavaScript's) and U+0085 (Unicode's).
-fn is_js_space(c: char) -> bool {
+pub(crate) fn is_js_space(c: char) -> bool {
     matches!(
         c,
         '\t' | '\n' | '\u{b}' | '\u{c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
@@ -433,7 +433,7 @@ fn expression(query: &str, syntax: &str) -> Result<Option<String>> {
 }
 
 // fts5_string quotes a word as an FTS5 string.
-fn fts5_string(word: &str) -> String {
+pub(crate) fn fts5_string(word: &str) -> String {
     format!("\"{}\"", word.replace('"', "\"\""))
 }
 
@@ -517,13 +517,13 @@ fn likeness(text: &str) -> Option<String> {
 
 /// One part of a snippet: text, and whether it is a match.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct SnippetPart {
-    text: String,
-    matched: bool,
+pub(crate) struct SnippetPart {
+    pub(crate) text: String,
+    pub(crate) matched: bool,
 }
 
 // snippet_of reads a snippet written with OPEN and CLOSE around each match.
-fn snippet_of(value: Option<&str>) -> Vec<SnippetPart> {
+pub(crate) fn snippet_of(value: Option<&str>) -> Vec<SnippetPart> {
     let mut parts = Vec::new();
     let mut text = String::new();
     let mut matched = false;
@@ -618,6 +618,7 @@ fn matches(
         key: "row",
         select: &["id"],
         filters: &filters,
+        readable: None,
         exclude,
         expression,
         caller: syntax == "fts5",

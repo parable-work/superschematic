@@ -1,6 +1,6 @@
 module example.com/fakeserver
 
-go 1.26.4
+go 1.27.3
 
 require github.com/parable-work/superschematic/runtime/http/go v0.0.0
 

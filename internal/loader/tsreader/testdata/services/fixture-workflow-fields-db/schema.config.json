@@ -1,0 +1,10 @@
+{
+  "name": "fixture-workflow-fields-db",
+  "kind": "DB",
+  "outputs": {
+    "types": {
+      "typescript": { "enabled": true },
+      "go": { "enabled": true }
+    }
+  }
+}

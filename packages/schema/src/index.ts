@@ -1,4 +1,6 @@
 export {
+  allowUnknownFields,
+  decrypted,
   denyUnknownFields,
   docs,
   icon,
@@ -42,6 +44,8 @@ export type {
   BranchesSweep,
   BudgetConfig,
   BudgetMeter,
+  CommentsBlockKind,
+  CommentsConfig,
   ConstantsConfig,
   DependenciesConfig,
   LeaseConfig,

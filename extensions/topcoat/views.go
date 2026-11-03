@@ -2,6 +2,7 @@ package topcoat
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -48,6 +49,14 @@ type view struct {
 	// in the table (D44, amended), by their JSON names; none when no
 	// sorted list does, and the table takes no `Sorted`.
 	SortFields map[string]bool
+	// DetailLets and RowLets bind, in the detail and in each row of the
+	// table, the code of each currency field an amount the detail or a
+	// column shows is in (D44, amended), before the view moves any field.
+	DetailLets []string
+	RowLets    []string
+	// moneyNotes say why an amount a component shows is a number, for the
+	// build log (moneyOf).
+	moneyNotes []string
 }
 
 // Sorted reports whether a sorted list's page shows the table, so it
@@ -72,6 +81,11 @@ type viewField struct {
 	blank string
 	// choices reports whether the field's value reads the app's choices.
 	choices bool
+	// detailLet and rowLet bind the code of the currency field the value
+	// is in, from `record` and from `row`; empty for a value in a literal
+	// currency, or in none.
+	detailLet string
+	rowLet    string
 }
 
 // enumLabel is the function that labels the values of an enum a record
@@ -104,6 +118,9 @@ const (
 	// timeValue is a date, a time or a date-time, rendered as a <time>
 	// with its text for a reader.
 	timeValue
+	// moneyValue is an amount in a currency's minor units, rendered as a
+	// <data> of the amount with its text for a reader (D44, amended).
+	moneyValue
 	// jsonValue is a union or any JSON value, held as its JSON text.
 	jsonValue
 	objectValue
@@ -120,6 +137,9 @@ type valueShape struct {
 	// timeFunc writes a time value's text for a reader: date_text,
 	// time_text or date_time_text.
 	timeFunc string
+	// currency is a money value's currency, the Rust of a &str: a literal
+	// code, or the binding of its currency field's.
+	currency string
 	// object is a nested record's components and title.
 	object *objectRef
 	// elem is a list's element, or a map's value.
@@ -208,12 +228,18 @@ func (b *viewBuilder) view(rec record) (view, error) {
 		if field == nil {
 			return view{}, fmt.Errorf("no field %s", rf.JSONName)
 		}
-		shape := b.shapeOf(field.TypeRef)
+		money := b.moneyOf(typeDef, rec, field)
+		if money.why != "" {
+			v.moneyNotes = append(v.moneyNotes, fmt.Sprintf("%s.%s shows as a number: %s", rec.TypeName, field.Name, money.why))
+		}
+		shape := b.shapeOf(field.TypeRef, money.currency)
 		b.collectNests(rec.TypeName, shape)
 		vf := viewField{
-			JSONName: rf.JSONName,
-			Label:    labelOf(field),
-			choices:  shape.readsChoices(),
+			JSONName:  rf.JSONName,
+			Label:     labelOf(field),
+			choices:   shape.readsChoices(),
+			detailLet: money.let("record"),
+			rowLet:    money.let("row"),
 		}
 		vf.Entry = indentLines(detailIndent, fieldEntry(vf, shape.render("record."+rf.Name, rf.JSONName, rf.Optional, false)))
 		vf.value = shape.render("row."+rf.Name, rf.JSONName, rf.Optional, true)
@@ -223,6 +249,7 @@ func (b *viewBuilder) view(rec record) (view, error) {
 		byJSON[rf.JSONName] = vf
 	}
 	v.Columns = append([]viewField(nil), v.Fields...)
+	v.DetailLets = lets(v.Fields, func(f viewField) string { return f.detailLet })
 	display := typeDef.Display
 	if display == nil {
 		display = &ir.TypeDisplay{}
@@ -284,7 +311,66 @@ func (b *viewBuilder) view(rec record) (view, error) {
 		}
 		v.Columns[i].Cell = indentLines(cellIndent, wrapLines(open+rustString(column.JSONName)+">", close, value))
 	}
+	v.RowLets = lets(v.Columns, func(f viewField) string { return f.rowLet })
 	return v, nil
+}
+
+// viewMoney is how a component shows an amount field: its currency's Rust,
+// the currency field it reads, and why it has none.
+type viewMoney struct {
+	// currency is the Rust of the amount's currency, a &str: a literal
+	// code, or the binding of its currency field's; empty for none.
+	currency string
+	// field is the record's field that holds the currency, and binding
+	// what the component binds it to; empty for a literal.
+	field   string
+	binding string
+	why     string
+}
+
+// let is the statement that binds the currency field's code from the
+// record at expr, record or row; empty for a literal currency, or none.
+func (m viewMoney) let(expr string) string {
+	if m.binding == "" {
+		return ""
+	}
+	return "let " + m.binding + " = " + expr + "." + m.field + ".clone();"
+}
+
+// moneyOf is how field, of rec's type typeDef, shows as money (D44,
+// amended), by its currency (currencyOf): a currency field must be one
+// the record holds, read from the same record.
+func (b *viewBuilder) moneyOf(typeDef *ir.TypeDef, rec record, field *ir.FieldDef) viewMoney {
+	currency := currencyOf(b.schemas, typeDef, field)
+	switch {
+	case currency.code != "":
+		return viewMoney{currency: rustString(currency.code)}
+	case currency.sibling == nil:
+		return viewMoney{why: currency.why}
+	}
+	for _, rf := range rec.Fields {
+		if rf.JSONName != currency.sibling.Name {
+			continue
+		}
+		m := viewMoney{field: rf.Name, binding: strings.TrimPrefix(rf.Name, "r#") + "_code"}
+		m.currency = "&" + m.binding
+		if rf.Optional {
+			m.currency = m.binding + ".as_deref().unwrap_or_default()"
+		}
+		return m
+	}
+	return viewMoney{why: "its currency field " + currency.sibling.Name + " is not in its record"}
+}
+
+// lets are the distinct currency bindings of fields, in order.
+func lets(fields []viewField, of func(viewField) string) []string {
+	var out []string
+	for _, f := range fields {
+		if let := of(f); let != "" && !slices.Contains(out, let) {
+			out = append(out, let)
+		}
+	}
+	return out
 }
 
 // linkLines puts a cell's value in a link to its row's page, `href`, when
@@ -363,9 +449,13 @@ func titleField(typeDef *ir.TypeDef, rec record) *recordField {
 }
 
 // shapeOf is how a value of a field of type ref renders: its element, in
-// each level of list, then a map's entries.
-func (b *viewBuilder) shapeOf(ref ir.TypeRef) valueShape {
+// each level of list, then a map's entries. An integer element with a
+// currency, the Rust of its code, is money.
+func (b *viewBuilder) shapeOf(ref ir.TypeRef, currency string) valueShape {
 	shape := b.element(ref.Name)
+	if currency != "" && b.schemas.leafOf(ref.Name) == integerLeaf {
+		shape = valueShape{kind: moneyValue, currency: currency}
+	}
 	for range ref.ArrayDepth() {
 		elem := shape
 		shape = valueShape{kind: listValue, elem: &elem}
@@ -514,6 +604,8 @@ func (s valueShape) markup(expr, path string, cell bool, depth int) []string {
 		return []string{"<data value=(&" + expr + ")>(" + s.enumFunc + "(&" + expr + "))</data>"}
 	case timeValue:
 		return []string{"<time datetime=(&" + expr + ")>(" + s.timeFunc + "(&" + expr + "))</time>"}
+	case moneyValue:
+		return []string{"<data value=(" + expr + ".to_string())>(money_text(" + expr + ", " + s.currency + "))</data>"}
 	case jsonValue:
 		return []string{`<pre class="ss-json">(` + expr + ")</pre>"}
 	case objectValue:
@@ -620,8 +712,8 @@ func indentLines(n int, lines []string) string {
 }
 
 // ViewsUse reports whether a component calls fn, a helper of views.rs:
-// text_of, number_of, date_text, time_text or date_time_text, so views.rs
-// declares it and what it needs.
+// text_of, number_of, date_text, time_text, date_time_text or money_text,
+// so views.rs declares it and what it needs.
 func (c *crate) ViewsUse(fn string) bool {
 	call := "(" + fn + "("
 	for _, v := range c.Views {
@@ -638,6 +730,12 @@ func (c *crate) ViewsUse(fn string) bool {
 	}
 	return false
 }
+
+// HasViews reports whether the crate writes views.rs: it has display
+// components, or something calls views::money_text (WritesMoney), an
+// engine panel's amount or a form's (D44, amended). Without components
+// views.rs holds money_text alone.
+func (c *crate) HasViews() bool { return len(c.Views) > 0 || c.WritesMoney() }
 
 // ViewsLabel reports whether a detail names itself by its title, so
 // views.rs declares label_of.

@@ -1,0 +1,32 @@
+{
+  "dialect": "sqlite",
+  "expanded": "3cb22c127616ba19f079543c4b35c3a0f9af474762de67b81f1b9f5e3d3c2ec2",
+  "from": "3cb22c127616ba19f079543c4b35c3a0f9af474762de67b81f1b9f5e3d3c2ec2",
+  "hash": "c8c3c2142cd6eff2d99785a5bc724967819e7fb9778eec610151929aa74d3d01",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropTrigger",
+      "phase": "contract",
+      "statements": [
+        "DROP TRIGGER IF EXISTS \"trg_order_enqueue_order_shipped_insert\""
+      ],
+      "subject": "trigger/order/trg_order_enqueue_order_shipped_insert",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "dropTrigger",
+      "phase": "contract",
+      "statements": [
+        "DROP TRIGGER IF EXISTS \"trg_order_enqueue_order_shipped_update\""
+      ],
+      "subject": "trigger/order/trg_order_enqueue_order_shipped_update",
+      "transactional": true
+    }
+  ],
+  "to": "8b31719ff22a7b5d91f2a5ea38dadc4b0e161cc16f1a33b4a241144e18ee55f1",
+  "toModel": null,
+  "version": 1
+}

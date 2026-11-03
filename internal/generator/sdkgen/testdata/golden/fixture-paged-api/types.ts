@@ -184,6 +184,25 @@ export interface HttpRequestOptions {
   data?: unknown;
   signal?: AbortSignal;
   forward?: ForwardedUser;
+  /**
+   * 'file' reads a success body as a file (D81), a DownloadedFile, not the
+   * JSON envelope; an error is read as any other's.
+   */
+  responseType?: 'json' | 'file';
+}
+
+/**
+ * The file a FileDownload operation answers (D81): its bytes, the filename
+ * the server offered in Content-Disposition (filename* first), and the
+ * media type it sent.
+ */
+export interface DownloadedFile {
+  /** The file's bytes, typed by the response's Content-Type. */
+  readonly blob: Blob;
+  /** The filename the server offered, null when it offered none. */
+  readonly filename: string | null;
+  /** The response's Content-Type. */
+  readonly contentType: string;
 }
 
 /**

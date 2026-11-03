@@ -10,6 +10,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/apigen"
+	"github.com/parable-work/superschematic/internal/generator/behaviortypes"
+	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -54,6 +57,15 @@ type DepsInfo struct {
 	// Buckets are the API's buckets entries, in order (D54).
 	Buckets []DepsBucket
 
+	// MemoryStores are the memory stores the API lists, its rateLimitStore
+	// among them, sorted by service (D75).
+	MemoryStores []DepsMemoryStore
+
+	// RateLimitStore is the memory store the API's @rateLimit routes count
+	// in, its config's rateLimitStore, which MemoryStores lists; empty
+	// keeps each replica's in-process limiter (D75).
+	RateLimitStore string
+
 	// Engine is the engine Deps holds when Database is an engine database
 	// (D58), nil otherwise.
 	Engine *DepsEngine
@@ -62,8 +74,27 @@ type DepsInfo struct {
 	// when the API declares a worker (D53): it declares the queues'
 	// messages, which the Workers interface takes, and exports their
 	// definitions from its ./queues entry, which a worker claims with and
-	// an implementation enqueues with. Empty otherwise.
+	// an implementation enqueues with. It is set too when Deps holds the
+	// database's repositories (ORM). Empty otherwise.
 	DatabaseTypesPackage string
+
+	// ORM is the type of the repositories Deps.orm holds (D79), which
+	// DatabaseTypesPackage's ./orm entry exports: ShopDbOrm. Set when
+	// Deps.db is a pool and Database's TypeScript types write orm.ts;
+	// empty otherwise.
+	ORM string
+
+	// ORMFieldKeys is the field of the API's env config that holds the keys
+	// of Database's Encrypted<T> fields, which the entrypoints open Deps.orm
+	// with (D85): its key. Empty for a database without one.
+	ORMFieldKeys string
+
+	// MCPConfirmationKey is the field of the API's env config that holds
+	// the key its MCP endpoint signs confirmations with, which a server's
+	// entrypoint builds the router with (D93): its key, the field
+	// outputs.api.mcpConfirmationKey names. Empty for an API whose
+	// endpoint serves no tool that asks.
+	MCPConfirmationKey string
 }
 
 // DepsEngine is the engine in Deps (D58): the engine of the API's engine
@@ -88,6 +119,22 @@ type DepsBucket struct {
 
 	// Field is the Deps member that holds the bucket.
 	Field string
+}
+
+// DepsMemoryStore is a memory store in Deps: the HTTP runtime's
+// MemoryStore, which the entrypoint opens on Redis, or disabled when its
+// field is unset (D75).
+type DepsMemoryStore struct {
+	// Service is the MemoryStore service.
+	Service string
+
+	// Field is the Deps member that holds the store.
+	Field string
+
+	// Definitions is the npm package of the store's TypeScript
+	// definitions, which the implementation's package depends on to name a
+	// channel or a key; empty when the store's outputs write none.
+	Definitions string
 }
 
 // DepsCall is an SDK client in Deps.
@@ -115,6 +162,36 @@ func (o *APIOutput) DepsPool() bool {
 	return o.Deps.Database != "" && !o.DepsSQLite()
 }
 
+// DepsORM reports whether Deps holds the database's repositories, orm
+// (D79): Deps.db is a pool, and the database's types write orm.ts.
+func (o *APIOutput) DepsORM() bool {
+	return depsORM(o.Deps)
+}
+
+// depsORM reports whether deps holds the database's repositories: a pool,
+// its database listing postgres first, and the type of orm.ts's
+// repositories.
+func depsORM(deps DepsInfo) bool {
+	return deps.Database != "" && deps.Dialect != SQLiteDialect && deps.ORM != "" && deps.DatabaseTypesPackage != ""
+}
+
+// checkBehaviorDeps refuses deps for an API that serves a table's behavior
+// operations (D103) when they hold no repositories: the router runs each
+// operation through RouterOptions.orm, which a server builds from Deps.orm,
+// the repositories the database's TypeScript types export for Postgres.
+func (o *APIOutput) checkBehaviorDeps(deps DepsInfo) error {
+	routes := o.BehaviorRoutes()
+	if len(routes) == 0 || depsORM(deps) {
+		return nil
+	}
+	route := routes[0]
+	why := fmt.Sprintf("enable outputs.types.typescript in %s's config", route.Database)
+	if deps.Dialect == SQLiteDialect {
+		why = fmt.Sprintf("%s lists sqlite first, and the repositories run on Postgres alone (D103)", route.Database)
+	}
+	return fmt.Errorf("tsrestgen: %s serves the behavior operations of %s's %s, %s (@behaviorOperations on %s), which run through Deps.orm, the repositories %s's TypeScript types export for Postgres; %s", o.SchemaName, route.Type, route.Use, behaviortypes.An(route.Behavior), route.Set, route.Database, why)
+}
+
 // DepsSQLite reports whether Deps.db is a SqlDatabase: the API has a
 // database whose DB service lists sqlite first (D64).
 func (o *APIOutput) DepsSQLite() bool {
@@ -123,11 +200,20 @@ func (o *APIOutput) DepsSQLite() bool {
 
 // depsFields are the members every Deps may hold beside its clients and
 // its buckets.
-var depsFields = []string{"config", "db", "engine", "logger"}
+var depsFields = []string{"config", "db", "orm", "engine", "logger"}
 
-// SetDeps sets what Deps holds, refusing a client or a bucket whose member
-// would take the name of another of its members.
+// SetDeps sets what Deps holds, refusing a client, a bucket or a memory
+// store whose member
+// would take the name of another of its members, and, for an API that
+// serves a table's behavior operations (D103), Deps without the
+// repositories they run through.
 func (o *APIOutput) SetDeps(deps DepsInfo) error {
+	if err := o.checkBehaviorDeps(deps); err != nil {
+		return err
+	}
+	if err := o.checkBehaviorWorkers(deps); err != nil {
+		return err
+	}
 	seen := map[string]string{}
 	for _, name := range depsFields {
 		seen[name] = "Deps." + name
@@ -143,6 +229,12 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 			return fmt.Errorf("tsrestgen: %s lists bucket %s, which would be Deps.%s, the member of %s", o.SchemaName, b.Service, b.Field, prev)
 		}
 		seen[b.Field] = b.Service
+	}
+	for _, m := range deps.MemoryStores {
+		if prev, clash := seen[m.Field]; clash {
+			return fmt.Errorf("tsrestgen: %s lists memory store %s, which would be Deps.%s, the member of %s", o.SchemaName, m.Service, m.Field, prev)
+		}
+		seen[m.Field] = m.Service
 	}
 	o.Deps = deps
 	return nil
@@ -169,13 +261,15 @@ func (o *APIOutput) ChecksEndUsers() bool {
 // DepsPeerPackages lists the packages deps.ts imports beside the runtime:
 // each callee's SDK, in order, then the types of the database whose queues
 // the Workers interface's messages are, when the API declares a worker,
-// then the engine's package, when Deps holds the engine (D58).
+// whose engine types the Derivers interface's methods fill (D74), or whose
+// repositories Deps.orm holds (D79), then the engine's package, when Deps
+// holds the engine (D58).
 func (o *APIOutput) DepsPeerPackages() []string {
 	var out []string
 	for _, call := range o.Deps.Calls {
 		out = append(out, call.Package)
 	}
-	if o.HasWorkers() && o.Deps.DatabaseTypesPackage != "" && !slices.Contains(o.PeerPackages, o.Deps.DatabaseTypesPackage) {
+	if (o.HasWorkers() || o.HasDerivers() || o.DepsORM()) && o.Deps.DatabaseTypesPackage != "" && !slices.Contains(o.PeerPackages, o.Deps.DatabaseTypesPackage) {
 		out = append(out, o.Deps.DatabaseTypesPackage)
 	}
 	if o.Deps.Engine != nil && !slices.Contains(o.PeerPackages, o.Deps.Engine.Package) {
@@ -198,10 +292,12 @@ type JobInfo struct {
 }
 
 // WorkerInfo is a worker of the API (D53): a method of the generated
-// Workers interface, which handles one message of its queue.
+// Workers interface, which handles one message of its queue; or a behavior
+// worker (D103), whose handler behavior-workers.ts holds.
 type WorkerInfo struct {
 	// Name is the worker's `@worker` class, and Method the Workers method
-	// that handles a message, the class in camel case.
+	// that handles a message, the class in camel case; empty for a
+	// behavior worker.
 	Name   string
 	Method string
 
@@ -211,8 +307,12 @@ type WorkerInfo struct {
 	Queue string
 
 	// Concurrency is the decorator's concurrency, for the method's
-	// comment.
+	// comment, and a behavior worker's for each of its queues.
 	Concurrency int
+
+	// Behavior is set for a @behaviorWorker (D103): a worker whose handler
+	// the generator writes, which the Workers interface has no method for.
+	Behavior *apigen.BehaviorWorkerInfo
 }
 
 // jobsOf reads the API's jobs, sorted by name.
@@ -227,8 +327,10 @@ func jobsOf(schema *ir.Schema) []JobInfo {
 	return jobs
 }
 
-// workersOf reads the API's workers, sorted by name.
-func workersOf(schema *ir.Schema) []WorkerInfo {
+// workersOf reads the API's workers, sorted by name, a behavior worker's
+// queues and the behaviors that arm and hear them from its database among
+// deps (apigen.BehaviorWorkerOf).
+func workersOf(schema *ir.Schema, deps map[string]*ir.Schema) []WorkerInfo {
 	var workers []WorkerInfo
 	for _, w := range schema.Workers {
 		if w == nil {
@@ -238,25 +340,159 @@ func workersOf(schema *ir.Schema) []WorkerInfo {
 		if concurrency <= 0 {
 			concurrency = ir.DefaultWorkerConcurrency
 		}
-		workers = append(workers, WorkerInfo{Name: w.Name, Method: tsutil.ToCamelCase(w.Name), Queue: w.Queue, Concurrency: concurrency})
+		info := WorkerInfo{Name: w.Name, Method: tsutil.ToCamelCase(w.Name), Queue: w.Queue, Concurrency: concurrency}
+		if w.BehaviorWorker != nil {
+			info.Method = ""
+			info.Behavior = apigen.BehaviorWorkerOf(schema, deps, w)
+		}
+		workers = append(workers, info)
 	}
 	slices.SortFunc(workers, func(a, b WorkerInfo) int { return strings.Compare(a.Name, b.Name) })
 	return workers
+}
+
+// OrdinaryWorkers are the API's @worker workers, each a method of the
+// generated Workers interface; a behavior worker is none (D103).
+func (o *APIOutput) OrdinaryWorkers() []WorkerInfo {
+	var out []WorkerInfo
+	for _, w := range o.Workers {
+		if w.Behavior == nil {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// BehaviorWorkers are the API's @behaviorWorker workers (D103), whose
+// queues behavior-workers.ts exports.
+func (o *APIOutput) BehaviorWorkers() []WorkerInfo {
+	var out []WorkerInfo
+	for _, w := range o.Workers {
+		if w.Behavior != nil {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// HasBehaviorWorkers reports whether the API declares a @behaviorWorker
+// (D103): the package then holds behavior-workers.ts.
+func (o *APIOutput) HasBehaviorWorkers() bool { return len(o.BehaviorWorkers()) > 0 }
+
+// BehaviorWorkersFile is the module of the API package that exports each
+// behavior worker's queues (D103), which index.ts exports.
+const BehaviorWorkersFile = "behavior-workers.ts"
+
+// QueuesFunc is the function behavior-workers.ts exports that builds a
+// behavior worker's queues (D103), the worker's class in camel case and
+// Queues: ticketTimersQueues, which the worker's main calls.
+func (w WorkerInfo) QueuesFunc() string { return tsutil.ToCamelCase(w.Name) + "Queues" }
+
+// Possessive is the worker's class as an owner: TicketTimers'.
+func (w WorkerInfo) Possessive() string {
+	if strings.HasSuffix(w.Name, "s") {
+		return w.Name + "'"
+	}
+	return w.Name + "'s"
+}
+
+// CallerConst is the constant behavior-workers.ts declares a behavior
+// worker's caller as (D103): ticketTimersCaller.
+func (w WorkerInfo) CallerConst() string { return tsutil.ToCamelCase(w.Name) + "Caller" }
+
+// Repository is the ORM's member that holds the repository of a behavior
+// worker's table, as tsgen names it: ticket.
+func (w WorkerInfo) Repository() string {
+	if w.Behavior == nil {
+		return ""
+	}
+	return lowerFirst(w.Behavior.Table)
+}
+
+// DeadlineQueueConst is the definition of a behavior worker's deadline
+// queue as the database's queues.ts exports it, ticketDeadlineQueue; ""
+// for a worker of a table whose behaviors arm none.
+func (w WorkerInfo) DeadlineQueueConst() string {
+	if w.Behavior == nil || w.Behavior.DeadlineQueue == "" {
+		return ""
+	}
+	return tsgen.QueueConst(w.Behavior.DeadlineQueue)
+}
+
+// ChangeQueueConst is the definition of a behavior worker's change queue
+// (D103) as the database's queues.ts exports it, ticketChangeQueue; "" for
+// a worker of a table nothing hears.
+func (w WorkerInfo) ChangeQueueConst() string {
+	if w.Behavior == nil || w.Behavior.ChangeQueue == "" {
+		return ""
+	}
+	return tsgen.QueueConst(w.Behavior.ChangeQueue)
+}
+
+// QueueKinds names what a behavior worker's queues hold, for its queues
+// function's comment: deadlines, changes, or deadlines and changes.
+func (w WorkerInfo) QueueKinds() string {
+	switch {
+	case w.Behavior == nil:
+		return ""
+	case w.Behavior.DeadlineQueue != "" && w.Behavior.ChangeQueue != "":
+		return "deadlines and changes"
+	case w.Behavior.ChangeQueue != "":
+		return "changes"
+	}
+	return "deadlines"
+}
+
+// BehaviorQueueConsts are the queue definitions behavior-workers.ts
+// imports from the database's queues.ts, sorted and each once.
+func (o *APIOutput) BehaviorQueueConsts() []string {
+	var out []string
+	for _, w := range o.BehaviorWorkers() {
+		for _, queue := range w.Behavior.Queues {
+			if name := tsgen.QueueConst(queue); !slices.Contains(out, name) {
+				out = append(out, name)
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// QueuesEntry and ORMEntry are the entries of the database's types package
+// behavior-workers.ts imports from: its queues and its repositories.
+func (o *APIOutput) QueuesEntry() string { return tsgen.QueuesEntry }
+func (o *APIOutput) ORMEntry() string    { return tsgen.ORMEntry }
+
+// checkBehaviorWorkers refuses deps for an API that declares a behavior
+// worker (D103) when they hold no repositories: its handlers run each
+// deadline and each change through Deps.orm's repository of the table, on
+// Postgres.
+func (o *APIOutput) checkBehaviorWorkers(deps DepsInfo) error {
+	workers := o.BehaviorWorkers()
+	if len(workers) == 0 || depsORM(deps) {
+		return nil
+	}
+	w := workers[0]
+	if deps.Dialect == SQLiteDialect {
+		return fmt.Errorf("tsrestgen: worker %s runs %s, and %s lists sqlite first: the TypeScript repositories run behaviors on Postgres alone (D103)", w.Name, w.Behavior.Runs(), deps.Database)
+	}
+	return fmt.Errorf("tsrestgen: worker %s runs %s, through the repositories %s's TypeScript types export for Postgres (D103); enable outputs.types.typescript in %s's config", w.Name, w.Behavior.Runs(), deps.Database, deps.Database)
 }
 
 // HasJobs reports whether the API declares a job, for which deps.ts
 // declares Jobs and JobsConstructor.
 func (o *APIOutput) HasJobs() bool { return len(o.Jobs) > 0 }
 
-// HasWorkers reports whether the API declares a worker, for which deps.ts
-// declares Workers and WorkersConstructor.
-func (o *APIOutput) HasWorkers() bool { return len(o.Workers) > 0 }
+// HasWorkers reports whether the API declares a @worker, for which deps.ts
+// declares Workers and WorkersConstructor. A behavior worker is not one:
+// its handler is generated (D103).
+func (o *APIOutput) HasWorkers() bool { return len(o.OrdinaryWorkers()) > 0 }
 
-// WorkerQueues are the queues the API's workers handle, sorted and each
-// once: the message types deps.ts imports from the database's types.
+// WorkerQueues are the queues the API's @worker workers handle, sorted and
+// each once: the message types deps.ts imports from the database's types.
 func (o *APIOutput) WorkerQueues() []string {
 	var out []string
-	for _, w := range o.Workers {
+	for _, w := range o.OrdinaryWorkers() {
 		if !slices.Contains(out, w.Queue) {
 			out = append(out, w.Queue)
 		}
@@ -357,6 +593,27 @@ func WriteImplementationScaffold(output *APIOutput, dir string) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+// ImplementationDependencies are what the scaffold's package.json depends
+// on: the API's package and its types, the database's types when Deps
+// reaches them and they are other than the API's, the definitions of each
+// memory store the API lists that writes them, and the runtime. A stack's
+// build warns of one an implementation it no longer writes lacks (D100).
+func (o *APIOutput) ImplementationDependencies() []tsutil.Dependency {
+	deps := []tsutil.Dependency{
+		{Name: o.PackageName, Spec: tsutil.WorkspaceSpec},
+		{Name: o.TypesPackage, Spec: tsutil.WorkspaceSpec},
+	}
+	if o.Deps.DatabaseTypesPackage != "" && o.Deps.DatabaseTypesPackage != o.TypesPackage {
+		deps = append(deps, tsutil.Dependency{Name: o.Deps.DatabaseTypesPackage, Spec: tsutil.WorkspaceSpec})
+	}
+	for _, store := range o.Deps.MemoryStores {
+		if store.Definitions != "" {
+			deps = append(deps, tsutil.Dependency{Name: store.Definitions, Spec: tsutil.WorkspaceSpec})
+		}
+	}
+	return append(deps, tsutil.Dependency{Name: o.RuntimePackage, Spec: "*"})
 }
 
 // ImplementationExists reports whether dir holds a TypeScript package: a

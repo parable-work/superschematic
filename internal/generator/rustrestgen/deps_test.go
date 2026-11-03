@@ -37,6 +37,17 @@ func TestSetDepsRefusesAClash(t *testing.T) {
 	if uses := strings.Join(output.DepsUses(), "\n"); !strings.Contains(uses, "bucket::Bucket") {
 		t.Errorf("deps.rs with a bucket names no Bucket:\n%s", uses)
 	}
+	// A memory store whose field is a bucket's, and one of its own (D75).
+	if err := output.SetDeps(DepsInfo{Buckets: []DepsBucket{{Service: "shop-cache", Field: "shop_cache"}}, MemoryStores: []DepsMemoryStore{{Service: "shop_cache", Field: "shop_cache"}}}); err == nil ||
+		!strings.Contains(err.Error(), "lists memory store shop_cache, which would be Deps.shop_cache, the field of shop-cache") {
+		t.Errorf("a bucket and a memory store with one field: %v", err)
+	}
+	if err := output.SetDeps(DepsInfo{MemoryStores: []DepsMemoryStore{{Service: "shop-cache", Field: DepsField("shop-cache")}}}); err != nil {
+		t.Errorf("a memory store of its own field: %v", err)
+	}
+	if uses := strings.Join(output.DepsUses(), "\n"); !strings.Contains(uses, "memorystore::MemoryStore") {
+		t.Errorf("deps.rs with a memory store names no MemoryStore:\n%s", uses)
+	}
 }
 
 // TestRuntimeFeatures: the crate turns on identity for the user model,

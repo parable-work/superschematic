@@ -103,8 +103,8 @@ func (r *resolver) resolveRunnerRef(where string, ref ir.DeployableRef) (*deploy
 	case ref.Service == nil:
 		r.fail(CodeInvalidStack, "%s names a runner but no DB service; an engine's runner is named beside its database's handle", where)
 		return nil, false
-	case ref.Job != "" || ref.Worker != "":
-		r.fail(CodeInvalidStack, "%s names the runner and a job or a worker; an element names one", where)
+	case ref.Job != "" || ref.Worker != "" || ref.Deriver != "" || ref.App != "":
+		r.fail(CodeInvalidStack, "%s names the runner and a job, a worker, a deriver or an app; an element names one", where)
 		return nil, false
 	}
 	if !r.checkRef(where, *ref.Service, ir.SchemaKindDB) {

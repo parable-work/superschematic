@@ -38,6 +38,7 @@ func TestValidateOperationMCP(t *testing.T) {
 		{name: "policy without key", mcp: OperationMCP{Handle: "get_order", Invocation: MCPInvocation{Value: "ask"}}, want: `invocation policy "ask" has no key`},
 		{name: "policy without value", mcp: OperationMCP{Handle: "get_order", Invocation: MCPInvocation{Key: "invocationPolicy"}}, want: "invocationPolicy must be non-empty"},
 		{name: "policy under a record key", mcp: OperationMCP{Handle: "get_order", Invocation: MCPInvocation{Key: "hidden", Value: "ask"}}, want: `invocation policy key "hidden" is a key @mcp already uses`},
+		{name: "policy under the engine's hiddenBy", mcp: OperationMCP{Handle: "get_order", Invocation: MCPInvocation{Key: "hiddenBy", Value: "ask"}}, want: `invocation policy key "hiddenBy" is a key @mcp already uses`},
 		{name: "hidden with policy", mcp: OperationMCP{Hidden: true, HiddenReason: "Browser only.", Invocation: MCPInvocation{Key: "review", Value: "never"}}, want: "a hidden operation must not declare review"},
 	}
 	for _, test := range tests {

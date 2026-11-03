@@ -36,6 +36,24 @@ pub struct WebhookReceiveGithubEventArgs {
     pub action: String,
 }
 
+/// The arguments of webhook.receiveLedgerEvent (`POST /api/webhooks/ledger`),
+/// decoded and checked by the router. `check` makes the same checks on
+/// arguments a caller builds.
+#[derive(Debug, Clone)]
+pub struct WebhookReceiveLedgerEventArgs {
+    /// The request body.
+    pub input: types::LedgerEvent,
+}
+
+/// The arguments of webhook.receivePlaidEvent (`POST /api/webhooks/plaid`),
+/// decoded and checked by the router. `check` makes the same checks on
+/// arguments a caller builds.
+#[derive(Debug, Clone)]
+pub struct WebhookReceivePlaidEventArgs {
+    /// The request body.
+    pub input: types::PlaidItemEvent,
+}
+
 /// The arguments of webhook.receiveStripeEvent (`POST /api/webhooks/stripe`),
 /// decoded and checked by the router. `check` makes the same checks on
 /// arguments a caller builds.
@@ -55,6 +73,10 @@ pub trait EventImplementation: Send + Sync + 'static {
 pub trait WebhookImplementation: Send + Sync + 'static {
     /// A GitHub event. Its signature is checked before the permission.
     async fn receive_github_event(&self, ctx: RequestContext, args: WebhookReceiveGithubEventArgs) -> Result<types::EventReceipt, ApiError>;
+    /// A ledger event, whose type refuses the keys it does not declare.
+    async fn receive_ledger_event(&self, ctx: RequestContext, args: WebhookReceiveLedgerEventArgs) -> Result<types::EventReceipt, ApiError>;
+    /// A Plaid event, unsigned in this fixture.
+    async fn receive_plaid_event(&self, ctx: RequestContext, args: WebhookReceivePlaidEventArgs) -> Result<types::EventReceipt, ApiError>;
     /// A Stripe event. Its signature is checked before the rate limit.
     async fn receive_stripe_event(&self, ctx: RequestContext, args: WebhookReceiveStripeEventArgs) -> Result<types::EventReceipt, ApiError>;
 }

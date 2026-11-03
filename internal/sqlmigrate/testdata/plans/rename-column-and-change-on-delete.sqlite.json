@@ -1,8 +1,8 @@
 {
   "dialect": "sqlite",
-  "expanded": "6ace3e16a8e660f06f8024d715b36e6464e8f248663ed2964f3a0283b4b303a8",
-  "from": "17bd156134f9bc031e491f427775ca4c6089cbdfb136747219a92c639979d53a",
-  "hash": "8d0b48dde680a5565d05883de273e38e0ae0248edb6c5c862bb0fc42c3344bbb",
+  "expanded": "666e6fff38cbcd7599c8018ec19b55d717808eb4d50f7e52750fa9fa18d18075",
+  "from": "d9697f8b128d88e9877145068feef31d9bdfa8a6c367bd3cdbd76a76318119f0",
+  "hash": "995ae5a616b3b1f3c0a2976417ed0e98684b913c4dc72d87fd2bc09a3ee88024",
   "renames": [
     "order.customer_id=order.buyer_id"
   ],
@@ -65,7 +65,7 @@
       "phase": "contract",
       "statements": [
         "PRAGMA defer_foreign_keys = ON",
-        "CREATE TABLE \"_new_order\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"code\" TEXT NOT NULL,\n  \"buyer_id\" TEXT NOT NULL,\n  \"total\" INTEGER NOT NULL,\n  \"reference\" TEXT,\n  \"note\" TEXT,\n  \"placed_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"buyer_id\") REFERENCES \"customer\" (\"id\") ON DELETE CASCADE\n)",
+        "CREATE TABLE \"_new_order\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"code\" TEXT NOT NULL,\n  \"buyer_id\" TEXT NOT NULL,\n  \"total\" INTEGER NOT NULL,\n  \"reference\" TEXT,\n  \"note\" TEXT,\n  \"placed_at\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"buyer_id\") REFERENCES \"customer\" (\"id\") ON DELETE CASCADE\n)",
         "CREATE TABLE \"_new_order_label\" (\n  \"order_id\" TEXT NOT NULL,\n  \"label_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"order_id\", \"label_id\"),\n  FOREIGN KEY (\"label_id\") REFERENCES \"label\" (\"id\") ON DELETE CASCADE,\n  FOREIGN KEY (\"order_id\") REFERENCES \"_new_order\" (\"id\") ON DELETE CASCADE\n)",
         "CREATE TABLE \"_new_order_line\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"sku\" TEXT NOT NULL,\n  \"quantity\" INTEGER NOT NULL,\n  \"order_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"order_id\") REFERENCES \"_new_order\" (\"id\") ON DELETE CASCADE\n)",
         "INSERT INTO \"_new_order\" (\"id\", \"code\", \"buyer_id\", \"total\", \"reference\", \"note\", \"placed_at\")\nSELECT \"id\", \"code\", \"buyer_id\", \"total\", \"reference\", \"note\", \"placed_at\"\nFROM \"order\"",
@@ -83,7 +83,7 @@
       "transactional": true
     }
   ],
-  "to": "cbbc1a890542c59cd38f36de12f56b8c99306e9c01726565903d76aec7e09ac2",
+  "to": "782540f839c7e9970fda53078b6a6986937f18f718356e5015642b825047b57f",
   "toModel": null,
   "version": 1
 }

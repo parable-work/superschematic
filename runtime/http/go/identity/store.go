@@ -20,6 +20,8 @@ var (
 	// ErrGrantExists: Bootstrap found a role grant, so someone holds a
 	// role already and the database is past its first administrator.
 	ErrGrantExists = errors.New("identity: a role grant exists")
+	// ErrNotPending: ApproveUser found the user not waiting for approval.
+	ErrNotPending = errors.New("identity: the user is not pending")
 )
 
 // InvalidLoginError is a login the login scalar does not parse.
@@ -54,6 +56,9 @@ type User struct {
 	Name  string
 	// Disabled: the user's credential has disabledAt set.
 	Disabled bool
+	// Pending: the user's credential has pendingAt set; they wait for an
+	// administrator's approval (D81).
+	Pending bool
 	// Roles are the roles the user holds, by name. GetUser and ListUsers
 	// fill them in; other methods leave them nil.
 	Roles []Role
@@ -100,6 +105,27 @@ type NewUser struct {
 	Name         string
 	PasswordHash string
 	At           time.Time
+
+	// Pending writes the credential's pendingAt: the user waits for an
+	// administrator's approval (ApproveUser) before they sign in (D81).
+	Pending bool
+	// Roles are the names of the roles the user is granted with their
+	// row, each created with no permissions when no role has the name
+	// (D81).
+	Roles []string
+	// First, when no role grant exists yet, makes the user the database's
+	// first administrator, as Bootstrap would (D81): never pending, and
+	// granted First.Role, created with First.Permissions when no role has
+	// the name, beside Roles. Two users created at once make one
+	// administrator.
+	First *FirstUser
+}
+
+// FirstUser is NewUser.First: the first administrator's role and the
+// permissions it is created with.
+type FirstUser struct {
+	Role        string
+	Permissions []string
 }
 
 // NewBootstrap is the first administrator Bootstrap creates: a role with
@@ -135,9 +161,15 @@ type Store interface {
 	GetUser(ctx context.Context, id string) (User, error)
 	// ListUsers returns every user with their roles, by login.
 	ListUsers(ctx context.Context) ([]User, error)
-	// CreateUser creates a user and their credential. The database
-	// generates the user's key. A taken login is ErrLoginTaken.
+	// CreateUser creates a user and their credential, and grants them
+	// NewUser's roles, in one transaction. The database generates the
+	// user's key. A taken login is ErrLoginTaken, and roles without a
+	// UserRole table ErrNoRoles. The user it returns holds the roles it
+	// granted and is Pending when it wrote pendingAt.
 	CreateUser(ctx context.Context, user NewUser) (User, error)
+	// ApproveUser clears the credential's pendingAt (D81). A user who is
+	// not pending is ErrNotPending.
+	ApproveUser(ctx context.Context, userID string) error
 
 	// SetPassword writes the user's password hash and passwordChangedAt,
 	// and revokes the user's sessions but keepSession (none when empty).

@@ -1,6 +1,10 @@
 package sqlmigrate
 
-import "strings"
+import (
+	"strings"
+
+	ir "github.com/parable-work/superschematic/ir"
+)
 
 // op names an operation. It is the Op of the step a change renders to; a
 // dialect that renders a change as several steps names the others itself.
@@ -26,6 +30,9 @@ const (
 	opAddUnique        op = "addUnique"
 	opAddForeignKey    op = "addForeignKey"
 	opReplaceFK        op = "replaceForeignKey"
+	opAddCheck         op = "addCheck"
+	opReplaceCheck     op = "replaceCheck"
+	opRunRawSQL        op = "runRawSQL"
 	opCreateFunction   op = "createFunction"
 	opReplaceFunction  op = "replaceFunction"
 	opCreateTrigger    op = "createTrigger"
@@ -37,6 +44,8 @@ const (
 	opGraphContent     op = "changeGraphContent"
 	opSetNotNull       op = "setNotNull"
 	opDropDefault      op = "dropDefault"
+	opDropCheck        op = "dropCheck"
+	opUndoRawSQL       op = "undoRawSQL"
 	opDropView         op = "dropView"
 	opDropTrigger      op = "dropTrigger"
 	opDropFunction     op = "dropFunction"
@@ -45,13 +54,18 @@ const (
 	opDropIndex        op = "dropIndex"
 	opDropColumn       op = "dropColumn"
 	opDropTable        op = "dropTable"
+
+	// The roles @seedRoles keeps in a UserRole table (D88).
+	opSeedRole   op = "seedRole"
+	opUpdateRole op = "updateRole"
 )
 
 // rank is a change's place in its phase. Expand runs renames, then creates
 // and adds, then alterations, then indexes, constraints, functions,
 // triggers, views and comments, then the changes of a version graph's
 // content that change no table. Contract runs tightenings, then drops in
-// reverse dependency order (D27).
+// reverse dependency order (D27). rankOf places the raw SQL between them
+// (D83).
 var rank = map[op]int{
 	opCreateExtension:  0,
 	opCreateSchema:     1,
@@ -65,11 +79,14 @@ var rank = map[op]int{
 	opAddColumn:        8,
 	opDropNotNull:      9,
 	opSetDefault:       9,
+	opDropCheck:        9,
 	opAlterColumnType:  10,
 	opRegenerateColumn: 10,
 	opCreateIndex:      11,
 	opReplaceIndex:     11,
 	opAddUnique:        12,
+	opAddCheck:         12,
+	opReplaceCheck:     12,
 	opAddForeignKey:    13,
 	opReplaceFK:        13,
 	opCreateFunction:   14,
@@ -80,10 +97,12 @@ var rank = map[op]int{
 	opCreateView:       16,
 	opReplaceView:      16,
 	opCommentOnTable:   17,
+	opRunRawSQL:        17,
 	opGraphContent:     18,
 
 	opSetNotNull:     20,
 	opDropDefault:    20,
+	opUndoRawSQL:     20,
 	opDropView:       30,
 	opDropTrigger:    31,
 	opDropFunction:   32,
@@ -92,6 +111,26 @@ var rank = map[op]int{
 	opDropIndex:      35,
 	opDropColumn:     36,
 	opDropTable:      37,
+
+	// A role is seeded, or updated, once its table and the unique name
+	// its insert's conflict reads exist; in contract, before any drop.
+	opSeedRole:   17,
+	opUpdateRole: 17,
+}
+
+// rankOf is c's place in its phase: its op's rank, scaled so the raw SQL
+// sits between ranks. A piece that runs after the tables runs after the
+// alterations and before the indexes; one that runs after every object,
+// after the comments; and a removed piece's down after the tightenings,
+// before any drop (D83).
+func rankOf(c *change) int {
+	switch {
+	case c.op == opRunRawSQL && c.raw.Position == ir.RawSQLAfterTables:
+		return rank[opAlterColumnType]*10 + 5
+	case c.op == opRunRawSQL, c.op == opUndoRawSQL:
+		return rank[c.op]*10 + 5
+	}
+	return rank[c.op] * 10
 }
 
 // change is one difference between two models, in terms every dialect
@@ -127,6 +166,15 @@ type change struct {
 	constraint *Constraint
 	foreignKey *ForeignKey
 	oldFK      *ForeignKey
+	// check is a check the change adds or replaces, oldCheck the one it
+	// replaces or drops; newColumn is set when the check's column is one the
+	// plan adds, which a dialect's ADD COLUMN may declare it on.
+	check     *Check
+	oldCheck  *Check
+	newColumn bool
+	// raw is a piece of raw SQL the change runs, oldRaw one it undoes.
+	raw        *RawSQL
+	oldRaw     *RawSQL
 	index      *Index
 	function   *Function
 	oldFunc    *Function
@@ -145,6 +193,22 @@ type change struct {
 
 	// partitioned is set when the change's table is partitioned.
 	partitioned bool
+
+	// dedupe is set on the index that keeps a queue's table to one ready
+	// message per key when the table exists (D80): the index's step first
+	// marks done the ready messages of a key but the one the queue's
+	// onDuplicate keeps, so the build finds none it refuses.
+	dedupe *QueueKey
+
+	// backfill is set on the creation of an @enqueueOnChange trigger with
+	// backfill on a table the previous model has (D88): the step runs the
+	// trigger's Backfill after creating it.
+	backfill bool
+
+	// role is a @seedRoles role the change inserts or updates, oldRole the
+	// previous model's (D88).
+	role    *RoleSeed
+	oldRole *RoleSeed
 
 	hazards []*Hazard
 }
@@ -211,7 +275,20 @@ func triggerSubject(table, name string) string {
 	return "trigger/" + table + "/" + name
 }
 
-func viewSubject(v *View) string { return "view/" + v.Schema + "." + v.Name }
+func viewSubject(v *View) string { return "view/" + viewRelation(v) }
+
+// viewRelation is the view as a reader names it: schema.name, or its name
+// alone in the search_path's schema (D90).
+func viewRelation(v *View) string {
+	if v.Schema == "" {
+		return v.Name
+	}
+	return v.Schema + "." + v.Name
+}
+
+func rawSQLSubject(id string) string { return "rawSql/" + id }
+
+func roleSubject(table, name string) string { return "role/" + table + "/" + name }
 
 // addHazard adds a hazard of class to c, or appends reason to the one c
 // already has of that class and reader.

@@ -348,6 +348,43 @@ func TestClosureRejectsUnknownRootAndUndiscoveredDependency(t *testing.T) {
 	assert.Contains(t, err.Error(), "missing")
 }
 
+// TestDependentsFollowsEveryEdgeBackwards: an edit to a service can change
+// the load of each service that names it, through any config field or an
+// edge the caller adds, transitively, and of no other.
+func TestDependentsFollowsEveryEdgeBackwards(t *testing.T) {
+	general := func(name string, deps ...string) Service {
+		cfg := &schemaconfig.SchemaConfig{Name: name, Kind: ir.SchemaKindGeneral}
+		for _, dep := range deps {
+			cfg.Dependencies = append(cfg.Dependencies, schemaconfig.ServiceDependency{Name: dep, Kind: ir.SchemaKindGeneral})
+		}
+		return Service{Name: name, Dir: "/services/" + name, Config: cfg}
+	}
+	db := general("db", "base")
+	db.Config.Kind = ir.SchemaKindDB
+	api := general("api")
+	api.Config.Kind = ir.SchemaKindAPI
+	api.Config.AuthDB = "db"
+	caller := general("caller")
+	caller.Config.Kind = ir.SchemaKindAPI
+	caller.Config.Calls = []schemaconfig.ServiceDependency{{Name: "api", Kind: ir.SchemaKindAPI}}
+	stack := general("stack")
+	stack.Config.Kind = ir.SchemaKindStack
+	services := []Service{general("base"), db, api, caller, general("other"), stack}
+
+	assert.Equal(t, []string{"base", "db", "api", "caller"}, serviceNames(Dependents(services, []string{"base"}, nil)),
+		"dependencies, authDb and calls, transitively, in the given order")
+	assert.Equal(t, []string{"other"}, serviceNames(Dependents(services, []string{"other", "missing"}, nil)))
+
+	references := func(s Service) []string {
+		if s.Name == "stack" {
+			return []string{"caller"}
+		}
+		return nil
+	}
+	assert.Equal(t, []string{"api", "caller", "stack"}, serviceNames(Dependents(services, []string{"api"}, references)),
+		"an edge the caller adds is followed too")
+}
+
 func stepNames(steps []Step) []string {
 	names := make([]string, 0, len(steps))
 	for _, step := range steps {
@@ -552,4 +589,37 @@ func TestDiscoverReadsTheConfigPackageByIdentity(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, services, 1)
 	assert.Equal(t, "aliased", services[0].Name)
+}
+
+// TestMemoryStoresOrderTheBuild: a MemoryStore service an API lists in its
+// memoryStores, or names its rateLimitStore, builds before the API, whose
+// implementation imports its definitions; it joins the closure, a handle of
+// the wrong kind is refused, and an edit to the store reaches the API
+// (D75).
+func TestMemoryStoresOrderTheBuild(t *testing.T) {
+	store := func(name string) Service {
+		return Service{Name: name, Dir: "/services/" + name, Config: &schemaconfig.SchemaConfig{Name: name, Kind: ir.SchemaKindMemoryStore}}
+	}
+	api := apiCalling("a-api")
+	api.Config.MemoryStores = []schemaconfig.ServiceDependency{{Name: "shop-cache", Kind: ir.SchemaKindMemoryStore}}
+	limited := apiCalling("b-api")
+	limited.Config.RateLimitStore = &schemaconfig.ServiceDependency{Name: "z-limits", Kind: ir.SchemaKindMemoryStore}
+	services := []Service{api, limited, store("shop-cache"), store("z-limits")}
+
+	sorted, err := TopologicalSort(services)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"shop-cache", "a-api", "z-limits", "b-api"}, serviceNames(sorted))
+
+	closure, err := Closure(sorted, "b-api")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"z-limits", "b-api"}, serviceNames(closure))
+
+	assert.Equal(t, []string{"shop-cache", "a-api"}, serviceNames(Dependents(sorted, []string{"shop-cache"}, nil)))
+	assert.Equal(t, []string{"z-limits", "b-api"}, serviceNames(Dependents(sorted, []string{"z-limits"}, nil)))
+
+	wrong := apiCalling("a-api")
+	wrong.Config.MemoryStores = []schemaconfig.ServiceDependency{{Name: "shop-cache", Kind: ir.SchemaKindBucket}}
+	err = validateHandleKinds([]Service{wrong, store("shop-cache")})
+	require.Error(t, err)
+	assert.Equal(t, "a-api: memoryStores names shop-cache with kind Bucket, but shop-cache is kind MemoryStore", err.Error())
 }

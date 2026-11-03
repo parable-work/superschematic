@@ -1,0 +1,48 @@
+{
+  "dialect": "postgres",
+  "expanded": "5d475986cff746a0a3aa87ed97d3b64f5a65320a699aabbea51338276da624c0",
+  "from": "5d475986cff746a0a3aa87ed97d3b64f5a65320a699aabbea51338276da624c0",
+  "hash": "e134d7bad6c40e020d008fb30231357f71bf46fff3623226f281ce11c7f0bd56",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "raw-sql",
+          "id": "raw-sql:rawSql/customer_totals",
+          "reason": "The raw SQL customer_totals is no longer declared: the step runs its down; the planner cannot judge what it does.",
+          "subject": "rawSql/customer_totals"
+        }
+      ],
+      "index": 1,
+      "op": "undoRawSQL",
+      "phase": "contract",
+      "statements": [
+        "DROP MATERIALIZED VIEW IF EXISTS customer_totals"
+      ],
+      "subject": "rawSql/customer_totals",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "raw-sql",
+          "id": "raw-sql:rawSql/order_code_lower",
+          "reason": "The raw SQL order_code_lower is no longer declared: the step runs its down; the planner cannot judge what it does.",
+          "subject": "rawSql/order_code_lower"
+        }
+      ],
+      "index": 2,
+      "op": "undoRawSQL",
+      "phase": "contract",
+      "statements": [
+        "DROP INDEX IF EXISTS order_code_lower"
+      ],
+      "subject": "rawSql/order_code_lower",
+      "transactional": true
+    }
+  ],
+  "to": "c6787cdef058267033f38e38e6c4e788b8fc54fcc00776b78d8b4db345c93d96",
+  "toModel": null,
+  "version": 1
+}

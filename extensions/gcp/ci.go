@@ -14,8 +14,11 @@ const CIIdentityKind = "gcp-workload-identity"
 
 // workloadIdentityPool is the id of the stack's workload identity pool,
 // which bootstrap creates for the GitHub repository (section 7.3), and
-// workloadIdentityProvider the id of its one provider.
-func workloadIdentityPool(stack string) string { return kebab(stack) + "-github" }
+// workloadIdentityProvider the id of its one provider. A pool's id holds
+// 32 characters, so a stack's name over 25 is shortened in it (D97).
+func workloadIdentityPool(stack string) string {
+	return shorten(kebab(stack), 32-len("-github"), "-") + "-github"
+}
 
 const workloadIdentityProvider = "github"
 

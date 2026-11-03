@@ -87,11 +87,15 @@ const (
 
 	// UserCredential: id; user, the User table, @unique; passwordHash, a
 	// Secret string holding the PHC string; passwordChangedAt,
-	// Temporal.DateTime; disabledAt, nullable Temporal.DateTime.
+	// Temporal.DateTime; disabledAt and pendingAt, nullable
+	// Temporal.DateTime. pendingAt is set while a user who registered under
+	// registration "approval" waits for an administrator (D81), apart from
+	// disabledAt so the two read apart.
 	IdentityCredentialUserField              = "user"
 	IdentityCredentialPasswordHashField      = "passwordHash"
 	IdentityCredentialPasswordChangedAtField = "passwordChangedAt"
 	IdentityCredentialDisabledAtField        = "disabledAt"
+	IdentityCredentialPendingAtField         = "pendingAt"
 
 	// UserRoleGrant: id; user, the User table; role, the UserRole table;
 	// grantedAt, Temporal.DateTime; a unique index on (user, role).

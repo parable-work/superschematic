@@ -1,0 +1,12 @@
+# A TypeScript API over caller-db's user model (D87): its operations write
+# notes through Deps.orm with no acting user of their own, so the caller
+# records them, and its worker writes notes as the system actor.
+name: caller-ts-api
+kind: API
+authDb: caller-db
+dependencies:
+  - { name: caller-db, kind: DB }
+outputs:
+  types:
+    typescript: { enabled: true }
+  api: { enabled: true, language: TYPESCRIPT }

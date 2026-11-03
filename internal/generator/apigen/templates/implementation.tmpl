@@ -123,7 +123,7 @@ var _ api.WorkersConstructor = NewWorkers
 type workers struct {
 	deps api.Deps
 }
-{{- range .Workers }}
+{{- range .OrdinaryWorkers }}
 
 // {{ .Method }} handles a message of the queue {{ .Queue }}.
 func (w *workers) {{ .Method }}(ctx context.Context, msg {{ $.Deps.DatabaseTypesAlias }}.{{ .Queue }}) error {
@@ -180,7 +180,7 @@ type {{ toGoName . }} struct {
 // @manualRouteRegistration: the server mounts the handler NewManualRoutes
 // builds at its route, not this method.
 {{- end }}
-func (impl *{{ toGoName $namespace }}) {{ .ShortImplName }}(ctx context.Context{{- range .PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .ArgQueryParams }}, {{ .Name }} {{ if .IsArray }}[]{{ else if not .Required }}*{{ end }}{{ .GoType }}{{- end }}{{- if .Filterable }}, filters []filterparse.Filter{{- end }}{{- if .HasInput }}, input *types.{{ .InputType }}{{- else if .ScalarArgs }}{{- range .ScalarArgs }}, {{ .Name }} {{ .GoListType }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files map[string]*api.FileUploadData{{- end }}{{- if .Page }}, page paging.Request{{- end }}) ({{ .GoResultType }}, error) {
+func (impl *{{ toGoName $namespace }}) {{ .ShortImplName }}(ctx context.Context{{- range .PathParams }}, {{ .Name }} {{ .GoType }}{{- end }}{{- range .ArgQueryParams }}, {{ .Name }} {{ if .IsArray }}[]{{ else if not .Required }}*{{ end }}{{ .GoType }}{{- end }}{{- if .Filterable }}, filters []filterparse.Filter{{- end }}{{- if .HasInput }}, input *types.{{ .InputType }}{{- else if .ScalarArgs }}{{- range .ScalarArgs }}, {{ .Name }} {{ .GoListType }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files map[string]*api.FileUploadData{{- end }}{{- if .Page }}, page paging.Request{{- end }}) ({{ .GoImplResultType }}, error) {
 	return {{ .GoZeroResult }}, api.NotImplementedError("{{ toGoName $namespace }}.{{ .ShortImplName }}")
 }
 {{- end }}

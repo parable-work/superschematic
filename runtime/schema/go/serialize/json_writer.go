@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/parable-work/superschematic/ir"
 )
@@ -44,10 +46,11 @@ func (s *Serializer) writeObject(buf *bytes.Buffer, td *ir.TypeDef, sanitized ma
 	// a map containing extra keys (e.g. bypassing TypeToMap), preserve them
 	// at the end in stable sorted order via json.Marshal so output is still
 	// deterministic.
-	for key, value := range sanitized {
+	for _, key := range slices.Sorted(maps.Keys(sanitized)) {
 		if _, done := emitted[key]; done {
 			continue
 		}
+		value := sanitized[key]
 		if !first {
 			buf.WriteByte(',')
 		}

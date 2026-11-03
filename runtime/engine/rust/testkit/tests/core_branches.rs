@@ -26,7 +26,7 @@ use superschematic_engine::{
     ReadEvents, RunnerOptions, SchemaTarget, WriteOptions,
 };
 use superschematic_engine_behaviors::{
-    uuid_v5, Branches, Comments, ACTOR_NAMESPACE, ROOT_NAMESPACE,
+    uuid_v5, Branches, Revisions, ACTOR_NAMESPACE, ROOT_NAMESPACE,
 };
 use support::{alice, refusal, schema_document, targets, veto, Target};
 
@@ -90,7 +90,7 @@ fn recipes(config: Value) -> Value {
 }
 
 fn behaviors() -> BehaviorSet {
-    BehaviorSet::new().with(Comments).with(Branches)
+    BehaviorSet::new().with(Revisions).with(Branches)
 }
 
 fn open_with(target: &Target, configure: impl FnOnce(&mut EngineOptions)) -> Engine {
@@ -1526,16 +1526,18 @@ fn another_behaviors_writing_operation_is_a_first_write_too() {
     for target in targets("branches_other_write") {
         let engine = open_with(&target, |_| {});
         let mut before = recipe_document(None, "Recipe");
-        before["types"]["Recipe"]["behaviors"] = json!([{"name": "Comments"}]);
+        let revisions =
+            json!({"name": "Revisions", "config": {"review": {"permission": "recipes.review"}}});
+        before["types"]["Recipe"]["behaviors"] = json!([revisions]);
         publish(&engine, &before);
         create(&engine, &alice(), "Recipe", "Old soup", "old");
         let mut after = recipes(recipe_config());
         after["types"]["Recipe"]["behaviors"] =
-            json!([{"name": "Comments"}, {"name": "Branches", "config": recipe_config()}]);
+            json!([revisions, {"name": "Branches", "config": recipe_config()}]);
         publish(&engine, &after);
         let old = Calls::of(&engine, "old", bob(), "Recipe");
         assert_eq!(old.refs(), Vec::<Value>::new());
-        old.invoke("comment", json!({"body": "Needs salt."}));
+        old.invoke("propose", json!({"patch": {"title": "Salted soup"}}));
         let refs: Vec<Value> = old
             .refs()
             .iter()

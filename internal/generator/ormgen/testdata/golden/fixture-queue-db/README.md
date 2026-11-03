@@ -12,6 +12,8 @@ Generated at: 2026-01-02T03:04:05Z
 - `query.go` -- typed field selectors, filters, update structs, snapshot builders, and `ApplyTo`
 - `utils.go` -- shared query helpers
 - `repository_order.go` -- Order repository
+- `repository_order_line.go` -- OrderLine repository
+- `repository_product.go` -- Product repository
 
 ## Usage
 

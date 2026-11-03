@@ -1,8 +1,9 @@
-import type { Context, Env, Hono, MiddlewareHandler } from 'hono';
+import { Hono, type Context, type Env, type MiddlewareHandler } from 'hono';
 import { bearerAuth } from 'hono/bearer-auth';
 import { bodyLimit } from 'hono/body-limit';
 import { HTTPException } from 'hono/http-exception';
 import { authorize, type Authenticator, type PermissionMatcher } from './auth.js';
+import { withCaller } from './caller.js';
 import { OperationResult, envelopeResponse, requestIdOf } from './envelope.js';
 import type { OperationSpec, RequestContext } from './operation.js';
 import { decodeJsonParam, decodeParams } from './params.js';
@@ -21,6 +22,17 @@ import {
 } from './problem.js';
 import { MemoryRateLimitStore, clientIpOf, remoteAddressKey, type RateLimitOptions, type RateLimitStore } from './ratelimit.js';
 import { authorizeService, type ServiceAuthenticator } from './serviceauth.js';
+import { downloadResponse } from './download.js';
+import { decodeUploads, uploadBodyLimitBytes, type UploadedFiles } from './upload.js';
+
+// What an operation runs within: its caller, whom an ORM opened with no
+// user acts as (D87). A manual route's handler may run its writes within
+// one too.
+export { currentCaller, withCaller, type Caller } from './caller.js';
+
+// A built-in WebhookVerifier: a JWT carrying the body's SHA-256 (D81).
+export { INVALID_SIGNATURE_CODE, jwtBodyHashVerifier } from './webhook.js';
+export type { JwtBodyHashVerifierOptions, JwtWebhookAlgorithm, WebhookJwk, WebhookKeyLookup } from './webhook.js';
 
 /*
 The Hono binding of the http runtime. A generated router calls
@@ -44,6 +56,11 @@ declared), service step, gate and timeout still run, then the service's own
 handler receives the Hono context (a streaming response cannot be expressed
 as a JSON result).
 
+mountOperation runs the implementation within its caller (withCaller,
+./caller), the principal the gate established, so an ORM opened with no
+user of its own, an API's Deps.orm, acts as that caller in the operation's
+writes (D87). A manual route's handler runs within no caller.
+
 The service step (D37) runs before the end-user step: with a service
 authenticator it verifies Service-Authorization on every route and puts the
 caller on ctx.serviceCaller, then applies the operation's @requireService
@@ -57,8 +74,18 @@ the decoding and the implementation, as the Go router's covers its handler:
 it answers 504 when they have not produced a response in time, and aborts
 ctx.signal so an implementation that honours it stops early.
 
-Streaming, multipart and file uploads are not modelled by this adapter; an
-operation that needs them is a manual route.
+An operation whose input has file parts (D81) reads a multipart/form-data
+body (upload.ts), capped by its files' limits beside the JSON cap unless
+it declares @bodyLimit, and one whose result is a FileDownload answers the
+file (download.ts). A streaming request, or a response no FileDownload
+describes, is a manual route.
+
+Each mount also records its route's check (D98), which checkRoute runs: the
+same steps, on a router of their own that no client reaches, but the rate
+limit, which counts the runs alone; then the decoding, and no
+implementation. The MCP endpoint checks a call of a tool that asks the
+person this way, so only a call that would reach the implementation is
+confirmed.
 */
 
 /** Default JSON body cap for operations without @bodyLimit: 1 MiB. The Go router has no default; only @bodyLimit caps its routes. */
@@ -126,6 +153,8 @@ export interface DecodedRequest {
   readonly body: Readonly<Record<string, unknown>>;
   /** The parsed input type, undefined when the operation declares none or the body was optional and absent. */
   readonly input: unknown;
+  /** The files of a multipart input (D81), by field name; absent for an operation without file parts. */
+  readonly files?: UploadedFiles;
 }
 
 export type OperationHandler = (ctx: RequestContext, request: DecodedRequest) => Promise<unknown>;
@@ -230,7 +259,9 @@ function rateLimitStoreOf(options: RouterRuntimeOptions): RateLimitStore {
 async function admit(ctx: RequestContext, limitPerMinute: number, options: RouterRuntimeOptions): Promise<void> {
   const keyOf = options.rateLimit?.keyOf ?? remoteAddressKey;
   const now = options.rateLimit?.now ?? Date.now;
-  const key = `${ctx.operation.name}:${keyOf(ctx)}`;
+  // `<namespace>.<name>`, the operation's name across the runtimes, which
+  // the shared rate limit counts under (D75); neither holds a ':'.
+  const key = `${ctx.operation.namespace}.${ctx.operation.name}:${keyOf(ctx)}`;
   const decision = await rateLimitStoreOf(options).take(key, limitPerMinute, now());
   if (!decision.allowed) throw tooManyRequests(decision.retryAfterSeconds);
 }
@@ -396,6 +427,14 @@ async function decode(ctx: RequestContext, spec: OperationSpec): Promise<Decoded
   if (!hasBody(spec)) {
     return { path, query, body: {}, input: undefined };
   }
+  if (spec.uploads) {
+    // A multipart input (D81): its files, then its other fields.
+    try {
+      return { path, query, body: {}, ...(await decodeUploads(ctx, spec)) };
+    } catch (error) {
+      throw error instanceof HttpProblem ? error : inputRefusal(error);
+    }
+  }
   const raw = await parseJsonBody(ctx.raw);
   let input: unknown;
   if (spec.input) {
@@ -456,6 +495,7 @@ function listOfListsResult(data: unknown): unknown {
 
 function successResponse(result: unknown, requestId: string, spec: OperationSpec): Response {
   if (result instanceof Response) return result;
+  if (spec.download) return downloadResponse(result, spec.download, requestId);
   const shape = spec.outputIsArrayOfArrays ? listOfListsResult : (data: unknown) => data;
   if (result instanceof OperationResult) {
     return envelopeResponse(shape(result.data), requestId, result.status, result.headers);
@@ -569,9 +609,97 @@ async function runRoute<E extends Env>(
 }
 
 /**
+ * The check of one mounted route (D98): the route's steps but the rate
+ * limit, then what its work does before the implementation, and nothing
+ * after.
+ */
+interface RouteCheck {
+  readonly method: string;
+  readonly path: string;
+  readonly run: (c: Context) => Promise<Response>;
+}
+
+/** The checks of the routes mounted on each app, in the order they were mounted. */
+const routeChecks = new WeakMap<object, RouteCheck[]>();
+
+/** The router each app's checks run on, built for the number of checks it holds. */
+const checkRouters = new WeakMap<object, { readonly checks: number; readonly router: Hono }>();
+
+/**
+ * Records the check of the route mounted on app at method and path: its
+ * steps but the rate limit, which counts the runs alone, so a call that is
+ * checked, confirmed and run takes one token, as a request does; then
+ * work, what the route does before its implementation.
+ */
+function addRouteCheck<E extends Env>(
+  app: Hono<E>,
+  method: string,
+  path: string,
+  spec: OperationSpec,
+  options: RouterRuntimeOptions,
+  steps: RouteSteps,
+  work: (ctx: RequestContext) => void | Promise<void>
+): void {
+  const checkSteps: RouteSteps = { ...steps, rateLimitPerMinute: undefined };
+  const run = (c: Context<E>) =>
+    runRoute(c, spec, options, checkSteps, async ctx => {
+      await work(ctx);
+      return reached();
+    });
+  const check: RouteCheck = { method, path, run: run as unknown as RouteCheck['run'] };
+  const checks = routeChecks.get(app);
+  if (checks) checks.push(check);
+  else routeChecks.set(app, [check]);
+}
+
+/** What a check answers a request nothing refused: it would reach the implementation. */
+function reached(): Response {
+  return new Response(null, { status: 204 });
+}
+
+/**
+ * The router app's checks run on, which no client reaches: built on first
+ * use, and again once more routes are mounted, since a Hono router takes no
+ * route after it first matches.
+ */
+function checkRouterOf(app: object): Hono | undefined {
+  const checks = routeChecks.get(app);
+  if (!checks) return undefined;
+  const built = checkRouters.get(app);
+  if (built?.checks === checks.length) return built.router;
+  const router = new Hono();
+  for (const check of checks) router.on(check.method, check.path, check.run);
+  // A request no route of app answers leaves nothing to check.
+  router.notFound(() => reached());
+  checkRouters.set(app, { checks: checks.length, router });
+  return router;
+}
+
+/**
+ * Runs request through the check of the route app mounted for it with
+ * mountOperation or mountManualOperation (D98): every step the route runs
+ * before its implementation but the rate limit (the webhook verifier, the
+ * body limit, the service step, the authenticator and the permission
+ * gate), then the decoding of the path, the query and the body by the
+ * operation's strict parser, or a manual route's check of its path, and no
+ * implementation or handler. Answers the route's refusal, its problem
+ * response, or undefined when the request would reach the implementation,
+ * or when app mounted no route for it, which leaves nothing to check. The
+ * MCP endpoint checks the call of a tool that asks the person this way
+ * before it asks them.
+ */
+export async function checkRoute<E extends Env>(app: Hono<E>, request: Request, env?: E['Bindings']): Promise<Response | undefined> {
+  const router = checkRouterOf(app);
+  if (!router) return undefined;
+  const response = await router.fetch(request, env);
+  return response.status >= 400 ? response : undefined;
+}
+
+/**
  * Mounts one generated operation: the full pipeline around `handler`, which
  * receives the decoded request and returns the implementation's result (a
- * view, an OperationResult, or a finished Response).
+ * view, an OperationResult, or a finished Response). Records the route's
+ * check, which decodes a request and runs no handler (checkRoute, D98).
  */
 export function mountOperation<E extends Env>(
   app: Hono<E>,
@@ -580,7 +708,10 @@ export function mountOperation<E extends Env>(
   options: RouterRuntimeOptions = {},
   mount: MountOptions = {}
 ): void {
-  const limitBytes = mount.bodyLimitBytes ?? spec.bodyLimitBytes ?? options.bodyLimitBytes ?? DEFAULT_BODY_LIMIT_BYTES;
+  const jsonLimitBytes = options.bodyLimitBytes ?? DEFAULT_BODY_LIMIT_BYTES;
+  // An input with file parts (D81) is capped by its files' limits beside the JSON cap.
+  const limitBytes =
+    mount.bodyLimitBytes ?? spec.bodyLimitBytes ?? (spec.uploads ? uploadBodyLimitBytes(spec.uploads, jsonLimitBytes) : jsonLimitBytes);
   const { rateLimitPerMinute, timeoutSeconds } = directivesOf(spec, mount);
   const steps: RouteSteps = {
     webhookVerifier: webhookVerifierOf(spec, mount),
@@ -588,9 +719,16 @@ export function mountOperation<E extends Env>(
     bodyLimitBytes: hasBody(spec) ? limitBytes : undefined,
     timeoutSeconds,
   };
-  app.on(spec.method, honoPath(mount.path ?? spec.path), c =>
-    runRoute(c, spec, options, steps, async ctx => successResponse(await handler(ctx, await decode(ctx, spec)), ctx.requestId, spec))
+  const path = honoPath(mount.path ?? spec.path);
+  app.on(spec.method, path, c =>
+    runRoute(c, spec, options, steps, async ctx => {
+      const request = await decode(ctx, spec);
+      return successResponse(await withCaller(ctx.principal, () => handler(ctx, request)), ctx.requestId, spec);
+    })
   );
+  addRouteCheck(app, spec.method, path, spec, options, steps, async ctx => {
+    await decode(ctx, spec);
+  });
 }
 
 /**
@@ -599,7 +737,9 @@ export function mountOperation<E extends Env>(
  * and auth gate run, then the service's handler owns the request and
  * response, under the timeout. A timeout covers the handler's return of a
  * Response; a streaming body it has started is not cut. Without a handler
- * the route answers 501 so a forgotten hook is visible, not a 404.
+ * the route answers 501 so a forgotten hook is visible, not a 404. Records
+ * the route's check, which runs the steps and no handler, which reads the
+ * request itself (checkRoute, D98).
  */
 export function mountManualOperation<E extends Env>(
   app: Hono<E>,
@@ -615,13 +755,17 @@ export function mountManualOperation<E extends Env>(
     bodyLimitBytes: mount.bodyLimitBytes ?? spec.bodyLimitBytes,
     timeoutSeconds,
   };
-  app.on(spec.method, honoPath(mount.path ?? spec.path), c =>
-    runRoute(c, spec, options, steps, async ctx => {
-      if (!handler) throw notImplemented(`${spec.name} has no manual route handler`);
-      refuseUndecodablePath(ctx);
-      return handler(c, ctx);
-    })
-  );
+  // What the route does before the handler, which then owns the request.
+  const prepare = (ctx: RequestContext): ManualRouteHandler<E> => {
+    if (!handler) throw notImplemented(`${spec.name} has no manual route handler`);
+    refuseUndecodablePath(ctx);
+    return handler;
+  };
+  const path = honoPath(mount.path ?? spec.path);
+  app.on(spec.method, path, c => runRoute(c, spec, options, steps, async ctx => prepare(ctx)(c, ctx)));
+  addRouteCheck(app, spec.method, path, spec, options, steps, ctx => {
+    prepare(ctx);
+  });
 }
 
 /** A notFound handler for the application root: the problem envelope with code not_found. */

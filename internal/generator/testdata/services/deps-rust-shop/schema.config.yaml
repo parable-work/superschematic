@@ -1,7 +1,8 @@
 # A Rust API with a database, a callee, a bucket and a service clause
 # (D57, D54): its database is its authDb, whose User table the identity
 # runtime authenticates its end users over; it calls deps-rust-pricing,
-# lists the bucket deps-media, holds one setting in its @envVars type,
+# lists the bucket deps-media and the memory store deps-cache (D75), holds
+# one setting in its @envVars type,
 # serves the session routes, checks the end user on one operation, admits
 # a calling service on another, and lets anyone call a third. The Rust Deps
 # tests in internal/generator build it.
@@ -12,6 +13,8 @@ calls:
   - { name: deps-rust-pricing, kind: API }
 buckets:
   - { name: deps-media, kind: Bucket }
+memoryStores:
+  - { name: deps-cache, kind: MemoryStore }
 outputs:
   types:
     rust: { enabled: true }

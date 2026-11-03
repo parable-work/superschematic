@@ -1,0 +1,8 @@
+# The API stock-stack deploys: a Rust API that declares Backoffice, an app
+# that needs the topcoat extension (D78).
+name: stock-app-api
+kind: API
+outputs:
+  types:
+    rust: { enabled: true }
+  api: { enabled: true, language: RUST }

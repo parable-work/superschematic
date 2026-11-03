@@ -8,7 +8,7 @@ import {
   type ServiceAuthConfig,
   type ServiceAuthenticatorOptions,
 } from './index';
-import { base64urlEncode } from './serviceauth';
+import { MAX_KEY_SET_BYTES, base64urlEncode, fetchKeySet } from './serviceauth';
 
 // The clock every token below is minted against, in seconds.
 const NOW = 1_767_225_600;
@@ -506,5 +506,35 @@ describe('authorizeService', () => {
     expect(authorizeService(billing, allow)).toBe(false);
     expect(authorizeService(null, allow)).toBe(false);
     expect(authorizeService(billing, { mode: 'allow', from: [] })).toBe(true);
+  });
+});
+
+describe('fetchKeySet', () => {
+  test('reads a key set of at most 1 MiB, declared or streamed, as Go and Rust read one', async () => {
+    const set = JSON.stringify({ keys: [] });
+    const large = JSON.stringify({ keys: [], pad: 'x'.repeat(MAX_KEY_SET_BYTES) });
+    const seen: (string | null)[] = [];
+    const server = Bun.serve({
+      port: 0,
+      fetch(request) {
+        seen.push(request.headers.get('authorization'));
+        const path = new URL(request.url).pathname;
+        if (path === '/streamed') return new Response(new ReadableStream({ start: controller => (controller.enqueue(new TextEncoder().encode(large)), controller.close()) }));
+        if (path === '/missing') return new Response('no', { status: 404 });
+        return new Response(path === '/large' ? large : set);
+      },
+    });
+    try {
+      expect(await fetchKeySet(new URL('/set', server.url).href, { accept: 'application/json', authorization: 'Bearer t' })).toEqual({ keys: [] });
+      expect(seen).toEqual(['Bearer t']);
+      for (const path of ['/large', '/streamed']) {
+        const url = new URL(path, server.url).href;
+        await expect(fetchKeySet(url)).rejects.toThrow(`GET ${url}: key set larger than ${MAX_KEY_SET_BYTES} bytes`);
+      }
+      const missing = new URL('/missing', server.url).href;
+      await expect(fetchKeySet(missing)).rejects.toThrow(`GET ${missing}: status 404`);
+    } finally {
+      await server.stop(true);
+    }
   });
 });

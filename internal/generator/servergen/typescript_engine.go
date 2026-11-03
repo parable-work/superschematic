@@ -237,14 +237,14 @@ func (s *TypeScriptServer) RunnerSubject() string {
 // entry.
 func (s *TypeScriptServer) EngineImports() []string {
 	out := []string{"openEngineInBackground"}
-	if s.Job == nil && s.Worker == nil && s.Runner == nil {
+	if !s.Background() {
 		out = append(out, "engineApp", "engineMcp")
 		if slices.ContainsFunc(s.Engines, func(e *TypeScriptEngine) bool { return e.Routes != "" }) {
 			out = append(out, "engineRouteSpecs")
 		}
 	}
 	out = append(out, "type AsyncEngine", "type EngineBackground")
-	if s.Job == nil && s.Worker == nil && s.Runner == nil {
+	if !s.Background() {
 		out = append(out, "type EngineHttpOptions")
 	}
 	return append(out, "type EngineOptions", "type Principal")

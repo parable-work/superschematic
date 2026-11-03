@@ -1,6 +1,6 @@
 -- Generated SQLite DDL for schema: fixture-queue-db
 -- This file is auto-generated. Do not edit manually.
--- It is the migration plan from an empty database to model 90c61cb2c00fe96df81e8992aa373929c9d0b5c4c745cf0ce3eb1063594ab606.
+-- It is the migration plan from an empty database to model 089003ae202191c48239dc681018bf0859fa3d73d68c2577c8ef5745cc72e523.
 
 CREATE TABLE "order" (
   "id" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,
@@ -12,9 +12,9 @@ CREATE TABLE "order_placed_queue" (
   "id" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,
   "order_id" TEXT NOT NULL,
   "placed_at" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
-  "priority" TEXT NOT NULL,
+  "priority" TEXT DEFAULT 'low' NOT NULL CHECK ("priority" IN ('low', 'high')),
   "quantity" INTEGER NOT NULL,
-  "note" TEXT,
+  "note" TEXT CHECK (length("note") <= 200),
   "ship_to" TEXT NOT NULL,
   "tags" TEXT DEFAULT '[]' NOT NULL,
   "state" TEXT DEFAULT 'ready' NOT NULL,

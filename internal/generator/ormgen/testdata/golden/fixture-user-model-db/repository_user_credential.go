@@ -26,6 +26,7 @@ var UserCredentialAllowedFields = map[string]bool{
 	"password_hash":       true,
 	"password_changed_at": true,
 	"disabled_at":         true,
+	"pending_at":          true,
 	"user_id":             true,
 }
 
@@ -35,6 +36,7 @@ var UserCredentialQuotedFields = map[string]string{
 	"password_hash":       `password_hash`,
 	"password_changed_at": `password_changed_at`,
 	"disabled_at":         `disabled_at`,
+	"pending_at":          `pending_at`,
 	"user_id":             `user_id`,
 }
 
@@ -147,7 +149,7 @@ func (r *UserCredentialRepository) batchUserByIDs(ctx context.Context, ids []typ
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&UserFilter{
 			Id: &UUIDFilter{
@@ -200,6 +202,9 @@ func (r *UserCredentialRepository) GetOne(ctx context.Context, id types.Identity
 		if opts.Fields.DisabledAt {
 			fieldStrings = append(fieldStrings, "disabled_at")
 		}
+		if opts.Fields.PendingAt {
+			fieldStrings = append(fieldStrings, "pending_at")
+		}
 		// Validate fields
 		if err := validateFields(fieldStrings, UserCredentialAllowedFields); err != nil {
 			return nil, err
@@ -208,7 +213,7 @@ func (r *UserCredentialRepository) GetOne(ctx context.Context, id types.Identity
 		query = fmt.Sprintf(`SELECT %s FROM user_credential WHERE id = $1`, selectFields)
 	} else {
 		// Select all fields in explicit order matching scan order (using OrderedMembers for schema order)
-		query = `SELECT "id", "user_id", "password_hash", "password_changed_at", "disabled_at" FROM user_credential WHERE id = $1`
+		query = `SELECT "id", "user_id", "password_hash", "password_changed_at", "disabled_at", "pending_at" FROM user_credential WHERE id = $1`
 	}
 
 	// Execute query
@@ -224,6 +229,7 @@ func (r *UserCredentialRepository) GetOne(ctx context.Context, id types.Identity
 	// Create temporary variables for nullable fields that need pointer scanning
 
 	var tempDisabledAt *types.TemporalDateTime
+	var tempPendingAt *types.TemporalDateTime
 
 	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
 	var tempRelUser *types.IdentityUUID
@@ -235,6 +241,7 @@ func (r *UserCredentialRepository) GetOne(ctx context.Context, id types.Identity
 		// Track whether special fields were selected so we can post-process after Scan.
 
 		var selectedDisabledAt bool
+		var selectedPendingAt bool
 
 		scanDest := make([]any, len(fieldStrings))
 		for i, fieldName := range fieldStrings {
@@ -248,6 +255,9 @@ func (r *UserCredentialRepository) GetOne(ctx context.Context, id types.Identity
 			case "disabled_at":
 				scanDest[i] = &tempDisabledAt
 				selectedDisabledAt = true
+			case "pending_at":
+				scanDest[i] = &tempPendingAt
+				selectedPendingAt = true
 			case "user_id":
 				scanDest[i] = &tempRelUser
 				selectedRelUser = true
@@ -264,6 +274,10 @@ func (r *UserCredentialRepository) GetOne(ctx context.Context, id types.Identity
 			if selectedDisabledAt && tempDisabledAt != nil {
 				// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 				result.DisabledAt = tempDisabledAt
+			}
+			if selectedPendingAt && tempPendingAt != nil {
+				// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+				result.PendingAt = tempPendingAt
 			}
 			if jsonFieldDecodeErr != nil {
 				return nil, jsonFieldDecodeErr
@@ -284,6 +298,8 @@ func (r *UserCredentialRepository) GetOne(ctx context.Context, id types.Identity
 			&result.PasswordChangedAt,
 
 			&tempDisabledAt,
+
+			&tempPendingAt,
 		)
 
 		if err == nil {
@@ -292,6 +308,10 @@ func (r *UserCredentialRepository) GetOne(ctx context.Context, id types.Identity
 			if tempDisabledAt != nil {
 				// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 				result.DisabledAt = tempDisabledAt
+			}
+			if tempPendingAt != nil {
+				// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+				result.PendingAt = tempPendingAt
 			}
 		}
 	}
@@ -361,7 +381,7 @@ func (r *UserCredentialRepository) GetManyByIDs(ctx context.Context, ids []types
 	}
 
 	// Build query with explicit column order
-	query := fmt.Sprintf(`SELECT "id", "user_id", "password_hash", "password_changed_at", "disabled_at" FROM user_credential WHERE id IN (%s)`, strings.Join(placeholders, ", "))
+	query := fmt.Sprintf(`SELECT "id", "user_id", "password_hash", "password_changed_at", "disabled_at", "pending_at" FROM user_credential WHERE id IN (%s)`, strings.Join(placeholders, ", "))
 
 	// Execute query
 	var rows pgx.Rows
@@ -384,6 +404,7 @@ func (r *UserCredentialRepository) GetManyByIDs(ctx context.Context, ids []types
 		// Create temporary variables for nullable fields that need pointer scanning
 
 		var tempDisabledAt *types.TemporalDateTime
+		var tempPendingAt *types.TemporalDateTime
 
 		// Create temporary variables for relationship foreign keys (we don't store these in the struct)
 		var tempRelUser *types.IdentityUUID
@@ -400,6 +421,8 @@ func (r *UserCredentialRepository) GetManyByIDs(ctx context.Context, ids []types
 			&entity.PasswordChangedAt,
 
 			&tempDisabledAt,
+
+			&tempPendingAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
@@ -409,6 +432,9 @@ func (r *UserCredentialRepository) GetManyByIDs(ctx context.Context, ids []types
 
 		if tempDisabledAt != nil {
 			entity.DisabledAt = tempDisabledAt
+		}
+		if tempPendingAt != nil {
+			entity.PendingAt = tempPendingAt
 		}
 
 		// Set relationship IDs from scanned FK values
@@ -454,6 +480,9 @@ func (r *UserCredentialRepository) FindOne(ctx context.Context, filter *UserCred
 		if opts.Fields.DisabledAt {
 			fieldStrings = append(fieldStrings, "disabled_at")
 		}
+		if opts.Fields.PendingAt {
+			fieldStrings = append(fieldStrings, "pending_at")
+		}
 		// Validate fields
 		if err := validateFields(fieldStrings, UserCredentialAllowedFields); err != nil {
 			return nil, err
@@ -461,7 +490,7 @@ func (r *UserCredentialRepository) FindOne(ctx context.Context, filter *UserCred
 		selectFields = buildSelectFieldsTyped(fieldStrings, "user_credential")
 	} else {
 		// Select all fields in explicit order matching scan order (using OrderedMembers for schema order)
-		selectFields = `"id", "user_id", "password_hash", "password_changed_at", "disabled_at"`
+		selectFields = `"id", "user_id", "password_hash", "password_changed_at", "disabled_at", "pending_at"`
 		if opts == nil {
 			opts = &UserCredentialFindOptions{}
 		}
@@ -490,6 +519,7 @@ func (r *UserCredentialRepository) FindOne(ctx context.Context, filter *UserCred
 	// Create temporary variables for nullable fields that need pointer scanning
 
 	var tempDisabledAt *types.TemporalDateTime
+	var tempPendingAt *types.TemporalDateTime
 
 	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
 	var tempRelUser *types.IdentityUUID
@@ -500,6 +530,7 @@ func (r *UserCredentialRepository) FindOne(ctx context.Context, filter *UserCred
 		// Track whether special fields were selected so we can post-process after Scan.
 
 		var selectedDisabledAt bool
+		var selectedPendingAt bool
 		var selectedRelUser bool
 
 		scanDest := make([]any, len(fieldStrings))
@@ -514,6 +545,9 @@ func (r *UserCredentialRepository) FindOne(ctx context.Context, filter *UserCred
 			case "disabled_at":
 				scanDest[i] = &tempDisabledAt
 				selectedDisabledAt = true
+			case "pending_at":
+				scanDest[i] = &tempPendingAt
+				selectedPendingAt = true
 			case "user_id":
 				scanDest[i] = &tempRelUser
 				selectedRelUser = true
@@ -530,6 +564,10 @@ func (r *UserCredentialRepository) FindOne(ctx context.Context, filter *UserCred
 			if selectedDisabledAt && tempDisabledAt != nil {
 				// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 				result.DisabledAt = tempDisabledAt
+			}
+			if selectedPendingAt && tempPendingAt != nil {
+				// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+				result.PendingAt = tempPendingAt
 			}
 			if jsonFieldDecodeErr != nil {
 				return nil, jsonFieldDecodeErr
@@ -553,6 +591,8 @@ func (r *UserCredentialRepository) FindOne(ctx context.Context, filter *UserCred
 			&result.PasswordChangedAt,
 
 			&tempDisabledAt,
+
+			&tempPendingAt,
 		)
 
 		if err == nil {
@@ -561,6 +601,10 @@ func (r *UserCredentialRepository) FindOne(ctx context.Context, filter *UserCred
 			if tempDisabledAt != nil {
 				// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 				result.DisabledAt = tempDisabledAt
+			}
+			if tempPendingAt != nil {
+				// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+				result.PendingAt = tempPendingAt
 			}
 		}
 	}
@@ -605,7 +649,8 @@ func (r *UserCredentialRepository) FindOne(ctx context.Context, filter *UserCred
 	return result, nil
 }
 
-// FindMany retrieves multiple UserCredential records matching the filter
+// FindMany retrieves multiple UserCredential records matching the filter, and how
+// many it matches in all, -1 when the options skip the count
 func (r *UserCredentialRepository) FindMany(ctx context.Context, filter *UserCredentialFilter, opts *UserCredentialFindOptions) ([]*types.UserCredential, int, error) {
 	if opts == nil || opts.Fields.IsZero() {
 		return nil, 0, fmt.Errorf("fields must be specified in FindOptions for performance")
@@ -638,18 +683,20 @@ func (r *UserCredentialRepository) FindMany(ctx context.Context, filter *UserCre
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM user_credential%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
 
-	// Get total count
-	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM user_credential%s`, whereClause)
+	// Get total count, unless the options skip it (D89)
+	totalCount := -1
+	if !opts.SkipCount {
+		countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM user_credential%s`, whereClause)
 
-	var totalCount int
-	var countRow pgx.Row
-	if r.tx != nil {
-		countRow = r.tx.QueryRow(ctx, countQuery, args...)
-	} else {
-		countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
-	}
-	if err := countRow.Scan(&totalCount); err != nil {
-		return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		var countRow pgx.Row
+		if r.tx != nil {
+			countRow = r.tx.QueryRow(ctx, countQuery, args...)
+		} else {
+			countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
+		}
+		if err := countRow.Scan(&totalCount); err != nil {
+			return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		}
 	}
 
 	results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
@@ -657,6 +704,30 @@ func (r *UserCredentialRepository) FindMany(ctx context.Context, filter *UserCre
 		return nil, 0, err
 	}
 	return results, totalCount, nil
+}
+
+// findRelated reads the rows filter finds as FindMany reads them, with no
+// count: the read that loads a relation's rows for the rows of another
+// table's read (D90), which counts nothing, as the TypeScript
+// repositories' include does.
+func (r *UserCredentialRepository) findRelated(ctx context.Context, filter *UserCredentialFilter, opts *UserCredentialFindOptions) ([]*types.UserCredential, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in FindOptions for performance")
+	}
+	fieldStrings := userCredentialFieldStrings(opts.Fields)
+	if err := validateFields(fieldStrings, UserCredentialAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "user_credential")
+	if selectFields == "" {
+		return nil, fmt.Errorf("no valid fields specified")
+	}
+	var args []interface{}
+	whereClause := filter.buildWhereClause(&args, 0)
+	orderByClause := buildUserCredentialOrderByClause(opts.OrderBy, `user_credential`)
+	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
+	query := fmt.Sprintf(`SELECT %s FROM user_credential%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
+	return r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
 }
 
 // userCredentialFieldStrings are the columns fields selects, in OrderedMembers
@@ -678,6 +749,9 @@ func userCredentialFieldStrings(fields UserCredentialFields) []string {
 	}
 	if fields.DisabledAt {
 		fieldStrings = append(fieldStrings, "disabled_at")
+	}
+	if fields.PendingAt {
+		fieldStrings = append(fieldStrings, "pending_at")
 	}
 	return fieldStrings
 }
@@ -707,6 +781,7 @@ func (r *UserCredentialRepository) findRows(ctx context.Context, method, query s
 		// Create temporary variables for nullable fields that need pointer scanning (per-row)
 
 		var tempDisabledAt *types.TemporalDateTime
+		var tempPendingAt *types.TemporalDateTime
 
 		// Create temporary variables for relationship foreign keys (we don't store these directly on the struct)
 		var tempRelUser *types.IdentityUUID
@@ -714,6 +789,7 @@ func (r *UserCredentialRepository) findRows(ctx context.Context, method, query s
 		// Track whether special fields were selected so we can post-process after Scan.
 
 		var selectedDisabledAt bool
+		var selectedPendingAt bool
 		var selectedRelUser bool
 
 		scanDest := make([]any, len(fieldStrings))
@@ -728,6 +804,9 @@ func (r *UserCredentialRepository) findRows(ctx context.Context, method, query s
 			case "disabled_at":
 				scanDest[i] = &tempDisabledAt
 				selectedDisabledAt = true
+			case "pending_at":
+				scanDest[i] = &tempPendingAt
+				selectedPendingAt = true
 			case "user_id":
 				scanDest[i] = &tempRelUser
 				selectedRelUser = true
@@ -746,6 +825,10 @@ func (r *UserCredentialRepository) findRows(ctx context.Context, method, query s
 		if selectedDisabledAt && tempDisabledAt != nil {
 			// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 			result.DisabledAt = tempDisabledAt
+		}
+		if selectedPendingAt && tempPendingAt != nil {
+			// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+			result.PendingAt = tempPendingAt
 		}
 		if jsonFieldDecodeErr != nil {
 			return nil, jsonFieldDecodeErr
@@ -963,13 +1046,22 @@ func (r *UserCredentialRepository) CreateOne(ctx context.Context, input *types.U
 			values = append(values, time.Time(*input.DisabledAt))
 		}
 	}
+	// Optional field: pendingAt - only add if set
+	{
+		if input.PendingAt != nil {
+			fields = append(fields, `pending_at`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, time.Time(*input.PendingAt))
+		}
+	}
 
 	// Handle relationship foreign key columns
 	// Relationship: user (FK: user_id)
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := userCredentialUUIDValue(input.User.Id); ok && relID != zeroId {
-			fields = append(fields, "user_id")
+			fields = append(fields, `user_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -977,7 +1069,7 @@ func (r *UserCredentialRepository) CreateOne(ctx context.Context, input *types.U
 	}
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClause := `"id", "user_id", "password_hash", "password_changed_at", "disabled_at"`
+	returningClause := `"id", "user_id", "password_hash", "password_changed_at", "disabled_at", "pending_at"`
 	query := fmt.Sprintf(
 		`INSERT INTO user_credential (%s) VALUES (%s) RETURNING %s`,
 		strings.Join(fields, ", "),
@@ -998,6 +1090,7 @@ func (r *UserCredentialRepository) CreateOne(ctx context.Context, input *types.U
 	// Create temporary variables for nullable fields that need pointer scanning
 
 	var tempDisabledAt *types.TemporalDateTime
+	var tempPendingAt *types.TemporalDateTime
 
 	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
 	var tempRelUser *types.IdentityUUID
@@ -1014,6 +1107,8 @@ func (r *UserCredentialRepository) CreateOne(ctx context.Context, input *types.U
 		&result.PasswordChangedAt,
 
 		&tempDisabledAt,
+
+		&tempPendingAt,
 	); err != nil {
 		return nil, fmt.Errorf("failed to scan result: %w", err)
 	}
@@ -1024,6 +1119,10 @@ func (r *UserCredentialRepository) CreateOne(ctx context.Context, input *types.U
 		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 		result.DisabledAt = tempDisabledAt
 	}
+	if tempPendingAt != nil {
+		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+		result.PendingAt = tempPendingAt
+	}
 
 	// Set relationship IDs from scanned FK values
 	if tempRelUser != nil {
@@ -1031,6 +1130,615 @@ func (r *UserCredentialRepository) CreateOne(ctx context.Context, input *types.U
 	}
 
 	return result, nil
+}
+
+// userCredentialUniqueKeys are the conflict targets of UserCredential's unique keys, and
+// the assignment an upsert that sets nothing writes, so the row it
+// conflicts with is returned (sqlutil.UniqueKey, D79); the read of the rows
+// that hold keys, which an upsert only if changed reads back, empty for a
+// key over an expression, and the key's columns as a batch insert's cells
+// name them (D89).
+var userCredentialUniqueKeys = map[UserCredentialUniqueKey]struct {
+	conflict, keep, rows string
+	columns              []string
+}{
+	UserCredentialUniqueById:   {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "user_id", "password_hash", "password_changed_at", "disabled_at", "pending_at" FROM user_credential WHERE (id) IN (%s)`, []string{`id`}},
+	UserCredentialUniqueByUser: {`(user_id)`, `user_id = EXCLUDED.user_id`, `SELECT "id", "user_id", "password_hash", "password_changed_at", "disabled_at", "pending_at" FROM user_credential WHERE (user_id) IN (%s)`, []string{`user_id`}},
+}
+
+// userCredentialKeyOf is the text of row's values of the unique key on, as
+// UpsertMany matches the rows a statement returns to its inputs, or false
+// when the insert leaves one of them to the database (D89).
+func userCredentialKeyOf(on UserCredentialUniqueKey, row *types.UserCredential) (string, bool) {
+	switch on {
+	case UserCredentialUniqueById:
+		return upsertKeyText(upsertKeyValue(row.Id, false))
+	case UserCredentialUniqueByUser:
+		return upsertKeyText(upsertKeyValue(row.User.Id, false))
+	}
+	return "", false
+}
+
+// database is the Database the repository runs on.
+func (r *UserCredentialRepository) database() *Database {
+	if r.txDB != nil {
+		return r.txDB
+	}
+	return r.db
+}
+
+// scanReturned scans a row of every column of UserCredential, as a write returns
+// it, and, with inserted, the flag an upsert returns after them (D89).
+func (r *UserCredentialRepository) scanReturned(row pgx.Row, inserted *bool) (*types.UserCredential, error) {
+	result := &types.UserCredential{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	var tempDisabledAt *types.TemporalDateTime
+	var tempPendingAt *types.TemporalDateTime
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+	var tempRelUser *types.IdentityUUID
+
+	// Scan all fields in schema order (matches DDL column order)
+	dest := []any{
+
+		&result.Id,
+
+		&tempRelUser,
+
+		&result.PasswordHash,
+
+		&result.PasswordChangedAt,
+
+		&tempDisabledAt,
+
+		&tempPendingAt,
+	}
+	if inserted != nil {
+		dest = append(dest, inserted)
+	}
+	if err := row.Scan(dest...); err != nil {
+		return nil, err
+	}
+
+	// Copy nullable fields when present
+
+	if tempDisabledAt != nil {
+		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+		result.DisabledAt = tempDisabledAt
+	}
+	if tempPendingAt != nil {
+		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+		result.PendingAt = tempPendingAt
+	}
+
+	// Set relationship IDs from scanned FK values
+	if tempRelUser != nil {
+		result.User.Id = userCredentialUUIDPtr(*tempRelUser)
+	}
+
+	return result, nil
+}
+
+// UpsertOne inserts input, or, when a row already holds its value of the
+// unique key on, applies update to that row instead, and returns the row
+// (D79). The insert writes what CreateOne writes and the update what
+// UpdateOne writes, updated_at and updated_by among it, but an update that
+// sets no field leaves the row as it is.
+func (r *UserCredentialRepository) UpsertOne(ctx context.Context, input *types.UserCredential, on UserCredentialUniqueKey, update *UserCredentialUpdate) (*types.UserCredential, error) {
+	result, err := r.UpsertOneResult(ctx, input, on, update, nil)
+	if err != nil {
+		return nil, err
+	}
+	return result.Row, nil
+}
+
+// UpsertOneResult is UpsertOne, and what it did with the row: inserted it,
+// updated the row that held the key, or left that row as it was (D89).
+// With opts.OnlyIfChanged it updates the row only when a field the update
+// sets differs from what the row holds, which it reads back otherwise. A write that
+// may take more than one statement runs in a transaction of its own when
+// none is open.
+func (r *UserCredentialRepository) UpsertOneResult(ctx context.Context, input *types.UserCredential, on UserCredentialUniqueKey, update *UserCredentialUpdate, opts *UpsertOptions) (UpsertResult[*types.UserCredential], error) {
+	var none UpsertResult[*types.UserCredential]
+	key, ok := userCredentialUniqueKeys[on]
+	if !ok {
+		return none, fmt.Errorf("orm: UserCredential has no unique key %q", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if opts.OnlyIfChanged && key.rows == "" {
+		return none, upsertExpressionKey("UpsertOneResult", "UserCredential", string(on))
+	}
+	if update == nil {
+		update = &UserCredentialUpdate{}
+	}
+	write := func(repo *UserCredentialRepository) (UpsertResult[*types.UserCredential], error) {
+		result, err := repo.upsertRow(ctx, input, on, update, opts.OnlyIfChanged)
+		if err != nil {
+			return none, err
+		}
+		return *result, nil
+	}
+	if !opts.OnlyIfChanged {
+		return write(r)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (UpsertResult[*types.UserCredential], error) {
+		return write(&UserCredentialRepository{tx: tx, txDB: r.database()})
+	})
+}
+
+// upsertRow is UpsertOneResult on the repository's connection: the upsert,
+// a read of the row it left as it was, only if changed, and the second
+// statement of an encrypted field.
+func (r *UserCredentialRepository) upsertRow(ctx context.Context, input *types.UserCredential, on UserCredentialUniqueKey, update *UserCredentialUpdate, onlyIfChanged bool) (*UpsertResult[*types.UserCredential], error) {
+	key := userCredentialUniqueKeys[on]
+	// Set audit fields
+
+	// Build INSERT query
+	var fields []string
+	var placeholders []string
+	var values []interface{}
+	paramNum := 0
+	// Schema-owned identities may supply a stable UUID. A zero value keeps the
+	// database-generated default used by ordinary creates.
+	{
+		var zeroPrimaryKey types.IdentityUUID
+		if primaryKey, ok := userCredentialUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+			fields = append(fields, `id`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, primaryKey.ToUUID())
+		}
+	}
+	// Required field: passwordHash
+	fields = append(fields, `password_hash`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.PasswordHash)
+	// Required field: passwordChangedAt
+	fields = append(fields, `password_changed_at`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, time.Time(input.PasswordChangedAt))
+	// Optional field: disabledAt - only add if set
+	{
+		if input.DisabledAt != nil {
+			fields = append(fields, `disabled_at`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, time.Time(*input.DisabledAt))
+		}
+	}
+	// Optional field: pendingAt - only add if set
+	{
+		if input.PendingAt != nil {
+			fields = append(fields, `pending_at`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, time.Time(*input.PendingAt))
+		}
+	}
+
+	// Handle relationship foreign key columns
+	// Relationship: user (FK: user_id)
+	{
+		var zeroId types.IdentityUUID
+		if relID, ok := userCredentialUUIDValue(input.User.Id); ok && relID != zeroId {
+			fields = append(fields, `user_id`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, relID.ToUUID())
+		}
+	}
+
+	// Build the update of the row the key conflicts with, its placeholders
+	// numbered after the insert's
+	var setClauses, compareCurrent, compareNext []string
+	if update.PasswordHash != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`password_hash = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `user_credential.password_hash`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		values = append(values, *update.PasswordHash)
+	}
+	if update.PasswordChangedAt != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`password_changed_at = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `user_credential.password_changed_at`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		values = append(values, time.Time(*update.PasswordChangedAt))
+	}
+	if update.DisabledAt != nil && update.DisabledAtSetNull {
+		return nil, fmt.Errorf("disabled_at cannot be updated with both value and null assignment")
+	}
+	if update.DisabledAtSetNull {
+		setClauses = append(setClauses, `disabled_at = NULL`)
+		compareCurrent = append(compareCurrent, `user_credential.disabled_at`)
+		compareNext = append(compareNext, `NULL`)
+	} else if update.DisabledAt != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`disabled_at = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `user_credential.disabled_at`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		values = append(values, time.Time(*update.DisabledAt))
+	}
+	if update.PendingAt != nil && update.PendingAtSetNull {
+		return nil, fmt.Errorf("pending_at cannot be updated with both value and null assignment")
+	}
+	if update.PendingAtSetNull {
+		setClauses = append(setClauses, `pending_at = NULL`)
+		compareCurrent = append(compareCurrent, `user_credential.pending_at`)
+		compareNext = append(compareNext, `NULL`)
+	} else if update.PendingAt != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`pending_at = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `user_credential.pending_at`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		values = append(values, time.Time(*update.PendingAt))
+	}
+	// Handle relationship foreign key: user
+	if update.UserID != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("user_id = $%d", paramNum))
+		compareCurrent = append(compareCurrent, `user_credential.user_id`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		values = append(values, update.UserID.ToUUID())
+	}
+
+	assigned := len(setClauses)
+	if assigned == 0 {
+		// An update that sets no field leaves the row as it is, stamps and
+		// all, and returns it.
+		setClauses = append(setClauses, key.keep)
+	} else {
+		// Set updated_at
+
+		// Set updated_by
+
+	}
+
+	query := fmt.Sprintf(
+		`INSERT INTO user_credential (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "user_id", "password_hash", "password_changed_at", "disabled_at", "pending_at", (xmax = 0) AS _inserted`,
+		strings.Join(fields, ", "),
+		"("+strings.Join(placeholders, ", ")+")",
+		key.conflict,
+		strings.Join(setClauses, ", "),
+		upsertWhere(``, compareCurrent, compareNext, onlyIfChanged),
+	)
+
+	// Execute query
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, values...)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, values...)
+	}
+	var inserted bool
+	scanned, err := r.scanReturned(row, &inserted)
+	var upserted *UpsertResult[*types.UserCredential]
+	switch {
+	case err == nil:
+		status := UpsertUnchanged
+		if inserted {
+			status = UpsertInserted
+		} else if assigned > 0 {
+			status = UpsertUpdated
+		}
+		upserted = &UpsertResult[*types.UserCredential]{Row: scanned, Status: status}
+	case err != pgx.ErrNoRows:
+		return nil, fmt.Errorf("failed to scan result: %w", err)
+	case !onlyIfChanged:
+		// The row the key conflicts with is soft-deleted.
+		return nil, ErrNotFound
+	default:
+		// The row the key conflicts with already held the update's values.
+		keyValues, ok := upsertCellValues(upsertCells(fields, values), key.columns)
+		if !ok {
+			return nil, fmt.Errorf("no UserCredential row holds an unset %s: %w", string(on), ErrNotFound)
+		}
+		found, err := r.rowsOfKeys(ctx, on, [][]any{keyValues}, []*types.UserCredential{input})
+		if err != nil {
+			return nil, err
+		}
+		upserted = &UpsertResult[*types.UserCredential]{Row: found[0], Status: UpsertUnchanged}
+	}
+	return upserted, nil
+}
+
+// UpsertMany inserts each input, or, when a row already holds its value of
+// the unique key on, sets each field update names of that row to the value
+// the input would have inserted, and returns each input's row and what it
+// did with it, in the inputs' order (D89). One statement writes a batch of
+// rows, opts.Batch or as many as Postgres binds the parameters of, and more
+// rows take a statement per batch, in one transaction; a write that may
+// take more than one statement runs in a transaction of its own when none
+// is open. An update that names no field leaves each row that holds a key
+// as it is. Two inputs of one batch that hold one key fail
+// the statement, and a key over an expression, whose rows the statement's
+// cannot be matched to the inputs by, is refused.
+func (r *UserCredentialRepository) UpsertMany(ctx context.Context, inputs []*types.UserCredential, on UserCredentialUniqueKey, update UserCredentialFields, opts *UpsertOptions) ([]UpsertResult[*types.UserCredential], error) {
+	key, ok := userCredentialUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: UserCredential has no unique key %q", string(on))
+	}
+	if key.rows == "" {
+		return nil, upsertExpressionKey("UpsertMany", "UserCredential", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if update.Id {
+		return nil, fmt.Errorf("orm: UpsertMany of UserCredential sets the fields an update sets, not id")
+	}
+	batch, err := upsertBatch("UserCredential", opts.Batch, 10922)
+	if err != nil {
+		return nil, err
+	}
+	if len(inputs) == 0 {
+		return []UpsertResult[*types.UserCredential]{}, nil
+	}
+	if len(inputs) <= batch && !opts.OnlyIfChanged {
+		return r.upsertBatches(ctx, inputs, on, update, batch, false)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]UpsertResult[*types.UserCredential], error) {
+		return (&UserCredentialRepository{tx: tx, txDB: r.database()}).upsertBatches(ctx, inputs, on, update, batch, opts.OnlyIfChanged)
+	})
+}
+
+// upsertBatches is UpsertMany on the repository's connection, a batch at a
+// time: each batch's statement, a read of the rows it left as they were,
+// only if changed, and the second statement of each encrypted field.
+func (r *UserCredentialRepository) upsertBatches(ctx context.Context, inputs []*types.UserCredential, on UserCredentialUniqueKey, update UserCredentialFields, batch int, onlyIfChanged bool) ([]UpsertResult[*types.UserCredential], error) {
+	key := userCredentialUniqueKeys[on]
+
+	// Set audit fields
+
+	// Each field update names takes the value the input would have
+	// inserted, which an upsert only if changed compares with the row's.
+	var setClauses, compareCurrent, compareNext []string
+	if update.PasswordHash {
+		setClauses = append(setClauses, `password_hash = EXCLUDED.password_hash`)
+		compareCurrent = append(compareCurrent, `user_credential.password_hash`)
+		compareNext = append(compareNext, `EXCLUDED.password_hash`)
+	}
+	if update.PasswordChangedAt {
+		setClauses = append(setClauses, `password_changed_at = EXCLUDED.password_changed_at`)
+		compareCurrent = append(compareCurrent, `user_credential.password_changed_at`)
+		compareNext = append(compareNext, `EXCLUDED.password_changed_at`)
+	}
+	if update.DisabledAt {
+		setClauses = append(setClauses, `disabled_at = EXCLUDED.disabled_at`)
+		compareCurrent = append(compareCurrent, `user_credential.disabled_at`)
+		compareNext = append(compareNext, `EXCLUDED.disabled_at`)
+	}
+	if update.PendingAt {
+		setClauses = append(setClauses, `pending_at = EXCLUDED.pending_at`)
+		compareCurrent = append(compareCurrent, `user_credential.pending_at`)
+		compareNext = append(compareNext, `EXCLUDED.pending_at`)
+	}
+	if update.User {
+		setClauses = append(setClauses, `user_id = EXCLUDED.user_id`)
+		compareCurrent = append(compareCurrent, `user_credential.user_id`)
+		compareNext = append(compareNext, `EXCLUDED.user_id`)
+	}
+
+	results := make([]UpsertResult[*types.UserCredential], 0, len(inputs))
+	for start := 0; start < len(inputs); start += batch {
+		chunk := inputs[start:min(start+batch, len(inputs))]
+		prepared := chunk
+
+		// The batch's rows, as CreateMany writes them.
+		rows := make([][]batchInsertCell, 0, len(prepared))
+		for _, input := range prepared {
+			var row []batchInsertCell
+			// Primary key: id. Schema-owned identities may supply a stable
+			// UUID, matching CreateOne; a row without one takes the generated default.
+			{
+				cell := batchInsertCell{column: `id`}
+				var zeroPrimaryKey types.IdentityUUID
+				if primaryKey, ok := userCredentialUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+					cell.value, cell.set = primaryKey.ToUUID(), true
+				}
+				row = append(row, cell)
+			}
+			// Required field: passwordHash
+			{
+				cell := batchInsertCell{column: `password_hash`, set: true}
+				cell.value = input.PasswordHash
+				row = append(row, cell)
+			}
+			// Required field: passwordChangedAt
+			{
+				cell := batchInsertCell{column: `password_changed_at`, set: true}
+				cell.value = time.Time(input.PasswordChangedAt)
+				row = append(row, cell)
+			}
+			// Optional field: disabledAt
+			{
+				cell := batchInsertCell{column: `disabled_at`}
+				if input.DisabledAt != nil {
+					cell.value = time.Time(*input.DisabledAt)
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
+			// Optional field: pendingAt
+			{
+				cell := batchInsertCell{column: `pending_at`}
+				if input.PendingAt != nil {
+					cell.value = time.Time(*input.PendingAt)
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
+
+			// Relationship foreign key columns, matching CreateOne
+			// Relationship: user (FK: user_id)
+			{
+				cell := batchInsertCell{column: `user_id`}
+				var zeroId types.IdentityUUID
+				if relID, ok := userCredentialUUIDValue(input.User.Id); ok && relID != zeroId {
+					cell.value, cell.set = relID.ToUUID(), true
+				}
+				row = append(row, cell)
+			}
+			rows = append(rows, row)
+		}
+		fieldNames, valuePlaceholders, values := buildBatchInsert(rows)
+		assignments := append([]string(nil), setClauses...)
+		if len(setClauses) == 0 {
+			// An update that names no field leaves each row as it is.
+			assignments = append(assignments, key.keep)
+		} else {
+		}
+		query := fmt.Sprintf(
+			`INSERT INTO user_credential (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "user_id", "password_hash", "password_changed_at", "disabled_at", "pending_at", (xmax = 0) AS _inserted`,
+			strings.Join(fieldNames, ", "),
+			strings.Join(valuePlaceholders, ", "),
+			key.conflict,
+			strings.Join(assignments, ", "),
+			upsertWhere(``, compareCurrent, compareNext, onlyIfChanged),
+		)
+		returned, inserted, err := r.upsertReturned(ctx, query, values)
+		if err != nil {
+			return nil, err
+		}
+
+		// A row is its input's by the key's values; an input that sets none
+		// of them, whose key the database generates, takes the next row whose
+		// key no input holds, as the rows come back in the inputs' order.
+		keys := make([]string, len(prepared))
+		set := make([]bool, len(prepared))
+		for i, input := range prepared {
+			keys[i], set[i] = userCredentialKeyOf(on, input)
+		}
+		matcher := newUpsertMatcher(keys, set)
+		matched := make([]*UpsertResult[*types.UserCredential], len(prepared))
+		for n, row := range returned {
+			text, ok := userCredentialKeyOf(on, row)
+			i := matcher.take(text, ok)
+			if i < 0 {
+				return nil, fmt.Errorf("orm: UpsertMany of UserCredential wrote a row whose %s no input holds", string(on))
+			}
+			status := UpsertUnchanged
+			if inserted[n] {
+				status = UpsertInserted
+			} else if len(setClauses) > 0 {
+				status = UpsertUpdated
+			}
+			matched[i] = &UpsertResult[*types.UserCredential]{Row: row, Status: status}
+		}
+
+		// A row it did not return is one it left as it was, only if changed,
+		// which it reads back by its key, or a deleted one.
+		var left []int
+		for i := range matched {
+			if matched[i] == nil {
+				left = append(left, i)
+			}
+		}
+		if len(left) > 0 {
+			if !onlyIfChanged {
+				return nil, fmt.Errorf("the UserCredential row that holds the %s of input %d is deleted: %w", string(on), start+left[0], ErrNotFound)
+			}
+			keyValues := make([][]any, len(left))
+			wanted := make([]*types.UserCredential, len(left))
+			for n, i := range left {
+				cells, ok := upsertCellValues(rows[i], key.columns)
+				if !ok {
+					return nil, fmt.Errorf("no UserCredential row holds an unset %s: %w", string(on), ErrNotFound)
+				}
+				keyValues[n], wanted[n] = cells, prepared[i]
+			}
+			found, err := r.rowsOfKeys(ctx, on, keyValues, wanted)
+			if err != nil {
+				return nil, err
+			}
+			for n, i := range left {
+				matched[i] = &UpsertResult[*types.UserCredential]{Row: found[n], Status: UpsertUnchanged}
+			}
+		}
+		for _, result := range matched {
+			results = append(results, *result)
+		}
+	}
+	return results, nil
+}
+
+// upsertReturned runs an upsert's statement, query with values, and scans
+// each row it returns and whether it inserted it.
+func (r *UserCredentialRepository) upsertReturned(ctx context.Context, query string, values []any) ([]*types.UserCredential, []bool, error) {
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to execute upsert: %w", err)
+	}
+	defer rows.Close()
+	var returned []*types.UserCredential
+	var inserted []bool
+	for rows.Next() {
+		var flag bool
+		row, err := r.scanReturned(rows, &flag)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		returned = append(returned, row)
+		inserted = append(inserted, flag)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	return returned, inserted, nil
+}
+
+// rowsOfKeys reads the rows that hold keys, each the values of the unique
+// key on an input's insert binds, among the rows the key's index holds, in
+// the inputs' order: the rows an upsert only if changed left as they were
+// (D89). A key no live row holds is ErrNotFound.
+func (r *UserCredentialRepository) rowsOfKeys(ctx context.Context, on UserCredentialUniqueKey, keys [][]any, inputs []*types.UserCredential) ([]*types.UserCredential, error) {
+	tuples, values := upsertKeyTuples(keys)
+	query := fmt.Sprintf(userCredentialUniqueKeys[on].rows, strings.Join(tuples, ", "))
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the rows the upsert left: %w", err)
+	}
+	defer rows.Close()
+	found := map[string]*types.UserCredential{}
+	for rows.Next() {
+		row, err := r.scanReturned(rows, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		if text, ok := userCredentialKeyOf(on, row); ok {
+			found[text] = row
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	out := make([]*types.UserCredential, len(inputs))
+	for i, input := range inputs {
+		text, _ := userCredentialKeyOf(on, input)
+		row := found[text]
+		if row == nil {
+			return nil, fmt.Errorf("the UserCredential row that holds the key %s is deleted: %w", string(on), ErrNotFound)
+		}
+		out[i] = row
+	}
+	return out, nil
 }
 
 // CreateMany inserts multiple UserCredential records in a single statement
@@ -1079,11 +1787,20 @@ func (r *UserCredentialRepository) CreateMany(ctx context.Context, inputs []*typ
 			}
 			row = append(row, cell)
 		}
+		// Optional field: pendingAt
+		{
+			cell := batchInsertCell{column: `pending_at`}
+			if input.PendingAt != nil {
+				cell.value = time.Time(*input.PendingAt)
+				cell.set = true
+			}
+			row = append(row, cell)
+		}
 
 		// Relationship foreign key columns, matching CreateOne
 		// Relationship: user (FK: user_id)
 		{
-			cell := batchInsertCell{column: "user_id"}
+			cell := batchInsertCell{column: `user_id`}
 			var zeroId types.IdentityUUID
 			if relID, ok := userCredentialUUIDValue(input.User.Id); ok && relID != zeroId {
 				cell.value, cell.set = relID.ToUUID(), true
@@ -1095,7 +1812,7 @@ func (r *UserCredentialRepository) CreateMany(ctx context.Context, inputs []*typ
 	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClauseMany := `"id", "user_id", "password_hash", "password_changed_at", "disabled_at"`
+	returningClauseMany := `"id", "user_id", "password_hash", "password_changed_at", "disabled_at", "pending_at"`
 	query := fmt.Sprintf(
 		`INSERT INTO user_credential (%s) VALUES %s RETURNING %s`,
 		strings.Join(fieldNames, ", "),
@@ -1123,6 +1840,7 @@ func (r *UserCredentialRepository) CreateMany(ctx context.Context, inputs []*typ
 		// Create temporary variables for nullable fields that need pointer scanning
 
 		var tempDisabledAt *types.TemporalDateTime
+		var tempPendingAt *types.TemporalDateTime
 
 		// Create temporary variables for relationship foreign keys (we don't store these in the struct)
 		var tempRelUser *types.IdentityUUID
@@ -1139,6 +1857,8 @@ func (r *UserCredentialRepository) CreateMany(ctx context.Context, inputs []*typ
 			&result.PasswordChangedAt,
 
 			&tempDisabledAt,
+
+			&tempPendingAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan result: %w", err)
@@ -1149,6 +1869,10 @@ func (r *UserCredentialRepository) CreateMany(ctx context.Context, inputs []*typ
 		if tempDisabledAt != nil {
 			// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 			result.DisabledAt = tempDisabledAt
+		}
+		if tempPendingAt != nil {
+			// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+			result.PendingAt = tempPendingAt
 		}
 
 		// Set relationship IDs from scanned FK values
@@ -1191,6 +1915,16 @@ func (r *UserCredentialRepository) UpdateOne(ctx context.Context, id types.Ident
 		setClauses = append(setClauses, fmt.Sprintf(`disabled_at = $%d`, paramNum))
 		values = append(values, time.Time(*update.DisabledAt))
 	}
+	if update.PendingAt != nil && update.PendingAtSetNull {
+		return nil, fmt.Errorf("pending_at cannot be updated with both value and null assignment")
+	}
+	if update.PendingAtSetNull {
+		setClauses = append(setClauses, `pending_at = NULL`)
+	} else if update.PendingAt != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`pending_at = $%d`, paramNum))
+		values = append(values, time.Time(*update.PendingAt))
+	}
 	// Handle relationship foreign key: user
 	if update.UserID != nil {
 		paramNum++
@@ -1216,7 +1950,7 @@ func (r *UserCredentialRepository) UpdateOne(ctx context.Context, id types.Ident
 	)
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	query += ` RETURNING "id", "user_id", "password_hash", "password_changed_at", "disabled_at"`
+	query += ` RETURNING "id", "user_id", "password_hash", "password_changed_at", "disabled_at", "pending_at"`
 
 	// Execute query
 	var row pgx.Row
@@ -1231,6 +1965,7 @@ func (r *UserCredentialRepository) UpdateOne(ctx context.Context, id types.Ident
 	// Create temporary variables for nullable fields that need pointer scanning
 
 	var tempDisabledAt *types.TemporalDateTime
+	var tempPendingAt *types.TemporalDateTime
 
 	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
 	var tempRelUser *types.IdentityUUID
@@ -1247,6 +1982,8 @@ func (r *UserCredentialRepository) UpdateOne(ctx context.Context, id types.Ident
 		&result.PasswordChangedAt,
 
 		&tempDisabledAt,
+
+		&tempPendingAt,
 	); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, ErrNotFound
@@ -1259,6 +1996,10 @@ func (r *UserCredentialRepository) UpdateOne(ctx context.Context, id types.Ident
 	if tempDisabledAt != nil {
 		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 		result.DisabledAt = tempDisabledAt
+	}
+	if tempPendingAt != nil {
+		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
+		result.PendingAt = tempPendingAt
 	}
 
 	// Set relationship IDs from scanned FK values
@@ -1294,6 +2035,16 @@ func (r *UserCredentialRepository) UpdateMany(ctx context.Context, filter *UserC
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`disabled_at = $%d`, paramNum))
 		values = append(values, time.Time(*update.DisabledAt))
+	}
+	if update.PendingAt != nil && update.PendingAtSetNull {
+		return 0, fmt.Errorf("pending_at cannot be updated with both value and null assignment")
+	}
+	if update.PendingAtSetNull {
+		setClauses = append(setClauses, `pending_at = NULL`)
+	} else if update.PendingAt != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`pending_at = $%d`, paramNum))
+		values = append(values, time.Time(*update.PendingAt))
 	}
 	// Handle relationship foreign key: user
 	if update.UserID != nil {

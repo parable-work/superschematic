@@ -36,6 +36,39 @@
           "typescript": "number[]"
         }
       },
+      "Finance.SignedMoney": {
+        "name": "Finance.SignedMoney",
+        "description": "Signed monetary amount in smallest currency unit (e.g., cents for USD)",
+        "languagePrimitive": "number",
+        "primitive": "Int",
+        "typeMappings": {
+          "go": "FinanceSignedMoney",
+          "json_schema": "integer",
+          "python": "int",
+          "rust": "i64",
+          "sql": "BIGINT",
+          "typescript": "number"
+        },
+        "minimum": -9007199254740991,
+        "maximum": 9007199254740991,
+        "hasCustomParse": true
+      },
+      "Generic.Decimal": {
+        "name": "Generic.Decimal",
+        "description": "Exact decimal number in plain notation, carried as a string",
+        "languagePrimitive": "string",
+        "primitive": "String",
+        "typeMappings": {
+          "go": "GenericDecimal",
+          "json_schema": "string",
+          "python": "decimal.Decimal",
+          "rust": "superscalar::Decimal",
+          "sql": "NUMERIC",
+          "typescript": "string"
+        },
+        "pattern": "^[+-]?[0-9]+(\\.[0-9]+)?$",
+        "hasCustomParse": true
+      },
       "Generic.Int64": {
         "name": "Generic.Int64",
         "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
@@ -198,6 +231,68 @@
       }
     },
     "types": {
+      "DigitMatrix": {
+        "name": "DigitMatrix",
+        "owner": "src/parity-matrix.schema.json",
+        "role": "EmbeddedStruct",
+        "fields": [
+          {
+            "name": "reqDec",
+            "typeRef": {
+              "name": "Generic.Decimal"
+            },
+            "required": true,
+            "validatePrecision": 5,
+            "validateScale": 2
+          },
+          {
+            "name": "optDec",
+            "typeRef": {
+              "name": "Generic.Decimal"
+            },
+            "validatePrecision": 3
+          },
+          {
+            "name": "decList",
+            "typeRef": {
+              "name": "Generic.Decimal",
+              "isArray": true
+            },
+            "validatePrecision": 4,
+            "validateScale": 1
+          },
+          {
+            "name": "reqDim",
+            "typeRef": {
+              "name": "Embedding.Vector"
+            },
+            "required": true,
+            "validateDimensions": 3
+          },
+          {
+            "name": "optDim",
+            "typeRef": {
+              "name": "Embedding.Vector"
+            },
+            "validateDimensions": 2
+          },
+          {
+            "name": "dimList",
+            "typeRef": {
+              "name": "Embedding.Vector",
+              "isArray": true
+            },
+            "validateDimensions": 2
+          },
+          {
+            "name": "amount",
+            "typeRef": {
+              "name": "Finance.SignedMoney"
+            }
+          }
+        ],
+        "jsonField": true
+      },
       "JsonMatrix": {
         "name": "JsonMatrix",
         "owner": "src/parity-matrix.schema.json",
@@ -3248,6 +3343,241 @@
           "type"
         ]
       }
+    },
+    {
+      "name": "digits_within_bounds",
+      "type": "DigitMatrix",
+      "payload": {
+        "reqDec": "123.45",
+        "optDec": "-999",
+        "decList": [
+          "0.5",
+          "999.9",
+          "-0"
+        ],
+        "reqDim": [
+          0.5,
+          -1,
+          2
+        ],
+        "optDim": [
+          1,
+          2
+        ],
+        "dimList": [
+          [
+            1,
+            2
+          ],
+          [
+            3,
+            4.5
+          ]
+        ],
+        "amount": -1250
+      },
+      "want": {}
+    },
+    {
+      "name": "digits_count_the_canonical_form",
+      "type": "DigitMatrix",
+      "payload": {
+        "reqDec": "+000123.4500",
+        "optDec": "0.000",
+        "decList": [
+          "-0.0",
+          "0999.90"
+        ],
+        "reqDim": [
+          1,
+          2,
+          3
+        ]
+      },
+      "want": {}
+    },
+    {
+      "name": "digits_too_many_before_the_point",
+      "type": "DigitMatrix",
+      "payload": {
+        "reqDec": "1234",
+        "optDec": "-1000",
+        "decList": [
+          "12345",
+          "999.9"
+        ],
+        "reqDim": [
+          1,
+          2,
+          3
+        ]
+      },
+      "want": {
+        "decList[0]": [
+          "precision"
+        ],
+        "optDec": [
+          "precision"
+        ],
+        "reqDec": [
+          "precision"
+        ]
+      }
+    },
+    {
+      "name": "digits_too_many_after_the_point",
+      "type": "DigitMatrix",
+      "payload": {
+        "reqDec": "1.234",
+        "optDec": "1.5",
+        "decList": [
+          "1.25",
+          "0.1"
+        ],
+        "reqDim": [
+          1,
+          2,
+          3
+        ]
+      },
+      "want": {
+        "decList[0]": [
+          "scale"
+        ],
+        "optDec": [
+          "scale"
+        ],
+        "reqDec": [
+          "scale"
+        ]
+      }
+    },
+    {
+      "name": "digits_too_many_either_side",
+      "type": "DigitMatrix",
+      "payload": {
+        "reqDec": "-1234.567",
+        "reqDim": [
+          1,
+          2,
+          3
+        ]
+      },
+      "want": {
+        "reqDec": [
+          "precision",
+          "scale"
+        ]
+      }
+    },
+    {
+      "name": "digits_of_no_decimal",
+      "type": "DigitMatrix",
+      "payload": {
+        "reqDec": "1e30",
+        "optDec": "1234.5678",
+        "decList": [
+          "NaN"
+        ],
+        "reqDim": [
+          1,
+          2,
+          3
+        ]
+      },
+      "want": {
+        "decList[0]": [
+          "pattern"
+        ],
+        "optDec": [
+          "precision",
+          "scale"
+        ],
+        "reqDec": [
+          "pattern"
+        ]
+      }
+    },
+    {
+      "name": "dimensions_of_another_length",
+      "type": "DigitMatrix",
+      "payload": {
+        "reqDec": "1",
+        "reqDim": [
+          1,
+          2
+        ],
+        "optDim": [],
+        "dimList": [
+          [
+            1,
+            2
+          ],
+          [
+            1,
+            2,
+            3
+          ]
+        ]
+      },
+      "want": {
+        "dimList[1]": [
+          "dimensions"
+        ],
+        "optDim": [
+          "dimensions"
+        ],
+        "reqDim": [
+          "dimensions"
+        ]
+      }
+    },
+    {
+      "name": "dimensions_of_the_json_text",
+      "type": "DigitMatrix",
+      "payload": {
+        "reqDec": "1",
+        "reqDim": "[1, 2]",
+        "optDim": "[1, 2]",
+        "dimList": [
+          "[1]"
+        ]
+      },
+      "want": {
+        "dimList[0]": [
+          "dimensions"
+        ],
+        "reqDim": [
+          "dimensions"
+        ]
+      }
+    },
+    {
+      "name": "digits_required_absent",
+      "type": "DigitMatrix",
+      "payload": {},
+      "want": {
+        "reqDec": [
+          "required"
+        ],
+        "reqDim": [
+          "required"
+        ]
+      }
+    },
+    {
+      "name": "signed_money_at_its_bounds",
+      "type": "DigitMatrix",
+      "payload": {
+        "reqDec": "1",
+        "reqDim": [
+          1,
+          2,
+          3
+        ],
+        "amount": -9007199254740991
+      },
+      "want": {}
     },
     {
       "name": "scalar_rules_at_bounds",

@@ -136,8 +136,17 @@ var modelFixtures = []string{
 	filepath.Join(sqlgenFixtures, "fixture-queue-db"),
 	filepath.Join(sqlgenFixtures, "fixture-version-graph-db"),
 	filepath.Join(sqlgenFixtures, "fixture-user-model-db"),
+	filepath.Join(sqlgenFixtures, "fixture-ddl-db"),
+	// A projection without a pool, beside the tables (D90).
+	filepath.Join(sqlgenFixtures, "fixture-finances-db"),
+	vectorsFixture,
 	shopDir,
 }
+
+// vectorsFixture is the model fixture with vector columns (D84), which the
+// convergence Postgres, without pgvector, cannot apply;
+// TestVectorPlansOnPostgres applies it.
+var vectorsFixture = filepath.Join(sqlgenFixtures, "fixture-vectors-db")
 
 // TestModelGoldens builds the model of each fixture and compares it with
 // testdata/models/<service>.json. Regenerate with:

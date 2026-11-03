@@ -169,6 +169,12 @@ func (d *declarations) writeDef(name string, schema any) error {
 			return err
 		}
 	}
+	if name == "Worker" {
+		// A worker requires its queue unless it is a behavior worker
+		// (D103), whose queue the build adds: the types leave queue
+		// optional, as the reader's check of the pair is the pass's.
+		keys = append(keys, "if", "then")
+	}
 	if err := onlyKeys(node, at, keys...); err != nil {
 		return err
 	}
@@ -196,7 +202,7 @@ func (d *declarations) writeDef(name string, schema any) error {
 		propAt := at + "/properties/" + key
 		var typ string
 		switch {
-		case key == "extensions":
+		case key == "extensions" && !isList(props[key]):
 			if err := d.openSlot(props[key], propAt); err != nil {
 				return err
 			}
@@ -232,6 +238,18 @@ func (d *declarations) writeDef(name string, schema any) error {
 			d.sawBehaviorName = true
 			d.writeComment("  ", "The behavior's registered name: bare for a core behavior, <extension>.<Name> for an extension's. A registry admits the behaviors it registers.")
 			typ = "string"
+		case name == "BehaviorRef" && key == "field":
+			typ, err = d.typeOf(props[key], propAt)
+			if err != nil {
+				return err
+			}
+			d.writeComment("  ", "The anchor field of a field-anchored use (D103): the field whose type is the behavior, which holds its value and names its columns and operations. Absent for a use on the whole type.")
+		case name == "BehaviorRef" && key == "implements":
+			typ, err = d.typeOf(props[key], propAt)
+			if err != nil {
+				return err
+			}
+			d.writeComment("  ", "True for a use a DB table implements (D103), `implements Timers<Ticket, Config>`: anchored on the type, on a table that stays a table. A use on the whole type without it is @behavior's, which makes the type an engine type.")
 		case name == "BehaviorRef" && key == "config":
 			if err := d.behaviorConfig(props[key], propAt); err != nil {
 				return err
@@ -378,6 +396,14 @@ func (d *declarations) typeOf(schema any, at string) (string, error) {
 	default:
 		return "", fmt.Errorf("%s: unsupported schema type %v", at, node["type"])
 	}
+}
+
+// isList reports whether a property's schema is an array's: an
+// "extensions" property that lists names, such as App's (D78), is an
+// ordinary property, not a slot a registry closes.
+func isList(schema any) bool {
+	node, ok := schema.(map[string]any)
+	return ok && node["type"] == "array"
 }
 
 // openSlot checks that an extensions or documents property is the object

@@ -5,6 +5,26 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "DEPS_CACHE_MEMORY_STORE_AUTH": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_CACHE_MEMORY_STORE, the memory store connection of deps-cache, which the platform sets."
+    },
+    "DEPS_CACHE_MEMORY_STORE_CA": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_CACHE_MEMORY_STORE, the memory store connection of deps-cache, which the platform sets."
+    },
+    "DEPS_CACHE_MEMORY_STORE_MEMBER": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_CACHE_MEMORY_STORE, the memory store connection of deps-cache, which the platform sets."
+    },
+    "DEPS_CACHE_MEMORY_STORE_STORE": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_CACHE_MEMORY_STORE, the memory store connection of deps-cache, which the platform sets."
+    },
+    "DEPS_CACHE_MEMORY_STORE_URL": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_CACHE_MEMORY_STORE, the memory store connection of deps-cache, which the platform sets."
+    },
     "DEPS_MEDIA_BUCKET_BINDING": {
       "type": "string",
       "description": "Derived: a member of DEPS_MEDIA_BUCKET, the bucket connection of deps-media, which the platform sets."
@@ -94,6 +114,14 @@
       "type": "string",
       "description": "Derived: a member of DEPS_USERS_DB_DATABASE, the database connection of deps-users-db, which the platform sets."
     },
+    "DEPS_USERS_DB_DATABASE_HYPERDRIVE_BINDING": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_USERS_DB_DATABASE, the database connection of deps-users-db, which the platform sets."
+    },
+    "DEPS_USERS_DB_DATABASE_HYPERDRIVE_CONFIG": {
+      "type": "string",
+      "description": "Derived: a member of DEPS_USERS_DB_DATABASE, the database connection of deps-users-db, which the platform sets."
+    },
     "DEPS_USERS_DB_DATABASE_URL": {
       "type": "string",
       "description": "Derived: a member of DEPS_USERS_DB_DATABASE, the database connection of deps-users-db, which the platform sets."
@@ -175,6 +203,23 @@
     "schemaName": "deps-rust-shop",
     "typeName": "ShopConfig",
     "envVars": [
+      {
+        "name": "DEPS_CACHE_MEMORY_STORE",
+        "irType": "MemoryStoreConnection",
+        "primitive": "object",
+        "required": false,
+        "hasDefault": false,
+        "description": "The memory store connection of deps-cache (memoryStores), one variable per member.",
+        "derived": "memoryStore",
+        "service": "deps-cache",
+        "variables": [
+          "DEPS_CACHE_MEMORY_STORE_STORE",
+          "DEPS_CACHE_MEMORY_STORE_URL",
+          "DEPS_CACHE_MEMORY_STORE_CA",
+          "DEPS_CACHE_MEMORY_STORE_AUTH",
+          "DEPS_CACHE_MEMORY_STORE_MEMBER"
+        ]
+      },
       {
         "name": "DEPS_MEDIA_BUCKET",
         "irType": "BucketConnection",
@@ -258,7 +303,9 @@
           "DEPS_USERS_DB_DATABASE_CLOUD_SQL_DATABASE",
           "DEPS_USERS_DB_DATABASE_CLOUD_SQL_USER",
           "DEPS_USERS_DB_DATABASE_D1_BINDING",
-          "DEPS_USERS_DB_DATABASE_D1_DATABASE"
+          "DEPS_USERS_DB_DATABASE_D1_DATABASE",
+          "DEPS_USERS_DB_DATABASE_HYPERDRIVE_BINDING",
+          "DEPS_USERS_DB_DATABASE_HYPERDRIVE_CONFIG"
         ]
       },
       {

@@ -5,7 +5,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	"github.com/parable-work/superschematic/internal/loader/identity"
 	ir "github.com/parable-work/superschematic/ir"
@@ -96,6 +95,7 @@ func checkIdentityRoutes(schema *ir.Schema, in Input, r *Result) {
 				r.errorf("", "%s: @userSessions: register needs the login; drop register: true or login: false", set.Name)
 			}
 			checkIdentityRoutesPath(set, "@userSessions", cfg.Path, r)
+			checkIdentityRegistration(set, cfg, r)
 			if sessions != nil {
 				r.errorf("", "%s", IdentityRoutesSecond(set, sessions, "@userSessions"))
 			} else {
@@ -131,12 +131,70 @@ func checkIdentityRoutes(schema *ir.Schema, in Input, r *Result) {
 	checkIdentityRouteNames(schema, r)
 	if schema.Kind == ir.SchemaKindAPI {
 		checkIdentityRoutesAuthDB(schema, in.AuthDB, sessions, admin, r)
+		checkSeededRoles(schema, in.AuthDB, sessions, in.Naming.OrDefault().IdentityPermissionPrefix, r)
 	}
 }
 
 func checkIdentityRoutesPath(set *ir.OperationSet, decorator, path string, r *Result) {
 	if path != "" && !identityRoutesPath.MatchString(path) {
 		r.errorf("", "%s: %s path %q must be route segments joined by /, with no leading or trailing / and no {parameter}", set.Name, decorator, path)
+	}
+}
+
+// identityPermission is a permission's form: dotted segments of ASCII
+// letters, digits, _ and -, as the identity runtimes check a role's.
+var identityPermission = regexp.MustCompile(`^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$`)
+
+// checkIdentityRegistration checks how register admits users (D81):
+// registration is open or approval, and it, defaultRoles and firstUser
+// need register; the role names are non-empty and named once, and
+// firstUser names its role and at least one permission of a permission's
+// form. The authDb's UserRole table is checkIdentityRoutesAuthDB's.
+func checkIdentityRegistration(set *ir.OperationSet, cfg *ir.UserSessionsConfig, r *Result) {
+	switch cfg.Registration {
+	case "", ir.IdentityRegistrationOpen, ir.IdentityRegistrationApproval:
+	default:
+		r.errorf("", "%s: @userSessions registration %q must be %q or %q", set.Name, cfg.Registration, ir.IdentityRegistrationOpen, ir.IdentityRegistrationApproval)
+	}
+	var keys []string
+	if cfg.Registration != "" {
+		keys = append(keys, "registration")
+	}
+	if len(cfg.DefaultRoles) > 0 {
+		keys = append(keys, "defaultRoles")
+	}
+	if cfg.FirstUser != nil {
+		keys = append(keys, "firstUser")
+	}
+	if len(keys) > 0 && (!cfg.Register || cfg.NoLogin) {
+		verb := "configures"
+		if len(keys) > 1 {
+			verb = "configure"
+		}
+		r.errorf("", "%s: @userSessions %s %s register, which needs register: true and the login", set.Name, joinAnd(keys), verb)
+	}
+	seen := map[string]bool{}
+	for _, role := range cfg.DefaultRoles {
+		switch {
+		case role == "":
+			r.errorf("", "%s: @userSessions defaultRoles holds an empty role name", set.Name)
+		case seen[role]:
+			r.errorf("", "%s: @userSessions defaultRoles names %q twice", set.Name, role)
+		}
+		seen[role] = true
+	}
+	if first := cfg.FirstUser; first != nil {
+		if first.Role == "" {
+			r.errorf("", "%s: @userSessions firstUser needs role, the name of the administrator's role", set.Name)
+		}
+		if len(first.Permissions) == 0 {
+			r.errorf("", "%s: @userSessions firstUser needs permissions, at least one, which the role carries when register creates it", set.Name)
+		}
+		for _, permission := range first.Permissions {
+			if !identityPermission.MatchString(permission) {
+				r.errorf("", "%s: @userSessions firstUser permission %q is not dotted segments of letters, digits, _ and -, such as orders.read", set.Name, permission)
+			}
+		}
 	}
 }
 
@@ -189,6 +247,9 @@ func checkIdentityRoutesAuthDB(schema, authDB *ir.Schema, sessions, admin *ir.Op
 	if admin != nil && authDB.UserRoleTable() == nil {
 		r.errorf("", "%s: @userAdministration needs a UserRole table in the authDb %s, a table that implements UserRole from @superschematic/db, and it has none", admin.Name, schema.AuthDB)
 	}
+	if sessions != nil && (len(sessions.UserSessions.DefaultRoles) > 0 || sessions.UserSessions.FirstUser != nil) && authDB.UserRoleTable() == nil {
+		r.errorf("", "%s: @userSessions defaultRoles and firstUser grant roles, which need a UserRole table in the authDb %s, a table that implements UserRole from @superschematic/db, and it has none", sessions.Name, schema.AuthDB)
+	}
 	var creators []string
 	if sessions != nil && sessions.UserSessions.Register && !sessions.UserSessions.NoLogin {
 		creators = append(creators, sessions.Name+"'s @userSessions({ register: true })")
@@ -204,42 +265,44 @@ func checkIdentityRoutesAuthDB(schema, authDB *ir.Schema, sessions, admin *ir.Op
 // checkUserCreatable refuses a User table that a row cannot be written to
 // from its key, login and name alone, the fields the routes that create
 // users write (D50, v1): every other field must be optional, take a
-// default, be generated, or be a timestamp sqlgen defaults to now.
+// default its column carries (D83), be generated, or be an audit
+// timestamp sqlgen defaults to now (D88).
 func checkUserCreatable(db *ir.Schema, user *ir.TypeDef, creators, authDB string, r *Result) {
 	written := map[string]bool{user.User.Login: true, user.User.NameField(): true}
 	scalarTypes := sqlutil.ScalarSQLTypes(db)
 	for _, fd := range user.Fields {
-		if fd.Key || written[fd.Name] || !needsValueOnCreate(fd, scalarTypes) {
+		if fd.Key || written[fd.Name] || !needsValueOnCreate(db, user, fd, scalarTypes) {
 			continue
 		}
-		r.errorf("", "%s create users with their key, login and name alone, and %s.%s in the authDb %s is required and has no default; make it optional or give it a @default", creators, user.Name, fd.Name, authDB)
+		r.errorf("", "%s create users with their key, login and name alone, and %s.%s in the authDb %s is required and has no default its column carries; make it optional or give it a Default<T, V> whose V is text, a number, a boolean or an enum member, or \"now\" for a date or time", creators, user.Name, fd.Name, authDB)
 	}
 }
 
-// needsValueOnCreate reports whether an insert must write fd: a required
-// column with no default of its own, no generated value and none sqlgen
-// gives it.
-func needsValueOnCreate(fd *ir.FieldDef, scalarTypes map[string]string) bool {
+// needsValueOnCreate reports whether an insert must write fd, a field of
+// the table td: a required column with no generated value and no default
+// sqlgen gives it, from its Default<T, V> (sqlutil.ColumnDefault) or, for
+// an audit timestamp, its type (sqlutil.ImpliedNowDefault).
+func needsValueOnCreate(db *ir.Schema, td *ir.TypeDef, fd *ir.FieldDef, scalarTypes map[string]string) bool {
+	if _, ok := sqlutil.ColumnDefault(fd, sqlutil.ColumnType(db, fd, scalarTypes)); ok {
+		return false
+	}
 	switch {
-	case !fd.Required, fd.AutoGenerated, fd.Default != nil, fd.PlatformDefault != "":
+	case !fd.Required, fd.AutoGenerated, fd.PlatformDefault != "":
 		return false
 	case fd.HasMany, fd.ManyToMany:
 		// The rows that hold the relation are another table's.
 		return false
 	}
-	return !sqlDefaultsToNow(fd, scalarTypes)
+	return !sqlDefaultsToNow(db, td, fd, scalarTypes)
 }
 
 // sqlDefaultsToNow reports whether sqlgen gives fd's required column the
-// CURRENT_TIMESTAMP, CURRENT_DATE or CURRENT_TIME default, as it does an
-// audit timestamp: a single date, time or timestamp column.
-func sqlDefaultsToNow(fd *ir.FieldDef, scalarTypes map[string]string) bool {
-	if fd.JsonField || fd.TypeRef.IsArray || fd.TypeRef.IsMap || fd.Relation != nil {
+// CURRENT_TIMESTAMP, CURRENT_DATE or CURRENT_TIME default with no
+// Default<T, "now">: a single date, time or timestamp column that is an
+// audit timestamp (sqlutil.ImpliedNowDefault, D88).
+func sqlDefaultsToNow(db *ir.Schema, td *ir.TypeDef, fd *ir.FieldDef, scalarTypes map[string]string) bool {
+	if fd.JsonField || fd.TypeRef.IsArray || fd.TypeRef.IsMap || fd.Relation != nil || !sqlutil.ImpliedNowDefault(td, fd) {
 		return false
 	}
-	columnType := sqlutil.ColumnType(fd, scalarTypes)
-	traits := codegen.GuessScalarTraits(fd.TypeRef.Name)
-	return columnType == "TIMESTAMPTZ" || traits.IsDateTimeLike ||
-		columnType == "DATE" || traits.IsDateLike ||
-		columnType == "TIME" || traits.IsTimeLike
+	return sqlutil.NowDefault(sqlutil.ColumnType(db, fd, scalarTypes), fd.TypeRef.Name) != ""
 }

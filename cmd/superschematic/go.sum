@@ -225,6 +225,8 @@ github.com/mattn/go-localereader v0.0.1 h1:ygSAOl7ZXTx4RdPYinUpg6W99U8jWvWi9Ye2J
 github.com/mattn/go-localereader v0.0.1/go.mod h1:8fBrzywKY7BI3czFoHkuzRoWE9C+EiG4R1k4Cjx5p88=
 github.com/mattn/go-runewidth v0.0.20 h1:WcT52H91ZUAwy8+HUkdM3THM6gXqXuLJi9O3rjcQQaQ=
 github.com/mattn/go-runewidth v0.0.20/go.mod h1:XBkDxAl56ILZc9knddidhrOlY5R/pDhgLpndooCuJAs=
+github.com/microsoft/TypeScript/tsc v0.0.0-20260708042240-1e4744d68260 h1:D4pdLG7ngZHrPuvD0xACXHZW/H+XW6JmN4L+3VoZ0qM=
+github.com/microsoft/TypeScript/tsc v0.0.0-20260708042240-1e4744d68260/go.mod h1:gV4G6M8xxLNqQSRHiFOgKHlY+5YJgYPM6QwFLWllC+8=
 github.com/mitchellh/go-ps v1.0.0 h1:i6ampVEEF4wQFF+bkYfwYgY+F/uYJDktmvLPf7qIgjc=
 github.com/mitchellh/go-ps v1.0.0/go.mod h1:J4lOc8z8yJs6vUwklHw2XEIiT4z4C40KtWVN3nvg8Pg=
 github.com/mitchellh/go-wordwrap v1.0.1 h1:TLuKupo69TCn6TQSyGxwI1EblZZEsQ0vMlAFQflz0v0=
@@ -248,10 +250,10 @@ github.com/opentracing/basictracer-go v1.1.0/go.mod h1:V2HZueSJEp879yv285Aap1BS6
 github.com/opentracing/opentracing-go v1.1.0/go.mod h1:UkNAQd3GIcIGf0SeVgPpRdFStlNbqXla1AfSYxPUl2o=
 github.com/opentracing/opentracing-go v1.2.0 h1:uEJPy/1a5RIPAJ0Ov+OIO8OxWu77jEv+1B0VhjKrZUs=
 github.com/opentracing/opentracing-go v1.2.0/go.mod h1:GxEUsuufX4nBwe+T+Wl9TAgYrxe9dPLANfrWvHYVTgc=
-github.com/parable-work/superscalar/go v0.0.0-20261021190928-62b300e78ba9 h1:NltaXCH0x8VvNQfDN7wKpWJ1uuauwSR+wo/Y+Gu0LlU=
-github.com/parable-work/superscalar/go v0.0.0-20261021190928-62b300e78ba9/go.mod h1:Km4/TsGNBp2Xk5+HuqjJzkbvTiY/x8eVoKFfjbNsliA=
-github.com/parable-work/typescript-go v0.0.0-20260701192534-c5de5679073f h1:BYYFPOUbFv3JsjlWOS8N7y3v29qPvnvtodAKvXL/MMo=
-github.com/parable-work/typescript-go v0.0.0-20260701192534-c5de5679073f/go.mod h1:gV4G6M8xxLNqQSRHiFOgKHlY+5YJgYPM6QwFLWllC+8=
+github.com/parable-work/superscalar/go v0.0.0-20261025233249-5cc6787bc45f h1:5TPyXHfcVDiUz98sKYPV/uY8VkiDtyyORavEo9iD+js=
+github.com/parable-work/superscalar/go v0.0.0-20261025233249-5cc6787bc45f/go.mod h1:Km4/TsGNBp2Xk5+HuqjJzkbvTiY/x8eVoKFfjbNsliA=
+github.com/parable-work/typescript-shim v0.0.0-20261028220021-9c62d2c703d9 h1:NbvbZAgxT6fQTQootSAMRZM9UxNyQYJ2IMUtEd/78pE=
+github.com/parable-work/typescript-shim v0.0.0-20261028220021-9c62d2c703d9/go.mod h1:DvdT3HZb6BacDrFNLlrPMofQF0LZ1T80IfNeg6uPHVo=
 github.com/pb33f/ordered-map/v2 v2.3.1 h1:5319HDO0aw4DA4gzi+zv4FXU9UlSs3xGZ40wcP1nBjY=
 github.com/pb33f/ordered-map/v2 v2.3.1/go.mod h1:qxFQgd0PkVUtOMCkTapqotNgzRhMPL7VvaHKbd1HnmQ=
 github.com/peter-evans/patience v0.3.0 h1:rX0JdJeepqdQl1Sk9c9uvorjYYzL2TfgLX1adqYm9cA=

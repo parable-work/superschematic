@@ -264,9 +264,14 @@ pub fn {{.Fn}}_required(value: Option<&Value>) -> rt::ScalarResult {
 /// refuses undeclared keys when asked and validates it, returning the value
 /// `{{.ParseFn}}` decodes.
 pub fn {{.PrepareFn}}(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
-    let Value::Object({{if .Defaults}}mut {{end}}object) = value else {
+    let Value::Object({{if or .Defaults .AllowsUnknownFields}}mut {{end}}object) = value else {
         return Err(rt::ParseError::NotAnObject);
     };
+{{- if .AllowsUnknownFields}}
+    // @allowUnknownFields: the keys `{{.Name}}` does not declare are
+    // dropped, whatever unknown_fields asks (D87).
+    rt::drop_unknown_fields(&mut object, {{.FieldsID}});
+{{- end}}
 {{- range .Defaults}}
     rt::fill_default(&mut object, {{rustString .Name}}, {{rustString .JSON}}, {{not $type.Strict}});
 {{- end}}

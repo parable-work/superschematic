@@ -51,19 +51,21 @@ describe('the work-queue behaviors say what their config means', () => {
     assert.ok(!codes(guidanceOf(engine, 'jobs', 'countClaimable')).includes('Lease.held_by_another'), 'a read is let through');
     assert.ok(!codes(guidanceOf(engine, 'jobs', 'create')).includes('Lease.held_by_another'), 'a create holds no lease');
 
-    // Another config: exempt operations pass, and requireToken asks every write for the token.
+    // Another config: exempt operations pass, operations beside the instance are no write it fences (D77), and requireToken asks every write for the token.
     publish(
       engine,
       jobsDocument([
         { name: 'Workflow', config: jobFlow },
         { name: 'Comments' },
-        { name: 'Lease', config: { ttlMs: 120000, heartbeatMs: 20000, exempt: ['Comments.comment'], requireToken: true } },
+        { name: 'Lease', config: { ttlMs: 120000, heartbeatMs: 20000, exempt: ['Workflow.transition'], requireToken: true } },
       ])
     );
     assert.match(summaryOf(engine, 'Job', 'Lease'), /for 2 minutes at a time, renewed by heartbeat at least every 20 seconds\./);
-    assert.match(summaryOf(engine, 'Job', 'Lease'), /only its holder writes, but for Comments\.comment;/);
-    assert.deepEqual(codes(guidanceOf(engine, 'Job', 'comment')), []);
-    assert.deepEqual(codes(guidanceOf(engine, 'Job', 'transition')).filter((code) => code.startsWith('Lease.')), [
+    assert.match(summaryOf(engine, 'Job', 'Lease'), /only its holder writes, but for Workflow\.transition;/);
+    for (const operation of ['transition', 'post', 'react']) {
+      assert.deepEqual(codes(guidanceOf(engine, 'Job', operation)).filter((code) => code.startsWith('Lease.')), [], operation);
+    }
+    assert.deepEqual(codes(guidanceOf(engine, 'Job', 'update')).filter((code) => code.startsWith('Lease.')), [
       'Lease.held_by_another',
       'Lease.token_stale',
       'Lease.lapsed',

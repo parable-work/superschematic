@@ -1,6 +1,9 @@
 package ir
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestContentHashedName: a name holds a content hash when the part before
 // its extension, or its last part after a dot or a hyphen, is 8 or more
@@ -48,5 +51,34 @@ func TestSiteFileCacheControl(t *testing.T) {
 		if got := SiteFileCacheControl(tc.rel, tc.fallback); got != tc.want {
 			t.Errorf("SiteFileCacheControl(%q, %q) = %q, want %q", tc.rel, tc.fallback, got, tc.want)
 		}
+	}
+}
+
+// TestSiteDevConfig: a dev server's command defaults to the dev script,
+// and Check refuses a command with a space in it and a port that is none
+// (D82).
+func TestSiteDevConfig(t *testing.T) {
+	if got := (SiteConfig{Dev: &SiteDevConfig{Port: 5173}}).WithDefaults().Dev; got == nil || got.Command != DefaultSiteDevCommand || got.Port != 5173 {
+		t.Fatalf("WithDefaults().Dev = %+v, want the dev script on 5173", got)
+	}
+	if got := (SiteConfig{}).WithDefaults().Dev; got != nil {
+		t.Fatalf("a site without a dev server got %+v", got)
+	}
+	for _, tc := range []struct {
+		dev  SiteDevConfig
+		want string
+	}{
+		{SiteDevConfig{Command: "vite"}, ""},
+		{SiteDevConfig{Command: "vite --host"}, `site.dev.command "vite --host" is no script name`},
+		{SiteDevConfig{Port: 70000}, "site.dev.port 70000 is no port"},
+		{SiteDevConfig{Port: -1}, "site.dev.port -1 is no port"},
+	} {
+		err := SiteConfig{Dev: &tc.dev}.Check()
+		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("Check(%+v) = %v, want %q", tc.dev, err, tc.want)
+		}
+	}
+	if got, want := SiteDevAPIPath("shop-api"), "/api/shop-api"; got != want {
+		t.Errorf("SiteDevAPIPath = %q, want %q", got, want)
 	}
 }

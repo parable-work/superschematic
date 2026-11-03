@@ -55,7 +55,7 @@ export type DocsConfig = {
   readonly title: string;
   /** The OpenAPI description; it replaces the operation's comment there. */
   readonly description: string;
-  /** Stable dotted identifier, at least two lowercase segments: "orders.returns.create". */
+  /** Stable dotted identifier, at least two segments of lowercase letters, digits and hyphens (never underscores): "orders.returns.create", "finances.line-items.list". */
   readonly capability: string;
   /** deprecated and retired mark the OpenAPI operation deprecated. */
   readonly lifecycle: DocsLifecycle;
@@ -145,14 +145,17 @@ const noopMethodDecorator: MethodDecorator = () => {};
 const noopPropertyDecorator: PropertyDecorator = () => {};
 const noopClassOrMethodDecorator: ClassDecorator & MethodDecorator = () => {};
 
+/** The route's HTTP method and path, under `/api`. */
 export function rest(_method: HttpMethod, _path?: string): MethodDecorator {
   return noopMethodDecorator;
 }
 
+/** The operation's documentation. */
 export function docs(_config: DocsConfig): MethodDecorator {
   return noopMethodDecorator;
 }
 
+/** Publishes the operation as an MCP tool, or says why it is not one. */
 export function mcp(_config: MCPConfig): MethodDecorator {
   return noopMethodDecorator;
 }
@@ -162,16 +165,37 @@ export function icon(_name: string): MethodDecorator {
   return noopMethodDecorator;
 }
 
-export function requirePermission(_perms: readonly string[]): MethodDecorator {
-  return noopMethodDecorator;
+/**
+ * The route needs a caller holding one of the permissions. On a
+ * @behaviorOperations class, every route the set serves.
+ */
+export function requirePermission(_perms: readonly string[]): ClassDecorator & MethodDecorator {
+  return noopClassOrMethodDecorator;
 }
 
+/**
+ * The route needs a caller; the implementation checks that the caller owns
+ * what it touches. A @behaviorOperations class takes none: its routes run no
+ * implementation that could check it.
+ */
 export const requireOwnership: MethodDecorator = noopMethodDecorator;
-export const auth: MethodDecorator = noopMethodDecorator;
+/** The route needs a caller. On a @behaviorOperations class, every route the set serves. */
+export const auth: ClassDecorator & MethodDecorator = noopClassOrMethodDecorator;
+/** The route's request body travels as an encrypted envelope. */
 export const encrypted: MethodDecorator = noopMethodDecorator;
-export const publicRoute: MethodDecorator = noopMethodDecorator;
+/**
+ * Anyone may call the route, in an `Authenticated` set too. Refused with
+ * `@auth`, `@requirePermission` or `@requireOwnership`. On a
+ * @behaviorOperations class, every route the set serves.
+ */
+export const publicRoute: ClassDecorator & MethodDecorator = noopClassOrMethodDecorator;
+/** An operation a third party calls: no SDK has a method or a tool for it. */
 export const webhook: MethodDecorator = noopMethodDecorator;
 
+/**
+ * Every server checks the request's signature with the provider's verifier
+ * first, before the rate limit, the body limit and the permission check.
+ */
 export function hmacVerified(_cfg: HmacVerifiedConfig): MethodDecorator {
   return noopMethodDecorator;
 }
@@ -214,18 +238,22 @@ export function allowService(_cfg?: ServiceCallersConfig): ClassDecorator & Meth
   return noopClassOrMethodDecorator;
 }
 
+/** Bounds a route's requests per minute; on a class, each route of the set's. */
 export function rateLimit(_cfg: RateLimitConfig): ClassDecorator & MethodDecorator {
   return noopClassOrMethodDecorator;
 }
 
+/** Bounds the size of a route's request body; on a class, each route of the set's. */
 export function bodyLimit(_cfg: BodyLimitConfig): ClassDecorator & MethodDecorator {
   return noopClassOrMethodDecorator;
 }
 
+/** Bounds how long a route's request may take; on a class, each route of the set's. */
 export function timeout(_cfg: TimeoutConfig): ClassDecorator & MethodDecorator {
   return noopClassOrMethodDecorator;
 }
 
+/** The class is a view of a table: its fields are checked against the table's. */
 export function source(_target: unknown): ClassDecorator {
   return noopClassDecorator;
 }
@@ -235,19 +263,48 @@ export function source(_target: unknown): ClassDecorator {
  * `login`, true by default, adds login, logout and changePassword; false
  * leaves me and capabilities, for an API whose users sign in through
  * another API of the same authDb. `register`, false by default, adds
- * register, which anyone may call, and needs the login.
+ * register, which anyone may call, and needs the login; the
+ * RegistrationConfig members shape it.
  */
 export type UserSessionsConfig =
   | {
       readonly path?: string;
       readonly login?: true;
-      readonly register?: boolean;
+      readonly register?: false;
     }
+  | ({
+      readonly path?: string;
+      readonly login?: true;
+      readonly register: true;
+    } & RegistrationConfig)
   | {
       readonly path?: string;
       readonly login: false;
       readonly register?: false;
     };
+
+/**
+ * How register admits a user (D81).
+ *
+ * - `registration`: "open", the default, signs the user in. "approval"
+ *   creates them pending: register answers 202 with no session, and login
+ *   refuses them with 403 pending_approval until an administrator calls
+ *   approveUser.
+ * - `defaultRoles`: the roles each new user holds, by name, each created
+ *   with no permissions when no role has the name. Under approval they
+ *   take effect at approval.
+ * - `firstUser`: the registration that finds no role grant, as `identity
+ *   bootstrap` would, makes the database's first administrator, active
+ *   even under approval, holding `role`, created with `permissions` when
+ *   no role has the name, beside the default roles. Two at once make one.
+ *
+ * defaultRoles and firstUser need a UserRole table in the authDb.
+ */
+export type RegistrationConfig = {
+  readonly registration?: 'open' | 'approval';
+  readonly defaultRoles?: readonly string[];
+  readonly firstUser?: { readonly role: string; readonly permissions: readonly string[] };
+};
 
 /** The routes @userAdministration adds. `path` prefixes them, "auth/admin" by default. */
 export type UserAdministrationConfig = {
@@ -280,6 +337,63 @@ export function userSessions(_cfg?: UserSessionsConfig): ClassDecorator {
  * clause.
  */
 export function userAdministration(_cfg?: UserAdministrationConfig): ClassDecorator {
+  return noopClassDecorator;
+}
+
+/**
+ * Serves the operations of a table's behaviors (D103), on a class with no
+ * members: superschematic adds, for each field of the table whose type is a
+ * behavior and each operation that behavior declares, a route
+ * (POST /api/<table>/{<key>}/<field>/<operation>), an SDK method
+ * (sdk.<namespace>.<field>.<operation>) and an MCP tool
+ * (<table>_<field>_<operation>), each run through the behaviors' core by the
+ * generated server, so the implementation has no method for them. The table
+ * is a class of the API's database, its authDb or its one DB dependency,
+ * imported from that service's package, and an API serves a table from one
+ * such class. The class's @auth, @requirePermission and @publicRoute, its
+ * service clause, rate limit, body limit and timeout apply to every route it
+ * serves; a permission the behavior's config names (a Workflow transition's)
+ * is the core's to check. Name the class <Table>Actions to put the SDK
+ * methods under the table's name.
+ *
+ * ```ts
+ * @behaviorOperations(Order)
+ * @requirePermission(["orders.write"])
+ * export abstract class OrderActions {}
+ * ```
+ */
+export function behaviorOperations(_table: abstract new (...args: never[]) => unknown): ClassDecorator {
+  return noopClassDecorator;
+}
+
+/** The options of a behavior worker (D103). */
+export type BehaviorWorkerOptions = {
+  /** How many messages of each of the table's behavior queues an instance handles at a time; one unless set. An environment's settings change it. */
+  readonly concurrency?: number;
+  /** How long a stopping worker lets its running handlers finish before it gives their messages back, a duration of whole seconds; eight seconds unless set. */
+  readonly grace?: string;
+  /** The permissions the worker's commands hold, which the core checks a move's permission against (a Workflow transition's that a Timers deadline's then makes); none unless set. */
+  readonly permissions?: readonly string[];
+};
+
+/**
+ * Runs a table's behaviors' timed work (D103) on a class with no members:
+ * its deadlines, each claimed from the table's deadline queue as it falls
+ * due and run through the behaviors' core in one transaction with the
+ * message's completion, as the worker (subject <API>/<class>, holding the
+ * permissions set here). The class is a worker of the API, a deployable of
+ * kind worker named after the API and the class, as @worker's is; its
+ * handler is generated, so the API's Workers and its implementation have no
+ * method for it. The table is a class of the API's database, its authDb or
+ * its one DB dependency, imported from that service's package, and one
+ * class runs a table.
+ *
+ * ```ts
+ * @behaviorWorker(Ticket, { concurrency: 2 })
+ * export abstract class TicketTimers {}
+ * ```
+ */
+export function behaviorWorker(_table: abstract new (...args: never[]) => unknown, _options?: BehaviorWorkerOptions): ClassDecorator {
   return noopClassDecorator;
 }
 
@@ -338,6 +452,68 @@ export function worker(_options: WorkerOptions): ClassDecorator {
   return noopClassDecorator;
 }
 
+/** The options of a deriver: the engine types whose Derived fields it fills, and how. */
+export type DeriverOptions = {
+  /** The names of the engine types of the API's database whose Derived fields the deriver fills; every type of it that composes Derived unless set. An API imports no engine type, so it names them. */
+  readonly schemas?: readonly string[];
+  /** How many answers an instance runs at a time; four unless set. An environment's settings change it. */
+  readonly concurrency?: number;
+  /** How many stale fields a pull asks for, 1 to 100; fifty unless set. */
+  readonly batchSize?: number;
+};
+
+/**
+ * Declares a deriver of the API service: a deployable that fills the
+ * Derived fields of the engine types of the API's database (D74). It pulls
+ * the stale fields, calls the project's generated Derivers for each, which
+ * asks a model, and settles the answers. The class's name is the
+ * deriver's, and the class holds nothing:
+ *
+ * ```ts
+ * @deriver({ schemas: ["Ticket"], concurrency: 4 })
+ * export abstract class TriageTickets {}
+ * ```
+ */
+export function deriver(_options?: DeriverOptions): ClassDecorator {
+  return noopClassDecorator;
+}
+
+/** The options of an app: the extensions its build needs. */
+export type AppOptions = {
+  /** The names of the superschematic extensions the app's build needs (`["topcoat"]`). A binary that does not link one refuses to build the app, and resolves and plans the stack as usual. */
+  readonly extensions?: readonly string[];
+};
+
+/**
+ * Declares an app of the API service: the project's own HTTP program over
+ * the API's Deps, implementations, identity and engine, which the stack
+ * runs as a deployable of its own where the API's servers run (D78). The
+ * program is a library crate the project writes, exporting `serve(parts)`,
+ * and the API is written in Rust. The class's name is the app's, and the
+ * class holds nothing:
+ *
+ * ```ts
+ * @app({ extensions: ["topcoat"] })
+ * export abstract class Backoffice {}
+ * ```
+ */
+export function app(_options?: AppOptions): ClassDecorator {
+  return noopClassDecorator;
+}
+
+/** A field of a `@source` view with no column behind it, which the implementation fills in. */
 export const virtual: PropertyDecorator = noopPropertyDecorator;
+/**
+ * A field of a `@source` view that carries the plaintext of its table's
+ * `Encrypted<T>` field (D85). A view leaves such a field out unless it says
+ * so: whatever the view holds, a response sends.
+ */
+export const decrypted: PropertyDecorator = noopPropertyDecorator;
+/** A UI schema renderer hides the field. */
 export const uiHidden: PropertyDecorator = noopPropertyDecorator;
+/**
+ * Each router gates the route and hands it to a handler the implementation
+ * writes: TypeScript's from `manualRoutes`, Go's from `Config.ManualRoutes`,
+ * Rust's from `build_router_with_manual_routes`.
+ */
 export const manualRouteRegistration: MethodDecorator = noopMethodDecorator;

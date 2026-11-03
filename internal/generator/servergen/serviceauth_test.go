@@ -501,7 +501,7 @@ func TestAServerCallsAnAPIItServesWithItsLoopbackKey(t *testing.T) {
 	repoRoot := t.TempDir()
 	f := loadFixture(t, servicesRoot)
 	withRequiredService(f)
-	f.build(t, repoRoot, paths, "shop-db", "shop-media", "shop-api", "shop-orders", monolithStack)
+	f.build(t, repoRoot, paths, "shop-db", "shop-media", "shop-cache", "shop-api", "shop-orders", monolithStack)
 
 	implement := func(service, from, to string, imports ...string) {
 		t.Helper()

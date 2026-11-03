@@ -4,12 +4,23 @@ import "encoding/json"
 
 // Principal is who a call acts for, in the HTTP runtime's shape: the
 // subject the call records as its actor, the permissions it holds, its
-// verified claims, and, for a call a service makes (D37), the service.
+// verified claims, for a call a service makes (D37), the service, and the
+// subject it acts for (D77).
 type Principal struct {
 	Subject     string            `json:"subject"`
 	Permissions []string          `json:"permissions"`
 	Claims      map[string]any    `json:"claims,omitempty"`
 	Service     *PrincipalService `json:"service,omitempty"`
+	// ActingFor is the subject the caller acts for (D77): the person an
+	// agent or a service works for, which the events it writes record as
+	// for beside actor. It adds no permissions; the policy may refuse it.
+	ActingFor *ActingFor `json:"actingFor,omitempty"`
+}
+
+// ActingFor is whom a principal acts for (D77): a subject that is not its
+// own.
+type ActingFor struct {
+	Subject string `json:"subject"`
 }
 
 // MarshalJSON writes no permissions as an empty list, which the engine

@@ -96,9 +96,31 @@ type BehaviorDeclaration struct {
 	Conflicts []string `json:"conflicts,omitempty"`
 	// Fields are the fields the behavior adds to a type.
 	Fields []BehaviorField `json:"fields,omitempty"`
+	// Value names the field that holds the behavior's value when a type
+	// carries it on a field (D103): one of Fields, which takes the anchor
+	// field's name and column (Workflow's status, on `status:
+	// Workflow<...>`). Absent, the behavior cannot be anchored on a field.
+	Value string `json:"value,omitempty"`
+	// Tables are the sub-tables the behavior keeps per row (D103): each a
+	// child table of the row its uses run on, deleted with it, which only
+	// its operations write.
+	Tables []BehaviorTable `json:"tables,omitempty"`
+	// ArmsDeadlines is true for a behavior that arms deadlines
+	// (superschematic_rules::Cx::arm): a table that composes it gets a
+	// deadline queue, which a @behaviorWorker runs (D103).
+	ArmsDeadlines bool `json:"armsDeadlines,omitempty"`
+	// HearsChanges is true for a behavior that hears the writes of its
+	// table's rows, whoever makes them (superschematic_rules::Behavior::heard):
+	// a table that composes it gets a change queue, which its change
+	// trigger writes and a @behaviorWorker runs (D103).
+	HearsChanges bool `json:"hearsChanges,omitempty"`
 	// Operations are the operations the behavior adds to a type, beside
 	// the create, get, list, update and delete every schema has.
 	Operations []BehaviorOperation `json:"operations,omitempty"`
+	// Signals are the messages about an instance an engine delivers to
+	// the event streams open on it and keeps nowhere (D77): a client's
+	// typing indicator, a draft being written.
+	Signals []BehaviorSignal `json:"signals,omitempty"`
 	// PreconditionSchema is the JSON Schema of the entry a caller sends
 	// for the behavior in the preconditions of an update, a delete or an
 	// operation: an object schema that sets "additionalProperties": false,
@@ -112,6 +134,30 @@ type BehaviorDeclaration struct {
 	Vetoes []BehaviorVeto `json:"vetoes,omitempty"`
 }
 
+// BehaviorTable is a sub-table a behavior keeps per row (D103): on a table
+// that composes the behavior, a child table of the row with a foreign key
+// to it, deleted with it, holding one row per key.
+type BehaviorTable struct {
+	// Name is camelCase, unique among the behavior's tables.
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// Key names the field whose value keys a row within its row: the key a
+	// change set's sub-row write names. Its type is string.
+	Key string `json:"key"`
+	// Fields are the table's fields, each typed, the key among them.
+	Fields []BehaviorField `json:"fields"`
+}
+
+// Table returns the behavior's sub-table named name, or false.
+func (d BehaviorDeclaration) Table(name string) (BehaviorTable, bool) {
+	for _, table := range d.Tables {
+		if table.Name == name {
+			return table, true
+		}
+	}
+	return BehaviorTable{}, false
+}
+
 // BehaviorVeto is one code a behavior's vetoes carry.
 type BehaviorVeto struct {
 	// Code is lowercase snake case, at most 64 characters, unique within
@@ -121,19 +167,35 @@ type BehaviorVeto struct {
 }
 
 // BehaviorField is a field a behavior adds to a type. It carries a name, a
-// description and whether it is volatile, no type: a field's type can
-// depend on the behavior's config. An instance keeps a behavior's fields
-// under the behavior's name, apart from the type's own and every other
-// behavior's, so a field collides with nothing (D16, amended: a behavior's
-// fields sit under its name); a string names one by BehaviorFieldPath.
+// description, whether it is volatile and per reader, and the type of the
+// column it takes on a table. An instance of an engine type keeps a
+// behavior's fields under the behavior's name, apart from the type's own
+// and every other behavior's, so a field collides with nothing (D16,
+// amended: a behavior's fields sit under its name); a string names one by
+// BehaviorFieldPath. On a table a field-anchored use's fields are columns
+// (D103), named by the layout rule internal/generator/behaviorlayout
+// states.
 type BehaviorField struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	// Type is the IR type of the column the field takes on a table that
+	// carries the behavior on a field (D103): a builtin (string, number,
+	// boolean) or a scalar of the registry's catalog, which the generators
+	// map as they map an own field's. A date-time scalar (Temporal.DateTime)
+	// is epoch milliseconds in the core, which the adapters convert. Absent
+	// on a behavior no table carries yet; a field-anchored use needs every
+	// field of its behavior typed.
+	Type string `json:"type,omitempty"`
 	// Volatile is true for a field that can move without an event of its
 	// own instance: computed when the instance is read, from other
 	// instances, the clock or the config. No event records such a move, so
 	// a rule that hears a field's changes refuses one (D56).
 	Volatile bool `json:"volatile,omitempty"`
+	// PerReader is true for a volatile field whose value is the caller's,
+	// not the instance's, as Comments.unread is (D77): a read computes it
+	// for its caller, and no event patch, create event or reference move
+	// records it. Only a volatile field is per reader.
+	PerReader bool `json:"perReader,omitempty"`
 }
 
 // BehaviorFieldPath is a behavior field's qualified name: the behavior's
@@ -160,13 +222,58 @@ type BehaviorOperation struct {
 	// Writes is true for an operation that changes stored state.
 	Writes bool `json:"writes,omitempty"`
 	// Scope is what the operation runs on: "instance" (or empty, the
-	// default), one instance, which an engine's call names by id; or
-	// "schema", the schema as a whole, with no instance.
+	// default), one instance, which an engine's call names by id;
+	// "schema", the schema as a whole, with no instance; or "namespace"
+	// (D77), the behavior's own tables across every schema of a namespace
+	// that composes it, with no instance and no schema, which an engine
+	// calls by the behavior's name. A namespace operation is never beside
+	// an instance and appends no event, so it sets neither Beside nor Log.
 	Scope string `json:"scope,omitempty"`
+	// Beside is true for an instance operation that writes beside the
+	// instance (D77): only its behavior's own tables and columns, so an
+	// engine moves no sequence of the instance, runs no other behavior's
+	// guard, and appends an operation event of no sequence. A behavior
+	// that declares one declares every field volatile.
+	Beside bool `json:"beside,omitempty"`
+	// Log, false, says a beside operation appends no event at all, for a
+	// write only its writer reads back. Absent, it appends one.
+	Log *bool `json:"log,omitempty"`
+	// Asks, "read", says the access policy is asked read for the operation
+	// though it writes (D77): a beside operation with "log": false that
+	// writes only its caller's own state, a read marker or a follow, which a
+	// caller who may only read the instance may call. Empty, a writing
+	// operation asks write.
+	Asks string `json:"asks,omitempty"`
 	// InvocationPolicy is the MCP invocation policy of the operation's
 	// tool: one of the values of the registry's ToolInvocationPolicy.
 	// Empty means the policy's default.
 	InvocationPolicy string `json:"invocationPolicy,omitempty"`
+}
+
+// The accesses a signal declares: who may send it.
+const (
+	// SignalAccessRead lets a caller who may read the schema send it.
+	SignalAccessRead = "read"
+	// SignalAccessWrite lets a caller who may write the schema send it.
+	SignalAccessWrite = "write"
+	// SignalAccessOperation lets only the behavior's own operations send
+	// it, through their context.
+	SignalAccessOperation = "operation"
+)
+
+// BehaviorSignal is a signal a behavior declares (D77). An engine checks a
+// sender's data against ParamsSchema, at most 4096 bytes of JSON, asks a
+// caller's of the access policy with the operation "signal:<name>", and
+// delivers it to the event streams opened with signals, stored nowhere.
+type BehaviorSignal struct {
+	// Name is camelCase, unique among the behavior's signals.
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// ParamsSchema is the JSON Schema of the signal's data.
+	ParamsSchema json.RawMessage `json:"paramsSchema"`
+	// Access is who may send it: SignalAccessRead, SignalAccessWrite or
+	// SignalAccessOperation.
+	Access string `json:"access"`
 }
 
 // Behavior is a registered behavior: its declaration, the extension that
@@ -192,12 +299,16 @@ type Behavior struct {
 // take one of these names.
 var builtinOperations = []string{"create", "get", "list", "update", "delete", "lookup"}
 
-// The scopes an operation declares: an instance, the default, or its
-// schema as a whole.
+// The scopes an operation declares: an instance, the default, its schema
+// as a whole, or a namespace (D77).
 const (
-	OperationScopeInstance = "instance"
-	OperationScopeSchema   = "schema"
+	OperationScopeInstance  = "instance"
+	OperationScopeSchema    = "schema"
+	OperationScopeNamespace = "namespace"
 )
+
+// OperationAsksRead is the one value of an operation's Asks.
+const OperationAsksRead = "read"
 
 var (
 	behaviorBareName      = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`)
@@ -228,17 +339,23 @@ const behaviorNameDescriptor = "a letter A-Z followed by letters and digits"
 // an object schema or sets "additionalProperties" to neither false nor a
 // schema; an operation name that is not camelCase, repeats, or is one an
 // engine gives every schema (create, get, list, update, delete); a scope
-// other than "instance" or "schema"; a field name that is not an
-// identifier or repeats; a preconditionSchema that does not compile, is
+// other than "instance" or "schema"; a signal whose name is not camelCase
+// or repeats, whose paramsSchema is absent or does not compile, or whose
+// access is not "read", "write" or "operation"; a field name that is not an
+// identifier or repeats, a volatile field with a type, and a value that
+// names no field of the declaration; a preconditionSchema that does not compile, is
 // not an object schema or does not set "additionalProperties": false; a
-// veto code that is not lowercase snake case of at most 64 characters, or
-// repeats; a Package that is not an npm package name; and a Rust crate on a
+// sub-table whose name is not camelCase or repeats, whose key names no
+// string field of it, or whose field is untyped, volatile or named id
+// (checkBehaviorTables); a veto code that is not lowercase snake case of at
+// most 64 characters, or repeats; a Package that is not an npm package name; and a Rust crate on a
 // core behavior, or one whose crate is not a Cargo package name, whose
 // path is empty, absolute or not clean, or whose register expression is
 // not a path into the crate (checkBehaviorRust). Finalize checks what needs
 // the whole registry: requires and conflicts name registered behaviors,
 // each operation's invocation policy is a value of the registry's policy,
-// and behaviors that name one Rust crate name it at one path.
+// behaviors that name one Rust crate name it at one path, and each field's
+// type is a builtin or a scalar of the catalog (checkBehaviorFieldTypes).
 func (r *Registry) RegisterBehavior(spec BehaviorSpec) error {
 	var decl BehaviorDeclaration
 	dec := json.NewDecoder(bytes.NewReader(spec.Declaration))
@@ -284,7 +401,13 @@ func (r *Registry) RegisterBehavior(spec BehaviorSpec) error {
 	if err := checkBehaviorFields(decl); err != nil {
 		return err
 	}
+	if err := checkBehaviorTables(decl); err != nil {
+		return err
+	}
 	if err := checkBehaviorOperations(decl); err != nil {
+		return err
+	}
+	if err := checkBehaviorSignals(decl); err != nil {
 		return err
 	}
 	if err := checkBehaviorPrecondition(decl); err != nil {
@@ -393,6 +516,89 @@ func checkBehaviorFields(decl BehaviorDeclaration) error {
 			return fmt.Errorf("registry: behavior %s declares field %q twice", decl.Name, field.Name)
 		}
 		seen[field.Name] = true
+		if field.PerReader && !field.Volatile {
+			return fmt.Errorf("registry: behavior %s field %s is perReader but not volatile: a value each reader reads its own of is computed at a read", decl.Name, field.Name)
+		}
+		if field.Type != "" && field.Volatile {
+			return fmt.Errorf("registry: behavior %s field %s is volatile and has a type: a value computed at a read takes no column", decl.Name, field.Name)
+		}
+	}
+	if decl.Value != "" && !seen[decl.Value] {
+		return fmt.Errorf("registry: behavior %s value %q is not one of its fields", decl.Name, decl.Value)
+	}
+	return nil
+}
+
+// checkBehaviorTables holds each sub-table a behavior declares to its rule
+// (D103): a camelCase name declared once; a key that names one of its
+// fields, typed string; fields that are identifiers, each declared once and
+// typed, none volatile or per reader, since a sub-table's row is stored,
+// and none named id, the surrogate key the build gives every sub-table.
+func checkBehaviorTables(decl BehaviorDeclaration) error {
+	seen := map[string]bool{}
+	for _, table := range decl.Tables {
+		if !behaviorOperationName.MatchString(table.Name) {
+			return fmt.Errorf("registry: behavior %s table %q is not camelCase", decl.Name, table.Name)
+		}
+		if seen[table.Name] {
+			return fmt.Errorf("registry: behavior %s table %s is declared twice", decl.Name, table.Name)
+		}
+		seen[table.Name] = true
+		fields := map[string]BehaviorField{}
+		for _, field := range table.Fields {
+			switch {
+			case !behaviorFieldName.MatchString(field.Name):
+				return fmt.Errorf("registry: behavior %s table %s field name %q is not an identifier", decl.Name, table.Name, field.Name)
+			case field.Name == "id":
+				return fmt.Errorf("registry: behavior %s table %s declares a field id, the surrogate key the build gives every sub-table: name it otherwise", decl.Name, table.Name)
+			case fields[field.Name].Name != "":
+				return fmt.Errorf("registry: behavior %s table %s declares field %q twice", decl.Name, table.Name, field.Name)
+			case field.Type == "":
+				return fmt.Errorf("registry: behavior %s table %s field %s has no type: a sub-table's field is a column", decl.Name, table.Name, field.Name)
+			case field.Volatile || field.PerReader:
+				return fmt.Errorf("registry: behavior %s table %s field %s is volatile: a sub-table's field is stored", decl.Name, table.Name, field.Name)
+			}
+			fields[field.Name] = field
+		}
+		key, ok := fields[table.Key]
+		switch {
+		case !ok:
+			return fmt.Errorf("registry: behavior %s table %s key %q is not one of its fields", decl.Name, table.Name, table.Key)
+		case key.Type != "string":
+			return fmt.Errorf("registry: behavior %s table %s key %s is of type %s: a sub-table's key is a string", decl.Name, table.Name, table.Key, key.Type)
+		}
+	}
+	return nil
+}
+
+// behaviorFieldBuiltins are the builtin types a behavior's field may take
+// beside the catalog's scalars: those sqlutil.ScalarSQLTypes maps.
+var behaviorFieldBuiltins = []string{"string", "number", "boolean"}
+
+// checkBehaviorFieldTypes holds every declared field's type to a builtin
+// or a scalar of the registry's catalog (D103). Finalize runs it, after an
+// extension's catalog has registered.
+func (r *Registry) checkBehaviorFieldTypes() error {
+	catalog := r.Scalars()
+	for _, b := range r.Behaviors() {
+		for _, field := range b.Fields {
+			if field.Type == "" || slices.Contains(behaviorFieldBuiltins, field.Type) {
+				continue
+			}
+			if _, ok := catalog.Scalar(field.Type); !ok {
+				return fmt.Errorf("registry: behavior %s field %s type %q is neither a builtin (%s) nor a scalar of the catalog", b.Name, field.Name, field.Type, strings.Join(behaviorFieldBuiltins, ", "))
+			}
+		}
+		for _, table := range b.Tables {
+			for _, field := range table.Fields {
+				if slices.Contains(behaviorFieldBuiltins, field.Type) {
+					continue
+				}
+				if _, ok := catalog.Scalar(field.Type); !ok {
+					return fmt.Errorf("registry: behavior %s table %s field %s type %q is neither a builtin (%s) nor a scalar of the catalog", b.Name, table.Name, field.Name, field.Type, strings.Join(behaviorFieldBuiltins, ", "))
+				}
+			}
+		}
 	}
 	return nil
 }
@@ -410,8 +616,18 @@ func checkBehaviorOperations(decl BehaviorDeclaration) error {
 			return fmt.Errorf("registry: behavior %s declares operation %q twice", decl.Name, op.Name)
 		}
 		seen[op.Name] = true
-		if op.Scope != "" && op.Scope != OperationScopeInstance && op.Scope != OperationScopeSchema {
-			return fmt.Errorf("registry: behavior %s operation %s scope %q is not %q or %q", decl.Name, op.Name, op.Scope, OperationScopeInstance, OperationScopeSchema)
+		if op.Scope != "" && op.Scope != OperationScopeInstance && op.Scope != OperationScopeSchema && op.Scope != OperationScopeNamespace {
+			return fmt.Errorf("registry: behavior %s operation %s scope %q is not %q, %q or %q", decl.Name, op.Name, op.Scope, OperationScopeInstance, OperationScopeSchema, OperationScopeNamespace)
+		}
+		if op.Scope == OperationScopeNamespace {
+			if err := checkNamespaceOperation(decl, op); err != nil {
+				return err
+			}
+		} else if err := checkBesideOperation(decl, op); err != nil {
+			return err
+		}
+		if err := checkAsks(decl, op); err != nil {
+			return err
 		}
 		for _, s := range []struct {
 			key    string
@@ -430,6 +646,99 @@ func checkBehaviorOperations(decl BehaviorDeclaration) error {
 		}
 		if !closed {
 			return fmt.Errorf("registry: behavior %s operation %s paramsSchema must set \"additionalProperties\": false, so its parameters are exactly the ones it declares", decl.Name, op.Name)
+		}
+	}
+	return nil
+}
+
+// checkBehaviorSignals holds each signal to its rule (D77): a camelCase
+// name declared once, a paramsSchema that compiles, and an access of read,
+// write or operation.
+func checkBehaviorSignals(decl BehaviorDeclaration) error {
+	seen := map[string]bool{}
+	for _, signal := range decl.Signals {
+		if !behaviorOperationName.MatchString(signal.Name) {
+			return fmt.Errorf("registry: behavior %s signal name %q is not camelCase", decl.Name, signal.Name)
+		}
+		if seen[signal.Name] {
+			return fmt.Errorf("registry: behavior %s declares signal %q twice", decl.Name, signal.Name)
+		}
+		seen[signal.Name] = true
+		if len(signal.ParamsSchema) == 0 {
+			return fmt.Errorf("registry: behavior %s signal %s has no paramsSchema", decl.Name, signal.Name)
+		}
+		if _, err := compileSchema(signal.ParamsSchema, "superschematic://behaviors/"+decl.Name+"/signals/"+signal.Name+"/paramsSchema.json"); err != nil {
+			return fmt.Errorf("registry: behavior %s signal %s paramsSchema: %w", decl.Name, signal.Name, err)
+		}
+		switch signal.Access {
+		case SignalAccessRead, SignalAccessWrite, SignalAccessOperation:
+		default:
+			return fmt.Errorf("registry: behavior %s signal %s access %q is not %q, %q or %q", decl.Name, signal.Name, signal.Access, SignalAccessRead, SignalAccessWrite, SignalAccessOperation)
+		}
+	}
+	return nil
+}
+
+// Logged reports whether the operation appends an event when it writes:
+// every operation but a beside one that declares "log": false.
+func (op BehaviorOperation) Logged() bool {
+	return op.Log == nil || *op.Log
+}
+
+// checkNamespaceOperation holds a namespace operation to its rule (D77): it
+// runs on no instance, so it is never beside one, and it appends no event,
+// so it says nothing of one.
+func checkNamespaceOperation(decl BehaviorDeclaration, op BehaviorOperation) error {
+	if op.Beside {
+		return fmt.Errorf("registry: behavior %s operation %s has scope %q and is beside the instance: a namespace operation runs on no instance", decl.Name, op.Name, OperationScopeNamespace)
+	}
+	if op.Log != nil {
+		return fmt.Errorf("registry: behavior %s operation %s has scope %q and sets \"log\": a namespace operation appends no event", decl.Name, op.Name, OperationScopeNamespace)
+	}
+	return nil
+}
+
+// AsksRead reports whether the access policy is asked read for the
+// operation though it writes (D77, "asks": "read").
+func (op BehaviorOperation) AsksRead() bool {
+	return op.Asks == OperationAsksRead
+}
+
+// checkAsks holds an operation's asks to its rule (D77): only "read", and
+// only on a beside operation that appends no event, which writes nothing
+// anyone but its caller reads.
+func checkAsks(decl BehaviorDeclaration, op BehaviorOperation) error {
+	if op.Asks == "" {
+		return nil
+	}
+	if op.Asks != OperationAsksRead {
+		return fmt.Errorf("registry: behavior %s operation %s asks %q: the only value is %q", decl.Name, op.Name, op.Asks, OperationAsksRead)
+	}
+	if !op.Beside || op.Logged() {
+		return fmt.Errorf("registry: behavior %s operation %s asks %q and is not beside the instance with \"log\": false: only an operation that writes its caller's own state, and appends no event, asks read", decl.Name, op.Name, OperationAsksRead)
+	}
+	return nil
+}
+
+// checkBesideOperation holds a beside operation to its rule (D77): it
+// writes, on an instance, and its behavior's fields are all volatile, since
+// no event records their moves; only a beside operation appends no event.
+func checkBesideOperation(decl BehaviorDeclaration, op BehaviorOperation) error {
+	if !op.Beside {
+		if !op.Logged() {
+			return fmt.Errorf("registry: behavior %s operation %s sets \"log\": false and is not beside the instance: only a beside operation appends no event", decl.Name, op.Name)
+		}
+		return nil
+	}
+	if !op.Writes {
+		return fmt.Errorf("registry: behavior %s operation %s is beside the instance and does not write: a beside operation declares \"writes\": true", decl.Name, op.Name)
+	}
+	if op.Scope == OperationScopeSchema {
+		return fmt.Errorf("registry: behavior %s operation %s is beside the instance and has scope %q: a beside operation runs on an instance", decl.Name, op.Name, OperationScopeSchema)
+	}
+	for _, field := range decl.Fields {
+		if !field.Volatile {
+			return fmt.Errorf("registry: behavior %s field %s is not volatile, and operation %s is beside the instance: a behavior with a beside operation declares every field volatile, since no event records its moves", decl.Name, field.Name, op.Name)
 		}
 	}
 	return nil

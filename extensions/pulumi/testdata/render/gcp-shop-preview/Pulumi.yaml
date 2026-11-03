@@ -9,8 +9,10 @@ config:
     type: string
 resources:
   # The stack of environment Staging, which owns the nodes this environment
-  # inherits: network, network.nat, network.router, network.subnet,
-  # secret.PaymentsSecrets.STRIPE_KEY, shop-db.instance, shop-db.migrator.
+  # inherits: network, network.memorystore, network.memorystore-subnet,
+  # network.nat, network.router, network.subnet,
+  # secret.PaymentsSecrets.STRIPE_KEY, shop-cache.instance, shop-db.instance,
+  # shop-db.migrator.
   parent-stack:
     type: pulumi:pulumi:StackReference
     properties:
@@ -70,6 +72,21 @@ resources:
         - ${Orders-account}
         - ${parent-stack}
       version: 9.37.1
+  # phase infrastructure; owners memoryStore:Orders->shop-cache
+  Orders-memorystore-shop-cache:
+    name: Orders.memorystore.shop-cache
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      condition:
+        expression: resource.type == "memorystore.googleapis.com/Instance" && resource.name == "projects/acme-staging/locations/us-east1/instances/acme-staging-shop-shop-cache"
+        title: Memorystore instance acme-staging-shop-shop-cache
+      member: ${Orders-account.member}
+      project: acme-staging
+      role: roles/memorystore.dbConnectionUser
+    options:
+      dependsOn:
+        - ${Orders-account}
+      version: 9.37.1
   # phase infrastructure; owners Orders
   Orders-reads-PaymentsSecrets-STRIPE_KEY:
     name: Orders.reads.PaymentsSecrets.STRIPE_KEY
@@ -125,6 +142,16 @@ resources:
                 value: google-id-token
               - name: SHOP_API_SERVICE_URL
                 value: ${shop-api-service.uri}
+              - name: SHOP_CACHE_MEMORY_STORE_AUTH
+                value: iam
+              - name: SHOP_CACHE_MEMORY_STORE_CA
+                value: ${parent-stack.outputs["shop-cache.instance.managedServerCas[0].caCerts[0].certificates[0]"]}
+              - name: SHOP_CACHE_MEMORY_STORE_MEMBER
+                value: pr${pr}
+              - name: SHOP_CACHE_MEMORY_STORE_STORE
+                value: shop-cache
+              - name: SHOP_CACHE_MEMORY_STORE_URL
+                value: rediss://${parent-stack.outputs["shop-cache.instance.endpoints[0].connections[0].pscAutoConnection.ipAddress"]}:${parent-stack.outputs["shop-cache.instance.endpoints[0].connections[0].pscAutoConnection.port"]}
               - name: SHOP_DB_DATABASE_CLOUD_SQL_DATABASE
                 value: ${shop-db-database-shop-db.name}
               - name: SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE
@@ -420,6 +447,21 @@ resources:
         - ${shop-api-certificate-map-entry}
         - ${shop-api-url-map}
       version: 9.37.1
+  # phase infrastructure; owners memoryStore:shop-api->shop-cache
+  shop-api-memorystore-shop-cache:
+    name: shop-api.memorystore.shop-cache
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      condition:
+        expression: resource.type == "memorystore.googleapis.com/Instance" && resource.name == "projects/acme-staging/locations/us-east1/instances/acme-staging-shop-shop-cache"
+        title: Memorystore instance acme-staging-shop-shop-cache
+      member: ${shop-api-account.member}
+      project: acme-staging
+      role: roles/memorystore.dbConnectionUser
+    options:
+      dependsOn:
+        - ${shop-api-account}
+      version: 9.37.1
   # phase infrastructure; owners shop-api
   shop-api-reads-PaymentsSecrets-STRIPE_KEY:
     name: shop-api.reads.PaymentsSecrets.STRIPE_KEY
@@ -456,6 +498,16 @@ resources:
                 value: ${pr}
               - name: SHOP_API_CORS_ORIGINS
                 value: https://shop-web-pr${pr}.staging.acme.dev
+              - name: SHOP_CACHE_MEMORY_STORE_AUTH
+                value: iam
+              - name: SHOP_CACHE_MEMORY_STORE_CA
+                value: ${parent-stack.outputs["shop-cache.instance.managedServerCas[0].caCerts[0].certificates[0]"]}
+              - name: SHOP_CACHE_MEMORY_STORE_MEMBER
+                value: pr${pr}
+              - name: SHOP_CACHE_MEMORY_STORE_STORE
+                value: shop-cache
+              - name: SHOP_CACHE_MEMORY_STORE_URL
+                value: rediss://${parent-stack.outputs["shop-cache.instance.endpoints[0].connections[0].pscAutoConnection.ipAddress"]}:${parent-stack.outputs["shop-cache.instance.endpoints[0].connections[0].pscAutoConnection.port"]}
               - name: SHOP_DB_DATABASE_CLOUD_SQL_DATABASE
                 value: ${shop-db-database-shop-db.name}
               - name: SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE
@@ -500,6 +552,11 @@ resources:
               instances:
                 - ${parent-stack.outputs["shop-db.instance.connectionName"]}
             name: cloudsql
+        vpcAccess:
+          egress: ALL_TRAFFIC
+          networkInterfaces:
+            - network: ${parent-stack.outputs["network.name"]}
+              subnetwork: ${parent-stack.outputs["network.subnet.name"]}
     options:
       dependsOn:
         - ${parent-stack}
@@ -631,6 +688,21 @@ resources:
         - ${parent-stack}
         - ${shop-orders-fulfil-orders-account}
       version: 9.37.1
+  # phase infrastructure; owners memoryStore:shop-orders-fulfil-orders->shop-cache
+  shop-orders-fulfil-orders-memorystore-shop-cache:
+    name: shop-orders-fulfil-orders.memorystore.shop-cache
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      condition:
+        expression: resource.type == "memorystore.googleapis.com/Instance" && resource.name == "projects/acme-staging/locations/us-east1/instances/acme-staging-shop-shop-cache"
+        title: Memorystore instance acme-staging-shop-shop-cache
+      member: ${shop-orders-fulfil-orders-account.member}
+      project: acme-staging
+      role: roles/memorystore.dbConnectionUser
+    options:
+      dependsOn:
+        - ${shop-orders-fulfil-orders-account}
+      version: 9.37.1
   # phase infrastructure; owners shop-orders-fulfil-orders
   shop-orders-fulfil-orders-reads-PaymentsSecrets-STRIPE_KEY:
     name: shop-orders-fulfil-orders.reads.PaymentsSecrets.STRIPE_KEY
@@ -685,6 +757,16 @@ resources:
                 value: google-id-token
               - name: SHOP_API_SERVICE_URL
                 value: ${shop-api-service.uri}
+              - name: SHOP_CACHE_MEMORY_STORE_AUTH
+                value: iam
+              - name: SHOP_CACHE_MEMORY_STORE_CA
+                value: ${parent-stack.outputs["shop-cache.instance.managedServerCas[0].caCerts[0].certificates[0]"]}
+              - name: SHOP_CACHE_MEMORY_STORE_MEMBER
+                value: pr${pr}
+              - name: SHOP_CACHE_MEMORY_STORE_STORE
+                value: shop-cache
+              - name: SHOP_CACHE_MEMORY_STORE_URL
+                value: rediss://${parent-stack.outputs["shop-cache.instance.endpoints[0].connections[0].pscAutoConnection.ipAddress"]}:${parent-stack.outputs["shop-cache.instance.endpoints[0].connections[0].pscAutoConnection.port"]}
               - name: SHOP_DB_DATABASE_CLOUD_SQL_DATABASE
                 value: ${shop-db-database-shop-db.name}
               - name: SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE
@@ -803,6 +885,16 @@ resources:
                   value: google-id-token
                 - name: SHOP_API_SERVICE_URL
                   value: ${shop-api-service.uri}
+                - name: SHOP_CACHE_MEMORY_STORE_AUTH
+                  value: iam
+                - name: SHOP_CACHE_MEMORY_STORE_CA
+                  value: ${parent-stack.outputs["shop-cache.instance.managedServerCas[0].caCerts[0].certificates[0]"]}
+                - name: SHOP_CACHE_MEMORY_STORE_MEMBER
+                  value: pr${pr}
+                - name: SHOP_CACHE_MEMORY_STORE_STORE
+                  value: shop-cache
+                - name: SHOP_CACHE_MEMORY_STORE_URL
+                  value: rediss://${parent-stack.outputs["shop-cache.instance.endpoints[0].connections[0].pscAutoConnection.ipAddress"]}:${parent-stack.outputs["shop-cache.instance.endpoints[0].connections[0].pscAutoConnection.port"]}
                 - name: SHOP_DB_DATABASE_CLOUD_SQL_DATABASE
                   value: ${shop-db-database-shop-db.name}
                 - name: SHOP_DB_DATABASE_CLOUD_SQL_INSTANCE
@@ -840,6 +932,21 @@ resources:
         - ${parent-stack}
         - ${shop-api-service}
         - ${shop-db-database-shop-db}
+        - ${shop-orders-ship-orders-account}
+      version: 9.37.1
+  # phase infrastructure; owners memoryStore:shop-orders-ship-orders->shop-cache
+  shop-orders-ship-orders-memorystore-shop-cache:
+    name: shop-orders-ship-orders.memorystore.shop-cache
+    type: gcp:projects/iAMMember:IAMMember
+    properties:
+      condition:
+        expression: resource.type == "memorystore.googleapis.com/Instance" && resource.name == "projects/acme-staging/locations/us-east1/instances/acme-staging-shop-shop-cache"
+        title: Memorystore instance acme-staging-shop-shop-cache
+      member: ${shop-orders-ship-orders-account.member}
+      project: acme-staging
+      role: roles/memorystore.dbConnectionUser
+    options:
+      dependsOn:
         - ${shop-orders-ship-orders-account}
       version: 9.37.1
   # phase infrastructure; owners shop-orders-ship-orders
@@ -1069,6 +1176,7 @@ outputs:
   Orders.cloudsql-client.shop-db.id: ${Orders-cloudsql-client-shop-db.id}
   Orders.cloudsql-login.shop-db.id: ${Orders-cloudsql-login-shop-db.id}
   Orders.database-user.shop-db.id: ${Orders-database-user-shop-db.id}
+  Orders.memorystore.shop-cache.id: ${Orders-memorystore-shop-cache.id}
   Orders.reads.PaymentsSecrets.STRIPE_KEY.id: ${Orders-reads-PaymentsSecrets-STRIPE_KEY.id}
   Orders.run-invoker.shop-api.id: ${Orders-run-invoker-shop-api.id}
   Orders.service.id: ${Orders-service.id}
@@ -1078,6 +1186,8 @@ outputs:
   dns.shop-web.a.id: ${dns-shop-web-a.id}
   dns.shop-web.cname.id: ${dns-shop-web-cname.id}
   network.id: ${parent-stack.outputs["network.id"]}
+  network.memorystore-subnet.id: ${parent-stack.outputs["network.memorystore-subnet.id"]}
+  network.memorystore.id: ${parent-stack.outputs["network.memorystore.id"]}
   network.name: ${parent-stack.outputs["network.name"]}
   network.nat.id: ${parent-stack.outputs["network.nat.id"]}
   network.router.id: ${parent-stack.outputs["network.router.id"]}
@@ -1104,6 +1214,7 @@ outputs:
   shop-api.endpoint-group.id: ${shop-api-endpoint-group.id}
   shop-api.forwarding-rule.id: ${shop-api-forwarding-rule.id}
   shop-api.https-proxy.id: ${shop-api-https-proxy.id}
+  shop-api.memorystore.shop-cache.id: ${shop-api-memorystore-shop-cache.id}
   shop-api.reads.PaymentsSecrets.STRIPE_KEY.id: ${shop-api-reads-PaymentsSecrets-STRIPE_KEY.id}
   shop-api.service.id: ${shop-api-service.id}
   shop-api.service.name: ${shop-api-service.name}
@@ -1111,6 +1222,10 @@ outputs:
   shop-api.sign-as-self.id: ${shop-api-sign-as-self.id}
   shop-api.storage.shop-media.id: ${shop-api-storage-shop-media.id}
   shop-api.url-map.id: ${shop-api-url-map.id}
+  shop-cache.instance.endpoints[0].connections[0].pscAutoConnection.ipAddress: ${parent-stack.outputs["shop-cache.instance.endpoints[0].connections[0].pscAutoConnection.ipAddress"]}
+  shop-cache.instance.endpoints[0].connections[0].pscAutoConnection.port: ${parent-stack.outputs["shop-cache.instance.endpoints[0].connections[0].pscAutoConnection.port"]}
+  shop-cache.instance.id: ${parent-stack.outputs["shop-cache.instance.id"]}
+  shop-cache.instance.managedServerCas[0].caCerts[0].certificates[0]: ${parent-stack.outputs["shop-cache.instance.managedServerCas[0].caCerts[0].certificates[0]"]}
   shop-db.database.shop-db.id: ${shop-db-database-shop-db.id}
   shop-db.database.shop-db.name: ${shop-db-database-shop-db.name}
   shop-db.instance.connectionName: ${parent-stack.outputs["shop-db.instance.connectionName"]}
@@ -1125,6 +1240,7 @@ outputs:
   shop-orders-fulfil-orders.cloudsql-client.shop-db.id: ${shop-orders-fulfil-orders-cloudsql-client-shop-db.id}
   shop-orders-fulfil-orders.cloudsql-login.shop-db.id: ${shop-orders-fulfil-orders-cloudsql-login-shop-db.id}
   shop-orders-fulfil-orders.database-user.shop-db.id: ${shop-orders-fulfil-orders-database-user-shop-db.id}
+  shop-orders-fulfil-orders.memorystore.shop-cache.id: ${shop-orders-fulfil-orders-memorystore-shop-cache.id}
   shop-orders-fulfil-orders.reads.PaymentsSecrets.STRIPE_KEY.id: ${shop-orders-fulfil-orders-reads-PaymentsSecrets-STRIPE_KEY.id}
   shop-orders-fulfil-orders.run-invoker.shop-api.id: ${shop-orders-fulfil-orders-run-invoker-shop-api.id}
   shop-orders-fulfil-orders.worker-pool.id: ${shop-orders-fulfil-orders-worker-pool.id}
@@ -1135,6 +1251,7 @@ outputs:
   shop-orders-ship-orders.cloudsql-login.shop-db.id: ${shop-orders-ship-orders-cloudsql-login-shop-db.id}
   shop-orders-ship-orders.database-user.shop-db.id: ${shop-orders-ship-orders-database-user-shop-db.id}
   shop-orders-ship-orders.job.id: ${shop-orders-ship-orders-job.id}
+  shop-orders-ship-orders.memorystore.shop-cache.id: ${shop-orders-ship-orders-memorystore-shop-cache.id}
   shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY.id: ${shop-orders-ship-orders-reads-PaymentsSecrets-STRIPE_KEY.id}
   shop-orders-ship-orders.run-invoker.shop-api.id: ${shop-orders-ship-orders-run-invoker-shop-api.id}
   shop-web.address.address: ${shop-web-address.address}

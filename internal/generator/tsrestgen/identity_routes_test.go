@@ -93,12 +93,13 @@ func TestGenerateUserRoutes(t *testing.T) {
 	if len(output.Namespaces) != 1 || output.Namespaces[0].Name != "greeting" || len(output.ManualEndpoints) != 0 {
 		t.Errorf("namespaces %+v, manual endpoints %+v; want greeting alone", output.Namespaces, output.ManualEndpoints)
 	}
-	if output.Identity == nil || *output.Identity != (IdentityInfo{AuthDB: userModelDB, DescriptorModule: "@schemas/fixture-user-model-db-types/identity", HasRoles: true, Routes: 18}) {
+	if output.Identity == nil || *output.Identity != (IdentityInfo{AuthDB: userModelDB, DescriptorModule: "@schemas/fixture-user-model-db-types/identity", HasRoles: true, Routes: 19,
+		Registration: "{ approval: true, defaultRoles: ['member'], firstUser: { role: 'admin', permissions: ['identity'] } }"}) {
 		t.Errorf("identity = %+v", output.Identity)
 	}
 	byName := endpointsByName(output)
-	if len(byName) != 19 {
-		t.Errorf("%d endpoints, want the 18 operations of the user model and greet", len(byName))
+	if len(byName) != 20 {
+		t.Errorf("%d endpoints, want the 19 operations of the user model and greet", len(byName))
 	}
 	for name, want := range map[string]struct {
 		rateLimit int
@@ -165,7 +166,7 @@ func TestGenerateUserRoutes(t *testing.T) {
 	}
 
 	alone := generateFixture(t, userRoutesFixture(t, routeSetsAlone))
-	if len(alone.Endpoints) != 18 || len(alone.Namespaces) != 0 || alone.Identity == nil || alone.Identity.Routes != 18 {
+	if len(alone.Endpoints) != 19 || len(alone.Namespaces) != 0 || alone.Identity == nil || alone.Identity.Routes != 19 {
 		t.Errorf("the route sets alone: endpoints %d, namespaces %+v, identity %+v", len(alone.Endpoints), alone.Namespaces, alone.Identity)
 	}
 }

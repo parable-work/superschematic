@@ -15,19 +15,161 @@ import (
 	_ "image/jpeg" // Register JPEG decoder
 	_ "image/png"  // Register PNG decoder
 	"io"
+	"mime"
 	"mime/multipart"
 	gohttp "net/http"
+	"strings"
 
-	scalars "{{ $.Naming.ScalarGoModule }}"
 	_ "golang.org/x/image/webp" // Register WebP decoder
 )
 
-type FileUploadData = scalars.FileUploadData
+// FileUploadData is one uploaded file: its name, its media type as sent,
+// its size and its bytes. The package defines it (D81): the scalar
+// package names no such type, so an upload no longer needs one there.
+type FileUploadData struct {
+	Filename    string
+	ContentType string
+	Size        int64
+	Data        io.Reader
+	// Closer closes the form file Data reads, nil when there is none.
+	Closer io.Closer
+	// Width and Height are an image's dimensions once
+	// ExtractAndSetImageDimensions has read them.
+	Width  *int
+	Height *int
+}
+
+// Close closes the form file the upload reads.
+func (f *FileUploadData) Close() error {
+	if f == nil || f.Closer == nil {
+		return nil
+	}
+	return f.Closer.Close()
+}
+
+// ReadAllBytes reads the rest of the file.
+func (f *FileUploadData) ReadAllBytes() ([]byte, error) {
+	return io.ReadAll(f.Data)
+}
+
+// ResetReader rewinds the file to its start, when its reader can seek.
+func (f *FileUploadData) ResetReader() error {
+	seeker, ok := f.Data.(io.Seeker)
+	if !ok {
+		return errors.New("file upload reader cannot seek")
+	}
+	_, err := seeker.Seek(0, io.SeekStart)
+	return err
+}
+
+// BodyNotMultipart is the detail of a body that is neither
+// multipart/form-data nor JSON, as every generated server answers it (D81).
+const BodyNotMultipart = "Request body is not multipart/form-data"
+
+// defaultPartContentType is the media type of a file part without a
+// Content-Type (RFC 7578, section 4.4).
+const defaultPartContentType = "application/octet-stream"
+
+// FileUploadRefusal is one file its field does not admit (D81): the field,
+// and the rule it breaks as the field error every generated server answers
+// names it: required, uploadMaxBytes, uploadContentType or uploadExtension.
+type FileUploadRefusal struct {
+	Field     string
+	Validator string
+	Message   string
+}
+
+// partMediaType is a Content-Type's media type, lowercased, without its
+// parameters; application/octet-stream for none.
+func partMediaType(contentType string) string {
+	mediaType, _, _ := strings.Cut(contentType, ";")
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+	if mediaType == "" {
+		return defaultPartContentType
+	}
+	return mediaType
+}
+
+// RequestMediaType is a request's media type, lowercased, without its
+// parameters; "" for none.
+func RequestMediaType(r *gohttp.Request) string {
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil {
+		return ""
+	}
+	return mediaType
+}
+
+// CheckFileUploads reads each upload field's file from form, the parsed
+// multipart body, or nil for a JSON body, which holds no file, and checks
+// it against its field in the fields' order (D81): present when required,
+// at most its MaxSize, of an allowed media type and with an allowed
+// extension. It returns the files it admits and every file it refuses; err
+// is an I/O failure opening one. The TypeScript router checks the same
+// rules with the same messages.
+func CheckFileUploads(form *multipart.Form, fields []FileUploadFieldConfig) (map[string]*FileUploadData, []FileUploadRefusal, error) {
+	files := make(map[string]*FileUploadData)
+	var refused []FileUploadRefusal
+	for _, field := range fields {
+		var header *multipart.FileHeader
+		if form != nil && len(form.File[field.Name]) > 0 {
+			header = form.File[field.Name][0]
+		}
+		if header == nil {
+			if field.Required {
+				refused = append(refused, FileUploadRefusal{Field: field.Name, Validator: "required", Message: "required file"})
+			}
+			continue
+		}
+		mediaType := partMediaType(header.Header.Get("Content-Type"))
+		switch {
+		case header.Size > field.Config.MaxSize:
+			refused = append(refused, FileUploadRefusal{Field: field.Name, Validator: "uploadMaxBytes",
+				Message: fmt.Sprintf("file is %d bytes, over the %d allowed", header.Size, field.Config.MaxSize)})
+			continue
+		case !isAllowedContentType(mediaType, field.Config.AllowedTypes):
+			refused = append(refused, FileUploadRefusal{Field: field.Name, Validator: "uploadContentType",
+				Message: fmt.Sprintf("file is %s, not one of %s", mediaType, strings.Join(field.Config.AllowedTypes, ", "))})
+			continue
+		case !hasAllowedExtension(header.Filename, field.Config.AllowedExtensions):
+			refused = append(refused, FileUploadRefusal{Field: field.Name, Validator: "uploadExtension",
+				Message: fmt.Sprintf("file name does not end in %s", strings.Join(field.Config.AllowedExtensions, ", "))})
+			continue
+		}
+		file, err := header.Open()
+		if err != nil {
+			_ = CloseFileUploads(files)
+			return nil, nil, fmt.Errorf("open file '%s': %w", field.Name, err)
+		}
+		files[field.Name] = &FileUploadData{Filename: header.Filename, ContentType: mediaType, Size: header.Size, Data: file, Closer: file}
+	}
+	if len(refused) > 0 {
+		_ = CloseFileUploads(files)
+		return nil, refused, nil
+	}
+	return files, nil, nil
+}
+
+// hasAllowedExtension reports whether name ends in one of extensions,
+// without regard to case; true when extensions is empty.
+func hasAllowedExtension(name string, extensions []string) bool {
+	if len(extensions) == 0 {
+		return true
+	}
+	lower := strings.ToLower(name)
+	for _, extension := range extensions {
+		if strings.HasSuffix(lower, strings.ToLower(extension)) {
+			return true
+		}
+	}
+	return false
+}
 
 // FileUploadConfig specifies validation constraints for file uploads.
 type FileUploadConfig struct {
-	MaxSize      int64    // Maximum file size in bytes
-	AllowedTypes []string // Allowed MIME types
+	MaxSize           int64    // Maximum file size in bytes
+	AllowedTypes      []string // Allowed MIME types, without parameters
+	AllowedExtensions []string // Allowed filename extensions, with the dot (D81)
 }
 
 // ErrFileMissing is returned when a required file field is not present in the form.
@@ -35,7 +177,7 @@ var ErrFileMissing = errors.New("file field is missing")
 
 // ParseFileUpload extracts a file upload from a multipart request.
 // It validates the file against the provided configuration.
-func ParseFileUpload(r *gohttp.Request, fieldName string, config FileUploadConfig) (*scalars.FileUploadData, error) {
+func ParseFileUpload(r *gohttp.Request, fieldName string, config FileUploadConfig) (*FileUploadData, error) {
 	file, header, err := r.FormFile(fieldName)
 	if err != nil {
 		if errors.Is(err, gohttp.ErrMissingFile) {
@@ -81,7 +223,7 @@ func ParseFileUpload(r *gohttp.Request, fieldName string, config FileUploadConfi
 
 // ParseFileUploadOptional extracts a file upload from a multipart request if present.
 // Returns nil without error if the file is missing.
-func ParseFileUploadOptional(r *gohttp.Request, fieldName string, config FileUploadConfig) (*scalars.FileUploadData, error) {
+func ParseFileUploadOptional(r *gohttp.Request, fieldName string, config FileUploadConfig) (*FileUploadData, error) {
 	upload, err := ParseFileUpload(r, fieldName, config)
 	if err != nil {
 		if errors.Is(err, ErrFileMissing) {
@@ -94,7 +236,7 @@ func ParseFileUploadOptional(r *gohttp.Request, fieldName string, config FileUpl
 
 // ParseFileUploadFromPart extracts file data from a multipart.Part.
 // Useful when iterating over multipart.Reader parts directly.
-func ParseFileUploadFromPart(part *multipart.Part, config FileUploadConfig) (*scalars.FileUploadData, error) {
+func ParseFileUploadFromPart(part *multipart.Part, config FileUploadConfig) (*FileUploadData, error) {
 	data, err := io.ReadAll(part)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read part content: %w", err)
@@ -114,7 +256,7 @@ func ParseFileUploadFromPart(part *multipart.Part, config FileUploadConfig) (*sc
 		return nil, fmt.Errorf("content type '%s' is not allowed; allowed types: %v", contentType, config.AllowedTypes)
 	}
 
-	return &scalars.FileUploadData{
+	return &FileUploadData{
 		Filename:    part.FileName(),
 		ContentType: contentType,
 		Size:        size,
@@ -125,8 +267,8 @@ func ParseFileUploadFromPart(part *multipart.Part, config FileUploadConfig) (*sc
 // ParseMultipleFileUploads extracts multiple file uploads from a multipart request.
 // It returns a map of field names to FileUploadData.
 // Missing files are silently skipped (nil value in the map).
-func ParseMultipleFileUploads(r *gohttp.Request, fields []FileUploadFieldConfig) (map[string]*scalars.FileUploadData, error) {
-	result := make(map[string]*scalars.FileUploadData)
+func ParseMultipleFileUploads(r *gohttp.Request, fields []FileUploadFieldConfig) (map[string]*FileUploadData, error) {
+	result := make(map[string]*FileUploadData)
 
 	for _, field := range fields {
 		upload, err := ParseFileUpload(r, field.Name, field.Config)
@@ -147,7 +289,7 @@ func ParseMultipleFileUploads(r *gohttp.Request, fields []FileUploadFieldConfig)
 	return result, nil
 }
 
-func CloseFileUploads(files map[string]*scalars.FileUploadData) error {
+func CloseFileUploads(files map[string]*FileUploadData) error {
 	var firstErr error
 	for _, upload := range files {
 		if upload == nil {
@@ -194,7 +336,7 @@ type FileUploadMetadata struct {
 // ExtractFileUploadMetadata extracts file metadata from a FileUploadData.
 // Unlike image extraction, this does not attempt to decode the file or extract dimensions.
 // Returns the metadata and any validation errors.
-func ExtractFileUploadMetadata(upload *scalars.FileUploadData) (*FileUploadMetadata, error) {
+func ExtractFileUploadMetadata(upload *FileUploadData) (*FileUploadMetadata, error) {
 	if upload == nil {
 		return nil, fmt.Errorf("file upload is nil")
 	}
@@ -266,7 +408,7 @@ type ImageUploadMetadata struct {
 // ExtractImageUploadMetadata extracts and validates image metadata from a FileUploadData.
 // It reads the file data to determine dimensions and validates the image properties.
 // Returns the metadata and any validation errors.
-func ExtractImageUploadMetadata(upload *scalars.FileUploadData) (*ImageUploadMetadata, error) {
+func ExtractImageUploadMetadata(upload *FileUploadData) (*ImageUploadMetadata, error) {
 	if upload == nil {
 		return nil, fmt.Errorf("file upload is nil")
 	}
@@ -350,7 +492,7 @@ type LogoImageUploadMetadata struct {
 // ExtractLogoImageUploadMetadata extracts and validates logo image metadata from a FileUploadData.
 // It reads the file data to determine dimensions and check for PNG transparency.
 // Returns the metadata and any validation errors.
-func ExtractLogoImageUploadMetadata(upload *scalars.FileUploadData) (*LogoImageUploadMetadata, error) {
+func ExtractLogoImageUploadMetadata(upload *FileUploadData) (*LogoImageUploadMetadata, error) {
 	if upload == nil {
 		return nil, fmt.Errorf("file upload is nil")
 	}
@@ -530,7 +672,7 @@ func CheckPNGTransparency(data io.Reader) (bool, error) {
 
 // ExtractAndSetImageDimensions extracts image dimensions from a FileUploadData
 // and sets the Width/Height fields. Returns an error if the image cannot be decoded.
-func ExtractAndSetImageDimensions(upload *scalars.FileUploadData) error {
+func ExtractAndSetImageDimensions(upload *FileUploadData) error {
 	if upload == nil {
 		return fmt.Errorf("file upload is nil")
 	}
@@ -556,7 +698,7 @@ func ExtractAndSetImageDimensions(upload *scalars.FileUploadData) error {
 // ValidateImageUpload validates image-specific properties on a FileUploadData.
 // This validates that the file is a valid image with proper dimensions.
 // Returns a slice of validation errors (empty if valid).
-func ValidateImageUpload(upload *scalars.FileUploadData) []string {
+func ValidateImageUpload(upload *FileUploadData) []string {
 	var errs []string
 
 	if upload == nil {
@@ -595,13 +737,15 @@ func ValidateImageUpload(upload *scalars.FileUploadData) []string {
 	return errs
 }
 
-// isAllowedContentType checks if the content type is in the allowed list.
+// isAllowedContentType checks if the content type's media type, without
+// its parameters, is in the allowed list.
 func isAllowedContentType(contentType string, allowedTypes []string) bool {
 	if len(allowedTypes) == 0 {
 		return true
 	}
+	mediaType := partMediaType(contentType)
 	for _, allowed := range allowedTypes {
-		if contentType == allowed {
+		if mediaType == allowed {
 			return true
 		}
 	}
@@ -609,7 +753,7 @@ func isAllowedContentType(contentType string, allowedTypes []string) bool {
 }
 
 // ValidateFileUpload validates a FileUploadData against the given config.
-func ValidateFileUpload(upload *scalars.FileUploadData, config FileUploadConfig) error {
+func ValidateFileUpload(upload *FileUploadData, config FileUploadConfig) error {
 	if upload == nil {
 		return fmt.Errorf("file upload is nil")
 	}
@@ -646,8 +790,9 @@ func {{ .HandlerName }}FileUploadConfigs() []FileUploadFieldConfig {
 		{
 			Name: "{{ .Name }}",
 			Config: FileUploadConfig{
-				MaxSize:      {{ .MaxSize }},
-				AllowedTypes: []string{ {{- range $i, $t := .AllowedTypes }}{{ if $i }}, {{ end }}"{{ $t }}"{{- end }} },
+				MaxSize:           {{ .MaxSize }},
+				AllowedTypes:      []string{ {{- range $i, $t := .AllowedTypes }}{{ if $i }}, {{ end }}"{{ $t }}"{{- end }} },
+				AllowedExtensions: []string{ {{- range $i, $e := .AllowedExtensions }}{{ if $i }}, {{ end }}{{ printf "%q" $e }}{{- end }} },
 			},
 			Required: {{ .Required }},
 		},

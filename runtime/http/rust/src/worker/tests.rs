@@ -609,3 +609,54 @@ fn a_cause_is_cut_at_its_characters() {
     let long = format!("{}tail", "ü".repeat(MAX_CAUSE));
     assert_eq!(cap(long), "ü".repeat(MAX_CAUSE));
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_self_completing_queue_hands_each_handler_its_claim_and_completes_nothing_itself() {
+    let queue = Memory::new(LEASE, 3);
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let saw = Arc::clone(&seen);
+    let shutdown = Shutdown::new();
+    let run = tokio::spawn(run_worker(
+        SelfCompleting::new(queue.clone()),
+        move |claimed: Claimed<u32>| {
+            let saw = Arc::clone(&saw);
+            async move {
+                let failing = claimed.message == 2;
+                saw.lock()
+                    .unwrap()
+                    .push((claimed.id, claimed.token.is_empty(), claimed.message));
+                if failing {
+                    return Err::<(), BoxError>("the deadline's unit failed".into());
+                }
+                Ok(())
+            }
+        },
+        Options::default(),
+        shutdown.clone(),
+    ));
+    wait(2.0).await;
+    let mut seen = seen.lock().unwrap().clone();
+    seen.sort();
+    assert_eq!(
+        seen,
+        [
+            ("m1".to_owned(), false, 1),
+            ("m2".to_owned(), false, 2),
+            ("m3".to_owned(), false, 3)
+        ]
+    );
+    // The handlers completed their messages; the loop completed none, and
+    // failed the one whose handler failed.
+    assert!(queue.of(completed).is_empty(), "{:?}", queue.calls());
+    let failed: Vec<String> = queue
+        .calls()
+        .into_iter()
+        .filter_map(|(_, call)| match call {
+            Call::Fail(id, _) => Some(id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failed, ["m2"]);
+    shutdown.cancel();
+    run.await.unwrap().unwrap();
+}

@@ -68,7 +68,7 @@ func TestTheSDKHasAMethodForEachUserRoute(t *testing.T) {
 	want := []string{
 		"account.capabilities", "account.change_password", "account.login",
 		"account.logout", "account.me", "account.register",
-		"account_admin.create_role", "account_admin.create_user", "account_admin.delete_role",
+		"account_admin.approve_user", "account_admin.create_role", "account_admin.create_user", "account_admin.delete_role",
 		"account_admin.disable_user", "account_admin.enable_user", "account_admin.get_user",
 		"account_admin.grant_role", "account_admin.list_roles", "account_admin.list_users",
 		"account_admin.revoke_role", "account_admin.set_user_password", "account_admin.update_role",

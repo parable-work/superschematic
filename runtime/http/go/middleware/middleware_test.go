@@ -2,15 +2,18 @@ package middleware_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/parable-work/superschematic/runtime/http/go/memorystore"
 	"github.com/parable-work/superschematic/runtime/http/go/middleware"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -199,6 +202,140 @@ func TestRateLimit(t *testing.T) {
 		assert.Equal(t, http.StatusTooManyRequests, last.Code)
 		assert.Contains(t, last.Body.String(), `"requestId":"req-7"`)
 	})
+}
+
+// TestRateLimitWithStore: two replicas of a route, each its own
+// middleware, spend one budget in the store WithStore names, and the
+// refusal is the route's problem with httprate's Retry-After; a Disabled
+// or nil store leaves each replica its own budget (D75).
+func TestRateLimitWithStore(t *testing.T) {
+	store := memorystore.NewInProcess("shop-cache")
+	defer store.Close()
+	replica := func(s memorystore.Store) http.Handler {
+		return middleware.RateLimit(2, time.Minute, nopLoggerGetter, middleware.WithStore(s, "shop-api", "ProductQueries.getProduct"))(okHandler())
+	}
+	serve := func(h http.Handler) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "10.0.0.97:12345"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		return w
+	}
+	for attempt := 0; ; attempt++ {
+		a, b := replica(store), replica(store)
+		start := time.Now().Truncate(time.Minute)
+		codes := []int{serve(a).Code, serve(b).Code}
+		last := serve(a)
+		if time.Now().Truncate(time.Minute) != start && attempt == 0 {
+			// The window turned between the requests: count again in the
+			// new one, whose keys are new.
+			continue
+		}
+		assert.Equal(t, []int{http.StatusOK, http.StatusOK}, codes)
+		assert.Equal(t, http.StatusTooManyRequests, last.Code)
+		assert.Equal(t, "60", last.Header().Get("Retry-After"))
+		assert.Equal(t, "application/problem+json", last.Header().Get("Content-Type"))
+		assert.JSONEq(t, `{"type":"about:blank","title":"Too Many Requests","status":429,"detail":"Too Many Requests","code":"too_many_requests"}`, last.Body.String())
+		// httprate's headers.
+		assert.Equal(t, "2", last.Header().Get("X-RateLimit-Limit"))
+		assert.Equal(t, "0", last.Header().Get("X-RateLimit-Remaining"))
+		assert.Equal(t, fmt.Sprint(start.Add(time.Minute).Unix()), last.Header().Get("X-RateLimit-Reset"))
+		// The store counts the client's address, hashed, as every
+		// language's limiter keys it.
+		ref, err := memorystore.RateLimitRef("shop-api", "ProductQueries.getProduct", start.Unix(), "10.0.0.97")
+		require.NoError(t, err)
+		n, err := store.Count(context.Background(), ref)
+		require.NoError(t, err)
+		assert.Equal(t, int64(2), n)
+		break
+	}
+
+	for _, s := range []memorystore.Store{memorystore.Disabled("shop-cache"), nil} {
+		a, b := replica(s), replica(s)
+		codes := []int{serve(a).Code, serve(a).Code, serve(b).Code, serve(b).Code}
+		assert.Equal(t, []int{http.StatusOK, http.StatusOK, http.StatusOK, http.StatusOK}, codes, "each replica has its own budget")
+	}
+}
+
+// TestRateLimitWithStoreFallsBack: a store that is up but fails a call
+// leaves the request to the route's in-process limiter, which answers as
+// httprate does, never 428.
+func TestRateLimitWithStoreFallsBack(t *testing.T) {
+	store := memorystore.NewInProcess("shop-cache")
+	defer store.Close()
+	failing := &slowStore{Store: store, fail: errors.New("OOM command not allowed")}
+	handler := middleware.RateLimit(2, time.Minute, nopLoggerGetter, middleware.WithStore(failing, "shop-api", "product.getProduct"))(okHandler())
+	var codes []int
+	for range 3 {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "10.0.0.96:12345"
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		codes = append(codes, w.Code)
+	}
+	assert.Equal(t, []int{http.StatusOK, http.StatusOK, http.StatusTooManyRequests}, codes)
+}
+
+// TestRateLimitWithStoreIsNotSerialized: concurrent requests of one route
+// and one client over a store whose every call takes a round trip finish
+// together, in about two round trips (the counts, then the increment),
+// not one after another as under httprate's lock around its counter.
+func TestRateLimitWithStoreIsNotSerialized(t *testing.T) {
+	store := memorystore.NewInProcess("shop-cache")
+	defer store.Close()
+	const n, rtt = 16, 50 * time.Millisecond
+	slow := &slowStore{Store: store, delay: rtt}
+	handler := middleware.RateLimit(1000, time.Minute, nopLoggerGetter, middleware.WithStore(slow, "shop-api", "product.getProduct"))(okHandler())
+	codes := make([]int, n)
+	var wg sync.WaitGroup
+	start := time.Now()
+	for i := range n {
+		wg.Go(func() {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.RemoteAddr = "10.0.0.95:12345"
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+			codes[i] = w.Code
+		})
+	}
+	wg.Wait()
+	elapsed := time.Since(start)
+	for i, code := range codes {
+		assert.Equal(t, http.StatusOK, code, "request %d", i)
+	}
+	assert.Less(t, elapsed, 5*rtt, "%d requests took %s: the route serialized its round trips", n, elapsed)
+	ref, err := memorystore.RateLimitRef("shop-api", "product.getProduct", start.Truncate(time.Minute).Unix(), "10.0.0.95")
+	require.NoError(t, err)
+	if time.Now().Truncate(time.Minute).Equal(start.Truncate(time.Minute)) {
+		count, err := store.Count(context.Background(), ref)
+		require.NoError(t, err)
+		assert.Equal(t, int64(n), count, "every request counted in the store")
+	}
+}
+
+// slowStore is a store whose every key call takes delay, as a round trip
+// to a server does, or fails with fail. It is no MultiCounter, so the
+// limiter reads its two counts by two Counts at once.
+type slowStore struct {
+	memorystore.Store
+	delay time.Duration
+	fail  error
+}
+
+func (s *slowStore) Count(ctx context.Context, ref memorystore.Ref) (int64, error) {
+	time.Sleep(s.delay)
+	if s.fail != nil {
+		return 0, s.fail
+	}
+	return s.Store.Count(ctx, ref)
+}
+
+func (s *slowStore) Increment(ctx context.Context, ref memorystore.Ref, ttl time.Duration) (int64, error) {
+	time.Sleep(s.delay)
+	if s.fail != nil {
+		return 0, s.fail
+	}
+	return s.Store.Increment(ctx, ref, ttl)
 }
 
 func TestBodyLimit_MaxBytesReaderEnforcement(t *testing.T) {

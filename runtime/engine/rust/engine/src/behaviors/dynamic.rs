@@ -22,8 +22,8 @@ use super::behavior::{
 };
 use super::config::ConfigTarget;
 use super::context::{
-    Core, InstanceCx, InstanceView, OperationCx, PublishCx, ReactionCx, ReferenceCx, ScheduleCx,
-    SchemaCx, Scope, ValidationCx,
+    Core, InstanceCx, InstanceView, NamespaceCx, OperationCx, PublishCx, ReactionCx, ReferenceCx,
+    ScheduleCx, SchemaCx, Scope, ValidationCx,
 };
 use super::erased::{ConfigBox, Erased, HookSet};
 use crate::errors::{Error, Result, ValidationIssue, Veto};
@@ -55,6 +55,8 @@ pub struct DynamicHooks {
     /// declaration's).
     pub operations: Vec<String>,
     pub schema_operations: Vec<String>,
+    /// The names of its namespace operations (D77).
+    pub namespace_operations: Vec<String>,
     pub fields: Vec<String>,
     pub filters: Vec<(String, BehaviorFilter)>,
     /// Each schedule's name and its fixed interval; `None` for one whose
@@ -158,6 +160,15 @@ pub trait DynamicBehavior: Send + Sync + 'static {
         params: &Value,
     ) -> Result<Value> {
         Err(absent("schemaOperations"))
+    }
+
+    fn namespace_operation(
+        &self,
+        name: &str,
+        cx: &NamespaceCx<'_, Self::Config>,
+        params: &Value,
+    ) -> Result<Value> {
+        Err(absent("namespaceOperations"))
     }
 
     fn field(&self, name: &str, view: &InstanceView<'_, Self::Config>) -> Result<Option<Value>> {
@@ -286,6 +297,7 @@ impl<D: DynamicBehavior> Erased for Dynamic<D> {
             watches: hooks.reactions && hooks.watches,
             operations: hooks.operations.clone(),
             schema_operations: hooks.schema_operations.clone(),
+            namespace_operations: hooks.namespace_operations.clone(),
             fields: hooks.fields.clone(),
             filters: hooks.filters.clone(),
             schedules: hooks.schedules.clone(),
@@ -453,6 +465,29 @@ impl<D: DynamicBehavior> Erased for Dynamic<D> {
             self.run(&format!("operation {name}"), || {
                 self.behavior.schema_operation(name, &cx, params)
             })
+        }))
+    }
+
+    fn namespace_operation(
+        &self,
+        name: &str,
+        core: &dyn Core,
+        params: &Value,
+    ) -> Option<Result<Value>> {
+        if !self
+            .hooks
+            .namespace_operations
+            .iter()
+            .any(|declared| declared == name)
+        {
+            return None;
+        }
+        let cx = NamespaceCx {
+            core,
+            config: std::marker::PhantomData,
+        };
+        Some(self.run(&format!("operation {name}"), || {
+            self.behavior.namespace_operation(name, &cx, params)
         }))
     }
 

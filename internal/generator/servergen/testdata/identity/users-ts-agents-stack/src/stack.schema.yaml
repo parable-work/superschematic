@@ -1,0 +1,27 @@
+# One TypeScript server, Agents, serves users-ts-agent, whose config turns
+# on outputs.api.mcp, beside users-ts-notes. One server answers POST
+# /api/mcp for one API, so the build refuses the stack when both turn it on
+# (D81). Its one environment, Local, runs on the local target.
+kind: Stack
+types:
+  Agents:
+    name: Agents
+    role: EmbeddedStruct
+    server:
+      serves:
+        - { name: users-ts-agent, kind: API }
+        - { name: users-ts-notes, kind: API }
+  Pair:
+    name: Pair
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: users-ts-agent, kind: API }
+        - { name: users-ts-notes, kind: API }
+      expose:
+        - deployable: Agents
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

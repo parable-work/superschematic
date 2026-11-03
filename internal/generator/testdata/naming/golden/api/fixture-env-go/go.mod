@@ -3,7 +3,7 @@
 
 module example.com/acme/schemas/api/fixture-env-go
 
-go 1.26.4
+go 1.27.3
 
 require (
 	example.com/acme/schemas/types/go/fixture-env-go v0.0.0-00010101000000-000000000000

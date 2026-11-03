@@ -1,6 +1,7 @@
 # A TypeScript API with a database, a callee, a bucket and a service clause
 # (D51, D54): it takes its database from its one DB-kind dependency, calls
-# deps-ts-pricing, lists the bucket deps-media, holds one setting in its
+# deps-ts-pricing, lists the bucket deps-media, counts its rate limits in
+# the memory store deps-cache (D75), holds one setting in its
 # @envVars type, checks the end user on one operation and admits a calling
 # service on another. The TypeScript Deps tests in internal/generator build
 # it.
@@ -12,6 +13,7 @@ calls:
   - { name: deps-ts-pricing, kind: API }
 buckets:
   - { name: deps-media, kind: Bucket }
+rateLimitStore: { name: deps-cache, kind: MemoryStore }
 outputs:
   types:
     typescript: { enabled: true }

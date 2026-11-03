@@ -34,7 +34,7 @@ use super::cross_origin::first;
 use super::errors::unauthenticated;
 use super::service::{
     ChangePasswordInput, CreateUserInput, IdentityPrincipal, Input, IssuedSession, LoginInput,
-    RegisterInput, RoleInput, Service, SetPasswordInput,
+    RegisterInput, Registered, RoleInput, Service, SetPasswordInput,
 };
 use super::token::Transport;
 
@@ -55,6 +55,7 @@ pub const OP_LIST_USERS: &str = "listUsers";
 pub const OP_GET_USER: &str = "getUser";
 pub const OP_DISABLE_USER: &str = "disableUser";
 pub const OP_ENABLE_USER: &str = "enableUser";
+pub const OP_APPROVE_USER: &str = "approveUser";
 pub const OP_SET_USER_PASSWORD: &str = "setUserPassword";
 pub const OP_LIST_ROLES: &str = "listRoles";
 pub const OP_CREATE_ROLE: &str = "createRole";
@@ -106,6 +107,7 @@ pub const OPERATIONS: &[Operation] = &[
     op(OP_GET_USER, true, "GET", "users/{id}"),
     op(OP_DISABLE_USER, true, "POST", "users/{id}/disable"),
     op(OP_ENABLE_USER, true, "POST", "users/{id}/enable"),
+    op(OP_APPROVE_USER, true, "POST", "users/{id}/approve"),
     op(OP_SET_USER_PASSWORD, true, "PUT", "users/{id}/password"),
     op(OP_LIST_ROLES, true, "GET", "roles"),
     op(OP_CREATE_ROLE, true, "POST", "roles"),
@@ -309,8 +311,29 @@ impl Service {
         if op == OP_REGISTER {
             let input: RegisterInput = decode(body).await?;
             self.check_cookie_login(parts, &input.session)?;
-            let issued = self.register(&input).await?;
-            return Ok(self.issued(issued, request_id));
+            let registered = self.register(&input).await?;
+            if !self.registration().approval {
+                return match registered {
+                    Registered::Signed(issued) => Ok(self.issued(issued, request_id)),
+                    Registered::Pending(_) => Err(ApiError::internal(
+                        "open registration left the user pending",
+                    )),
+                };
+            }
+            // Under approval register answers RegisterResult (D81): 202 with
+            // no session for a pending user, 200 with one otherwise.
+            let mut response = respond(&registered.register_result(), request_id);
+            match registered {
+                Registered::Pending(_) => *response.status_mut() = StatusCode::ACCEPTED,
+                Registered::Signed(issued) if issued.transport == Transport::Cookie => {
+                    let cookie = self
+                        .config()
+                        .session_cookie(&issued.token, self.config().session_ttl());
+                    append_cookie(&mut response, &cookie);
+                }
+                Registered::Signed(_) => {}
+            }
+            return Ok(response);
         }
         let caller = self.caller(parts).await?;
         match op {
@@ -318,7 +341,9 @@ impl Service {
                 self.serve_session(op, &caller, body, request_id).await
             }
             OP_CREATE_USER | OP_LIST_USERS | OP_GET_USER | OP_DISABLE_USER | OP_ENABLE_USER
-            | OP_SET_USER_PASSWORD => self.serve_users(op, &caller, parts, body, request_id).await,
+            | OP_APPROVE_USER | OP_SET_USER_PASSWORD => {
+                self.serve_users(op, &caller, parts, body, request_id).await
+            }
             _ => self.serve_roles(op, &caller, parts, body, request_id).await,
         }
     }
@@ -365,13 +390,14 @@ impl Service {
                 let input: CreateUserInput = decode(body).await?;
                 Ok(ok(&self.create_user(caller, &input).await?))
             }
-            OP_LIST_USERS => Ok(ok(&self.list_users(caller).await?)),
+            OP_LIST_USERS => Ok(ok(&self.list_users(caller, pending_param(parts)?).await?)),
             _ => {
                 let id = path_param(parts, "id").await?;
                 match op {
                     OP_GET_USER => Ok(ok(&self.get_user(caller, &id).await?)),
                     OP_DISABLE_USER => Ok(ok(&self.disable_user(caller, &id).await?)),
                     OP_ENABLE_USER => Ok(ok(&self.enable_user(caller, &id).await?)),
+                    OP_APPROVE_USER => Ok(ok(&self.approve_user(caller, &id).await?)),
                     _ => {
                         let input: SetPasswordInput = decode(body).await?;
                         self.set_user_password(caller, &id, &input).await?;
@@ -445,6 +471,18 @@ impl Service {
             append_cookie(&mut response, &cookie);
         }
         response
+    }
+}
+
+/// `listUsers`' `?pending`: `None` when absent, else `true` or `false`, and
+/// 400 for any other value (D81).
+fn pending_param(parts: &Parts) -> Result<Option<bool>, ApiError> {
+    let query = crate::query_values(axum::extract::Query::try_from_uri(&parts.uri))?;
+    match query.all("pending").as_slice() {
+        [] => Ok(None),
+        ["true"] => Ok(Some(true)),
+        ["false"] => Ok(Some(false)),
+        _ => Err(ApiError::bad_request("pending must be true or false")),
     }
 }
 

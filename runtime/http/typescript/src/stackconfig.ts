@@ -40,7 +40,8 @@ from node:, so it runs on Node.js, Bun and Workers.
 
 The members a Worker alone reads (D64) are read here, and refused by the Go
 and Rust readers: a database's D1 binding (field_D1_BINDING,
-field_D1_DATABASE), a service's binding (field_BINDING_NAME,
+field_D1_DATABASE) and Hyperdrive binding (field_HYPERDRIVE_BINDING,
+field_HYPERDRIVE_CONFIG, D92), a service's binding (field_BINDING_NAME,
 field_BINDING_WORKER), and a bucket's R2 binding and credential
 (field_BINDING, field_R2_ACCOUNT, field_R2_ACCESS_KEY_ID, field_R2_TOKEN).
 The Workers entry (./workers) takes each binding from its env by the name
@@ -71,11 +72,27 @@ export interface D1Connection {
   readonly database: string;
 }
 
+/**
+ * A Postgres database bound to a Worker through a Hyperdrive config (D92):
+ * the Workers entry takes the hyperdrive binding named binding from its env,
+ * whose connection string reaches the database through Hyperdrive's pool
+ * (./hyperdrive).
+ */
+export interface HyperdriveConnection {
+  /** The name of the Worker's hyperdrive binding. */
+  readonly binding: string;
+  /** The Hyperdrive config's id. */
+  readonly config: string;
+}
+
 /** A database connection a server opens a pool over: a connection string, or a Cloud SQL connector configuration. */
 export type Database = { readonly url: string } | { readonly cloudSql: CloudSqlConnection };
 
-/** Any database connection loadDatabase reads: a Database, or a D1 binding, which only a Worker reads (D64). */
-export type DatabaseConnection = Database | { readonly d1: D1Connection };
+/**
+ * Any database connection loadDatabase reads: a Database, or a D1 binding
+ * (D64) or a Hyperdrive binding (D92), which only a Worker reads.
+ */
+export type DatabaseConnection = Database | { readonly d1: D1Connection } | { readonly hyperdrive: HyperdriveConnection };
 
 /** The credential sources the HTTP runtimes ship (D37). */
 export const CREDENTIAL_SOURCES = ['google-id-token', 'token-file', 'signed-token'] as const;
@@ -172,6 +189,32 @@ export interface BucketConnection {
   readonly r2?: R2Credential;
 }
 
+/**
+ * A memory store connection: how the server, a job or a worker reaches a
+ * memory store an API it serves uses (D75). It holds no credential: with
+ * auth iam the client sends the workload's access token. loadMemoryStore
+ * returns null for a field none of whose variables is set, a disabled
+ * store.
+ */
+export interface MemoryStoreConnection {
+  /** The MemoryStore service's name, the first segment of every name the store holds for it. */
+  readonly store: string;
+  /** The server's redis:// or rediss:// URL. */
+  readonly url: string;
+  /** How the client authenticates: iam, the workload's access token as the password of user default, which needs rediss; or none. */
+  readonly auth: MemoryStoreAuth;
+  /** The PEM of the CA a rediss server is verified against; absent verifies it against the system's roots. */
+  readonly ca?: string;
+  /** The member's name in a member of a parameterized environment, which prefixes the store's names `<store>@<member>`. */
+  readonly member?: string;
+}
+
+/** The authentications of a memory store connection. */
+export const MEMORY_STORE_AUTHS = ['iam', 'none'] as const;
+
+/** iam or none. */
+export type MemoryStoreAuth = (typeof MEMORY_STORE_AUTHS)[number];
+
 /** What an API's callers field adds to the API's name in upper snake case: SHOP_API_CALLERS is shop-api's. */
 export const CALLERS_SUFFIX = '_CALLERS';
 
@@ -219,26 +262,40 @@ function partition(env: StackEnv, names: readonly string[]): { values: string[];
 /**
  * Reads the database field named field: field_URL, the three
  * field_CLOUD_SQL_ variables, or on Workers the two field_D1_ variables
- * (D64). Throws StackConfigError when none is set, two are, or only some
- * of the Cloud SQL or D1 variables.
+ * (D64) or the two field_HYPERDRIVE_ variables (D92). Throws
+ * StackConfigError when none is set, two are, or only some of the Cloud
+ * SQL, D1 or Hyperdrive variables.
  */
 export function loadDatabase(field: string, env: StackEnv = processEnv()): DatabaseConnection {
   const url = getenv(env, `${field}_URL`);
   const cloud = [`${field}_CLOUD_SQL_INSTANCE`, `${field}_CLOUD_SQL_DATABASE`, `${field}_CLOUD_SQL_USER`];
   const { values, set, unset } = partition(env, cloud);
   const d1 = partition(env, [`${field}_D1_BINDING`, `${field}_D1_DATABASE`]);
-  if (d1.set.length > 0) {
-    const others = [...(url !== '' ? [`${field}_URL`] : []), ...set];
+  const hyperdrive = partition(env, [`${field}_HYPERDRIVE_BINDING`, `${field}_HYPERDRIVE_CONFIG`]);
+  // A binding a Worker reads is the database's one form: each is refused
+  // beside any other, then one with only some of its variables.
+  for (const [bound, what] of [
+    [d1, 'a D1 binding'],
+    [hyperdrive, 'a Hyperdrive binding'],
+  ] as const) {
+    if (bound.set.length === 0) continue;
+    const others = [...(url !== '' ? [`${field}_URL`] : []), ...set, ...(bound === hyperdrive ? d1.set : hyperdrive.set)];
     if (others.length > 0) {
       throw new StackConfigError([
-        `environment variables ${d1.set.join(', ')} are set beside ${others.join(', ')}; a database connection is one of a connection string, a Cloud SQL connector configuration and a D1 binding`,
+        `environment variables ${bound.set.join(', ')} are set beside ${others.join(', ')}; a database connection is one of a connection string, a Cloud SQL connector configuration, a D1 binding and a Hyperdrive binding`,
       ]);
     }
-    if (d1.unset.length > 0) {
-      throw new StackConfigError([`environment variables ${d1.set.join(', ')} are set and ${d1.unset.join(', ')} is not; a D1 binding sets both`]);
+    if (bound.unset.length > 0) {
+      throw new StackConfigError([`environment variables ${bound.set.join(', ')} are set and ${bound.unset.join(', ')} is not; ${what} sets both`]);
     }
+  }
+  if (d1.set.length > 0) {
     const [binding, database] = d1.values as [string, string];
     return { d1: { binding, database } };
+  }
+  if (hyperdrive.set.length > 0) {
+    const [binding, config] = hyperdrive.values as [string, string];
+    return { hyperdrive: { binding, config } };
   }
   if (url !== '' && set.length > 0) {
     throw new StackConfigError([
@@ -309,6 +366,79 @@ export function loadBucket(field: string, env: StackEnv = processEnv()): BucketC
     ...(endpoint !== '' ? { endpoint: endpoint.replace(/\/+$/u, '') } : {}),
     ...(binding !== '' ? { binding } : {}),
     ...(r2.set.length > 0 ? { r2: { account, accessKeyId, token, ...(jurisdiction !== '' ? { jurisdiction } : {}) } } : {}),
+  };
+}
+
+/** The shape of a memory store's URL: redis or rediss, a host, and no user or password. */
+const MEMORY_STORE_URL = /^rediss?:\/\/[^/?#@\t\n\f\r ]+(\/[0-9]*)?$/u;
+
+/** The bytes no segment of a memory store's names holds, besides the control bytes. */
+const SEGMENT_REFUSED = new Set([...':*?[]@\\'].map(c => c.charCodeAt(0)));
+
+/** Whether s is one segment of a memory store's names (D75): 1 to 128 bytes of UTF-8, none a control byte or one of : * ? [ ] @ \. */
+function memoryStoreSegment(s: string): boolean {
+  const bytes = new TextEncoder().encode(s);
+  if (bytes.length === 0 || bytes.length > 128) return false;
+  return bytes.every(b => b >= 0x20 && b !== 0x7f && !SEGMENT_REFUSED.has(b));
+}
+
+/**
+ * Reads the memory store field named field: field_STORE, field_URL and
+ * field_AUTH, and field_CA and field_MEMBER when set (D75). Returns null
+ * when none of them is set: a disabled store. Throws StackConfigError for
+ * a required variable that is not set, a store or a member that is no
+ * segment, a URL that is no redis or rediss URL with a host and no user or
+ * password, a CA with redis or one that holds no PEM certificate, and an
+ * authentication other than iam and none, or iam with redis. No message
+ * holds the URL or the CA.
+ */
+export function loadMemoryStore(field: string, env: StackEnv = processEnv()): MemoryStoreConnection | null {
+  const store = getenv(env, `${field}_STORE`);
+  const url = getenv(env, `${field}_URL`);
+  const ca = getenv(env, `${field}_CA`);
+  const auth = getenv(env, `${field}_AUTH`);
+  const member = getenv(env, `${field}_MEMBER`);
+  if (store === '' && url === '' && ca === '' && auth === '' && member === '') return null;
+  const problems: string[] = [];
+  for (const [name, value] of [
+    ['STORE', store],
+    ['URL', url],
+    ['AUTH', auth],
+  ] as const) {
+    if (value === '') {
+      problems.push(
+        `required environment variable ${field}_${name} is not set: a memory store connection sets STORE, URL and AUTH, or none of its variables for a disabled store`
+      );
+    }
+  }
+  const segment = 'want one segment: 1 to 128 bytes, with no : * ? [ ] @ \\ or control character';
+  if (store !== '' && !memoryStoreSegment(store)) problems.push(`environment variable ${field}_STORE is ${quote(store)}; ${segment}`);
+  if (member !== '' && !memoryStoreSegment(member)) problems.push(`environment variable ${field}_MEMBER is ${quote(member)}; ${segment}`);
+  if (url !== '' && !MEMORY_STORE_URL.test(url)) {
+    problems.push(`environment variable ${field}_URL is no redis:// or rediss:// URL with a host and no user or password`);
+  }
+  const tls = url.startsWith('rediss://');
+  if (ca !== '') {
+    if (url.startsWith('redis://')) {
+      problems.push(`environment variable ${field}_CA is set with a redis:// URL; a CA verifies a rediss:// server`);
+    } else if (!ca.includes('-----BEGIN CERTIFICATE-----')) {
+      problems.push(`environment variable ${field}_CA holds no PEM certificate`);
+    }
+  }
+  if (auth === 'iam') {
+    if (url !== '' && !tls) {
+      problems.push(`environment variable ${field}_AUTH is iam with a redis:// URL; an access token travels only over rediss://`);
+    }
+  } else if (auth !== '' && auth !== 'none') {
+    problems.push(`environment variable ${field}_AUTH is ${quote(auth)}; want iam or none`);
+  }
+  if (problems.length > 0) throw new StackConfigError(problems);
+  return {
+    store,
+    url,
+    auth: auth as MemoryStoreAuth,
+    ...(ca !== '' ? { ca } : {}),
+    ...(member !== '' ? { member } : {}),
   };
 }
 

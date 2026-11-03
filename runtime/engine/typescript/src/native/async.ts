@@ -121,7 +121,9 @@ export class AsyncEngine {
     thresholdBytes(): Promise<number>;
     maxBytes(): Promise<number>;
   };
-  readonly behaviors: Promised<Pick<Engine['behaviors'], 'has' | 'names' | 'declaration'>>;
+  readonly behaviors: Promised<Pick<Engine['behaviors'], 'has' | 'names' | 'declaration' | 'invoke'>>;
+  /** The signals of instances (D77): what a caller sends to the event streams open on one. */
+  readonly signals: Promised<Engine['signals']>;
   private readonly watchers = new Set<EventWatcher>();
   private head = 0;
   private started: Promise<void> | undefined;
@@ -220,7 +222,11 @@ export class AsyncEngine {
       has: plainCall(call, 'behaviors.has') as (name: string) => Promise<boolean>,
       names: plainCall(call, 'behaviors.names') as () => Promise<string[]>,
       declaration: plainCall(call, 'behaviors.declaration'),
+      invoke: principalCall(call, 'behaviors.invoke'),
     } as unknown as AsyncEngine['behaviors'];
+    this.signals = {
+      send: principalCall(call, 'signals.send'),
+    } as unknown as AsyncEngine['signals'];
   }
 
   /**

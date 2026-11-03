@@ -106,7 +106,7 @@ impl AccountNamespace {
             .request_json("GET", path, &query_params, None, options)
             .await
     }
-    /// Creates a user with the login, name and password given and signs them in, as login does.
+    /// Creates a user with the login, name and password given, who waits for an administrator's approval: it answers 202 with pending true and starts no session. The first administrator, when the set names one, is signed in as login does.
     ///
     /// - `options.timeout_ms`: optional per-request timeout override.
     /// - `options.request_hook`: optional request builder hook.
@@ -114,7 +114,7 @@ impl AccountNamespace {
         &self,
         input: types::RegisterInput,
         options: Option<&runtime::RequestOptions>,
-    ) -> Result<types::LoginResult, SDKError> {
+    ) -> Result<types::RegisterResult, SDKError> {
         let path = "/api/auth/register";
         let input_value = serde_json::to_value(&input)?;
         runtime::validate_input("RegisterInput", &input_value)?;

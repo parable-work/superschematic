@@ -81,24 +81,17 @@ type ConfigType struct {
 }
 
 // ConfigTypeOf returns the config type an API schema's sentinel names: its
-// one @envVars class, when a TypeScript schema file declares it. Only an
-// API handle has a config type. An @envVars class from a data-form schema
-// file has no TypeScript type to import, so its handle has none either.
+// config, the @envVars class no other extends (ir.Schema.EnvVarsType, D94),
+// when a TypeScript schema file declares it. Only an API handle has a
+// config type. An @envVars class from a data-form schema file has no
+// TypeScript type to import, so its handle has none either, nor has a
+// schema whose @envVars classes make no one config, which its load refuses.
 func ConfigTypeOf(schema *ir.Schema) *ConfigType {
 	if schema == nil || schema.Kind != ir.SchemaKindAPI {
 		return nil
 	}
-	var found *ir.TypeDef
-	for _, def := range schema.Types {
-		if !def.EnvVars {
-			continue
-		}
-		if found != nil {
-			return nil
-		}
-		found = def
-	}
-	if found == nil || !strings.HasPrefix(found.Owner, "src/") || !strings.HasSuffix(found.Owner, ".ts") {
+	found, err := schema.EnvVarsType()
+	if err != nil || found == nil || !strings.HasPrefix(found.Owner, "src/") || !strings.HasSuffix(found.Owner, ".ts") {
 		return nil
 	}
 	return &ConfigType{Name: found.Name, Module: "./" + strings.TrimSuffix(strings.TrimPrefix(found.Owner, "src/"), ".ts")}
@@ -140,18 +133,56 @@ func WorkersOf(schema *ir.Schema) []string {
 	return workers
 }
 
+// DeriversOf returns the names of an API schema's derivers, sorted, which
+// its handle carries as its fifth type argument so that an environment's
+// settings name only a deriver the API declares (D74). Only an API
+// declares one.
+func DeriversOf(schema *ir.Schema) []string {
+	if schema == nil || schema.Kind != ir.SchemaKindAPI {
+		return nil
+	}
+	var derivers []string
+	for _, deriver := range schema.Derivers {
+		if deriver != nil && identifier.MatchString(deriver.Name) && !slices.Contains(derivers, deriver.Name) {
+			derivers = append(derivers, deriver.Name)
+		}
+	}
+	slices.Sort(derivers)
+	return derivers
+}
+
+// AppsOf returns the names of an API schema's apps, sorted, which its
+// handle carries as its sixth type argument so that an environment's
+// settings and the stack's expose name only an app the API declares
+// (D78). Only an API declares one.
+func AppsOf(schema *ir.Schema) []string {
+	if schema == nil || schema.Kind != ir.SchemaKindAPI {
+		return nil
+	}
+	var apps []string
+	for _, app := range schema.Apps {
+		if app != nil && identifier.MatchString(app.Name) && !slices.Contains(apps, app.Name) {
+			apps = append(apps, app.Name)
+		}
+	}
+	slices.Sort(apps)
+	return apps
+}
+
 // HandleTypes are what types an API's handle: its config type, the names
-// of its jobs and the names of its workers. Every other kind's handle has
-// none.
+// of its jobs, the names of its workers, the names of its derivers and
+// the names of its apps. Every other kind's handle has none.
 type HandleTypes struct {
-	Config  *ConfigType
-	Jobs    []string
-	Workers []string
+	Config   *ConfigType
+	Jobs     []string
+	Workers  []string
+	Derivers []string
+	Apps     []string
 }
 
 // HandleTypesOf reads what types a service's handle from its schema.
 func HandleTypesOf(schema *ir.Schema) HandleTypes {
-	return HandleTypes{Config: ConfigTypeOf(schema), Jobs: JobsOf(schema), Workers: WorkersOf(schema)}
+	return HandleTypes{Config: ConfigTypeOf(schema), Jobs: JobsOf(schema), Workers: WorkersOf(schema), Derivers: DeriversOf(schema), Apps: AppsOf(schema)}
 }
 
 // identifier is a TypeScript identifier a sentinel writes as a string
@@ -160,7 +191,7 @@ var identifier = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$]*$`)
 
 // Content renders the sentinel file for a service. The SchemaKind enum in
 // the schema-config package is closed over the core kinds (DB, API,
-// General and Bucket, D54; the ir constants), so those render as the enum
+// General, Bucket, D54, and MemoryStore, D75; the ir constants), so those render as the enum
 // member, which keeps committed sentinels byte-stable. Any other kind is an
 // extension's
 // and has no member: it renders as a string literal, which the kind slot's
@@ -180,7 +211,12 @@ func Content(name string, kind ir.SchemaKind, n naming.Naming, configType *Confi
 // HandleContent renders the sentinel file for a service as Content does,
 // with the names of the API's workers, when it has any, as the fourth type
 // argument, beside its jobs or `never` (D53):
-// `service<"API", unknown, never, "FulfilOrders">`.
+// `service<"API", unknown, never, "FulfilOrders">`, and the names of its
+// derivers, when it has any, as the fifth, beside its workers or `never`
+// (D74): `service<"API", unknown, never, never, "TriageTickets">`, and the
+// names of its apps, when it has any, as the sixth, beside its derivers
+// or `never` (D78):
+// `service<"API", unknown, never, never, never, "Backoffice">`.
 func HandleContent(name string, kind ir.SchemaKind, n naming.Naming, types HandleTypes) string {
 	configType, jobs := types.Config, types.Jobs
 	handle := tsutil.ToClassName(name)
@@ -188,7 +224,7 @@ func HandleContent(name string, kind ir.SchemaKind, n naming.Naming, types Handl
 	imports := "service"
 	kindExpr := fmt.Sprintf("%q", string(kind))
 	switch kind {
-	case ir.SchemaKindDB, ir.SchemaKindAPI, ir.SchemaKindGeneral, ir.SchemaKindBucket:
+	case ir.SchemaKindDB, ir.SchemaKindAPI, ir.SchemaKindGeneral, ir.SchemaKindBucket, ir.SchemaKindMemoryStore:
 		imports = "service, SchemaKind"
 		kindExpr = "SchemaKind." + string(kind)
 	case ir.SchemaKindSite:
@@ -225,6 +261,22 @@ func HandleContent(name string, kind ir.SchemaKind, n naming.Naming, types Handl
 		}
 		typeArgs = fmt.Sprintf("<%q, %s, %s, %s>", string(kind), config, jobNames, strings.Join(names, " | "))
 	}
+	union := func(list []string) string {
+		if len(list) == 0 {
+			return "never"
+		}
+		names := make([]string, len(list))
+		for i, name := range list {
+			names[i] = fmt.Sprintf("%q", name)
+		}
+		return strings.Join(names, " | ")
+	}
+	if len(types.Derivers) > 0 {
+		typeArgs = fmt.Sprintf("<%q, %s, %s, %s, %s>", string(kind), config, union(jobs), union(types.Workers), union(types.Derivers))
+	}
+	if len(types.Apps) > 0 {
+		typeArgs = fmt.Sprintf("<%q, %s, %s, %s, %s, %s>", string(kind), config, union(jobs), union(types.Workers), union(types.Derivers), union(types.Apps))
+	}
 	return fmt.Sprintf(`// Code generated by superschematic sentinel. DO NOT EDIT.
 import { %s } from %q;
 %sexport const %s = service%s({ name: %q, kind: %s });
@@ -234,15 +286,20 @@ import { %s } from %q;
 // configTypeImport matches the type import Content writes for a typed
 // handle; jobsTypeArg the jobs type argument it writes for an API with
 // jobs, and workersTypeArg the jobs and the workers it writes for an API
-// with workers.
+// with workers, deriversTypeArg the jobs, the workers and the derivers
+// it writes for an API with derivers, and appsTypeArg the jobs, the
+// workers, the derivers and the apps it writes for an API with apps.
 var (
 	configTypeImport = regexp.MustCompile(`(?m)^import type \{ (\w+) \} from "([^"]+)";$`)
 	jobsTypeArg      = regexp.MustCompile(`(?m)^export const \w+ = service<"[^"]+", [\w$]+, ((?:"[\w$]+"(?: \| )?)+)>\(`)
 	workersTypeArg   = regexp.MustCompile(`(?m)^export const \w+ = service<"[^"]+", [\w$]+, (never|(?:"[\w$]+"(?: \| )?)+), ((?:"[\w$]+"(?: \| )?)+)>\(`)
+	deriversTypeArg  = regexp.MustCompile(`(?m)^export const \w+ = service<"[^"]+", [\w$]+, (never|(?:"[\w$]+"(?: \| )?)+), (never|(?:"[\w$]+"(?: \| )?)+), ((?:"[\w$]+"(?: \| )?)+)>\(`)
+	appsTypeArg      = regexp.MustCompile(`(?m)^export const \w+ = service<"[^"]+", [\w$]+, (never|(?:"[\w$]+"(?: \| )?)+), (never|(?:"[\w$]+"(?: \| )?)+), (never|(?:"[\w$]+"(?: \| )?)+), ((?:"[\w$]+"(?: \| )?)+)>\(`)
 )
 
-// writtenTypes returns the config type, the jobs and the workers of the
-// sentinel at path, as a build wrote them, or none.
+// writtenTypes returns the config type, the jobs, the workers, the
+// derivers and the apps of the sentinel at path, as a build wrote them, or
+// none.
 func writtenTypes(path string) HandleTypes {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -267,6 +324,23 @@ func writtenTypes(path string) HandleTypes {
 			types.Jobs = names(match[1])
 		}
 		types.Workers = names(match[2])
+	}
+	if match := deriversTypeArg.FindStringSubmatch(string(data)); match != nil {
+		if match[1] != "never" {
+			types.Jobs = names(match[1])
+		}
+		if match[2] != "never" {
+			types.Workers = names(match[2])
+		}
+		types.Derivers = names(match[3])
+	}
+	if match := appsTypeArg.FindStringSubmatch(string(data)); match != nil {
+		for i, list := range []*[]string{&types.Jobs, &types.Workers, &types.Derivers} {
+			if match[i+1] != "never" {
+				*list = names(match[i+1])
+			}
+		}
+		types.Apps = names(match[4])
 	}
 	return types
 }
@@ -317,8 +391,9 @@ func EmitHandle(servicePath string, cfg *schemaconfig.SchemaConfig, reg *registr
 // re-checked for those.
 //
 // The sweep reads configs, not schemas, so it cannot find an API's @envVars
-// class, its jobs or its workers. It keeps the config type, the jobs and
-// the workers the service's own build wrote into the sentinel instead, so
+// class, its jobs, its workers, its derivers or its apps. It keeps the
+// config type, the jobs, the workers, the derivers and the apps the
+// service's own build wrote into the sentinel instead, so
 // a sweep after a config edit does not strip the handle's types until that
 // service builds again.
 func EnsureSiblings(servicesRoot string, opts Options) error {

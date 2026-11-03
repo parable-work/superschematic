@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/codegen"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -32,7 +33,11 @@ func validateDefaultValues(schema *ir.Schema, externalEnums map[string]*ir.EnumD
 	for _, types := range []map[string]*ir.TypeDef{schema.Types, schema.Inputs} {
 		for _, name := range sortedTypeNames(types) {
 			for _, field := range types[name].Fields {
-				if field.Default != nil {
+				// Default<T, "now"> on a date or time is the time of the
+				// insert, which no value is (D88); verification holds
+				// where it may stand.
+				nowDefault := !field.TypeRef.IsArray && !field.TypeRef.IsMap && codegen.IsDefaultNow(field.TypeRef.Name, field.Default)
+				if field.Default != nil && !nowDefault {
 					check(name+"."+field.Name, field.TypeRef, fieldValueRules(field), *field.Default)
 				}
 				for _, arg := range field.Arguments {
@@ -48,6 +53,27 @@ func validateDefaultValues(schema *ir.Schema, externalEnums map[string]*ir.EnumD
 			for _, arg := range op.Arguments {
 				if arg.Default != nil {
 					check(fmt.Sprintf("%s.%s(%s)", set.Name, op.Name, arg.Name), arg.TypeRef, argumentValueRules(arg), *arg.Default)
+				}
+			}
+		}
+	}
+	// A role @seedRoles declares is written into its table as it is, so
+	// its name keeps the name field's rules (D88).
+	for _, name := range sortedTypeNames(schema.Types) {
+		td := schema.Types[name]
+		for _, field := range td.Fields {
+			if field == nil || field.Name != ir.IdentityRoleNameField || field.TypeRef.IsArray || field.TypeRef.IsMap {
+				continue
+			}
+			for _, seed := range td.SeedRoles {
+				value, ok, err := defaultValue(schema, externalEnums, field.TypeRef, seed.Name)
+				if err == nil && ok {
+					if err = validateCompositeValue(schema, externalEnums, field.TypeRef, value, "name"); err == nil {
+						err = validateCompositeFieldConstraints(fieldValueRules(field), field.TypeRef, value, "name")
+					}
+				}
+				if err != nil {
+					errs = append(errs, fmt.Errorf("%s: %s: @seedRoles role %q: %w", schema.Name, name, seed.Name, err))
 				}
 			}
 		}

@@ -36,6 +36,15 @@ func render(models []*schemaModel, names naming.Naming) ([]byte, error) {
 			return nil, err
 		}
 	}
+	behaviors, err := namespaceBehaviors(models)
+	if err != nil {
+		return nil, err
+	}
+	for _, behavior := range behaviors {
+		if err := m.namespaceBehavior(behavior); err != nil {
+			return nil, err
+		}
+	}
 	if m.ts.UsesJSONObject {
 		m.uses["JSONObject"] = true
 	}
@@ -44,10 +53,14 @@ func render(models []*schemaModel, names naming.Naming) ([]byte, error) {
 	out.WriteString("//\n")
 	out.WriteString("// Typed wrappers over the engine's client: each schema's instances, create\n")
 	out.WriteString("// input and patches, and its behaviors' create parameters, preconditions,\n")
-	out.WriteString("// operations and veto codes, as their configs narrow them.\n")
+	out.WriteString("// operations, signals and veto codes, as their configs narrow them; then\n")
+	out.WriteString("// each composed behavior's namespace operations, which belong to no schema.\n")
 	out.WriteString("//\n")
 	for _, model := range models {
 		fmt.Fprintf(&out, "// Schema %s: %s, %s.\n", model.name, model.client, codegen.ToCamelCase(model.client))
+	}
+	for _, behavior := range behaviors {
+		fmt.Fprintf(&out, "// Behavior %s, across a namespace: %s, %s.\n", behavior.name, behavior.client, codegen.ToCamelCase(behavior.client))
 	}
 	out.WriteString("\n")
 	client := names.EngineNpmPackage + "/client"
@@ -104,7 +117,9 @@ func (m *module) typeAlias(name, owner, doc string, schema any) error {
 // operationInfo is one operation of a type, in the order the module lists
 // them: the behaviors' in list order, each behavior's in declaration order.
 type operationInfo struct {
-	behavior    string
+	behavior string
+	// core is whether the behavior is the core's, not an extension's.
+	core        bool
 	declaration registry.BehaviorOperation
 	params      any
 	result      any
@@ -116,10 +131,23 @@ func (op operationInfo) schemaScope() bool {
 	return op.declaration.Scope == registry.OperationScopeSchema
 }
 
+// namespaceScope reports whether a declared operation runs across a
+// namespace (D77): it belongs to its behavior, not the type, so no schema's
+// types or client hold it.
+func namespaceScope(op registry.BehaviorOperation) bool {
+	return op.Scope == registry.OperationScopeNamespace
+}
+
 // paramsOptional reports whether an operation's parameters require
 // nothing, so its method takes them optionally.
 func (op operationInfo) paramsOptional() bool {
-	params, ok := op.params.(map[string]any)
+	return requiresNothing(op.params)
+}
+
+// requiresNothing reports whether a schema of parameters or of a signal's
+// data requires no member, so {} is one it takes.
+func requiresNothing(schema any) bool {
+	params, ok := schema.(map[string]any)
 	if !ok {
 		return true
 	}
@@ -131,6 +159,29 @@ func (op operationInfo) paramsOptional() bool {
 	}
 	required, _ := params["required"].([]any)
 	return len(required) == 0
+}
+
+// signalInfo is one signal of a type (D77), in the order the module lists
+// them: the behaviors' in list order, each behavior's in declaration
+// order.
+type signalInfo struct {
+	behavior    string
+	core        bool
+	declaration registry.BehaviorSignal
+	data        any
+	// dataType is <Base><Signal>Signal, or <Base><Behavior><Signal>Signal
+	// when another behavior of the type declares a signal of its name.
+	dataType string
+	// send is the wrapper's method that sends it, send<Signal> or
+	// send<Behavior><Signal>; "" for a signal of access operation, which
+	// only the behavior's operations send.
+	send string
+}
+
+// dataOptional reports whether the signal's data requires no member, so
+// its send helper takes it optionally.
+func (sig signalInfo) dataOptional() bool {
+	return requiresNothing(sig.data)
 }
 
 func (m *module) schema(s *schemaModel) error {
@@ -167,6 +218,10 @@ func (m *module) schema(s *schemaModel) error {
 	if err := m.vetoes(s); err != nil {
 		return err
 	}
+	signals, err := m.signals(s, ops)
+	if err != nil {
+		return err
+	}
 
 	createOptions := s.base + "CreateOptions"
 	writeOptions := s.base + "WriteOptions"
@@ -201,7 +256,12 @@ func (m *module) schema(s *schemaModel) error {
 			return err
 		}
 	}
-	return m.client(s, ops, createRequired)
+	if len(signals) > 0 {
+		if err := m.signalGuard(s); err != nil {
+			return err
+		}
+	}
+	return m.client(s, ops, signals, createRequired)
 }
 
 // documentTypes writes the enums and types an instance can hold besides
@@ -491,12 +551,16 @@ func (m *module) preconditions(s *schemaModel) (string, error) {
 }
 
 // operations writes each operation's parameters and result, then
-// <T>Operations and <T>InstanceOperation.
+// <T>Operations and <T>InstanceOperation. A behavior's namespace
+// operations are not the type's: namespaceBehavior writes them once.
 func (m *module) operations(s *schemaModel) ([]operationInfo, error) {
 	owner := "schema " + s.name
 	var ops []operationInfo
 	for _, behavior := range s.behaviors {
 		for _, declared := range behavior.Declaration.Operations {
+			if namespaceScope(declared) {
+				continue
+			}
 			for _, member := range clientMembers {
 				if declared.Name == member {
 					return nil, fmt.Errorf("engine-client: %s: behavior %s's operation %s is named like the wrapper's own %s", owner, behavior.Declaration.Name, declared.Name, member)
@@ -504,6 +568,7 @@ func (m *module) operations(s *schemaModel) ([]operationInfo, error) {
 			}
 			op := operationInfo{
 				behavior:    behavior.Declaration.Name,
+				core:        behavior.Declaration.Extension == "",
 				declaration: declared,
 				params:      behavior.Narrowed.Params[declared.Name],
 				result:      behavior.Narrowed.Results[declared.Name],
@@ -598,8 +663,154 @@ func (m *module) vetoGuard(s *schemaModel) error {
 	return nil
 }
 
+// signals writes the data type of each signal the type's behaviors
+// declare (D77), <T>Signals, the data types by behavior and name, and
+// <T>SignalMessage, the stream's signal message narrowed to them; it
+// names each signal's send helper. A type whose behaviors declare no
+// signal gets none of them.
+func (m *module) signals(s *schemaModel, ops []operationInfo) ([]signalInfo, error) {
+	owner := "schema " + s.name
+	declaredBy := map[string]int{}
+	for _, behavior := range s.behaviors {
+		for _, declared := range behavior.Declaration.Signals {
+			declaredBy[declared.Name]++
+		}
+	}
+	if len(declaredBy) == 0 {
+		return nil, nil
+	}
+	taken := map[string]string{}
+	for _, member := range clientMembers {
+		taken[member] = "the wrapper's own " + member
+	}
+	for _, op := range ops {
+		taken[op.declaration.Name] = possessive(op.behavior) + " operation " + op.declaration.Name
+	}
+	sends := map[string]int{}
+	for _, behavior := range s.behaviors {
+		for _, declared := range behavior.Declaration.Signals {
+			if declared.Access != registry.SignalAccessOperation {
+				sends["send"+codegen.ToPascalCase(declared.Name)]++
+			}
+		}
+	}
+	var signals []signalInfo
+	for _, behavior := range s.behaviors {
+		for _, declared := range behavior.Declaration.Signals {
+			pascal := codegen.ToPascalCase(declared.Name)
+			qualified := behaviortypes.MemberName(behavior.Declaration.Name) + pascal
+			sig := signalInfo{
+				behavior:    behavior.Declaration.Name,
+				core:        behavior.Declaration.Extension == "",
+				declaration: declared,
+				data:        behavior.Narrowed.Signals[declared.Name],
+				dataType:    s.base + pascal + "Signal",
+			}
+			if declaredBy[declared.Name] > 1 {
+				sig.dataType = s.base + qualified + "Signal"
+			}
+			if declared.Access != registry.SignalAccessOperation {
+				sig.send = "send" + pascal
+				if _, clash := taken[sig.send]; clash || sends[sig.send] > 1 {
+					sig.send = "send" + qualified
+				}
+				if prev, clash := taken[sig.send]; clash {
+					return nil, fmt.Errorf("engine-client: %s: the send helper of %s signal %s would be %s, which %s already takes", owner, possessive(sig.behavior), declared.Name, sig.send, prev)
+				}
+				taken[sig.send] = possessive(sig.behavior) + " signal " + declared.Name
+			}
+			doc := fmt.Sprintf("The data of %s %s signal.", possessive(sig.behavior), declared.Name)
+			if declared.Description != "" {
+				doc = strings.TrimSuffix(doc, ".") + ": " + declared.Description
+			}
+			if note := coreSignalNotes[sig.behavior+"."+declared.Name]; sig.core && note != "" {
+				doc += " " + note
+			}
+			if err := m.typeAlias(sig.dataType, owner+" signal "+declared.Name, doc, behaviortypes.WithoutDescription(sig.data)); err != nil {
+				return nil, err
+			}
+			signals = append(signals, sig)
+		}
+	}
+
+	name := s.base + "Signals"
+	if err := m.export(name, owner); err != nil {
+		return nil, err
+	}
+	m.line("")
+	m.doc("", fmt.Sprintf("The data of the signals of %s's behaviors, by behavior, then signal name: what a signal's data holds.", behaviortypes.An(s.base)))
+	m.line("export type %s = {", name)
+	for _, behavior := range s.behaviors {
+		var members []string
+		for _, sig := range signals {
+			if sig.behavior == behavior.Declaration.Name {
+				members = append(members, fmt.Sprintf("%s: %s", behaviortypes.TSPropertyKey(sig.declaration.Name), sig.dataType))
+			}
+		}
+		if len(members) > 0 {
+			m.line("  %s: { %s };", behaviortypes.TSPropertyKey(behavior.Declaration.Name), strings.Join(members, "; "))
+		}
+	}
+	m.line("};")
+
+	message := s.base + "SignalMessage"
+	if err := m.export(message, owner); err != nil {
+		return nil, err
+	}
+	m.uses["EngineSignal"] = true
+	m.line("")
+	m.doc("", fmt.Sprintf("A signal of %s, as a stream opened with signals hands it out: its behavior, its name and its data, typed.", behaviortypes.An(s.base)))
+	branches := make([]string, len(signals))
+	for i, sig := range signals {
+		branches[i] = fmt.Sprintf("  | { readonly type: 'signal'; readonly signal: EngineSignal & { readonly behavior: %s; readonly name: %s; readonly data: %s } }",
+			behaviortypes.TSQuote(sig.behavior), behaviortypes.TSQuote(sig.declaration.Name), sig.dataType)
+	}
+	m.line("export type %s =\n%s;", message, strings.Join(branches, "\n"))
+	return signals, nil
+}
+
+// coreOperationNotes add to the doc of a core behavior's operation's
+// method, by <Behavior>.<operation>, what a reader does with its result;
+// %s is the type's base name.
+var coreOperationNotes = map[string]string{
+	"Comments.getMessage": "%sDraftSignal says how a reader follows a draft.",
+}
+
+// coreSignalNotes add to the doc of a core behavior's signal's data, by
+// <Behavior>.<signal>, what a reader does with it.
+var coreSignalNotes = map[string]string{
+	"Comments.draft": "A reader opens the stream with signals before it reads, counts what it holds in code points (Array.from(body).length), and drops a draft at its message's finish, interrupt, deleteMessage or purge event; a draft signal may arrive after that event, and is then ignored.",
+}
+
+// signalGuard writes is<T>Signal, which tells the type's signals from the
+// other messages of a stream and types their data.
+func (m *module) signalGuard(s *schemaModel) error {
+	name := "is" + s.base + "Signal"
+	if err := m.export(name, "schema "+s.name); err != nil {
+		return err
+	}
+	signals, message := s.base+"Signals", s.base+"SignalMessage"
+	m.uses["SignalMessage"] = true
+	m.uses["StreamMessage"] = true
+	m.line("")
+	m.doc("", fmt.Sprintf("%s reports whether a message of a stream opened with signals is a signal of the %s schema, of the behavior and with the name when they are given, and types its data.", name, s.name))
+	m.line("export function %s<B extends keyof %s = keyof %s, N extends (B extends keyof %s ? keyof %s[B] : never) = B extends keyof %s ? keyof %s[B] : never>(", name, signals, signals, signals, signals, signals, signals)
+	m.line("  message: StreamMessage | SignalMessage,")
+	m.line("  behavior?: B,")
+	m.line("  name?: N")
+	m.line("): message is Extract<%s, { readonly signal: { readonly behavior: B; readonly name: N } }> {", message)
+	m.line("  return (")
+	m.line("    message.type === 'signal' &&")
+	m.line("    message.signal.schema === %s &&", behaviortypes.TSQuote(s.name))
+	m.line("    (behavior === undefined || message.signal.behavior === behavior) &&")
+	m.line("    (name === undefined || message.signal.name === name)")
+	m.line("  );")
+	m.line("}")
+	return nil
+}
+
 // client writes the wrapper's interface and its factory.
-func (m *module) client(s *schemaModel, ops []operationInfo, createRequired bool) error {
+func (m *module) client(s *schemaModel, ops []operationInfo, signals []signalInfo, createRequired bool) error {
 	owner := "schema " + s.name
 	factory := codegen.ToCamelCase(s.client)
 	if err := m.export(s.client, owner); err != nil {
@@ -646,7 +857,11 @@ func (m *module) client(s *schemaModel, ops []operationInfo, createRequired bool
 			s.base, s.base, writeOptions, s.base)
 	}
 	for _, op := range ops {
-		m.doc("  ", fmt.Sprintf("%s %s: %s", possessive(op.behavior), op.declaration.Name, op.declaration.Description))
+		doc := fmt.Sprintf("%s %s: %s", possessive(op.behavior), op.declaration.Name, op.declaration.Description)
+		if note := coreOperationNotes[op.behavior+"."+op.declaration.Name]; note != "" && op.core {
+			doc += " " + fmt.Sprintf(note, s.base)
+		}
+		m.doc("  ", doc)
 		optional := ""
 		if op.paramsOptional() {
 			optional = "?"
@@ -656,6 +871,18 @@ func (m *module) client(s *schemaModel, ops []operationInfo, createRequired bool
 		} else {
 			m.line("  %s(id: string, params%s: %s, options?: %s): Promise<%s>;", op.declaration.Name, optional, op.paramsType, writeOptions, op.resultType)
 		}
+	}
+	for _, sig := range signals {
+		if sig.send == "" {
+			continue
+		}
+		m.doc("  ", fmt.Sprintf("%s sends %s %s signal to the streams open on %s, as the policy lets its caller %s; nothing is stored, and past the engine's rate it is 429 rate_limited. %s",
+			sig.send, possessive(sig.behavior), sig.declaration.Name, behaviortypes.An(s.base), sig.declaration.Access, sig.declaration.Description))
+		optional := ""
+		if sig.dataOptional() {
+			optional = "?"
+		}
+		m.line("  %s(id: string, data%s: %s, options?: CallOptions): Promise<void>;", sig.send, optional, sig.dataType)
 	}
 	m.line("}")
 
@@ -696,6 +923,19 @@ func (m *module) client(s *schemaModel, ops []operationInfo, createRequired bool
 			m.line("    %s(id, params, options) {", op.declaration.Name)
 			m.line("      return client.instances.invoke<%s>(%s, id, %s, %s, options);", op.resultType, schemaName, behaviortypes.TSQuote(op.declaration.Name), params)
 		}
+		m.line("    },")
+	}
+	for _, sig := range signals {
+		if sig.send == "" {
+			continue
+		}
+		data := "data"
+		if sig.dataOptional() {
+			data = "data: data ?? {}"
+		}
+		m.line("    %s(id, data, options) {", sig.send)
+		m.line("      return client.signals.send({ schema: %s, instanceId: id, behavior: %s, name: %s, %s }, options);",
+			schemaName, behaviortypes.TSQuote(sig.behavior), behaviortypes.TSQuote(sig.declaration.Name), data)
 		m.line("    },")
 	}
 	m.line("  };")

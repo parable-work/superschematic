@@ -30,12 +30,29 @@ const (
 	DefaultLiteralEmptyArray
 )
 
+// DefaultNow is the V of Default<T, V> that makes a required date, time or
+// timestamp field of a DB table take the time of the insert (D88): its
+// column's DEFAULT is CURRENT_TIMESTAMP, CURRENT_DATE or CURRENT_TIME. The
+// database fills it in, so it is no decoder's default.
+const DefaultNow = "now"
+
+// IsDefaultNow reports whether value, the default of a single field of the
+// named type, is DefaultNow on a date, time or timestamp scalar.
+func IsDefaultNow(typeName string, value *string) bool {
+	if value == nil || *value != DefaultNow {
+		return false
+	}
+	traits := GuessScalarTraits(typeName)
+	return traits.IsDateTimeLike || traits.IsDateLike || traits.IsTimeLike
+}
+
 // ClassifyDefault determines the literal kind for a field's default value.
 // Fields with no default, or whose shape cannot be expressed as a single
 // scalar literal (arrays, maps, unions, relations, object refs, or scalars
-// without a recognised primitive), return DefaultLiteralUnknown.
+// without a recognised primitive), return DefaultLiteralUnknown, as does
+// DefaultNow, which the database fills in.
 func ClassifyDefault(field FieldInfo, enumLookup EnumLookup) DefaultLiteralKind {
-	if field.Default == nil {
+	if field.Default == nil || (!field.IsArray && !field.IsMap && IsDefaultNow(field.Type, field.Default)) {
 		return DefaultLiteralUnknown
 	}
 	if field.IsArray {

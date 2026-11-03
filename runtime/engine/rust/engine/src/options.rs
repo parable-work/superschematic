@@ -18,7 +18,8 @@
 //!   "values": { "thresholdBytes": 65536, "cacheBytes": 0, "maxBytes": 16777216 },
 //!   "runner": { "principal": { "subject": "runner", "permissions": [] } },
 //!   "retention": { "maxAgeMs": 86400000 },
-//!   "tools": { "keys": { "scalar": "x-scalar" } }
+//!   "tools": { "keys": { "scalar": "x-scalar" } },
+//!   "signals": { "perSecond": 20 }
 //! }
 //! ```
 //!
@@ -42,11 +43,12 @@ use crate::errors::{Error, Result};
 use crate::namespaces::NamespaceOptions;
 use crate::retention::RetentionOptions;
 use crate::runner::RunnerOptions;
+use crate::signals::SignalOptions;
 use crate::tools::ToolOptions;
 use crate::values::{ValueOptions, MIN_VALUE_THRESHOLD};
 
 /// The members [`EngineOptions::from_json`] takes.
-pub const OPTION_MEMBERS: [&str; 12] = [
+pub const OPTION_MEMBERS: [&str; 13] = [
     "path",
     "postgres",
     "busyTimeoutMs",
@@ -59,6 +61,7 @@ pub const OPTION_MEMBERS: [&str; 12] = [
     "runner",
     "retention",
     "tools",
+    "signals",
 ];
 
 const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
@@ -106,6 +109,9 @@ impl EngineOptions {
         let retention = member("retention")
             .map(RetentionOptions::from_json)
             .transpose()?;
+        let signals = member("signals")
+            .map(SignalOptions::from_json)
+            .transpose()?;
         let ids = member("ids").map(ids_of).transpose()?;
         let clock = member("clock").map(clock_of).transpose()?;
         let busy_timeout = match member("busyTimeoutMs") {
@@ -143,6 +149,9 @@ impl EngineOptions {
         }
         if let Some(clock) = clock {
             options.clock = clock;
+        }
+        if let Some(signals) = signals {
+            options.signals = signals;
         }
         Ok(options)
     }

@@ -139,7 +139,7 @@ func TestParseRejectsUnknownTopLevelKeyNextToExtensionTable(t *testing.T) {
 }
 
 func TestParseReadsPathsTable(t *testing.T) {
-	n, err := Parse([]byte("[paths]\nscalar_go = \"vendor/scalars/go\"\nhttp_runtime_rust = \"runtime/http/rust\"\nschema_runtime_rust = \"runtime/schema/rust\"\nengine_rust = \"runtime/engine/rust/engine\"\nengine_behaviors_rust = \"runtime/engine/rust/behaviors\"\nengine_workqueue_rust = \"runtime/engine-workqueue/rust\"\nengine_commerce_rust = \"runtime/engine-commerce/rust\"\nengine_abi_rust = \"runtime/engine/rust/abi\"\nengine_napi_rust = \"runtime/engine/rust/napi\"\n"), "test")
+	n, err := Parse([]byte("[paths]\nscalar_go = \"vendor/scalars/go\"\nhttp_runtime_rust = \"runtime/http/rust\"\nschema_runtime_rust = \"runtime/schema/rust\"\nengine_rust = \"runtime/engine/rust/engine\"\nengine_behaviors_rust = \"runtime/engine/rust/behaviors\"\nengine_workqueue_rust = \"runtime/engine-workqueue/rust\"\nengine_commerce_rust = \"runtime/engine-commerce/rust\"\nengine_abi_rust = \"runtime/engine/rust/abi\"\nengine_napi_rust = \"runtime/engine/rust/napi\"\nrules_adapter_rust = \"runtime/engine/rust/rules-adapter\"\nrules_behaviors_rust = \"runtime/engine/rust/rules-behaviors\"\n"), "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,6 +173,12 @@ func TestParseReadsPathsTable(t *testing.T) {
 	}
 	if want := filepath.Join("/repo", "runtime", "engine", "rust", "napi"); local.EngineNapiRust != want {
 		t.Fatalf("LocalPaths.EngineNapiRust = %q, want %q", local.EngineNapiRust, want)
+	}
+	if want := filepath.Join("/repo", "runtime", "engine", "rust", "rules-adapter"); local.RulesAdapterRust != want {
+		t.Fatalf("LocalPaths.RulesAdapterRust = %q, want %q", local.RulesAdapterRust, want)
+	}
+	if want := filepath.Join("/repo", "runtime", "engine", "rust", "rules-behaviors"); local.RulesBehaviorsRust != want {
+		t.Fatalf("LocalPaths.RulesBehaviorsRust = %q, want %q", local.RulesBehaviorsRust, want)
 	}
 	if local.SchemaIR != "" {
 		t.Fatalf("unset key must resolve to empty, got %q", local.SchemaIR)
@@ -737,6 +743,42 @@ func TestImplementationPaths(t *testing.T) {
 		_, err := Parse([]byte("[implementation_paths]\n"+tc.key+" = \""+tc.value+"\"\n"), "test")
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("implementation_paths.%s = %q: err = %v, want it to contain %q", tc.key, tc.value, err, tc.want)
+		}
+	}
+}
+
+// TestRustAppPaths: an app's crate is at the [implementation_paths]
+// rust_app template, apps/{app} by default, with the app's name in kebab
+// case and its API's; a template without {app} is refused; and the app's
+// crates are named after the API and the app (D78).
+func TestRustAppPaths(t *testing.T) {
+	d := Default()
+	if got, want := d.RustAppDir("/repo", "shop-stock", "StockBackoffice"), filepath.Join("/repo", "apps", "stock-backoffice"); got != want {
+		t.Fatalf("RustAppDir = %q, want %q", got, want)
+	}
+	if got := (Naming{}).RustAppDir("/repo", "shop-stock", "Backoffice"); got != filepath.Join("/repo", "apps", "backoffice") {
+		t.Fatalf("an empty naming's RustAppDir = %q, want the default", got)
+	}
+	if got := d.RustAppImplementationCrate("shop-stock", "Backoffice"); got != "schemas-shop-stock-backoffice-app" {
+		t.Fatalf("RustAppImplementationCrate = %q", got)
+	}
+	if got := d.RustAppCrate("shop-stack", "shop-stock-backoffice"); got != "schemas-shop-stack-shop-stock-backoffice-app" {
+		t.Fatalf("RustAppCrate = %q", got)
+	}
+	n, err := Parse([]byte("[implementation_paths]\nrust_app = \"rust-impl/{service}-{app}\"\n"), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := n.RustAppDir("/repo", "shop-stock", "Backoffice"), filepath.Join("/repo", "rust-impl", "shop-stock-backoffice"); got != want {
+		t.Fatalf("RustAppDir = %q, want %q", got, want)
+	}
+	for _, tc := range []struct{ value, want string }{
+		{"/abs/{app}", "implementation_paths.rust_app \"/abs/{app}\" is an absolute path"},
+		{"apps/{service}", "implementation_paths.rust_app \"apps/{service}\" does not contain {app}"},
+	} {
+		_, err := Parse([]byte("[implementation_paths]\nrust_app = \""+tc.value+"\"\n"), "test")
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("implementation_paths.rust_app = %q: err = %v, want it to contain %q", tc.value, err, tc.want)
 		}
 	}
 }

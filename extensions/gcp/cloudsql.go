@@ -95,7 +95,9 @@ func lowerDatabase(ctx registry.PlatformContext) (registry.Lowered, error) {
 		},
 	}}}
 	for _, svc := range d.Services {
-		name := suffixed(env, snake(svc.Name), "_")
+		// A database is named after its DB service, shortened when over
+		// Postgres's 63 characters (D97).
+		name, _ := fitted(env, snake(svc.Name), "_", 63)
 		if err := checkLength("the database name of "+svc.Name, name, 1, 63, "the DB service"); err != nil {
 			return registry.Lowered{}, err
 		}

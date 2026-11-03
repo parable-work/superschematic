@@ -203,6 +203,11 @@ type DecoratorSpec struct {
 	// a type argument in an extension slot.
 	typeArgs int
 
+	// typeArgAliases lets a type argument name an object type alias as
+	// well as a class: @query's params and row types, which a DB schema
+	// may write either way (D86).
+	typeArgAliases bool
+
 	// optionalArg lets the decorator be written without its argument when
 	// it has Args: @paginated() as well as @paginated({ maxLimit: 50 }).
 	// Apply then receives no argument. Only core decorators set it: the
@@ -224,6 +229,12 @@ func (s DecoratorSpec) RecordsErrors() bool {
 // decorator but the core ones that name a table (@projection, @join).
 func (s DecoratorSpec) TypeArgs() int {
 	return s.typeArgs
+}
+
+// TypeArgAliases reports whether a type argument may name an object type
+// alias of the schema as well as a class.
+func (s DecoratorSpec) TypeArgAliases() bool {
+	return s.typeArgAliases
 }
 
 // DeclaredIn reports whether pkg is one of the spec's authoring packages.
@@ -427,6 +438,23 @@ type GeneratorSpec struct {
 	// (D58). An API's own type never composes one: behaviors compose on
 	// DB types.
 	RendersBehaviors bool
+	// RendersFieldBehaviors marks a generator whose output covers what a
+	// behavior adds to a table that stays a table, implemented by it or
+	// anchored on a field (D103, ir.TypeDef.TableBehaviors): the columns
+	// of the fields it owns, which the loader adds as fields
+	// (ir.FieldDef.Behavior), read-only in a repository's inputs, its
+	// sub-tables and deadline queue, which the loader adds as types
+	// (ir.TypeDef.BehaviorTable and BehaviorQueue), and its operations,
+	// or nothing of the table at all. Run refuses to run a generator without it on a schema one of
+	// whose tables composes one, or that imports a DB service's table
+	// that does, rather than render the owned columns as writable or drop
+	// the operations. Of the core's generators, sql sets it, which writes
+	// the columns, and types, whose TypeScript package's repositories
+	// (orm.ts) read the owned columns and run the operations through the
+	// behaviors' core and whose other languages write the owned fields as
+	// any field; enginedoc, projectengine and envConfig, which read no
+	// table, set it too.
+	RendersFieldBehaviors bool
 	// ReadsCalls marks a generator whose output imports the SDK of each
 	// API the service calls: the core API server's Deps
 	// (docs/stack-model.md, section 8.5). The build plan runs it in the
@@ -484,6 +512,21 @@ func (ctx GenerateContext) Logf(format string, args ...any) {
 	if ctx.Options.Log != nil {
 		_, _ = fmt.Fprintf(ctx.Options.Log, format, args...)
 	}
+}
+
+// Warnf records a warning on the run's Result and writes it to the run's
+// log, "warning: " first, as the load writes the verification pass's
+// warnings (D100): what the run found that fails nothing now, such as a
+// package the build scaffolded once lacking a dependency its generated
+// neighbours need. A warning the run met before, as the server, the job
+// and the worker of one API meet it, is not recorded again.
+func (ctx GenerateContext) Warnf(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	if slices.Contains(ctx.Result.Warnings, msg) {
+		return
+	}
+	ctx.Result.Warnings = append(ctx.Result.Warnings, msg)
+	ctx.Logf("warning: %s\n", msg)
 }
 
 // Done records an output key written to dir.

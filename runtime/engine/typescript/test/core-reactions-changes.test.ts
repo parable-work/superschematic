@@ -58,6 +58,9 @@ function tickets(rules: unknown[], extra: BehaviorRef[] = []): Record<string, un
   return ticketSchema([ticketFlow, ...extra, { name: 'Reactions', config: { rules } }]);
 }
 
+// review is Revisions with a review step, whose propose moves pendingProposals.
+const review = { name: 'Revisions', config: { review: { permission: 'tickets.review' } } };
+
 function projects(): Record<string, unknown> {
   const document = schemaDocument('Project', [{ name: 'title', typeRef: { name: 'string' }, required: true }]) as {
     types: Record<string, Record<string, unknown>>;
@@ -188,7 +191,7 @@ for (const driver of drivers) {
       assert.deepEqual(moves(engine, 'Ticket', 'd'), [['triaged', 1]]);
     });
 
-    test("a behavior's field: Workflow.status as enters hears it, and Comments.commentCount moving from 0, the operation's patch read as a diff", () => {
+    test("a behavior's field: Workflow.status as enters hears it, and Revisions.pendingProposals moving from 0, the operation's patch read as a diff", () => {
       const engine = open();
       publish(engine, projects());
       publish(
@@ -196,22 +199,22 @@ for (const driver of drivers) {
         tickets(
           [
             { when: { changes: { field: 'Workflow.status', to: 'escalated' } }, then: { link: 'project', transition: 'active' } },
-            { when: { changes: { field: 'Comments.commentCount', from: 0 } }, then: { transition: 'triaged' } },
+            { when: { changes: { field: 'Revisions.pendingProposals', from: 0 } }, then: { transition: 'triaged' } },
           ],
-          [{ name: 'Comments' }, linksToProject]
+          [review, linksToProject]
         )
       );
       engine.instances.create(alice, 'Project', { title: 'Launch' }, { id: 'p1' });
       engine.instances.create(alice, 'Ticket', { title: 't1' }, { id: 't1', behaviors: { Links: { project: 'p1' } } });
-      // The first comment moves the count from 0 and triages the ticket; a comment's patch holds no status.
-      engine.instances.invoke(alice, 'Ticket', 't1', 'comment', { body: 'Seen it.' });
+      // The first proposal moves the count from 0 and triages the ticket; a proposal's patch holds no status.
+      engine.instances.invoke(alice, 'Ticket', 't1', 'propose', { patch: { title: 't1, seen' } });
       engine.runner.runDue();
       assert.deepEqual([status(engine, 'Ticket', 't1'), status(engine, 'Project', 'p1')], ['triaged', 'planned']);
       move(engine, 'Ticket', 't1', 'escalated');
       engine.runner.runDue();
       assert.equal(status(engine, 'Project', 'p1'), 'active');
-      // A second comment moves the count from 1: the ticket stays escalated.
-      engine.instances.invoke(alice, 'Ticket', 't1', 'comment', { body: 'Still there.' });
+      // A second proposal moves the count from 1: the ticket stays escalated.
+      engine.instances.invoke(alice, 'Ticket', 't1', 'propose', { patch: { title: 't1, still there' } });
       engine.runner.runDue();
       assert.equal(status(engine, 'Ticket', 't1'), 'escalated');
       assert.deepEqual(moves(engine, 'Ticket', 't1'), [['triaged', 1]]);
@@ -339,21 +342,21 @@ for (const driver of drivers) {
         tickets(
           [
             { when: { changes: { field: 'priority', to: 'urgent' } }, then: { transition: 'escalated' } },
-            { when: { changes: { field: 'Comments.commentCount', from: 0 } }, then: { transition: 'triaged' } },
+            { when: { changes: { field: 'Revisions.pendingProposals', from: 0 } }, then: { transition: 'triaged' } },
           ],
-          [{ name: 'Comments' }]
+          [review]
         )
       );
       const described = engine.tools.describe(alice, 'Ticket');
       assert.equal(
         described.behaviors.find((behavior) => behavior.name === 'Reactions')?.summary,
-        'After a change commits, the runner moves statuses by rules, through transition and its guards: when priority changes to "urgent", it moves to escalated; when Comments.commentCount changes from 0, it moves to triaged. A move a guard vetoes, or that no transition allows, is left undone.'
+        'After a change commits, the runner moves statuses by rules, through transition and its guards: when priority changes to "urgent", it moves to escalated; when Revisions.pendingProposals changes from 0, it moves to triaged. A move a guard vetoes, or that no transition allows, is left undone.'
       );
       const success = (name: string) => described.operations.find((operation) => operation.name === name)?.guidance.success ?? '';
-      for (const name of ['transition', 'create', 'update', 'comment']) {
+      for (const name of ['transition', 'create', 'update', 'propose', 'approve']) {
         assert.match(success(name), /Reactions' rules on Ticket may move it, or the instances it links to, again after the commit\./, name);
       }
-      assert.doesNotMatch(success('listComments'), /Reactions/);
+      assert.doesNotMatch(success('listProposals'), /Reactions/);
     });
 
     test("parseConfig refuses a field the type does not have, a volatile one and Workflow.enteredAt, and a changes rule's cycles on the status", () => {

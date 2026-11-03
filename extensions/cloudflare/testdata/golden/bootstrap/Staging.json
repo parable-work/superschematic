@@ -34,6 +34,9 @@
                 },
                 {
                   "id": "cce7bffb1614015a55f65573a0b0a36b"
+                },
+                {
+                  "id": "55c4499c9ffecd0dc801ed38c0756741"
                 }
               ],
               "resources": "{\"com.cloudflare.api.account.0123456789abcdef0123456789abcdef\":\"*\"}"

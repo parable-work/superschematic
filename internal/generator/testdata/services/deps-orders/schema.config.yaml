@@ -1,6 +1,7 @@
 # Takes its database from its one DB-kind dependency, calls deps-catalog,
-# which calls it back, and lists the bucket deps-media (D54). Its @envVars
-# type holds one setting beside the fields the three edges derive.
+# which calls it back, lists the bucket deps-media (D54) and the memory
+# store deps-cache (D75). Its @envVars type holds one setting beside the
+# fields the four edges derive.
 name: deps-orders
 kind: API
 dependencies:
@@ -9,6 +10,8 @@ calls:
   - { name: deps-catalog, kind: API }
 buckets:
   - { name: deps-media, kind: Bucket }
+memoryStores:
+  - { name: deps-cache, kind: MemoryStore }
 outputs:
   types:
     go: { enabled: true }

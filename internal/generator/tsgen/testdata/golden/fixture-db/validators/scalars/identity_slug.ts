@@ -2,6 +2,12 @@
 
 import type { ScalarValidationResult, ValidationError } from 'superscalar/validation';
 
+// The constructors of IdentitySlug, the scalar library's own, which the
+// package hands out beside the type: each returns the value as
+// IdentitySlug and throws on a value Identity.Slug refuses (D25,
+// amended; D100).
+export { parseIdentitySlugStrict, normalizeIdentitySlugStrict } from 'superscalar/scalars';
+
 const IdentitySlugPattern = new RegExp("^[a-z0-9]+(?:[-_][a-z0-9]+)*$", "u");
 
 /**

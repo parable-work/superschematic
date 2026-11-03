@@ -18,7 +18,11 @@ export const authenticate: Authenticator = async (ctx) => {
   return token === 'alice' || token === 'bob' || token === 'reader' || token === 'outsider' ? { subject: token, permissions: [] } : null;
 };
 
+/** reader may only read, outsider nothing; only alice may act for someone (D77). */
 export const policy: AccessPolicy = ({ principal, action }) => {
+  if (principal.actingFor !== undefined && principal.subject !== 'alice') {
+    return false;
+  }
   if (principal.subject === 'outsider') {
     return false;
   }

@@ -3,6 +3,9 @@
 export * from './interfaces';
 export * from './router';
 export * from './deps';
+{{- if .HasBehaviorWorkers }}
+export * from './behavior-workers';
+{{- end }}
 {{- if .HasEnvConfig }}
 export * from './config';
 {{- end }}

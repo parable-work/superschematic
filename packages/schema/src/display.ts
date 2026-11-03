@@ -52,7 +52,7 @@ export interface DisplayConfig {
   readonly transitions?: Readonly<Record<string, Readonly<Record<string, string>>>>;
 }
 
-/** @display's argument on a field. Give one member. */
+/** @display's argument on a field. Give at least one member. */
 export interface FieldDisplayConfig {
   /**
    * A control of several lines (true) or one line (false), whatever the
@@ -60,6 +60,16 @@ export interface FieldDisplayConfig {
    * must not be secret.
    */
   readonly multiline?: boolean;
+  /**
+   * The currency of the amount the field holds, in that currency's minor
+   * units: an active ISO 4217 code in capitals (`"GBP"`), or a field of
+   * the same type that holds the code, a `Finance.Currency` or text
+   * (`{ field: "currency" }`). The field must hold `Finance.Money` or
+   * another integer scalar, or a list of them. A `Finance.Money` field
+   * without it takes its type's one `Finance.Currency` field, when the
+   * type has exactly one.
+   */
+  readonly currency?: string | { readonly field: string };
 }
 
 /**
@@ -70,10 +80,11 @@ export interface FieldDisplayConfig {
  */
 export function display(config: DisplayConfig): ClassDecorator;
 /**
- * Says how a UI renders the field's control: `@display({ multiline: true })`
- * asks for one that holds several lines. It adds no storage or validation,
- * and changes no generated code. A field takes one; an operation and an
- * argument take none.
+ * Says how a UI renders the field's control and its value:
+ * `@display({ multiline: true })` asks for a control that holds several
+ * lines, and `@display({ currency: "GBP" })` shows an amount in pounds. It
+ * adds no storage or validation, and changes no type, SDK or server code.
+ * A field takes one; an operation and an argument take none.
  */
 export function display(config: FieldDisplayConfig): PropertyDecorator;
 export function display(_config: DisplayConfig | FieldDisplayConfig): ClassDecorator & PropertyDecorator {

@@ -65,6 +65,7 @@ dependencies = [
  "axum",
  "serde",
  "serde_json",
+ "superscalar",
  "superschematic-engine",
  "tokio",
  "topcoat",

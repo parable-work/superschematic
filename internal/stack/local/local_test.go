@@ -754,6 +754,69 @@ func TestRunnerProcess(t *testing.T) {
 	}
 }
 
+// TestDeriverProcess: a deriver (D74) is a process of its own, as a worker
+// is: the entrypoint module the build writes at server/<stack>/<deriver>,
+// in its API's TypeScript, no port, ready once it starts, its API's
+// environment with WORKER_CONCURRENCY its concurrency; the provisioner's
+// program reads it as a deriver's process; and one an environment turns
+// off has no process.
+func TestDeriverProcess(t *testing.T) {
+	services := tsOrdersShop()
+	for i := range services {
+		switch services[i].Name {
+		case "shop-db":
+			services[i].Engine, services[i].Derived = true, []string{"Ticket"}
+		case stacktest.ShopOrders.Name:
+			services[i].Derivers = []ir.Deriver{{Name: "TriageTickets", Concurrency: 3}}
+		}
+	}
+	const deriver = "shop-orders-triage-tickets"
+	env := resolve(t, assemble(t), shop(), services, "Dev")
+	d := env.Deployable(deriver)
+	if d == nil || d.Kind != ir.DeployableDeriver || d.Platform != local.DeriverPlatform || d.Language != registry.APILanguageTypeScript {
+		t.Fatalf("the deriver is %+v", d)
+	}
+	process := env.Resources.Resource(deriver + ".process")
+	if process == nil {
+		t.Fatalf("no process for %s", deriver)
+	}
+	if process.Properties["kind"] != "deriver" || process.Properties["language"] != "typescript" || process.Properties["readiness"] != local.ReadinessStarted || process.Properties["port"] != nil {
+		t.Errorf("the deriver's process = %v", process.Properties)
+	}
+	concurrency := false
+	for _, v := range process.Properties["env"].([]any) {
+		if v := v.(map[string]any); v["name"] == local.WorkerConcurrencyVariable {
+			concurrency = v["value"] == "3"
+		}
+	}
+	if !concurrency {
+		t.Errorf("the deriver's env = %v, want %s=3", process.Properties["env"], local.WorkerConcurrencyVariable)
+	}
+	prog, err := local.ProgramOf(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, s := range prog.Servers {
+		if s.Deployable == deriver {
+			found = true
+			if s.Kind != "deriver" || s.Port != 0 || s.Readiness != local.ReadinessStarted || s.Binary != "" {
+				t.Errorf("the deriver's process = %+v", s)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("the program runs no %s: %+v", deriver, prog.Servers)
+	}
+
+	off := false
+	s := shop()
+	s.Environments[0].Settings = append(s.Environments[0].Settings, &ir.DeployableSettings{Of: stacktest.DeriverOf(stacktest.ShopOrders, "TriageTickets"), Enabled: &off})
+	if env := resolve(t, assemble(t), s, services, "Dev"); env.Resources.Resource(deriver+".process") != nil {
+		t.Errorf("a deriver turned off has a process")
+	}
+}
+
 // serverVariable is the value of variable name in the process of server.
 func serverVariable(t *testing.T, env *ir.ResolvedEnvironment, server, name string) any {
 	t.Helper()

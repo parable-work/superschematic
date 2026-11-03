@@ -237,3 +237,28 @@ func TestTheSchemaDeclaresInOrder(t *testing.T) {
 	assert.Contains(t, text, `@stack({ deploy: [NotesApi, NotesIndex, NotesWeb], expose: [NotesApi] })`)
 	assert.Contains(t, text, `@environment({ target: "fake", fake: { project: "notes-staging", region: "us-east1" } })`)
 }
+
+// TestTheSchemaExposesEveryApp: init exposes every @app of a deployed API
+// after the services, as { of, app }, and says why (D78).
+func TestTheSchemaExposesEveryApp(t *testing.T) {
+	reg := assemble(t)
+	naming.SetActive(naming.Default())
+	plan := goldenPlan()
+	apis := map[string]*ir.Schema{
+		"notes-api":   {Name: "notes-api", Kind: ir.SchemaKindAPI, Apps: []*ir.App{{Name: "Backoffice"}, {Name: "Reports"}}},
+		"notes-index": {Name: "notes-index", Kind: ir.SchemaKindAPI},
+		"notes-web":   {Name: "notes-web", Kind: ir.SchemaKindSite, Apps: []*ir.App{{Name: "NotAnApi"}}},
+	}
+	plan.ExposeApps = stackinit.AppsOf(plan.Deploy, apis)
+	assert.Equal(t, []stackinit.AppRef{{API: "notes-api", App: "Backoffice"}, {API: "notes-api", App: "Reports"}}, plan.ExposeApps)
+	schema, err := stackinit.Schema(plan, reg)
+	require.NoError(t, err)
+	text := string(schema)
+	assert.Contains(t, text, `expose: [NotesApi, { of: NotesApi, app: "Backoffice" }, { of: NotesApi, app: "Reports" }]`)
+	assert.Contains(t, text, "It exposes every app of those APIs too")
+
+	plan.ExposeApps = nil
+	schema, err = stackinit.Schema(plan, reg)
+	require.NoError(t, err)
+	assert.NotContains(t, string(schema), "every app")
+}

@@ -100,6 +100,37 @@ fn decode<T: DeserializeOwned>(argument: &str, value: Value) -> Result<T, Proble
     })
 }
 
+/// The arguments of order.getInvoice, as browser code builds them.
+#[record]
+#[derive(Debug, Clone, PartialEq)]
+pub struct OrderGetInvoiceArgsRecord {
+    pub number: String,
+}
+
+impl OrderGetInvoiceArgsRecord {
+    /// The operation's arguments: each field's JSON, as a request carries
+    /// it, decoded into its Rust type.
+    pub fn to_args(&self) -> Result<crate::api::OrderGetInvoiceArgs, ProblemRecord> {
+        Ok(crate::api::OrderGetInvoiceArgs {
+            number: decode("number", wire::put_string(&self.number))?,
+        })
+    }
+}
+
+/// order.getInvoice, called from the browser.
+#[procedure("/_superschematic/fixture-views-api/order/get-invoice")]
+pub async fn order_get_invoice(cx: &Cx, args: OrderGetInvoiceArgsRecord) -> topcoat::Result<Result<InvoiceRecord, ProblemRecord>> {
+    Ok(call_order_get_invoice(cx, args).await)
+}
+
+/// The body of the order_get_invoice procedure.
+pub async fn call_order_get_invoice(cx: &Cx, args: OrderGetInvoiceArgsRecord) -> Result<InvoiceRecord, ProblemRecord> {
+    let args = args.to_args()?;
+    let value = operations::order_get_invoice(cx, args).await?;
+    let json = serde_json::to_value(&value).unwrap_or_default();
+    Ok(InvoiceRecord::from_wire(&json))
+}
+
 /// The arguments of order.getOrder, as browser code builds them.
 #[record]
 #[derive(Debug, Clone, PartialEq)]

@@ -1,0 +1,30 @@
+{
+  "dialect": "sqlite",
+  "expanded": "38890b710ee2d56f53bf96160cca4d2579b7c2319fbd52780d217281f22ba4a1",
+  "from": "38890b710ee2d56f53bf96160cca4d2579b7c2319fbd52780d217281f22ba4a1",
+  "hash": "f3cfcf20d90bc2b2c474c190c25e18eff2f4a5c7ff09cd08e49d9875ab260ac8",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "raw-sql",
+          "id": "raw-sql:rawSql/order_code_lower",
+          "reason": "The raw SQL order_code_lower is no longer declared: the step runs its down; the planner cannot judge what it does.",
+          "subject": "rawSql/order_code_lower"
+        }
+      ],
+      "index": 1,
+      "op": "undoRawSQL",
+      "phase": "contract",
+      "statements": [
+        "DROP INDEX IF EXISTS order_code_lower"
+      ],
+      "subject": "rawSql/order_code_lower",
+      "transactional": true
+    }
+  ],
+  "to": "d9697f8b128d88e9877145068feef31d9bdfa8a6c367bd3cdbd76a76318119f0",
+  "toModel": null,
+  "version": 1
+}

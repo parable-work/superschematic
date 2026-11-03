@@ -54,6 +54,22 @@ func TestReadsTheQueueDocuments(t *testing.T) {
 	}
 }
 
+// TestReadsTheBackfillDocument reads the golden backfill document of
+// fixture-queue-db's OrderChanged (D88): a backfill with one statement,
+// which counts what it enqueues, beside the queue's operator statements.
+func TestReadsTheBackfillDocument(t *testing.T) {
+	q, err := migrate.ReadQueueDocument(queueGolden(t, filepath.Join("..", "..", ".."), "backfill"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q.Service != "fixture-queue-db" || q.Queue != "OrderChanged" || q.Operation != migrate.QueueBackfill || q.Limit != 0 || len(q.IDs) != 0 || q.All {
+		t.Fatalf("read %+v", q)
+	}
+	if len(q.Statements.Backfill) != 1 || !strings.Contains(q.Statements.Backfill[0], "INSERT INTO order_changed_queue") || !strings.Contains(q.Statements.Backfill[0], "SELECT count(*) FROM enqueued") {
+		t.Fatalf("the backfill's statements: %q", q.Statements.Backfill)
+	}
+}
+
 // TestReadQueueDocumentRefuses refuses a document of another version, an
 // operation with what it does not take or without what it needs, an ID that
 // is no lower-case UUID or is listed twice, and a missing statement.
@@ -79,7 +95,10 @@ func TestReadQueueDocumentRefuses(t *testing.T) {
 		"version":        {edit(func(d map[string]any) { d["version"] = 2 }), "version 2; this runner reads version 1"},
 		"unknown member": {edit(func(d map[string]any) { d["sql"] = "DROP TABLE x" }), `unknown field "sql"`},
 		"no queue":       {edit(func(d map[string]any) { delete(d, "queue") }), "names no service or no queue"},
-		"operation":      {edit(func(d map[string]any) { d["operation"] = "prune" }), `operation "prune" is not dead, retry or drop`},
+		"operation":      {edit(func(d map[string]any) { d["operation"] = "prune" }), `operation "prune" is not dead, retry, drop or backfill`},
+		"backfill ids":   {edit(func(d map[string]any) { d["operation"] = "backfill" }), "backfill takes no limit, no ids and no all"},
+		"backfill none":  {edit(func(d map[string]any) { d["operation"] = "backfill"; delete(d, "ids") }), "backfill has no backfill statement"},
+		"retry backfill": {edit(func(d map[string]any) { d["statements"].(map[string]any)["backfill"] = []string{"SELECT 1"} }), "retry takes no backfill statement"},
 		"ids and all":    {edit(func(d map[string]any) { d["all"] = true }), "retry takes either ids or all"},
 		"neither":        {edit(func(d map[string]any) { delete(d, "ids") }), "retry takes either ids or all"},
 		"limit on retry": {edit(func(d map[string]any) { d["limit"] = 5 }), "retry takes no limit"},

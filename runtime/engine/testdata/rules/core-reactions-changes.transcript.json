@@ -1,0 +1,4475 @@
+{
+  "file": "core-reactions-changes",
+  "source": "runtime/engine/testdata/scenarios/core-reactions-changes.json",
+  "behaviors": [
+    "Workflow",
+    "Reactions",
+    "Timers"
+  ],
+  "scenarios": [
+    {
+      "name": "Reactions' changes (node) > an own field: a create moves it from absent, an update that moves it fires, and one that leaves it fires nothing",
+      "clock": "wall",
+      "types": [
+        {
+          "name": "Ticket",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "priority",
+              "type": "string"
+            },
+            {
+              "name": "body",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Ticket",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "new",
+                      "triaged",
+                      "escalated",
+                      "closed"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "new",
+                        "to": "triaged"
+                      },
+                      {
+                        "from": "new",
+                        "to": "escalated"
+                      },
+                      {
+                        "from": "triaged",
+                        "to": "escalated"
+                      },
+                      {
+                        "from": "escalated",
+                        "to": "triaged"
+                      },
+                      {
+                        "from": "triaged",
+                        "to": "closed"
+                      },
+                      {
+                        "from": "escalated",
+                        "to": "closed"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Reactions",
+                  "config": {
+                    "rules": [
+                      {
+                        "when": {
+                          "changes": {
+                            "field": "priority",
+                            "to": "urgent"
+                          }
+                        },
+                        "then": {
+                          "transition": "escalated"
+                        }
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "priority",
+                  "type": "string"
+                },
+                {
+                  "name": "body",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Ticket",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "new",
+                    "triaged",
+                    "escalated",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "new",
+                      "to": "triaged"
+                    },
+                    {
+                      "from": "new",
+                      "to": "escalated"
+                    },
+                    {
+                      "from": "triaged",
+                      "to": "escalated"
+                    },
+                    {
+                      "from": "escalated",
+                      "to": "triaged"
+                    },
+                    {
+                      "from": "triaged",
+                      "to": "closed"
+                    },
+                    {
+                      "from": "escalated",
+                      "to": "closed"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Reactions",
+                "config": {
+                  "rules": [
+                    {
+                      "when": {
+                        "changes": {
+                          "field": "priority",
+                          "to": "urgent"
+                        }
+                      },
+                      "then": {
+                        "transition": "escalated"
+                      }
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priority",
+                "type": "string"
+              },
+              {
+                "name": "body",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Ticket",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "new",
+                    "triaged",
+                    "escalated",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "new",
+                      "to": "triaged"
+                    },
+                    {
+                      "from": "new",
+                      "to": "escalated"
+                    },
+                    {
+                      "from": "triaged",
+                      "to": "escalated"
+                    },
+                    {
+                      "from": "escalated",
+                      "to": "triaged"
+                    },
+                    {
+                      "from": "triaged",
+                      "to": "closed"
+                    },
+                    {
+                      "from": "escalated",
+                      "to": "closed"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Reactions",
+                "config": {
+                  "rules": [
+                    {
+                      "when": {
+                        "changes": {
+                          "field": "priority",
+                          "to": "urgent"
+                        }
+                      },
+                      "then": {
+                        "transition": "escalated"
+                      }
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priority",
+                "type": "string"
+              },
+              {
+                "name": "body",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600003,
+            "action": {
+              "kind": "create",
+              "id": "a",
+              "own": {
+                "title": "a",
+                "priority": "urgent"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "a",
+            "row": {
+              "own": {
+                "title": "a",
+                "priority": "urgent"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "new",
+                  "enteredAt": 1767225600003
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600004,
+            "action": {
+              "kind": "create",
+              "id": "b",
+              "own": {
+                "title": "b",
+                "priority": "low"
+              },
+              "params": {}
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "key": "b",
+            "row": {
+              "own": {
+                "title": "b",
+                "priority": "low"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "new",
+                  "enteredAt": 1767225600004
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600006,
+            "action": {
+              "kind": "change",
+              "key": "a",
+              "change": {
+                "write": "insert",
+                "at": 1767225600003,
+                "after": {
+                  "own": {
+                    "title": "a",
+                    "priority": "urgent"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "new",
+                      "enteredAt": 1767225600003
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "a",
+                "priority": "urgent"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "escalated",
+                  "enteredAt": 1767225600006
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600007,
+            "action": {
+              "kind": "change",
+              "key": "b",
+              "change": {
+                "write": "insert",
+                "at": 1767225600004,
+                "after": {
+                  "own": {
+                    "title": "b",
+                    "priority": "low"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "new",
+                      "enteredAt": 1767225600004
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "b",
+                "priority": "low"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "new",
+                  "enteredAt": 1767225600004
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600008,
+            "action": {
+              "kind": "change",
+              "key": "a",
+              "change": {
+                "write": "update",
+                "at": 1767225600006,
+                "before": {
+                  "own": {
+                    "title": "a",
+                    "priority": "urgent"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "new",
+                      "enteredAt": 1767225600003
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "a",
+                    "priority": "urgent"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "escalated",
+                      "enteredAt": 1767225600006
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "a",
+                "priority": "urgent"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "escalated",
+                  "enteredAt": 1767225600006
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600013,
+            "action": {
+              "kind": "update",
+              "key": "b",
+              "patch": {
+                "title": "b, again"
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "b, again",
+                "priority": "low"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "new",
+                  "enteredAt": 1767225600004
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600015,
+            "action": {
+              "kind": "change",
+              "key": "b",
+              "change": {
+                "write": "update",
+                "at": 1767225600013,
+                "before": {
+                  "own": {
+                    "title": "b",
+                    "priority": "low"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "new",
+                      "enteredAt": 1767225600004
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "b, again",
+                    "priority": "low"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "new",
+                      "enteredAt": 1767225600004
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "b, again",
+                "priority": "low"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "new",
+                  "enteredAt": 1767225600004
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 14,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600017,
+            "action": {
+              "kind": "update",
+              "key": "b",
+              "patch": {
+                "priority": "urgent"
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "b, again",
+                "priority": "urgent"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "new",
+                  "enteredAt": 1767225600004
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 15,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600019,
+            "action": {
+              "kind": "change",
+              "key": "b",
+              "change": {
+                "write": "update",
+                "at": 1767225600017,
+                "before": {
+                  "own": {
+                    "title": "b, again",
+                    "priority": "low"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "new",
+                      "enteredAt": 1767225600004
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "b, again",
+                    "priority": "urgent"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "new",
+                      "enteredAt": 1767225600004
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "b, again",
+                "priority": "urgent"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "escalated",
+                  "enteredAt": 1767225600019
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 15,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600020,
+            "action": {
+              "kind": "change",
+              "key": "b",
+              "change": {
+                "write": "update",
+                "at": 1767225600019,
+                "before": {
+                  "own": {
+                    "title": "b, again",
+                    "priority": "urgent"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "new",
+                      "enteredAt": 1767225600004
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "b, again",
+                    "priority": "urgent"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "escalated",
+                      "enteredAt": 1767225600019
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "b, again",
+                "priority": "urgent"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "escalated",
+                  "enteredAt": 1767225600019
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 17,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600022,
+            "action": {
+              "kind": "operation",
+              "key": "b",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "triaged"
+              }
+            },
+            "request": "request-11"
+          },
+          "expect": {
+            "result": {
+              "from": "escalated",
+              "to": "triaged"
+            },
+            "row": {
+              "own": {
+                "title": "b, again",
+                "priority": "urgent"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "triaged",
+                  "enteredAt": 1767225600022
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 18,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600023,
+            "action": {
+              "kind": "update",
+              "key": "b",
+              "patch": {
+                "priority": "urgent",
+                "title": "b, the third"
+              }
+            },
+            "request": "request-12"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "b, the third",
+                "priority": "urgent"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "triaged",
+                  "enteredAt": 1767225600022
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 19,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600025,
+            "action": {
+              "kind": "change",
+              "key": "b",
+              "change": {
+                "write": "update",
+                "at": 1767225600022,
+                "before": {
+                  "own": {
+                    "title": "b, again",
+                    "priority": "urgent"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "escalated",
+                      "enteredAt": 1767225600019
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "b, again",
+                    "priority": "urgent"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "triaged",
+                      "enteredAt": 1767225600022
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-13"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "b, the third",
+                "priority": "urgent"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "triaged",
+                  "enteredAt": 1767225600022
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 19,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600026,
+            "action": {
+              "kind": "change",
+              "key": "b",
+              "change": {
+                "write": "update",
+                "at": 1767225600023,
+                "before": {
+                  "own": {
+                    "title": "b, again",
+                    "priority": "urgent"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "triaged",
+                      "enteredAt": 1767225600022
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "b, the third",
+                    "priority": "urgent"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "triaged",
+                      "enteredAt": 1767225600022
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-14"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "b, the third",
+                "priority": "urgent"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "triaged",
+                  "enteredAt": 1767225600022
+                }
+              }
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 7,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 8,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 9,
+          "call": "events.read",
+          "reason": "a read of the engine's event log that holds what a table's writes do not: a Links operation, which a table writes as an update of its relation's column, or a move a rule made, which a change command writes as an update of the row's owned fields (D103)"
+        },
+        {
+          "step": 10,
+          "call": "events.read",
+          "reason": "a read of the engine's event log that holds what a table's writes do not: a Links operation, which a table writes as an update of its relation's column, or a move a rule made, which a change command writes as an update of the row's owned fields (D103)"
+        },
+        {
+          "step": 13,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 16,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 20,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 21,
+          "call": "events.read",
+          "reason": "a read of the engine's event log that holds what a table's writes do not: a Links operation, which a table writes as an update of its relation's column, or a move a rule made, which a change command writes as an update of the row's owned fields (D103)"
+        }
+      ]
+    },
+    {
+      "name": "Reactions' changes (node) > from and to: only a move from the one value to the other fires, and a create moves a field from no value",
+      "clock": "wall",
+      "types": [
+        {
+          "name": "Ticket",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "priority",
+              "type": "string"
+            },
+            {
+              "name": "body",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Ticket",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "new",
+                      "triaged",
+                      "escalated",
+                      "closed"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "new",
+                        "to": "triaged"
+                      },
+                      {
+                        "from": "new",
+                        "to": "escalated"
+                      },
+                      {
+                        "from": "triaged",
+                        "to": "escalated"
+                      },
+                      {
+                        "from": "escalated",
+                        "to": "triaged"
+                      },
+                      {
+                        "from": "triaged",
+                        "to": "closed"
+                      },
+                      {
+                        "from": "escalated",
+                        "to": "closed"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Reactions",
+                  "config": {
+                    "rules": [
+                      {
+                        "when": {
+                          "changes": {
+                            "field": "priority",
+                            "from": "urgent",
+                            "to": "low"
+                          }
+                        },
+                        "then": {
+                          "transition": "triaged"
+                        }
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "priority",
+                  "type": "string"
+                },
+                {
+                  "name": "body",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Ticket",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "new",
+                    "triaged",
+                    "escalated",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "new",
+                      "to": "triaged"
+                    },
+                    {
+                      "from": "new",
+                      "to": "escalated"
+                    },
+                    {
+                      "from": "triaged",
+                      "to": "escalated"
+                    },
+                    {
+                      "from": "escalated",
+                      "to": "triaged"
+                    },
+                    {
+                      "from": "triaged",
+                      "to": "closed"
+                    },
+                    {
+                      "from": "escalated",
+                      "to": "closed"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Reactions",
+                "config": {
+                  "rules": [
+                    {
+                      "when": {
+                        "changes": {
+                          "field": "priority",
+                          "from": "urgent",
+                          "to": "low"
+                        }
+                      },
+                      "then": {
+                        "transition": "triaged"
+                      }
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priority",
+                "type": "string"
+              },
+              {
+                "name": "body",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Ticket",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "new",
+                    "triaged",
+                    "escalated",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "new",
+                      "to": "triaged"
+                    },
+                    {
+                      "from": "new",
+                      "to": "escalated"
+                    },
+                    {
+                      "from": "triaged",
+                      "to": "escalated"
+                    },
+                    {
+                      "from": "escalated",
+                      "to": "triaged"
+                    },
+                    {
+                      "from": "triaged",
+                      "to": "closed"
+                    },
+                    {
+                      "from": "escalated",
+                      "to": "closed"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Reactions",
+                "config": {
+                  "rules": [
+                    {
+                      "when": {
+                        "changes": {
+                          "field": "priority",
+                          "from": "urgent",
+                          "to": "low"
+                        }
+                      },
+                      "then": {
+                        "transition": "triaged"
+                      }
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priority",
+                "type": "string"
+              },
+              {
+                "name": "body",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600003,
+            "action": {
+              "kind": "create",
+              "id": "d",
+              "own": {
+                "title": "d",
+                "priority": "low"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "d",
+            "row": {
+              "own": {
+                "title": "d",
+                "priority": "low"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "new",
+                  "enteredAt": 1767225600003
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600004,
+            "action": {
+              "kind": "operation",
+              "key": "d",
+              "useId": "Workflow",
+              "operation": "transition",
+              "params": {
+                "to": "escalated"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "from": "new",
+              "to": "escalated"
+            },
+            "row": {
+              "own": {
+                "title": "d",
+                "priority": "low"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "escalated",
+                  "enteredAt": 1767225600004
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600005,
+            "action": {
+              "kind": "update",
+              "key": "d",
+              "patch": {
+                "priority": "urgent"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "d",
+                "priority": "urgent"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "escalated",
+                  "enteredAt": 1767225600004
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600006,
+            "action": {
+              "kind": "update",
+              "key": "d",
+              "patch": {
+                "priority": "normal"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "d",
+                "priority": "normal"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "escalated",
+                  "enteredAt": 1767225600004
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600007,
+            "action": {
+              "kind": "update",
+              "key": "d",
+              "patch": {
+                "priority": "urgent"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "d",
+                "priority": "urgent"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "escalated",
+                  "enteredAt": 1767225600004
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600009,
+            "action": {
+              "kind": "change",
+              "key": "d",
+              "change": {
+                "write": "insert",
+                "at": 1767225600003,
+                "after": {
+                  "own": {
+                    "title": "d",
+                    "priority": "low"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "new",
+                      "enteredAt": 1767225600003
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "d",
+                "priority": "urgent"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "escalated",
+                  "enteredAt": 1767225600004
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600010,
+            "action": {
+              "kind": "change",
+              "key": "d",
+              "change": {
+                "write": "update",
+                "at": 1767225600004,
+                "before": {
+                  "own": {
+                    "title": "d",
+                    "priority": "low"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "new",
+                      "enteredAt": 1767225600003
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "d",
+                    "priority": "low"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "escalated",
+                      "enteredAt": 1767225600004
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "d",
+                "priority": "urgent"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "escalated",
+                  "enteredAt": 1767225600004
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600011,
+            "action": {
+              "kind": "change",
+              "key": "d",
+              "change": {
+                "write": "update",
+                "at": 1767225600005,
+                "before": {
+                  "own": {
+                    "title": "d",
+                    "priority": "low"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "escalated",
+                      "enteredAt": 1767225600004
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "d",
+                    "priority": "urgent"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "escalated",
+                      "enteredAt": 1767225600004
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "d",
+                "priority": "urgent"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "escalated",
+                  "enteredAt": 1767225600004
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600012,
+            "action": {
+              "kind": "change",
+              "key": "d",
+              "change": {
+                "write": "update",
+                "at": 1767225600006,
+                "before": {
+                  "own": {
+                    "title": "d",
+                    "priority": "urgent"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "escalated",
+                      "enteredAt": 1767225600004
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "d",
+                    "priority": "normal"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "escalated",
+                      "enteredAt": 1767225600004
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "d",
+                "priority": "urgent"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "escalated",
+                  "enteredAt": 1767225600004
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600013,
+            "action": {
+              "kind": "change",
+              "key": "d",
+              "change": {
+                "write": "update",
+                "at": 1767225600007,
+                "before": {
+                  "own": {
+                    "title": "d",
+                    "priority": "normal"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "escalated",
+                      "enteredAt": 1767225600004
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "d",
+                    "priority": "urgent"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "escalated",
+                      "enteredAt": 1767225600004
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "d",
+                "priority": "urgent"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "escalated",
+                  "enteredAt": 1767225600004
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600015,
+            "action": {
+              "kind": "update",
+              "key": "d",
+              "patch": {
+                "priority": "low"
+              }
+            },
+            "request": "request-11"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "d",
+                "priority": "low"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "escalated",
+                  "enteredAt": 1767225600004
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600017,
+            "action": {
+              "kind": "change",
+              "key": "d",
+              "change": {
+                "write": "update",
+                "at": 1767225600015,
+                "before": {
+                  "own": {
+                    "title": "d",
+                    "priority": "urgent"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "escalated",
+                      "enteredAt": 1767225600004
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "d",
+                    "priority": "low"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "escalated",
+                      "enteredAt": 1767225600004
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-12"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "d",
+                "priority": "low"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "triaged",
+                  "enteredAt": 1767225600017
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600018,
+            "action": {
+              "kind": "change",
+              "key": "d",
+              "change": {
+                "write": "update",
+                "at": 1767225600017,
+                "before": {
+                  "own": {
+                    "title": "d",
+                    "priority": "low"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "escalated",
+                      "enteredAt": 1767225600004
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "d",
+                    "priority": "low"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "triaged",
+                      "enteredAt": 1767225600017
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-13"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "d",
+                "priority": "low"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "triaged",
+                  "enteredAt": 1767225600017
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 14,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600020,
+            "action": {
+              "kind": "update",
+              "key": "d",
+              "patch": {
+                "priority": null
+              }
+            },
+            "request": "request-14"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "d"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "triaged",
+                  "enteredAt": 1767225600017
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 15,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600022,
+            "action": {
+              "kind": "change",
+              "key": "d",
+              "change": {
+                "write": "update",
+                "at": 1767225600020,
+                "before": {
+                  "own": {
+                    "title": "d",
+                    "priority": "low"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "triaged",
+                      "enteredAt": 1767225600017
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "d"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "triaged",
+                      "enteredAt": 1767225600017
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-15"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "d"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "triaged",
+                  "enteredAt": 1767225600017
+                }
+              }
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 10,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 13,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 16,
+          "call": "events.read",
+          "reason": "a read of the engine's event log that holds what a table's writes do not: a Links operation, which a table writes as an update of its relation's column, or a move a rule made, which a change command writes as an update of the row's owned fields (D103)"
+        }
+      ]
+    },
+    {
+      "name": "Reactions' changes (node) > a behavior's field: Workflow.status as enters hears it, and Revisions.pendingProposals moving from 0, the operation's patch read as a diff",
+      "clock": "wall",
+      "types": [],
+      "steps": [],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it composes behaviors the core does not run: Revisions"
+        },
+        {
+          "step": 2,
+          "call": "schemas.define",
+          "reason": "it composes behaviors the core does not run: Revisions"
+        },
+        {
+          "step": 3,
+          "call": "schemas.publish",
+          "reason": "it composes behaviors the core does not run: Revisions"
+        },
+        {
+          "step": 4,
+          "call": "schemas.define",
+          "reason": "it composes behaviors the core does not run: Revisions"
+        },
+        {
+          "step": 5,
+          "call": "schemas.publish",
+          "reason": "it composes behaviors the core does not run: Revisions"
+        },
+        {
+          "step": 6,
+          "call": "instances.create",
+          "reason": "it composes behaviors the core does not run: Revisions"
+        },
+        {
+          "step": 7,
+          "call": "instances.create",
+          "reason": "it composes behaviors the core does not run: Revisions"
+        },
+        {
+          "step": 8,
+          "call": "instances.invoke",
+          "reason": "it composes behaviors the core does not run: Revisions"
+        },
+        {
+          "step": 9,
+          "call": "runner.runDue",
+          "reason": "it composes behaviors the core does not run: Revisions"
+        },
+        {
+          "step": 10,
+          "call": "instances.get",
+          "reason": "it composes behaviors the core does not run: Revisions"
+        },
+        {
+          "step": 11,
+          "call": "instances.get",
+          "reason": "it composes behaviors the core does not run: Revisions"
+        },
+        {
+          "step": 12,
+          "call": "instances.invoke",
+          "reason": "it composes behaviors the core does not run: Revisions"
+        },
+        {
+          "step": 13,
+          "call": "runner.runDue",
+          "reason": "it composes behaviors the core does not run: Revisions"
+        },
+        {
+          "step": 14,
+          "call": "instances.get",
+          "reason": "it composes behaviors the core does not run: Revisions"
+        },
+        {
+          "step": 15,
+          "call": "instances.invoke",
+          "reason": "it composes behaviors the core does not run: Revisions"
+        },
+        {
+          "step": 16,
+          "call": "runner.runDue",
+          "reason": "it composes behaviors the core does not run: Revisions"
+        },
+        {
+          "step": 17,
+          "call": "instances.get",
+          "reason": "it composes behaviors the core does not run: Revisions"
+        },
+        {
+          "step": 18,
+          "call": "events.read",
+          "reason": "it composes behaviors the core does not run: Revisions"
+        }
+      ]
+    },
+    {
+      "name": "Reactions' changes (node) > a delete moves nothing",
+      "clock": "wall",
+      "types": [
+        {
+          "name": "Project",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "versions": [
+            {
+              "name": "Project",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "planned",
+                      "active",
+                      "done"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "planned",
+                        "to": "active"
+                      },
+                      {
+                        "from": "active",
+                        "to": "done"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Ticket",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "priority",
+              "type": "string"
+            },
+            {
+              "name": "body",
+              "type": "string"
+            },
+            {
+              "name": "projectId",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Ticket",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "new",
+                      "triaged",
+                      "escalated",
+                      "closed"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "new",
+                        "to": "triaged"
+                      },
+                      {
+                        "from": "new",
+                        "to": "escalated"
+                      },
+                      {
+                        "from": "triaged",
+                        "to": "escalated"
+                      },
+                      {
+                        "from": "escalated",
+                        "to": "triaged"
+                      },
+                      {
+                        "from": "triaged",
+                        "to": "closed"
+                      },
+                      {
+                        "from": "escalated",
+                        "to": "closed"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Reactions",
+                  "config": {
+                    "rules": [
+                      {
+                        "when": {
+                          "changes": {
+                            "field": "priority"
+                          }
+                        },
+                        "then": {
+                          "link": "project",
+                          "transition": "active"
+                        }
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "priority",
+                  "type": "string"
+                },
+                {
+                  "name": "body",
+                  "type": "string"
+                },
+                {
+                  "name": "projectId",
+                  "type": "string",
+                  "relation": {
+                    "name": "project",
+                    "type": "Project"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Project",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "planned",
+                    "active",
+                    "done"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "planned",
+                      "to": "active"
+                    },
+                    {
+                      "from": "active",
+                      "to": "done"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Project",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "planned",
+                    "active",
+                    "done"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "planned",
+                      "to": "active"
+                    },
+                    {
+                      "from": "active",
+                      "to": "done"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 4,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Ticket",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "new",
+                    "triaged",
+                    "escalated",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "new",
+                      "to": "triaged"
+                    },
+                    {
+                      "from": "new",
+                      "to": "escalated"
+                    },
+                    {
+                      "from": "triaged",
+                      "to": "escalated"
+                    },
+                    {
+                      "from": "escalated",
+                      "to": "triaged"
+                    },
+                    {
+                      "from": "triaged",
+                      "to": "closed"
+                    },
+                    {
+                      "from": "escalated",
+                      "to": "closed"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Reactions",
+                "config": {
+                  "rules": [
+                    {
+                      "when": {
+                        "changes": {
+                          "field": "priority"
+                        }
+                      },
+                      "then": {
+                        "link": "project",
+                        "transition": "active"
+                      }
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priority",
+                "type": "string"
+              },
+              {
+                "name": "body",
+                "type": "string"
+              },
+              {
+                "name": "projectId",
+                "type": "string",
+                "relation": {
+                  "name": "project",
+                  "type": "Project"
+                }
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600003,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 5,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Ticket",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "new",
+                    "triaged",
+                    "escalated",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "new",
+                      "to": "triaged"
+                    },
+                    {
+                      "from": "new",
+                      "to": "escalated"
+                    },
+                    {
+                      "from": "triaged",
+                      "to": "escalated"
+                    },
+                    {
+                      "from": "escalated",
+                      "to": "triaged"
+                    },
+                    {
+                      "from": "triaged",
+                      "to": "closed"
+                    },
+                    {
+                      "from": "escalated",
+                      "to": "closed"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Reactions",
+                "config": {
+                  "rules": [
+                    {
+                      "when": {
+                        "changes": {
+                          "field": "priority"
+                        }
+                      },
+                      "then": {
+                        "link": "project",
+                        "transition": "active"
+                      }
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priority",
+                "type": "string"
+              },
+              {
+                "name": "body",
+                "type": "string"
+              },
+              {
+                "name": "projectId",
+                "type": "string",
+                "relation": {
+                  "name": "project",
+                  "type": "Project"
+                }
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600004,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Project",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600005,
+            "action": {
+              "kind": "create",
+              "id": "p1",
+              "own": {
+                "title": "p1"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "p1",
+            "row": {
+              "own": {
+                "title": "p1"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "planned",
+                  "enteredAt": 1767225600005
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Project",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600006,
+            "action": {
+              "kind": "create",
+              "id": "p2",
+              "own": {
+                "title": "p2"
+              },
+              "params": {}
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "key": "p2",
+            "row": {
+              "own": {
+                "title": "p2"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "planned",
+                  "enteredAt": 1767225600006
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600007,
+            "action": {
+              "kind": "create",
+              "id": "t1",
+              "own": {
+                "title": "t1",
+                "projectId": "p1"
+              },
+              "params": {}
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "key": "t1",
+            "row": {
+              "own": {
+                "title": "t1",
+                "projectId": "p1"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "new",
+                  "enteredAt": 1767225600007
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600008,
+            "action": {
+              "kind": "create",
+              "id": "t2",
+              "own": {
+                "title": "t2",
+                "priority": "low"
+              },
+              "params": {}
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "key": "t2",
+            "row": {
+              "own": {
+                "title": "t2",
+                "priority": "low"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "new",
+                  "enteredAt": 1767225600008
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600010,
+            "action": {
+              "kind": "change",
+              "key": "t1",
+              "change": {
+                "write": "insert",
+                "at": 1767225600007,
+                "after": {
+                  "own": {
+                    "title": "t1",
+                    "projectId": "p1"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "new",
+                      "enteredAt": 1767225600007
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "t1",
+                "projectId": "p1"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "new",
+                  "enteredAt": 1767225600007
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600011,
+            "action": {
+              "kind": "change",
+              "key": "t2",
+              "change": {
+                "write": "insert",
+                "at": 1767225600008,
+                "after": {
+                  "own": {
+                    "title": "t2",
+                    "priority": "low"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "new",
+                      "enteredAt": 1767225600008
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "t2",
+                "priority": "low"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "new",
+                  "enteredAt": 1767225600008
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600012,
+            "action": {
+              "kind": "update",
+              "key": "t2",
+              "patch": {
+                "projectId": "p2"
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "t2",
+                "priority": "low",
+                "projectId": "p2"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "new",
+                  "enteredAt": 1767225600008
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600014,
+            "action": {
+              "kind": "change",
+              "key": "t2",
+              "change": {
+                "write": "update",
+                "at": 1767225600012,
+                "before": {
+                  "own": {
+                    "title": "t2",
+                    "priority": "low"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "new",
+                      "enteredAt": 1767225600008
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "t2",
+                    "priority": "low",
+                    "projectId": "p2"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "new",
+                      "enteredAt": 1767225600008
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "t2",
+                "priority": "low",
+                "projectId": "p2"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "new",
+                  "enteredAt": 1767225600008
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.delete",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600015,
+            "action": {
+              "kind": "delete",
+              "key": "t2"
+            },
+            "request": "request-9"
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 14,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600016,
+            "action": {
+              "kind": "update",
+              "key": "t1",
+              "patch": {
+                "priority": "high"
+              }
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "t1",
+                "projectId": "p1",
+                "priority": "high"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "new",
+                  "enteredAt": 1767225600007
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 15,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600018,
+            "action": {
+              "kind": "change",
+              "key": "t2",
+              "change": {
+                "write": "delete",
+                "at": 1767225600015,
+                "before": {
+                  "own": {
+                    "title": "t2",
+                    "priority": "low",
+                    "projectId": "p2"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "new",
+                      "enteredAt": 1767225600008
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-11"
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 15,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600019,
+            "action": {
+              "kind": "change",
+              "key": "t1",
+              "change": {
+                "write": "update",
+                "at": 1767225600016,
+                "before": {
+                  "own": {
+                    "title": "t1",
+                    "projectId": "p1"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "new",
+                      "enteredAt": 1767225600007
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "t1",
+                    "projectId": "p1",
+                    "priority": "high"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "new",
+                      "enteredAt": 1767225600007
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-12"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "t1",
+                "projectId": "p1",
+                "priority": "high"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "new",
+                  "enteredAt": 1767225600007
+                }
+              }
+            },
+            "others": [
+              {
+                "type": "Project",
+                "key": "p1",
+                "row": {
+                  "own": {
+                    "title": "p1"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "active",
+                      "enteredAt": 1767225600019
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 16,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 17,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Reactions' changes (node) > a member path below a behavior field whose value is an object, the behavior the longest name that prefixes it",
+      "clock": "wall",
+      "types": [],
+      "steps": [],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it composes test behaviors (Workflow.Tally, test.Score), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 2,
+          "call": "schemas.define",
+          "reason": "it composes test behaviors (Workflow.Tally, test.Score), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 3,
+          "call": "schemas.publish",
+          "reason": "it composes test behaviors (Workflow.Tally, test.Score), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 4,
+          "call": "instances.create",
+          "reason": "it composes test behaviors (Workflow.Tally, test.Score), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 5,
+          "call": "instances.invoke",
+          "reason": "it composes test behaviors (Workflow.Tally, test.Score), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 6,
+          "call": "events.read",
+          "reason": "it composes test behaviors (Workflow.Tally, test.Score), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 7,
+          "call": "runner.runDue",
+          "reason": "it composes test behaviors (Workflow.Tally, test.Score), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 8,
+          "call": "instances.get",
+          "reason": "it composes test behaviors (Workflow.Tally, test.Score), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 9,
+          "call": "instances.invoke",
+          "reason": "it composes test behaviors (Workflow.Tally, test.Score), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 10,
+          "call": "runner.runDue",
+          "reason": "it composes test behaviors (Workflow.Tally, test.Score), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 11,
+          "call": "instances.get",
+          "reason": "it composes test behaviors (Workflow.Tally, test.Score), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 12,
+          "call": "instances.invoke",
+          "reason": "it composes test behaviors (Workflow.Tally, test.Score), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 13,
+          "call": "instances.invoke",
+          "reason": "it composes test behaviors (Workflow.Tally, test.Score), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 14,
+          "call": "runner.runDue",
+          "reason": "it composes test behaviors (Workflow.Tally, test.Score), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 15,
+          "call": "events.read",
+          "reason": "it composes test behaviors (Workflow.Tally, test.Score), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        }
+      ]
+    },
+    {
+      "name": "Reactions' changes (node) > a value the event keeps in the value store is compared once loaded, never as its ref",
+      "clock": "wall",
+      "types": [],
+      "steps": [],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 2,
+          "call": "schemas.define",
+          "reason": "its engine keeps large values in a value store, which a table has no counterpart of: a column holds the value (D103)"
+        },
+        {
+          "step": 3,
+          "call": "schemas.publish",
+          "reason": "its engine keeps large values in a value store, which a table has no counterpart of: a column holds the value (D103)"
+        },
+        {
+          "step": 4,
+          "call": "instances.create",
+          "reason": "its engine keeps large values in a value store, which a table has no counterpart of: a column holds the value (D103)"
+        },
+        {
+          "step": 5,
+          "call": "events.read",
+          "reason": "its engine keeps large values in a value store, which a table has no counterpart of: a column holds the value (D103)"
+        },
+        {
+          "step": 6,
+          "call": "runner.runDue",
+          "reason": "its engine keeps large values in a value store, which a table has no counterpart of: a column holds the value (D103)"
+        },
+        {
+          "step": 7,
+          "call": "instances.get",
+          "reason": "its engine keeps large values in a value store, which a table has no counterpart of: a column holds the value (D103)"
+        },
+        {
+          "step": 8,
+          "call": "instances.invoke",
+          "reason": "its engine keeps large values in a value store, which a table has no counterpart of: a column holds the value (D103)"
+        },
+        {
+          "step": 9,
+          "call": "instances.update",
+          "reason": "its engine keeps large values in a value store, which a table has no counterpart of: a column holds the value (D103)"
+        },
+        {
+          "step": 10,
+          "call": "events.read",
+          "reason": "its engine keeps large values in a value store, which a table has no counterpart of: a column holds the value (D103)"
+        },
+        {
+          "step": 11,
+          "call": "runner.runDue",
+          "reason": "its engine keeps large values in a value store, which a table has no counterpart of: a column holds the value (D103)"
+        },
+        {
+          "step": 12,
+          "call": "instances.get",
+          "reason": "its engine keeps large values in a value store, which a table has no counterpart of: a column holds the value (D103)"
+        },
+        {
+          "step": 13,
+          "call": "instances.update",
+          "reason": "its engine keeps large values in a value store, which a table has no counterpart of: a column holds the value (D103)"
+        },
+        {
+          "step": 14,
+          "call": "runner.runDue",
+          "reason": "its engine keeps large values in a value store, which a table has no counterpart of: a column holds the value (D103)"
+        },
+        {
+          "step": 15,
+          "call": "instances.get",
+          "reason": "its engine keeps large values in a value store, which a table has no counterpart of: a column holds the value (D103)"
+        }
+      ]
+    },
+    {
+      "name": "Reactions' changes (node) > a rule with to on the instance itself acts only while the field still holds it; one through a link does not ask",
+      "clock": "wall",
+      "types": [
+        {
+          "name": "Project",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "versions": [
+            {
+              "name": "Project",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "planned",
+                      "active",
+                      "done"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "planned",
+                        "to": "active"
+                      },
+                      {
+                        "from": "active",
+                        "to": "done"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Ticket",
+          "fields": [
+            {
+              "name": "title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "name": "priority",
+              "type": "string"
+            },
+            {
+              "name": "body",
+              "type": "string"
+            },
+            {
+              "name": "projectId",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Ticket",
+              "uses": [
+                {
+                  "behavior": "Workflow",
+                  "config": {
+                    "states": [
+                      "new",
+                      "triaged",
+                      "escalated",
+                      "closed"
+                    ],
+                    "transitions": [
+                      {
+                        "from": "new",
+                        "to": "triaged"
+                      },
+                      {
+                        "from": "new",
+                        "to": "escalated"
+                      },
+                      {
+                        "from": "triaged",
+                        "to": "escalated"
+                      },
+                      {
+                        "from": "escalated",
+                        "to": "triaged"
+                      },
+                      {
+                        "from": "triaged",
+                        "to": "closed"
+                      },
+                      {
+                        "from": "escalated",
+                        "to": "closed"
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                },
+                {
+                  "behavior": "Reactions",
+                  "config": {
+                    "rules": [
+                      {
+                        "when": {
+                          "changes": {
+                            "field": "priority",
+                            "to": "urgent"
+                          }
+                        },
+                        "then": {
+                          "transition": "escalated"
+                        }
+                      },
+                      {
+                        "when": {
+                          "changes": {
+                            "field": "priority",
+                            "to": "urgent"
+                          }
+                        },
+                        "then": {
+                          "link": "project",
+                          "transition": "active"
+                        }
+                      }
+                    ]
+                  },
+                  "anchor": "type"
+                }
+              ],
+              "fields": [
+                {
+                  "name": "title",
+                  "type": "string"
+                },
+                {
+                  "name": "priority",
+                  "type": "string"
+                },
+                {
+                  "name": "body",
+                  "type": "string"
+                },
+                {
+                  "name": "projectId",
+                  "type": "string",
+                  "relation": {
+                    "name": "project",
+                    "type": "Project"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Project",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "planned",
+                    "active",
+                    "done"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "planned",
+                      "to": "active"
+                    },
+                    {
+                      "from": "active",
+                      "to": "done"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600001,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Project",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "planned",
+                    "active",
+                    "done"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "planned",
+                      "to": "active"
+                    },
+                    {
+                      "from": "active",
+                      "to": "done"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600002,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 4,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Ticket",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "new",
+                    "triaged",
+                    "escalated",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "new",
+                      "to": "triaged"
+                    },
+                    {
+                      "from": "new",
+                      "to": "escalated"
+                    },
+                    {
+                      "from": "triaged",
+                      "to": "escalated"
+                    },
+                    {
+                      "from": "escalated",
+                      "to": "triaged"
+                    },
+                    {
+                      "from": "triaged",
+                      "to": "closed"
+                    },
+                    {
+                      "from": "escalated",
+                      "to": "closed"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Reactions",
+                "config": {
+                  "rules": [
+                    {
+                      "when": {
+                        "changes": {
+                          "field": "priority",
+                          "to": "urgent"
+                        }
+                      },
+                      "then": {
+                        "transition": "escalated"
+                      }
+                    },
+                    {
+                      "when": {
+                        "changes": {
+                          "field": "priority",
+                          "to": "urgent"
+                        }
+                      },
+                      "then": {
+                        "link": "project",
+                        "transition": "active"
+                      }
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priority",
+                "type": "string"
+              },
+              {
+                "name": "body",
+                "type": "string"
+              },
+              {
+                "name": "projectId",
+                "type": "string",
+                "relation": {
+                  "name": "project",
+                  "type": "Project"
+                }
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600003,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 5,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Ticket",
+            "uses": [
+              {
+                "behavior": "Workflow",
+                "config": {
+                  "states": [
+                    "new",
+                    "triaged",
+                    "escalated",
+                    "closed"
+                  ],
+                  "transitions": [
+                    {
+                      "from": "new",
+                      "to": "triaged"
+                    },
+                    {
+                      "from": "new",
+                      "to": "escalated"
+                    },
+                    {
+                      "from": "triaged",
+                      "to": "escalated"
+                    },
+                    {
+                      "from": "escalated",
+                      "to": "triaged"
+                    },
+                    {
+                      "from": "triaged",
+                      "to": "closed"
+                    },
+                    {
+                      "from": "escalated",
+                      "to": "closed"
+                    }
+                  ]
+                },
+                "anchor": "type"
+              },
+              {
+                "behavior": "Reactions",
+                "config": {
+                  "rules": [
+                    {
+                      "when": {
+                        "changes": {
+                          "field": "priority",
+                          "to": "urgent"
+                        }
+                      },
+                      "then": {
+                        "transition": "escalated"
+                      }
+                    },
+                    {
+                      "when": {
+                        "changes": {
+                          "field": "priority",
+                          "to": "urgent"
+                        }
+                      },
+                      "then": {
+                        "link": "project",
+                        "transition": "active"
+                      }
+                    }
+                  ]
+                },
+                "anchor": "type"
+              }
+            ],
+            "fields": [
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "priority",
+                "type": "string"
+              },
+              {
+                "name": "body",
+                "type": "string"
+              },
+              {
+                "name": "projectId",
+                "type": "string",
+                "relation": {
+                  "name": "project",
+                  "type": "Project"
+                }
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600004,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Project",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600005,
+            "action": {
+              "kind": "create",
+              "id": "p1",
+              "own": {
+                "title": "Launch"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "p1",
+            "row": {
+              "own": {
+                "title": "Launch"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "planned",
+                  "enteredAt": 1767225600005
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600006,
+            "action": {
+              "kind": "create",
+              "id": "t1",
+              "own": {
+                "title": "t1",
+                "projectId": "p1"
+              },
+              "params": {}
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "key": "t1",
+            "row": {
+              "own": {
+                "title": "t1",
+                "projectId": "p1"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "new",
+                  "enteredAt": 1767225600006
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600007,
+            "action": {
+              "kind": "update",
+              "key": "t1",
+              "patch": {
+                "priority": "urgent"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "t1",
+                "projectId": "p1",
+                "priority": "urgent"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "new",
+                  "enteredAt": 1767225600006
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.update",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1767225600008,
+            "action": {
+              "kind": "update",
+              "key": "t1",
+              "patch": {
+                "priority": "low"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "t1",
+                "projectId": "p1",
+                "priority": "low"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "new",
+                  "enteredAt": 1767225600006
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600010,
+            "action": {
+              "kind": "change",
+              "key": "t1",
+              "change": {
+                "write": "insert",
+                "at": 1767225600006,
+                "after": {
+                  "own": {
+                    "title": "t1",
+                    "projectId": "p1"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "new",
+                      "enteredAt": 1767225600006
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "t1",
+                "projectId": "p1",
+                "priority": "low"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "new",
+                  "enteredAt": 1767225600006
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600011,
+            "action": {
+              "kind": "change",
+              "key": "t1",
+              "change": {
+                "write": "update",
+                "at": 1767225600007,
+                "before": {
+                  "own": {
+                    "title": "t1",
+                    "projectId": "p1"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "new",
+                      "enteredAt": 1767225600006
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "t1",
+                    "projectId": "p1",
+                    "priority": "urgent"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "new",
+                      "enteredAt": 1767225600006
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "t1",
+                "projectId": "p1",
+                "priority": "low"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "new",
+                  "enteredAt": 1767225600006
+                }
+              }
+            },
+            "others": [
+              {
+                "type": "Project",
+                "key": "p1",
+                "row": {
+                  "own": {
+                    "title": "Launch"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "active",
+                      "enteredAt": 1767225600011
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Ticket",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": []
+            },
+            "now": 1767225600012,
+            "action": {
+              "kind": "change",
+              "key": "t1",
+              "change": {
+                "write": "update",
+                "at": 1767225600008,
+                "before": {
+                  "own": {
+                    "title": "t1",
+                    "projectId": "p1",
+                    "priority": "urgent"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "new",
+                      "enteredAt": 1767225600006
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "t1",
+                    "projectId": "p1",
+                    "priority": "low"
+                  },
+                  "owned": {
+                    "Workflow": {
+                      "status": "new",
+                      "enteredAt": 1767225600006
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "t1",
+                "projectId": "p1",
+                "priority": "low"
+              },
+              "owned": {
+                "Workflow": {
+                  "status": "new",
+                  "enteredAt": 1767225600006
+                }
+              }
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 11,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 12,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Reactions' changes (node) > rules on Workflow.status chain on the instance itself, each move one deeper, and stop at the depth limit",
+      "clock": "wall",
+      "types": [],
+      "steps": [],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 2,
+          "call": "schemas.define",
+          "reason": "the engine's runner stops a chain at its depth limit; a table's change queue hears each move as any write (D103)"
+        },
+        {
+          "step": 3,
+          "call": "schemas.publish",
+          "reason": "the engine's runner stops a chain at its depth limit; a table's change queue hears each move as any write (D103)"
+        },
+        {
+          "step": 4,
+          "call": "instances.create",
+          "reason": "the engine's runner stops a chain at its depth limit; a table's change queue hears each move as any write (D103)"
+        },
+        {
+          "step": 5,
+          "call": "instances.invoke",
+          "reason": "the engine's runner stops a chain at its depth limit; a table's change queue hears each move as any write (D103)"
+        },
+        {
+          "step": 6,
+          "call": "runner.runDue",
+          "reason": "the engine's runner stops a chain at its depth limit; a table's change queue hears each move as any write (D103)"
+        },
+        {
+          "step": 7,
+          "call": "instances.get",
+          "reason": "the engine's runner stops a chain at its depth limit; a table's change queue hears each move as any write (D103)"
+        },
+        {
+          "step": 8,
+          "call": "events.read",
+          "reason": "the engine's runner stops a chain at its depth limit; a table's change queue hears each move as any write (D103)"
+        },
+        {
+          "step": 9,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 10,
+          "call": "schemas.define",
+          "reason": "the engine's runner stops a chain at its depth limit; a table's change queue hears each move as any write (D103)"
+        },
+        {
+          "step": 11,
+          "call": "schemas.publish",
+          "reason": "the engine's runner stops a chain at its depth limit; a table's change queue hears each move as any write (D103)"
+        },
+        {
+          "step": 12,
+          "call": "instances.create",
+          "reason": "the engine's runner stops a chain at its depth limit; a table's change queue hears each move as any write (D103)"
+        },
+        {
+          "step": 13,
+          "call": "instances.invoke",
+          "reason": "the engine's runner stops a chain at its depth limit; a table's change queue hears each move as any write (D103)"
+        },
+        {
+          "step": 14,
+          "call": "runner.runDue",
+          "reason": "the engine's runner stops a chain at its depth limit; a table's change queue hears each move as any write (D103)"
+        },
+        {
+          "step": 15,
+          "call": "instances.get",
+          "reason": "the engine's runner stops a chain at its depth limit; a table's change queue hears each move as any write (D103)"
+        },
+        {
+          "step": 16,
+          "call": "events.read",
+          "reason": "the engine's runner stops a chain at its depth limit; a table's change queue hears each move as any write (D103)"
+        }
+      ]
+    },
+    {
+      "name": "Reactions' changes (node) > guidance names each changes rule, and the writes that can set one off say the status may move after the commit",
+      "clock": "wall",
+      "types": [],
+      "steps": [],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it composes behaviors the core does not run: Revisions"
+        },
+        {
+          "step": 2,
+          "call": "schemas.define",
+          "reason": "it composes behaviors the core does not run: Revisions"
+        },
+        {
+          "step": 3,
+          "call": "schemas.publish",
+          "reason": "it composes behaviors the core does not run: Revisions"
+        },
+        {
+          "step": 4,
+          "call": "tools.describe",
+          "reason": "it composes behaviors the core does not run: Revisions"
+        }
+      ]
+    },
+    {
+      "name": "Reactions' changes (node) > parseConfig refuses a field the type does not have, a volatile one and Workflow.enteredAt, and a changes rule's cycles on the status",
+      "clock": "wall",
+      "types": [],
+      "steps": [],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it composes test behaviors (Workflow.Tally), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 2,
+          "call": "schemas.define",
+          "reason": "it composes test behaviors (Workflow.Tally), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 3,
+          "call": "schemas.define",
+          "reason": "it composes test behaviors (Workflow.Tally), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 4,
+          "call": "schemas.define",
+          "reason": "it composes test behaviors (Workflow.Tally), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 5,
+          "call": "schemas.define",
+          "reason": "it composes test behaviors (Workflow.Tally), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 6,
+          "call": "schemas.define",
+          "reason": "it composes test behaviors (Workflow.Tally), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 7,
+          "call": "schemas.define",
+          "reason": "it composes test behaviors (Workflow.Tally), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 8,
+          "call": "schemas.define",
+          "reason": "it composes test behaviors (Workflow.Tally), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 9,
+          "call": "schemas.define",
+          "reason": "it composes test behaviors (Workflow.Tally), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 10,
+          "call": "schemas.define",
+          "reason": "it composes test behaviors (Workflow.Tally), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 11,
+          "call": "schemas.define",
+          "reason": "it composes test behaviors (Workflow.Tally), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 12,
+          "call": "schemas.define",
+          "reason": "it composes test behaviors (Workflow.Tally), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 13,
+          "call": "schemas.define",
+          "reason": "it composes test behaviors (Workflow.Tally), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 14,
+          "call": "schemas.define",
+          "reason": "it composes test behaviors (Workflow.Tally), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 15,
+          "call": "schemas.define",
+          "reason": "it composes test behaviors (Workflow.Tally), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 16,
+          "call": "schemas.define",
+          "reason": "it composes test behaviors (Workflow.Tally), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        },
+        {
+          "step": 17,
+          "call": "schemas.define",
+          "reason": "it composes test behaviors (Workflow.Tally), which the reference host runs as fixtures and the core an adapter embeds does not register"
+        }
+      ]
+    }
+  ]
+}

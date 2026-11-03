@@ -8,7 +8,9 @@ nothing, which is how the stream keeps a client's place past events its
 filters dropped.
 
 A subscription is an async iterable of messages: each event of the log,
-and `ready` once per connection, when replay has caught up. Its cursor is
+and `ready` once per connection, when replay has caught up; with
+`signals: true`, each signal (D77) of an instance its filters keep, as a
+`signal` message, which carries no id and moves no cursor. Its cursor is
 the id of the last message it has handed out, an id-only one included.
 When the connection drops, or the stream ends because the engine closed,
 it connects again with `Last-Event-ID` set to that cursor, after a
@@ -21,7 +23,7 @@ whose floor and head say where a new subscription may start; a 5xx, a
 
 import { EngineProblem } from './errors.js';
 import type { CallOptions, RequestSpec, Transport } from './transport.js';
-import type { EngineEvent, EventKind } from './types.js';
+import type { EngineEvent, EngineSignal, EventKind } from './types.js';
 
 /** The filters of an event read or stream, ANDed (runtime/engine/README.md, "The event log"). */
 export interface EventFilters {
@@ -35,6 +37,8 @@ export interface EventFilters {
   readonly behaviors?: readonly string[];
   /** No operation events of operations by these names (`heartbeat`). */
   readonly exclude?: readonly string[];
+  /** `false` drops beside operations' events (D77); `true` keeps only them. */
+  readonly beside?: boolean;
 }
 
 export interface SubscribeOptions extends EventFilters, CallOptions {
@@ -48,13 +52,29 @@ export interface SubscribeOptions extends EventFilters, CallOptions {
   readonly reconnect?: false | { readonly initialMs?: number; readonly maxMs?: number };
   /** Called before each reconnect with what ended the connection and the number of reconnects in a row. */
   readonly onReconnect?: (error: unknown, attempt: number) => void;
+  /**
+   * Also hand out the signals (D77) of the instances the filters keep, on
+   * schemas the caller may read, as `signal` messages: at most once, in no
+   * order with the events, and never replayed (`signals=1`). `kinds`,
+   * `exclude` and `beside` do not apply to them.
+   */
+  readonly signals?: boolean;
 }
 
 /** A message of the stream: an event of the log, or `ready` once a connection's replay has caught up. */
 export type StreamMessage = { readonly type: 'event'; readonly event: EngineEvent } | { readonly type: 'ready'; readonly cursor: number };
 
+/** A signal (D77), which a subscription with `signals: true` hands out beside its StreamMessages. */
+export interface SignalMessage {
+  readonly type: 'signal';
+  readonly signal: EngineSignal;
+}
+
 /** The name of the event the stream sends once replay has caught up. */
 export const READY_EVENT = 'ready';
+
+/** The name of the event a stream opened with signals sends for each signal (D77). */
+export const SIGNAL_EVENT = 'signal';
 
 export const DEFAULT_RECONNECT_INITIAL_MS = 500;
 export const DEFAULT_RECONNECT_MAX_MS = 30_000;
@@ -179,6 +199,9 @@ export function eventQuery(filters: EventFilters, after: number | 'head' | undef
   if (filters.instanceId !== undefined) {
     query.push(['instanceId', filters.instanceId]);
   }
+  if (filters.beside !== undefined) {
+    query.push(['beside', String(filters.beside)]);
+  }
   for (const [name, values] of [
     ['kind', filters.kinds],
     ['behavior', filters.behaviors],
@@ -196,7 +219,7 @@ export function eventQuery(filters: EventFilters, after: number | 'head' | undef
  * await`, once. Breaking out of the loop, `close()` or the options' signal
  * ends it.
  */
-export class EventSubscription implements AsyncIterable<StreamMessage> {
+export class EventSubscription<M extends StreamMessage | SignalMessage = StreamMessage> implements AsyncIterable<M> {
   private readonly controller = new AbortController();
   private lastId: number | undefined;
   private iterated = false;
@@ -235,7 +258,7 @@ export class EventSubscription implements AsyncIterable<StreamMessage> {
     this.controller.abort();
   }
 
-  [Symbol.asyncIterator](): AsyncIterator<StreamMessage> {
+  [Symbol.asyncIterator](): AsyncIterator<M> {
     if (this.iterated) {
       throw new TypeError('An EventSubscription is iterated once');
     }
@@ -243,7 +266,7 @@ export class EventSubscription implements AsyncIterable<StreamMessage> {
     return this.messages();
   }
 
-  private async *messages(): AsyncGenerator<StreamMessage, void, undefined> {
+  private async *messages(): AsyncGenerator<M, void, undefined> {
     const reconnect = this.options.reconnect;
     const initialMs = reconnect === false ? 0 : (reconnect?.initialMs ?? DEFAULT_RECONNECT_INITIAL_MS);
     const maxMs = reconnect === false ? 0 : (reconnect?.maxMs ?? DEFAULT_RECONNECT_MAX_MS);
@@ -294,7 +317,7 @@ export class EventSubscription implements AsyncIterable<StreamMessage> {
     const spec: RequestSpec = {
       method: 'GET',
       path: this.path,
-      query: eventQuery(this.options, this.options.after),
+      query: this.options.signals === true ? [...eventQuery(this.options, this.options.after), ['signals', '1']] : eventQuery(this.options, this.options.after),
       accept: 'text/event-stream',
       ...(resume !== undefined ? { headers: { 'last-event-id': String(resume) } } : {}),
       options: { ...(this.options.forward !== undefined ? { forward: this.options.forward } : {}), signal: this.controller.signal },
@@ -302,7 +325,7 @@ export class EventSubscription implements AsyncIterable<StreamMessage> {
     return this.transport.stream(spec);
   }
 
-  private async *read(response: Response): AsyncGenerator<StreamMessage, void, undefined> {
+  private async *read(response: Response): AsyncGenerator<M, void, undefined> {
     if (response.body === null) {
       return;
     }
@@ -335,7 +358,7 @@ export class EventSubscription implements AsyncIterable<StreamMessage> {
   // The cursor moves as each message is handed out, so a reconnect
   // resumes after the last one the caller received, not after one the
   // parser read ahead.
-  private *handOut(message: SseMessage): Generator<StreamMessage, void, undefined> {
+  private *handOut(message: SseMessage): Generator<M, void, undefined> {
     const id = /^[0-9]{1,15}$/u.test(message.lastEventId) ? Number(message.lastEventId) : undefined;
     if (message.data === '') {
       if (id !== undefined) {
@@ -346,11 +369,14 @@ export class EventSubscription implements AsyncIterable<StreamMessage> {
     if (message.type === 'message') {
       const event = parseJson(message.data, 'an event') as EngineEvent;
       this.lastId = id ?? event.cursor;
-      yield { type: 'event', event };
+      yield { type: 'event', event } as M;
+    } else if (message.type === SIGNAL_EVENT) {
+      // A signal carries no id, so the cursor stays where it was.
+      yield { type: 'signal', signal: parseJson(message.data, 'a signal') as EngineSignal } as M;
     } else if (message.type === READY_EVENT) {
       const { cursor } = parseJson(message.data, 'a ready event') as { cursor: number };
       this.lastId = id ?? cursor;
-      yield { type: 'ready', cursor };
+      yield { type: 'ready', cursor } as M;
     } else if (id !== undefined) {
       this.lastId = id;
     }

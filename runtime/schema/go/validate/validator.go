@@ -196,6 +196,7 @@ func (v *Validator) validateSingleField(field *ir.FieldDef, key, kind string, re
 		}
 		fieldErrs = append(fieldErrs, validateFieldNumericConstraints(field, value)...)
 		fieldErrs = append(fieldErrs, v.validateFieldStringConstraints(field, value)...)
+		fieldErrs = append(fieldErrs, validateFieldDigits(field, value)...)
 		errs.SetFieldErrors(key, fieldErrs)
 
 	case "enum":
@@ -276,6 +277,7 @@ func (v *Validator) validateArrayElem(field *ir.FieldDef, elemKey, kind string, 
 		}
 		elemErrs = append(elemErrs, validateFieldNumericConstraints(field, elem)...)
 		elemErrs = append(elemErrs, v.validateFieldStringConstraints(field, elem)...)
+		elemErrs = append(elemErrs, validateFieldDigits(field, elem)...)
 		errs.SetFieldErrors(elemKey, elemErrs)
 
 	case "enum":

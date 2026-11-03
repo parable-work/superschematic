@@ -9,7 +9,10 @@
 //! is done to it (`create`, `archive`, `unarchive`, or `list`). The tools
 //! document asks one more kind while it lists a caller's tools, a listing
 //! question ([`AccessRequest::Listing`]): whether the caller may do what
-//! `define_schema` or a namespace tool does at all.
+//! `define_schema` or a namespace tool does at all. A namespace operation
+//! of a behavior (D77) asks a fourth kind ([`AccessRequest::Behavior`]):
+//! `read` or `write`, with the behavior and the operation, and no schema;
+//! the tools document asks it as a listing question too.
 //!
 //! The TypeScript engine took the policy as a function it called before
 //! every check. A Go or Rust host would answer such a function through a
@@ -18,22 +21,40 @@
 //!
 //! - `"allowAll"` allows everything (tests and local use);
 //! - `"permission"` is the TypeScript engine's `permissionPolicy()`: an
-//!   action on a schema to a caller holding `<schema>.<action>`, and no
-//!   question that names no schema;
+//!   action on a schema to a caller holding `<schema>.<action>`; a
+//!   behavior's namespace operation that reads to anyone, and one that
+//!   writes to a caller holding `<behavior>.<operation>`; and no other
+//!   question that names no schema. A principal acting for a subject (D77)
+//!   is refused every question unless it holds `actFor`, and is otherwise
+//!   answered as for its own permissions;
 //! - `{"rules": [...]}` is a list of rules, the first that matches a
 //!   question deciding it, a question no rule matches refused. A rule
 //!   matches on the question's action (one or a list of `read`, `write`,
 //!   `define`, `publish` and `manage`), its operation, schema and
-//!   namespace, the principal's subject, its calling service (D37) and
-//!   whether that service stands in for an end user, and whether the
-//!   question is a listing one; a member a rule leaves out matches
-//!   anything. It decides with `allow` (`true` or `false`) or with
-//!   `require`, a permission or a list of them, any one of which the
-//!   principal must hold, matched with the engine's permission matcher
-//!   (the HTTP runtime's `hasAnyPermission` unless configured). A
-//!   permission is a template: `{schema}`, `{action}`, `{namespace}` and
-//!   `{operation}` stand for the question's; one whose placeholder the
-//!   question lacks (`{schema}` in a `manage` question) is held by no one.
+//!   namespace, its behavior (`true` for any question about a behavior's
+//!   namespace operation, `false` for any other, or a name or a list of
+//!   them), the principal's subject, its calling service (D37) and
+//!   whether that service stands in for an end user, whom the principal
+//!   acts for (D77: `actingFor`, `true` for any principal acting for a
+//!   subject, `false` for one acting for none, or a subject or a list of
+//!   them), and whether the question is a listing one; a member a rule
+//!   leaves out matches anything, but `behavior` and `actingFor`: a rule
+//!   that leaves `behavior` out matches no question about a behavior's
+//!   namespace operation, and an allow or a require that leaves
+//!   `actingFor` out matches no question whose principal acts for a
+//!   subject, so only a rule that names them allows such a question, and
+//!   with none such the question falls to the end of the rules and is
+//!   refused. A deny (`allow: false`) that leaves `actingFor` out matches
+//!   a principal acting for a subject as it matches one acting for none,
+//!   so a principal a deny refuses is refused when it acts for someone
+//!   too. It decides with `allow`
+//!   (`true` or `false`) or with `require`, a permission or a list of
+//!   them, any one of which the principal must hold, matched with the
+//!   engine's permission matcher (the HTTP runtime's `hasAnyPermission`
+//!   unless configured). A permission is a template: `{schema}`,
+//!   `{action}`, `{namespace}`, `{operation}` and `{behavior}` stand for
+//!   the question's; one whose placeholder the question lacks (`{schema}`
+//!   in a `manage` question) is held by no one.
 //!
 //! ```json
 //! {"rules": [
@@ -144,6 +165,19 @@ pub enum AccessRequest<'a> {
         namespace: &'a str,
         operation: Option<NamespaceOperation>,
     },
+    /// About a behavior's namespace operation (D77), which runs on the
+    /// behavior's tables across the namespace's schemas and names no
+    /// schema: `read` or `write`, as its declaration says. The tools
+    /// document asks it with `listing` while it lists the operation's tool.
+    Behavior {
+        principal: &'a Principal,
+        /// `Read` or `Write`.
+        action: SchemaAction,
+        namespace: &'a str,
+        behavior: &'a str,
+        operation: &'a str,
+        listing: bool,
+    },
 }
 
 impl AccessRequest<'_> {
@@ -152,7 +186,8 @@ impl AccessRequest<'_> {
         match self {
             AccessRequest::Schema { principal, .. }
             | AccessRequest::Namespace { principal, .. }
-            | AccessRequest::Listing { principal, .. } => principal,
+            | AccessRequest::Listing { principal, .. }
+            | AccessRequest::Behavior { principal, .. } => principal,
         }
     }
 
@@ -162,6 +197,7 @@ impl AccessRequest<'_> {
             AccessRequest::Schema { action, .. } => action.as_str(),
             AccessRequest::Namespace { .. } => "manage",
             AccessRequest::Listing { action, .. } => action.as_str(),
+            AccessRequest::Behavior { action, .. } => action.as_str(),
         }
     }
 
@@ -170,7 +206,8 @@ impl AccessRequest<'_> {
         match self {
             AccessRequest::Schema { namespace, .. }
             | AccessRequest::Namespace { namespace, .. }
-            | AccessRequest::Listing { namespace, .. } => namespace,
+            | AccessRequest::Listing { namespace, .. }
+            | AccessRequest::Behavior { namespace, .. } => namespace,
         }
     }
 
@@ -189,17 +226,30 @@ impl AccessRequest<'_> {
             AccessRequest::Schema { operation, .. } => *operation,
             AccessRequest::Namespace { operation, .. } => Some(operation.as_str()),
             AccessRequest::Listing { operation, .. } => operation.map(NamespaceOperation::as_str),
+            AccessRequest::Behavior { operation, .. } => Some(operation),
+        }
+    }
+
+    /// The behavior, for a question about one of its namespace operations.
+    pub fn behavior(&self) -> Option<&str> {
+        match self {
+            AccessRequest::Behavior { behavior, .. } => Some(behavior),
+            _ => None,
         }
     }
 
     /// Whether it is a listing question.
     pub fn listing(&self) -> bool {
-        matches!(self, AccessRequest::Listing { .. })
+        match self {
+            AccessRequest::Listing { .. } => true,
+            AccessRequest::Behavior { listing, .. } => *listing,
+            _ => false,
+        }
     }
 
     /// The question as the TypeScript engine passes it to a policy, with
     /// the principal as `principal`: `{ principal, action, namespace,
-    /// schema?, operation?, listing? }`.
+    /// schema?, behavior?, operation?, listing? }`.
     pub fn to_json(&self, principal: Value) -> Value {
         let mut question = Map::new();
         question.insert("principal".into(), principal);
@@ -207,6 +257,9 @@ impl AccessRequest<'_> {
         question.insert("namespace".into(), Value::from(self.namespace()));
         if let Some(schema) = self.schema() {
             question.insert("schema".into(), Value::from(schema));
+        }
+        if let Some(behavior) = self.behavior() {
+            question.insert("behavior".into(), Value::from(behavior));
         }
         if let Some(operation) = self.operation() {
             question.insert("operation".into(), Value::from(operation));
@@ -311,6 +364,28 @@ pub enum ServiceMatch {
     Deployables(Vec<String>),
 }
 
+/// What a rule says about a behavior's namespace operation (D77): any
+/// question about one or none (`true`, `false`), or one about one of these
+/// behaviors.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BehaviorMatch {
+    Any(bool),
+    Names(Vec<String>),
+}
+
+/// What a rule says about whom the principal acts for (D77): any principal
+/// acting for a subject or one acting for none (`true`, `false`), or one
+/// acting for one of these subjects.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ActingForMatch {
+    Any(bool),
+    Subjects(Vec<String>),
+}
+
+/// The permission the `"permission"` shorthand requires of a principal
+/// acting for a subject (D77), beside the question's own.
+pub const ACT_FOR_PERMISSION: &str = "actFor";
+
 /// A placeholder a permission template fills from the question.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Placeholder {
@@ -318,6 +393,7 @@ enum Placeholder {
     Action,
     Namespace,
     Operation,
+    Behavior,
 }
 
 impl Placeholder {
@@ -327,6 +403,7 @@ impl Placeholder {
             "action" => Some(Placeholder::Action),
             "namespace" => Some(Placeholder::Namespace),
             "operation" => Some(Placeholder::Operation),
+            "behavior" => Some(Placeholder::Behavior),
             _ => None,
         }
     }
@@ -337,6 +414,7 @@ impl Placeholder {
             Placeholder::Action => Some(request.action()),
             Placeholder::Namespace => Some(request.namespace()),
             Placeholder::Operation => request.operation(),
+            Placeholder::Behavior => request.behavior(),
         }
     }
 }
@@ -348,7 +426,8 @@ enum Segment {
 }
 
 /// A permission a rule requires, with `{schema}`, `{action}`,
-/// `{namespace}` and `{operation}` standing for the question's.
+/// `{namespace}`, `{operation}` and `{behavior}` standing for the
+/// question's.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PermissionTemplate {
     text: String,
@@ -356,7 +435,7 @@ pub struct PermissionTemplate {
 }
 
 impl PermissionTemplate {
-    /// Reads a template; a placeholder other than the four, or a brace
+    /// Reads a template; a placeholder other than the five, or a brace
     /// left open, is refused.
     pub fn parse(text: &str) -> Result<Self, String> {
         let mut segments = Vec::new();
@@ -372,7 +451,7 @@ impl PermissionTemplate {
             let name = &after[..close];
             let placeholder = Placeholder::of(name).ok_or_else(|| {
                 format!(
-                    "{} names {{{name}}}; a permission's placeholders are {{schema}}, {{action}}, {{namespace}} and {{operation}}",
+                    "{} names {{{name}}}; a permission's placeholders are {{schema}}, {{action}}, {{namespace}}, {{operation}} and {{behavior}}",
                     json::quote(text)
                 )
             })?;
@@ -423,16 +502,21 @@ pub enum Decision {
 }
 
 /// One rule of a policy: what it matches, each member left out matching
-/// anything, and how it decides.
+/// anything, but `behavior`, which left out matches only a question about
+/// no behavior, and `actingFor`, which left out matches only a question
+/// whose principal acts for no one (D77) unless the rule denies (`allow:
+/// false`), and how it decides.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PolicyRule {
     pub action: Option<Vec<PolicyAction>>,
     pub operation: Option<Vec<String>>,
     pub schema: Option<Vec<String>>,
     pub namespace: Option<Vec<String>>,
+    pub behavior: Option<BehaviorMatch>,
     pub subject: Option<Vec<String>>,
     pub service: Option<ServiceMatch>,
     pub stands_in: Option<bool>,
+    pub acting_for: Option<ActingForMatch>,
     pub listing: Option<bool>,
     pub decision: Decision,
 }
@@ -452,6 +536,17 @@ impl PolicyRule {
         }) && named(&self.operation, request.operation())
             && named(&self.schema, request.schema())
             && named(&self.namespace, Some(request.namespace()))
+            && match &self.behavior {
+                // A rule that names no behavior was written for schemas and
+                // namespaces: it matches no behavior question (D77), so a
+                // subject-wide allow does not reach every behavior's
+                // namespace operations.
+                None => request.behavior().is_none(),
+                Some(BehaviorMatch::Any(any)) => request.behavior().is_some() == *any,
+                Some(BehaviorMatch::Names(list)) => request
+                    .behavior()
+                    .is_some_and(|behavior| list.iter().any(|item| item == behavior)),
+            }
             && named(&self.subject, Some(&principal.subject))
             && match &self.service {
                 None => true,
@@ -464,6 +559,22 @@ impl PolicyRule {
             && self
                 .stands_in
                 .is_none_or(|stands_in| principal.stands_in() == stands_in)
+            && match &self.acting_for {
+                // A rule that names no actingFor was written for callers
+                // acting as themselves: an allow or a require matches no
+                // principal acting for a subject (D77), so a subject- or
+                // service-wide allow does not let its principal write for
+                // anyone. A deny binds it all the same: a principal a rule
+                // refuses is not let through by acting for someone.
+                None => {
+                    principal.acting_for.is_none()
+                        || matches!(self.decision, Decision::Allow(false))
+                }
+                Some(ActingForMatch::Any(any)) => principal.acting_for.is_some() == *any,
+                Some(ActingForMatch::Subjects(list)) => principal
+                    .acting_for_subject()
+                    .is_some_and(|subject| list.iter().any(|item| item == subject)),
+            }
             && self
                 .listing
                 .is_none_or(|listing| request.listing() == listing)
@@ -491,7 +602,13 @@ pub enum PolicyShorthand {
     AllowAll,
     /// `"permission"`: the TypeScript engine's `permissionPolicy()`, an
     /// action on a schema to a caller holding `<schema>.<action>`; a
-    /// question that names no schema is refused.
+    /// behavior's namespace operation (D77) that reads to anyone, since its
+    /// `readable()` keeps the rows of the schemas the caller may read, and
+    /// one that writes to a caller holding `<behavior>.<operation>`; any
+    /// other question that names no schema is refused. A principal acting
+    /// for a subject (D77) is refused every question unless it holds
+    /// [`ACT_FOR_PERMISSION`], and otherwise answered as for its own
+    /// permissions.
     Permission,
 }
 
@@ -507,18 +624,64 @@ pub enum PolicyConfig {
 
 impl PolicyConfig {
     /// The rules a configuration answers with: a shorthand's, or its own.
+    /// The `"permission"` shorthand's answer a principal acting for a
+    /// subject (D77) as for its own permissions; [`RulePolicy`] refuses
+    /// such a principal first unless it holds [`ACT_FOR_PERMISSION`]
+    /// ([`PolicyConfig::acting_for_requires`]).
     pub fn rules(&self) -> Vec<PolicyRule> {
+        // Each of a shorthand's rules, for a principal acting as itself and
+        // for one acting for a subject (D77), which a rule matches only when
+        // it names actingFor.
+        let both = |rules: Vec<PolicyRule>| -> Vec<PolicyRule> {
+            let acting: Vec<PolicyRule> = rules
+                .iter()
+                .map(|rule| PolicyRule {
+                    acting_for: Some(ActingForMatch::Any(true)),
+                    ..rule.clone()
+                })
+                .collect();
+            rules.into_iter().chain(acting).collect()
+        };
         match self {
-            PolicyConfig::Shorthand(PolicyShorthand::AllowAll) => vec![rule(Decision::Allow(true))],
+            PolicyConfig::Shorthand(PolicyShorthand::AllowAll) => both(vec![
+                rule(Decision::Allow(true)),
+                PolicyRule {
+                    behavior: Some(BehaviorMatch::Any(true)),
+                    ..rule(Decision::Allow(true))
+                },
+            ]),
             PolicyConfig::Shorthand(PolicyShorthand::Permission) => {
-                vec![rule(Decision::Require(vec![PermissionTemplate::parse(
-                    "{schema}.{action}",
-                )
-                .unwrap_or_else(|_| {
-                    unreachable!("the permission shorthand's template reads")
-                })]))]
+                let template = |text: &str| {
+                    PermissionTemplate::parse(text).unwrap_or_else(|_| {
+                        unreachable!("the permission shorthand's templates read")
+                    })
+                };
+                both(vec![
+                    PolicyRule {
+                        action: Some(vec![PolicyAction::Read]),
+                        behavior: Some(BehaviorMatch::Any(true)),
+                        ..rule(Decision::Allow(true))
+                    },
+                    PolicyRule {
+                        action: Some(vec![PolicyAction::Write]),
+                        behavior: Some(BehaviorMatch::Any(true)),
+                        ..rule(Decision::Require(vec![template("{behavior}.{operation}")]))
+                    },
+                    rule(Decision::Require(vec![template("{schema}.{action}")])),
+                ])
             }
             PolicyConfig::Rules(rules) => rules.clone(),
+        }
+    }
+
+    /// The permission a principal acting for a subject (D77) must hold
+    /// before the rules are asked: [`ACT_FOR_PERMISSION`] for the
+    /// `"permission"` shorthand, none otherwise, where the rules say it
+    /// with `actingFor`.
+    pub fn acting_for_requires(&self) -> Option<&'static str> {
+        match self {
+            PolicyConfig::Shorthand(PolicyShorthand::Permission) => Some(ACT_FOR_PERMISSION),
+            _ => None,
         }
     }
 
@@ -597,22 +760,26 @@ fn rule(decision: Decision) -> PolicyRule {
         operation: None,
         schema: None,
         namespace: None,
+        behavior: None,
         subject: None,
         service: None,
         stands_in: None,
+        acting_for: None,
         listing: None,
         decision,
     }
 }
 
-const RULE_MEMBERS: [&str; 10] = [
+const RULE_MEMBERS: [&str; 12] = [
     "action",
     "operation",
     "schema",
     "namespace",
+    "behavior",
     "subject",
     "service",
     "standsIn",
+    "actingFor",
     "listing",
     "allow",
     "require",
@@ -630,7 +797,7 @@ fn rule_of(entry: &Value) -> Result<PolicyRule, String> {
         return Err(format!(
             ": {} is not a member of a rule, which matches on {} and decides with allow or require",
             json::quote(key),
-            RULE_MEMBERS[..8].join(", ")
+            RULE_MEMBERS[..10].join(", ")
         ));
     }
     let names = |key: &str| -> Result<Option<Vec<String>>, String> {
@@ -679,6 +846,24 @@ fn rule_of(entry: &Value) -> Result<PolicyRule, String> {
                 .unwrap_or_default(),
         )),
     };
+    let behavior = match members.get("behavior") {
+        None => None,
+        Some(Value::Bool(any)) => Some(BehaviorMatch::Any(*any)),
+        Some(_) => Some(BehaviorMatch::Names(
+            names("behavior")
+                .map_err(|_| ".behavior: true, false, or a behavior or a list of them".to_owned())?
+                .unwrap_or_default(),
+        )),
+    };
+    let acting_for = match members.get("actingFor") {
+        None => None,
+        Some(Value::Bool(any)) => Some(ActingForMatch::Any(*any)),
+        Some(_) => Some(ActingForMatch::Subjects(
+            names("actingFor")
+                .map_err(|_| ".actingFor: true, false, or a subject or a list of them".to_owned())?
+                .unwrap_or_default(),
+        )),
+    };
     let decision = match (members.get("allow"), members.get("require")) {
         (Some(Value::Bool(allow)), None) => Decision::Allow(*allow),
         (Some(_), None) => return Err(".allow: true or false".to_owned()),
@@ -707,9 +892,11 @@ fn rule_of(entry: &Value) -> Result<PolicyRule, String> {
         operation: names("operation")?,
         schema: names("schema")?,
         namespace: names("namespace")?,
+        behavior,
         subject: names("subject")?,
         service,
         stands_in: flag("standsIn")?,
+        acting_for,
         listing: flag("listing")?,
         decision,
     })
@@ -740,6 +927,15 @@ fn rule_json(rule: &PolicyRule) -> Value {
             out.insert(key.into(), list(items));
         }
     }
+    match &rule.behavior {
+        None => {}
+        Some(BehaviorMatch::Any(any)) => {
+            out.insert("behavior".into(), Value::Bool(*any));
+        }
+        Some(BehaviorMatch::Names(names)) => {
+            out.insert("behavior".into(), list(names));
+        }
+    }
     match &rule.service {
         None => {}
         Some(ServiceMatch::Any(any)) => {
@@ -751,6 +947,15 @@ fn rule_json(rule: &PolicyRule) -> Value {
     }
     if let Some(stands_in) = rule.stands_in {
         out.insert("standsIn".into(), Value::Bool(stands_in));
+    }
+    match &rule.acting_for {
+        None => {}
+        Some(ActingForMatch::Any(any)) => {
+            out.insert("actingFor".into(), Value::Bool(*any));
+        }
+        Some(ActingForMatch::Subjects(subjects)) => {
+            out.insert("actingFor".into(), list(subjects));
+        }
     }
     if let Some(listing) = rule.listing {
         out.insert("listing".into(), Value::Bool(listing));
@@ -822,6 +1027,7 @@ impl fmt::Debug for Policy {
 pub struct RulePolicy {
     rules: Vec<PolicyRule>,
     matcher: Arc<dyn PermissionMatcher>,
+    acting_for_requires: Option<&'static str>,
 }
 
 impl RulePolicy {
@@ -829,12 +1035,22 @@ impl RulePolicy {
         RulePolicy {
             rules: config.rules(),
             matcher,
+            acting_for_requires: config.acting_for_requires(),
         }
     }
 }
 
 impl AccessPolicy for RulePolicy {
     fn allows(&self, request: &AccessRequest<'_>) -> bool {
+        let principal = request.principal();
+        if let (Some(_), Some(required)) = (&principal.acting_for, self.acting_for_requires) {
+            if !self
+                .matcher
+                .matches(&principal.permissions, &[required.to_owned()])
+            {
+                return false;
+            }
+        }
         self.rules
             .iter()
             .find(|rule| rule.matches(request))
@@ -965,6 +1181,50 @@ impl Access {
             namespace,
             operation,
         })
+    }
+
+    /// Whether the policy allows a behavior's namespace operation (D77),
+    /// `listing` while the tools document lists its tool.
+    pub fn allows_behavior(
+        &self,
+        principal: &Principal,
+        action: SchemaAction,
+        namespace: &str,
+        behavior: &str,
+        operation: &str,
+        listing: bool,
+    ) -> bool {
+        self.ask(&AccessRequest::Behavior {
+            principal,
+            action,
+            namespace,
+            behavior,
+            operation,
+            listing,
+        })
+    }
+
+    /// Refuses with `forbidden` unless the policy allows a behavior's
+    /// namespace operation (D77).
+    pub fn require_behavior(
+        &self,
+        principal: &Principal,
+        action: SchemaAction,
+        namespace: &str,
+        behavior: &str,
+        operation: &str,
+    ) -> Result<(), EngineError> {
+        if self.allows_behavior(principal, action, namespace, behavior, operation, false) {
+            return Ok(());
+        }
+        Err(EngineError::new(
+            EngineErrorCode::Forbidden,
+            format!(
+                "{} may not call {behavior}'s {operation} ({}) in namespace {namespace}",
+                principal.subject,
+                action.as_str()
+            ),
+        ))
     }
 
     /// Refuses with `forbidden` unless the policy allows the operation on
@@ -1130,6 +1390,133 @@ mod tests {
         }));
     }
 
+    fn behavior_question<'a>(
+        principal: &'a Principal,
+        action: SchemaAction,
+        operation: &'a str,
+        listing: bool,
+    ) -> AccessRequest<'a> {
+        AccessRequest::Behavior {
+            principal,
+            action,
+            namespace: "default",
+            behavior: "Comments",
+            operation,
+            listing,
+        }
+    }
+
+    #[test]
+    fn a_behavior_question_names_no_schema_and_the_permission_shorthand_answers_it() {
+        let policy = rules(json!("permission"));
+        let nobody = Principal::new("ann", Vec::<String>::new());
+        let claimer = Principal::new("nate", ["Comments.claimDeliveries"]);
+        let question = behavior_question(&nobody, SchemaAction::Read, "inbox", false);
+        assert_eq!(
+            question.to_json(Value::from("ann")),
+            json!({"principal": "ann", "action": "read", "namespace": "default", "behavior": "Comments", "operation": "inbox"})
+        );
+        assert_eq!(question.schema(), None);
+        assert!(policy.allows(&question));
+        for listing in [false, true] {
+            assert!(policy.allows(&behavior_question(
+                &nobody,
+                SchemaAction::Read,
+                "inbox",
+                listing
+            )));
+            assert!(!policy.allows(&behavior_question(
+                &nobody,
+                SchemaAction::Write,
+                "claimDeliveries",
+                listing
+            )));
+            assert!(policy.allows(&behavior_question(
+                &claimer,
+                SchemaAction::Write,
+                "claimDeliveries",
+                listing
+            )));
+            assert!(!policy.allows(&behavior_question(
+                &claimer,
+                SchemaAction::Write,
+                "settleDeliveries",
+                listing
+            )));
+        }
+        assert_eq!(
+            behavior_question(&nobody, SchemaAction::Read, "inbox", true).to_json(Value::Null)
+                ["listing"],
+            json!(true)
+        );
+        // A rule that names no behavior, as every rule written before D77
+        // does, matches no behavior question: a subject- or service-wide
+        // allow lets its principal read and write schemas, and call no
+        // behavior's namespace operation, which falls to the end of the
+        // rules and is refused.
+        let before_d77 = rules(json!({"rules": [
+            {"subject": ["root"], "action": ["read", "write"], "allow": true},
+            {"allow": true}
+        ]}));
+        let root = Principal::new("root", Vec::<String>::new());
+        assert!(before_d77.allows(&schema(&root, SchemaAction::Write, "Task", None)));
+        for (action, operation) in [
+            (SchemaAction::Write, "claimDeliveries"),
+            (SchemaAction::Read, "inbox"),
+        ] {
+            for listing in [false, true] {
+                assert!(!before_d77.allows(&behavior_question(&root, action, operation, listing)));
+            }
+        }
+        // The rules match a behavior question by its behavior, and a rule
+        // written for schemas, {schema}.{action}, refuses it.
+        let rules = rules(json!({"rules": [
+            {"behavior": ["Other"], "allow": true},
+            {"behavior": true, "action": "write", "require": "{behavior}.{operation}"},
+            {"behavior": false, "action": "read", "allow": true},
+            {"require": "{schema}.{action}"}
+        ]}));
+        let everything = Principal::new("root", ["Comments"]);
+        assert!(rules.allows(&behavior_question(
+            &everything,
+            SchemaAction::Write,
+            "claimDeliveries",
+            false
+        )));
+        assert!(!rules.allows(&behavior_question(
+            &everything,
+            SchemaAction::Read,
+            "inbox",
+            false
+        )));
+        assert!(rules.allows(&schema(&nobody, SchemaAction::Read, "Task", None)));
+        assert!(Access::of(
+            &Policy::allow_all(),
+            &(Arc::new(DottedPermissions) as Arc<dyn PermissionMatcher>)
+        )
+        .allows_behavior(
+            &nobody,
+            SchemaAction::Write,
+            "default",
+            "Comments",
+            "claimDeliveries",
+            false
+        ));
+        assert_eq!(
+            Access::new(Arc::new(Nothing))
+                .require_behavior(
+                    &nobody,
+                    SchemaAction::Write,
+                    "default",
+                    "Comments",
+                    "claimDeliveries"
+                )
+                .unwrap_err()
+                .message(),
+            "ann may not call Comments's claimDeliveries (write) in namespace default"
+        );
+    }
+
     #[test]
     fn the_first_rule_that_matches_decides_and_none_refuses() {
         let policy = rules(json!({"rules": [
@@ -1193,7 +1580,13 @@ mod tests {
                 {"action": ["define", "publish"], "require": "schemas.{action}"},
                 {"action": "write", "operation": ["comment", "propose"], "require": ["{schema}.read", "x.{namespace}.{operation}"]},
                 {"service": false, "listing": false, "subject": ["a", "b"], "allow": true},
-                {"service": ["worker", "crawler"], "standsIn": true, "allow": false}
+                {"service": ["worker", "crawler"], "standsIn": true, "allow": false},
+                {"behavior": true, "action": "read", "allow": true},
+                {"behavior": ["Comments", "acme.Rating"], "require": "{behavior}.{operation}"},
+                {"behavior": false, "allow": false},
+                {"actingFor": true, "require": "actFor"},
+                {"actingFor": ["alice", "bob"], "allow": true},
+                {"actingFor": false, "allow": false}
             ]}),
         ] {
             let config: PolicyConfig = serde_json::from_value(policy.clone()).unwrap();
@@ -1210,7 +1603,7 @@ mod tests {
         );
         assert_eq!(
             refused(json!({"rules": [{"require": "{schema}.{verb}"}]})),
-            "policy: rules[0].require: \"{schema}.{verb}\" names {verb}; a permission's placeholders are {schema}, {action}, {namespace} and {operation}"
+            "policy: rules[0].require: \"{schema}.{verb}\" names {verb}; a permission's placeholders are {schema}, {action}, {namespace}, {operation} and {behavior}"
         );
         assert_eq!(
             refused(json!({"rules": [{"action": "read"}]})),
@@ -1230,6 +1623,140 @@ mod tests {
             refused(json!(true)),
             "a policy is \"allowAll\", \"permission\" or { \"rules\": [...] }"
         );
+        assert_eq!(
+            refused(json!({"rules": [{"actingFor": 3, "allow": true}]})),
+            "policy: rules[0].actingFor: true, false, or a subject or a list of them"
+        );
         assert!(serde_json::from_value::<PolicyConfig>(json!({"rules": [{}]})).is_err());
+    }
+
+    #[test]
+    fn a_principal_acting_for_a_subject_is_decided_only_by_a_rule_that_names_acting_for() {
+        let agent = Principal::new("agent:reviewer", ["Task", "Comments"]);
+        let for_alice = agent.clone().acting_for("alice");
+        let for_bob = agent.clone().acting_for("bob");
+        // A rule that names no actingFor, as every rule written before it
+        // does, matches no question whose principal acts for a subject:
+        // the question falls past the last rule and is refused.
+        let before = rules(json!({"rules": [
+            {"subject": "agent:reviewer", "allow": true},
+            {"behavior": true, "allow": true}
+        ]}));
+        assert!(before.allows(&schema(&agent, SchemaAction::Write, "Task", None)));
+        assert!(!before.allows(&schema(&for_alice, SchemaAction::Write, "Task", None)));
+        assert!(!before.allows(&behavior_question(
+            &for_alice,
+            SchemaAction::Read,
+            "inbox",
+            false
+        )));
+        // A rule matches by whom the principal acts for.
+        let named = rules(json!({"rules": [
+            {"actingFor": ["alice"], "action": "write", "require": "{schema}.write"},
+            {"actingFor": true, "action": "read", "allow": true},
+            {"actingFor": false, "allow": true}
+        ]}));
+        assert!(named.allows(&schema(&for_alice, SchemaAction::Write, "Task", None)));
+        assert!(!named.allows(&schema(&for_alice, SchemaAction::Write, "Note", None)));
+        assert!(!named.allows(&schema(&for_bob, SchemaAction::Write, "Task", None)));
+        assert!(named.allows(&schema(&for_bob, SchemaAction::Read, "Task", None)));
+        assert!(named.allows(&schema(&agent, SchemaAction::Define, "Task", None)));
+        // "permission" refuses a principal acting for a subject unless it
+        // holds actFor, and then answers as for its own permissions.
+        let permission = rules(json!("permission"));
+        assert!(permission.allows(&schema(&agent, SchemaAction::Write, "Task", None)));
+        assert!(!permission.allows(&schema(&for_alice, SchemaAction::Write, "Task", None)));
+        assert!(!permission.allows(&schema(&for_alice, SchemaAction::Read, "Task", None)));
+        assert!(!permission.allows(&behavior_question(
+            &for_alice,
+            SchemaAction::Read,
+            "inbox",
+            false
+        )));
+        let trusted =
+            Principal::new("agent:reviewer", ["Task.write", "actFor"]).acting_for("alice");
+        assert!(permission.allows(&schema(&trusted, SchemaAction::Write, "Task", None)));
+        assert!(!permission.allows(&schema(&trusted, SchemaAction::Write, "Note", None)));
+        assert!(permission.allows(&behavior_question(
+            &trusted,
+            SchemaAction::Read,
+            "inbox",
+            false
+        )));
+        assert!(!permission.allows(&behavior_question(
+            &trusted,
+            SchemaAction::Write,
+            "claimDeliveries",
+            false
+        )));
+        // allowAll still allows everything.
+        let all = rules(json!("allowAll"));
+        assert!(all.allows(&schema(&for_alice, SchemaAction::Publish, "Task", None)));
+        assert!(all.allows(&behavior_question(
+            &for_alice,
+            SchemaAction::Write,
+            "claimDeliveries",
+            true
+        )));
+        // The question carries the principal's actingFor.
+        assert_eq!(
+            schema(&for_alice, SchemaAction::Read, "Task", None)
+                .to_json(serde_json::to_value(&for_alice).unwrap())["principal"]["actingFor"],
+            json!({"subject": "alice"})
+        );
+    }
+
+    #[test]
+    fn a_deny_that_names_no_acting_for_binds_a_principal_acting_for_a_subject() {
+        let crawler = Principal::service("crawler", &["api".into()], "sa@issuer");
+        let crawling_for_alice = crawler.clone().acting_for("alice");
+        let agent = Principal::new("agent:reviewer", ["Task"]);
+        let for_alice = agent.clone().acting_for("alice");
+        // A deny with no actingFor refuses the crawler whether or not it
+        // acts for someone: the allow after it is never reached.
+        let policy = rules(json!({"rules": [
+            {"service": "crawler", "standsIn": true, "allow": false},
+            {"actingFor": true, "allow": true},
+            {"allow": true}
+        ]}));
+        assert!(!policy.allows(&schema(&crawler, SchemaAction::Read, "Task", None)));
+        assert!(!policy.allows(&schema(
+            &crawling_for_alice,
+            SchemaAction::Read,
+            "Task",
+            None
+        )));
+        assert!(policy.allows(&schema(&for_alice, SchemaAction::Write, "Task", None)));
+        assert!(policy.allows(&schema(&agent, SchemaAction::Write, "Task", None)));
+        // An allow with no actingFor still matches no principal acting for
+        // a subject, and neither does a require: the question falls past
+        // them and is refused.
+        let allows = rules(json!({"rules": [
+            {"service": "crawler", "allow": true},
+            {"subject": "agent:reviewer", "require": "Task"}
+        ]}));
+        assert!(allows.allows(&schema(&crawler, SchemaAction::Read, "Task", None)));
+        assert!(!allows.allows(&schema(
+            &crawling_for_alice,
+            SchemaAction::Read,
+            "Task",
+            None
+        )));
+        assert!(allows.allows(&schema(&agent, SchemaAction::Read, "Task", None)));
+        assert!(!allows.allows(&schema(&for_alice, SchemaAction::Read, "Task", None)));
+        // A deny that names actingFor: false binds only a principal acting
+        // for no one, as it did.
+        let named = rules(json!({"rules": [
+            {"actingFor": false, "service": "crawler", "allow": false},
+            {"allow": true},
+            {"actingFor": true, "allow": true}
+        ]}));
+        assert!(!named.allows(&schema(&crawler, SchemaAction::Read, "Task", None)));
+        assert!(named.allows(&schema(
+            &crawling_for_alice,
+            SchemaAction::Read,
+            "Task",
+            None
+        )));
     }
 }

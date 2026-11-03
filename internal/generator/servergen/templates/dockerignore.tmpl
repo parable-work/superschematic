@@ -16,6 +16,9 @@
 {{- if .Docker.Engine }}
 {{ .Docker.Engine.Go }}/lib
 {{- end }}
+{{- if .Docker.Rules }}
+{{ .Docker.Rules.Go }}/lib
+{{- end }}
 **/node_modules
 **/target
 **/.git

@@ -1777,6 +1777,8 @@ name = "superschematic-engine-addon"
 version = "0.0.0"
 dependencies = [
  "napi-build",
+ "serde_json",
+ "superschematic-engine",
  "superschematic-engine-behaviors",
  "superschematic-engine-commerce",
  "superschematic-engine-napi",
@@ -1873,6 +1875,60 @@ dependencies = [
  "serde_json",
  "superschematic-engine",
  "superschematic-engine-behaviors",
+]
+
+[[package]]
+name = "superschematic-rules"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "superschematic-rules-adapter"
+version = "0.0.0"
+dependencies = [
+ "bytes",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "superschematic-rules",
+ "superschematic-rules-behaviors",
+ "superschematic-rules-testkit",
+ "tokio",
+ "tokio-postgres",
+ "uuid",
+]
+
+[[package]]
+name = "superschematic-rules-behaviors"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "superschematic-rules",
+]
+
+[[package]]
+name = "superschematic-rules-testkit"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "superschematic-engine-testkit",
+ "superschematic-rules",
+ "superschematic-rules-behaviors",
+]
+
+[[package]]
+name = "superschematic-rules-wasm"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "superschematic-rules",
+ "superschematic-rules-behaviors",
 ]
 
 [[package]]

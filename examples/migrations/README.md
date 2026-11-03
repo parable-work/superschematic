@@ -17,7 +17,7 @@ database that holds rows, one phase at a time (D27 in
 
 ## The change
 
-v2 changes v1 in five ways:
+v2 changes v1 in eight ways:
 
 | Change | Postgres | SQLite |
 |---|---|---|
@@ -26,12 +26,17 @@ v2 changes v1 in five ways:
 | `Task.remindBefore` changes from a list of text to a list of integers | `ALTER COLUMN ... TYPE BIGINT[]`, which fails on text that is not a number | a rebuild of `task`, and of `comment`, which references it; text that is not a number becomes `0` |
 | an index over `Task.project` and `Task.dueAt` | `CREATE INDEX CONCURRENTLY`, outside a transaction | `CREATE INDEX` in the rebuild |
 | `Comment.legacyId` is dropped | `DROP NOT NULL` in `expand`, `DROP COLUMN` in `contract` | nullable in the rebuild, `DROP COLUMN` in `contract` |
+| `Project.status`, a `Default<ProjectStatus, ProjectStatus.Active>`, is added | `ADD COLUMN ... DEFAULT 'active' NOT NULL`, then its enum's check, added `NOT VALID` and validated, in `expand`, since the column is new | `ADD COLUMN` with its default and check |
+| an index over `lower(summary)` | `CREATE INDEX CONCURRENTLY` over the expression | `CREATE INDEX` in the rebuild |
+| a materialized view of each project's open tasks, raw SQL on Postgres alone (`@rawSql`) | its statements, last in `expand` (`raw-sql`) | nothing: the piece names Postgres alone |
 
-`Default<T, V>` fills in decoded payloads, not columns, so a required
-column a version adds has a database default only where the compiler gives
-it one: an empty list for a list, the current time for a timestamp, a new
-UUID for a generated key. A required column without one is `compat` and
-`data-dependent`: adding it fails on a table with rows.
+A required column a version adds takes its `Default<T, V>` as its database
+default, when `V` is text, a number, a boolean or an enum member (D83), and
+the compiler gives some others one: an empty list for a list, the current
+time for a timestamp, a new UUID for a generated key. So the previous
+version's servers keep inserting rows without `status`. A required column
+without a default is `compat` and `data-dependent`: adding it fails on a
+table with rows.
 
 ## Run it
 

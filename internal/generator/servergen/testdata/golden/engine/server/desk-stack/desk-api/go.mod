@@ -12,7 +12,7 @@
 
 module example.com/schemas/server/desk-stack/desk-api
 
-go 1.26.4
+go 1.27.3
 
 require (
 	example.com/schemas/api/desk-api v0.0.0-00010101000000-000000000000

@@ -17,7 +17,7 @@ import (
 
 // objectTemplates holds the named templates of templates/objects.tmpl.
 var objectTemplates = template.Must(
-	template.New("objects.tmpl").Funcs(codegen.BaseTemplateFuncs()).ParseFS(templatesFS, "templates/objects.tmpl"),
+	template.New("objects.tmpl").Funcs(codegen.BaseTemplateFuncs()).Funcs(template.FuncMap{"quote": sqlutil.QuoteIdentifier}).ParseFS(templatesFS, "templates/objects.tmpl"),
 )
 
 func renderObject(name string, data any) (string, error) {

@@ -13,7 +13,9 @@ import (
 
 // A queue document is one operator's operation on a queue's dead messages
 // (`superschematic-migrate queue`, runtime/migrate/README.md, "Queues"):
-// list them, make them ready again, or delete them. `superschematic stack
+// list them, make them ready again, or delete them; or a backfill, which
+// enqueues a message for each row an @enqueueOnChange trigger would have
+// enqueued it for (D88). `superschematic stack
 // queue` writes it with the statements the compiler writes for the queue's
 // table on Postgres (sqlutil.PostgresQueueOperatorStatements), so the
 // runner runs the compiler's SQL as it runs a plan's, and writes none of
@@ -34,6 +36,10 @@ const (
 	QueueRetry QueueOperation = "retry"
 	// QueueDrop deletes dead messages.
 	QueueDrop QueueOperation = "drop"
+	// QueueBackfill enqueues a message for each row of the tables whose
+	// @enqueueOnChange trigger enqueues the queue that meets the trigger's
+	// conditions (D88).
+	QueueBackfill QueueOperation = "backfill"
 )
 
 // QueueDocument is a queue document.
@@ -80,6 +86,10 @@ type QueueStatements struct {
 	// message, and return their IDs.
 	Drop    string `json:"drop"`
 	DropAll string `json:"dropAll"`
+	// Backfill are QueueBackfill's statements, one per table whose trigger
+	// enqueues the queue: each enqueues its messages and returns one row,
+	// how many it enqueued.
+	Backfill []string `json:"backfill,omitempty"`
 }
 
 // queueIDPattern is a message's ID as a queue's table returns it: a UUID
@@ -127,8 +137,23 @@ func ReadQueueDocument(doc []byte) (*QueueDocument, error) {
 			}
 			seen[id] = true
 		}
+	case QueueBackfill:
+		if q.Limit != 0 || len(q.IDs) > 0 || q.All {
+			return nil, fmt.Errorf("queue document: backfill takes no limit, no ids and no all")
+		}
+		if len(q.Statements.Backfill) == 0 {
+			return nil, fmt.Errorf("queue document: backfill has no backfill statement")
+		}
+		for i, sql := range q.Statements.Backfill {
+			if strings.TrimSpace(sql) == "" {
+				return nil, fmt.Errorf("queue document: backfill statement %d is empty", i)
+			}
+		}
 	default:
-		return nil, fmt.Errorf("queue document: operation %q is not dead, retry or drop", q.Operation)
+		return nil, fmt.Errorf("queue document: operation %q is not dead, retry, drop or backfill", q.Operation)
+	}
+	if q.Operation != QueueBackfill && len(q.Statements.Backfill) > 0 {
+		return nil, fmt.Errorf("queue document: %s takes no backfill statement", q.Operation)
 	}
 	s := q.Statements
 	for name, sql := range map[string]string{
@@ -150,7 +175,8 @@ type QueueResult struct {
 	Operation QueueOperation `json:"operation"`
 
 	// Total is the number of dead messages, of which Messages are the
-	// oldest deaths, up to the document's limit (QueueDead).
+	// oldest deaths, up to the document's limit (QueueDead), or the
+	// number of messages a backfill enqueued (QueueBackfill).
 	Total    int64         `json:"total"`
 	Messages []DeadMessage `json:"messages"`
 
@@ -160,7 +186,7 @@ type QueueResult struct {
 }
 
 // MarshalJSON writes the members of the result's operation alone: total
-// and messages for QueueDead, ids for the others.
+// and messages for QueueDead, total for QueueBackfill, ids for the others.
 func (r QueueResult) MarshalJSON() ([]byte, error) {
 	type head struct {
 		Version   int            `json:"version"`
@@ -169,6 +195,12 @@ func (r QueueResult) MarshalJSON() ([]byte, error) {
 		Operation QueueOperation `json:"operation"`
 	}
 	h := head{r.Version, r.Service, r.Queue, r.Operation}
+	if r.Operation == QueueBackfill {
+		return json.Marshal(struct {
+			head
+			Total int64 `json:"total"`
+		}{h, r.Total})
+	}
 	if r.Operation == QueueDead {
 		messages := r.Messages
 		if messages == nil {
@@ -223,7 +255,7 @@ func (e *QueueRefusal) Error() string {
 // RunQueue runs a queue document's operation on a Postgres database: the
 // listing in a read-only transaction, a retry or a drop in one that changes
 // every message it names or, when one of them is no dead message, none
-// (QueueRefusal).
+// (QueueRefusal), and a backfill in one that runs each table's statement.
 func RunQueue(ctx context.Context, driver Driver, doc *QueueDocument) (*QueueResult, error) {
 	if driver.Dialect() != Postgres {
 		return nil, fmt.Errorf("queue %s of %s: a queue's dead messages are read, retried and dropped on Postgres alone, and the database is %s", doc.Queue, doc.Service, driver.Dialect())
@@ -248,6 +280,29 @@ func RunQueue(ctx context.Context, driver Driver, doc *QueueDocument) (*QueueRes
 		})
 		if err != nil {
 			return nil, fmt.Errorf("queue %s of %s: list the dead messages: %w", doc.Queue, doc.Service, err)
+		}
+		return result, nil
+	}
+	if doc.Operation == QueueBackfill {
+		// Every table's backfill in one transaction, so the queue holds
+		// all of them or none.
+		err := driver.Transact(ctx, TxOptions{}, func(ctx context.Context, conn Conn) error {
+			for _, statement := range doc.Statements.Backfill {
+				if err := conn.Query(ctx, statement, nil, func(scan func(dest ...any) error) error {
+					var n int64
+					if err := scan(&n); err != nil {
+						return err
+					}
+					result.Total += n
+					return nil
+				}); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("queue %s of %s: backfill: %w", doc.Queue, doc.Service, err)
 		}
 		return result, nil
 	}

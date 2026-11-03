@@ -120,6 +120,12 @@ fn tickets(rules: Value, extra: &[Value]) -> Value {
     ticket_schema(Value::Array(behaviors))
 }
 
+// review is Revisions with a review step, whose propose moves
+// pendingProposals.
+fn review() -> Value {
+    json!({"name": "Revisions", "config": {"review": {"permission": "tickets.review"}}})
+}
+
 fn projects() -> Value {
     let mut document = schema_document(
         "Project",
@@ -339,7 +345,7 @@ fn from_and_to_only_a_move_from_the_one_value_to_the_other_fires() {
 }
 
 #[test]
-fn a_behaviors_field_workflow_status_as_enters_hears_it_and_a_comment_count_read_as_a_diff() {
+fn a_behaviors_field_workflow_status_as_enters_hears_it_and_a_proposal_count_read_as_a_diff() {
     for target in targets("changes_behavior_field") {
         let engine = open(&target);
         publish(&engine, &projects());
@@ -348,9 +354,9 @@ fn a_behaviors_field_workflow_status_as_enters_hears_it_and_a_comment_count_read
             &tickets(
                 json!([
                     {"when": {"changes": {"field": "Workflow.status", "to": "escalated"}}, "then": {"link": "project", "transition": "active"}},
-                    {"when": {"changes": {"field": "Comments.commentCount", "from": 0}}, "then": {"transition": "triaged"}}
+                    {"when": {"changes": {"field": "Revisions.pendingProposals", "from": 0}}, "then": {"transition": "triaged"}}
                 ]),
-                &[json!({"name": "Comments"}), links_to_project()],
+                &[review(), links_to_project()],
             ),
         );
         create(&engine, "Project", "p1", json!({"title": "Launch"}), None);
@@ -361,14 +367,14 @@ fn a_behaviors_field_workflow_status_as_enters_hears_it_and_a_comment_count_read
             json!({"title": "t1"}),
             Some(json!({"Links": {"project": "p1"}})),
         );
-        // The first comment moves the count from 0 and triages the ticket;
-        // a comment's patch holds no status.
+        // The first proposal moves the count from 0 and triages the ticket;
+        // a proposal's patch holds no status.
         invoke(
             &engine,
             "Ticket",
             "t1",
-            "comment",
-            json!({"body": "Seen it."}),
+            "propose",
+            json!({"patch": {"title": "t1, seen"}}),
         );
         run_due(&engine);
         assert_eq!(
@@ -381,14 +387,14 @@ fn a_behaviors_field_workflow_status_as_enters_hears_it_and_a_comment_count_read
         move_to(&engine, "Ticket", "t1", "escalated");
         run_due(&engine);
         assert_eq!(status(&engine, "Project", "p1"), "active");
-        // A second comment moves the count from 1: the ticket stays
+        // A second proposal moves the count from 1: the ticket stays
         // escalated.
         invoke(
             &engine,
             "Ticket",
             "t1",
-            "comment",
-            json!({"body": "Still there."}),
+            "propose",
+            json!({"patch": {"title": "t1, still there"}}),
         );
         run_due(&engine);
         assert_eq!(status(&engine, "Ticket", "t1"), "escalated");
@@ -631,9 +637,9 @@ fn guidance_names_each_changes_rule_and_the_writes_that_can_set_one_off_say_so()
             &tickets(
                 json!([
                     {"when": {"changes": {"field": "priority", "to": "urgent"}}, "then": {"transition": "escalated"}},
-                    {"when": {"changes": {"field": "Comments.commentCount", "from": 0}}, "then": {"transition": "triaged"}}
+                    {"when": {"changes": {"field": "Revisions.pendingProposals", "from": 0}}, "then": {"transition": "triaged"}}
                 ]),
-                &[json!({"name": "Comments"})],
+                &[review()],
             ),
         );
         let described = engine
@@ -648,7 +654,7 @@ fn guidance_names_each_changes_rule_and_the_writes_that_can_set_one_off_say_so()
             .map(|behavior| behavior["summary"].clone());
         assert_eq!(
             summary,
-            Some(json!("After a change commits, the runner moves statuses by rules, through transition and its guards: when priority changes to \"urgent\", it moves to escalated; when Comments.commentCount changes from 0, it moves to triaged. A move a guard vetoes, or that no transition allows, is left undone."))
+            Some(json!("After a change commits, the runner moves statuses by rules, through transition and its guards: when priority changes to \"urgent\", it moves to escalated; when Revisions.pendingProposals changes from 0, it moves to triaged. A move a guard vetoes, or that no transition allows, is left undone."))
         );
         let success = |name: &str| -> String {
             described["operations"]
@@ -662,10 +668,10 @@ fn guidance_names_each_changes_rule_and_the_writes_that_can_set_one_off_say_so()
         };
         let said =
             "Reactions' rules on Ticket may move it, or the instances it links to, again after the commit.";
-        for name in ["transition", "create", "update", "comment"] {
+        for name in ["transition", "create", "update", "propose", "approve"] {
             assert!(success(name).contains(said), "{name}: {}", success(name));
         }
-        assert!(!success("listComments").contains("Reactions"));
+        assert!(!success("listProposals").contains("Reactions"));
     }
 }
 

@@ -29,6 +29,8 @@ export abstract class ProductView {
   id: Identity.UUID;
   sku: Identity.Slug;
   name: Identity.Name;
+  // What one sells for, in pence, which a page shows as money.
+  @display({ currency: "GBP" })
   priceCents: Generic.Int64;
   inStock: boolean;
 }
@@ -38,6 +40,7 @@ export abstract class ProductView {
 export abstract class OrderLineView {
   id: Identity.UUID;
   quantity: Generic.Int64;
+  @display({ currency: "GBP" })
   unitPriceCents: Generic.Int64;
 
   // The product this line is for: the key of OrderLine.product, which
@@ -61,7 +64,9 @@ export abstract class OrderView {
   lines: OrderLineView[];
 
   // The sum of each line's quantity times its unit price, stored with the
-  // order when it is placed, so a page of orders sorts by it.
+  // order when it is placed, so a page of orders sorts by it. The shop
+  // sells in pounds, so a page shows it, and each line's price, as money.
+  @display({ currency: "GBP" })
   totalCents: Generic.Int64;
 }
 

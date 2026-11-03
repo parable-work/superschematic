@@ -150,6 +150,7 @@
           "type": "UUID"
         },
         {
+          "default": "false",
           "name": "deleted_on_ref",
           "origin": "Cover.deletedOnRef",
           "type": "BOOLEAN"
@@ -306,6 +307,7 @@
           "type": "UUID"
         },
         {
+          "default": "false",
           "name": "deleted_on_ref",
           "origin": "Ingredient.deletedOnRef",
           "type": "BOOLEAN"
@@ -465,6 +467,7 @@
           "type": "UUID"
         },
         {
+          "default": "false",
           "name": "deleted_on_ref",
           "origin": "Note.deletedOnRef",
           "type": "BOOLEAN"
@@ -733,6 +736,29 @@
       }
     },
     {
+      "checks": [
+        {
+          "column": "entity_kind",
+          "in": [
+            "cover",
+            "ingredient",
+            "note",
+            "step",
+            "tasting",
+            "utensil"
+          ],
+          "name": "ck_recipe_patch_entity_kind"
+        },
+        {
+          "column": "operation",
+          "in": [
+            "ADD",
+            "UPDATE",
+            "DELETE"
+          ],
+          "name": "ck_recipe_patch_operation"
+        }
+      ],
       "columns": [
         {
           "default": "gen_random_uuid()",
@@ -1178,6 +1204,20 @@
       }
     },
     {
+      "checks": [
+        {
+          "column": "entity_kind",
+          "in": [
+            "cover",
+            "ingredient",
+            "note",
+            "step",
+            "tasting",
+            "utensil"
+          ],
+          "name": "ck_recipe_snapshot_entry_entity_kind"
+        }
+      ],
       "columns": [
         {
           "default": "gen_random_uuid()",
@@ -1323,6 +1363,7 @@
           "type": "UUID"
         },
         {
+          "default": "false",
           "name": "deleted_on_ref",
           "origin": "Step.deletedOnRef",
           "type": "BOOLEAN"
@@ -1450,6 +1491,17 @@
       }
     },
     {
+      "checks": [
+        {
+          "column": "verdict",
+          "in": [
+            "again",
+            "tweak",
+            "never"
+          ],
+          "name": "ck_tasting_verdict"
+        }
+      ],
       "columns": [
         {
           "default": "gen_random_uuid()",
@@ -1483,19 +1535,16 @@
           "type": "BIGINT"
         },
         {
-          "default": "CURRENT_DATE",
           "name": "tasted_on",
           "origin": "Tasting.tastedOn",
           "type": "DATE"
         },
         {
-          "default": "CURRENT_TIMESTAMP",
           "name": "tasted_at",
           "origin": "Tasting.tastedAt",
           "type": "TIMESTAMPTZ"
         },
         {
-          "default": "CURRENT_TIME",
           "name": "served_at",
           "origin": "Tasting.servedAt",
           "type": "TIME"
@@ -1544,6 +1593,7 @@
           "type": "UUID"
         },
         {
+          "default": "false",
           "name": "deleted_on_ref",
           "origin": "Tasting.deletedOnRef",
           "type": "BOOLEAN"
@@ -1690,6 +1740,7 @@
           "type": "UUID"
         },
         {
+          "default": "false",
           "name": "deleted_on_ref",
           "origin": "Utensil.deletedOnRef",
           "type": "BOOLEAN"

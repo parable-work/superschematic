@@ -26,6 +26,11 @@ handlers and say who the caller is.
   anyone.
 - `Validate<number, { min: 1; max: 99 }>` bounds the quantity. The router
   checks it on every request, and the SDK checks it before sending.
+- `FileUpload<C>` makes `ImportCartLinesInput.lines` a file, a CSV of at
+  most 64 KiB: `importCartLines` takes a multipart body, and the router
+  checks the file against its field before the method runs.
+  `FileDownload<C>` makes `exportCart` answer the cart as a CSV file under
+  `cart.csv`, not as JSON ([Files](/superschematic/guides/api-routes/#files)).
 
 ## Configure it
 
@@ -56,6 +61,7 @@ superschematic build --with-deps schemas/services/shop-storefront
     - router.ts buildRouter and the operation table
     - deps.ts Deps and Constructor, what an implementation is built from
     - openapi.json
+    - openapi.ts the same document, which buildRouter serves at /api/openapi.json
   - sdk/typescript/shop-storefront/ @acme/shop-storefront-sdk
   - types/typescript/
     - shop-common/ @acme/shop-common-types
@@ -117,6 +123,11 @@ Then each namespace is a property of the SDK, and each method takes the
 route's arguments:
 
 <Snippet file="typescript/shop-storefront/index.test.ts" from="test('a shopper adds lines" to="  });" />
+
+A file goes beside the input, and a file comes back as a `Blob` with the
+name the router offered:
+
+<Snippet file="typescript/shop-storefront/index.test.ts" from="test('a shopper imports lines" to="  });" />
 
 The SDK parses each response with the generated parser, so `updatedAt`
 arrives as a `Date`. A response outside 2xx throws an `ApiError` with its

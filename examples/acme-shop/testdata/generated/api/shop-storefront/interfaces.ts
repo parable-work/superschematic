@@ -6,14 +6,17 @@
 // success envelope by the router) or an OperationResult to choose the status.
 // Operations declared @manualRouteRegistration are not part of these
 // interfaces: the service supplies them through RouterOptions.manualRoutes.
+// An operation whose result is a FileDownload (D81) returns the file, its
+// body and filename, which the router answers in place of the envelope.
 
-import type { OperationResult, RequestContext } from '@superschematic/http-runtime';
+import type { FileDownload, OperationResult, RequestContext } from '@superschematic/http-runtime';
 import type {
   IdentityUUID,
 } from 'superscalar/scalars';
 import type {
   AddCartLineInput,
   CartView,
+  ImportCartLinesInput,
   StorefrontHealth,
 } from '@acme/shop-storefront-types/types';
 
@@ -25,10 +28,23 @@ export interface GetCartArgs {
   cartId: IdentityUUID;
 }
 
+/** Arguments of cart.exportCart (GET /api/carts/{cartId}/export). */
+export interface ExportCartArgs {
+  cartId: IdentityUUID;
+}
+
 /** Arguments of cart.addCartLine (POST /api/carts/{cartId}/lines). */
 export interface AddCartLineArgs {
   cartId: IdentityUUID;
   input: AddCartLineInput;
+}
+
+/** Arguments of cart.importCartLines (POST /api/carts/{cartId}/lines/import). */
+export interface ImportCartLinesArgs {
+  cartId: IdentityUUID;
+  input: Omit<ImportCartLinesInput, 'lines'>;
+  /** The input's files (D81), each within its field's limits; an optional one the caller left out is absent. */
+  files: { lines: File };
 }
 
 export interface CartImplementation {
@@ -38,10 +54,27 @@ export interface CartImplementation {
    */
   getCart(args: GetCartArgs, ctx: RequestContext): Promise<OperationOutcome<CartView>>;
   /**
+   * A cart's lines as CSV, the form importCartLines reads, with each
+   * line's unit price.
+   *
+   * GET /api/carts/{cartId}/export
+   * Answers a file (text/csv; charset=utf-8): a FileDownload, its body and its filename, cart.csv when it names none.
+   * Requires a principal holding one of: carts.read.
+   */
+  exportCart(args: ExportCartArgs, ctx: RequestContext): Promise<FileDownload>;
+  /**
    * POST /api/carts/{cartId}/lines
    * Requires a principal holding one of: carts.write.
    */
   addCartLine(args: AddCartLineArgs, ctx: RequestContext): Promise<OperationOutcome<CartView>>;
+  /**
+   * Adds each line of a CSV to a cart, as addCartLine adds one.
+   *
+   * POST /api/carts/{cartId}/lines/import
+   * Multipart: the files (lines) arrive in args.files, checked against their fields' limits.
+   * Requires a principal holding one of: carts.write.
+   */
+  importCartLines(args: ImportCartLinesArgs, ctx: RequestContext): Promise<OperationOutcome<CartView>>;
 }
 
 /** Arguments of storefront-probes.getHealth (GET /api/health). */

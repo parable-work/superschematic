@@ -1,0 +1,5 @@
+# Test-local to the TypeScript SDK generator (sdktest), so no other
+# generator's goldens read it.
+name: list-filters-api
+kind: API
+outputs: {}

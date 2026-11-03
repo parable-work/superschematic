@@ -117,7 +117,7 @@ func (s *session) planImages(prev *Manifest, given map[string]string, src *Sourc
 	p := &imagePlan{images: map[string]string{}, contexts: map[string]string{}}
 	if prev != nil {
 		for server, image := range prev.Images {
-			if d := s.env.Deployable(server); d != nil && d.HasImage() {
+			if d := s.env.Deployable(server); d != nil && runsImage(d) {
 				p.images[server] = image
 				if c := prev.Contexts[server]; c != "" {
 					p.contexts[server] = c
@@ -133,7 +133,7 @@ func (s *session) planImages(prev *Manifest, given map[string]string, src *Sourc
 		return p, nil
 	}
 	for _, d := range s.env.Deployables {
-		if !d.HasImage() {
+		if !runsImage(d) {
 			continue
 		}
 		if _, ok := given[d.Name]; ok {
@@ -318,8 +318,12 @@ func Build(ctx context.Context, o BuildOptions) (*BuildResult, error) {
 		return nil, fmt.Errorf("target %s keeps no deploy state, so environment %s does not deploy", s.target.Name, s.env.Environment)
 	}
 	for _, name := range o.Deployables {
-		if d := s.env.Deployable(name); d == nil || !d.Kind.RollsOut() {
+		d := s.env.Deployable(name)
+		if d == nil || !d.Kind.RollsOut() {
 			return nil, fmt.Errorf("environment %s has no server, job or site %s", s.env.Environment, name)
+		}
+		if appOff(d) {
+			return nil, fmt.Errorf("environment %s turns app %s off, so it runs no image to build; turn it on in the environment's settings", s.env.Environment, name)
 		}
 	}
 	prev, err := readManifest(ctx, s.target.State, s.run)

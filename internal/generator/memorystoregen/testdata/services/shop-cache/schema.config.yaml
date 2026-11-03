@@ -1,0 +1,11 @@
+# The memorystoregen goldens' store (D75): a signal channel, a channel whose
+# payload is a dependency's object type, a claim with a TTL, and a counter
+# with a maximum TTL whose parts are one of each kind a part may be: a
+# string, a scalar whose wire form is a string, an integer scalar, a
+# boolean and an enum. Each language's golden test sets outputs.types to
+# its own language.
+name: shop-cache
+kind: MemoryStore
+dependencies:
+  - { name: shop-cache-common, kind: General }
+outputs: {}

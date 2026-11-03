@@ -67,6 +67,26 @@ function owns(corpus: CorpusFiles, file: string): boolean {
   return corpus.prefix === '' ? !PACKAGE_PREFIXES.some((prefix) => file.startsWith(prefix)) : file.startsWith(corpus.prefix);
 }
 
+// firstDifference names the first line the recorder wrote otherwise, with
+// the committed line and the recorded one around where they part: what a
+// check that fails in CI shows of the diff it cannot leave behind.
+function firstDifference(committed: string, recorded: string): string {
+  const was = committed.split('\n');
+  const now = recorded.split('\n');
+  let line = 0;
+  while (line < was.length && line < now.length && was[line] === now[line]) {
+    line += 1;
+  }
+  const a = was[line] ?? '';
+  const b = now[line] ?? '';
+  let column = 0;
+  while (column < a.length && column < b.length && a[column] === b[column]) {
+    column += 1;
+  }
+  const around = (text: string) => JSON.stringify(text.slice(Math.max(0, column - 200), column + 400));
+  return `line ${line + 1}, column ${column + 1}:\n  committed: ${around(a)}\n  recorded:  ${around(b)}`;
+}
+
 function jsonFiles(directory: string): string[] {
   return existsSync(directory) ? readdirSync(directory).filter((name) => name.endsWith('.json')).sort() : [];
 }
@@ -99,7 +119,10 @@ export async function checkCorpus(corpus: CorpusFiles): Promise<void> {
       for (const file of written) {
         const text = readFileSync(join(testdata, kind, file), 'utf8');
         const recorded = readFileSync(join(out, kind, file), 'utf8');
-        assert.ok(text === recorded, `runtime/engine/testdata/${kind}/${file} is stale: the engine now records otherwise; rerun with UPDATE_ENGINE_CORPUS=1 and review the diff`);
+        assert.ok(
+          text === recorded,
+          `runtime/engine/testdata/${kind}/${file} is stale: the engine now records otherwise; rerun with UPDATE_ENGINE_CORPUS=1 and review the diff\n${firstDifference(text, recorded)}`
+        );
       }
     }
   } finally {

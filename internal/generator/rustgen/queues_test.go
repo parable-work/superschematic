@@ -126,8 +126,7 @@ func TestQueuesOfOnlyLeftOutQueues(t *testing.T) {
 		t.Fatal(err)
 	}
 	schema.Scalars["Geo.Point"] = &ir.ScalarDef{Name: "Geo.Point", LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"sql": "POINT"}}
-	for _, name := range []string{"OrderPlaced", "Ping"} {
-		td := schema.Types[name]
+	for _, td := range schema.Queues() {
 		td.Fields = append(td.Fields, &ir.FieldDef{Name: "at", TypeRef: ir.TypeRef{Name: "Geo.Point", IsArray: true}})
 	}
 	output, err := Generate(schema, Options{SchemaName: "fixture-queue-db", Clock: codegen.FixedClock(time.Unix(0, 0).UTC())})

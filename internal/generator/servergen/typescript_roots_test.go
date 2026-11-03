@@ -27,9 +27,10 @@ import (
 
 // tsRootServices are the services of the TypeScript fixture a build of
 // ts-stack reaches, in build order: ts-db's TypeScript types export the
-// queue ts-shop's worker claims (D53), and ts-stack deploys the site
-// ts-web (D55).
-var tsRootServices = append([]string{"ts-db"}, append(slices.Clone(tsAPIs), tsSite, "ts-stack")...)
+// queue ts-shop's worker claims (D53), ts-cache's the definitions both
+// implementations depend on (D75), and ts-stack deploys the site ts-web
+// (D55).
+var tsRootServices = append([]string{"ts-db", "ts-cache"}, append(slices.Clone(tsAPIs), tsSite, "ts-stack")...)
 
 // buildTSInto builds services of the TypeScript fixture into the output
 // root out of the repository at repoRoot, naming its schemas root as every

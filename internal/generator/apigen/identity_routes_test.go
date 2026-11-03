@@ -63,8 +63,8 @@ func generateUserRoutesAPI(t *testing.T, schema *ir.Schema) *apigen.APIOutput {
 // and the tool manifest read them.
 func TestUserRoutesAreEndpoints(t *testing.T) {
 	output := generateUserRoutesAPI(t, loadUserRoutesAPI(t))
-	if len(output.Endpoints) != 19 {
-		t.Fatalf("got %d endpoints, want 19", len(output.Endpoints))
+	if len(output.Endpoints) != 20 {
+		t.Fatalf("got %d endpoints, want 20", len(output.Endpoints))
 	}
 	byName := map[string]apigen.EndpointInfo{}
 	for _, endpoint := range output.Endpoints {
@@ -85,6 +85,23 @@ func TestUserRoutesAreEndpoints(t *testing.T) {
 	if grant.Path != "/api/auth/admin/users/{id}/roles/{roleId}" || grant.Method != "PUT" ||
 		!slices.Equal(grant.RequiredPerms, []string{"identity.roles.write"}) || len(grant.PathParams) != 2 {
 		t.Errorf("grantRole = %+v", grant)
+	}
+	// The fixture registers under approval (D81): register answers
+	// RegisterResult, approveUser needs users.write, and the output carries
+	// the registration the identity wiring hands the runtime.
+	if register := byName["register"]; register.OutputType != "RegisterResult" {
+		t.Errorf("register answers %s, want RegisterResult", register.OutputType)
+	}
+	approve := byName["approveUser"]
+	if approve.Path != "/api/auth/admin/users/{id}/approve" || approve.Method != "POST" ||
+		!slices.Equal(approve.RequiredPerms, []string{"identity.users.write"}) || len(approve.PathParams) != 1 {
+		t.Errorf("approveUser = %+v", approve)
+	}
+	if list := byName["listUsers"]; len(list.ScalarArgs) != 1 || list.ScalarArgs[0].Name != "pending" || list.ArgumentsInBody() {
+		t.Errorf("listUsers' arguments = %+v, want pending in the query", list.ScalarArgs)
+	}
+	if reg := output.Registration; reg == nil || !reg.Approval() || !slices.Equal(reg.DefaultRoles, []string{"member"}) || reg.FirstUser == nil {
+		t.Errorf("Registration = %+v, want approval with member and a first administrator", output.Registration)
 	}
 	if !slices.Equal(output.Namespaces, []string{"account", "account-admin", "greeting"}) {
 		t.Errorf("Namespaces = %v", output.Namespaces)
@@ -109,7 +126,7 @@ func TestImplementedOutputLeavesOutUserRoutes(t *testing.T) {
 	if len(view.Endpoints) != 1 || view.Endpoints[0].Name != "greet" {
 		t.Fatalf("view endpoints = %+v", view.Endpoints)
 	}
-	if len(view.IdentityEndpoints) != 18 || len(view.RoutedEndpoints()) != 19 {
+	if len(view.IdentityEndpoints) != 19 || len(view.RoutedEndpoints()) != 20 {
 		t.Fatalf("view: %d identity endpoints, %d routed", len(view.IdentityEndpoints), len(view.RoutedEndpoints()))
 	}
 	// The administration routes' permission check is the identity
@@ -121,7 +138,7 @@ func TestImplementedOutputLeavesOutUserRoutes(t *testing.T) {
 	if !view.Auth.Identity || !view.AuthWired() || view.IsPublic {
 		t.Errorf("view: Auth %+v, AuthWired %v, IsPublic %v; want the identity wiring without public", view.Auth, view.AuthWired(), view.IsPublic)
 	}
-	if view.OpenAPISpecRaw != output.OpenAPISpecRaw || len(output.Endpoints) != 19 {
+	if view.OpenAPISpecRaw != output.OpenAPISpecRaw || len(output.Endpoints) != 20 {
 		t.Error("the view changed the output, or its OpenAPI document")
 	}
 	plain := generateServiceAuthFixtureAPI(t)
@@ -192,6 +209,9 @@ func TestOpenAPIUserRoutesGolden(t *testing.T) {
 		want         []string
 	}{
 		{"/api/auth/login", "post", []string{"200", "400", "401", "403", "500"}},
+		// Under approval register answers 202 for a pending user (D81).
+		{"/api/auth/register", "post", []string{"200", "202", "400", "403", "409", "500"}},
+		{"/api/auth/admin/users/{id}/approve", "post", []string{"200", "400", "401", "403", "404", "409", "500"}},
 		{"/api/auth/me", "get", []string{"200", "400", "401", "500"}},
 		{"/api/auth/admin/roles/{id}", "put", []string{"200", "400", "401", "403", "404", "409", "422", "500"}},
 		{"/api/greeting", "get", []string{"200", "400", "500"}},
@@ -202,6 +222,9 @@ func TestOpenAPIUserRoutesGolden(t *testing.T) {
 	}
 	if got := spec.Paths["/api/auth/login"]["post"].Responses["401"].Description; !strings.HasPrefix(got, ir.IdentityCodeInvalidCredentials+": ") {
 		t.Errorf("login's 401 = %q", got)
+	}
+	if got := spec.Paths["/api/auth/login"]["post"].Responses["403"].Description; !strings.Contains(got, ir.IdentityCodePendingApproval+": ") {
+		t.Errorf("login's 403 = %q, want pending_approval among its codes", got)
 	}
 	for path, method := range map[string]string{
 		"/api/auth/login": "post", "/api/auth/logout": "post", "/api/auth/me": "get", "/api/auth/capabilities": "get",

@@ -216,6 +216,19 @@ func TestCommands(t *testing.T) {
 				t.Fatalf("the printed model hashes to %v, %v; want %s", model, err, evolve.To)
 			}
 
+			// The database is at 02, so it differs from 01, and --diff
+			// says so and records nothing (D85).
+			if db != testdb.D1 {
+				invoke(t, nil, "adopt", "--model", modelFile, "--diff", "--database-url", urls[2]).
+					expect(t, exitFailed, ": the database holds it, and the model does not", "the database differs from model "+create.To+" of service shop in ")
+				invoke(t, env, "status", "--service", "shop").expect(t, exitOK, "applied model:    "+evolve.To)
+				evolveModel := filepath.Join(t.TempDir(), "evolve.json")
+				if err := os.WriteFile(evolveModel, evolve.ToModel, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				invoke(t, nil, "adopt", "--model", evolveModel, "--diff", "--database-url", urls[2]).
+					expect(t, exitOK, "the database holds model "+evolve.To+" of service shop")
+			}
 			invoke(t, nil, "adopt", "--model", modelFile, "--database-url", urls[2]).
 				expect(t, exitOK, "adopted model "+create.To+" for service shop; it replaces "+evolve.To)
 			invoke(t, env, "status", "--service", "shop").expect(t, exitOK, "applied model:    "+create.To, "plan in progress: none")

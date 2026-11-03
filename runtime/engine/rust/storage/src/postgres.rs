@@ -34,7 +34,11 @@
 //!
 //! The listener is one more connection per [`Db`], which LISTENs on the
 //! engine's channel and moves the [`Notifier`]'s epoch for each commit any
-//! process announces ([`crate::Tx::notify`]).
+//! process announces ([`crate::Tx::notify`]), and on the engine's signal
+//! channel, `superschematic_engine_signals.<schema>` (shortened as a long
+//! identifier is), whose payloads it hands to the process's [`Signals`]
+//! sinks ([`crate::Tx::signal`], D77). The dot keeps the two channels of
+//! every pair of schemas apart, since a schema's name holds none.
 
 use std::collections::HashMap;
 use std::error::Error as StdError;
@@ -56,6 +60,7 @@ use crate::dialect::Dialect;
 use crate::error::{DbCode, Error, Result};
 use crate::ident::{postgres_identifier, quote_identifier};
 use crate::notifier::Notifier;
+use crate::signals::{untag, Signals};
 use crate::tokens::{postgres_placeholders, statement_changes_tables, statement_writes};
 use crate::value::SqlValue;
 
@@ -243,14 +248,21 @@ impl Db {
             <PgConn as RawConn>::healthy,
         );
         let notifier = Arc::new(Notifier::new());
+        let signals = Arc::new(Signals::new());
         let channel = postgres_identifier(&format!("superschematic_engine_{schema}")).into_owned();
+        let signal_channel =
+            postgres_identifier(&format!("superschematic_engine_signals.{schema}")).into_owned();
         let mut closers: Vec<Box<dyn FnOnce() + Send + Sync>> = Vec::new();
         if options.listen {
             closers.push(listen(
                 listen_config,
                 deadline,
-                channel.clone(),
+                Channels {
+                    commits: channel.clone(),
+                    signals: signal_channel.clone(),
+                },
                 Arc::clone(&notifier),
+                Arc::clone(&signals),
             ));
         }
         Ok(Db::new(
@@ -259,6 +271,8 @@ impl Db {
                 schema,
                 schemas,
                 channel,
+                signal_channel,
+                listens: options.listen,
                 pool,
                 lease_config,
                 deadline,
@@ -266,6 +280,7 @@ impl Db {
             options.busy_timeout,
             options.migration_timeout,
             notifier,
+            signals,
             closers,
         ))
     }
@@ -379,6 +394,10 @@ struct PostgresBackend {
     schema: String,
     schemas: Vec<String>,
     channel: String,
+    /// The channel signals travel on (D77).
+    signal_channel: String,
+    /// Whether a listener hands this process its own signals.
+    listens: bool,
     pool: Pool<PgConn>,
     /// What a lease's own connection opens with, and how long it may take.
     lease_config: Connecting,
@@ -433,6 +452,14 @@ impl Backend for PostgresBackend {
 
     fn channel(&self) -> Option<&str> {
         Some(&self.channel)
+    }
+
+    fn signal_channel(&self) -> Option<&str> {
+        Some(&self.signal_channel)
+    }
+
+    fn listens(&self) -> bool {
+        self.listens
     }
 
     fn stale_retries(&self) -> usize {
@@ -954,19 +981,26 @@ fn read_error(error: postgres::Error) -> Error {
     Error::Value { message: reason }
 }
 
+// The channels a listener LISTENs on: the commits' and the signals'.
+struct Channels {
+    commits: String,
+    signals: String,
+}
+
 // listen starts the listener thread and returns what stops it.
 fn listen(
     config: Connecting,
     deadline: Duration,
-    channel: String,
+    channels: Channels,
     notifier: Arc<Notifier>,
+    signals: Arc<Signals>,
 ) -> Box<dyn FnOnce() + Send + Sync> {
     let stop = Arc::new(AtomicBool::new(false));
     let thread: JoinHandle<()> = {
         let stop = Arc::clone(&stop);
         thread::Builder::new()
             .name("engine-storage-listen".to_owned())
-            .spawn(move || listen_loop(&config, deadline, &channel, &notifier, &stop))
+            .spawn(move || listen_loop(&config, deadline, &channels, &notifier, &signals, &stop))
             .expect("start the storage's listener thread")
     };
     Box::new(move || {
@@ -978,8 +1012,9 @@ fn listen(
 fn listen_loop(
     config: &Connecting,
     deadline: Duration,
-    channel: &str,
+    channels: &Channels,
     notifier: &Notifier,
+    signals: &Signals,
     stop: &AtomicBool,
 ) {
     let mut backoff = Duration::from_millis(50);
@@ -993,7 +1028,11 @@ fn listen_loop(
             }
         };
         if client
-            .batch_execute(&format!("LISTEN {}", quote_identifier(channel)))
+            .batch_execute(&format!(
+                "LISTEN {}; LISTEN {}",
+                quote_identifier(&channels.commits),
+                quote_identifier(&channels.signals)
+            ))
             .is_err()
         {
             pause(backoff, stop);
@@ -1006,6 +1045,9 @@ fn listen_loop(
         while !stop.load(Ordering::SeqCst) {
             let next = client.notifications().timeout_iter(LISTEN_POLL).next();
             match next {
+                Ok(Some(notification)) if notification.channel() == channels.signals => {
+                    signals.deliver(untag(notification.payload()));
+                }
                 Ok(Some(_)) => {
                     notifier.bump();
                 }

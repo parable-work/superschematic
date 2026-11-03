@@ -123,8 +123,36 @@ func TestTheReleaseLinksTheDigests(t *testing.T) {
 		"-X " + symbol + "=$digests",
 		"for platform in " + strings.Join([]string{"linux-x64", "linux-arm64", "darwin-arm64", "darwin-x64"}, " ") + "; do",
 		`tarball="archives/` + ArchiveName("${VERSION}", "${platform}") + `"`,
-		"for bin in superschematic superschematic-identity superschematic-migrate superschematic-archives; do",
 		`scripts/release-archives.sh "$VERSION" "$NAME" dist`,
+	} {
+		if !strings.Contains(workflow, want) {
+			t.Errorf(".github/workflows/release.yml lacks %q", want)
+		}
+	}
+	// Each extension's binary is built, checked and packed beside the
+	// CLI, from its module's command, and counted among the release's
+	// tarballs.
+	for _, ext := range ExtensionCLIs {
+		cli := ExtensionCLI(ext)
+		module := "extensions/" + ext
+		if _, err := os.Stat(filepath.Join(root, module, "cmd", cli)); err != nil {
+			t.Errorf("%s has no command %s: %v", module, cli, err)
+		}
+		for _, want := range []string{
+			"build_cli " + cli + " " + module + " ./cmd/" + cli + " ",
+			" " + cli + " superschematic-identity",
+		} {
+			if !strings.Contains(workflow, want) {
+				t.Errorf(".github/workflows/release.yml lacks %q", want)
+			}
+		}
+	}
+	for _, want := range []string{
+		`out="dist/` + CLIName("${bin}", "${VERSION}", "${NAME}") + `"`,
+		`got="$("$out/$bin" --version)"`,
+		`if [ "$got" != "$bin version $VERSION" ]; then`,
+		`if ! grep -qaF -- "$digests" "$out/$bin"; then`,
+		"build_cli " + CLI + " cmd/" + CLI + " . ",
 	} {
 		if !strings.Contains(workflow, want) {
 			t.Errorf(".github/workflows/release.yml lacks %q", want)

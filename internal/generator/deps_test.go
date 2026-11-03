@@ -52,7 +52,7 @@ func buildDeps(t *testing.T, outputRoot, implementationRoot string, paths naming
 	t.Helper()
 	configs := map[string]*schemaconfig.SchemaConfig{}
 	schemas := map[string]*ir.Schema{}
-	for _, name := range []string{"deps-db", "deps-catalog", "deps-orders"} {
+	for _, name := range []string{"deps-db", "deps-catalog", "deps-orders", "deps-cache"} {
 		schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(depsFixtures, name))
 		if err != nil {
 			t.Fatalf("load %s: %v", name, err)
@@ -165,7 +165,7 @@ func TestDepsAndScaffoldCompile(t *testing.T) {
 	names := naming.Default()
 	implDir := filepath.Join(root, "go")
 	var gomod strings.Builder
-	gomod.WriteString("module example.com/impl\n\ngo 1.26.4\n")
+	gomod.WriteString("module example.com/impl\n\ngo 1.27.3\n")
 	local := map[string]string{
 		names.GoAPIModule("deps-orders"):    APIDir(outputRoot, "deps-orders"),
 		names.GoAPIModule("deps-catalog"):   APIDir(outputRoot, "deps-catalog"),
@@ -205,6 +205,9 @@ func TestDepsAndScaffoldCompile(t *testing.T) {
 			Headers: []string{ir.ServiceAuthorizationHeader, "X-Serverless-Authorization"},
 		}},
 		"DEPS_MEDIA_BUCKET": ir.BucketConnection{Name: "acme-shop-deps-media"},
+		"DEPS_CACHE_MEMORY_STORE": ir.MemoryStoreConnection{
+			Store: "deps-cache", URL: "rediss://10.1.2.3:6379", CA: "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n", Auth: ir.MemoryStoreAuthIAM,
+		},
 	} {
 		vars, err := ir.DerivedVariables(field, value)
 		if err != nil {
@@ -243,6 +246,9 @@ func TestTheImplementationBuildsFromDeps(t *testing.T) {
 	}
 	if b := cfg.DepsMediaBucket; b.Name != "acme-shop-deps-media" || b.Endpoint != "" {
 		t.Errorf("DepsMediaBucket = %+v", b)
+	}
+	if m := cfg.DepsCacheMemoryStore; !m.Enabled() || !m.TLS() || m.Store != "deps-cache" || m.Auth != "iam" {
+		t.Errorf("DepsCacheMemoryStore = %+v", m)
 	}
 	impls, err := impl.New(api.Deps{Config: *cfg})
 	if err != nil {

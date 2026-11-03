@@ -1,0 +1,7 @@
+# The memory store triage-ts-api and triage-rs-api list (D75), so each
+# deriver, an entrypoint of its own, opens it once, on Redis, beside the
+# engine, and closes it when it stops. triage-stack's Local runs it on the
+# local target's Valkey.
+name: triage-cache
+kind: MemoryStore
+outputs: {}

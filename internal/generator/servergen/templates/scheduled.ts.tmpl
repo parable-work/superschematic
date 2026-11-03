@@ -5,8 +5,13 @@
 // {{ $api.Service }} on Cloudflare's Cron Triggers (docs/stack-model.md, section 18.9).
 // superschematic writes it beside main.ts, which stack dev runs on Bun,
 // because an environment of the stack places the job on Cron Triggers;
+{{- if .NodeCompat }}
+// bundle.ts bundles it for workerd, with Node's modules, which
+// node-postgres needs (D92).
+{{- else }}
 // bundle.ts bundles it for workerd, with no Node API but AsyncLocalStorage,
 // under nodejs_als.
+{{- end }}
 //
 // When Cloudflare loads the version, scheduled.ts reads the API's config
 // from the Worker's string bindings, so a refused config fails the
@@ -20,6 +25,13 @@
 // logs `job started` before each try, then `job done` or `job failed`
 // with how long the try took, and throws after the last failure, so
 // Cloudflare records the run as failed.
+{{- if .PostgresDatabases }}
+//
+// A database whose DB service lists postgres first is reached through the
+// Hyperdrive config its connection names (D92): Deps.db is a pg Pool over
+// the Worker's hyperdrive binding, and each try opens its connections
+// through Hyperdrive and ends them as it ends.
+{{- end }}
 //
 // The Worker also exports {{ .WorkflowClass }}, the class of the job's Workflow, through
 // which the cloudflare target runs the job once, for stack run and on a
@@ -40,7 +52,7 @@
 
 import { env, WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
 import { NonRetryableError } from 'cloudflare:workflows';
-import { {{ join .RuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}';
+import { {{ join .WorkersRuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}';
 {{- if .WorkersImports }}
 import { {{ join .WorkersImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/workers';
 {{- end }}
@@ -51,6 +63,11 @@ import { openR2Bucket } from '{{ .Naming.HTTPRuntimeNpmPackage }}/r2';
 {{- if .SQLiteDatabases }}
 import type { SqlDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/d1';
 {{- end }}
+{{- if .PostgresDatabases }}
+import { hyperdrivePool, withHyperdrive } from '{{ .Naming.HTTPRuntimeNpmPackage }}/hyperdrive';
+import type { Pool } from 'pg';
+{{- end }}
+{{- template "ts-orm-imports" . }}
 import * as {{ $api.Module }} from '{{ $api.Package }}';
 import * as {{ $api.Impl }} from '{{ $api.ImplPackage }}';
 {{- range .Clients }}
@@ -120,6 +137,14 @@ async function build() {
   const {{ .Var }} = openR2Bucket(binding(env, bindingName({{ tsQuote .Field }}, {{ .From }}.binding), 'r2'), {{ .From }});
 {{- end }}
 {{- end }}
+{{- if .PostgresDatabases }}
+
+  // The API's Postgres database, over the hyperdrive binding its connection
+  // names (D92), which connects within the try alone.
+{{- range .PostgresDatabases }}
+  const {{ .Var }} = hyperdriveDatabase({{ tsQuote .Service }}, {{ tsQuote .Field }}, {{ .From }});
+{{- end }}
+{{- end }}
 {{- if .SQLiteDatabases }}
 
   // The API's D1 database, through the d1 binding its connection names
@@ -128,11 +153,28 @@ async function build() {
   const {{ .Var }} = d1Database({{ tsQuote .Field }}, {{ .From }});
 {{- end }}
 {{- end }}
+{{- template "ts-workers-memory-stores" . }}
 
   // {{ $api.Service }}: its jobs, built from its Deps.
   {{ template "ts-deps" $api }}
   return construct({{ tsQuote $api.Service }}, 'jobs', () => {{ $api.Impl }}.createJobs({{ $api.Deps }}));
 }
+{{- if .PostgresDatabases }}
+
+/**
+ * Runs one try: builds the jobs and runs the job's method, until signal
+ * aborts, in a scope whose database connections the try's end ends (D92).
+ */
+async function tryOnce(signal: AbortSignal): Promise<void> {
+  await withHyperdrive(async () => {
+    const jobs = await build();
+    await untilAborted(
+      telemetry.job({{ tsQuote .Job.Name }}, () => jobs.{{ .Job.Method }}(signal)),
+      signal
+    );
+  });
+}
+{{- else }}
 
 /** Runs one try: builds the jobs and runs the job's method, until signal aborts. */
 async function tryOnce(signal: AbortSignal): Promise<void> {
@@ -142,6 +184,7 @@ async function tryOnce(signal: AbortSignal): Promise<void> {
     signal
   );
 }
+{{- end }}
 
 /**
  * Runs the job's tries, one after the other, until one succeeds; throws
@@ -236,6 +279,10 @@ function untilAborted(work: Promise<void>, signal: AbortSignal): Promise<void> {
 {{ template "ts-configure" . }}
 
 {{ template "ts-construct" . }}
+{{- if .PostgresDatabases }}
+
+{{ template "ts-hyperdrive" . }}
+{{- end }}
 {{- if .SQLiteDatabases }}
 
 /**

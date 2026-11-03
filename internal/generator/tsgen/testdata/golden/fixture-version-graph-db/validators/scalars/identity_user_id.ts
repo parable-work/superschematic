@@ -4,6 +4,12 @@ import type { ScalarValidationResult, ValidationError } from 'superscalar/valida
 
 import { parseIdentityUserID as parseIdentityUserIDFromLib } from 'superscalar/scalars';
 
+// The constructors of IdentityUserID, the scalar library's own, which the
+// package hands out beside the type: each returns the value as
+// IdentityUserID and throws on a value Identity.UserID refuses (D25,
+// amended; D100).
+export { parseIdentityUserIDStrict, normalizeIdentityUserIDStrict } from 'superscalar/scalars';
+
 const IdentityUserIDPattern = new RegExp("^[0-9A-Za-z]{1,22}$", "u");
 
 /**

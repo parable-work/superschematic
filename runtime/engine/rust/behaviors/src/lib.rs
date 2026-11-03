@@ -33,7 +33,8 @@
 //! (milestone 10), [`Rollups`] and [`Reactions`] (with D56's changes
 //! trigger), and [`Search`], over the engine's own full-text search; and
 //! milestone 11, [`Branches`], the version graph's Rust engine over its
-//! fixed layout in the call's transaction ([`graph`]): all fifteen, in
+//! fixed layout in the call's transaction ([`graph`]); and D73's
+//! [`Derived`] and [`Provenance`]: all seventeen, in
 //! [`NAMES`], which [`core`] registers.
 
 pub mod approvals;
@@ -41,10 +42,12 @@ pub mod branches;
 pub mod comments;
 pub mod constants;
 pub mod dependencies;
+pub mod derived;
 pub mod graph;
 mod guidance;
 pub mod links;
 pub mod numbering;
+pub mod provenance;
 pub mod reactions;
 pub mod revised;
 pub mod revisions;
@@ -60,11 +63,13 @@ pub use branches::{
     uuid_v5, Branches, BranchesConfig, BranchesKind, BranchesParent, BranchesSweep, BranchesUnit,
     ACTOR_NAMESPACE, DEFAULT_PRIMARY, ROOT_NAMESPACE,
 };
-pub use comments::{CommentRecord, Comments};
+pub use comments::{Comments, CommentsConfig};
 pub use constants::{Constants, ConstantsConfig};
 pub use dependencies::{BlockerRecord, Dependencies, DependenciesConfig};
+pub use derived::{Derived, DerivedConfig, DerivedField};
 pub use links::{link_many, link_pin, LinkPin, LinkSpec, Links, LinksConfig};
 pub use numbering::{Numbering, NumberingConfig};
+pub use provenance::{Provenance, ProvenanceConfig, ProvenanceReview};
 pub use reactions::{
     Reactions, ReactionsChanges, ReactionsConfig, ReactionsField, ReactionsRevisedLink,
     ReactionsRollup, ReactionsRule, ReactionsTerminal, ReactionsThen, ReactionsWhen,
@@ -85,8 +90,8 @@ pub use workflow::{
 use superschematic_engine::BehaviorSet;
 
 /// The core behaviors [`core`] registers, in its order: the TypeScript
-/// engine's order (`coreBehaviors`), all fifteen.
-pub const NAMES: [&str; 15] = [
+/// engine's order (`coreBehaviors`), all seventeen.
+pub const NAMES: [&str; 17] = [
     "Workflow",
     "Comments",
     "Revisions",
@@ -102,6 +107,8 @@ pub const NAMES: [&str; 15] = [
     "Approvals",
     "Numbering",
     "Timers",
+    "Derived",
+    "Provenance",
 ];
 
 /// The core's behaviors, in the order the TypeScript engine registers
@@ -124,6 +131,8 @@ pub fn core() -> BehaviorSet {
         .with(Approvals)
         .with(Numbering)
         .with(Timers)
+        .with(Derived)
+        .with(Provenance)
 }
 
 #[cfg(test)]

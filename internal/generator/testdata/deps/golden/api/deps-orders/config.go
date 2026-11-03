@@ -146,6 +146,11 @@ type EnvConfig struct {
 	// DepsMediaBucket is how the server reaches deps-media, a bucket the API
 	// lists. It is read from DEPS_MEDIA_BUCKET_*.
 	DepsMediaBucket stackconfig.Bucket
+
+	// DepsCacheMemoryStore is how the server reaches deps-cache, a memory store
+	// the API lists. It is read from DEPS_CACHE_MEMORY_STORE_*; none of them set
+	// is a disabled store, which its Enabled reports.
+	DepsCacheMemoryStore stackconfig.MemoryStore
 }
 
 // LoadEnvConfig loads the API's configuration from environment variables.
@@ -172,6 +177,11 @@ func LoadEnvConfig() (*EnvConfig, error) {
 		errs = append(errs, err)
 	} else {
 		cfg.DepsMediaBucket = v
+	}
+	if v, err := stackconfig.LoadMemoryStore("DEPS_CACHE_MEMORY_STORE"); err != nil {
+		errs = append(errs, err)
+	} else {
+		cfg.DepsCacheMemoryStore = v
 	}
 	if len(errs) > 0 {
 		return nil, errors.Join(errs...)

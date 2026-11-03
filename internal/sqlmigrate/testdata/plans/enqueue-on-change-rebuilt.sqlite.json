@@ -1,0 +1,57 @@
+{
+  "dialect": "sqlite",
+  "expanded": "3cb22c127616ba19f079543c4b35c3a0f9af474762de67b81f1b9f5e3d3c2ec2",
+  "from": "3cb22c127616ba19f079543c4b35c3a0f9af474762de67b81f1b9f5e3d3c2ec2",
+  "hash": "558493d7cd12487e2d0bf5ca054def31489bda60b9e662dab39d83de6d22fdfc",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/order",
+          "reason": "Copying order, order_label and order_line holds the database's write lock for time that grows with the tables.",
+          "subject": "table/order"
+        },
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/order/column/note",
+          "reason": "Order.note becomes required: the step fails when order has a row where note is null.",
+          "subject": "table/order/column/note"
+        },
+        {
+          "class": "copy-table",
+          "id": "copy-table:table/order",
+          "reason": "SQLite's ALTER TABLE cannot make note NOT NULL, so the step rebuilds order with the tables that reference it, directly or through another table: order_label and order_line. It copies the rows of each table it keeps into a new table, drops the old tables and renames the new ones.",
+          "subject": "table/order"
+        }
+      ],
+      "index": 1,
+      "op": "copyTable",
+      "phase": "contract",
+      "statements": [
+        "PRAGMA defer_foreign_keys = ON",
+        "CREATE TABLE \"_new_order\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"code\" TEXT NOT NULL,\n  \"customer_id\" TEXT NOT NULL,\n  \"total\" INTEGER NOT NULL,\n  \"reference\" TEXT,\n  \"note\" TEXT NOT NULL,\n  \"placed_at\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"customer_id\") REFERENCES \"customer\" (\"id\") ON DELETE RESTRICT\n)",
+        "CREATE TABLE \"_new_order_label\" (\n  \"order_id\" TEXT NOT NULL,\n  \"label_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"order_id\", \"label_id\"),\n  FOREIGN KEY (\"label_id\") REFERENCES \"label\" (\"id\") ON DELETE CASCADE,\n  FOREIGN KEY (\"order_id\") REFERENCES \"_new_order\" (\"id\") ON DELETE CASCADE\n)",
+        "CREATE TABLE \"_new_order_line\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"sku\" TEXT NOT NULL,\n  \"quantity\" INTEGER NOT NULL,\n  \"order_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"order_id\") REFERENCES \"_new_order\" (\"id\") ON DELETE CASCADE\n)",
+        "INSERT INTO \"_new_order\" (\"id\", \"code\", \"customer_id\", \"total\", \"reference\", \"note\", \"placed_at\")\nSELECT \"id\", \"code\", \"customer_id\", \"total\", \"reference\", \"note\", \"placed_at\"\nFROM \"order\"",
+        "INSERT INTO \"_new_order_label\" (\"order_id\", \"label_id\")\nSELECT \"order_id\", \"label_id\"\nFROM \"order_label\"",
+        "INSERT INTO \"_new_order_line\" (\"id\", \"sku\", \"quantity\", \"order_id\")\nSELECT \"id\", \"sku\", \"quantity\", \"order_id\"\nFROM \"order_line\"",
+        "DROP TABLE \"order_label\"",
+        "DROP TABLE \"order_line\"",
+        "DROP TABLE \"order\"",
+        "ALTER TABLE \"_new_order\" RENAME TO \"order\"",
+        "ALTER TABLE \"_new_order_label\" RENAME TO \"order_label\"",
+        "ALTER TABLE \"_new_order_line\" RENAME TO \"order_line\"",
+        "CREATE INDEX \"idx_order_customer_placed_at\" ON \"order\" (\"customer_id\", \"placed_at\")",
+        "CREATE TRIGGER \"trg_order_enqueue_order_shipped_insert\" AFTER INSERT ON \"order\" FOR EACH ROW\nBEGIN\n  INSERT INTO \"order_shipped_queue\" (\"order_id\", \"note\") VALUES (NEW.\"id\", NEW.\"note\")\n    ON CONFLICT (order_id) WHERE state = 'ready' DO UPDATE SET note = excluded.note, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now');\nEND",
+        "CREATE TRIGGER \"trg_order_enqueue_order_shipped_update\" AFTER UPDATE ON \"order\" FOR EACH ROW\nWHEN (OLD.\"note\" IS NOT NEW.\"note\")\nBEGIN\n  INSERT INTO \"order_shipped_queue\" (\"order_id\", \"note\") VALUES (NEW.\"id\", NEW.\"note\")\n    ON CONFLICT (order_id) WHERE state = 'ready' DO UPDATE SET note = excluded.note, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now');\nEND"
+      ],
+      "subject": "table/order",
+      "transactional": true
+    }
+  ],
+  "to": "20147f3ceeac434e43cbab9b6d986f714a3ff2b348c736bcf2e81ad951ab83da",
+  "toModel": null,
+  "version": 1
+}

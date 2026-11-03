@@ -1,0 +1,29 @@
+{
+  "dialect": "sqlite",
+  "from": "d9697f8b128d88e9877145068feef31d9bdfa8a6c367bd3cdbd76a76318119f0",
+  "hash": "13fd03e5023d04b35257068ac0fbd50ebb75fc0db4971503a249a7a3566699a7",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/order_line/index/idx_order_line_sku",
+          "reason": "Building the index holds the database's write lock for time that grows with order_line.",
+          "subject": "table/order_line/index/idx_order_line_sku"
+        }
+      ],
+      "index": 1,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX \"idx_order_line_sku\" ON \"order_line\" (\"sku\")"
+      ],
+      "subject": "table/order_line/index/idx_order_line_sku",
+      "transactional": true
+    }
+  ],
+  "to": "1dc7cfe29f50d6c449afb65b2edd87c8025ae69dbb5b0cefd34072e3f08175cf",
+  "toModel": null,
+  "version": 1
+}

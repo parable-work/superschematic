@@ -95,7 +95,23 @@ func storefrontEnvironment(t *testing.T) *ir.ResolvedEnvironment {
 // and pins the site's files and both bundles as a deploy does.
 func webEnvironment(t *testing.T) *ir.ResolvedEnvironment {
 	t.Helper()
-	data, err := os.ReadFile(stack.EnvironmentPath(cloudflareGoldenRoot, "web-stack", "Staging"))
+	return pinnedWebEnvironment(t, "web-stack")
+}
+
+// originWebEnvironment reads the cloudflare target's golden Staging of its
+// origin web fixture, the web fixture with storefront-web serving
+// shop-storefront on its origin (D91), pinned as webEnvironment pins it.
+func originWebEnvironment(t *testing.T) *ir.ResolvedEnvironment {
+	t.Helper()
+	return pinnedWebEnvironment(t, "origin-web-stack")
+}
+
+// pinnedWebEnvironment reads the golden Staging of a stack of the web
+// fixture's deployables, and pins the site's files and both bundles as a
+// deploy does.
+func pinnedWebEnvironment(t *testing.T, stackName string) *ir.ResolvedEnvironment {
+	t.Helper()
+	data, err := os.ReadFile(stack.EnvironmentPath(cloudflareGoldenRoot, stackName, "Staging"))
 	if err != nil {
 		t.Fatal(err)
 	}

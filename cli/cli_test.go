@@ -64,3 +64,18 @@ func TestNewAddsTheSubcommandsOfACommandProvider(t *testing.T) {
 	require.NoError(t, root.Execute())
 	assert.Equal(t, "hello from the extension\n", buf.String())
 }
+
+// TestVersionNamesTheBinaryAndItsRelease: --version prints the binary's
+// name and its release, 0.0.0 for one built from a checkout, as a test
+// binary is: what release.yml and a generated workflow check a binary
+// they install against.
+func TestVersionNamesTheBinaryAndItsRelease(t *testing.T) {
+	for _, name := range []string{"superschematic", "superschematic-topcoat"} {
+		buf := new(bytes.Buffer)
+		root := New(Config{Name: name})
+		root.SetOut(buf)
+		root.SetArgs([]string{"--version"})
+		require.NoError(t, root.Execute())
+		assert.Equal(t, name+" version 0.0.0\n", buf.String())
+	}
+}

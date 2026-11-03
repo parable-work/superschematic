@@ -123,6 +123,9 @@ func (t sqliteQueueTable) insert(ctx context.Context, tx SQLiteExecer, msg any) 
 	if len(columns) > 0 {
 		query = t.statements.insert + " (" + strings.Join(columns, ", ") + ") VALUES (" + strings.Join(placeholders, ", ") + ")"
 	}
+	if t.statements.conflict != "" {
+		query += " " + t.statements.conflict
+	}
 	if _, err := tx.ExecContext(ctx, query, values...); err != nil {
 		return fmt.Errorf("enqueue on %s: %w", t.name, err)
 	}

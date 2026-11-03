@@ -32,7 +32,7 @@
 
 import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
-import { createLogger, serviceAuthenticator } from '@superschematic/http-runtime';
+import { createLogger, serviceAuthenticator, disabledMemoryStore, type MemoryStore, type MemoryStoreConnection } from '@superschematic/http-runtime';
 import { errorHandler, notFoundHandler } from '@superschematic/http-runtime/hono';
 import { perIsolate, requestIP, stackEnvOf } from '@superschematic/http-runtime/workers';
 import { startWorkersTelemetry } from '@superschematic/http-runtime/workers-telemetry';
@@ -63,6 +63,10 @@ async function build(): Promise<Handle> {
   const values = stackEnvOf(env);
   const tsPricingConfig = configure('ts-pricing', () => tsPricingApi.loadEnvConfig(values));
 
+  // One memory store per store, disabled: a Worker reaches no memory store,
+  // so every call takes its fallback path (D75).
+  const tsCacheStore = disabledMemoryStore('ts-cache');
+
   const app = new Hono();
   app.use(telemetry.middleware());
   app.get('/healthz', c => c.json({ status: 'ok' }));
@@ -71,6 +75,7 @@ async function build(): Promise<Handle> {
   // ts-pricing: its implementation, built from its Deps, and its routes.
   const tsPricingDeps: tsPricingApi.Deps = {
     config: tsPricingConfig,
+    tsCache: tsCacheStore,
     logger: logger.child({ api: 'ts-pricing' }),
   };
   const tsPricingImplementations = await construct('ts-pricing', 'implementation', () => tsPricingImpl.create(tsPricingDeps));

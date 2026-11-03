@@ -201,7 +201,7 @@ func checkAdministrator(t *testing.T, dialect identity.Dialect, url string, cfg 
 		!slices.Equal(p.Permissions, []string{"identity", "orders.read"}) {
 		t.Errorf("the administrator signs in as %+v", p)
 	}
-	users, err := svc.ListUsers(ctx, p)
+	users, err := svc.ListUsers(ctx, p, nil)
 	if err != nil || len(users) != 1 || users[0].ID != p.ID {
 		t.Errorf("the administrator lists the users %+v, %v", users, err)
 	}

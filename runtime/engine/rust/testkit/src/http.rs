@@ -24,8 +24,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::{Map, Value};
 
 use superschematic_engine::api::{
-    self, ApiOptions, Body, Caller, EventStream, McpOptions, Pull, Refusal, Request, ServiceCaller,
-    StreamOptions,
+    self, ActingForHeader, ApiOptions, Body, Caller, EventStream, McpOptions, Pull, Refusal,
+    Request, ServiceCaller, StreamOptions,
 };
 use superschematic_engine::{seeded_uuid, Engine, Principal, SCENARIO_SEED};
 
@@ -242,6 +242,11 @@ fn mount_of(prefix: &str, kind: &str, options: &Value) -> Mount {
                     .map(str::to_owned),
             },
             tools: None,
+            acting_for: match member("actingFor") {
+                Some(Value::Bool(true)) => ActingForHeader::Honor,
+                Some(Value::String(subject)) => ActingForHeader::Decided(subject.clone()),
+                _ => ActingForHeader::Ignore,
+            },
         },
         rate_limit: member("rateLimitPerMinute")
             .and_then(Value::as_f64)

@@ -1,0 +1,10 @@
+{
+  "name": "fixture-app-db",
+  "kind": "DB",
+  "outputs": {
+    "types": {
+      "go": { "enabled": true },
+      "rust": { "enabled": true }
+    }
+  }
+}

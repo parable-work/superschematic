@@ -92,6 +92,97 @@ export interface JobBehaviors {
 /** NoteBehaviors holds the fields of a Note's behaviors as a read returns them, under behaviors: one member per behavior that declares a field, under the behavior's name. */
 export type NoteBehaviors = Record<string, never>;
 
+/** A state of a Request's Workflow. */
+export type RequestState = 'new' | 'triage' | 'assigned';
+
+/** RequestBehaviors holds the fields of a Request's behaviors as a read returns them, under behaviors: one member per behavior that declares a field, under the behavior's name. */
+export interface RequestBehaviors {
+  readonly Workflow: {
+    /** The state the instance is in. */
+    readonly status: RequestState;
+    /** When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition. */
+    readonly enteredAt?: number;
+  };
+  readonly Derived: {
+    /** The last value settled for each derived field, by field: { sourceHash, model, settledAt, settledBy, confidence? }, and overridden: { by, at } once a caller or another behavior's operation wrote it. A field with neither is absent. */
+    readonly fields: {
+      category?: {
+        confidence?: number;
+        model?: string;
+        overridden?: { at: number; by: string };
+        settledAt?: number;
+        settledBy?: string;
+        sourceHash?: string;
+      };
+      summary?: {
+        confidence?: number;
+        model?: string;
+        overridden?: { at: number; by: string };
+        settledAt?: number;
+        settledBy?: string;
+        sourceHash?: string;
+      };
+    };
+    /** The derived fields whose inputs, instruction, model or type moved since their last value, or that rederive asked for, and that no write overrode, in the config's order. */
+    readonly stale: Array<'category' | 'summary'>;
+  };
+  readonly Provenance: {
+    /** By recorded field written since Provenance was added: { source, by, for?, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; for is the subject it acted for, when it acted for one (D77); review is { state, by?, at? }, state proposed, accepted, rejected or edited. */
+    readonly fields: {
+      body?: {
+        at: number;
+        by: string;
+        confidence?: number;
+        for?: string;
+        review?: {
+          at?: number;
+          by?: string;
+          state: 'proposed' | 'accepted' | 'rejected' | 'edited';
+        };
+        source: string;
+      };
+      category?: {
+        at: number;
+        by: string;
+        confidence?: number;
+        for?: string;
+        review?: {
+          at?: number;
+          by?: string;
+          state: 'proposed' | 'accepted' | 'rejected' | 'edited';
+        };
+        source: string;
+      };
+      subject?: {
+        at: number;
+        by: string;
+        confidence?: number;
+        for?: string;
+        review?: {
+          at?: number;
+          by?: string;
+          state: 'proposed' | 'accepted' | 'rejected' | 'edited';
+        };
+        source: string;
+      };
+      summary?: {
+        at: number;
+        by: string;
+        confidence?: number;
+        for?: string;
+        review?: {
+          at?: number;
+          by?: string;
+          state: 'proposed' | 'accepted' | 'rejected' | 'edited';
+        };
+        source: string;
+      };
+    };
+    /** Whether any recorded field is proposed. A list filters on it. */
+    readonly inReview: boolean;
+  };
+}
+
 /** A state of a Ticket's Workflow. */
 export type TicketState = 'open' | 'in-progress' | 'done' | 'dropped';
 
@@ -104,8 +195,16 @@ export interface TicketBehaviors {
     readonly enteredAt?: number;
   };
   readonly Comments: {
-    /** How many comments the instance has. */
-    readonly commentCount: number;
+    /** How many posted and interrupted messages the conversation has, top-level and replies; composing, deleted and purged ones are not counted. */
+    readonly messages: number;
+    /** The greatest postedAt of a posted or interrupted message, in epoch milliseconds; absent while there is none. */
+    readonly lastMessageAt?: number;
+    /** The posted and interrupted top-level messages, each a thread, whether resolved or not: { open, resolved }. */
+    readonly threads: { open: number; resolved: number };
+    /** The subjects writing a message now: each subject with a composing message on the instance, once, in the order of its earliest composing message's id; empty while nobody is. */
+    readonly composing: string[];
+    /** The caller's: how many posted and interrupted top-level messages of others came to stand after the caller's read marker on the conversation. 0 until the caller first reads the conversation with markRead or posts in it top-level, so a conversation nobody opened is unread for nobody. Replies are read thread by thread, in the inbox, and not counted here. */
+    readonly unread: number;
   };
   readonly Revisions: {
     /** The number of the instance's latest revision. */

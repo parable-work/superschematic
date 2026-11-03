@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/parable-work/superschematic/runtime/http/go/bodyargs"
 	"github.com/parable-work/superschematic/runtime/http/go/identity"
+	"github.com/parable-work/superschematic/runtime/http/go/memorystore"
 	runtimemiddleware "github.com/parable-work/superschematic/runtime/http/go/middleware"
 	runtimerouting "github.com/parable-work/superschematic/runtime/http/go/routing"
 	runtimesession "github.com/parable-work/superschematic/runtime/http/go/session"
@@ -55,6 +56,13 @@ type Config struct {
 	// it and authenticates the caller itself, usually by wrapping
 	// Identity.Middleware.
 	AuthMiddleware func(gohttp.Handler) gohttp.Handler
+
+	// RateLimitStore is shop-cache, the memory store the API's config names
+	// its rateLimitStore (D75): each @rateLimit route counts in it, so every
+	// replica spends one budget. Optional: nil, or a disabled store, counts
+	// each replica's requests in its own process, and while the store is
+	// unavailable each replica counts in process.
+	RateLimitStore memorystore.Store
 
 	// Implementations contains all namespace implementation instances
 	Implementations Implementations
@@ -168,7 +176,7 @@ func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/auth/login",
 			Handler: identityHandler(cfg.Identity, "login"),
 			Middlewares: []runtimerouting.Middleware{
-				runtimemiddleware.RateLimit(10, time.Minute, LoggerFromContext),
+				runtimemiddleware.RateLimit(10, time.Minute, LoggerFromContext, runtimemiddleware.WithStore(cfg.RateLimitStore, "shop-api", "account.login")),
 			},
 		},
 	}
@@ -237,6 +245,15 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Handler: identityHandler(cfg.Identity, "getUser"),
 			Middlewares: []runtimerouting.Middleware{
 				cfg.Identity.RequirePermissions("identity.users.read"),
+			},
+		},
+		// Approves a user who registered to wait for approval, who can then sign in with the roles register granted them. The caller's own permissions must cover those roles'.
+		{
+			Method:  "POST",
+			Path:    "/auth/admin/users/{id}/approve",
+			Handler: identityHandler(cfg.Identity, "approveUser"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.users.write"),
 			},
 		},
 		// Disables a user, who can no longer sign in, and ends their sessions.
@@ -308,7 +325,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/auth/password",
 			Handler: identityHandler(cfg.Identity, "changePassword"),
 			Middlewares: []runtimerouting.Middleware{
-				runtimemiddleware.RateLimit(10, time.Minute, LoggerFromContext),
+				runtimemiddleware.RateLimit(10, time.Minute, LoggerFromContext, runtimemiddleware.WithStore(cfg.RateLimitStore, "shop-api", "account.changePassword")),
 			},
 		},
 		{
@@ -327,10 +344,26 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 				runtimesession.RequirePermissions("products.write"),
 			},
 		},
+		// At most 120 a minute from one address, which every replica counts in
+		// shop-cache, shop-api's rateLimitStore (D75).
 		{
 			Method:  "GET",
 			Path:    "/products/{id}",
 			Handler: createProductGetProductHandler(cfg.Implementations.Product),
+			Middlewares: []runtimerouting.Middleware{
+				runtimemiddleware.RateLimit(120, time.Minute, LoggerFromContext, runtimemiddleware.WithStore(cfg.RateLimitStore, "shop-api", "product.getProduct")),
+				runtimesession.RequirePermissions("products.read"),
+			},
+		},
+		// Waits up to waitSeconds, at most 30, for the product to have an image,
+		// and returns it as it is then. The replica that records an image wakes
+		// the waiter, on whichever replica it is, through shop-cache (D75); the
+		// waiter still reads the product now and then, since a wake-up can be
+		// lost.
+		{
+			Method:  "GET",
+			Path:    "/products/{id}/image",
+			Handler: createProductWaitForProductImageHandler(cfg.Implementations.Product),
 			Middlewares: []runtimerouting.Middleware{
 				runtimesession.RequirePermissions("products.read"),
 			},
@@ -368,7 +401,7 @@ func createProductListProductsHandler(impl ProductImplementation) gohttp.Handler
 		}
 
 		// Call implementation
-		result, err := impl.ListProducts(r.Context(), InStock)
+		result, err := impl.ListProducts(callerContext(r.Context()), InStock)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -415,7 +448,7 @@ func createProductCreateProductHandler(impl ProductImplementation) gohttp.Handle
 		}
 
 		// Call implementation
-		result, err := impl.CreateProduct(r.Context(), &input)
+		result, err := impl.CreateProduct(callerContext(r.Context()), &input)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -429,6 +462,9 @@ func createProductCreateProductHandler(impl ProductImplementation) gohttp.Handle
 }
 
 // createProductGetProductHandler creates a handler for GET /api/products/{id}
+//
+// At most 120 a minute from one address, which every replica counts in
+// shop-cache, shop-api's rateLimitStore (D75).
 func createProductGetProductHandler(impl ProductImplementation) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Extract path parameters, each percent-decoded once
@@ -455,7 +491,55 @@ func createProductGetProductHandler(impl ProductImplementation) gohttp.HandlerFu
 		}
 
 		// Call implementation
-		result, err := impl.GetProduct(r.Context(), Id)
+		result, err := impl.GetProduct(callerContext(r.Context()), Id)
+		if err != nil {
+			// Get logger from context and use proper error handling
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Respond with result
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createProductWaitForProductImageHandler creates a handler for GET /api/products/{id}/image
+//
+// Waits up to waitSeconds, at most 30, for the product to have an image,
+// and returns it as it is then. The replica that records an image wakes
+// the waiter, on whichever replica it is, through shop-cache (D75); the
+// waiter still reads the product now and then, since a wake-up can be
+// lost.
+func createProductWaitForProductImageHandler(impl ProductImplementation) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+		// Extract query parameters
+		WaitSeconds := parseIntQueryParam(r, "waitSeconds", 0)
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Call implementation
+		result, err := impl.WaitForProductImage(callerContext(r.Context()), Id, WaitSeconds)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -520,7 +604,7 @@ func createProductCreateProductImageUploadHandler(impl ProductImplementation) go
 		}
 
 		// Call implementation
-		result, err := impl.CreateProductImageUpload(r.Context(), Id, &input)
+		result, err := impl.CreateProductImageUpload(callerContext(r.Context()), Id, &input)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())

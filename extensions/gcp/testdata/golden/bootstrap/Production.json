@@ -377,6 +377,48 @@
         ]
       },
       {
+        "id": "deployer.role.memorystore-admin",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "deployer",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/memorystore.admin"
+        },
+        "dependsOn": [
+          "deployer"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
+        "id": "deployer.role.networkconnectivity-consumerNetworkAdmin",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "deployer",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/networkconnectivity.consumerNetworkAdmin"
+        },
+        "dependsOn": [
+          "deployer"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "bootstrap"
+        ]
+      },
+      {
         "id": "deployer.role.resourcemanager-projectIamAdmin",
         "type": "gcp:projects/iAMMember:IAMMember",
         "properties": {
@@ -885,6 +927,8 @@
         "deployer.role.iam-serviceAccountAdmin",
         "deployer.role.iam-serviceAccountUser",
         "deployer.role.logging-viewer",
+        "deployer.role.memorystore-admin",
+        "deployer.role.networkconnectivity-consumerNetworkAdmin",
         "deployer.role.resourcemanager-projectIamAdmin",
         "deployer.role.run-admin",
         "deployer.role.secretmanager-admin",

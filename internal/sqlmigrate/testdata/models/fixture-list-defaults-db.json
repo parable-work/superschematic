@@ -71,7 +71,7 @@
           "type": "JSONB"
         }
       ],
-      "comment": "A tasting whose required columns hold temporal values. A required\ntemporal scalar defaults to the current date or time; a required list of\none defaults to an empty array; a list of lists, a map or a JSON field\nholding one has no default.",
+      "comment": "A tasting whose required columns hold temporal values. A required\ntemporal scalar declared Default\u003cT, \"now\"\u003e defaults to the current date\nor time; a required list of one defaults to an empty array; a list of\nlists, a map or a JSON field holding one has no default.",
       "kind": "entity",
       "name": "tasting",
       "origin": "Tasting",

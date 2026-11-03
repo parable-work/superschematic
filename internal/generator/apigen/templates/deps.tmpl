@@ -41,6 +41,9 @@ import (
 {{- if .Deps.Buckets }}
 	"{{ $.Naming.HTTPRuntimeGoModule }}/bucket"
 {{- end }}
+{{- if .Deps.MemoryStores }}
+	"{{ $.Naming.HTTPRuntimeGoModule }}/memorystore"
+{{- end }}
 {{- if .Engine }}
 	engine "{{ $.Naming.EngineGoModule }}"
 {{- end }}
@@ -71,6 +74,18 @@ type Deps struct {
 	// storage it puts, gets, deletes and lists objects in, and signs URLs
 	// for (D54).
 	{{ .Field }} bucket.Bucket
+{{ end }}
+{{- range .Deps.MemoryStores }}
+	// {{ .Field }} is {{ .Service }}, a memory store the API lists, which every
+	// replica shares and can lose (D75).
+{{- if .Definitions }} The store's definitions,
+	// {{ .Definitions }}, name its channels and keys.
+{{- end }}
+	// While the store is disabled or unreachable every call returns
+	// memorystore.ErrUnavailable at once, and the implementation takes the
+	// path it had without it; a Subscribe while it is unreachable is held
+	// until it reconnects.
+	{{ .Field }} memorystore.Store
 {{ end }}
 {{- if .Engine }}
 	// Engine is the engine of {{ .Engine.Database }}, the API's engine database
@@ -127,7 +142,7 @@ type JobsConstructor func(deps Deps) (Jobs, error)
 // retries it after its backoff until its retries are spent. A message may
 // come again after a worker dies holding it, so a method is idempotent.
 type Workers interface {
-{{- range .Workers }}
+{{- range .OrdinaryWorkers }}
 	// {{ .Method }} handles a message of the queue {{ .Queue }}, {{ if eq .Concurrency 1 }}one at a time{{ else }}{{ .Concurrency }} at a time{{ end }}
 	// unless an environment changes the worker's concurrency.
 	{{ .Method }}(ctx context.Context, msg {{ $.Deps.DatabaseTypesAlias }}.{{ .Queue }}) error

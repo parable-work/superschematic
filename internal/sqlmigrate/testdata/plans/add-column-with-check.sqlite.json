@@ -1,0 +1,21 @@
+{
+  "dialect": "sqlite",
+  "from": "d9697f8b128d88e9877145068feef31d9bdfa8a6c367bd3cdbd76a76318119f0",
+  "hash": "23d801aa8b19017e0a5ca46b0c7de0723824442fa56fb70c58bc9ff0f3f981ce",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" ADD COLUMN \"status\" TEXT CHECK (\"status\" IN ('placed', 'shipped'))"
+      ],
+      "subject": "table/order/column/status",
+      "transactional": true
+    }
+  ],
+  "to": "db494498d82d2b0a9be05b92ae9a59aab35f76dc2a1326d47dad99365c03caad",
+  "toModel": null,
+  "version": 1
+}

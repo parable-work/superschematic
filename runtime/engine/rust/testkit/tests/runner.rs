@@ -1536,8 +1536,18 @@ fn on_postgres_one_engines_runner_runs_and_another_takes_over_once_it_stops() {
         let second = open("second", Arc::clone(&seen));
         publish(&first, &ledger_document("Order", json!({})), None);
         first.runner().start().unwrap();
-        // The first takes the lease at its first pass.
-        std::thread::sleep(Duration::from_millis(300));
+        // The first takes the lease at its first pass, which finds
+        // test.Ledger's sweep on Order: a schedule is listed once a pass
+        // under the lease has found it, and only the first runs one yet.
+        wait_for("the first runner's first pass under the lease", || {
+            first
+                .runner()
+                .status()
+                .unwrap()
+                .schedules
+                .iter()
+                .any(|schedule| schedule.behavior == "test.Ledger" && schedule.schema == "Order")
+        });
         second.runner().start().unwrap();
         assert_eq!(
             code(second.runner().run_due()),

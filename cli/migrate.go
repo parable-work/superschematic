@@ -28,6 +28,9 @@ type migratePlanFlags struct {
 	allow      []string
 	printModel bool
 	namingPath string
+	// databaseURL names the Postgres the new version's queries are
+	// prepared on (D86).
+	databaseURL string
 }
 
 // migratePlanInputs are the flag values migrate plan parses before it
@@ -93,6 +96,12 @@ recorded (--from <model.json>).
 as json, sql or markdown. --fail-on exits non-zero, after printing, when
 the plan has a hazard of a listed class that no --allow names.
 
+A Postgres plan of a service that declares queries (@query) prepares
+each of them on the new version's create.sql first, as queries verify
+does, and fails, naming each query that no longer prepares or no longer
+returns its row: on the Postgres --database-url names, else
+$SUPERSCHEMATIC_QUERIES_DATABASE_URL's, else one it runs in Docker.
+
 Examples:
   superschematic migrate plan ./schemas/services/shop-db
   superschematic migrate plan ./schemas/services/shop-db --from-ref origin/main --format markdown --fail-on destructive,compat
@@ -115,6 +124,7 @@ Examples:
 	cmd.Flags().StringArrayVar(&flags.allow, "allow", nil, "a hazard id --fail-on lets pass (repeatable)")
 	cmd.Flags().BoolVar(&flags.printModel, "print-model", false, "print the new version's model as canonical JSON and plan nothing")
 	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <service-dir>/../../superschematic.toml)")
+	cmd.Flags().StringVar(&flags.databaseURL, "database-url", "", "a Postgres server whose role may create a database, which the new version's queries are prepared on (default $"+QueriesDatabaseEnv+", else Postgres in Docker)")
 	return cmd
 }
 
@@ -124,7 +134,7 @@ func (f *migratePlanFlags) parse(cmd *cobra.Command) (migratePlanInputs, error) 
 	var in migratePlanInputs
 	if f.printModel {
 		var given []string
-		for _, name := range []string{"from", "from-ref", "rename", "reader", "out", "format", "fail-on", "allow"} {
+		for _, name := range []string{"from", "from-ref", "rename", "reader", "out", "format", "fail-on", "allow", "database-url"} {
 			if cmd.Flags().Changed(name) {
 				given = append(given, "--"+name)
 			}
@@ -310,6 +320,13 @@ func runMigratePlan(cmd *cobra.Command, a *app, flags *migratePlanFlags, service
 	})
 	if err != nil {
 		return err
+	}
+	// The new version's queries must hold against the model the plan
+	// migrates to (D86).
+	if in.dialect == sqlmigrate.Postgres {
+		if _, err := current.verifyQueries(cmd, name, flags.databaseURL, "migrate plan"); err != nil {
+			return err
+		}
 	}
 	return writeMigratePlan(cmd, flags, in, plan)
 }

@@ -1,0 +1,40 @@
+{
+  "dialect": "postgres",
+  "expanded": "acfef9b1566fc33557602cbd2b39a049f5c10f4fc12cb15b1c356a50e8e991cc",
+  "from": "acfef9b1566fc33557602cbd2b39a049f5c10f4fc12cb15b1c356a50e8e991cc",
+  "hash": "77b3646349862b1477c7e08c8494472374d854587df2c37c53c92a4cf651230a",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "addCheck",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"order\" ADD CONSTRAINT ck_order_status CHECK (status IN ('placed', 'shipped')) NOT VALID"
+      ],
+      "subject": "table/order/constraint/ck_order_status",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/order/constraint/ck_order_status",
+          "reason": "Order.status gets a CHECK in the database: validating ck_order_status fails when a row of order holds a value other than 'placed', 'shipped'.",
+          "subject": "table/order/constraint/ck_order_status"
+        }
+      ],
+      "index": 2,
+      "op": "validateCheck",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"order\" VALIDATE CONSTRAINT ck_order_status"
+      ],
+      "subject": "table/order/constraint/ck_order_status",
+      "transactional": true
+    }
+  ],
+  "to": "ae5c744ddcfe8cceb624d759c560efadcc3ee006d350e2eddd692c0a67e14675",
+  "toModel": null,
+  "version": 1
+}

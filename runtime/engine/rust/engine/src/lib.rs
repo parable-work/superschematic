@@ -11,7 +11,8 @@
 //! and compatibility rule, the access policy as data ([`PolicyConfig`]),
 //! the instances ([`Instances`]) with their filters, unique indexes and
 //! the value store that keeps a large member once, the event log
-//! ([`Events`]), the behavior plug-in API ([`behaviors`]: a behavior is a
+//! ([`Events`]), the signals that reach its event streams and are kept
+//! nowhere ([`Signals`], D77), the behavior plug-in API ([`behaviors`]: a behavior is a
 //! Rust type that implements [`Behavior`], composed on a schema's instance
 //! type and run with every call on its instances), the refusals and their
 //! codes ([`errors`]), the principal a call acts for ([`Principal`]), and
@@ -53,6 +54,8 @@ pub mod background;
 pub mod behaviors;
 pub mod calls;
 mod deploy;
+#[cfg(feature = "background")]
+pub mod derive;
 mod engine;
 pub mod errors;
 mod events;
@@ -68,17 +71,20 @@ mod registry;
 mod retention;
 mod runner;
 pub mod search;
+mod signals;
 pub mod tools;
 mod values;
 
 pub use access::{
-    covers, has_any_permission, AccessPolicy, AccessRequest, Decision, DottedPermissions,
-    ListingAction, NamespaceOperation, PermissionMatcher, PermissionTemplate, Policy, PolicyAction,
-    PolicyConfig, PolicyRule, PolicyShorthand, RulePolicy, SchemaAction, ServiceMatch,
+    covers, has_any_permission, AccessPolicy, AccessRequest, BehaviorMatch, Decision,
+    DottedPermissions, ListingAction, NamespaceOperation, PermissionMatcher, PermissionTemplate,
+    Policy, PolicyAction, PolicyConfig, PolicyRule, PolicyShorthand, RulePolicy, SchemaAction,
+    ServiceMatch,
 };
 pub use behaviors::{
     json_config, Behavior, BehaviorSet, Behaviors, ConfigTarget, GuardRequest, Hooks,
-    InstanceChange, InstanceCx, InstanceView, OperationCx, SchemaCx, ValidationRequest,
+    InstanceChange, InstanceCx, InstanceView, NamespaceCall, NamespaceCx, OperationCx, SchemaCx,
+    ValidationRequest,
 };
 pub use deploy::Deployed;
 pub use engine::{
@@ -105,8 +111,8 @@ pub use namespaces::{
 pub use options::OPTION_MEMBERS;
 pub use paging::{DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE};
 pub use principal::{
-    actor_of, check_principal, Actor, Principal, PrincipalService, SERVICE_SUBJECT_PREFIX,
-    SYSTEM_SUBJECT,
+    acting_for_header_subject, actor_of, check_principal, ActingFor, Actor, Principal,
+    PrincipalService, SERVICE_SUBJECT_PREFIX, SYSTEM_SUBJECT,
 };
 pub use registry::{
     is_schema_name, ComposedBehavior, DefineOptions, NormalizeMode, Normalized, PublishResult,
@@ -124,10 +130,14 @@ pub use runner::{
     DEFAULT_LEASE_RETRY_MS, DEFAULT_MAX_ATTEMPTS, DEFAULT_MAX_DEPTH, DEFAULT_RETRY_INITIAL_MS,
     DEFAULT_RETRY_MAX_MS,
 };
+pub use signals::{
+    EngineSignal, SendSignal, SignalOptions, Signals, DEFAULT_SIGNALS_PER_SECOND,
+    MAX_SIGNAL_DATA_BYTES, SIGNAL_BUFFER, SIGNAL_OPERATION_PREFIX,
+};
 /// The storage the engine runs on, for a host that opens it itself.
 pub use superschematic_engine_storage as storage;
 pub use tools::{
-    InvocationPolicy, ToolFilter, ToolKeys, ToolOptions, ToolSummary, ToolTarget, Tools,
+    HiddenBy, InvocationPolicy, ToolFilter, ToolKeys, ToolOptions, ToolSummary, ToolTarget, Tools,
 };
 pub use values::{
     is_hash, DriverError, StoredValue, SweepResult, ValueDriver, ValueOptions, Values,

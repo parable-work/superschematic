@@ -164,13 +164,28 @@ func (r *resolver) order(out *ir.ResolvedEnvironment) {
 // caller never meets an old callee, and a job rolls out after its callees
 // as a server does (D52), and so does a site, whose config names the
 // public addresses of the servers it calls (D55). A server's calls to the
-// APIs it serves itself do not order it. A cycle of calls between servers
-// has no such order and fails.
+// APIs it serves itself do not order it. An app rolls out after its
+// callees and after each server of its API (D78), whose start deploys the
+// engine document the app's engine waits for. A cycle of calls between
+// servers has no such order and fails.
 func (r *resolver) orderRollout() {
 	callees := map[string][]string{}
 	for _, id := range sortedKeys(r.edges) {
 		if e := r.edges[id].res; (e.Kind == ir.EdgeHTTP || e.Kind == ir.EdgeSite) && e.From != e.To {
 			callees[e.From] = append(callees[e.From], e.To)
+		}
+	}
+	for _, name := range sortedKeys(r.deployables) {
+		app := r.deployables[name].res
+		if app.Kind != ir.DeployableApp || app.App == nil {
+			continue
+		}
+		for _, server := range sortedKeys(r.deployables) {
+			d := r.deployables[server].res
+			if d.Kind == ir.DeployableServer && slices.ContainsFunc(d.Services, func(s ir.ServiceRef) bool { return s.Name == app.App.API }) &&
+				!slices.Contains(callees[name], server) {
+				callees[name] = append(callees[name], server)
+			}
 		}
 	}
 	waves := map[string]int{}

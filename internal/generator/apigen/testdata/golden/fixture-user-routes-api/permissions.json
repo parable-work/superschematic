@@ -33,6 +33,7 @@
       "name": "identity.users.write",
       "identity": true,
       "operations": [
+        "AccountAdminApproveUserHandler",
         "AccountAdminCreateUserHandler",
         "AccountAdminDisableUserHandler",
         "AccountAdminEnableUserHandler",

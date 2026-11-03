@@ -120,7 +120,7 @@ func TestQueuesLeaveOutWhatTheClientCannotHold(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Queue Ping is left out: field every is a list of Temporal.Duration values, an INTERVAL[] column, which the TypeScript queue client does not read yet.",
-		"import type { OrderPlaced } from './types';",
+		"import type { OrderChanged, OrderPlaced, StockChecked, SyncRequested } from './types';",
 		"export const orderPlacedQueue: QueueDefinition<OrderPlaced> = {",
 	} {
 		if !strings.Contains(string(text), want) {
@@ -129,5 +129,33 @@ func TestQueuesLeaveOutWhatTheClientCannotHold(t *testing.T) {
 	}
 	if strings.Contains(string(text), "pingQueue") {
 		t.Errorf("queues.ts writes the queue it leaves out:\n%s", text)
+	}
+}
+
+// TestQueueFieldShapes: a JSON field carries the kind of JSON value its
+// type holds, which a claim holds the row to as Go's and Rust's types do:
+// an object for a @jsonField type, a struct or a map, a list for a list of
+// them or a list of lists, and none for a JSON scalar, which holds any
+// value, or a column that is not JSON.
+func TestQueueFieldShapes(t *testing.T) {
+	schema := ir.NewSchema("shapes-db", ir.SchemaKindDB)
+	schema.Types["Address"] = &ir.TypeDef{Name: "Address", Role: ir.RoleEmbeddedStruct, JsonField: true}
+	sqlTypes := map[string]string{"Generic.JSON": "JSONB", "string": "TEXT"}
+	for _, tc := range []struct {
+		field *ir.FieldDef
+		json  bool
+		shape string
+	}{
+		{&ir.FieldDef{Name: "shipTo", TypeRef: ir.TypeRef{Name: "Address"}}, true, "object"},
+		{&ir.FieldDef{Name: "stops", TypeRef: ir.TypeRef{Name: "Address", IsArray: true}}, true, "list"},
+		{&ir.FieldDef{Name: "labels", TypeRef: ir.TypeRef{Name: "string", IsMap: true}}, true, "object"},
+		{&ir.FieldDef{Name: "grid", TypeRef: ir.TypeRef{Name: "string", IsArray: true, IsArrayOfArrays: true}}, true, "list"},
+		{&ir.FieldDef{Name: "detail", TypeRef: ir.TypeRef{Name: "Generic.JSON"}}, true, ""},
+		{&ir.FieldDef{Name: "note", TypeRef: ir.TypeRef{Name: "string"}}, false, ""},
+	} {
+		field, unsupported := queueField(schema, tc.field, sqlTypes)
+		if unsupported != "" || field.JSON != tc.json || field.Shape != tc.shape {
+			t.Errorf("field %s: JSON %v, shape %q (%s); want JSON %v, shape %q", tc.field.Name, field.JSON, field.Shape, unsupported, tc.json, tc.shape)
+		}
 	}
 }

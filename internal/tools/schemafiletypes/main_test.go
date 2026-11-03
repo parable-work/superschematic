@@ -98,6 +98,10 @@ export const unknownTone: TypeDef = { name: 'Item', role: 'DBTable', display: { 
 export const displayExtraKey: TypeDef = { name: 'Item', role: 'DBTable', display: { colour: 'red' } };
 // @ts-expect-error a field display's multiline that is not a boolean
 export const multilineAsString: FieldDef = { name: 'notes', typeRef: { name: 'string' }, display: { multiline: 'yes' } };
+// @ts-expect-error a field display's currency that is a number
+export const currencyAsNumber: FieldDef = { name: 'amount', typeRef: { name: 'Finance.Money' }, display: { currency: 826 } };
+// @ts-expect-error a field display's currency field without its name
+export const currencyWithoutField: FieldDef = { name: 'amount', typeRef: { name: 'Finance.Money' }, display: { currency: {} } };
 // @ts-expect-error an unknown key on a field display
 export const fieldDisplayExtraKey: FieldDef = { name: 'notes', typeRef: { name: 'string' }, display: { rows: 6 } };
 // @ts-expect-error an enum member's title that is not a string

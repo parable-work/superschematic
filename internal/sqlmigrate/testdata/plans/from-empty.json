@@ -1,7 +1,7 @@
 {
   "dialect": "postgres",
   "from": "",
-  "hash": "6296a467053926e2a9c8020a5d1eb92fb496e834e39d63085bd2b109550153d2",
+  "hash": "435ee6ae5f91383cdbb035905521e095842a31e941b8cd7e98a048023f436abc",
   "service": "shop-db",
   "steps": [
     {
@@ -71,7 +71,7 @@
       "op": "createTable",
       "phase": "expand",
       "statements": [
-        "CREATE TABLE \"order\" (\n  id UUID DEFAULT gen_random_uuid() NOT NULL,\n  code VARCHAR(80) NOT NULL,\n  customer_id UUID NOT NULL,\n  total BIGINT NOT NULL,\n  reference TEXT,\n  note TEXT,\n  placed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,\n  CONSTRAINT order_pkey PRIMARY KEY (id)\n)",
+        "CREATE TABLE \"order\" (\n  id UUID DEFAULT gen_random_uuid() NOT NULL,\n  code VARCHAR(80) NOT NULL,\n  customer_id UUID NOT NULL,\n  total BIGINT NOT NULL,\n  reference TEXT,\n  note TEXT,\n  placed_at TIMESTAMPTZ NOT NULL,\n  CONSTRAINT order_pkey PRIMARY KEY (id)\n)",
         "COMMENT ON TABLE \"order\" IS 'An order a customer placed.'"
       ],
       "subject": "table/order",
@@ -182,7 +182,7 @@
       "transactional": true
     }
   ],
-  "to": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
+  "to": "c6787cdef058267033f38e38e6c4e788b8fc54fcc00776b78d8b4db345c93d96",
   "toModel": null,
   "version": 1
 }

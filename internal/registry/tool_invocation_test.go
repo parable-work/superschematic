@@ -33,7 +33,7 @@ func (e policyExtension) Register(r *Registry) error {
 
 func TestToolInvocationPolicyDefaultsToTheCore(t *testing.T) {
 	got := New(naming.Default()).ToolInvocationPolicy()
-	want := ToolInvocationPolicy{Key: "invocationPolicy", Values: []string{"auto", "ask"}, Default: "auto"}
+	want := ToolInvocationPolicy{Key: "invocationPolicy", Values: []string{"auto", "ask"}, Default: "auto", Confirm: []string{"ask"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ToolInvocationPolicy() = %+v, want %+v", got, want)
 	}
@@ -73,10 +73,13 @@ func TestRegisterToolInvocationPolicyRejectsInvalid(t *testing.T) {
 		{"hyphenated key", ToolInvocationPolicy{Extension: "x", Key: "on-call", Values: []string{"a"}, Default: "a"}, `invocation policy key "on-call" must be a letter`},
 		{"record key", ToolInvocationPolicy{Extension: "x", Key: "handle", Values: []string{"a"}, Default: "a"}, `invocation policy key "handle" is a key @mcp already uses`},
 		{"authoring key", ToolInvocationPolicy{Extension: "x", Key: "reason", Values: []string{"a"}, Default: "a"}, `invocation policy key "reason" is a key @mcp already uses`},
+		{"engine's key", ToolInvocationPolicy{Extension: "x", Key: "hiddenBy", Values: []string{"a"}, Default: "a"}, `invocation policy key "hiddenBy" is a key @mcp already uses`},
 		{"no values", ToolInvocationPolicy{Extension: "x", Key: "review", Default: "a"}, "invocation policy review lists no values"},
 		{"quoted value", ToolInvocationPolicy{Extension: "x", Key: "review", Values: []string{"it's"}, Default: "it's"}, `invocation policy review value "it's" must be lowercase`},
 		{"repeated value", ToolInvocationPolicy{Extension: "x", Key: "review", Values: []string{"a", "a"}, Default: "a"}, `invocation policy review lists "a" twice`},
 		{"default not a value", ToolInvocationPolicy{Extension: "x", Key: "review", Values: []string{"a", "b"}, Default: "c"}, `invocation policy review default "c" is not one of "a", "b"`},
+		{"confirms no value", ToolInvocationPolicy{Extension: "x", Key: "review", Values: []string{"a", "b"}, Default: "a", Confirm: []string{"c"}}, `invocation policy review confirms "c", which is not one of "a", "b"`},
+		{"confirms twice", ToolInvocationPolicy{Extension: "x", Key: "review", Values: []string{"a", "b"}, Default: "a", Confirm: []string{"b", "b"}}, `invocation policy review confirms "b" twice`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			reg := New(naming.Default())
@@ -88,6 +91,42 @@ func TestRegisterToolInvocationPolicyRejectsInvalid(t *testing.T) {
 				t.Fatalf("a refused registration installed %+v", got)
 			}
 		})
+	}
+}
+
+// TestToolInvocationPolicyConfirms: an API's MCP endpoint confirms a call
+// of a tool whose policy is one the policy's Confirm lists, ask in the
+// core's, or, when an extension lists none, any value but its default
+// (D93); a value outside the policy confirms nothing.
+func TestToolInvocationPolicyConfirms(t *testing.T) {
+	confirmed := func(p ToolInvocationPolicy) []string {
+		var out []string
+		for _, value := range append(slices.Clone(p.Values), "unknown") {
+			if p.Confirms(value) {
+				out = append(out, value)
+			}
+		}
+		return out
+	}
+	if got := confirmed(New(naming.Default()).ToolInvocationPolicy()); !slices.Equal(got, []string{"ask"}) {
+		t.Errorf("the core's policy confirms %v, want ask", got)
+	}
+	if got := confirmed(reviewPolicy); !slices.Equal(got, []string{"never", "always"}) {
+		t.Errorf("a policy that lists none confirms %v, want every value but the default", got)
+	}
+	listed := reviewPolicy
+	listed.Confirm = []string{"always"}
+	reg := New(naming.Default())
+	if err := reg.RegisterToolInvocationPolicy(listed); err != nil {
+		t.Fatal(err)
+	}
+	got := reg.ToolInvocationPolicy()
+	if !slices.Equal(confirmed(got), []string{"always"}) {
+		t.Errorf("a policy that lists always confirms %v", confirmed(got))
+	}
+	got.Confirm[0] = "changed"
+	if reg.ToolInvocationPolicy().Confirm[0] != "always" {
+		t.Fatal("ToolInvocationPolicy() shares its Confirm with the registry")
 	}
 }
 

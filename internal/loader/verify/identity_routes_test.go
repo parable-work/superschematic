@@ -115,6 +115,66 @@ func TestUserModelRoutes(t *testing.T) {
 			want: `AccountAdmin: @userAdministration path "tenants/{tenant}/admin" must be route segments joined by /, with no leading or trailing / and no {parameter}`,
 		},
 
+		// How register admits users (D81).
+		{name: "approval with default roles and a first administrator", api: func(s *ir.Schema) {
+			sessions(s).UserSessions.Registration = ir.IdentityRegistrationApproval
+			sessions(s).UserSessions.DefaultRoles = []string{"member", "viewer"}
+			sessions(s).UserSessions.FirstUser = &ir.IdentityFirstUser{Role: "admin", Permissions: []string{"identity", "orders.read"}}
+		}},
+		{name: "open registration, written out", api: func(s *ir.Schema) { sessions(s).UserSessions.Registration = ir.IdentityRegistrationOpen }},
+		{
+			name: "an unknown registration",
+			api:  func(s *ir.Schema) { sessions(s).UserSessions.Registration = "invite" },
+			want: `Account: @userSessions registration "invite" must be "open" or "approval"`,
+		},
+		{
+			name: "registration without register",
+			api: func(s *ir.Schema) {
+				sessions(s).UserSessions.Register = false
+				sessions(s).UserSessions.Registration = ir.IdentityRegistrationApproval
+				sessions(s).UserSessions.DefaultRoles = []string{"member"}
+			},
+			want: "Account: @userSessions registration and defaultRoles configure register, which needs register: true and the login",
+		},
+		{
+			name: "a default role named twice",
+			api:  func(s *ir.Schema) { sessions(s).UserSessions.DefaultRoles = []string{"member", "member"} },
+			want: `Account: @userSessions defaultRoles names "member" twice`,
+		},
+		{
+			name: "an empty default role",
+			api:  func(s *ir.Schema) { sessions(s).UserSessions.DefaultRoles = []string{""} },
+			want: "Account: @userSessions defaultRoles holds an empty role name",
+		},
+		{
+			name: "a first administrator without a role",
+			api: func(s *ir.Schema) {
+				sessions(s).UserSessions.FirstUser = &ir.IdentityFirstUser{Permissions: []string{"identity"}}
+			},
+			want: "Account: @userSessions firstUser needs role, the name of the administrator's role",
+		},
+		{
+			name: "a first administrator without permissions",
+			api:  func(s *ir.Schema) { sessions(s).UserSessions.FirstUser = &ir.IdentityFirstUser{Role: "admin"} },
+			want: "Account: @userSessions firstUser needs permissions, at least one, which the role carries when register creates it",
+		},
+		{
+			name: "a first administrator with a malformed permission",
+			api: func(s *ir.Schema) {
+				sessions(s).UserSessions.FirstUser = &ir.IdentityFirstUser{Role: "admin", Permissions: []string{"orders..read"}}
+			},
+			want: `Account: @userSessions firstUser permission "orders..read" is not dotted segments of letters, digits, _ and -, such as orders.read`,
+		},
+		{
+			name: "default roles without a UserRole table",
+			api: func(s *ir.Schema) {
+				s.OperationSets = s.OperationSets[:1]
+				sessions(s).UserSessions.DefaultRoles = []string{"member"}
+			},
+			db:   func(db *ir.Schema) { delete(db.Types, "Role") },
+			want: "Account: @userSessions defaultRoles and firstUser grant roles, which need a UserRole table in the authDb users, a table that implements UserRole from @superschematic/db, and it has none",
+		},
+
 		// The reserved type names.
 		{
 			name: "an authored type named as an added one",
@@ -187,7 +247,7 @@ func TestUserModelRoutes(t *testing.T) {
 			db: func(db *ir.Schema) {
 				addAccountField(db, &ir.FieldDef{Name: "plan", TypeRef: ir.TypeRef{Name: "string"}, Required: true})
 			},
-			want: "Account's @userSessions({ register: true }) and AccountAdmin's @userAdministration create users with their key, login and name alone, and Account.plan in the authDb users is required and has no default; make it optional or give it a @default",
+			want: "Account's @userSessions({ register: true }) and AccountAdmin's @userAdministration create users with their key, login and name alone, and Account.plan in the authDb users is required and has no default its column carries; make it optional or give it a Default<T, V> whose V is text, a number, a boolean or an enum member",
 		},
 		{
 			name: "a required field and administration alone",
@@ -227,6 +287,17 @@ func TestUserModelRoutes(t *testing.T) {
 				plan := "free"
 				addAccountField(db, &ir.FieldDef{Name: "plan", TypeRef: ir.TypeRef{Name: "string"}, Required: true, Default: &plan})
 			},
+		},
+		// A default the column cannot carry leaves the decoders to fill
+		// it, which the routes' insert does not run (D83).
+		{
+			name: "a required field with a default its column cannot carry",
+			db: func(db *ir.Schema) {
+				db.Scalars["Identity.UUID"] = &ir.ScalarDef{Name: "Identity.UUID", LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"sql": "UUID"}}
+				owner := "00000000-0000-4000-8000-000000000001"
+				addAccountField(db, &ir.FieldDef{Name: "owner", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true, Default: &owner})
+			},
+			want: "Account.owner in the authDb users is required and has no default its column carries",
 		},
 		{
 			name: "a generated field",

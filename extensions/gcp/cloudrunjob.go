@@ -68,7 +68,7 @@ func lowerJob(ctx registry.PlatformContext) (registry.Lowered, error) {
 	task["timeout"] = fmt.Sprintf("%ds", timeout)
 	// Cloud Run's default is 3 retries, so none is written as 0.
 	task["maxRetries"] = run.Retries
-	out.Resources = append(out.Resources, &ir.Resource{ID: d.Name + ".job", Type: TypeJob, Properties: map[string]any{
+	out.Resources = append(out.Resources, &ir.Resource{ID: d.Name + ".job", Type: TypeJob, Properties: w.labeled(map[string]any{
 		"project":            v.project,
 		"location":           v.region,
 		"name":               d.ResourceName,
@@ -77,7 +77,7 @@ func lowerJob(ctx registry.PlatformContext) (registry.Lowered, error) {
 			"taskCount": 1,
 			"template":  task,
 		},
-	}})
+	})})
 	if run.Schedule != "" {
 		out.Resources = append(out.Resources, scheduleNodes(env, v, d)...)
 	}

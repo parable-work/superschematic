@@ -114,11 +114,19 @@ async fn run() -> Result<(), Failure> {
         let workers = Arc::clone(&workers);
         async move { workers.{{ .Worker.Method }}(message).await }
     };
-{{- if .Engines }}
+{{- if .Closes }}
     let worked = worker::run_worker(queue, handle, options, shutdown).await;
+{{- if .Engines }}
     // The engine closes once the worker stops, off the runtime.
 {{- range .Engines }}
     {{ .Var }}.shutdown().await;
+{{- end }}
+{{- end }}
+{{- if .MemoryStores }}
+    // Each memory store closes once the worker stops.
+{{- range .MemoryStores }}
+    {{ .Var }}.close().await;
+{{- end }}
 {{- end }}
     worked?;
 {{- else }}

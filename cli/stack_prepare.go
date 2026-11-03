@@ -54,7 +54,9 @@ With no environment named it prepares every environment off the local
 target. --no-build writes the documents alone, which a plan or a destroy
 needs. --dir is the directory, <output-root>/prepared/<stack> unless set;
 an earlier prepare's directory is replaced, and one that holds anything
-else is refused. Run superschematic build-all first.`,
+else is refused. Run superschematic build-all first. A stack with an app
+that needs an extension this binary does not link is refused unless
+--no-build, as build-all refuses it (D78).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p, err := openStackProject(cmd, a, stackDir, outputRoot, namingPath)
 			if err != nil {
@@ -102,6 +104,9 @@ else is refused. Run superschematic build-all first.`,
 			}
 			var src *stackdeploy.Sources
 			if !noBuild {
+				if err := checkAppExtensions(p.reg, st, services); err != nil {
+					return err
+				}
 				src = p.sources()
 			}
 			if dir == "" {

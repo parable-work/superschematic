@@ -64,14 +64,29 @@ func SplitImage(image string) (repository, digest string, err error) {
 	return repository, digest, nil
 }
 
+// runsImage reports whether the environment runs d's image, so that a
+// deploy needs, builds and pins one: d has an image (HasImage) and is not
+// an app the environment turns off (D78). Such an app lowers to no node
+// that holds an image; the manifest keeps the image it last ran, for when
+// it is turned on again.
+func runsImage(d *ir.ResolvedDeployable) bool {
+	return d.HasImage() && !appOff(d)
+}
+
+// appOff reports whether d is an app the environment turns off (D78).
+func appOff(d *ir.ResolvedDeployable) bool {
+	return d.Kind == ir.DeployableApp && d.App != nil && !d.App.Enabled
+}
+
 // checkImages refuses an image for a deployable env does not have or that
 // has no image, a database or a server whose platform builds a bundle
-// (D64), and returns the servers, jobs and workers with an image that
-// images names none for, sorted by name.
+// (D64), or an app the environment turns off, and returns the servers,
+// jobs, workers and apps that run an image images names none for, sorted
+// by name.
 func checkImages(env *ir.ResolvedEnvironment, images map[string]string) (missing []string, err error) {
 	var withImages []string
 	for _, d := range env.Deployables {
-		if d.HasImage() {
+		if runsImage(d) {
 			withImages = append(withImages, d.Name)
 			if _, ok := images[d.Name]; !ok {
 				missing = append(missing, d.Name)
@@ -79,8 +94,12 @@ func checkImages(env *ir.ResolvedEnvironment, images map[string]string) (missing
 		}
 	}
 	for _, name := range sortedKeys(images) {
-		if d := env.Deployable(name); d == nil || !d.HasImage() {
+		d := env.Deployable(name)
+		switch {
+		case d == nil || !d.HasImage():
 			return nil, fmt.Errorf("--image names %s, which is no server or job of environment %s that runs an image (its servers and jobs that do: %s)", name, env.Environment, strings.Join(withImages, ", "))
+		case appOff(d):
+			return nil, fmt.Errorf("--image names app %s, which environment %s turns off, so it runs no image; turn it on in the environment's settings, or leave its image out", name, env.Environment)
 		}
 	}
 	return missing, nil
@@ -98,13 +117,17 @@ func kindOf(env *ir.ResolvedEnvironment, name string) string {
 // PinImages returns a copy of env in which each server's and job's image,
 // by its repository, is pinned to the digest images names for it. It
 // refuses an image whose repository no property of the deployable's own
-// nodes holds.
+// nodes holds. It skips an app the environment turns off (D78), whose
+// nodes hold no image: the image the manifest keeps for it pins nothing.
 func PinImages(env *ir.ResolvedEnvironment, images map[string]string) (*ir.ResolvedEnvironment, error) {
 	pinned, err := copyEnvironment(env)
 	if err != nil {
 		return nil, err
 	}
 	for _, server := range sortedKeys(images) {
+		if d := env.Deployable(server); d != nil && appOff(d) {
+			continue
+		}
 		image := images[server]
 		repo, digest, err := SplitImage(image)
 		if err != nil {

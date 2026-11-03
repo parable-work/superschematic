@@ -477,19 +477,69 @@ function hasFieldLevelConstraints(field: FieldDef): boolean {
     field.validateMax !== null ||
     field.validateMinLength !== null ||
     field.validateMaxLength !== null ||
-    field.validatePattern !== ''
+    field.validatePattern !== '' ||
+    hasDigitRules(field)
   );
 }
 
 function applyFieldLevelConstraints(field: FieldDef, value: unknown): ValidationError[] {
+  const digits = validateFieldDigits(field, value);
   if (typeof value === 'string') {
-    return validateFieldLevelStringConstraints(field, value);
+    return [...validateFieldLevelStringConstraints(field, value), ...digits];
   }
   const numeric = toNumber(value);
   if (numeric !== null) {
-    return validateFieldLevelNumericConstraints(field, numeric);
+    return [...validateFieldLevelNumericConstraints(field, numeric), ...digits];
   }
-  return [];
+  return digits;
+}
+
+function hasDigitRules(field: FieldDef): boolean {
+  return (
+    (field.validatePrecision !== null && field.validatePrecision !== undefined) ||
+    (field.validateDimensions !== null && field.validateDimensions !== undefined)
+  );
+}
+
+/**
+ * A field's digit rules (D84) on one value: a Generic.Decimal's canonical
+ * form holds at most precision less scale digits before the point, without
+ * leading zeros ("precision"), and at most scale after it, without
+ * trailing zeros ("scale"); an Embedding.Vector, the JSON array or the one
+ * its JSON text holds, has exactly dimensions numbers ("dimensions"). A
+ * value of another shape is the scalar's to report, and is not counted.
+ */
+function validateFieldDigits(field: FieldDef, value: unknown): ValidationError[] {
+  const errors: ValidationError[] = [];
+  const precision = field.validatePrecision;
+  if (precision !== null && precision !== undefined && typeof value === 'string') {
+    const m = /^[+-]?([0-9]+)(?:\.([0-9]+))?$/u.exec(value.trim());
+    if (m) {
+      const scale = field.validateScale ?? 0;
+      const integerDigits = precision - scale;
+      if (m[1]!.replace(/^0+/u, '').length > integerDigits) {
+        errors.push({ validator: 'precision', message: `${field.name} must have at most ${integerDigits} digits before the decimal point.` });
+      }
+      if ((m[2] ?? '').replace(/0+$/u, '').length > scale) {
+        errors.push({ validator: 'scale', message: `${field.name} must have at most ${scale} digits after the decimal point.` });
+      }
+    }
+  }
+  const dimensions = field.validateDimensions;
+  if (dimensions !== null && dimensions !== undefined) {
+    let vector = value;
+    if (typeof vector === 'string' && vector !== '') {
+      try {
+        vector = JSON.parse(vector);
+      } catch {
+        vector = undefined;
+      }
+    }
+    if (Array.isArray(vector) && vector.length !== dimensions) {
+      errors.push({ validator: 'dimensions', message: `${field.name} must have exactly ${dimensions} dimensions.` });
+    }
+  }
+  return errors;
 }
 
 function validateSingleField(

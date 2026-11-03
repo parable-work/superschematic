@@ -71,7 +71,7 @@ type Order struct {
 	deps api.Deps
 }
 
-// GetOrder handles GET /api/orders/:id.
+// GetOrder handles GET /api/orders/{id}.
 func (impl *Order) GetOrder(ctx context.Context, id string) (*types.OrderView, error) {
 	return nil, api.NotImplementedError("Order.GetOrder")
 }

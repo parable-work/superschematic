@@ -8,10 +8,12 @@ import { Auditable, Product } from "./shop.schema";
 // available units at or below its reorderAt (Stock.low, D70), and by its
 // job OrderRestocks for one a count left low: shop-stock's worker
 // ReorderStock files a restock request for the product. The message holds
-// the units available and the reorder level as the sale left them. A
-// message whose handler fails is retried every half minute, five times at
-// most.
-@queue({ retries: 5, backoff: "30s" })
+// the units available and the reorder level as the sale left them. One
+// waits per product: a later sale that leaves the product low replaces it,
+// so the worker reads the latest level, and the worker handles one
+// product's message at a time. A message whose handler fails is retried
+// every half minute, five times at most.
+@queue({ retries: 5, backoff: "30s", key: "productId", onDuplicate: "replace", serialize: true })
 export abstract class StockLow {
   productId: Identity.UUID;
   quantity: Generic.Int64;

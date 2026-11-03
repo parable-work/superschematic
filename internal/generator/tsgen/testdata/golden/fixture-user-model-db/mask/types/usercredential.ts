@@ -16,5 +16,6 @@ export function maskSecretsUserCredential(value: UserCredential): UserCredential
     passwordHash: '',
     passwordChangedAt: value.passwordChangedAt,
     disabledAt: value.disabledAt,
+    pendingAt: value.pendingAt,
   };
 }

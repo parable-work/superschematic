@@ -14,7 +14,7 @@ import (
 // - Login: Signs a user in with their login and password and starts a session. A bearer session answers its token; a cookie session sets the session cookie and answers none.
 // - Logout: Ends the caller's session and clears the session cookie. It answers true. Requires authentication.
 // - Me: The caller's user, the roles they hold and the permissions those roles grant. Requires authentication.
-// - Register: Creates a user with the login, name and password given and signs them in, as login does.
+// - Register: Creates a user with the login, name and password given, who waits for an administrator's approval: it answers 202 with pending true and starts no session. The first administrator, when the set names one, is signed in as login does.
 type AccountNamespace struct {
 	client jsonClient
 }
@@ -158,22 +158,22 @@ func (n *AccountNamespace) Me(
 	return out, nil
 }
 
-// Register Creates a user with the login, name and password given and signs them in, as login does.
+// Register Creates a user with the login, name and password given, who waits for an administrator's approval: it answers 202 with pending true and starts no session. The first administrator, when the set names one, is signed in as login does.
 func (n *AccountNamespace) Register(
 	ctx context.Context,
 	input types.RegisterInput,
-) (types.LoginResult, error) {
+) (types.RegisterResult, error) {
 	path := "/api/auth/register"
 	validationErrors := types.NewValidationErrors()
 	appendInputValidationErrors(validationErrors, any(&input))
 	if validationErrors.HasErrors() {
-		var zero types.LoginResult
+		var zero types.RegisterResult
 		return zero, NewValidationError(validationErrors)
 	}
 
 	var requestBody any
 	requestBody = input
-	var out types.LoginResult
+	var out types.RegisterResult
 	if err := n.client.DoJSON(
 		ctx,
 		"POST",
@@ -182,7 +182,7 @@ func (n *AccountNamespace) Register(
 		requestBody,
 		&out,
 	); err != nil {
-		var zero types.LoginResult
+		var zero types.RegisterResult
 		return zero, err
 	}
 	return out, nil

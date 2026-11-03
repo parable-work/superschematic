@@ -155,7 +155,7 @@ func publicAPIRoutes(cfg Config) []runtimerouting.Route {
 				runtimemiddleware.RateLimit(10, time.Minute, LoggerFromContext),
 			},
 		},
-		// Creates a user with the login, name and password given and signs them in, as login does.
+		// Creates a user with the login, name and password given, who waits for an administrator's approval: it answers 202 with pending true and starts no session. The first administrator, when the set names one, is signed in as login does.
 		{
 			Method:  "POST",
 			Path:    "/auth/register",
@@ -230,6 +230,15 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Handler: identityHandler(cfg.Identity, "getUser"),
 			Middlewares: []runtimerouting.Middleware{
 				cfg.Identity.RequirePermissions("identity.users.read"),
+			},
+		},
+		// Approves a user who registered to wait for approval, who can then sign in with the roles register granted them. The caller's own permissions must cover those roles'.
+		{
+			Method:  "POST",
+			Path:    "/auth/admin/users/{id}/approve",
+			Handler: identityHandler(cfg.Identity, "approveUser"),
+			Middlewares: []runtimerouting.Middleware{
+				cfg.Identity.RequirePermissions("identity.users.write"),
 			},
 		},
 		// Disables a user, who can no longer sign in, and ends their sessions.

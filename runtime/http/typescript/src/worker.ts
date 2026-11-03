@@ -32,10 +32,26 @@ queue's retention, PRUNE_BATCH at a time until a batch is short, and logs
 how many. Every instance of every worker of the queue prunes, which is
 safe: each batch skips the rows another holds, and a row deleted once is
 gone. It never deletes a dead message.
+
+On Cloudflare Workers no process runs until it is stopped, so a worker's
+drain.ts runs runWorker at each firing of a Cron Trigger every minute, with
+a signal that aborts after WORKER_DRAIN_SECONDS, which the target sets, and
+then stops as it stops at SIGTERM (D92): a firing claims, handles and
+prunes as a process does, for its window.
 */
 
 /** The environment variable a platform sets to the number of messages a worker handles at a time. */
 export const WORKER_CONCURRENCY_VARIABLE = 'WORKER_CONCURRENCY';
+
+/**
+ * The environment variable, a binding on Workers, the cloudflare target
+ * sets to how long each firing of a worker's Cron Trigger claims, in
+ * seconds (D92).
+ */
+export const WORKER_DRAIN_SECONDS_VARIABLE = 'WORKER_DRAIN_SECONDS';
+
+/** How long a firing claims unless WORKER_DRAIN_SECONDS says: within the minute between firings, with room for a grace. */
+export const DEFAULT_DRAIN_SECONDS = 50;
 
 /** How long a stopping worker lets its handlers finish: under the ten seconds Cloud Run gives a container after SIGTERM. */
 export const DEFAULT_GRACE_MS = 8_000;
@@ -113,6 +129,21 @@ export function workerConcurrency(fallback: number, env: Readonly<Record<string,
   const n = Number(value);
   if (!/^\d+$/.test(value.trim()) || !Number.isSafeInteger(n) || n < 1) {
     throw new Error(`${WORKER_CONCURRENCY_VARIABLE} is ${JSON.stringify(value)}; it is a whole number, one or more`);
+  }
+  return n;
+}
+
+/**
+ * How long a firing of a worker on Workers claims, in seconds: what the
+ * environment gives in WORKER_DRAIN_SECONDS, or fallback when it sets none
+ * (D92). Throws for a value that is not a whole number, one or more.
+ */
+export function workerDrainSeconds(fallback: number, env: Readonly<Record<string, string | undefined>> = processEnv()): number {
+  const value = env[WORKER_DRAIN_SECONDS_VARIABLE];
+  if (value === undefined || value === '') return fallback;
+  const n = Number(value);
+  if (!/^\d+$/.test(value.trim()) || !Number.isSafeInteger(n) || n < 1) {
+    throw new Error(`${WORKER_DRAIN_SECONDS_VARIABLE} is ${JSON.stringify(value)}; it is a whole number of seconds, one or more`);
   }
   return n;
 }

@@ -1,0 +1,490 @@
+{
+  "types": {
+    "Invoice": {
+      "type": "Invoice",
+      "table": "invoice",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "number",
+          "column": "number",
+          "type": "string"
+        }
+      ],
+      "uses": [
+        {
+          "id": "Timers",
+          "behavior": "Timers",
+          "member": "timers",
+          "fields": [],
+          "operations": [
+            {
+              "name": "fireTimer",
+              "writes": true
+            },
+            {
+              "name": "resetTimer",
+              "writes": true
+            },
+            {
+              "name": "snoozeTimer",
+              "writes": true
+            }
+          ],
+          "tables": [
+            {
+              "name": "deadlines",
+              "table": "invoice_timers_deadlines",
+              "row": "invoice_id",
+              "key": {
+                "name": "name",
+                "field": "name",
+                "column": "name",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "baseAt",
+                  "field": "baseAt",
+                  "column": "base_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "armedFrom",
+                  "field": "armedFrom",
+                  "column": "armed_from",
+                  "type": "string"
+                },
+                {
+                  "name": "dueAt",
+                  "field": "dueAt",
+                  "column": "due_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "fired",
+                  "field": "fired",
+                  "column": "fired",
+                  "type": "boolean"
+                },
+                {
+                  "name": "firedAt",
+                  "field": "firedAt",
+                  "column": "fired_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "outcome",
+                  "field": "outcome",
+                  "column": "outcome",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "status",
+          "behavior": "Workflow",
+          "anchor": "status",
+          "member": "status",
+          "fields": [
+            {
+              "name": "status",
+              "field": "status",
+              "column": "status",
+              "type": "string",
+              "value": true
+            },
+            {
+              "name": "enteredAt",
+              "field": "statusEnteredAt",
+              "column": "status_entered_at",
+              "type": "Temporal.DateTime",
+              "convert": "epochMillis"
+            }
+          ],
+          "operations": [
+            {
+              "name": "transition",
+              "writes": true
+            }
+          ]
+        },
+        {
+          "id": "payment",
+          "behavior": "Workflow",
+          "anchor": "payment",
+          "member": "payment",
+          "fields": [
+            {
+              "name": "status",
+              "field": "payment",
+              "column": "payment",
+              "type": "string",
+              "value": true
+            },
+            {
+              "name": "enteredAt",
+              "field": "paymentEnteredAt",
+              "column": "payment_entered_at",
+              "type": "Temporal.DateTime",
+              "convert": "epochMillis"
+            }
+          ],
+          "operations": [
+            {
+              "name": "transition",
+              "writes": true
+            }
+          ]
+        }
+      ],
+      "deadlines": {
+        "queue": "InvoiceDeadline",
+        "table": "invoice_deadline_queue",
+        "rowKey": "row_key",
+        "use": "use_id",
+        "name": "name",
+        "at": "at",
+        "payload": "payload"
+      },
+      "changes": {
+        "queue": "InvoiceChange",
+        "table": "invoice_change_queue",
+        "rowKey": "row_key",
+        "write": "write",
+        "at": "at",
+        "before": "before",
+        "after": "after"
+      },
+      "spec": {
+        "name": "Invoice",
+        "uses": [
+          {
+            "behavior": "Timers",
+            "config": {
+              "deadlines": {
+                "overdue": {
+                  "afterMs": 2592000000,
+                  "start": {
+                    "create": true
+                  },
+                  "then": {
+                    "transition": "overdue"
+                  },
+                  "until": {
+                    "leaves": "unpaid"
+                  }
+                }
+              },
+              "status": "payment"
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Workflow",
+            "config": {
+              "states": [
+                "draft",
+                "issued",
+                "void"
+              ],
+              "transitions": [
+                {
+                  "from": "draft",
+                  "to": "issued"
+                },
+                {
+                  "from": "issued",
+                  "to": "void"
+                }
+              ]
+            },
+            "anchor": {
+              "field": "status"
+            }
+          },
+          {
+            "behavior": "Workflow",
+            "config": {
+              "states": [
+                "unpaid",
+                "overdue",
+                "paid"
+              ],
+              "transitions": [
+                {
+                  "from": "unpaid",
+                  "to": "overdue"
+                },
+                {
+                  "from": "unpaid",
+                  "to": "paid"
+                },
+                {
+                  "from": "overdue",
+                  "to": "paid"
+                }
+              ]
+            },
+            "anchor": {
+              "field": "payment"
+            }
+          }
+        ],
+        "fields": [
+          {
+            "name": "number",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "Ticket": {
+      "type": "Ticket",
+      "table": "ticket",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "title",
+          "column": "title",
+          "type": "string"
+        },
+        {
+          "field": "visitAt",
+          "column": "visit_at",
+          "type": "Temporal.DateTime",
+          "convert": "epochMillis"
+        }
+      ],
+      "uses": [
+        {
+          "id": "Timers",
+          "behavior": "Timers",
+          "member": "timers",
+          "fields": [],
+          "operations": [
+            {
+              "name": "fireTimer",
+              "writes": true
+            },
+            {
+              "name": "resetTimer",
+              "writes": true
+            },
+            {
+              "name": "snoozeTimer",
+              "writes": true
+            }
+          ],
+          "tables": [
+            {
+              "name": "deadlines",
+              "table": "ticket_timers_deadlines",
+              "row": "ticket_id",
+              "key": {
+                "name": "name",
+                "field": "name",
+                "column": "name",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "baseAt",
+                  "field": "baseAt",
+                  "column": "base_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "armedFrom",
+                  "field": "armedFrom",
+                  "column": "armed_from",
+                  "type": "string"
+                },
+                {
+                  "name": "dueAt",
+                  "field": "dueAt",
+                  "column": "due_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "fired",
+                  "field": "fired",
+                  "column": "fired",
+                  "type": "boolean"
+                },
+                {
+                  "name": "firedAt",
+                  "field": "firedAt",
+                  "column": "fired_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "outcome",
+                  "field": "outcome",
+                  "column": "outcome",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "status",
+          "behavior": "Workflow",
+          "anchor": "status",
+          "member": "status",
+          "fields": [
+            {
+              "name": "status",
+              "field": "status",
+              "column": "status",
+              "type": "string",
+              "value": true
+            },
+            {
+              "name": "enteredAt",
+              "field": "statusEnteredAt",
+              "column": "status_entered_at",
+              "type": "Temporal.DateTime",
+              "convert": "epochMillis"
+            }
+          ],
+          "operations": [
+            {
+              "name": "transition",
+              "writes": true
+            }
+          ]
+        }
+      ],
+      "deadlines": {
+        "queue": "TicketDeadline",
+        "table": "ticket_deadline_queue",
+        "rowKey": "row_key",
+        "use": "use_id",
+        "name": "name",
+        "at": "at",
+        "payload": "payload"
+      },
+      "changes": {
+        "queue": "TicketChange",
+        "table": "ticket_change_queue",
+        "rowKey": "row_key",
+        "write": "write",
+        "at": "at",
+        "before": "before",
+        "after": "after"
+      },
+      "spec": {
+        "name": "Ticket",
+        "uses": [
+          {
+            "behavior": "Timers",
+            "config": {
+              "deadlines": {
+                "idle": {
+                  "afterMs": 3600000,
+                  "start": {
+                    "enters": "waiting"
+                  },
+                  "then": {
+                    "transition": "closed"
+                  }
+                },
+                "remind": {
+                  "afterMs": -86400000,
+                  "start": {
+                    "field": "visitAt"
+                  }
+                },
+                "respond": {
+                  "afterMs": 1500,
+                  "start": {
+                    "create": true
+                  },
+                  "then": {
+                    "transition": "escalated"
+                  },
+                  "until": {
+                    "leaves": "open"
+                  }
+                }
+              },
+              "permission": "tickets.timers"
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Workflow",
+            "config": {
+              "states": [
+                "open",
+                "waiting",
+                "escalated",
+                "closed"
+              ],
+              "transitions": [
+                {
+                  "from": "open",
+                  "to": "waiting"
+                },
+                {
+                  "from": "waiting",
+                  "to": "open"
+                },
+                {
+                  "from": "open",
+                  "to": "escalated"
+                },
+                {
+                  "from": "open",
+                  "to": "closed"
+                },
+                {
+                  "from": "waiting",
+                  "to": "closed"
+                },
+                {
+                  "from": "escalated",
+                  "to": "closed"
+                }
+              ]
+            },
+            "anchor": {
+              "field": "status"
+            }
+          }
+        ],
+        "fields": [
+          {
+            "name": "title",
+            "type": "string"
+          },
+          {
+            "name": "visitAt",
+            "type": "Temporal.DateTime",
+            "dateTime": true
+          }
+        ]
+      }
+    }
+  }
+}

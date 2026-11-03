@@ -45,8 +45,27 @@ func NewIdentity(store identity.Store, cfg identity.Config, opts ...identity.Opt
 	return identity.New(store, cfg, append([]identity.Option{
 		identity.WithRoutes(IdentityRoutes()),
 		identity.WithPermissionPrefix(IdentityPermissionPrefix),
+{{- if .Registration }}
+		identity.WithRegistration(IdentityRegistration),
+{{- end }}
 	}, opts...)...)
 }
+{{- with .Registration }}
+
+// IdentityRegistration is how register admits users, as {{ $.SchemaName }}'s
+// @userSessions declares it (D81).
+var IdentityRegistration = identity.Registration{
+{{- if .Approval }}
+	Approval: true,
+{{- end }}
+{{- if .DefaultRoles }}
+	DefaultRoles: []string{ {{- range $i, $role := .DefaultRoles }}{{ if $i }}, {{ end }}{{ printf "%q" $role }}{{ end -}} },
+{{- end }}
+{{- with .FirstUser }}
+	FirstUser: &identity.FirstUser{Role: {{ printf "%q" .Role }}, Permissions: []string{ {{- range $i, $p := .Permissions }}{{ if $i }}, {{ end }}{{ printf "%q" $p }}{{ end -}} }},
+{{- end }}
+}
+{{- end }}
 {{- if .IdentityEndpoints }}
 
 // identityOperations are the user model's operations {{ .SchemaName }} serves,

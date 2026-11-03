@@ -16,6 +16,11 @@ identity-sqlite = ["{{ .RuntimeCrate }}/identity-sqlite"]
 async-trait = "0.1.89"
 axum = { version = "0.8.9", features = ["json", "matched-path"] }
 http = "1"
+{{- if .HasDerivers }}
+serde = { version = "1.0.228", features = ["derive"] }
+{{- else if .HasBehaviors }}
+serde = "{{ rulesSerdeVersion }}"
+{{- end }}
 serde_json = "1.0.149"
 tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread"] }
 {{- if .HasEnvConfig }}
@@ -45,5 +50,9 @@ tracing = { version = "{{ tracingVersion }}", default-features = false, features
 {{- end }}
 {{- with .Engine }}
 {{ .Crate }} = { path = "{{ .Path }}", default-features = false, features = ["background"] }
+{{- end }}
+{{- with .Behaviors }}
+{{ rulesAdapterCrate }} = { path = "{{ .AdapterPath }}", features = ["postgres"] }
+{{ rulesBehaviorsCrate }} = { path = "{{ .BehaviorsPath }}" }
 {{- end }}
 {{- end }}

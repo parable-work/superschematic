@@ -12,7 +12,7 @@
 
 module example.com/schemas/server/shop-stack/shop-api
 
-go 1.26.4
+go 1.27.3
 
 require (
 	example.com/schemas/api/shop-api v0.0.0-00010101000000-000000000000

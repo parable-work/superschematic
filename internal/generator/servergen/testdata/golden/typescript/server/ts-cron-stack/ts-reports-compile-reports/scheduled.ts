@@ -39,7 +39,7 @@
 
 import { env, WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
 import { NonRetryableError } from 'cloudflare:workflows';
-import { createLogger } from '@superschematic/http-runtime';
+import { createLogger, disabledMemoryStore, type MemoryStore, type MemoryStoreConnection } from '@superschematic/http-runtime';
 import { stackEnvOf, stackEnvWithSecrets } from '@superschematic/http-runtime/workers';
 import { startWorkersTelemetry } from '@superschematic/http-runtime/workers-telemetry';
 import * as tsReportsApi from '@schemas/ts-reports-api';
@@ -78,9 +78,14 @@ async function build() {
   const values = await stackEnvWithSecrets(env, ['REPORT_TOKEN']);
   const tsReportsConfig = configure('ts-reports', () => tsReportsApi.loadEnvConfig(values));
 
+  // One memory store per store, disabled: a Worker reaches no memory store,
+  // so every call takes its fallback path (D75).
+  const tsCacheStore = disabledMemoryStore('ts-cache');
+
   // ts-reports: its jobs, built from its Deps.
   const tsReportsDeps: tsReportsApi.Deps = {
     config: tsReportsConfig,
+    tsCache: tsCacheStore,
     logger: logger.child({ api: 'ts-reports' }),
   };
   return construct('ts-reports', 'jobs', () => tsReportsImpl.createJobs(tsReportsDeps));

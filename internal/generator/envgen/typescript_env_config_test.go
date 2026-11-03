@@ -54,3 +54,34 @@ func TestTypeScriptEnvConfigGolden(t *testing.T) {
 		}
 	}
 }
+
+// TestDeriverMakesTheConfigBackground: an API whose only background
+// deployable is a deriver gets the background loaders too (D74), as one
+// with a job does, which the deriver's entrypoint calls: the same config.ts
+// as the API with a job.
+func TestDeriverMakesTheConfigBackground(t *testing.T) {
+	withDeriver := rustEnvSchema()
+	withDeriver.Derivers = []*ir.Deriver{{Name: "TriageTickets"}}
+	output, err := envgen.GenerateWithOptions(withDeriver, envgen.Options{SchemaName: "shop-api", Naming: naming.Default(), Derived: true, Callers: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !output.Background {
+		t.Fatal("an API with a deriver is not background")
+	}
+	dir := t.TempDir()
+	if err := envgen.WriteTypeScriptEnvConfig(output, dir); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, envgen.TypeScriptEnvConfigFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile(filepath.Join("testdata", "golden", "typescript-env-config-background", envgen.TypeScriptEnvConfigFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("the deriver's API's config.ts differs from the background golden:\n%s", got)
+	}
+}

@@ -1,6 +1,7 @@
 package sqlmigrate
 
 import (
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -133,6 +134,12 @@ func convertScalar(f, t pgType) conversion {
 		default:
 			return conversion{kind: convertMayFail}
 		}
+	case f.base == t.base && f.base == "VECTOR" && len(f.mods) == 1 && len(t.mods) == 1:
+		// pgvector casts a vector to another length only when it already
+		// has it (D84): every stored vector fails.
+		return conversion{kind: convertMayFail, lossy: true, loss: fmt.Sprintf(
+			"a stored vector keeps its %d numbers, which vector(%d) refuses, so the cast fails on every row that holds one; set the column NULL, or embed every row again at %d dimensions, before this step.",
+			f.mods[0], t.mods[0], t.mods[0])}
 	case f.base == t.base:
 		// Another type whose modifier changes (CHAR(n), TIME(p)): rewrite,
 		// and assume the narrower one loses data.

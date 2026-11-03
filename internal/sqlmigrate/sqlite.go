@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 )
 
 // sqliteDialect plans for SQLite. Its ALTER TABLE renames a table or a
@@ -46,7 +48,7 @@ func (sqliteDialect) canAlter(c *change) bool {
 	switch c.op {
 	case opRenameTable, opRenameColumn, opRenameConstraint, opRenameIndex,
 		opCreateIndex, opReplaceIndex, opAddUnique, opDropUnique, opDropIndex, opDropColumn,
-		opRegenerateColumn:
+		opRegenerateColumn, opCreateTrigger, opReplaceTrigger, opRenameTrigger, opDropTrigger:
 		return true
 	case opAddColumn:
 		return sqliteAddable(c.column, foreignKeyOver(c.tableDef, c.column.Name) != nil)
@@ -55,6 +57,9 @@ func (sqliteDialect) canAlter(c *change) bool {
 		// column the plan adds: ADD COLUMN declares it, or the rebuild
 		// that adds the column does.
 		return c.phase == Expand && len(c.foreignKey.Columns) == 1
+	case opAddCheck:
+		// So is a check over a column the plan adds (D83).
+		return c.newColumn
 	}
 	return false
 }
@@ -103,8 +108,8 @@ func (d sqliteDialect) render(c *change) (rendered, error) {
 	case opRenameColumn:
 		return one(sqliteStep(c, "ALTER TABLE "+qs(c.table)+" RENAME COLUMN "+qs(c.oldName)+" TO "+qs(c.name))), nil
 	case opRenameConstraint:
-		// SQLite does not name a primary key or a foreign key. A unique
-		// constraint is an index, which SQLite cannot rename.
+		// SQLite does not name a primary key, a foreign key or a check. A
+		// unique constraint is an index, which SQLite cannot rename.
 		if c.constraint == nil {
 			return rendered{}, nil
 		}
@@ -128,10 +133,25 @@ func (d sqliteDialect) render(c *change) (rendered, error) {
 		if c.created || c.phase == Expand {
 			return rendered{}, nil
 		}
+	case opAddCheck:
+		// CREATE TABLE and ADD COLUMN declare the check.
+		if c.created || c.newColumn {
+			return rendered{}, nil
+		}
+	case opRunRawSQL:
+		return one(sqliteStep(c, c.raw.Statements...)), nil
+	case opUndoRawSQL:
+		if len(c.oldRaw.Down) == 0 {
+			return noSQL(c), nil
+		}
+		return one(sqliteStep(c, c.oldRaw.Down...)), nil
 	case opCreateIndex, opReplaceIndex:
 		var statements []string
 		if c.op == opReplaceIndex {
 			statements = append(statements, "DROP INDEX "+qs(c.index.Name))
+		}
+		if c.dedupe != nil {
+			statements = append(statements, dedupeSQL(c.table, c.dedupe, sqlutil.SQLiteNow, qs))
 		}
 		step := sqliteStep(c, append(statements, sqliteIndexSQL(c.table, c.index))...)
 		if !c.created {
@@ -160,11 +180,30 @@ func (d sqliteDialect) render(c *change) (rendered, error) {
 		for _, g := range c.alter.regenerate {
 			statements = append(statements,
 				"ALTER TABLE "+qs(g.table)+" DROP COLUMN "+qs(g.before.Name),
-				"ALTER TABLE "+qs(g.table)+" ADD COLUMN "+sqliteColumnSQL(g.after))
+				"ALTER TABLE "+qs(g.table)+" ADD COLUMN "+sqliteColumnSQL(nil, g.after))
 		}
 		return one(sqliteStep(c, statements...)), nil
 	case opGraphContent:
 		return noSQL(c), nil
+	case opCreateTrigger:
+		if c.backfill {
+			return one(backfillStep(sqliteStep(c, c.trigger.Definition, c.trigger.Backfill), c)), nil
+		}
+		return one(sqliteStep(c, c.trigger.Definition)), nil
+	case opReplaceTrigger:
+		// A trigger's statements are its definition: SQLite has no
+		// functions, so a new one replaces the trigger.
+		return one(sqliteStep(c, "DROP TRIGGER IF EXISTS "+qs(c.trigger.Name), c.trigger.Definition)), nil
+	case opRenameTrigger:
+		// SQLite cannot rename a trigger, and its definition names its
+		// table: the replacement that follows creates it under its new name.
+		return one(sqliteStep(c, "DROP TRIGGER IF EXISTS "+qs(c.oldName))), nil
+	case opDropTrigger:
+		return one(sqliteStep(c, "DROP TRIGGER IF EXISTS "+qs(c.oldTrigger.Name))), nil
+	case opSeedRole:
+		return one(sqliteStep(c, c.role.Insert)), nil
+	case opUpdateRole:
+		return one(sqliteStep(c, c.role.Update)), nil
 	case opDropTable:
 		// The tables of a reference cycle go in one step (dropTables).
 		// Every other table that references one of them is gone by then.
@@ -184,10 +223,12 @@ func sqliteIndexBlocking(step *Step, table, what string) {
 	blocking(step, fmt.Sprintf("%s holds the database's write lock for time that grows with %s.", what, table))
 }
 
-// sqliteColumnSQL is a column's definition in CREATE TABLE and ADD COLUMN.
-// A generated column is VIRTUAL: SQLite computes it when a row is read, and
-// ADD COLUMN cannot add a STORED one.
-func sqliteColumnSQL(col *Column) string {
+// sqliteColumnSQL is a column's definition in CREATE TABLE and ADD COLUMN,
+// with the check t has over it. A generated column is VIRTUAL: SQLite
+// computes it when a row is read, and ADD COLUMN cannot add a STORED one.
+// A check is the column's own, unnamed, as SQLite keeps no constraint
+// names, so DROP COLUMN drops it with the column (D83).
+func sqliteColumnSQL(t *Table, col *Column) string {
 	if col.Generated != "" {
 		return qs(col.Name) + " " + col.Type + " GENERATED ALWAYS AS (" + col.Generated + ") VIRTUAL"
 	}
@@ -197,6 +238,13 @@ func sqliteColumnSQL(col *Column) string {
 	}
 	if !col.Nullable {
 		def += " NOT NULL"
+	}
+	if t != nil {
+		for _, c := range t.Checks {
+			if c.Column == col.Name {
+				def += " CHECK (" + c.spec().Expression(qs) + ")"
+			}
+		}
 	}
 	return def
 }
@@ -211,7 +259,7 @@ func sqliteReferencesSQL(fk *ForeignKey) string {
 func sqliteCreateTableSQL(t *Table, name string) string {
 	var lines []string
 	for _, col := range t.Columns {
-		lines = append(lines, "  "+sqliteColumnSQL(col))
+		lines = append(lines, "  "+sqliteColumnSQL(t, col))
 	}
 	if t.PrimaryKey != nil {
 		lines = append(lines, "  PRIMARY KEY ("+qsList(t.PrimaryKey.Columns)+")")
@@ -225,7 +273,7 @@ func sqliteCreateTableSQL(t *Table, name string) string {
 // sqliteAddColumnSQL adds a column, with the foreign key the new table has
 // over it.
 func sqliteAddColumnSQL(c *change) string {
-	s := "ALTER TABLE " + qs(c.table) + " ADD COLUMN " + sqliteColumnSQL(c.column)
+	s := "ALTER TABLE " + qs(c.table) + " ADD COLUMN " + sqliteColumnSQL(c.tableDef, c.column)
 	if fk := foreignKeyOver(c.tableDef, c.column.Name); fk != nil {
 		s += " " + sqliteReferencesSQL(fk)
 	}
@@ -233,13 +281,18 @@ func sqliteAddColumnSQL(c *change) string {
 }
 
 // sqliteIndexSQL creates an index. SQLite has one access method, so the
-// model's BTREE is not written.
+// model's BTREE is not written. An expression index covers its expression
+// (D83).
 func sqliteIndexSQL(table string, idx *Index) string {
 	s := "CREATE "
 	if idx.Unique {
 		s += "UNIQUE "
 	}
-	s += "INDEX " + qs(idx.Name) + " ON " + qs(table) + " (" + qsList(idx.Columns) + ")"
+	elements := qsList(idx.Columns)
+	if idx.Expression != "" {
+		elements = "(" + idx.Expression + ")"
+	}
+	s += "INDEX " + qs(idx.Name) + " ON " + qs(table) + " (" + elements + ")"
 	if idx.Where != "" {
 		s += " WHERE " + idx.Where
 	}
@@ -276,8 +329,9 @@ const sqliteDeferForeignKeys = "PRAGMA defer_foreign_keys = ON"
 // which rewrites the foreign keys naming it; and creates the unique
 // indexes and indexes. A column a table gains is left out of its copy, so
 // its default fills it, and so is a generated column, which SQLite
-// computes; a column whose affinity changes is cast, and a list
-// whose element changes has each element converted. Renaming an old table
+// computes; a column whose affinity changes is cast, text that becomes a
+// JSON value is parsed, and a list whose element changes has each element
+// converted. Renaming an old table
 // out of the way instead would rewrite the foreign keys that reference it
 // to the old table, whose drop would then run their ON DELETE actions.
 func (d sqliteDialect) rebuild(rb *tableRebuild) (rendered, error) {
@@ -310,6 +364,20 @@ func (d sqliteDialect) rebuild(rb *tableRebuild) (rendered, error) {
 		}
 		for _, idx := range rt.after.Indexes {
 			statements = append(statements, sqliteIndexSQL(rt.name, idx))
+		}
+	}
+	// Dropping a table drops its triggers, so the step creates those the
+	// phase leaves on each table it keeps (D80).
+	for _, rt := range kept {
+		for _, t := range rb.triggers[rt.name] {
+			statements = append(statements, t.Definition)
+		}
+	}
+	// A trigger the plan adds with backfill enqueues for the rows the
+	// copy kept, once every trigger is back (D88).
+	for _, c := range rb.changes {
+		if c.op == opCreateTrigger && c.backfill {
+			statements = append(statements, c.trigger.Backfill)
 		}
 	}
 	step := &Step{
@@ -405,6 +473,10 @@ func sqliteCopySQL(before, after *Table, into string) string {
 			if sqliteListConvert(prev.Element, col.Element).kind != convertSame {
 				value = sqliteListValue(before.Name, col.Name, prev.Element, col.Element)
 			}
+		case prev.Holds == "" && col.Holds == holdsJSON:
+			// Text becomes a JSON value: json() keeps JSON text and fails
+			// on any other (convert).
+			value = "json(" + value + ")"
 		case sqliteAffinity(prev.Type) != sqliteAffinity(col.Type):
 			value = "CAST(" + value + " AS " + sqliteAffinity(col.Type) + ")"
 		}
@@ -577,6 +649,12 @@ func sqliteCannot(c *change) string {
 		return "change foreign key " + c.foreignKey.Name
 	case opDropForeignKey:
 		return "drop foreign key " + c.foreignKey.Name
+	case opAddCheck:
+		return "add a check on " + c.check.Column
+	case opReplaceCheck:
+		return "change the check on " + c.check.Column
+	case opDropCheck:
+		return "drop the check on " + c.oldCheck.Column
 	}
 	return string(c.op) + " " + c.subject
 }

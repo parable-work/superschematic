@@ -33,3 +33,27 @@ export type User<Config extends UserConfig> = NonNullable<unknown>;
  * type and takes no type argument.
  */
 export type UserRole = NonNullable<unknown>;
+
+/** A role `@seedRoles` declares: its name and the permissions it carries, each dotted segments such as `orders.read`. */
+export interface RoleSeed {
+  readonly name: string;
+  readonly permissions: readonly string[];
+}
+
+/**
+ * The roles the UserRole table holds from its first migration on, so a user approved into a default role can use
+ * what it permits with no administrator's step first:
+ *
+ * ```ts
+ * @seedRoles([{ name: "member", permissions: ["finances.read", "finances.write"] }])
+ * export abstract class Role implements UserRole { ... }
+ * ```
+ *
+ * `create.sql` inserts each. A migration plan inserts a new one, gives a role of its name that has no permissions,
+ * as the first registration creates a default role, the seed's, and sets the permissions of one whose declaration
+ * changes, a step the plan marks destructive. It never deletes a role. An API whose authDb this is checks the
+ * permissions against its own.
+ */
+export function seedRoles(_roles: readonly RoleSeed[]): ClassDecorator {
+  return () => {};
+}

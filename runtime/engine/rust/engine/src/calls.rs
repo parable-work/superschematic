@@ -30,14 +30,24 @@
 //! an event stream it opens, or one `stream.open` opens from a read of the
 //! log, is held by the engine and named by an id, which `stream.next`
 //! pulls (`{data}`, `{pending: true}` or `{end: true}`) and `stream.close`
-//! ends.
+//! ends; `stream.open`'s read takes `signals: true` for the signals of what
+//! it reads (D77).
+//!
+//! `behaviors.invoke` calls a behavior's namespace operation (D77):
+//! `[{ namespace?, behavior, operation, params? }]`, after the principal,
+//! answering its result.
+//!
+//! `signals.send` (also by the name `sendSignal`) sends a signal (D77):
+//! `[{ namespace?, schema, instanceId, behavior, name, data? }]`, after
+//! the principal, answering nothing.
 
 use std::borrow::Cow;
 
 use serde_json::{Map, Value};
 
 use crate::api::{
-    self, ApiOptions, Body, Caller, McpOptions, Refusal, Request, ServiceCaller, StreamOptions,
+    self, ActingForHeader, ApiOptions, Body, Caller, McpOptions, Refusal, Request, ServiceCaller,
+    StreamOptions,
 };
 use crate::engine::Engine;
 use crate::errors::{EngineError, Error, Result};
@@ -53,7 +63,7 @@ use crate::registry::{DefineOptions, SchemaInput, SchemaTarget, ValidateOptions}
 use crate::storage::Dialect;
 
 /// The calls [`call`] answers, by name.
-pub const CALLS: [&str; 57] = [
+pub const CALLS: [&str; 60] = [
     "schemas.define",
     "schemas.publish",
     "schemas.live",
@@ -92,6 +102,8 @@ pub const CALLS: [&str; 57] = [
     "tools.manifest",
     "tools.call",
     "search",
+    "signals.send",
+    "sendSignal",
     "runner.start",
     "runner.stop",
     "runner.running",
@@ -103,6 +115,7 @@ pub const CALLS: [&str; 57] = [
     "behaviors.has",
     "behaviors.names",
     "behaviors.declaration",
+    "behaviors.invoke",
     "api.routes",
     "api.handle",
     "stream.open",
@@ -397,6 +410,30 @@ pub fn call_with(
         "behaviors.has" => Ok(Value::Bool(engine.behaviors().has(&text(arg(0))))),
         "behaviors.names" => to_json(engine.behaviors().names()),
         "behaviors.declaration" => return Ok(engine.behaviors().declaration(&text(arg(0)))),
+        "behaviors.invoke" => {
+            let principal = who()?;
+            let input = options(0);
+            let required = |key: &str| -> Result<String> {
+                match input.and_then(|input| input.get(key)) {
+                    Some(Value::String(text)) => Ok(text.clone()),
+                    _ => Err(EngineError::invalid_argument(format!(
+                        "behaviors.invoke takes {{ namespace?, behavior, operation, params? }}: {key} is a string"
+                    ))
+                    .into()),
+                }
+            };
+            let (behavior, operation) = (required("behavior")?, required("operation")?);
+            let namespace = text_member(input, "namespace");
+            engine.behaviors().invoke(
+                principal,
+                &crate::behaviors::NamespaceCall {
+                    namespace: namespace.as_deref(),
+                    behavior: &behavior,
+                    operation: &operation,
+                    params: input.and_then(|input| input.get("params")),
+                },
+            )
+        }
         "events.read" => {
             let principal = who()?;
             let read = ReadArgs::of(options(0))?;
@@ -472,6 +509,40 @@ pub fn call_with(
                 },
             )
         }
+        "signals.send" | "sendSignal" => {
+            let principal = who()?;
+            let input = options(0);
+            let required = |key: &str| -> Result<String> {
+                match input.and_then(|input| input.get(key)) {
+                    Some(Value::String(text)) => Ok(text.clone()),
+                    _ => Err(EngineError::invalid_argument(format!(
+                        "signals.send takes {{ namespace?, schema, instanceId, behavior, name, data? }}: {key} is a string"
+                    ))
+                    .into()),
+                }
+            };
+            let (schema, instance_id, behavior, name) = (
+                required("schema")?,
+                required("instanceId")?,
+                required("behavior")?,
+                required("name")?,
+            );
+            let namespace = text_member(input, "namespace");
+            let empty = Value::Object(Map::new());
+            let data = input.and_then(|input| input.get("data")).unwrap_or(&empty);
+            engine.signals().send(
+                principal,
+                &crate::signals::SendSignal {
+                    namespace: namespace.as_deref(),
+                    schema: &schema,
+                    instance_id: &instance_id,
+                    behavior: &behavior,
+                    name: &name,
+                    data,
+                },
+            )?;
+            return Ok(None);
+        }
         "search" => {
             let namespace = text_member(options(1), "namespace");
             engine.search(who()?, arg(0), namespace.as_deref())
@@ -512,11 +583,22 @@ pub fn call_with(
         "stream.open" => {
             let principal = who()?;
             let read = ReadArgs::of(options(0))?;
-            let stream = api::start_stream(
+            let signals = match options(0).and_then(|read| read.get("signals")) {
+                None | Some(Value::Null) => false,
+                Some(Value::Bool(signals)) => *signals,
+                Some(_) => {
+                    return Err(EngineError::invalid_argument(
+                        "signals is a boolean: true sends the signals of what the stream reads",
+                    )
+                    .into())
+                }
+            };
+            let stream = api::start_stream_with(
                 engine,
                 &stream_options_of(options(1))?,
                 principal,
                 &read.view(),
+                signals,
             )?;
             Ok(Value::from(engine.streams.hold(Box::new(stream))))
         }
@@ -674,9 +756,20 @@ pub fn principal_from_json(given: &Value) -> Result<Principal, EngineError> {
             )));
         }
     }
+    if let Some(acting) = members.get("actingFor") {
+        if !acting
+            .as_object()
+            .and_then(|acting| acting.get("subject"))
+            .is_some_and(Value::is_string)
+        {
+            return Err(EngineError::invalid_argument(
+                "a principal's actingFor is { subject }, a subject that is not empty",
+            ));
+        }
+    }
     serde_json::from_value(given.clone()).map_err(|error| {
         EngineError::invalid_argument(format!(
-            "a principal is {{ subject, permissions, claims?, service? }}: {error}"
+            "a principal is {{ subject, permissions, claims?, service?, actingFor? }}: {error}"
         ))
     })
 }
@@ -693,6 +786,7 @@ struct ReadArgs {
     kinds: Option<Vec<String>>,
     behaviors: Option<Vec<String>>,
     exclude: Option<Vec<String>>,
+    beside: Option<bool>,
 }
 
 impl ReadArgs {
@@ -713,6 +807,14 @@ impl ReadArgs {
         };
         let [kinds, behaviors, exclude] =
             check_filters([member("kinds"), member("behaviors"), member("exclude")])?;
+        let beside = match member("beside") {
+            None => None,
+            Some(Value::Bool(beside)) => Some(*beside),
+            Some(_) => return Err(EngineError::invalid_argument(
+                "beside is a boolean: false drops beside operations' events, true keeps only them",
+            )
+            .into()),
+        };
         Ok(ReadArgs {
             namespace: text_member(options, "namespace"),
             schema: text_member(options, "schema"),
@@ -722,6 +824,7 @@ impl ReadArgs {
             kinds,
             behaviors,
             exclude,
+            beside,
         })
     }
 
@@ -735,6 +838,7 @@ impl ReadArgs {
             kinds: self.kinds.clone(),
             behaviors: self.behaviors.clone(),
             exclude: self.exclude.clone(),
+            beside: self.beside,
         }
     }
 }
@@ -900,8 +1004,10 @@ fn request_of(given: &Value) -> Result<Request> {
 }
 
 // api_options_of is how `api.handle` serves: `stream` ({pageSize,
-// heartbeatMs}) and `mcp` ({serverInfo: {name, version}, instructions}).
-// A tool filter is a function, which JSON cannot carry.
+// heartbeatMs}), `mcp` ({serverInfo: {name, version}, instructions}) and
+// `actingFor`, true when the Acting-For header is honored (D77), or the
+// subject a host's function decided, a string. A tool filter, or a
+// function deciding actingFor, is a function, which JSON cannot carry.
 fn api_options_of(options: Option<&Map<String, Value>>) -> Result<ApiOptions> {
     let member = |key: &str| {
         options
@@ -920,6 +1026,17 @@ fn api_options_of(options: Option<&Map<String, Value>>) -> Result<ApiOptions> {
             instructions: text_member(mcp, "instructions"),
         },
         tools: None,
+        acting_for: match options.and_then(|options| options.get("actingFor")) {
+            None | Some(Value::Null) | Some(Value::Bool(false)) => ActingForHeader::Ignore,
+            Some(Value::Bool(true)) => ActingForHeader::Honor,
+            Some(Value::String(subject)) => ActingForHeader::Decided(subject.clone()),
+            Some(given) => {
+                return Err(Error::usage(format!(
+                    "actingFor must be true, false or the subject the host decided, got {}",
+                    js_string(given)
+                )))
+            }
+        },
     })
 }
 

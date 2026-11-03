@@ -256,7 +256,7 @@ for (const driver of drivers) {
 
       // An operation that changes no own field, and an update that changes
       // nothing, leave them.
-      invoke(engine, wes, 'comment', { body: 'Looks close.' });
+      invoke(engine, wes, 'post', { body: 'Looks close.' });
       engine.instances.update(alice, 'Doc', 'd1', { title: 'Plan' });
       assert.deepEqual(gatesOf(engine), held);
 

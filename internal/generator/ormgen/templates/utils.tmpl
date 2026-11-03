@@ -454,6 +454,64 @@ func copyIntervalElements[T ~int64](field string, values []*time.Duration, dst *
 	return nil
 }
 {{- end }}
+{{- if .HasDecimalHistory }}
+
+// historyDecimal reads a NUMERIC column of a history row, which to_jsonb
+// writes as a JSON number in the column's scale, or of a version graph's
+// canonical row, which holds the decimal's text, as a Generic.Decimal's
+// canonical text (D84): no leading zero before the point, none trailing
+// after it, and no sign on zero.
+func historyDecimal(raw []byte) (string, error) {
+	text := strings.TrimSpace(string(raw))
+	if strings.HasPrefix(text, `"`) {
+		if err := json.Unmarshal(raw, &text); err != nil {
+			return "", err
+		}
+	}
+	negative := strings.HasPrefix(text, "-")
+	unsigned := strings.TrimPrefix(strings.TrimPrefix(text, "-"), "+")
+	whole, fraction, _ := strings.Cut(unsigned, ".")
+	if whole == "" || strings.Trim(whole, "0123456789") != "" || strings.Trim(fraction, "0123456789") != "" {
+		return "", fmt.Errorf("%s is no decimal", text)
+	}
+	whole = strings.TrimLeft(whole, "0")
+	fraction = strings.TrimRight(fraction, "0")
+	if whole == "" {
+		whole = "0"
+	}
+	out := whole
+	if fraction != "" {
+		out += "." + fraction
+	}
+	if negative && out != "0" {
+		out = "-" + out
+	}
+	return out, nil
+}
+
+// unmarshalHistoryDecimals reads a NUMERIC[] column of a history row into
+// *dst, each element as historyDecimal reads one; a null element is
+// refused at field[i].
+func unmarshalHistoryDecimals[T ~string](raw []byte, dst *[]T, field string) error {
+	var elements []json.RawMessage
+	if err := json.Unmarshal(raw, &elements); err != nil {
+		return err
+	}
+	list := make([]T, len(elements))
+	for i, element := range elements {
+		if string(element) == "null" {
+			return fmt.Errorf("%s[%d]: null element", field, i)
+		}
+		decimal, err := historyDecimal(element)
+		if err != nil {
+			return fmt.Errorf("%s[%d]: %w", field, i, err)
+		}
+		list[i] = T(decimal)
+	}
+	*dst = list
+	return nil
+}
+{{- end }}
 {{- if .HasIntervalHistory }}
 
 // parseHistoryInterval reads a duration of a row the history decoder reads.

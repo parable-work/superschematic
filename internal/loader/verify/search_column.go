@@ -2,6 +2,7 @@ package verify
 
 import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -36,7 +37,7 @@ func checkSearchColumns(schema *ir.Schema, r *Result) {
 			if fd.SearchField {
 				searched = true
 			}
-			if codegen.ToSnakeCase(fd.Name) == searchTextColumn {
+			if sqlutil.ColumnName(fd) == searchTextColumn {
 				clashes = append(clashes, fd)
 			}
 		}

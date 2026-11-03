@@ -30,9 +30,19 @@
 # Usage:
 #   scripts/superscalar-dep.sh            # checkout + build, print CGO_LDFLAGS
 #   scripts/superscalar-dep.sh --archive  # checkout + the Go archive alone
+#   scripts/superscalar-dep.sh --prebuilt # download both prebuilt, no Rust
 #   scripts/superscalar-dep.sh --checkout # checkout alone
 #   scripts/superscalar-dep.sh --print    # print CGO_LDFLAGS only
 #   eval "$(scripts/superscalar-dep.sh --export)"   # export CGO_LDFLAGS
+#
+# --prebuilt builds nothing and needs no Rust, wasm-pack or git (D82): it
+# downloads the Go binding with its archive and the TypeScript binding with
+# its builds, built from the pinned commit with RUST_VERSION by the
+# prebuilt-deps workflow, checks each against the manifest prebuilt.pin
+# pins, and stages them under third_party/superscalar as a build leaves
+# them (scripts/prebuilt_deps.py says how, and how to point it at another
+# place). Without cargo on PATH, a run with no argument does the same, and
+# --archive stages the prebuilt Go binding alone.
 #
 # --archive skips the TypeScript binding, for the release's static archives
 # (scripts/release-archives.sh), and leaves the stamp below as it was, so a
@@ -66,13 +76,20 @@ if [ -z "$commit" ]; then
 fi
 
 checkout() {
-  if [ ! -d "$DEP/.git" ]; then
+  # A directory a prebuilt download staged (--prebuilt) holds no clone; the
+  # checkout goes over it, its files taken over by the commit's.
+  local force=()
+  if [ -d "$DEP" ] && [ ! -d "$DEP/.git" ]; then
+    git -C "$DEP" init --quiet
+    git -C "$DEP" remote add origin "$REPO_URL"
+    force=(--force)
+  elif [ ! -d "$DEP/.git" ]; then
     git clone --quiet --no-checkout "$REPO_URL" "$DEP"
   fi
   if ! git -C "$DEP" cat-file -e "$commit^{commit}" 2>/dev/null; then
     git -C "$DEP" fetch --quiet origin "$commit"
   fi
-  git -C "$DEP" checkout --quiet --detach "$commit"
+  git -C "$DEP" checkout --quiet ${force[@]+"${force[@]}"} --detach "$commit"
 }
 
 if [ "${1:-}" = "--checkout" ]; then
@@ -86,6 +103,7 @@ goarch="$(go env GOARCH)"
 ldflags="-L$DEP/go/lib/${goos}_${goarch}"
 
 archive_only=0
+prebuilt=0
 case "${1:-}" in
   --print)
     echo "$ldflags"
@@ -98,6 +116,9 @@ case "${1:-}" in
   --archive)
     archive_only=1
     ;;
+  --prebuilt)
+    prebuilt=1
+    ;;
   "")
     ;;
   *)
@@ -105,6 +126,20 @@ case "${1:-}" in
     exit 2
     ;;
 esac
+if [ "$prebuilt" = "0" ] && ! command -v cargo >/dev/null 2>&1; then
+  echo "superscalar-dep: cargo is not on PATH, so superscalar comes prebuilt (D82); install Rust ${RUSTUP_TOOLCHAIN} to build it from source" >&2
+  prebuilt=1
+fi
+if [ "$prebuilt" = "1" ]; then
+  only=()
+  if [ "$archive_only" = "1" ]; then
+    only=(--only superscalar-go)
+  fi
+  python3 "$ROOT/scripts/prebuilt_deps.py" fetch superscalar ${only[@]+"${only[@]}"}
+  echo "superscalar $commit staged prebuilt under $DEP" >&2
+  echo "$ldflags"
+  exit 0
+fi
 
 checkout
 

@@ -19,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/parable-work/superschematic/internal/buildcache"
+	"github.com/parable-work/superschematic/internal/release"
 	"github.com/parable-work/superschematic/registry"
 )
 
@@ -57,9 +58,10 @@ type app struct {
 	exts []registry.Extension
 }
 
-// New builds the root command with build, build-all, migrate, json-schema,
-// format, behaviors, stack, identity and env, plus the subcommands of any
-// extension that implements CommandProvider.
+// New builds the root command with check, build, build-all, migrate,
+// json-schema, format, behaviors, engine-client, env, catalog, init, new,
+// stack and identity, plus the subcommands of any extension that implements
+// CommandProvider, and the --version flag.
 func New(cfg Config, exts ...registry.Extension) *cobra.Command {
 	name := cfg.Name
 	if name == "" {
@@ -85,10 +87,16 @@ kinds, decorators, documents, generators, auth providers and subcommands.`, name
 		Long:          long,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		// --version prints `<name> version <release>`, 0.0.0 for a binary
+		// built from a checkout: what the release workflow and a generated
+		// workflow check a binary they install against (D47, amended).
+		Version: release.Current().CLIVersion(),
 	}
+	root.AddCommand(newCheckCmd(a))
 	root.AddCommand(newBuildCmd(a))
 	root.AddCommand(newBuildAllCmd(a))
 	root.AddCommand(newMigrateCmd(a))
+	root.AddCommand(newQueriesCmd(a))
 	root.AddCommand(newJSONSchemaCmd(a))
 	root.AddCommand(newFormatCmd(a))
 	root.AddCommand(newBehaviorsCmd(a))
@@ -96,6 +104,9 @@ kinds, decorators, documents, generators, auth providers and subcommands.`, name
 	root.AddCommand(newStackCmd(a))
 	root.AddCommand(newIdentityCmd(a))
 	root.AddCommand(newEnvCmd(a))
+	root.AddCommand(newCatalogCmd(a))
+	root.AddCommand(newInitCmd(a))
+	root.AddCommand(newNewCmd(a))
 	for _, ext := range exts {
 		if provider, ok := ext.(CommandProvider); ok {
 			root.AddCommand(provider.Commands()...)

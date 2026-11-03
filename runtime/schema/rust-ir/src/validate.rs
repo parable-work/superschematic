@@ -316,13 +316,16 @@ impl Validator<'_> {
         field: &FieldDef,
         value: &Value,
     ) -> Vec<ValidationError> {
-        if let Some(text) = value.as_str() {
-            return self.validate_field_level_string_constraints(field, text);
-        }
-        match to_number(value) {
-            Some(number) => validate_field_level_numeric_constraints(field, number),
-            None => Vec::new(),
-        }
+        let mut errors = if let Some(text) = value.as_str() {
+            self.validate_field_level_string_constraints(field, text)
+        } else {
+            match to_number(value) {
+                Some(number) => validate_field_level_numeric_constraints(field, number),
+                None => Vec::new(),
+            }
+        };
+        errors.extend(validate_field_digits(field, value));
+        errors
     }
 
     fn validate_single_field(
@@ -690,6 +693,87 @@ fn has_field_level_constraints(field: &FieldDef) -> bool {
         || field.validate_min_length.is_some()
         || field.validate_max_length.is_some()
         || !field.validate_pattern.is_empty()
+        || field.validate_precision.is_some()
+        || field.validate_dimensions.is_some()
+}
+
+/// A field's digit rules (D84) on one value: a Generic.Decimal's canonical
+/// form holds at most precision less scale digits before the point, without
+/// leading zeros ("precision"), and at most scale after it, without
+/// trailing zeros ("scale"); an Embedding.Vector, the JSON array or the one
+/// its JSON text holds, has exactly dimensions numbers ("dimensions"). A
+/// value of another shape is the scalar's to report, and is not counted.
+fn validate_field_digits(field: &FieldDef, value: &Value) -> Vec<ValidationError> {
+    let mut errors = Vec::new();
+    if let (Some(precision), Some((whole, fraction))) = (
+        field.validate_precision,
+        value.as_str().and_then(decimal_digits),
+    ) {
+        let scale = field.validate_scale.unwrap_or(0.0);
+        let integer_digits = precision - scale;
+        if whole as f64 > integer_digits {
+            errors.push(ValidationError::new(
+                "precision",
+                format!(
+                    "{} must have at most {} digits before the decimal point.",
+                    field.name,
+                    js_number(integer_digits)
+                ),
+            ));
+        }
+        if fraction as f64 > scale {
+            errors.push(ValidationError::new(
+                "scale",
+                format!(
+                    "{} must have at most {} digits after the decimal point.",
+                    field.name,
+                    js_number(scale)
+                ),
+            ));
+        }
+    }
+    if let Some(dimensions) = field.validate_dimensions {
+        let length = match value {
+            Value::Array(items) => Some(items.len()),
+            Value::String(text) if !text.is_empty() => match serde_json::from_str::<Value>(text) {
+                Ok(Value::Array(items)) => Some(items.len()),
+                _ => None,
+            },
+            _ => None,
+        };
+        if length.is_some_and(|length| length as f64 != dimensions) {
+            errors.push(ValidationError::new(
+                "dimensions",
+                format!(
+                    "{} must have exactly {} dimensions.",
+                    field.name,
+                    js_number(dimensions)
+                ),
+            ));
+        }
+    }
+    errors
+}
+
+/// The digits of a Generic.Decimal's canonical form: before the point,
+/// without leading zeros, and after it, without trailing zeros; None for
+/// text that is no decimal.
+fn decimal_digits(text: &str) -> Option<(usize, usize)> {
+    let text = text.trim();
+    let unsigned = text.strip_prefix(['+', '-']).unwrap_or(text);
+    let (whole, fraction) = match unsigned.split_once('.') {
+        Some((whole, fraction)) if !fraction.is_empty() => (whole, fraction),
+        Some(_) => return None,
+        None => (unsigned, ""),
+    };
+    let digits = |part: &str| part.bytes().all(|b| b.is_ascii_digit());
+    if whole.is_empty() || !digits(whole) || !digits(fraction) {
+        return None;
+    }
+    Some((
+        whole.trim_start_matches('0').len(),
+        fraction.trim_end_matches('0').len(),
+    ))
 }
 
 /// The errors of data as a value of the named object type; empty when it

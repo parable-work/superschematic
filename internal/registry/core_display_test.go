@@ -129,9 +129,10 @@ func TestDisplayDecorator(t *testing.T) {
 	}
 }
 
-// @display({ multiline }) from @superschematic/schema on a field (D48,
-// amended) is a spec of its own beside the type's: Args holds its argument
-// to one boolean member, and Apply writes FieldDef.Display, once per field.
+// @display({ multiline, currency }) from @superschematic/schema on a field
+// (D48, amended) is a spec of its own beside the type's: Args holds its
+// argument to a boolean multiline and a currency that is a code or a
+// field, and Apply writes FieldDef.Display, once per field.
 func TestAFieldDisplayDecorator(t *testing.T) {
 	reg := New(naming.Naming{})
 	spec, ok := reg.Decorator("display", TargetField)
@@ -159,8 +160,37 @@ func TestAFieldDisplayDecorator(t *testing.T) {
 		}
 	}
 
+	// A currency is a code or a field (D48, amended), alone or beside
+	// multiline.
+	for arg, want := range map[string]ir.DisplayCurrency{
+		`{"currency": "GBP"}`:                     {Code: "GBP"},
+		`{"currency": {"field": "currency"}}`:     {Field: "currency"},
+		`{"multiline": false, "currency": "JPY"}`: {Code: "JPY"},
+	} {
+		var value any
+		if err := json.Unmarshal([]byte(arg), &value); err != nil {
+			t.Fatal(err)
+		}
+		if err := spec.ValidateArgs([]any{value}); err != nil {
+			t.Fatalf("ValidateArgs(%s): %v", arg, err)
+		}
+		fd := &ir.FieldDef{Name: "amount"}
+		if err := spec.Apply(Node{Field: fd}, []any{value}, Site{}); err != nil {
+			t.Fatalf("Apply(%s): %v", arg, err)
+		}
+		if fd.Display == nil || fd.Display.Currency == nil || *fd.Display.Currency != want {
+			t.Fatalf("Apply(%s): Display = %+v, want currency %+v", arg, fd.Display, want)
+		}
+	}
+
 	for _, bad := range []string{
 		`{}`,
+		`{"currency": "gbp"}`,
+		`{"currency": "GBPX"}`,
+		`{"currency": 826}`,
+		`{"currency": {}}`,
+		`{"currency": {"field": " "}}`,
+		`{"currency": {"field": "currency", "code": "GBP"}}`,
 		`{"multiline": "yes"}`,
 		`{"multiline": 1}`,
 		`{"multiline": null}`,

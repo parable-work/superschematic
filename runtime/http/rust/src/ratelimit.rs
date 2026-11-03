@@ -1,7 +1,19 @@
 //! `@rateLimit`, with the Go runtime's semantics: a limiter counting each
 //! client's requests per minute, 429 Too Many Requests past the limit with
-//! `Retry-After`. The limiter is a token bucket in process memory, as the
-//! Go runtime's httprate limiter is, so replicas do not share a budget.
+//! `Retry-After`. In process, the limiter is a token bucket of the
+//! route's limit per minute, refilled continuously, in each replica's own
+//! memory, so replicas do not share a budget. (The Go runtime's limiter,
+//! httprate, counts a sliding window instead: the previous minute's count
+//! weighted by the part of it still in the window, plus this minute's.)
+//!
+//! An API whose config names a `rateLimitStore` (D75) shares each
+//! operation's budget between its replicas: the generated entrypoint
+//! builds its registry with [`RateLimits::with_store`], and each limiter
+//! counts in that memory store by httprate's rule
+//! ([`crate::memorystore::window_decision`]), over the reserved
+//! `rate-limit` counters of the operation, the minute and the client,
+//! whose key is a SHA-256 in hex. While the store is unavailable, or a
+//! call to it fails, a request falls back to the limiter's token bucket.
 //!
 //! A generated router takes each route's limiter from a [`RateLimits`],
 //! one per operation, so everything in a process that holds the same
@@ -22,8 +34,11 @@ use std::collections::HashMap;
 use std::fmt;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
+use crate::memorystore::{
+    rate_limit_name, window_decision, MemoryStore, Ref, RATE_LIMIT_DECLARATION,
+};
 use crate::OperationInfo;
 
 /// The client address a rate limit counts requests by. A service behind a
@@ -55,10 +70,21 @@ struct Bucket {
 }
 
 /// Token buckets of `requests_per_minute` capacity, refilled continuously
-/// at that rate, one per client.
+/// at that rate, one per client; and for a limiter of a `rateLimitStore`,
+/// the shared count it takes first.
 pub struct RateLimiter {
     requests_per_minute: u32,
     buckets: Mutex<HashMap<String, Bucket>>,
+    shared: Option<SharedCount>,
+}
+
+/// Where a shared limiter counts: the store, and the service and operation
+/// its counters' names hold.
+struct SharedCount {
+    store: Arc<dyn MemoryStore>,
+    service: String,
+    operation: String,
+    clock: Arc<dyn Fn() -> SystemTime + Send + Sync>,
 }
 
 impl RateLimiter {
@@ -66,7 +92,56 @@ impl RateLimiter {
         Self {
             requests_per_minute,
             buckets: Mutex::new(HashMap::new()),
+            shared: None,
         }
+    }
+
+    /// A limiter of `requests_per_minute` that counts `service`'s
+    /// `operation` in `store`, by httprate's sliding window, and falls back
+    /// to a token bucket of its own while the store is unavailable (D75).
+    pub fn shared(
+        requests_per_minute: u32,
+        store: Arc<dyn MemoryStore>,
+        service: impl Into<String>,
+        operation: impl Into<String>,
+    ) -> Self {
+        Self::shared_with_clock(
+            requests_per_minute,
+            store,
+            service,
+            operation,
+            SystemTime::now,
+        )
+    }
+
+    fn shared_with_clock(
+        requests_per_minute: u32,
+        store: Arc<dyn MemoryStore>,
+        service: impl Into<String>,
+        operation: impl Into<String>,
+        clock: impl Fn() -> SystemTime + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            shared: Some(SharedCount {
+                store,
+                service: service.into(),
+                operation: operation.into(),
+                clock: Arc::new(clock),
+            }),
+            ..Self::per_minute(requests_per_minute)
+        }
+    }
+
+    /// Admits one request of `key`: in the shared store when the limiter
+    /// has one and it answers, else from `key`'s token bucket. `Err` holds
+    /// the whole seconds of `Retry-After`.
+    pub async fn admit(&self, key: &str) -> Result<(), u64> {
+        if let Some(shared) = &self.shared {
+            if let Some(decision) = shared.admit(self.requests_per_minute, key).await {
+                return decision;
+            }
+        }
+        self.take(key)
     }
 
     /// Takes one token from `key`'s bucket: `Ok` when the request may go
@@ -115,6 +190,41 @@ impl RateLimiter {
     }
 }
 
+impl SharedCount {
+    /// httprate's rule over the store's counts of this window and the one
+    /// before it, for one request of `key`; `None` when the store is
+    /// unavailable or a call to it fails, so the request falls back.
+    async fn admit(&self, limit: u32, key: &str) -> Option<Result<(), u64>> {
+        if !self.store.available() {
+            return None;
+        }
+        let window = i64::try_from(MINUTE.as_millis()).unwrap_or(60_000);
+        let now = (self.clock)()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .ok()
+            .and_then(|since| i64::try_from(since.as_millis()).ok())?;
+        let curr_start = now.div_euclid(window) * window;
+        let counter = |start: i64| {
+            rate_limit_name(&self.service, &self.operation, start / 1000, key)
+                .ok()
+                .map(|name| Ref::new(RATE_LIMIT_DECLARATION, name))
+        };
+        let (prev, curr) = (counter(curr_start - window)?, counter(curr_start)?);
+        let prev_count = self.store.count(&prev).await.ok()?;
+        let curr_count = self.store.count(&curr).await.ok()?;
+        let decision = window_decision(i64::from(limit), window, now, prev_count, curr_count);
+        match (decision.increment_ttl, decision.retry_after_seconds) {
+            (Some(ttl), _) => {
+                // The request is admitted: a failed increment undercounts
+                // it alone.
+                let _ = self.store.increment(&curr, ttl).await;
+                Some(Ok(()))
+            }
+            (None, retry_after) => Some(Err(retry_after.unwrap_or(MINUTE.as_secs()))),
+        }
+    }
+}
+
 /// The key of an operation's limiter: its route's method and path, its
 /// namespace, its name and its rate.
 type LimiterKey = (&'static str, &'static str, &'static str, &'static str, u32);
@@ -139,11 +249,23 @@ type LimiterKey = (&'static str, &'static str, &'static str, &'static str, u32);
 #[derive(Clone, Default)]
 pub struct RateLimits {
     limiters: Arc<Mutex<HashMap<LimiterKey, Arc<RateLimiter>>>>,
+    store: Option<(Arc<dyn MemoryStore>, Arc<str>)>,
 }
 
 impl RateLimits {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A registry whose limiters count in `store`, the API's
+    /// `rateLimitStore`, under the API service `service`, so the replicas
+    /// of its servers share each operation's budget (D75). Each falls back
+    /// to its own token bucket while the store is unavailable.
+    pub fn with_store(service: impl Into<String>, store: Arc<dyn MemoryStore>) -> Self {
+        Self {
+            limiters: Arc::default(),
+            store: Some((store, Arc::from(service.into()))),
+        }
     }
 
     /// The limiter of `operation`'s `@rateLimit`, at its rate, made the
@@ -162,7 +284,17 @@ impl RateLimits {
                 operation.name,
                 rate,
             ))
-            .or_insert_with(|| Arc::new(RateLimiter::per_minute(rate)));
+            .or_insert_with(|| {
+                Arc::new(match &self.store {
+                    None => RateLimiter::per_minute(rate),
+                    Some((store, service)) => RateLimiter::shared(
+                        rate,
+                        Arc::clone(store),
+                        service.as_ref(),
+                        format!("{}.{}", operation.namespace, operation.name),
+                    ),
+                })
+            });
         Some(Arc::clone(limiter))
     }
 
@@ -176,9 +308,12 @@ impl RateLimits {
 
 impl fmt::Debug for RateLimits {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RateLimits")
-            .field("limiters", &self.len())
-            .finish()
+        let mut debug = f.debug_struct("RateLimits");
+        debug.field("limiters", &self.len());
+        if let Some((store, _)) = &self.store {
+            debug.field("store", &store.name());
+        }
+        debug.finish()
     }
 }
 
@@ -326,6 +461,76 @@ mod tests {
             &limits.of(&PLACE_ORDER).unwrap(),
             &other.of(&PLACE_ORDER).unwrap()
         ));
+    }
+
+    /// A clock a test sets, in milliseconds from the epoch.
+    fn clock(ms: &Arc<std::sync::atomic::AtomicU64>) -> impl Fn() -> SystemTime + Send + Sync {
+        let ms = Arc::clone(ms);
+        move || {
+            SystemTime::UNIX_EPOCH
+                + Duration::from_millis(ms.load(std::sync::atomic::Ordering::SeqCst))
+        }
+    }
+
+    #[tokio::test]
+    async fn replicas_share_a_budget_in_the_store_by_the_sliding_window() {
+        use crate::memorystore::InProcessMemoryStore;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        let now = Arc::new(AtomicU64::new(1_761_350_400_000));
+        let store: Arc<dyn MemoryStore> =
+            Arc::new(InProcessMemoryStore::with_clock("shop-cache", clock(&now)));
+        let replica = |store: &Arc<dyn MemoryStore>| {
+            RateLimiter::shared_with_clock(
+                3,
+                Arc::clone(store),
+                "shop-api",
+                "orders.placeOrder",
+                clock(&now),
+            )
+        };
+        let (a, b) = (replica(&store), replica(&store));
+        assert_eq!(a.admit("203.0.113.7").await, Ok(()));
+        assert_eq!(b.admit("203.0.113.7").await, Ok(()));
+        assert_eq!(a.admit("203.0.113.7").await, Ok(()));
+        // The fourth, on either replica, is past the shared limit, and
+        // waits the window.
+        assert_eq!(b.admit("203.0.113.7").await, Err(60));
+        assert_eq!(a.admit("198.51.100.1").await, Ok(()), "another client");
+        // Half way through the next minute, half of the last one's three
+        // still count: round(1.5) + 1 = 3 <= 3 admits one more.
+        now.fetch_add(90_000, Ordering::SeqCst);
+        assert_eq!(a.admit("203.0.113.7").await, Ok(()));
+        assert_eq!(b.admit("203.0.113.7").await, Err(60));
+    }
+
+    #[tokio::test]
+    async fn an_unavailable_store_falls_back_to_the_token_bucket() {
+        use crate::memorystore::DisabledMemoryStore;
+        let store: Arc<dyn MemoryStore> = Arc::new(DisabledMemoryStore::new("shop-cache"));
+        let limiter = RateLimiter::shared(2, store, "shop-api", "orders.placeOrder");
+        assert_eq!(limiter.admit("a").await, Ok(()));
+        assert_eq!(limiter.admit("a").await, Ok(()));
+        assert_eq!(limiter.admit("a").await, Err(30), "the bucket's wait");
+    }
+
+    #[tokio::test]
+    async fn a_registry_with_a_store_makes_shared_limiters() {
+        use crate::memorystore::InProcessMemoryStore;
+        let store: Arc<dyn MemoryStore> = Arc::new(InProcessMemoryStore::new("shop-cache"));
+        let limits = RateLimits::with_store("shop-api", Arc::clone(&store));
+        let other = RateLimits::with_store("shop-api", store);
+        // Two processes' registries, one store: one budget.
+        let (a, b) = (
+            limits.of(&PLACE_ORDER).unwrap(),
+            other.of(&PLACE_ORDER).unwrap(),
+        );
+        assert_eq!(a.admit("c").await, Ok(()));
+        assert_eq!(b.admit("c").await, Ok(()));
+        assert!(a.admit("c").await.is_err());
+        assert_eq!(
+            format!("{limits:?}"),
+            r#"RateLimits { limiters: 1, store: "shop-cache" }"#
+        );
     }
 
     #[test]

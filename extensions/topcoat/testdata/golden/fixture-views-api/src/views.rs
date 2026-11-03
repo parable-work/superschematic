@@ -18,9 +18,13 @@
 //! value leaves its `<dd>` or `<td>` empty. Every value is text the view
 //! escapes. The markup has `ss-` classes and `data-field` attributes, the
 //! field's JSON key, for a stylesheet or a test, and no style of its own.
+//!
+//! An amount whose field names its currency (D44, amended), a code or a
+//! field of the same record, is a `<data>` of the amount in minor units
+//! whose text is the code and the amount in major units ("GBP 1,234.50").
 
 use crate::choices::Choices;
-use crate::records::{AddressRecord, CommentRecord, MoneyRecord, OrderLineRecord, OrderViewRecord};
+use crate::records::{AddressRecord, CommentRecord, InvoiceLineRecord, InvoiceRecord, MoneyRecord, OrderLineRecord, OrderViewRecord};
 use topcoat::view::{View, ViewExt, component, view};
 
 /// A detail's accessible name: its title when it has one, else its type's
@@ -180,6 +184,42 @@ fn digits(bytes: &[u8]) -> Option<u32> {
         .then(|| bytes.iter().fold(0, |number, digit| number * 10 + u32::from(digit - b'0')))
 }
 
+/// An amount of `currency`'s minor units as a reader reads it (D44,
+/// amended): the code, a space, then the amount over `10^minor_units` with
+/// exactly that many decimals, its whole part grouped by `,` in threes, and
+/// `-` before a negative amount. `money_text(123456, "GBP")` is
+/// "GBP 1,234.56", `money_text(450, "JPY")` "JPY 450" and
+/// `money_text(-5, "BHD")` "BHD -0.005". A code ISO 4217 gives no minor
+/// units (XAU) shows the whole number after it. A currency that is no
+/// active ISO 4217 code, an absent currency field's empty one among them,
+/// shows the amount as a number. Each currency's minor units are
+/// superscalar's `Finance.Currency` table's.
+pub fn money_text(amount: i64, currency: &str) -> String {
+    let Some(found) = superscalar::scalars::finance_currency::lookup(currency) else {
+        return amount.to_string();
+    };
+    let places = usize::from(found.minor_units.unwrap_or(0));
+    let digits = format!("{:0>width$}", amount.unsigned_abs(), width = places + 1);
+    let (whole, fraction) = digits.split_at(digits.len() - places);
+    let mut text = String::with_capacity(currency.len() + digits.len() + digits.len() / 3 + 3);
+    text.push_str(currency);
+    text.push(' ');
+    if amount < 0 {
+        text.push('-');
+    }
+    for (index, digit) in whole.char_indices() {
+        if index > 0 && (whole.len() - index) % 3 == 0 {
+            text.push(',');
+        }
+        text.push(digit);
+    }
+    if !fraction.is_empty() {
+        text.push('.');
+        text.push_str(fraction);
+    }
+    text
+}
+
 /// Labels a value of `OrderStatus`: its member's title, else its name in
 /// words. A value the enum does not declare is its own label.
 pub fn order_status_label(value: &str) -> &str {
@@ -322,6 +362,220 @@ pub async fn comment_table(
         </table>
     }
     .boxed())
+}
+
+/// `InvoiceRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
+#[component]
+pub async fn invoice_detail(record: InvoiceRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+    let label = label_of(Some(record.number.as_str()), Some("Invoice"));
+    let billed_in_code = record.billed_in.clone();
+    Ok(view! {
+        <div class="ss-detail" data-type="Invoice" role="group" aria-label=(label)>
+            <dl>
+                <div data-field="number">
+                    <dt>"Number"</dt>
+                    <dd>(text_of(&choices, "number", &record.number))</dd>
+                </div>
+                <div data-field="total">
+                    <dt>"Total"</dt>
+                    <dd><data value=(record.total.to_string())>(money_text(record.total, "GBP"))</data></dd>
+                </div>
+                <div data-field="deposit">
+                    <dt>"Deposit"</dt>
+                    <dd>
+                        match record.deposit {
+                            Some(value) => <data value=(value.to_string())>(money_text(value, "JPY"))</data>,
+                            None => "",
+                        }
+                    </dd>
+                </div>
+                <div data-field="fee">
+                    <dt>"Fee"</dt>
+                    <dd><data value=(record.fee.to_string())>(money_text(record.fee, "BHD"))</data></dd>
+                </div>
+                <div data-field="gold">
+                    <dt>"Gold"</dt>
+                    <dd>
+                        match record.gold {
+                            Some(value) => <data value=(value.to_string())>(money_text(value, "XAU"))</data>,
+                            None => "",
+                        }
+                    </dd>
+                </div>
+                <div data-field="adjustments">
+                    <dt>"Adjustments"</dt>
+                    <dd>
+                        <ul class="ss-list">
+                            for item in record.adjustments {
+                                <li><data value=(item.to_string())>(money_text(item, billed_in_code.as_deref().unwrap_or_default()))</data></li>
+                            }
+                        </ul>
+                    </dd>
+                </div>
+                <div data-field="billedIn">
+                    <dt>"Billed in"</dt>
+                    <dd>
+                        match record.billed_in {
+                            Some(value) => (text_of(&choices, "billedIn", &value)),
+                            None => "",
+                        }
+                    </dd>
+                </div>
+                <div data-field="settledIn">
+                    <dt>"Settled in"</dt>
+                    <dd>(text_of(&choices, "settledIn", &record.settled_in))</dd>
+                </div>
+                <div data-field="refund">
+                    <dt>"Refund"</dt>
+                    <dd>
+                        match record.refund {
+                            Some(value) => (number_of(&choices, "refund", value)),
+                            None => "",
+                        }
+                    </dd>
+                </div>
+                <div data-field="lines">
+                    <dt>"Lines"</dt>
+                    <dd>invoice_line_table(rows: record.lines, choices: choices.under("lines"))</dd>
+                </div>
+            </dl>
+        </div>
+    })
+}
+
+/// `InvoiceRecord`s as a table: a column per summary field and a row per record.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's title cell; a row past
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
+#[component]
+pub async fn invoice_table(
+    rows: Vec<InvoiceRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <table class="ss-table" data-type="Invoice">
+            <thead>
+                <tr>
+                    <th scope="col" data-field="number">"Number"</th>
+                    <th scope="col" data-field="total">"Total"</th>
+                    <th scope="col" data-field="adjustments">"Adjustments"</th>
+                    <th scope="col" data-field="refund">"Refund"</th>
+                </tr>
+            </thead>
+            <tbody>
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.number.trim().is_empty()).then_some("Invoice");
+                    let billed_in_code = row.billed_in.clone();
+                    <tr>
+                        <th scope="row" data-field="number">
+                            if let Some(href) = &href {
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "number", &row.number))
+                                    }
+                                </a>
+                            } else {
+                                (text_of(&choices, "number", &row.number))
+                            }
+                        </th>
+                        <td data-field="total"><data value=(row.total.to_string())>(money_text(row.total, "GBP"))</data></td>
+                        <td data-field="adjustments">
+                            <ul class="ss-list">
+                                for item in row.adjustments {
+                                    <li><data value=(item.to_string())>(money_text(item, billed_in_code.as_deref().unwrap_or_default()))</data></li>
+                                }
+                            </ul>
+                        </td>
+                        <td data-field="refund">
+                            match row.refund {
+                                Some(value) => (number_of(&choices, "refund", value)),
+                                None => "",
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    })
+}
+
+/// `InvoiceLineRecord` as a description list: each field's label and value.
+/// `choices` labels the values they name.
+#[component]
+pub async fn invoice_line_detail(record: InvoiceLineRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+    let currency_code = record.currency.clone();
+    Ok(view! {
+        <div class="ss-detail" data-type="InvoiceLine" role="group">
+            <dl>
+                <div data-field="item">
+                    <dt>"Item"</dt>
+                    <dd>(text_of(&choices, "item", &record.item))</dd>
+                </div>
+                <div data-field="amount">
+                    <dt>"Amount"</dt>
+                    <dd><data value=(record.amount.to_string())>(money_text(record.amount, &currency_code))</data></dd>
+                </div>
+                <div data-field="currency">
+                    <dt>"Currency"</dt>
+                    <dd>(text_of(&choices, "currency", &record.currency))</dd>
+                </div>
+            </dl>
+        </div>
+    })
+}
+
+/// `InvoiceLineRecord`s as a table: a column per field and a row per record.
+/// `choices` labels the values they name. `hrefs` links each row to a
+/// page: the i-th, unless it is empty, row i's first cell; a row past
+/// its end links nowhere. A linked cell without text
+/// links the type's noun in its place, with the row's id when it has one.
+#[component]
+pub async fn invoice_line_table(
+    rows: Vec<InvoiceLineRecord>,
+    #[default] choices: Choices,
+    #[default] hrefs: Vec<String>,
+) -> topcoat::Result<impl View> {
+    Ok(view! {
+        <table class="ss-table" data-type="InvoiceLine">
+            <thead>
+                <tr>
+                    <th scope="col" data-field="item">"Item"</th>
+                    <th scope="col" data-field="amount">"Amount"</th>
+                    <th scope="col" data-field="currency">"Currency"</th>
+                </tr>
+            </thead>
+            <tbody>
+                for (index, row) in rows.into_iter().enumerate() {
+                    let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let untitled = (href.is_some() && row.item.trim().is_empty()).then_some("Invoice line");
+                    let currency_code = row.currency.clone();
+                    <tr>
+                        <td data-field="item">
+                            if let Some(href) = &href {
+                                <a href=(href)>
+                                    if let Some(untitled) = untitled {
+                                        (untitled)
+                                    } else {
+                                        (text_of(&choices, "item", &row.item))
+                                    }
+                                </a>
+                            } else {
+                                (text_of(&choices, "item", &row.item))
+                            }
+                        </td>
+                        <td data-field="amount"><data value=(row.amount.to_string())>(money_text(row.amount, &currency_code))</data></td>
+                        <td data-field="currency">(text_of(&choices, "currency", &row.currency))</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    })
 }
 
 /// `MoneyRecord` as a description list: each field's label and value.

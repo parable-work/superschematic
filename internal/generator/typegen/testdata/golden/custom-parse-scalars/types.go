@@ -603,6 +603,57 @@ func validateFinanceMoneyValue(value FinanceMoney, required bool) (bool, []Valid
 	return valid, coreErrs
 }
 
+// validateFinanceSignedMoneyValue validates one Finance.SignedMoney value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateFinanceSignedMoneyValue(value FinanceSignedMoney, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if float64(value) < -9007199254740991 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "min", Message: "must be at least -9007199254740991"})
+	}
+	if float64(value) > 9007199254740991 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "max", Message: "must be at most 9007199254740991"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
+// validateGenericDecimalValue validates one Generic.Decimal value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateGenericDecimalValue(value GenericDecimal, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if matched, err := regexp.MatchString("^[+-]?[0-9]+(\\.[0-9]+)?$", string(value)); err != nil || !matched {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "pattern", Message: "invalid format"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
 // validateGenericInt64Value validates one Generic.Int64 value and reports a
 // failure once. A missing required value is "required". A value that breaks
 // the scalar's own length, pattern or range is reported by that rule's name,
@@ -844,6 +895,10 @@ func validateTemporalSecondsValue(value TemporalSeconds, required bool) (bool, [
 type CustomParseScalars struct {
 	FinanceMoney FinanceMoney `json:"financeMoney"`
 
+	FinanceSignedMoney FinanceSignedMoney `json:"financeSignedMoney"`
+
+	GenericDecimal GenericDecimal `json:"genericDecimal"`
+
 	GenericInt64 GenericInt64 `json:"genericInt64"`
 
 	GenericStringMap GenericStringMap `json:"genericStringMap"`
@@ -890,6 +945,10 @@ func (t *CustomParseScalars) MaskSecrets() *CustomParseScalars {
 
 	masked.FinanceMoney = t.FinanceMoney
 
+	masked.FinanceSignedMoney = t.FinanceSignedMoney
+
+	masked.GenericDecimal = t.GenericDecimal
+
 	masked.GenericInt64 = t.GenericInt64
 
 	masked.GenericStringMap = t.GenericStringMap
@@ -921,7 +980,7 @@ func (t *CustomParseScalars) MaskSecrets() *CustomParseScalars {
 // route refuses an input body with any other top-level key, as every
 // generated server does.
 func (*CustomParseScalars) JSONFieldNames() []string {
-	return []string{"financeMoney", "genericInt64", "genericStringMap", "geoLocation", "identityUUID", "identityUserID", "temporalDateTime", "temporalDays", "temporalDuration", "temporalHours", "temporalMilliseconds", "temporalMinutes", "temporalSeconds"}
+	return []string{"financeMoney", "financeSignedMoney", "genericDecimal", "genericInt64", "genericStringMap", "geoLocation", "identityUUID", "identityUserID", "temporalDateTime", "temporalDays", "temporalDuration", "temporalHours", "temporalMilliseconds", "temporalMinutes", "temporalSeconds"}
 }
 
 // Validate validates all fields in CustomParseScalars
@@ -932,6 +991,18 @@ func (t *CustomParseScalars) Validate() ValidationErrors {
 
 	if valid, fieldErrs := validateFinanceMoneyValue(t.FinanceMoney, true); !valid {
 		errors.SetFieldErrors("financeMoney", fieldErrs)
+	}
+
+	// Validate financeSignedMoney (required)
+
+	if valid, fieldErrs := validateFinanceSignedMoneyValue(t.FinanceSignedMoney, true); !valid {
+		errors.SetFieldErrors("financeSignedMoney", fieldErrs)
+	}
+
+	// Validate genericDecimal (required)
+
+	if valid, fieldErrs := validateGenericDecimalValue(t.GenericDecimal, true); !valid {
+		errors.SetFieldErrors("genericDecimal", fieldErrs)
 	}
 
 	// Validate genericInt64 (required)

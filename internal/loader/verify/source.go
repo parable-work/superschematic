@@ -70,6 +70,7 @@ func checkSourceProjections(schema *ir.Schema, in Input, r *Result) {
 		for _, f := range td.Fields {
 			viewNames[f.Name] = true
 			sf, onSource := sourceByName[f.Name]
+			checkDecrypted(td, f, sf, onSource && !f.Virtual, r)
 			if !onSource {
 				if relation, ok := ir.RelationKey(src, f); ok && isRelationKey(schema, in, td, f, relation) {
 					// The key reads the relation's foreign key; @virtual
@@ -110,6 +111,21 @@ func checkSourceProjections(schema *ir.Schema, in Input, r *Result) {
 
 		td.Source.Virtual = virtual
 		td.Source.OmittedFromSource = omitted
+	}
+}
+
+// checkDecrypted holds a view's field to its source's Encrypted<T> field
+// (D85): a field that reads one carries its plaintext to every response
+// the view is in, so it must say so with @decrypted, and @decrypted marks
+// such a field alone. reads is a field that reads sf.
+func checkDecrypted(view *ir.TypeDef, f, sf *ir.FieldDef, reads bool, r *Result) {
+	encrypted := reads && sf != nil && sf.EncryptedAtRest
+	switch {
+	case encrypted && !f.Decrypted:
+		r.errorf(view.Owner, "%s.%s reads %s.%s, which is Encrypted<T>: a response of %s would carry its plaintext. Leave the field out of the view, or mark it @decrypted to send it",
+			view.Name, f.Name, view.Source.Target, sf.Name, view.Name)
+	case f.Decrypted && !encrypted:
+		r.errorf(view.Owner, "%s.%s is @decrypted, which marks a field that reads an Encrypted<T> field of %s, and it reads none", view.Name, f.Name, view.Source.Target)
 	}
 }
 

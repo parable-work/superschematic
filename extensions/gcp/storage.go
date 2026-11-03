@@ -25,10 +25,17 @@ import (
 // name is global across Google Cloud and the project's id is the
 // environment's own, then the parameter's name and value under a
 // parameter: `acme-staging-shop-stack-shop-media`, or
-// `acme-staging-shop-stack-shop-media-pr123`.
+// `acme-staging-shop-stack-shop-media-pr123`. A name over a bucket's 63
+// characters is shortened (D97).
 func bucketName(ctx registry.PlatformContext) any {
-	v := valuesOf(ctx.Environment)
-	return suffixed(ctx.Environment, v.project+"-"+kebab(ctx.Environment.Stack)+"-"+kebab(ctx.Deployable.Name), "-")
+	name, _ := bucketNameOf(ctx.Environment, ctx.Deployable)
+	return name
+}
+
+// bucketNameOf is bucketName's name, and whether it was shortened.
+func bucketNameOf(env registry.StackEnvironment, d ir.ResolvedDeployable) (any, bool) {
+	v := valuesOf(env)
+	return fitted(env, v.project+"-"+kebab(env.Stack)+"-"+kebab(d.Name), "-", 63)
 }
 
 // bucketAddress is the bucket's name, an output of the bucket, so each
@@ -68,6 +75,9 @@ func lowerBucket(ctx registry.PlatformContext) (registry.Lowered, error) {
 		"publicAccessPrevention":   publicAccessEnforced,
 		"versioning":               map[string]any{"enabled": versioning},
 		"forceDestroy":             len(env.Parameters) > 0,
+	}
+	if _, short := bucketNameOf(env, d); short {
+		props["labels"] = nameLabels(d, short)
 	}
 	if days, ok := d.Settings["deleteAfterDays"]; ok {
 		props["lifecycleRules"] = []any{map[string]any{

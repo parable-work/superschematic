@@ -1,0 +1,11 @@
+# The database of the caller fixture (D87): the user model, a Note table
+# whose writes record who made them, and a queue of notes a worker writes.
+# It names its system actor, which a worker's writes act as.
+name: caller-db
+kind: DB
+outputs:
+  types:
+    go: { enabled: true }
+    typescript: { enabled: true }
+  sql:
+    systemActor: { id: 3f2c1a9e-7b4d-4e8a-9c61-0d5e2f7a8b10, name: notes-worker }

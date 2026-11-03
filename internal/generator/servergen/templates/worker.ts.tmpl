@@ -43,9 +43,13 @@ import type { Pool } from 'pg';
 {{- if .Buckets }}
 import { openBucket } from '{{ .Naming.HTTPRuntimeNpmPackage }}/gcs';
 {{- end }}
+{{- if .MemoryStores }}
+import { openRedisMemoryStore } from '{{ .Naming.HTTPRuntimeNpmPackage }}/redis';
+{{- end }}
 import { {{ .Worker.Definition }} } from '{{ .Worker.Module }}';
 import * as {{ $api.Module }} from '{{ $api.Package }}';
 import * as {{ $api.Impl }} from '{{ $api.ImplPackage }}';
+{{- template "ts-orm-imports" . }}
 {{- range .Clients }}
 import * as {{ .Module }} from '{{ .Package }}';
 {{- end }}
@@ -99,6 +103,10 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]{{ if .
 {{ template "ts-configure" . }}
 
 {{ template "ts-construct" . }}
+{{- if .MemoryStores }}
+
+{{ template "ts-open-memory-store" . }}
+{{- end }}
 {{- if .PostgresDatabases }}
 
 {{ template "ts-connect" . }}

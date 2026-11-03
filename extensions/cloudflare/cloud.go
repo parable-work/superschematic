@@ -87,6 +87,30 @@ type Cloud interface {
 	// TerminateWorkflowInstance stops an instance; one that has ended
 	// already is not an error.
 	TerminateWorkflowInstance(ctx context.Context, account, workflow, id string) error
+
+	// HyperdriveConfig returns a Hyperdrive config's origin, without its
+	// password, which Cloudflare never gives back, and whether it caches
+	// reads (D92). A config that does not exist is an error that wraps
+	// fs.ErrNotExist.
+	HyperdriveConfig(ctx context.Context, account, id string) (*HyperdriveConfig, error)
+}
+
+// HyperdriveConfig is a Hyperdrive config as Cloudflare reports it: its
+// name, the database of its origin it pools connections to and the user it
+// connects as, and its caching (D92).
+type HyperdriveConfig struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Origin struct {
+		Host     string `json:"host"`
+		Port     int    `json:"port"`
+		Database string `json:"database"`
+		User     string `json:"user"`
+		Scheme   string `json:"scheme"`
+	} `json:"origin"`
+	Caching struct {
+		Disabled bool `json:"disabled"`
+	} `json:"caching"`
 }
 
 // WorkflowInstance is a Workflow instance as Cloudflare reports it.
@@ -411,6 +435,18 @@ func (c *restCloud) TerminateWorkflowInstance(ctx context.Context, account, work
 		return nil
 	}
 	return err
+}
+
+func (c *restCloud) HyperdriveConfig(ctx context.Context, account, id string) (*HyperdriveConfig, error) {
+	var config HyperdriveConfig
+	_, err := c.call(ctx, http.MethodGet, "/accounts/"+url.PathEscape(account)+"/hyperdrive/configs/"+url.PathEscape(id), nil, &config)
+	if notFound(err) {
+		return nil, fmt.Errorf("%w: %w", err, fs.ErrNotExist)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &config, nil
 }
 
 func (c *restCloud) PermissionGroups(ctx context.Context, account string) ([]PermissionGroup, error) {

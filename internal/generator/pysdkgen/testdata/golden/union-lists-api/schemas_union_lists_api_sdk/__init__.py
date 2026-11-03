@@ -6,6 +6,7 @@ __version__ = "1.0.0"
 
 from .client import (
     ClientConfig,
+    DownloadedFile,
     EncryptedRequestOptions,
     FilePart,
     PublicEncryptionKey,
@@ -31,6 +32,7 @@ __all__ = [
     "ServiceCredential",
     "EncryptedRequestOptions",
     "FilePart",
+    "DownloadedFile",
     "SDKError",
     "APIError",
     "AuthenticationError",

@@ -46,10 +46,14 @@ func TestDisplayDefsAreTheRegisteredArgs(t *testing.T) {
 		t.Fatal(err)
 	}
 	args.Defs["FieldDisplay"] = fieldArgs.Defs["FieldDisplay"]
-	for _, name := range []string{"TypeDisplay", "DisplayState", "FieldDisplay"} {
+	args.Defs["DisplayCurrency"] = fieldArgs.Defs["DisplayCurrency"]
+	for _, name := range []string{"TypeDisplay", "DisplayState", "FieldDisplay", "DisplayCurrency"} {
 		registered := args.Defs[name].(map[string]any)
 		emitted := root.Defs[name]
-		for _, key := range []string{"minProperties", "additionalProperties", "description"} {
+		for _, key := range []string{"minProperties", "additionalProperties", "description", "required"} {
+			if registered[key] == nil && emitted[key] == nil {
+				continue
+			}
 			if emitted[key] == nil || !jsonEqual(t, emitted[key], registered[key]) {
 				t.Errorf("$defs/%s %s = %v, want %v", name, key, emitted[key], registered[key])
 			}
@@ -71,7 +75,7 @@ func TestDisplayDefsAreTheRegisteredArgs(t *testing.T) {
 		"FieldDisplay": map[string]any{"properties": map[string]any{"rows": map[string]any{}}},
 	}
 	err = replaceDisplayDefs(defs, reg)
-	if err == nil || !strings.HasPrefix(err.Error(), "@display Args $defs/FieldDisplay has the properties [multiline], but ir.FieldDisplay has [rows]") {
+	if err == nil || !strings.HasPrefix(err.Error(), "@display Args $defs/FieldDisplay has the properties [currency multiline], but ir.FieldDisplay has [rows]") {
 		t.Fatalf("replaceDisplayDefs of a field display = %v", err)
 	}
 }

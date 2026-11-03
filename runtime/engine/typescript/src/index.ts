@@ -17,14 +17,18 @@ export { AsyncEngine, openEngineAsync } from './native/async.js';
 export type { DeployedSchema, DeployOptions, EngineHealth } from './native/async.js';
 export type { EngineOptions, PostgresOptions } from './native/options.js';
 export { UnsupportedError } from './native/errors.js';
+export { inProcess, runDeriver } from './client/deriver.js';
+export type { DerivationAnswer, DerivationItem, DerivationSource, DeriverOptions, SettleResult } from './client/deriver.js';
 export type { UnsupportedGap } from './native/errors.js';
 export type { SqliteConnection } from './native/sqlite.js';
 
-export { SERVICE_SUBJECT_PREFIX, allowAll, permissionPolicy, servicePrincipal, standsIn } from './access.js';
+export { ACT_FOR_PERMISSION, SERVICE_SUBJECT_PREFIX, allowAll, permissionPolicy, servicePrincipal, standsIn } from './access.js';
 export type {
   AccessPolicy,
   AccessRequest,
+  ActingFor,
   Action,
+  BehaviorAccessRequest,
   ListingAccessRequest,
   NamespaceAccessRequest,
   NamespaceOperation,
@@ -89,10 +93,13 @@ export { BRANCHES_RELEASE, LINKS_TARGETS, REVISIONS_REVISION, WORKFLOW_STATUS, b
 export type { BehaviorFields, InstanceFields } from './types/fields.js';
 
 export { EVENT_KINDS } from './types/events.js';
-export type { DefineChange, EngineEvent, EventCause, EventKind, EventPage, EventWatcher, OperationChange, ReadEventsOptions } from './types/events.js';
+export type { BesideChange, DefineChange, EngineEvent, EventCause, EventKind, EventPage, EventWatcher, OperationChange, ReadEventsOptions } from './types/events.js';
 // Event log retention (runtime/engine/README.md, "Retention").
 export { DEFAULT_RETENTION_BATCH_SIZE, DEFAULT_RETENTION_EVERY_MS, MAX_RETENTION_BATCH_SIZE } from './types/events.js';
 export type { RetentionOptions } from './types/events.js';
+// Signals (D77; runtime/engine/README.md, "The event stream").
+export { DEFAULT_SIGNALS_PER_SECOND, MAX_SIGNAL_DATA_BYTES } from './types/signals.js';
+export type { EngineSignal, NamespaceOperationInput, SendSignalInput, SignalOptions } from './types/signals.js';
 
 // The value store (runtime/engine/README.md, "The value store").
 export {
@@ -135,9 +142,11 @@ export type {
   BehaviorDeclaration,
   BehaviorFieldDeclaration,
   BehaviorOperationDeclaration,
+  BehaviorSignalDeclaration,
   BehaviorVetoDeclaration,
   JSONSchema,
   OperationScope,
+  SignalAccess,
 } from './types/declarations.js';
 
 // The core's behaviors, which every engine registers (runtime/engine/README.md, "Core behaviors").
@@ -167,19 +176,26 @@ export type {
   BranchesKind,
   BranchesSweep,
   BranchesUnit,
-  CommentRecord,
+  CommentsConfig,
   ConstantsConfig,
   DependenciesConfig,
   DependentRecord,
+  DerivedConfig,
+  DerivedField,
   EvidenceRecord,
   LinkPin,
   LinkRecord,
   LinkSpec,
   LinksConfig,
+  MessageBlock,
+  MessageListing,
+  MessageRecord,
   NumberingConfig,
   NumberingNumber,
   ProposalRecord,
   ProposalState,
+  ProvenanceRecord,
+  ProvenanceReview,
   ReactionsChanges,
   ReactionsConfig,
   ReactionsField,
@@ -228,10 +244,12 @@ export type {
   DescribedField,
   DescribedOperation,
   DisplayState,
+  FieldDisplay,
   JSONSchemaObject,
   ToolDefinition,
   ToolFilter,
   ToolGuidance,
+  ToolHiddenBy,
   ToolMCPRecord,
   ToolManifest,
   ToolSummary,

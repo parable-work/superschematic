@@ -1,0 +1,82 @@
+name: caller-go-api
+kind: API
+imports:
+  - package: "@schemas/caller-db"
+    types: [NoteRequested]
+types:
+  NoteView:
+    name: NoteView
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+      - name: text
+        typeRef: { name: string }
+        required: true
+      - name: createdBy
+        typeRef: { name: string }
+        required: true
+      - name: updatedBy
+        typeRef: { name: string }
+  NoteInput:
+    name: NoteInput
+    role: APIView
+    fields:
+      - name: text
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: Account
+    userSessions: { register: true }
+    operations: []
+  - name: Notes
+    operations:
+      # Writes a note, and asks the worker for a follow-up in the same
+      # transaction.
+      - name: createNote
+        typeRef: { name: NoteView }
+        required: true
+        auth: true
+        httpMethod: POST
+        restPath: notes
+        arguments:
+          - name: input
+            typeRef: { name: NoteInput }
+            required: true
+      - name: updateNote
+        typeRef: { name: NoteView }
+        required: true
+        auth: true
+        httpMethod: PUT
+        restPath: notes/{id}
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+          - name: input
+            typeRef: { name: NoteInput }
+            required: true
+      # Edits a note as the system actor, which an explicit asSystem()
+      # chooses over the caller.
+      - name: stampNote
+        typeRef: { name: NoteView }
+        required: true
+        auth: true
+        httpMethod: POST
+        restPath: notes/{id}/stamp
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+      - name: listNotes
+        typeRef: { name: NoteView, isArray: true }
+        required: true
+        auth: true
+        httpMethod: GET
+        restPath: notes
+workers:
+  - name: WriteNotes
+    queue: NoteRequested
+    concurrency: 1
+    grace: 1s

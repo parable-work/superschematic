@@ -11,8 +11,8 @@ take, whose capabilities answer per live schema and action. See
 runtime/engine/README.md, "HTTP".
 */
 
-export { JSON_MEDIA_TYPE, MERGE_PATCH_MEDIA_TYPE, PRECONDITIONS_HEADER, engineApp } from './app.js';
-export type { EngineHttpOptions } from './app.js';
+export { ACTING_FOR_HEADER, JSON_MEDIA_TYPE, MERGE_PATCH_MEDIA_TYPE, PRECONDITIONS_HEADER, engineApp } from './app.js';
+export type { ActingForOption, EngineHttpOptions } from './app.js';
 export type { ServedEngine } from '../native/http.js';
 export { ENGINE_ERROR_STATUS, engineProblem } from './problems.js';
 export { engineCapabilities, engineIdentity, engineIdentityStore } from './identity.js';

@@ -17,6 +17,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -185,6 +186,31 @@ func (c *HTTPClient) DoJSON(
 		return fmt.Errorf("decode response body: %w", err)
 	}
 	return nil
+}
+
+// DoFile sends a request whose success body is a file, a FileDownload
+// result (D81), not the envelope: it returns the bytes, the filename
+// Content-Disposition offered and the Content-Type. A refusal is the error
+// DoJSON would return.
+func (c *HTTPClient) DoFile(
+	ctx context.Context,
+	method string,
+	path string,
+	query url.Values,
+	body any,
+) (*runtime.DownloadedFile, error) {
+	statusCode, responseBody, responseHeaders, err := c.do(ctx, method, path, query, body)
+	if err != nil {
+		return nil, err
+	}
+	if statusCode >= 400 {
+		return nil, decodeError(statusCode, responseBody, responseHeaders)
+	}
+	return &runtime.DownloadedFile{
+		Body:        responseBody,
+		Filename:    runtime.FilenameOf(responseHeaders.Get("Content-Disposition")),
+		ContentType: responseHeaders.Get("Content-Type"),
+	}, nil
 }
 
 // unwrapEnvelope enforces the success response contract and returns
@@ -378,6 +404,10 @@ func (c *HTTPClient) serviceTokenSource() func(ctx context.Context, fresh bool) 
 	return c.config.ServiceCredential.Token
 }
 
+// quoteEscaper escapes a multipart part's name and filename as
+// mime/multipart's CreateFormFile does.
+var quoteEscaper = strings.NewReplacer("\\", "\\\\", `"`, "\\\"")
+
 func (c *HTTPClient) buildRequestBody(body any) ([]byte, string, error) {
 	contentType := "application/json"
 	switch payload := body.(type) {
@@ -399,7 +429,16 @@ func (c *HTTPClient) buildRequestBody(body any) ([]byte, string, error) {
 			if len(file.Reader) == 0 {
 				continue
 			}
-			part, err := writer.CreateFormFile(fieldName, file.Filename)
+			// The part carries the file's media type, which a route checks
+			// against its field (D81); application/octet-stream without one.
+			partContentType := file.ContentType
+			if partContentType == "" {
+				partContentType = "application/octet-stream"
+			}
+			header := textproto.MIMEHeader{}
+			header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, quoteEscaper.Replace(fieldName), quoteEscaper.Replace(file.Filename)))
+			header.Set("Content-Type", partContentType)
+			part, err := writer.CreatePart(header)
 			if err != nil {
 				return nil, "", fmt.Errorf("create multipart file field %q: %w", fieldName, err)
 			}

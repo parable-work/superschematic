@@ -94,6 +94,11 @@ type EndpointInfo struct {
 	// other. The identity runtime serves it: build_router mounts the
 	// runtime's handler, and no namespace trait has a method for it.
 	IdentityOperation string
+	// Behavior is the behavior operation the endpoint runs (D103), nil for
+	// every other: build_router mounts it as any operation, and its
+	// handler runs it through the behaviors' core (src/behaviors.rs), so
+	// no namespace trait has a method for it.
+	Behavior *BehaviorInfo
 }
 
 // PageInfo is a paged operation's @paginated (D60) as the crate renders it.
@@ -408,6 +413,19 @@ type APIOutput struct {
 	// Workers trait deps.rs declares, which handles one message of the
 	// worker's queue (D53, D65).
 	Workers []WorkerInfo
+	// BehaviorWorkers are the API's behavior workers, sorted by name
+	// (D103): each runs its table's behavior queues through the behaviors'
+	// core, by functions src/behaviors.rs holds, and has no method of the
+	// Workers trait nor of the scaffold.
+	BehaviorWorkers []WorkerInfo
+	// Derivers are the API's derivers, sorted by name: a trait each in
+	// deps.rs, which the implementation's create_derivers builds with the
+	// API's Deps (D74). The dispatch layer sets them with SetDerivers.
+	Derivers []DeriverInfo
+	// Apps are the API's apps, sorted by name: a parts struct each in
+	// src/apps.rs, which the app's entrypoint builds and hands to the
+	// app's program (D78).
+	Apps []AppInfo
 }
 
 // HasRateLimits reports whether a route the router mounts, a manual one
@@ -478,6 +496,10 @@ type IdentityInfo struct {
 	// ScalarDepPath is the scalar crate's directory relative to the
 	// crate's, set by SetReplacePaths; empty names the crate's version.
 	ScalarDepPath string
+	// Registration is how register admits users (D81), when the API's
+	// @userSessions declares approval, default roles or a first
+	// administrator; nil otherwise.
+	Registration *ir.UserSessionsConfig
 }
 
 // Specs are the ParamSpec statics of every mounted operation's arguments.
@@ -627,6 +649,18 @@ type Options struct {
 // operations, and the operations module declares each, so capabilities
 // answers for every route.
 //
+// An operation the loader adds for a @behaviorOperations set (D103) is
+// mounted as any other, behind its set's controls, its key and input
+// decoded into its Args struct, and its handler runs it through the
+// behaviors' core: src/behaviors.rs hands it to superschematic-rules-adapter
+// on a transaction of the API's database's pool, as the request's caller,
+// and answers a refusal as the problem of its status, code, message and
+// details. The namespace traits and the scaffold have no method for it, so
+// a namespace of behavior operations alone has no trait, and
+// Implementations holds the Behaviors its handlers run on. The crate's
+// Deps must name the database's layout and the adapter's and the
+// behaviors' crates (DepsBehaviors), or WriteAPI refuses it.
+//
 // The endpoints and the OpenAPI document come from api, the apigen output
 // generator.Run builds once for the Go and TypeScript servers and every
 // SDK, with the service's dependencies, naming, OpenAPI and tool hooks and
@@ -670,6 +704,7 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 
 	namespaceSet := make(map[string]struct{})
 	webhookProviders := make(map[string]struct{})
+	var err error
 	for _, endpoint := range implemented {
 		// The Go router decrypts an encrypted operation's body with the
 		// configured PayloadDecryptor before it parses it. The Rust router
@@ -680,11 +715,15 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 		if endpoint.Encrypted && !endpoint.ManualRouteRegistration {
 			return nil, fmt.Errorf("rustrestgen: operation %s.%s is encrypted (an Encrypted operation set, @encrypted, or an EncryptedField<T> result or argument); the Rust router has no decryption step, declare it @manualRouteRegistration and add its route in the service, which decrypts the payload", endpoint.Namespace, endpoint.Name)
 		}
-		// The Go router reads a file upload's multipart body. The Rust
-		// router's handlers take JSON, so axum would answer every upload
-		// 415; the service mounts the route and reads the multipart body.
+		// The Go and TypeScript routers read a file upload's multipart body
+		// and answer a FileDownload's file (D81). The Rust router's handlers
+		// take and answer JSON, so axum would answer every upload 415; the
+		// service mounts the route and reads the body or answers the file.
 		if endpoint.HasFileUpload && !endpoint.ManualRouteRegistration {
-			return nil, fmt.Errorf("rustrestgen: operation %s.%s uploads files; the Rust router has no multipart step, declare it @manualRouteRegistration and add its route in the service, which reads the multipart body", endpoint.Namespace, endpoint.Name)
+			return nil, fmt.Errorf("rustrestgen: operation %s.%s uploads files; the Rust router has no multipart step yet (the Go and TypeScript routers read one, D81), declare it @manualRouteRegistration and add its route in the service, which reads the multipart body, or serve the API in Go or TypeScript; support follows", endpoint.Namespace, endpoint.Name)
+		}
+		if endpoint.FileDownload != nil && !endpoint.ManualRouteRegistration {
+			return nil, fmt.Errorf("rustrestgen: operation %s.%s answers a FileDownload; the Rust router answers JSON only yet (the Go and TypeScript routers answer the file, D81), declare it @manualRouteRegistration and answer the file in the service, or serve the API in Go or TypeScript; support follows", endpoint.Namespace, endpoint.Name)
 		}
 		info := endpointInfo(endpoint, output.HasServiceCallers)
 		if info.WebhookProvider != "" {
@@ -701,7 +740,15 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 		if err := b.params(endpoint, &info); err != nil {
 			return nil, err
 		}
-		namespaceSet[info.Namespace] = struct{}{}
+		// A behavior operation's handler runs it through the behaviors'
+		// core (D103): its namespace has no method for it, and a namespace
+		// of behavior operations alone no trait.
+		if info.Behavior, err = behaviorInfo(endpoint, info); err != nil {
+			return nil, err
+		}
+		if info.Behavior == nil {
+			namespaceSet[info.Namespace] = struct{}{}
+		}
 		output.Endpoints = append(output.Endpoints, info)
 	}
 	// The runtime's handlers decode their own arguments, so a user model's
@@ -713,8 +760,7 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 		output.IdentityEndpoints = append(output.IdentityEndpoints, info)
 	}
 
-	var err error
-	if output.Identity, err = identityOf(opts, output.HasAuth); err != nil {
+	if output.Identity, err = identityOf(opts, output.HasAuth, api.Registration); err != nil {
 		return nil, err
 	}
 	if len(output.IdentityEndpoints) > 0 && output.Identity == nil {
@@ -734,9 +780,10 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 	if output.Jobs, err = jobsOf(schema); err != nil {
 		return nil, err
 	}
-	if output.Workers, err = workersOf(schema); err != nil {
+	if output.Workers, output.BehaviorWorkers, err = workersOf(schema, opts.Dependencies); err != nil {
 		return nil, err
 	}
+	output.Apps = appsOf(schema)
 
 	return output, nil
 }
@@ -790,7 +837,7 @@ func endpointInfo(endpoint apigen.EndpointInfo, serviceStep bool) EndpointInfo {
 // identityOf is the crate's user model wiring (D50): nil unless the authDb
 // has a User table and an operation needs a caller, since otherwise no
 // route reads a session.
-func identityOf(opts Options, hasAuth bool) (*IdentityInfo, error) {
+func identityOf(opts Options, hasAuth bool, registration *ir.UserSessionsConfig) (*IdentityInfo, error) {
 	if opts.AuthDB == nil || !hasAuth {
 		return nil, nil
 	}
@@ -812,6 +859,7 @@ func identityOf(opts Options, hasAuth bool) (*IdentityInfo, error) {
 		PermissionPrefix: names.IdentityPermissionPrefix,
 		ScalarCrate:      names.ScalarRustCrate,
 		ScalarRegistry:   names.ScalarRustRegistryExpr(),
+		Registration:     registration,
 	}, nil
 }
 
@@ -855,14 +903,23 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		{templateName: "operations.tmpl", outputName: filepath.Join("src", "operations.rs")},
 	}
 
-	// The user model's wiring (D50) and the implementation's Deps (D57); a
-	// crate written before with either keeps no stale module.
+	// The behaviors' core runs the behavior operations on the Deps' pool
+	// (D103), with the layout and the crates the Deps name.
+	if err := output.checkBehaviorDeps(output.Deps); err != nil {
+		return err
+	}
+
+	// The user model's wiring (D50), the implementation's Deps (D57), the
+	// apps' parts (D78) and the behavior operations' runner (D103); a crate
+	// written before with one keeps no stale module.
 	for _, module := range []struct {
 		template, file string
 		written        bool
 	}{
 		{"identity.tmpl", "identity.rs", output.Identity != nil},
 		{"deps.tmpl", "deps.rs", output.Deps != nil},
+		{"apps.tmpl", "apps.rs", output.HasApps()},
+		{"behaviors.tmpl", "behaviors.rs", output.HasBehaviors()},
 	} {
 		path := filepath.Join("src", module.file)
 		if module.written {
@@ -925,7 +982,7 @@ func WriteScaffolds(output *APIOutput, scaffoldsDir string) (*codegen.ScaffoldRe
 			CrateIdent:        strings.ReplaceAll(output.CrateName, "-", "_"),
 			RuntimeCrateIdent: output.RuntimeCrateIdent,
 		}
-		for _, endpoint := range output.Endpoints {
+		for _, endpoint := range output.ImplementedEndpoints() {
 			if endpoint.Namespace == namespace {
 				data.Endpoints = append(data.Endpoints, endpoint)
 			}
@@ -936,7 +993,7 @@ func WriteScaffolds(output *APIOutput, scaffoldsDir string) (*codegen.ScaffoldRe
 		ScaffoldsDir: scaffoldsDir,
 		ReadmeData:   output,
 		Namespaces:   modules,
-		Endpoints:    output.Endpoints,
+		Endpoints:    output.ImplementedEndpoints(),
 		EndpointNamespace: func(endpoint EndpointInfo) string {
 			return moduleOf(endpoint.Namespace)
 		},
@@ -1000,6 +1057,9 @@ func templateFuncs() template.FuncMap {
 		"rustString":          rustString,
 		"tracingVersion":      func() string { return TracingVersion },
 		"databaseTypesModule": func() string { return DatabaseTypesModule },
+		"rulesAdapterCrate":   func() string { return RulesAdapterCrate },
+		"rulesBehaviorsCrate": func() string { return RulesBehaviorsCrate },
+		"rulesSerdeVersion":   func() string { return RulesSerdeVersion },
 	})
 }
 

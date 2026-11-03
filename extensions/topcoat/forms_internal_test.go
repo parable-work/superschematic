@@ -230,6 +230,71 @@ func TestHowAFormHoldsAField(t *testing.T) {
 
 func ptr(text string) *string { return &text }
 
+// TestAnAmountIsReadByItsCurrency reads an amount in a literal currency as
+// a decimal, signed when its bounds take a negative amount, and never from
+// the app's choices, whose values are minor units; and one whose currency
+// is a field as minor units, digits alone (D44, amended).
+func TestAnAmountIsReadByItsCurrency(t *testing.T) {
+	zero := int64(0)
+	integer := map[string]string{"json_schema": "integer"}
+	text := map[string]string{"json_schema": "string"}
+	schema := &ir.Schema{
+		Scalars: map[string]*ir.ScalarDef{
+			moneyScalar:     {Name: moneyScalar, TypeMappings: integer, Minimum: &zero},
+			"Generic.Int64": {Name: "Generic.Int64", TypeMappings: integer},
+			currencyScalar:  {Name: currencyScalar, TypeMappings: text},
+		},
+		Types: map[string]*ir.TypeDef{
+			"Input": {Name: "Input", Fields: []*ir.FieldDef{
+				{Name: "price", TypeRef: ir.TypeRef{Name: moneyScalar}, Display: &ir.FieldDisplay{Currency: &ir.DisplayCurrency{Code: "GBP"}}},
+				{Name: "refund", TypeRef: ir.TypeRef{Name: "Generic.Int64"}, Display: &ir.FieldDisplay{Currency: &ir.DisplayCurrency{Code: "GBP"}}},
+				{Name: "tip", TypeRef: ir.TypeRef{Name: moneyScalar}, Display: &ir.FieldDisplay{Currency: &ir.DisplayCurrency{Code: "JPY"}}},
+				{Name: "extra", TypeRef: ir.TypeRef{Name: moneyScalar}},
+				{Name: "currency", TypeRef: ir.TypeRef{Name: currencyScalar}},
+				{Name: "count", TypeRef: ir.TypeRef{Name: "Generic.Int64"}},
+			}},
+		},
+	}
+	b := &formBuilder{schemaSet: schemaSet{schema}, structs: map[string]*formStruct{}}
+	st, err := b.structOf(schema.Types["Input"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range st.Fields {
+		var want struct {
+			read      string
+			choosable bool
+			currency  string
+			signed    bool
+		}
+		switch f.JSONName {
+		case "price":
+			want.read, want.currency = "money_gbp", "GBP"
+		case "refund":
+			want.read, want.currency, want.signed = "signed_money_gbp", "GBP", true
+		case "tip":
+			want.read, want.currency = "money_jpy", "JPY"
+		case "extra":
+			want.read, want.choosable = "minor_amount", true
+		case "currency":
+			want.read, want.choosable = "text", true
+		case "count":
+			want.read, want.choosable = "integer", true
+		}
+		if f.Read != want.read || f.Choosable != want.choosable || f.Currency != want.currency || f.Signed != want.signed {
+			t.Errorf("%s: read %s, choosable %t, currency %q, signed %t; want %+v", f.JSONName, f.Read, f.Choosable, f.Currency, f.Signed, want)
+		}
+	}
+	c := &crate{FormStructs: []*formStruct{st}}
+	var readers []string
+	for _, currency := range c.FormCurrencies() {
+		readers = append(readers, fmt.Sprintf("%s %s %t", currency.Read, currency.Code, currency.Signed))
+	}
+	if got, want := strings.Join(readers, ", "), "money_gbp GBP false, money_jpy JPY false, signed_money_gbp GBP true"; got != want {
+		t.Errorf("FormCurrencies: %s, want %s", got, want)
+	}
+}
+
 // TestAMemberIsLabeledByItsTitle labels an enum's member by its title,
 // else by its name in words, and keeps its serialized value: one rule for
 // a select's options, a checkbox group's, a filter's and <enum>_label.

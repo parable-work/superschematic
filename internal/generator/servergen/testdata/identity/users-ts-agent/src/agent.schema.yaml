@@ -1,0 +1,98 @@
+name: users-ts-agent
+kind: API
+types:
+  # The key the MCP endpoint signs the confirmations of set_motto with,
+  # which the config's outputs.api.mcpConfirmationKey names (D93).
+  AgentKeys:
+    name: AgentKeys
+    role: EmbeddedStruct
+    envVars: true
+    fields:
+      - name: AGENT_MCP_CONFIRMATION_KEY
+        typeRef: { name: string }
+        required: true
+        secret: true
+  Greeting:
+    name: Greeting
+    role: APIView
+    fields:
+      - name: message
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: Account
+    userSessions: { register: true }
+    operations: []
+  - name: AgentQueries
+    operations:
+      # A visible tool that only reads, for a signed-in user.
+      - name: greet
+        typeRef: { name: Greeting }
+        required: true
+        auth: true
+        httpMethod: GET
+        restPath: greeting
+        docs:
+          title: Greet the caller
+          description: Greets the signed-in user by name.
+          capability: agent.greet
+          lifecycle: active
+          visibility: public
+          mappingStatus: mapped
+          replayMode: read_only
+        mcp: { handle: greet, hidden: false }
+      # A visible tool for a user holding staff, which a user with no role
+      # is not offered. It asks, and a user it is not offered is refused
+      # its call at once, never asked to confirm it (D98).
+      - name: audit
+        typeRef: { name: Greeting }
+        required: true
+        permissions: [staff]
+        httpMethod: GET
+        restPath: audit
+        docs:
+          title: Audit the motto
+          description: Reports who set the motto.
+          capability: agent.audit
+          lifecycle: active
+          visibility: public
+          mappingStatus: mapped
+          replayMode: read_only
+        mcp: { handle: audit, hidden: false, invocationPolicy: ask }
+      # Not classified: no @mcp, so no tool.
+      - name: motto
+        typeRef: { name: Greeting }
+        required: true
+        auth: true
+        httpMethod: GET
+        restPath: motto
+  - name: AgentMutations
+    operations:
+      # A visible tool whose client asks the person before it runs.
+      - name: setMotto
+        typeRef: { name: Greeting }
+        required: true
+        auth: true
+        httpMethod: POST
+        restPath: motto
+        arguments:
+          - name: motto
+            typeRef: { name: string }
+            required: true
+            validateMinLength: 1
+        docs:
+          title: Set the motto
+          description: Sets the motto the greeting carries.
+          capability: agent.motto.set
+          lifecycle: active
+          visibility: public
+          mappingStatus: mapped
+        mcp: { handle: set_motto, hidden: false, invocationPolicy: ask }
+      # Hidden: an operation, never a tool.
+      - name: forgetMotto
+        typeRef: { name: Greeting }
+        required: true
+        auth: true
+        httpMethod: DELETE
+        restPath: motto
+        mcp: { hidden: true, hiddenReason: Staff console only. }

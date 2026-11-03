@@ -116,6 +116,7 @@ func TestStackInitWritesAGcpEnvironment(t *testing.T) {
 		"      values: { project: string; projectNumber?: string; region: string; production?: boolean; telemetry?: { endpoint?: string; sampleRatio?: number } };\n",
 		"      server: { minInstances?: number; ",
 		"      database: { tier?: string; highAvailability?: boolean; version?: \"POSTGRES_15\" | ",
+		"      memoryStore: { nodeType?: \"SHARED_CORE_NANO\" | ",
 	} {
 		if !strings.Contains(string(types), want) {
 			t.Errorf("src/gcp-target.ts holds no %q:\n%s", want, types)

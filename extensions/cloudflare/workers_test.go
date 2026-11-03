@@ -383,14 +383,47 @@ func TestWorkersRefusals(t *testing.T) {
 		_, errs := resolveOver(t, reg, s, services, "Staging")
 		refusedWith(t, errs, stack.CodeUnrealizable, "server shop-api is a GO server, and platform cloudflare.workers runs only TYPESCRIPT")
 	})
-	t.Run("a queue worker", func(t *testing.T) {
-		// D64, amended: the refusal says why and where a worker runs.
+	t.Run("a Go queue worker", func(t *testing.T) {
+		// D92: a worker is placed on the drainer, which runs TypeScript.
 		s := storefrontStack()
 		s.Deploy = []ir.ServiceRef{stacktest.ShopOrders}
 		s.Expose = nil
 		_, errs := resolveOver(t, reg, s, stacktest.AcmeShop(), "Staging")
-		refusedWith(t, errs, stack.CodeUnrealizable, "worker shop-orders-fulfil-orders: target cloudflare places no worker: a queue worker claims its queue's messages from Postgres or a SQLite file in a loop that lasts as long as its process (D53, amended), "+
-			"and a Worker runs only per request or per firing and reaches neither; run the stack's workers in an environment on the gcp target, whose gcp.cloudrunworker runs them, or under stack dev on the local target")
+		refusedWith(t, errs, stack.CodeUnrealizable, "worker shop-orders-fulfil-orders is a GO worker, and platform cloudflare.drainer runs only TYPESCRIPT")
+	})
+	t.Run("a deriver", func(t *testing.T) {
+		// D74: the refusal says why and where a deriver runs.
+		s := storefrontStack()
+		s.Deploy = []ir.ServiceRef{stacktest.ShopOrders}
+		s.Expose = nil
+		services := stacktest.AcmeShop()
+		for i := range services {
+			switch services[i].Name {
+			case "shop-db":
+				services[i].Engine, services[i].Derived = true, []string{"Ticket"}
+			case stacktest.ShopOrders.Name:
+				services[i].Language = registry.APILanguageTypeScript
+				services[i].Derivers = []ir.Deriver{{Name: "TriageTickets"}}
+			}
+		}
+		_, errs := resolveOver(t, reg, s, services, "Staging")
+		refusedWith(t, errs, stack.CodeUnrealizable, "deriver shop-orders-triage-tickets: target cloudflare places no deriver: a deriver fills Derived fields in a loop that lasts as long as its process, "+
+			"over its API's engine, a native addon, and a Worker runs only per request or per firing and loads no native code; run the stack's derivers in an environment on the gcp target, whose gcp.cloudrunderiver runs them, or under stack dev on the local target")
+	})
+	t.Run("an app", func(t *testing.T) {
+		// D78: the refusal says why and where an app runs.
+		s := storefrontStack()
+		s.Deploy = []ir.ServiceRef{stacktest.ShopOrders}
+		s.Expose = nil
+		services := stacktest.InRust(stacktest.AcmeShop(), stacktest.ShopOrders.Name)
+		for i := range services {
+			if services[i].Name == stacktest.ShopOrders.Name {
+				services[i].Apps = []ir.App{{Name: "Backoffice", Extensions: []string{"topcoat"}}}
+			}
+		}
+		_, errs := resolveOver(t, reg, s, services, "Staging")
+		refusedWith(t, errs, stack.CodeUnrealizable, "app shop-orders-backoffice: target cloudflare places no app: an app is the project's own Rust program, which serves HTTP until it is stopped, "+
+			"and cloudflare runs TypeScript Workers only; run the stack's apps in an environment on the gcp target, whose gcp.cloudrunapp runs them, or under stack dev on the local target")
 	})
 	t.Run("a name over 63 characters", func(t *testing.T) {
 		s := storefrontStack()
@@ -410,16 +443,6 @@ func TestWorkersRefusals(t *testing.T) {
 		if _, errs := resolveOver(t, reg, s, workersServices(), "Staging"); errs != nil {
 			t.Errorf("a 40-character name, 62 with the stack and the environment, without a parameter: %v", errs)
 		}
-	})
-	t.Run("an API over the user model", func(t *testing.T) {
-		services := stacktest.AcmeShop()
-		for i := range services {
-			if services[i].Name == "shop-storefront" {
-				services[i].Identity = true
-			}
-		}
-		_, errs := resolveOver(t, reg, storefrontStack(), services, "Staging")
-		refusedWith(t, errs, stack.CodeUnrealizable, "server shop-storefront serves shop-storefront, an API over the user model, which authenticates with the identity runtime (D50), and platform cloudflare.workers runs none: the TypeScript identity runtime hashes passwords with node:crypto's argon2")
 	})
 	t.Run("no workers.dev subdomain", func(t *testing.T) {
 		s := storefrontStack()

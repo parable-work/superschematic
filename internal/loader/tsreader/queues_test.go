@@ -2,6 +2,7 @@ package tsreader
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -18,8 +19,11 @@ func TestQueuesAreMessageTypes(t *testing.T) {
 	}
 	three := 3
 	for name, want := range map[string]*ir.QueueDef{
-		"OrderPlaced": {Retries: &three, Backoff: "1m", MaxBackoff: "200s", Lease: "2m", Retain: "1h"},
-		"Ping":        {Retain: "0s"},
+		"OrderPlaced":   {Retries: &three, Backoff: "1m", MaxBackoff: "200s", Lease: "2m", Retain: "1h"},
+		"Ping":          {Retain: "0s"},
+		"OrderChanged":  {Key: "orderId", OnDuplicate: "replace", Serialize: true},
+		"StockChecked":  {Key: "sku", OnDuplicate: "skip"},
+		"SyncRequested": {Key: "accountId", Serialize: true},
 	} {
 		td := schema.Types[name]
 		if td == nil {
@@ -42,8 +46,38 @@ func TestQueuesAreMessageTypes(t *testing.T) {
 	for _, td := range schema.Queues() {
 		names = append(names, td.Name)
 	}
-	if strings.Join(names, ",") != "OrderPlaced,Ping" {
+	if strings.Join(names, ",") != "OrderChanged,OrderPlaced,Ping,StockChecked,SyncRequested" {
 		t.Errorf("Queues() = %v", names)
+	}
+}
+
+// TestEnqueueOnChangeIsATablesTrigger: @enqueueOnChange on a table records
+// the queue, its writes in their one order, the fields, the conditions
+// with their literals and the message, from the TypeScript the author
+// writes (D80).
+func TestEnqueueOnChangeIsATablesTrigger(t *testing.T) {
+	schema, _, err := LoadService("testdata/services/fixture-queue-db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := schema.Types["OrderLine"]
+	if line == nil || line.Role != ir.RoleDBTable {
+		t.Fatalf("OrderLine = %+v, want a table", line)
+	}
+	want := []*ir.EnqueueOnChange{{
+		Queue:   "OrderChanged",
+		On:      []string{"insert", "update", "delete"},
+		Fields:  []string{"product", "quantity"},
+		When:    []*ir.EnqueueCondition{{Field: "product", NotNull: true}},
+		Message: map[string]string{"orderId": "order", "lineId": "id"},
+	}}
+	if !reflect.DeepEqual(line.EnqueueOnChange, want) {
+		t.Errorf("OrderLine.EnqueueOnChange = %+v, want %+v", line.EnqueueOnChange, want)
+	}
+	for _, name := range []string{"Order", "Product", "OrderChanged"} {
+		if len(schema.Types[name].EnqueueOnChange) > 0 {
+			t.Errorf("%s has an @enqueueOnChange", name)
+		}
 	}
 }
 
@@ -213,5 +247,80 @@ export abstract class AnswerPings {}
 `})
 	if _, _, err := LoadService(dir); err == nil || !strings.Contains(err.Error(), "@worker is only allowed in API schemas (this service is kind DB)") {
 		t.Fatalf("load = %v, want @worker refused in a DB schema", err)
+	}
+}
+
+// TestDeriversAreNoTypes: each @deriver class of an API is a deriver of it,
+// in declaration order, with its comment and arguments, and no type of the
+// schema; each of its schemas is a name, which the schema does not import
+// (D74).
+func TestDeriversAreNoTypes(t *testing.T) {
+	schema, _, err := LoadService("testdata/services/fixture-derived-api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []*ir.Deriver{
+		{Name: "TriageTickets", Comment: "Triages each ticket, eight answers at a time.", Schemas: []string{"Ticket"}, Concurrency: 8, BatchSize: 20},
+		{Name: "FillAll", Comment: "Fills every derived field of the database."},
+	}
+	if !reflect.DeepEqual(schema.Derivers, want) {
+		t.Errorf("Derivers = %+v, want %+v", schema.Derivers, want)
+	}
+	for _, name := range []string{"TriageTickets", "FillAll"} {
+		if schema.Types[name] != nil {
+			t.Errorf("deriver %s is a type", name)
+		}
+	}
+	for _, imp := range schema.Imports {
+		if slices.Contains(imp.Types, "Ticket") {
+			t.Errorf("imports = %+v, want no engine type", schema.Imports)
+		}
+	}
+}
+
+// TestDeriverRefusals: what @deriver refuses, where it is written, and
+// that only an API declares one.
+func TestDeriverRefusals(t *testing.T) {
+	dir := decoratorTestService(t, "API", map[string]string{"src/a.schema.ts": `import { deriver } from "@superschematic/api";
+
+export abstract class Local {
+  id: string;
+}
+
+@deriver({ concurrency: 0 })
+export abstract class NoConcurrency {}
+
+@deriver({ batchSize: 101 })
+export abstract class TooLarge {}
+
+@deriver({ schemas: ["Local", "Local"] })
+export abstract class Twice {}
+
+@deriver()
+export abstract class WithFields {
+  limit: number;
+}
+`})
+	_, _, err := LoadService(dir)
+	if err == nil {
+		t.Fatal("the load passed")
+	}
+	for _, want := range []string{
+		`@deriver concurrency is 0; it is a whole number, one or more`,
+		`@deriver batchSize is 101; it is a whole number from 1 to 100`,
+		`@deriver Twice: names schema Local twice`,
+		`@deriver class WithFields has fields`,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("missing %q in:\n%s", want, err)
+		}
+	}
+	dir = decoratorTestService(t, "DB", map[string]string{"src/a.schema.ts": `import { deriver } from "@superschematic/api";
+
+@deriver()
+export abstract class Fill {}
+`})
+	if _, _, err := LoadService(dir); err == nil || !strings.Contains(err.Error(), "@deriver is only allowed in API schemas (this service is kind DB)") {
+		t.Fatalf("load = %v, want @deriver refused in a DB schema", err)
 	}
 }

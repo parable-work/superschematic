@@ -1,0 +1,47 @@
+{
+  "dialect": "postgres",
+  "from": "83fb203dfcd654b5a414b5afb557fecb6b76faeffb2272579e0ec7c241819108",
+  "hash": "41e27d5931b21de46f8ad95258c5610ebccb686b45303b03475c0948b07ea30d",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/product/column/embedding",
+          "reason": "Product.embedding changes from vector(3) to vector(4): a stored vector keeps its 3 numbers, which vector(4) refuses, so the cast fails on every row that holds one; set the column NULL, or embed every row again at 4 dimensions, before this step.",
+          "subject": "table/product/column/embedding"
+        },
+        {
+          "class": "blocking",
+          "id": "blocking:table/product/column/embedding",
+          "reason": "The change rewrites product and rebuilds its indexes under an ACCESS EXCLUSIVE lock.",
+          "subject": "table/product/column/embedding"
+        },
+        {
+          "class": "compat",
+          "id": "compat:table/product/column/embedding",
+          "reason": "Product.embedding changes from vector(3) to vector(4): servers built from the previous version still read and write vector(3).",
+          "subject": "table/product/column/embedding"
+        },
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/product/column/embedding",
+          "reason": "Product.embedding changes from vector(3) to vector(4): the cast fails on a value vector(4) cannot hold.",
+          "subject": "table/product/column/embedding"
+        }
+      ],
+      "index": 1,
+      "op": "alterColumnType",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE product\n  ALTER COLUMN embedding TYPE vector(4) USING embedding::vector(4)"
+      ],
+      "subject": "table/product/column/embedding",
+      "transactional": true
+    }
+  ],
+  "to": "01e0234978e6052fa120a87a4fdffd7679435a18719cc26c2a54f50abfc9b9c0",
+  "toModel": null,
+  "version": 1
+}

@@ -3,13 +3,16 @@ package namespaces
 import (
 	"context"
 	"fmt"
+	"net/url"
 
+	"example.com/schemas/sdk/go/fixture-user-routes-api/runtime"
 	types "example.com/schemas/types/go/fixture-user-routes-api"
 )
 
 // AccountAdminNamespace contains API methods for the account-admin namespace.
 //
 // Endpoints:
+// - ApproveUser: Approves a user who registered to wait for approval, who can then sign in with the roles register granted them. The caller's own permissions must cover those roles'. Requires authentication.
 // - CreateRole: Creates a role. The caller's own permissions must cover each permission it grants. Requires authentication.
 // - CreateUser: Creates a user with the login, name and password given. Requires authentication.
 // - DeleteRole: Deletes a role and every grant of it. It answers true. Requires authentication.
@@ -33,6 +36,30 @@ func NewAccountAdminNamespace(
 	return &AccountAdminNamespace{
 		client: client,
 	}
+}
+
+// ApproveUser Approves a user who registered to wait for approval, who can then sign in with the roles register granted them. The caller's own permissions must cover those roles'.
+// Requires authentication.
+func (n *AccountAdminNamespace) ApproveUser(
+	ctx context.Context,
+	Id string,
+) (types.IdentityUser, error) {
+	path := fmt.Sprintf("/api/auth/admin/users/%v/approve", pathSegment(Id))
+
+	var requestBody any
+	var out types.IdentityUser
+	if err := n.client.DoJSON(
+		ctx,
+		"POST",
+		path,
+		nil,
+		requestBody,
+		&out,
+	); err != nil {
+		var zero types.IdentityUser
+		return zero, err
+	}
+	return out, nil
 }
 
 // CreateRole Creates a role. The caller's own permissions must cover each permission it grants.
@@ -241,20 +268,38 @@ func (n *AccountAdminNamespace) ListRoles(
 	return out, nil
 }
 
+type AccountAdminListUsersInput struct {
+	Pending *bool `json:"pending,omitempty"`
+}
+
 // ListUsers Lists the users and the roles each holds.
 // Requires authentication.
 func (n *AccountAdminNamespace) ListUsers(
 	ctx context.Context,
+	input AccountAdminListUsersInput,
 ) ([]types.IdentityUser, error) {
 	path := "/api/auth/admin/users"
+	validationErrors := types.NewValidationErrors()
+	if input.Pending != nil {
+		appendScalarValidationErrors(validationErrors, "pending", any(*input.Pending))
+	}
+	if validationErrors.HasErrors() {
+		var zero []types.IdentityUser
+		return zero, NewValidationError(validationErrors)
+	}
 
 	var requestBody any
+	// GET endpoints: scalar args go as query parameters, not request body.
+	queryValues := url.Values{}
+	if input.Pending != nil {
+		runtime.AddQueryParam(queryValues, "pending", *input.Pending)
+	}
 	var out []types.IdentityUser
 	if err := n.client.DoJSON(
 		ctx,
 		"GET",
 		path,
-		nil,
+		queryValues,
 		requestBody,
 		&out,
 	); err != nil {

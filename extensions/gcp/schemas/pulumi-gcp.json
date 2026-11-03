@@ -42,6 +42,8 @@
     "gcp:iam/workloadIdentityPool:WorkloadIdentityPool",
     "gcp:iam/workloadIdentityPoolProvider:WorkloadIdentityPoolProvider",
     "gcp:kms/cryptoKeyIAMMember:CryptoKeyIAMMember",
+    "gcp:memorystore/instance:Instance",
+    "gcp:networkconnectivity/serviceConnectionPolicy:ServiceConnectionPolicy",
     "gcp:projects/iAMMember:IAMMember",
     "gcp:secretmanager/secret:Secret",
     "gcp:secretmanager/secretIamMember:SecretIamMember",

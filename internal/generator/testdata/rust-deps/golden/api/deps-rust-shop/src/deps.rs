@@ -20,7 +20,8 @@ use crate::interfaces::{
     CartsImplementation, Implementations, ProductsImplementation, StockImplementation,
 };
 use superschematic_http_runtime::{
-    bucket::Bucket, postgres::Pool, IdentityAuthenticator, ServiceAuthenticator,
+    bucket::Bucket, memorystore::MemoryStore, postgres::Pool, IdentityAuthenticator,
+    ServiceAuthenticator,
 };
 
 /// What the implementation of deps-rust-shop is built from. The server's
@@ -40,6 +41,12 @@ pub struct Deps {
     /// deps-media, a bucket the API lists: private object storage it puts,
     /// gets, deletes and lists objects in, and signs URLs for (D54).
     pub deps_media: Arc<dyn Bucket>,
+    /// deps-cache, a memory store the API lists (D75): channels and keys
+    /// every replica shares and may lose, which its generated definitions
+    /// name. While it is disabled or unreachable, every call is unavailable
+    /// at once, and the implementation takes its fallback path; a subscribe
+    /// while it is unreachable is held until it reconnects.
+    pub deps_cache: Arc<dyn MemoryStore>,
     /// The API's span: the implementation logs inside it, so each event
     /// names the API.
     pub span: tracing::Span,

@@ -1,0 +1,31 @@
+{
+  "dialect": "postgres",
+  "from": "d56bacb22f9890f01a5f4fec8e8a03c8b37a3d2ab95b339b5b9d7dbb23ce099b",
+  "hash": "358cb2bdb403574ef57398ceb141a1c2cdc4b421395825044398090c00927efd",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE product ADD COLUMN note TEXT"
+      ],
+      "subject": "table/product/column/note",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "replaceFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION \"product_changes\"() RETURNS trigger AS $$\nDECLARE\n  written timestamptz := clock_timestamp();\nBEGIN\n  -- Writes a message of ProductChange for each write of a row of product\n  -- its behaviors hear, whoever makes it (D103).\n  IF TG_OP = 'UPDATE' AND NOT (OLD.\"title\" IS DISTINCT FROM NEW.\"title\" OR OLD.\"price\" IS DISTINCT FROM NEW.\"price\" OR OLD.\"note\" IS DISTINCT FROM NEW.\"note\" OR OLD.\"phase\" IS DISTINCT FROM NEW.\"phase\" OR OLD.\"phase_entered_at\" IS DISTINCT FROM NEW.\"phase_entered_at\") THEN\n    RETURN NULL;\n  END IF;\n  IF TG_OP = 'INSERT' THEN\n    INSERT INTO \"product_change_queue\" (\"row_key\", \"write\", \"at\", \"before\", \"after\", \"due_at\", \"created_at\")\n    VALUES (NEW.\"id\", 'insert', floor(extract(epoch FROM written) * 1000)::bigint, NULL, jsonb_build_object('title', NEW.\"title\", 'price', NEW.\"price\", 'note', NEW.\"note\", 'phase', NEW.\"phase\", 'phase_entered_at', NEW.\"phase_entered_at\"), written, written);\n  ELSIF TG_OP = 'UPDATE' THEN\n    INSERT INTO \"product_change_queue\" (\"row_key\", \"write\", \"at\", \"before\", \"after\", \"due_at\", \"created_at\")\n    VALUES (NEW.\"id\", 'update', floor(extract(epoch FROM written) * 1000)::bigint, jsonb_build_object('title', OLD.\"title\", 'price', OLD.\"price\", 'note', OLD.\"note\", 'phase', OLD.\"phase\", 'phase_entered_at', OLD.\"phase_entered_at\"), jsonb_build_object('title', NEW.\"title\", 'price', NEW.\"price\", 'note', NEW.\"note\", 'phase', NEW.\"phase\", 'phase_entered_at', NEW.\"phase_entered_at\"), written, written);\n  ELSE\n    INSERT INTO \"product_change_queue\" (\"row_key\", \"write\", \"at\", \"before\", \"after\", \"due_at\", \"created_at\")\n    VALUES (OLD.\"id\", 'delete', floor(extract(epoch FROM written) * 1000)::bigint, jsonb_build_object('title', OLD.\"title\", 'price', OLD.\"price\", 'note', OLD.\"note\", 'phase', OLD.\"phase\", 'phase_entered_at', OLD.\"phase_entered_at\"), NULL, written, written);\n  END IF;\n  RETURN NULL;\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/product_changes",
+      "transactional": true
+    }
+  ],
+  "to": "6853083c19399ac331ea8f969893197dbc75d9f93a2237b82e3c76d0965f0bff",
+  "toModel": null,
+  "version": 1
+}

@@ -44,6 +44,8 @@ var corpus = []roundtripFixture{
 	// Type-level decode decorators: the TS writer emits both.
 	{name: "fixture-deny-unknown-fields", dir: tsFixtures + "/fixture-deny-unknown-fields", native: FormatTS},
 	{name: "fixture-strict-json", dir: tsFixtures + "/fixture-strict-json", native: FormatTS},
+	// @allowUnknownFields, and @webhook inputs (D87).
+	{name: "fixture-webhooks-api", dir: tsFixtures + "/fixture-webhooks-api", native: FormatTS},
 	// Operation @docs records in the data forms.
 	{name: "fixture-docs", dir: tsFixtures + "/fixture-docs", native: FormatTS},
 	// An API's @job classes (D52), which every form writes as the
@@ -54,11 +56,20 @@ var corpus = []roundtripFixture{
 	// each naming a queue it imports.
 	{name: "fixture-queue-db", dir: tsFixtures + "/fixture-queue-db", native: FormatTS},
 	{name: "fixture-queue-api", dir: tsFixtures + "/fixture-queue-api", native: FormatTS},
+	// An API's @deriver classes (D74), which every form writes as the
+	// schema's derivers, each naming the engine types it imports.
+	{name: "fixture-derived-api", dir: tsFixtures + "/fixture-derived-api", native: FormatTS},
+	// An API's @app classes (D78), which every form writes as the schema's
+	// apps, each with the extensions it names.
+	{name: "fixture-app-api", dir: tsFixtures + "/fixture-app-api", native: FormatTS},
 	// Operation @mcp, @icon and @docs replay keys in the data forms.
 	{name: "fixture-mcp", dir: tsFixtures + "/fixture-mcp", native: FormatTS},
 	// SQL projection views: every row rule form, joins, @column in both
 	// forms of the source and the collapse.
 	{name: "fixture-projection", dir: tsFixtures + "/fixture-projection", native: FormatTS},
+	// A projection without a pool, beside the tables (D90), over joins
+	// through a joined table.
+	{name: "fixture-finances-db", dir: tsFixtures + "/fixture-finances-db", native: FormatTS},
 	// Arrays of arrays (T[][]) in a General type, a DB table and an API's
 	// request body, argument and response.
 	{name: "fixture-nested-arrays", dir: tsFixtures + "/fixture-nested-arrays", native: FormatTS},
@@ -95,6 +106,10 @@ var corpus = []roundtripFixture{
 	{name: "fixture-refs-api", dir: tsFixtures + "/fixture-refs-api", native: FormatTS},
 	{name: "fixture-refs-api-json", dir: dataFixtures + "/fixture-refs-api-json", native: FormatJSON},
 	{name: "fixture-refs-api-yaml", dir: dataFixtures + "/fixture-refs-api-yaml", native: FormatYAML},
+	// A FileUpload field, bare and with its constraints, and FileDownload
+	// results (D81), from TypeScript and from YAML.
+	{name: "fixture-files-api", dir: tsFixtures + "/fixture-files-api", native: FormatTS},
+	{name: "fixture-files-api-yaml", dir: dataFixtures + "/fixture-files-api-yaml", native: FormatYAML},
 	// A relation's key on an @source type, with no @virtual, whose
 	// reference the loader derives and no form writes (D61, amended).
 	{name: "fixture-refs-keys-api", dir: tsFixtures + "/fixture-refs-keys-api", native: FormatTS},
@@ -228,6 +243,62 @@ func TestTSWriterRoundTripsJobs(t *testing.T) {
 		if !strings.Contains(string(data), line) {
 			t.Errorf("written TypeScript lacks %q:\n%s", line, data)
 		}
+	}
+}
+
+// TestTSWriterRoundTripsKeyedQueuesAndTriggers: the TS writer writes a
+// queue's key, onDuplicate and serialize and a table's @enqueueOnChange
+// (D80), the queue's class before a table that names it, which TypeScript
+// needs, whatever their names' order, and the reader reads them back.
+func TestTSWriterRoundTripsKeyedQueuesAndTriggers(t *testing.T) {
+	schema, err := loader.LoadService(tsFixtures + "/fixture-queue-db")
+	if err != nil {
+		t.Fatalf("loading fixture: %v", err)
+	}
+	// A queue whose name sorts after a table of its file that names it, and
+	// a table of another file that names it.
+	uuid := ir.TypeRef{Name: "Identity.UUID"}
+	schema.Types["ZQueue"] = &ir.TypeDef{Name: "ZQueue", Owner: "src/changes.schema", Role: ir.RoleEmbeddedStruct, Queue: &ir.QueueDef{Key: "orderId", OnDuplicate: "skip"},
+		Fields: []*ir.FieldDef{{Name: "orderId", TypeRef: uuid, Required: true}}}
+	schema.Types["Aisle"] = &ir.TypeDef{Name: "Aisle", Owner: "src/changes.schema", Role: ir.RoleDBTable,
+		Fields:          []*ir.FieldDef{{Name: "id", TypeRef: uuid, Required: true, Key: true}},
+		EnqueueOnChange: []*ir.EnqueueOnChange{{Queue: "ZQueue", On: []string{"delete"}, Message: map[string]string{"orderId": "id"}}}}
+	schema.Types["Order"].EnqueueOnChange = []*ir.EnqueueOnChange{{Queue: "ZQueue", On: []string{"insert"}, Message: map[string]string{"orderId": "id"}}}
+	want := normalizeIR(t, schema)
+	if got := normalizeIR(t, writeAndReload(t, schema, FormatTS)); got != want {
+		t.Errorf("IR mismatch after TS -> TS round trip\nwant:\n%s\ngot:\n%s", want, got)
+	}
+	dir := t.TempDir()
+	if _, err := WriteService(schema, FormatTS, dir); err != nil {
+		t.Fatal(err)
+	}
+	read := func(name string) string {
+		data, err := os.ReadFile(filepath.Join(dir, "src", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	changes, orders := read("changes.schema.ts"), read("orders.schema.ts")
+	for file, lines := range map[string][]string{
+		changes: {
+			`@queue({ key: "orderId", onDuplicate: "replace", serialize: true })`,
+			`@enqueueOnChange(OrderChanged, { on: ["insert", "update", "delete"], fields: ["product", "quantity"], when: [{ field: "product", notNull: true }], message: { lineId: "id", orderId: "order" } })`,
+			`@enqueueOnChange(ZQueue, { on: ["delete"], message: { orderId: "id" } })`,
+		},
+		orders: {
+			`ZQueue } from "./changes.schema";`,
+			`@enqueueOnChange(ZQueue, { on: ["insert"], message: { orderId: "id" } })`,
+		},
+	} {
+		for _, line := range lines {
+			if !strings.Contains(file, line) {
+				t.Errorf("written TypeScript lacks %q:\n%s", line, file)
+			}
+		}
+	}
+	if strings.Index(changes, "class ZQueue") > strings.Index(changes, "class Aisle") {
+		t.Errorf("the written TypeScript declares Aisle before ZQueue, which its decorator names:\n%s", changes)
 	}
 }
 
@@ -480,6 +551,12 @@ func TestTSWriterEmitsMultiPinVersionedDecorator(t *testing.T) {
 // service directory and loads it back through the full reader pipeline.
 func writeAndReload(t *testing.T, schema *ir.Schema, target Format) *ir.Schema {
 	t.Helper()
+	return writeAndReloadWith(t, schema, target)
+}
+
+// writeAndReloadWith is writeAndReload with loader options for the reload.
+func writeAndReloadWith(t *testing.T, schema *ir.Schema, target Format, opts ...loader.Option) *ir.Schema {
+	t.Helper()
 	dir := t.TempDir()
 	if _, err := WriteService(schema, target, dir); err != nil {
 		t.Fatalf("WriteService(%s): %v", target, err)
@@ -491,7 +568,7 @@ func writeAndReload(t *testing.T, schema *ir.Schema, target Format) *ir.Schema {
 	if target == FormatTS {
 		writeTSProject(t, dir, cfgSchema)
 	}
-	reloaded, err := loader.LoadService(dir)
+	reloaded, err := loader.LoadService(dir, opts...)
 	if err != nil {
 		dumpService(t, dir)
 		t.Fatalf("reloading %s output: %v", target, err)
@@ -503,9 +580,11 @@ func writeAndReload(t *testing.T, schema *ir.Schema, target Format) *ir.Schema {
 // their schema kinds, for the generated service configs (the verification
 // pass requires every imported service to be a declared dependency).
 var fixtureDependencyKinds = map[string]ir.SchemaKind{
-	"fixture-db":       ir.SchemaKindDB,
-	"fixture-queue-db": ir.SchemaKindDB,
-	"web-db":           ir.SchemaKindDB,
+	"fixture-db":           ir.SchemaKindDB,
+	"fixture-queue-db":     ir.SchemaKindDB,
+	"fixture-derived-db":   ir.SchemaKindDB,
+	"web-db":               ir.SchemaKindDB,
+	"fixture-cache-common": ir.SchemaKindGeneral,
 }
 
 // writeServiceConfig writes the minimal data-form service config, declaring
@@ -553,7 +632,7 @@ func writeTSProject(t *testing.T, dir string, schema *ir.Schema) {
 	}
 
 	paths := make(map[string][]string)
-	for _, name := range []string{"api", "db", "schema", "schema-config"} {
+	for _, name := range []string{"api", "db", "memory-store", "schema", "schema-config"} {
 		paths["@superschematic/"+name] = []string{filepath.ToSlash(filepath.Join(packagesDir, name, "src", "index.ts"))}
 	}
 	// superscalar is a dependency, not a packages/ member: it resolves to the

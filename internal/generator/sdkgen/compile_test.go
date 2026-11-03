@@ -120,6 +120,17 @@ func TestGeneratedSDKCompiles(t *testing.T) {
 		t.Fatalf("generated SDK does not type-check: %v", err)
 	}
 	requireToolsBuilt(t, sdkDir)
+
+	// The SDK that loads its validators on its first call (D82)
+	// type-checks too, against the same types package.
+	sdkOutput.LazyValidation = true
+	lazyDir := filepath.Join(tempRoot, "sdk", "typescript-lazy", "fixture-api")
+	if err := WriteSDKWithTools(sdkOutput, apiOutput, lazyDir, fixedClock); err != nil {
+		t.Fatalf("WriteSDKWithTools: %v", err)
+	}
+	if err := CompileSDK(lazyDir, filepath.Join(tempRoot, "types", "typescript", "fixture-api")); err != nil {
+		t.Fatalf("the SDK with lazyValidation does not type-check: %v", err)
+	}
 }
 
 // requireToolsBuilt checks that the SDK package's own build (CompileSDK)

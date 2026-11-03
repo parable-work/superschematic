@@ -29,10 +29,21 @@ type DepsInfo struct {
 	// ORMModule is Database's Go ORM module.
 	ORMModule string
 
+	// FieldKeys is the field of the API's EnvConfig that holds the keys
+	// of Database's Encrypted<T> fields, which the entrypoints open its ORM
+	// with (D85): its Go name. Empty for a database without one.
+	FieldKeys string
+
 	// VersionGraph reports whether Database declares a version graph: its
 	// ORM then imports the version-graph core's Go binding, which go.mod
 	// replaces.
 	VersionGraph bool
+
+	// Rules reports whether a table of Database has a field that is a
+	// behavior (D103): its ORM then requires the rules module, which
+	// links the behaviors' core, and go.mod requires and replaces it,
+	// since Go takes no replace from the ORM's go.mod.
+	Rules bool
 
 	// Calls are the API's calls entries, in order.
 	Calls []DepsCall
@@ -45,6 +56,32 @@ type DepsInfo struct {
 
 	// Buckets are the API's buckets entries, in order (D54).
 	Buckets []DepsBucket
+
+	// MemoryStores are the memory stores the API lists, its rateLimitStore
+	// among them, sorted (D75).
+	MemoryStores []DepsMemoryStore
+
+	// RateLimitStore is the memory store the API's @rateLimit routes count
+	// in, its config's rateLimitStore; empty when they count in process.
+	RateLimitStore string
+}
+
+// DepsMemoryStore is a memory store in Deps: the HTTP runtime's
+// provider-neutral memorystore.Store, which the entrypoint opens on Redis,
+// or disabled (D75).
+type DepsMemoryStore struct {
+	// Service is the MemoryStore service.
+	Service string
+
+	// Field is the Deps field that holds the store.
+	Field string
+
+	// Definitions is the module of the store's Go definitions, which an
+	// implementation imports to name a channel or a key, empty when its
+	// outputs write none; Modules are the Go types modules they reach,
+	// which a server's go.mod replaces.
+	Definitions string
+	Modules     []string
 }
 
 // DepsBucket is a bucket in Deps: the HTTP runtime's provider-neutral
@@ -74,8 +111,8 @@ type DepsCall struct {
 	Client string
 }
 
-// depsFields are the fields every Deps may hold beside its clients and its
-// buckets.
+// depsFields are the fields every Deps may hold beside its clients, its
+// buckets and its memory stores.
 var depsFields = []string{"Config", "DB", "Logger"}
 
 // JobInfo is a job of the API (D52): a method of the generated Jobs
@@ -109,7 +146,8 @@ func jobsOf(schema *ir.Schema) []JobInfo {
 func (o *APIOutput) HasJobs() bool { return len(o.Jobs) > 0 }
 
 // WorkerInfo is a worker of the API (D53): a method of the generated
-// Workers interface, which handles one message of its queue.
+// Workers interface, which handles one message of its queue; or a behavior
+// worker (D103), whose handler behaviors.go holds.
 type WorkerInfo struct {
 	// Name is the worker's `@worker` class.
 	Name string
@@ -125,10 +163,146 @@ type WorkerInfo struct {
 	// comment: how many messages an instance handles at a time unless an
 	// environment changes it.
 	Concurrency int
+
+	// Behavior is set for a @behaviorWorker (D103): a worker whose handler
+	// the generator writes, which the Workers interface has no method for.
+	// Method is empty then.
+	Behavior *BehaviorWorkerInfo
 }
 
-// workersOf reads the API's workers, sorted by name.
-func workersOf(schema *ir.Schema) []WorkerInfo {
+// BehaviorWorkerInfo is what a @behaviorWorker runs (D103): a table's
+// behavior queues, each claimed as its messages fall due and run through
+// the behaviors' core as the worker.
+type BehaviorWorkerInfo struct {
+	// Table is the table whose behaviors the worker runs: Ticket.
+	Table string
+
+	// Queues are the table's behavior queues, deadlines first: its deadline
+	// queue (TicketDeadline) and its change queue (TicketChange), each when
+	// the table has it.
+	Queues []string
+
+	// DeadlineQueue is the deadline queue, "" when its behaviors arm none;
+	// ChangeQueue the change queue, "" when nothing hears its writes.
+	DeadlineQueue string
+	ChangeQueue   string
+
+	// Subject is the subject the worker's commands run as,
+	// ir.BehaviorWorkerSubject(api, worker).
+	Subject string
+
+	// Permissions are the permissions the worker's commands hold.
+	Permissions []string
+
+	// Behaviors are those of the table's uses that arm deadlines (Timers),
+	// which a generator's refusal of the worker names; empty when the
+	// API's database is not among the generator's dependencies.
+	Behaviors []string
+
+	// Hearing are those of the table's uses that hear its writes (Timers,
+	// Reactions), and HeardBy the tables whose behaviors hear them through
+	// a relation (Project), from the change queue's marker; empty when
+	// deps lacks the database.
+	Hearing []string
+	HeardBy []string
+}
+
+// BehaviorWorkerOf is what the @behaviorWorker w of the API schema runs
+// (D103): its table's queues as the loader filled them (w.Queues, else
+// w.Queue), each named a deadline or a change queue by its table
+// (behaviorlayout.DeadlineQueueTypeName, ChangeQueueTypeName, whose rule
+// behaviorQueueName repeats, since the registry imports apigen), the subject
+// and permissions its commands run with, and from its database among deps
+// the behaviors that arm, hear and listen. Nil for a worker that is no
+// behavior worker. apigen, tsrestgen and rustrestgen build their worker
+// info with it.
+func BehaviorWorkerOf(schema *ir.Schema, deps map[string]*ir.Schema, w *ir.Worker) *BehaviorWorkerInfo {
+	if w == nil || w.BehaviorWorker == nil {
+		return nil
+	}
+	bw := w.BehaviorWorker
+	info := &BehaviorWorkerInfo{
+		Table:       bw.Type,
+		Queues:      slices.Clone(w.Queues),
+		Subject:     ir.BehaviorWorkerSubject(schema.Name, w.Name),
+		Permissions: slices.Clone(bw.Permissions),
+	}
+	if len(info.Queues) == 0 && w.Queue != "" {
+		info.Queues = []string{w.Queue}
+	}
+	for _, queue := range info.Queues {
+		switch queue {
+		case behaviorQueueName(bw.Type, ir.BehaviorQueueDeadlines):
+			info.DeadlineQueue = queue
+		case behaviorQueueName(bw.Type, ir.BehaviorQueueChanges):
+			info.ChangeQueue = queue
+		}
+	}
+	info.Behaviors = ArmingBehaviors(schema, deps, bw.Type)
+	if db, _, ok := schema.Database(); ok {
+		if queue := deps[db].BehaviorQueueOf(bw.Type, ir.BehaviorQueueChanges); queue != nil {
+			info.Hearing = slices.Clone(queue.BehaviorQueue.Behaviors)
+			info.HeardBy = slices.Clone(queue.BehaviorQueue.HeardBy)
+		}
+	}
+	return info
+}
+
+// behaviorQueueName is the name of the behavior queue of kind the loader
+// adds for table (D103): behaviorlayout.DeadlineQueueTypeName's
+// TicketDeadline, ChangeQueueTypeName's TicketChange.
+func behaviorQueueName(table, kind string) string {
+	if kind == ir.BehaviorQueueChanges {
+		return table + "Change"
+	}
+	return table + "Deadline"
+}
+
+// Runs names what the worker runs for a generator's refusal: Deadlines()
+// alone, "<Table>'s changes" alone, or "<Table>'s deadlines and changes".
+func (b *BehaviorWorkerInfo) Runs() string {
+	switch {
+	case b.ChangeQueue == "":
+		return b.Deadlines()
+	case b.DeadlineQueue == "":
+		return b.Table + "'s changes"
+	}
+	return b.Table + "'s deadlines and changes"
+}
+
+// Deadlines names the deadlines the worker runs for a generator's
+// refusal: the table's, and the behaviors that arm them when known
+// ("Ticket's deadlines, which Timers arms").
+func (b *BehaviorWorkerInfo) Deadlines() string {
+	switch len(b.Behaviors) {
+	case 0:
+		return b.Table + "'s deadlines"
+	case 1:
+		return fmt.Sprintf("%s's deadlines, which %s arms", b.Table, b.Behaviors[0])
+	}
+	return fmt.Sprintf("%s's deadlines, which %s and %s arm", b.Table, strings.Join(b.Behaviors[:len(b.Behaviors)-1], ", "), b.Behaviors[len(b.Behaviors)-1])
+}
+
+// ArmingBehaviors are the behaviors of table's uses that arm the deadlines
+// a behavior worker of the API schema runs, as the loader marked its
+// database's deadline queue (ir.BehaviorQueue.Behaviors), or none when
+// deps holds no such queue of the API's database.
+func ArmingBehaviors(schema *ir.Schema, deps map[string]*ir.Schema, table string) []string {
+	db, _, ok := schema.Database()
+	if !ok {
+		return nil
+	}
+	if queue := deps[db].BehaviorQueueOf(table, ir.BehaviorQueueDeadlines); queue != nil {
+		return slices.Clone(queue.BehaviorQueue.Behaviors)
+	}
+	return nil
+}
+
+// workersOf reads the API's workers, sorted by name: a behavior worker
+// with what it runs (BehaviorWorkerOf: its table, its queues as the loader
+// filled them, the subject its commands run as and their permissions, the
+// behaviors that arm and hear) and no method.
+func workersOf(schema *ir.Schema, deps map[string]*ir.Schema) []WorkerInfo {
 	var workers []WorkerInfo
 	for _, worker := range schema.Workers {
 		if worker == nil {
@@ -138,15 +312,82 @@ func workersOf(schema *ir.Schema) []WorkerInfo {
 		if concurrency <= 0 {
 			concurrency = ir.DefaultWorkerConcurrency
 		}
-		workers = append(workers, WorkerInfo{Name: worker.Name, Method: goutil.GoPublicIdentifier(worker.Name), Queue: worker.Queue, Concurrency: concurrency})
+		info := WorkerInfo{Name: worker.Name, Method: goutil.GoPublicIdentifier(worker.Name), Queue: worker.Queue, Concurrency: concurrency}
+		if worker.BehaviorWorker != nil {
+			info.Method = ""
+			info.Behavior = BehaviorWorkerOf(schema, deps, worker)
+		}
+		workers = append(workers, info)
 	}
 	slices.SortFunc(workers, func(a, b WorkerInfo) int { return strings.Compare(a.Name, b.Name) })
 	return workers
 }
 
-// HasWorkers reports whether the API declares a worker, for which deps.go
-// declares Workers and WorkersConstructor.
-func (o *APIOutput) HasWorkers() bool { return len(o.Workers) > 0 }
+// QueuesFunc is the function of the API package that returns a behavior
+// worker's queues (D103): TicketTimersQueues.
+func (w WorkerInfo) QueuesFunc() string {
+	return goutil.GoPublicIdentifier(w.Name) + "Queues"
+}
+
+// QueuesDoc is the doc comment of a behavior worker's QueuesFunc, the
+// worker's queues over the tables of database, wrapped as gofmt keeps it.
+func (w WorkerInfo) QueuesDoc(database string) string {
+	if w.Behavior == nil {
+		return ""
+	}
+	kinds := "deadlines"
+	switch {
+	case w.Behavior.ChangeQueue != "" && w.Behavior.DeadlineQueue != "":
+		kinds = "deadlines and changes"
+	case w.Behavior.ChangeQueue != "":
+		kinds = "changes"
+	}
+	text := fmt.Sprintf("%s are the queues of the behavior worker %s (D103): %s's %s's %s, each claimed as it falls due and run through the behaviors' core as the worker, %s, in one transaction with its message's completion. Its main runs them with worker.RunAll; logger, nil for none, logs a message spent with nothing run: its claim lost, its row gone, or its fire vetoed and released.",
+		w.QueuesFunc(), w.Name, database, w.Behavior.Table, kinds, w.Behavior.Subject)
+	var lines []string
+	line := "//"
+	for _, word := range strings.Fields(text) {
+		if len(line)+1+len(word) > 78 && line != "//" {
+			lines = append(lines, line)
+			line = "//"
+		}
+		line += " " + word
+	}
+	return strings.Join(append(lines, line), "\n")
+}
+
+// OrdinaryWorkers are the API's @worker workers, each a method of the
+// generated Workers interface; a behavior worker is none (D103).
+func (o *APIOutput) OrdinaryWorkers() []WorkerInfo {
+	var out []WorkerInfo
+	for _, w := range o.Workers {
+		if w.Behavior == nil {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// BehaviorWorkers are the API's @behaviorWorker workers (D103), whose
+// handlers behaviors.go holds.
+func (o *APIOutput) BehaviorWorkers() []WorkerInfo {
+	var out []WorkerInfo
+	for _, w := range o.Workers {
+		if w.Behavior != nil {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// HasWorkers reports whether the API declares a @worker, for which deps.go
+// declares Workers and WorkersConstructor. A behavior worker is not one:
+// its handler is generated (D103).
+func (o *APIOutput) HasWorkers() bool { return len(o.OrdinaryWorkers()) > 0 }
+
+// HasBehaviorWorkers reports whether the API declares a @behaviorWorker
+// (D103), whose queues behaviors.go writes.
+func (o *APIOutput) HasBehaviorWorkers() bool { return len(o.BehaviorWorkers()) > 0 }
 
 // HasBackgroundWork reports whether deps.go declares Jobs or Workers, which
 // take a context.
@@ -170,6 +411,12 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 			return fmt.Errorf("apigen: %s lists bucket %s, which would be Deps.%s, the field of %s", o.SchemaName, b.Service, b.Field, prev)
 		}
 		seen[b.Field] = b.Service
+	}
+	for _, m := range deps.MemoryStores {
+		if prev, clash := seen[m.Field]; clash {
+			return fmt.Errorf("apigen: %s lists memory store %s, which would be Deps.%s, the field of %s", o.SchemaName, m.Service, m.Field, prev)
+		}
+		seen[m.Field] = m.Service
 	}
 	o.Deps = deps
 	return nil

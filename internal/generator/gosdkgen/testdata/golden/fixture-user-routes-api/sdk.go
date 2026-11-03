@@ -16,11 +16,12 @@ type FixtureUserRoutesApiSDK struct {
 	// - Login: Signs a user in with their login and password and starts a session. A bearer session answers its token; a cookie session sets the session cookie and answers none.
 	// - Logout: Ends the caller's session and clears the session cookie. It answers true. Requires authentication.
 	// - Me: The caller's user, the roles they hold and the permissions those roles grant. Requires authentication.
-	// - Register: Creates a user with the login, name and password given and signs them in, as login does.
+	// - Register: Creates a user with the login, name and password given, who waits for an administrator's approval: it answers 202 with pending true and starts no session. The first administrator, when the set names one, is signed in as login does.
 	AccountNamespace *namespaces.AccountNamespace
 	// AccountAdminNamespace exposes account-admin namespace operations.
 	//
 	// Endpoints:
+	// - ApproveUser: Approves a user who registered to wait for approval, who can then sign in with the roles register granted them. The caller's own permissions must cover those roles'. Requires authentication.
 	// - CreateRole: Creates a role. The caller's own permissions must cover each permission it grants. Requires authentication.
 	// - CreateUser: Creates a user with the login, name and password given. Requires authentication.
 	// - DeleteRole: Deletes a role and every grant of it. It answers true. Requires authentication.

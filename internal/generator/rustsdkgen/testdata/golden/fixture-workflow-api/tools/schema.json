@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FixtureWorkflowApiSdk Tool Definitions",
+  "description": "LLM tool calling bindings for fixture-workflow-api API",
+  "tools": [
+    {
+      "name": "order.getOrder",
+      "operationId": "OrderGetOrderHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "getOrder endpoint (Requires authentication)",
+      "namespace": "order",
+      "methodName": "get_order",
+      "httpMethod": "GET",
+      "httpPath": "/api/orders/{id}",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "Order object"
+      }
+    },
+    {
+      "name": "order.status.transition",
+      "operationId": "OrderStatusTransitionHandler",
+      "title": "Order status: transition",
+      "mcp": {
+        "hidden": false,
+        "name": "Order status: transition",
+        "handle": "order_status_transition",
+        "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "order.status.transition",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+      "namespace": "order",
+      "methodName": "status.transition",
+      "httpMethod": "POST",
+      "httpPath": "/api/order/{id}/status/transition",
+      "requiresAuth": true,
+      "requiredPermissions": ["orders.write"],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:f1bdaa3b33dc62022166a0d06291a16a7cc7e3611fe15aa607b2dac2199c8f9b",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "to": {"description":"A OrderStatusState value","enum":["draft","paid","shipped"],"type":"string"}
+        },
+        "required": ["id", "to"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "OrderStatusTransitionResult object"
+      }
+    },
+    {
+      "name": "shipment.paymentStatus.transition",
+      "operationId": "ShipmentPaymentStatusTransitionHandler",
+      "title": "Shipment payment status: transition",
+      "mcp": {
+        "hidden": false,
+        "name": "Shipment payment status: transition",
+        "handle": "shipment_payment_status_transition",
+        "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "shipment.payment-status.transition",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+      "namespace": "shipment",
+      "methodName": "payment_status.transition",
+      "httpMethod": "POST",
+      "httpPath": "/api/shipment/{id}/payment-status/transition",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:012214fc1ff58eefa2e573e2d0c5f4405116b690a96219eb6afa7dc58e4d3116",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "to": {"description":"A ShipmentPaymentStatusState value","enum":["unpaid","paid","refunded"],"type":"string"}
+        },
+        "required": ["id", "to"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "ShipmentPaymentStatusTransitionResult object"
+      }
+    },
+    {
+      "name": "shipment.status.transition",
+      "operationId": "ShipmentStatusTransitionHandler",
+      "title": "Shipment status: transition",
+      "mcp": {
+        "hidden": false,
+        "name": "Shipment status: transition",
+        "handle": "shipment_status_transition",
+        "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "shipment.status.transition",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+      "namespace": "shipment",
+      "methodName": "status.transition",
+      "httpMethod": "POST",
+      "httpPath": "/api/shipment/{id}/status/transition",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:8d57b465cd848f24e773fd391f72ee7606615da08133eaf1e53482529ba9aeda",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "to": {"description":"A ShipmentStatusState value","enum":["pending","packed","sent"],"type":"string"}
+        },
+        "required": ["id", "to"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "ShipmentStatusTransitionResult object"
+      }
+    }
+  ]
+}

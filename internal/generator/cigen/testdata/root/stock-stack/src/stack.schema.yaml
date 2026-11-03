@@ -1,0 +1,13 @@
+kind: Stack
+types:
+  Stock:
+    name: Stock
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: stock-app-api, kind: API }
+  Dev:
+    name: Dev
+    role: EmbeddedStruct
+    environment:
+      target: local

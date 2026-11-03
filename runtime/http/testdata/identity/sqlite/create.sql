@@ -1,6 +1,6 @@
 -- Generated SQLite DDL for schema: fixture-user-model-db
 -- This file is auto-generated. Do not edit manually.
--- It is the migration plan from an empty database to model 26e7befbfde24d10c968ea59d22e632658d21fc394ced423809794992132aeb6.
+-- It is the migration plan from an empty database to model 49b7866e0ba67c03f26f6a4711ebd6e175438a4e9720871194d49e33a683ab36.
 
 CREATE TABLE "role" (
   "id" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,
@@ -38,6 +38,7 @@ CREATE TABLE "user_credential" (
   "password_hash" TEXT NOT NULL,
   "password_changed_at" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
   "disabled_at" TEXT,
+  "pending_at" TEXT,
   PRIMARY KEY ("id"),
   FOREIGN KEY ("user_id") REFERENCES "user" ("id") ON DELETE CASCADE
 );

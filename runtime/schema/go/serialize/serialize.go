@@ -145,7 +145,9 @@ func (s *Serializer) walkTypeDef(td *ir.TypeDef, data map[string]any, errs Valid
 		out[key] = s.walkField(field, value, errs, key)
 	}
 
-	if s.strict {
+	// A type that is @allowUnknownFields accepts the keys it does not
+	// declare, in strict mode too, and out holds only its own (D87).
+	if s.strict && !td.AllowUnknownFields {
 		for k := range data {
 			if _, ok := known[k]; ok {
 				continue

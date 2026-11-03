@@ -42,6 +42,8 @@ export interface IdentityDescriptor {
       readonly passwordHash: string;
       readonly passwordChangedAt: string;
       readonly disabledAt: string;
+      /** Set while a user waits for an administrator's approval (D81). */
+      readonly pendingAt: string;
     };
   };
   /** Absent when the schema has no UserRole table, and roleGrant with it. */
@@ -74,7 +76,7 @@ const columns = (...names: string[]): Shape => Object.fromEntries(names.map(name
 const SHAPE: Record<string, Shape> = {
   user: { type: 'name', table: 'name', columns: columns('key', 'login', 'name'), keyScalar: 'name', loginScalar: 'name', nameScalar: 'name' },
   session: { table: 'name', columns: columns('id', 'user', 'tokenHash', 'createdAt', 'expiresAt', 'lastSeenAt', 'revokedAt') },
-  credential: { table: 'name', columns: columns('id', 'user', 'passwordHash', 'passwordChangedAt', 'disabledAt') },
+  credential: { table: 'name', columns: columns('id', 'user', 'passwordHash', 'passwordChangedAt', 'disabledAt', 'pendingAt') },
   role: { type: 'name', table: 'name', columns: columns('key', 'name', 'permissions'), keyScalar: 'name' },
   roleGrant: { table: 'name', columns: columns('id', 'user', 'role', 'grantedAt') },
 };

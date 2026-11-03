@@ -18,7 +18,7 @@ operationSets:
         typeRef: { name: Quote }
         required: true
         httpMethod: GET
-        restPath: quotes/:sku
+        restPath: "quotes/{sku}"
         arguments:
           - name: sku
             typeRef: { name: string }

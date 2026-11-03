@@ -47,7 +47,7 @@ var templatesFS embed.FS
 // GoVersion is the go directive of the modules this package writes and the
 // Go image the Dockerfile builds in: tools.env's GO_VERSION, which every
 // go.mod in the repository and every generated one states.
-const GoVersion = "1.26.4"
+const GoVersion = "1.27.3"
 
 // RustVersion is the Rust image the Dockerfile builds the static archives
 // in: tools.env's RUST_VERSION, which scripts/superscalar-dep.sh and
@@ -61,6 +61,7 @@ const (
 	MainFile         = "main.go"
 	CloudSQLFile     = "cloudsql.go"
 	BucketsFile      = "buckets.go"
+	MemoryStoresFile = "memorystores.go"
 	ModFile          = "go.mod"
 	DockerFile       = "Dockerfile"
 	DockerIgnoreFile = "Dockerfile.dockerignore"
@@ -87,6 +88,12 @@ const (
 	storageVersion   = "v1.69.0"
 	googleAPIModule  = "google.golang.org/api"
 	googleAPIVersion = "v0.288.0"
+)
+
+// The Redis client memorystores.go imports (D75).
+const (
+	redisModule  = "github.com/redis/go-redis/v9"
+	redisVersion = "v9.23.0"
 )
 
 // ZeroVersion is the version a go.mod requires a module at that a replace
@@ -206,9 +213,20 @@ type Input struct {
 	// archive of the crate's ffi member in the core's place.
 	EngineProject *EngineProject
 
+	// RulesGo is the directory of the rules module (D103), when a database
+	// the server connects to has a table whose fields are behaviors, whose
+	// ORM requires it: it links the behaviors' core's static archive, which
+	// a checkout's Dockerfile builds from the engine's Cargo workspace, the
+	// rules-wasm crate's staticlib, and a release's archives hold.
+	RulesGo string
+
 	// opensEngine is true when the entrypoint opens an engine (D58), whose
 	// archive its image must link.
 	opensEngine bool
+	// linksRules is true when an API's Deps holds the ORM of a database
+	// whose tables' fields are behaviors (D103), whose binary links the
+	// behaviors' core's archive.
+	linksRules bool
 	// Job, when set, plans the entrypoint of a job of the one API in APIs
 	// rather than a server's (D52): Server is then the job's deployable.
 	Job *JobInput
@@ -238,6 +256,23 @@ type WorkerInput struct {
 	// GraceSeconds is how long the worker lets its running handlers finish
 	// once it is told to stop.
 	GraceSeconds int
+}
+
+// DeriverInput is the deriver a deriver's entrypoint runs (D74).
+type DeriverInput struct {
+	// Name is the deriver's @deriver class.
+	Name string
+}
+
+// AppInput is the app an app's entrypoint runs (D78).
+type AppInput struct {
+	// Name is the app's @app class.
+	Name string
+
+	// Implementation is the app's crate, the program the project writes
+	// at the naming file's [implementation_paths] rust_app template
+	// (ReadRustApp).
+	Implementation RustImplementation
 }
 
 // ServerDir is where the entrypoint of server in stack is written; a job's
@@ -311,6 +346,12 @@ type Server struct {
 	// the server does not link it (D54).
 	Buckets []*Bucket
 
+	// MemoryStores are the memory stores the entrypoint opens once, for
+	// every API that lists it. With one, memorystores.go opens each on
+	// Redis, or disabled, and go.mod requires go-redis; with none the
+	// entrypoint does not link it (D75).
+	MemoryStores []*MemoryStore
+
 	// CloudSQL are the databases, by service and sorted, that some
 	// environment places on Cloud SQL. When there is one, cloudsql.go
 	// connects them through the Cloud SQL connector, which go.mod
@@ -373,6 +414,12 @@ type Worker struct {
 	Database     *Database
 	Concurrency  int
 	GraceSeconds int
+
+	// Behavior is set for a @behaviorWorker (D103), whose handler the
+	// API's generator writes: its main runs the table's behavior queues
+	// and builds no Deps or Workers. Method is empty then. Nil for an
+	// ordinary worker.
+	Behavior *apigen.BehaviorWorkerInfo
 }
 
 // Background reports whether the entrypoint is a job's, a worker's or an
@@ -380,6 +427,19 @@ type Worker struct {
 // on no port, verifies no end user or caller, and decrypts no payload.
 func (s *Server) Background() bool {
 	return s.Job != nil || s.Worker != nil || s.Runner != nil
+}
+
+// BehaviorWorker reports whether the entrypoint is a behavior worker's
+// (D103): it opens the API's database and its ORM, and runs the queues of
+// the worker's generated handler, building no Deps and no implementation.
+func (s *Server) BehaviorWorker() bool {
+	return s.Worker != nil && s.Worker.Behavior != nil
+}
+
+// QueuesFunc is the function of the API package that returns a behavior
+// worker's queues (D103), as apigen writes it.
+func (w *Worker) QueuesFunc() string {
+	return apigen.WorkerInfo{Name: w.Name, Behavior: w.Behavior}.QueuesFunc()
 }
 
 // Require is a go.mod require line.
@@ -416,13 +476,16 @@ type API struct {
 	// service, built over its database's identity store, in place of an
 	// auth middleware; ManualRoutes when it takes the handlers of its
 	// @manualRouteRegistration operations, which the implementation's
-	// NewManualRoutes builds from Deps (D51).
+	// NewManualRoutes builds from Deps (D51); Behaviors when it serves a
+	// table's behavior operations, which run through the ORM of its
+	// database, so its Config takes the database too (D103).
 	Config       bool
 	Public       bool
 	Encrypted    bool
 	ServiceAuth  bool
 	Identity     bool
 	ManualRoutes bool
+	Behaviors    bool
 
 	// CORS is true when a site of the stack calls the API, whose server
 	// then answers CORS for the origins its CORS field lists, with
@@ -438,6 +501,11 @@ type API struct {
 
 	// Buckets are Deps' buckets (D54).
 	Buckets []BucketUse
+
+	// MemoryStores are Deps' memory stores, and RateLimitStore the one the
+	// API's @rateLimit routes count in, its config's rateLimitStore (D75).
+	MemoryStores   []MemoryStoreUse
+	RateLimitStore *MemoryStore
 
 	// Engine is the engine Deps holds, of the API's engine database (D58),
 	// nil without one; MountsEngine is true for the API whose router
@@ -471,6 +539,25 @@ type Bucket struct {
 	From  string
 }
 
+// MemoryStoreUse is a memory store in an API's Deps.
+type MemoryStoreUse struct {
+	Field string
+	Store *MemoryStore
+}
+
+// MemoryStore is a memory store the entrypoint opens once, for every API
+// that lists it (D75).
+type MemoryStore struct {
+	Service string
+	Var     string
+
+	// Field is the derived config field the store's connection is read
+	// from, and From the expression that reads it from the first listing
+	// API's config.
+	Field string
+	From  string
+}
+
 // Database is a database the server connects to once, for every API on it.
 type Database struct {
 	Service string
@@ -495,6 +582,12 @@ type Database struct {
 	// From the expression that reads it from the first API's config.
 	Field string
 	From  string
+
+	// FieldKeys is the expression of the first API's config that holds the
+	// keys of the database's Encrypted<T> fields, which the ORM opens with
+	// (D85): every API on the database holds the one secret. Empty for a
+	// database without one.
+	FieldKeys string
 }
 
 // Client is an SDK client of an API called, built once for every API
@@ -539,10 +632,21 @@ type Docker struct {
 	// archives (D58).
 	Engine *engineDocker
 
+	// Rules is where the rules stage builds the behaviors' core's archive
+	// from, nil when no database the entrypoint connects to has a table
+	// whose fields are behaviors, or it downloads the release's archives
+	// (D103).
+	Rules *rulesDocker
+
 	// Archives, when set, are the static archives of the release the
 	// build stage downloads, in place of the stages that build them from
 	// checkouts.
 	Archives *Archives
+
+	// LinksRules is true when the binary links the behaviors' core's
+	// archive (D103): the rules stage builds it, or the release's archives
+	// hold it.
+	LinksRules bool
 
 	// Include are the paths the build context holds.
 	Include []string
@@ -590,6 +694,8 @@ var reserved = []string{
 	"engineSetup", "deployEngine", "startRunner", "engineTimeout", "cloudSQLEngineURL", "cloudSQLProxy", "cloudSQLDialerOf",
 	"runner", "runtimemiddleware", "identity", "serviceauth", "streams", "filepath", "slog",
 	"openedEngine", "cloudSQLEngineSocket", "keywordValue", "apperror", "principal", "stop",
+	"openMemoryStore", "openRedisStore", "redisStore", "redisOptions", "memoryStoreRetryBackoff", "installRedisLog",
+	"isConnectionError", "redis", "maintnotifications", "memorystore", "tls", "strconv",
 }
 
 // names hands out identifiers no other declaration of main.go takes.
@@ -682,7 +788,7 @@ func Plan(in Input) (*Server, error) {
 			grace = ir.DefaultWorkerGraceSeconds
 		}
 		s.Kind, s.Binary = "worker", "worker"
-		s.Worker = &Worker{Name: o.Workers[i].Name, Method: o.Workers[i].Method, Queue: o.Workers[i].Queue, Concurrency: o.Workers[i].Concurrency, GraceSeconds: grace}
+		s.Worker = &Worker{Name: o.Workers[i].Name, Method: o.Workers[i].Method, Queue: o.Workers[i].Queue, Concurrency: o.Workers[i].Concurrency, GraceSeconds: grace, Behavior: o.Workers[i].Behavior}
 	case len(in.APIs) == 0:
 		return nil, fmt.Errorf("stack %s: server %s serves no API", in.Stack, in.Server)
 	default:
@@ -717,6 +823,7 @@ func Plan(in Input) (*Server, error) {
 			apis[i].ServiceAuth = o.HasServiceCallers
 			apis[i].Identity = o.Auth.Identity
 			apis[i].ManualRoutes = o.HasManualRoutes()
+			apis[i].Behaviors = o.HasBehaviorEndpoints()
 			if a.CORS {
 				apis[i].CORS = true
 				apis[i].CORSMethods = endpointMethods(o)
@@ -726,13 +833,14 @@ func Plan(in Input) (*Server, error) {
 	databases := map[string]*Database{}
 	clients := map[string]*Client{}
 	buckets := map[string]*Bucket{}
+	stores := map[string]*MemoryStore{}
 	for i, a := range in.APIs {
 		o, api := a.Output, apis[i]
 		derived := map[string]string{}
 		if o.EnvConfig != nil {
 			for _, f := range o.EnvConfig.Derived {
 				derived[string(f.Kind)+" "+f.Service] = f.GoName
-				if f.Kind == ir.EdgeSQL || f.Kind == ir.EdgeBucket {
+				if f.Kind == ir.EdgeSQL || f.Kind == ir.EdgeBucket || f.Kind == ir.EdgeMemoryStore {
 					derived[string(f.Kind)+" field "+f.Service] = f.Key
 				}
 			}
@@ -756,6 +864,9 @@ func Plan(in Input) (*Server, error) {
 					Field:   derived[string(ir.EdgeSQL)+" field "+db],
 					From:    api.Var + "Config." + goName,
 				}
+				if keys := o.Deps.FieldKeys; keys != "" {
+					d.FieldKeys = api.Var + "Config." + keys
+				}
 				databases[db] = d
 				s.Databases = append(s.Databases, d)
 				if slices.Contains(in.CloudSQL, db) {
@@ -763,6 +874,14 @@ func Plan(in Input) (*Server, error) {
 				}
 			}
 			api.Database = d
+		}
+		if api.Behaviors && api.Database == nil {
+			return nil, fmt.Errorf("stack %s: server %s serves %s, whose behavior operations run through the ORM of its database (D103), and it has no database", in.Stack, in.Server, o.SchemaName)
+		}
+		if api.Behaviors {
+			if err := checkBehaviorCallers(in, o); err != nil {
+				return nil, err
+			}
 		}
 		if api.Identity {
 			d := api.Database
@@ -774,6 +893,11 @@ func Plan(in Input) (*Server, error) {
 				d.Types = taken.take(packageName(d.Service) + "types")
 				d.TypesModule = in.Naming.OrDefault().GoTypesModule(d.Service)
 			}
+		}
+		if s.BehaviorWorker() {
+			// A behavior worker builds no Deps: it opens the database alone,
+			// whose ORM its handler runs on (D103).
+			continue
 		}
 		for _, call := range o.Deps.Calls {
 			c := clients[call.Service]
@@ -814,6 +938,27 @@ func Plan(in Input) (*Server, error) {
 			}
 			api.Buckets = append(api.Buckets, BucketUse{Field: b.Field, Bucket: h})
 		}
+		for _, m := range o.Deps.MemoryStores {
+			h := stores[m.Service]
+			if h == nil {
+				goName, ok := derived[string(ir.EdgeMemoryStore)+" "+m.Service]
+				if !ok || !api.Config {
+					return nil, fmt.Errorf("stack %s: %s %s serves %s, whose config has no field for memory store %s, which it lists", in.Stack, s.Kind, in.Server, o.SchemaName, m.Service)
+				}
+				h = &MemoryStore{
+					Service: m.Service,
+					Var:     taken.take(varStem(m.Service) + "Store"),
+					Field:   derived[string(ir.EdgeMemoryStore)+" field "+m.Service],
+					From:    api.Var + "Config." + goName,
+				}
+				stores[m.Service] = h
+				s.MemoryStores = append(s.MemoryStores, h)
+			}
+			api.MemoryStores = append(api.MemoryStores, MemoryStoreUse{Field: m.Field, Store: h})
+			if m.Service == o.Deps.RateLimitStore && !s.Background() {
+				api.RateLimitStore = h
+			}
+		}
 	}
 	if err := s.planEngines(in, apis, taken); err != nil {
 		return nil, err
@@ -832,6 +977,7 @@ func Plan(in Input) (*Server, error) {
 		return nil, err
 	}
 	in.opensEngine = len(s.Engines) > 0
+	in.linksRules = slices.ContainsFunc(in.APIs, func(a APIInput) bool { return a.Output.Deps.Rules })
 	if s.EngineLink, err = engineLink(in.EngineProject, dir, projectengine.FFIDir); err != nil {
 		return nil, err
 	}
@@ -880,6 +1026,9 @@ func (s *Server) planModule(in Input, dir string) error {
 	}
 	if len(s.Buckets) > 0 {
 		direct = append(direct, Require{storageModule, storageVersion}, Require{googleAPIModule, googleAPIVersion})
+	}
+	if len(s.MemoryStores) > 0 {
+		direct = append(direct, Require{redisModule, redisVersion})
 	}
 	seen := map[string]bool{}
 	for _, r := range direct {
@@ -952,7 +1101,7 @@ func planDocker(in Input, dir string) (*Docker, string, error) {
 		}
 		return filepath.ToSlash(r), true
 	}
-	d := &Docker{}
+	d := &Docker{LinksRules: in.linksRules}
 	var ok bool
 	if d.Context, ok = rel(dir); !ok {
 		return nil, fmt.Sprintf("the output root holding %s lies outside the repository root %s, the build context", dir, root), nil
@@ -1000,6 +1149,18 @@ func planDocker(in Input, dir string) (*Docker, string, error) {
 			include = append(include, engine.Project)
 			include = append(include, engine.ProjectCrates...)
 		}
+	}
+	if in.linksRules {
+		if in.RulesGo == "" {
+			return nil, "a database the entrypoint connects to has a table whose fields are behaviors, whose ORM links the behaviors' core (D103), and the naming file's [paths] rules_go, the rules module, whose engine workspace the image builds the core's archive from, is unset while [paths] scalar_go names a checkout to build superscalar's from; set rules_go to the same checkout's runtime/rules/go", nil
+		}
+		rules, why := planRulesDocker(in.RulesGo, root, rel)
+		if rules == nil {
+			return nil, why, nil
+		}
+		d.Rules = rules
+		include = append(include, rules.Go, rules.Workspace)
+		include = append(include, rules.Crates...)
 	}
 	return finish(d, in, root, include, rel)
 }
@@ -1080,7 +1241,8 @@ func checkRoutes(in Input) error {
 
 // Write writes the entrypoint module into dir: main.go, go.mod,
 // cloudsql.go when some environment places a database of the server on
-// Cloud SQL, buckets.go when its APIs list a bucket (D54), and the
+// Cloud SQL, buckets.go when its APIs list a bucket (D54), memorystores.go
+// when they list a memory store (D75), and the
 // Dockerfile with its ignore file when s.Docker is planned.
 //
 // A job's module holds the same files but serviceauth.go and identity.go,
@@ -1109,6 +1271,9 @@ func Write(s *Server, dir string) error {
 	}
 	if len(s.Buckets) > 0 {
 		files = append(files, struct{ template, name string }{"buckets.go.tmpl", BucketsFile})
+	}
+	if len(s.MemoryStores) > 0 {
+		files = append(files, struct{ template, name string }{"memorystores.go.tmpl", MemoryStoresFile})
 	}
 	if s.Docker != nil {
 		files = append(files, struct{ template, name string }{"Dockerfile.tmpl", DockerFile}, struct{ template, name string }{"dockerignore.tmpl", DockerIgnoreFile})

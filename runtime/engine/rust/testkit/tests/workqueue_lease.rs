@@ -469,25 +469,27 @@ fn while_the_lease_is_active_another_principals_writes_are_refused_and_the_holde
         );
         assert_eq!(veto(jobs.delete(&other(), "j1", None)).1, "delete");
         assert_eq!(
-            veto(w.invoke(
-                &other(),
-                "comment",
-                json!({"body": "Taking over."}),
-                "j1",
-                None
-            ))
-            .1,
-            "comment"
-        );
-        assert_eq!(
             veto(w.invoke(&other(), "transition", json!({"to": "running"}), "j1", None)).1,
             "transition"
         );
-        // A read-only operation is no change, and Lease's own operations
-        // check their callers themselves.
+        // An operation beside the instance asks Lease nothing (D77): another
+        // principal posts under the lease. A read-only operation is no
+        // change, and Lease's own operations check their callers
+        // themselves.
         assert_eq!(
-            w.call(&other(), "listComments").unwrap(),
-            json!({"items": [], "next": null})
+            w.invoke(
+                &other(),
+                "post",
+                json!({"body": "Taking over?"}),
+                "j1",
+                None
+            )
+            .unwrap()["id"],
+            1
+        );
+        assert_eq!(
+            w.call(&other(), "listMessages").unwrap()["items"][0]["author"],
+            "otto"
         );
         assert_eq!(
             w.call(&other(), "expire").unwrap(),
@@ -496,14 +498,8 @@ fn while_the_lease_is_active_another_principals_writes_are_refused_and_the_holde
 
         jobs.update(&worker(), "j1", json!({"title": "Build the site"}), None)
             .unwrap();
-        w.invoke(
-            &worker(),
-            "comment",
-            json!({"body": "Started."}),
-            "j1",
-            None,
-        )
-        .unwrap();
+        w.invoke(&worker(), "post", json!({"body": "Started."}), "j1", None)
+            .unwrap();
         w.invoke(
             &worker(),
             "transition",
@@ -523,22 +519,18 @@ fn an_exempt_operation_and_an_override_pass_while_another_holds_the_lease() {
     for target in targets("lease_guard_exempt") {
         let w = world(
             &target,
-            json!({"exempt": ["Comments.comment"], "overridePermission": "jobs.override"}),
+            json!({"exempt": ["Workflow.transition"], "overridePermission": "jobs.override"}),
         );
         w.call(&worker(), "acquire").unwrap();
+        w.invoke(&other(), "transition", json!({"to": "running"}), "j1", None)
+            .unwrap();
+        assert_eq!(w.status_of("j1"), "running");
         assert_eq!(
-            w.invoke(
-                &other(),
-                "comment",
-                json!({"body": "Is it done yet?"}),
-                "j1",
-                None
+            veto(
+                w.jobs()
+                    .update(&other(), "j1", json!({"title": "Mine"}), None)
             )
-            .unwrap()["id"],
-            1
-        );
-        assert_eq!(
-            veto(w.invoke(&other(), "transition", json!({"to": "running"}), "j1", None)).0,
+            .0,
             "Lease"
         );
         w.jobs()
@@ -549,16 +541,7 @@ fn an_exempt_operation_and_an_override_pass_while_another_holds_the_lease() {
                 None,
             )
             .unwrap();
-        w.invoke(
-            &operator(),
-            "transition",
-            json!({"to": "running"}),
-            "j1",
-            None,
-        )
-        .unwrap();
         assert_eq!(w.jobs().read("j1").data["title"], "Renamed by an operator");
-        assert_eq!(w.status_of("j1"), "running");
     }
 }
 
@@ -578,7 +561,13 @@ fn an_expired_holder_no_longer_holds_the_instance_and_others_writes_go_through()
             why
         );
         assert_eq!(
-            reason(w.invoke(&worker(), "comment", json!({"body": "Late."}), "j1", None)),
+            reason(w.invoke(
+                &worker(),
+                "transition",
+                json!({"to": "running"}),
+                "j1",
+                None
+            )),
             why
         );
         assert_eq!(
@@ -1371,15 +1360,35 @@ fn a_write_that_presents_a_token_other_than_the_current_one_is_refused() {
             )),
             Some("token_stale".to_owned())
         );
+        // A post is beside the instance: Lease's guard, which reads the
+        // token, is not asked, so a token presented for it would fence
+        // nothing and is refused; a post that presents none is the
+        // holder's.
+        let refused = refusal(w.invoke(
+            &worker(),
+            "post",
+            json!({"body": "Done, I think."}),
+            "j1",
+            Some(1),
+        ));
+        assert_eq!(refused.code(), EngineErrorCode::InvalidArgument);
         assert_eq!(
-            veto_code(w.invoke(
+            issues_of(&refused),
+            [issue(
+                "/Lease",
+                "operation post of behavior Comments is beside the instance (D77) and asks only its own behavior's guard, so it takes no precondition for behavior Lease"
+            )]
+        );
+        assert_eq!(
+            w.invoke(
                 &worker(),
-                "comment",
+                "post",
                 json!({"body": "Done, I think."}),
                 "j1",
-                Some(1)
-            )),
-            Some("token_stale".to_owned())
+                None
+            )
+            .unwrap()["id"],
+            1
         );
         assert_eq!(
             veto_code(jobs.delete(&worker(), "j1", Some(1))),
@@ -1407,9 +1416,11 @@ fn a_write_that_presents_a_token_other_than_the_current_one_is_refused() {
             .unwrap();
         // A read-only operation presents nothing that can be stale.
         assert_eq!(
-            w.invoke(&worker(), "listComments", json!({}), "j1", Some(1))
-                .unwrap(),
-            json!({"items": [], "next": null})
+            w.invoke(&worker(), "listMessages", json!({}), "j1", Some(1))
+                .unwrap()["items"]
+                .as_array()
+                .map(Vec::len),
+            Some(1)
         );
         // The heartbeat, the acknowledgement and the release of the old
         // lease are refused the same way.
@@ -1456,7 +1467,7 @@ fn with_require_token_a_write_under_an_active_lease_presents_the_current_token()
     for target in targets("lease_require_token") {
         let (w, token) = retaken(
             &target,
-            json!({"requireToken": true, "exempt": ["Comments.comment"], "overridePermission": "jobs.override"}),
+            json!({"requireToken": true, "overridePermission": "jobs.override"}),
         );
         let jobs = w.jobs();
         let (_, _, why, code, _) =
@@ -1484,18 +1495,20 @@ fn with_require_token_a_write_under_an_active_lease_presents_the_current_token()
         );
         jobs.update(&worker(), "j1", json!({"title": "Fenced"}), Some(token))
             .unwrap();
-        w.invoke(&other(), "comment", json!({"body": "Exempt."}), "j1", None)
+        // A post is beside the instance, so neither another principal nor
+        // the holder presents the token for one.
+        w.invoke(&other(), "post", json!({"body": "Beside."}), "j1", None)
             .unwrap();
         w.invoke(
             &worker(),
-            "comment",
-            json!({"body": "Exempt for the holder too."}),
+            "post",
+            json!({"body": "Beside, for the holder too."}),
             "j1",
             None,
         )
         .unwrap();
         assert_eq!(
-            w.call(&worker(), "listComments").unwrap()["items"]
+            w.call(&worker(), "listMessages").unwrap()["items"]
                 .as_array()
                 .unwrap()
                 .len(),
@@ -1549,7 +1562,8 @@ fn with_require_token_the_runners_sweep_still_expires_a_lapsed_lease() {
         )
         .unwrap();
         w.advance(60000);
-        assert_eq!(run_due(&w.engine).scheduled, 1);
+        // Lease's sweep, and Comments' interrupt, which the type composes too.
+        assert_eq!(run_due(&w.engine).scheduled, 2);
         let lease = w.lease_of("j1");
         assert_eq!(
             (
@@ -1915,7 +1929,8 @@ fn every_sweep_ms_the_runner_expires_the_leases_past_their_expiry_time_or_longes
         w.advance(30000);
         w.invoke(&worker(), "heartbeat", json!({}), "j2", Some(1))
             .unwrap();
-        assert_eq!(run_due(&w.engine).scheduled, 1);
+        // Lease's sweep, and Comments' interrupt, which the type composes too.
+        assert_eq!(run_due(&w.engine).scheduled, 2);
         let state = |w: &World, id: &str| {
             let lease = w.lease_of(id);
             (
@@ -1933,7 +1948,7 @@ fn every_sweep_ms_the_runner_expires_the_leases_past_their_expiry_time_or_longes
             ]
         );
         w.advance(30000);
-        assert_eq!(run_due(&w.engine).scheduled, 1);
+        assert_eq!(run_due(&w.engine).scheduled, 2);
         assert_eq!(
             ["j1", "j2", "j3"].map(|id| state(&w, id)),
             [
@@ -2417,7 +2432,7 @@ fn parse_config_holds_the_config_to_the_type() {
             &engine,
             &jobs_document(json!([
                 {"name": "Workflow", "config": job_flow()},
-                {"name": "Lease", "config": with(requeue(), json!({"ttlMs": 10000, "heartbeatMs": 5000, "exempt": ["Comments.comment"], "maxHoldField": "timeLimitMs"}))},
+                {"name": "Lease", "config": with(requeue(), json!({"ttlMs": 10000, "heartbeatMs": 5000, "exempt": ["Workflow.transition"], "maxHoldField": "timeLimitMs"}))},
                 {"name": "Comments"}
             ])),
         );

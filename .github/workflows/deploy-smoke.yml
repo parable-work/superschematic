@@ -1,0 +1,164 @@
+name: deploy-smoke
+
+# The live deploy smoke (D97): examples/deploy-smoke's smoke-stack deployed
+# to Google Cloud or to Cloudflare from this checkout, checked through the
+# site's origin by examples/deploy-smoke/scripts/smoke.sh, and destroyed.
+# It proves what D91 and D92 prove offline only: on gcp, the load balancer
+# passing Host through a serverless network endpoint group, a fullPathMatch
+# rule's pathPrefixRewrite and INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER; on
+# Cloudflare, runWorkerFirst, a service binding's requests, Hyperdrive and
+# its TLS to a real origin, and the Cron drainer's and a sign-in's time.
+#
+# Manual only: a deploy costs money and is outward facing, so nothing but
+# workflow_dispatch starts it, from main, by someone with write access.
+# CONTRIBUTING.md, "A deploy to the cloud", has the one-time bootstrap,
+# and the variables and secrets each GitHub environment holds:
+#
+#   Gcp         vars  SMOKE_GCP_PROJECT, SMOKE_GCP_REGION,
+#                     SMOKE_GCP_WORKLOAD_IDENTITY_PROVIDER, SMOKE_GCP_SERVICE_ACCOUNT
+#               secrets SMOKE_ADMIN_PASSWORD
+#   Cloudflare  vars  SMOKE_CLOUDFLARE_ACCOUNT_ID, SMOKE_CLOUDFLARE_WORKERS_SUBDOMAIN,
+#                     SMOKE_CLOUDFLARE_SECRETS_STORE_ID, SMOKE_HYPERDRIVE_ID
+#               secrets CLOUDFLARE_API_TOKEN, PULUMI_CONFIG_PASSPHRASE,
+#                     HYPERDRIVE_ORIGIN_SMOKE_DB, SMOKE_ADMIN_PASSWORD
+#
+# The job runs in the GitHub environment named as the stack's environment,
+# Gcp or Cloudflare: bootstrap's Workload Identity Federation admits the
+# deployer account to a manual run of main in that environment alone (D69).
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: The target to deploy, check and destroy
+        type: choice
+        options: [gcp, cloudflare]
+        required: true
+      keep:
+        description: Leave the deployment up; a run of scripts/smoke.sh <environment> --destroy removes it
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# One smoke of a target at a time: two would deploy the same run.
+concurrency:
+  group: deploy-smoke-${{ inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: smoke ${{ inputs.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: ${{ inputs.target == 'gcp' && 'Gcp' || 'Cloudflare' }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load pinned tool versions
+        # Emit only real KEY=VALUE pins; $GITHUB_ENV rejects '#' comments/blanks.
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Cache the superscalar checkout
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            third_party/superscalar
+            !third_party/superscalar/target
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
+
+      - name: Install Rust toolchain
+        # Builds superscalar's archive the CLI links, and its WebAssembly
+        # core for the browser and workerd builds a site's bundle and a
+        # Worker's take (D55, amended; D64), with tools.env's toolchain.
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown
+          rustup default "$RUST_VERSION"
+
+      - name: Cache wasm-pack
+        id: wasm-pack
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/wasm-pack
+          key: wasm-pack-${{ runner.os }}-${{ runner.arch }}-${{ env.WASM_PACK_VERSION }}
+
+      - name: Install wasm-pack
+        if: steps.wasm-pack.outputs.cache-hit != 'true'
+        run: cargo install wasm-pack --version "$WASM_PACK_VERSION" --locked
+
+      - name: Build the superscalar dependency
+        run: scripts/superscalar-dep.sh
+
+      - name: Build the CLI
+        # bin/superschematic, which links the gcp, cloudflare and pulumi
+        # extensions, and bin/superschematic-migrate beside it.
+        run: make cli
+
+      - name: Build the HTTP runtime
+        # Every TypeScript server, job and worker of the stack links it.
+        working-directory: runtime/http/typescript
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
+      - name: Install the pulumi CLI
+        uses: pulumi/actions@8e5e406f4007fca908480587cb9893c07090f58d # v7.0.0
+        with:
+          pulumi-version: ${{ env.PULUMI_VERSION }}
+
+      - name: Sign in to Google Cloud as the stack's deployer
+        if: inputs.target == 'gcp'
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.SMOKE_GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.SMOKE_GCP_SERVICE_ACCOUNT }}
+
+      - name: Deploy, check and destroy Gcp
+        if: inputs.target == 'gcp'
+        env:
+          SMOKE_GCP_PROJECT: ${{ vars.SMOKE_GCP_PROJECT }}
+          SMOKE_GCP_REGION: ${{ vars.SMOKE_GCP_REGION }}
+          SMOKE_ADMIN_PASSWORD: ${{ secrets.SMOKE_ADMIN_PASSWORD }}
+          KEEP: ${{ inputs.keep }}
+        run: |
+          flags=()
+          if [ "$KEEP" = true ]; then flags+=(--keep); fi
+          examples/deploy-smoke/scripts/smoke.sh Gcp "${flags[@]}"
+
+      - name: Deploy, check and destroy Cloudflare
+        if: inputs.target == 'cloudflare'
+        env:
+          SMOKE_CLOUDFLARE_ACCOUNT_ID: ${{ vars.SMOKE_CLOUDFLARE_ACCOUNT_ID }}
+          SMOKE_CLOUDFLARE_WORKERS_SUBDOMAIN: ${{ vars.SMOKE_CLOUDFLARE_WORKERS_SUBDOMAIN }}
+          SMOKE_CLOUDFLARE_SECRETS_STORE_ID: ${{ vars.SMOKE_CLOUDFLARE_SECRETS_STORE_ID }}
+          SMOKE_HYPERDRIVE_ID: ${{ vars.SMOKE_HYPERDRIVE_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          HYPERDRIVE_ORIGIN_SMOKE_DB: ${{ secrets.HYPERDRIVE_ORIGIN_SMOKE_DB }}
+          SMOKE_ADMIN_PASSWORD: ${{ secrets.SMOKE_ADMIN_PASSWORD }}
+          KEEP: ${{ inputs.keep }}
+        run: |
+          flags=()
+          if [ "$KEEP" = true ]; then flags+=(--keep); fi
+          examples/deploy-smoke/scripts/smoke.sh Cloudflare "${flags[@]}"

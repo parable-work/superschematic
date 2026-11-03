@@ -83,6 +83,13 @@ export function validateUserCredential(value: UserCredential | null | undefined)
     }
   }
 
+  if (value.pendingAt !== null && value.pendingAt !== undefined) {
+    const [valid, fieldErrors] = validateTemporalDateTime(value.pendingAt);
+    if (!valid && fieldErrors) {
+      setFieldErrors(errors, "pendingAt", fieldErrors);
+    }
+  }
+
   return Object.keys(errors).length > 0 ? errors : true;
 }
 
@@ -105,6 +112,7 @@ const UserCredentialKnownFields = new Set<string>([
   'passwordHash',
   'passwordChangedAt',
   'disabledAt',
+  'pendingAt',
 ]);
 
 type UserCredentialTextParser = (value: string) => unknown;
@@ -206,6 +214,10 @@ export function parseUserCredentialFromJSON(input: unknown): UserCredential {
     disabledAt: obj.disabledAt != null
       ? (parseTemporalDateTimeFromLib(obj.disabledAt as string) as JSDate)
       : (obj.disabledAt as unknown as JSDate | null),
+
+    pendingAt: obj.pendingAt != null
+      ? (parseTemporalDateTimeFromLib(obj.pendingAt as string) as JSDate)
+      : (obj.pendingAt as unknown as JSDate | null),
 
   };
 }

@@ -38,7 +38,10 @@ type QueueOperatorStatements struct {
 	// Retry makes each dead message among $1 ready again: due now, with no
 	// attempts, so its retries start over, and no claim. Its last error
 	// stays until its next failure replaces it. It returns the IDs it
-	// changed. RetryAll does so to every dead message.
+	// changed. RetryAll does so to every dead message. On a queue that
+	// keeps one ready message per key (D80), a retry leaves dead a message
+	// whose key a ready message holds, and of the dead messages of one key
+	// it retries the one that died last; States says so of each it left.
 	Retry    string
 	RetryAll string
 
@@ -51,8 +54,10 @@ type QueueOperatorStatements struct {
 // PostgresQueueOperatorStatements are the operator's statements on the
 // queue whose table is table, quoted for SQL as QuoteIdentifier quotes it.
 // They read the columns every queue keeps (ir.QueueColumns), and the
-// message's as the row's other columns, so they need no list of them.
-func PostgresQueueOperatorStatements(table string) QueueOperatorStatements {
+// message's as the row's other columns, so they need no list of them. key
+// is the quoted column of the key of a queue that keeps one ready message
+// per key (D80), or "" for every other queue.
+func PostgresQueueOperatorStatements(table, key string) QueueOperatorStatements {
 	kept := make([]string, 0, len(ir.QueueColumns()))
 	for _, c := range ir.QueueColumns() {
 		kept = append(kept, "'"+c+"'")
@@ -60,7 +65,7 @@ func PostgresQueueOperatorStatements(table string) QueueOperatorStatements {
 	dead := fmt.Sprintf("q.state = '%s'", ir.QueueStateDead)
 	ids := "id = ANY($1::text[]::uuid[])"
 	retry := fmt.Sprintf("UPDATE %s SET state = '%s', attempts = 0, due_at = now(), claim_token = NULL, claim_expires_at = NULL, updated_at = now()", table, ir.QueueStateReady)
-	return QueueOperatorStatements{
+	s := QueueOperatorStatements{
 		Dead: lines(
 			"SELECT q.id::text, q.attempts::bigint, COALESCE(q.last_error, ''),",
 			`  to_char(q.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),`,
@@ -93,4 +98,31 @@ func PostgresQueueOperatorStatements(table string) QueueOperatorStatements {
 			"RETURNING id::text",
 		),
 	}
+	if key != "" {
+		// One dead message per key, the last to die, and none whose key a
+		// ready message holds.
+		free := fmt.Sprintf("NOT EXISTS (SELECT 1 FROM %[1]s AS p WHERE p.%[2]s = %[1]s.%[2]s AND p.state = '%[3]s')", table, key, ir.QueueStateReady)
+		last := func(where string) string {
+			return fmt.Sprintf("id IN (SELECT DISTINCT ON (%s) id FROM %s WHERE %s ORDER BY %s, updated_at DESC, id)", key, table, where, key)
+		}
+		s.States = lines(
+			fmt.Sprintf("SELECT q.id::text, CASE WHEN q.state = '%[1]s' AND EXISTS (SELECT 1 FROM %[2]s AS p WHERE p.%[3]s = q.%[3]s AND p.state = '%[4]s')", ir.QueueStateDead, table, key, ir.QueueStateReady),
+			fmt.Sprintf("  THEN 'dead, and a ready message holds its key' ELSE q.state END FROM %s AS q WHERE q.%s", table, ids),
+		)
+		s.Retry = lines(
+			retry,
+			fmt.Sprintf("WHERE state = '%s' AND %s", ir.QueueStateDead, ids),
+			"  AND "+free,
+			"  AND "+last(fmt.Sprintf("state = '%s' AND %s", ir.QueueStateDead, ids)),
+			"RETURNING id::text",
+		)
+		s.RetryAll = lines(
+			retry,
+			fmt.Sprintf("WHERE state = '%s'", ir.QueueStateDead),
+			"  AND "+free,
+			"  AND "+last(fmt.Sprintf("state = '%s'", ir.QueueStateDead)),
+			"RETURNING id::text",
+		)
+	}
+	return s
 }

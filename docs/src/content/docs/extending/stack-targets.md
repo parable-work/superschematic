@@ -158,6 +158,22 @@ bucket, `stack/stacktest`'s `fake.storage` to a private bucket in the
 environment's region; the core's `local.gcs` to a bucket on the
 environment's fake-gcs-server container.
 
+A memory store platform (`Kind: ir.DeployableMemoryStore`) realizes a
+MemoryStore service's Redis or Valkey server (D75). It declares no
+`Languages` and no `Dialects`. Its `NameOf` names the server's resource;
+its `AddressOf` is the store's URL, `redis://` or `rediss://`, which its
+connectors derive the field from, and may reference an output of the
+node it lowers. A member of a parameterized environment shares its
+parent's server, so `NameOf` gives it no name of its own and `Lower`
+marks the nodes `Inherited`; the member's names carry the member's name
+instead. Several stores may lower to one node, as the core's
+`local.valkey` lowers every store of an environment to its one Valkey
+container: the store's names start with its own name. A store takes its
+platform's settings, such as `gcp.memorystore`'s `nodeType` and
+`replicas`, beside the core's `enabled`, and no `env`. A store that an
+environment turns off with `enabled: false` reaches no platform at all.
+`stack/stacktest`'s `fake.memorystore` is the smallest worked example.
+
 A worker platform (`Kind: ir.DeployableWorker`) places an API's workers
 (D53). It declares `Languages` as a job platform does, and its
 `AddressOf` may return nil: nothing reaches a worker. Its `Lower` reads
@@ -239,6 +255,7 @@ at fault:
 | sql | `ir.DatabaseConnection` | `URL`, a connection string; or `CloudSQL`: `Instance`, `Database` and `User` |
 | http | `ir.ServiceEndpoint` | `URL`, the callee's base URL, and an optional `Credential`: its `Source` (`google-id-token`, `token-file` or `signed-token`), the members that source reads, and the `Headers` that carry it |
 | bucket | `ir.BucketConnection` | `Name`, the bucket's name with its provider, and an optional `Endpoint`, the base URL of an emulator that serves the provider's API in its place. No credential: the workload's own identity reaches the bucket, which the connector's grant allows |
+| memoryStore | `ir.MemoryStoreConnection` | `Store`, the MemoryStore service's name (`ctx.Edge.Service.Name`); `URL`, `redis://` or `rediss://`; `CA`, the server's CA in PEM, with `rediss://` only; `Auth`, `ir.MemoryStoreAuthIAM`, which needs `rediss://`, or `ir.MemoryStoreAuthNone`; and `Member`, the member's name in a member of a parameterized environment. No credential: with `iam` each runtime sends the workload's own access token |
 
 Each member may hold a reference. An http edge between two APIs one
 server serves runs from the server to itself, and its connector derives
@@ -247,7 +264,8 @@ cannot serve, as the gcp sql connector does for a Rust server.
 
 A connector's `From` is a server, a job or a worker platform, and its
 `To` a database platform for a sql edge, a server platform for an http
-edge and a bucket platform for a bucket edge. A job or a worker takes its
+edge, a bucket platform for a bucket edge and a memory store platform for
+a memoryStore edge, whose `From` may be a deriver platform too. A job or a worker takes its
 API's edges, so a target with a job or a worker platform registers a
 connector from it for each edge its server platform has; it may share the
 server connector's `Connect`, which sees the job or the worker as `From`,
@@ -265,7 +283,8 @@ no connector to or from another provider's platforms, and a connector
 that knows both, such as a database driver for another cloud's Postgres,
 still wins where it is registered. Two platforms of one provider that no
 connector names get none, and resolution reports `no-connector`. A sql or
-a bucket edge across providers always needs a connector of its own.
+a bucket or a memoryStore edge across providers always needs a connector
+of its own.
 
 The generic connector reaches the callee at its public address, so the
 callee's server must be exposed: resolution refuses an http edge across
@@ -295,7 +314,7 @@ for it, `stack.GenericKeyPackage` at `stack.GenericKeyProviderVersion`.
 ## A target
 
 A `TargetSpec` names a platform for each deployable kind (`server`,
-`database`, `job`, `worker` and `bucket`), the JSON Schema of an
+`database`, `job`, `worker`, `bucket` and `memoryStore`), the JSON Schema of an
 environment's values under the target's name, its default DNS platform,
 its provisioner, the schema of every resource type its platforms,
 connectors and default DNS platform emit, and its policy rules. A kind it
@@ -303,7 +322,14 @@ names no platform for is refused in its environments, so a stack whose
 APIs declare jobs or workers resolves on it only with each placed on
 another target's platform. `Unplaced` says, for such a kind, why the
 target places none and where one runs, which the refusal gives in place
-of that advice: the cloudflare target's queue workers.
+of that advice: the cloudflare target's derivers and apps. `DatabasePlatforms`
+names, per SQL dialect, the platform of a database whose DB services all
+list that dialect first, in place of the kind's: the local target's
+`local.sqlite`, and the cloudflare target's `cloudflare.hyperdrive` for
+postgres, beside D1 for sqlite (D92). A target with no
+memoryStore platform refuses a store that is on, and its refusal names
+`settings: [{ of: ShopCache, enabled: false }]`, under which the
+environment resolves.
 
 A policy rule is a name and a `Check` over the whole resolved
 environment that returns one message per violation:
@@ -393,7 +419,9 @@ amended). Its bundle and site
 publishers keep files in R2 by their digest and are `ArtifactFetcher`s,
 its `PreDestroy` empties each bucket of a parameterized member, and its
 migration runner runs `superschematic-migrate` on the deploying machine
-against each D1 database. Its state store's `Backend` hands each run, in
+against each D1 database, and against each Postgres database on
+Hyperdrive with the origin's connection string from the shell, once it
+has read the Hyperdrive config and found it names that database (D92). Its state store's `Backend` hands each run, in
 `StateBackend.Env`, the S3 credentials of the shell's token and the
 passphrase of its secrets provider, and refuses a run without either
 before the provisioner starts. Its secret store's `Get` refuses, since
@@ -417,7 +445,10 @@ until bootstrap records `projectNumber`. cloudflare's kind is
 `cloudflare-api-token`, whose `token` and `passphrase` name GitHub Actions
 secrets and whose `environment`, when set, names the GitHub environment
 that holds them; `github` writes no step for it, but the job's `env` from
-those secrets, and asks for no identity token. A renderer refuses a kind
+those secrets, and asks for no identity token. A field named
+`env.<VARIABLE>` names one more secret, which the job reads into that
+variable, as the deploy job reads a Hyperdrive origin's connection string
+into `HYPERDRIVE_ORIGIN_<DB>` (D92). A renderer refuses a kind
 it does not know, so a target with a new kind of sign-in teaches the
 renderers it is used with.
 

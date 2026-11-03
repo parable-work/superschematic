@@ -15,6 +15,7 @@ import {
   parseIdentityConfigJSON,
   sessionCookie,
   uncovered,
+  uncoveredUser,
   validPermission,
   verifyPassword,
   type Argon2Params,
@@ -67,6 +68,7 @@ const SECTIONS = [
   'permissionNames',
   'effectivePermissions',
   'grants',
+  'userWrites',
   'capabilities',
 ];
 
@@ -171,6 +173,15 @@ describe('grants', () => {
   for (const c of section<Named & { held: string[]; given: string[]; want: { allowed: boolean; uncovered: string[] } }>('grants')) {
     test(c.name, () => {
       const missing = uncovered(c.held, c.given);
+      expect({ allowed: missing.length === 0, uncovered: missing }).toEqual(c.want);
+    });
+  }
+});
+
+describe('userWrites', () => {
+  for (const c of section<Named & { held: string[]; roles: { name: string; permissions: string[] }[]; want: { allowed: boolean; uncovered: string[] } }>('userWrites')) {
+    test(c.name, () => {
+      const missing = uncoveredUser(c.held, c.roles);
       expect({ allowed: missing.length === 0, uncovered: missing }).toEqual(c.want);
     });
   }

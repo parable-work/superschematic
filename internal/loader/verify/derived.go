@@ -36,6 +36,11 @@ func checkDerivedFields(schema *ir.Schema, in Input, r *Result) {
 			continue
 		}
 		for _, field := range typ.Fields {
+			// A field an @envVars class inherits from another is reported
+			// once, at the class that declares it (D94).
+			if base := schema.Types[field.InheritedFrom]; base != nil && base.EnvVars {
+				continue
+			}
 			for _, d := range derived {
 				if ir.DerivedFieldClaims(d.name, field.Name) {
 					r.errorf("", "@envVars field %s of %s collides with %s, %s; a stack's platform sets it, so rename the setting", field.Name, typ.Name, d.name, d.from)

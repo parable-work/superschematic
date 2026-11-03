@@ -1,7 +1,7 @@
 {
   "dialect": "sqlite",
-  "from": "17bd156134f9bc031e491f427775ca4c6089cbdfb136747219a92c639979d53a",
-  "hash": "7ead59dfd2ce51a4003bbcf6b4e41858cb02380b790e6276aaa373f132dad467",
+  "from": "d9697f8b128d88e9877145068feef31d9bdfa8a6c367bd3cdbd76a76318119f0",
+  "hash": "84f61ca3706020c4a7dc3db413bcfee163ba2f72705e61b8fe3e4bb122739a71",
   "renames": [
     "product.title=product.heading"
   ],
@@ -37,7 +37,7 @@
       "transactional": true
     }
   ],
-  "to": "aad191372c6548be62ba5bd91726fde1e733e3470f8e167983e3947570876a45",
+  "to": "54be66f34c96b72ade18d4002c5303176eb3d6dc1102325d64fecdc94fdcae54",
   "toModel": null,
   "version": 1
 }

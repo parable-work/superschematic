@@ -61,6 +61,7 @@ use crate::dialect::{Dialect, Sql};
 use crate::error::{Error, Result};
 use crate::ident::{catalog_lock_key, namespace_lock_key};
 use crate::notifier::Notifier;
+use crate::signals::{Signals, MAX_SIGNAL_BYTES};
 use crate::value::{Row, RunResult, SqlValue};
 
 /// How long a statement waits for another writer's lock by default.
@@ -108,6 +109,15 @@ pub(crate) trait Backend: Send + Sync {
     fn schemas(&self) -> &[String];
     /// The Postgres channel commits notify; `None` on SQLite.
     fn channel(&self) -> Option<&str>;
+    /// The Postgres channel signals travel on (D77); `None` on SQLite.
+    fn signal_channel(&self) -> Option<&str> {
+        None
+    }
+    /// Whether a listener hands this process the signals it sends on
+    /// Postgres, so the commit need not; false on SQLite.
+    fn listens(&self) -> bool {
+        false
+    }
     /// How many times a transaction whose BEGIN found its pooled
     /// connection closed takes another: as many as the pool holds on
     /// Postgres, whose server can end an idle session; none on SQLite.
@@ -171,6 +181,8 @@ pub(crate) struct Inner {
     /// How long a migration waits for the locks it needs.
     migration_timeout: Duration,
     notifier: Arc<Notifier>,
+    /// What this process's signals are handed to (D77).
+    signals: Arc<Signals>,
     /// What runs as the database closes (the Postgres listener's stop).
     closers: Vec<Box<dyn FnOnce() + Send + Sync>>,
 }
@@ -260,6 +272,7 @@ impl Db {
         busy_timeout: Duration,
         migration_timeout: Duration,
         notifier: Arc<Notifier>,
+        signals: Arc<Signals>,
         closers: Vec<Box<dyn FnOnce() + Send + Sync>>,
     ) -> Db {
         Db {
@@ -268,6 +281,7 @@ impl Db {
                 busy_timeout,
                 migration_timeout,
                 notifier,
+                signals,
                 closers,
             }),
         }
@@ -304,6 +318,13 @@ impl Db {
     /// What wakes waiters when a transaction that notified commits.
     pub fn notifier(&self) -> &Arc<Notifier> {
         &self.inner.notifier
+    }
+
+    /// What this process's signals are handed to (D77): the signals a
+    /// transaction sends ([`Tx::signal`]) once it commits, from any
+    /// process on Postgres.
+    pub fn signals(&self) -> &Arc<Signals> {
+        &self.inner.signals
     }
 
     /// Whether this thread holds a transaction on the database: a call that
@@ -872,6 +893,36 @@ impl<'db> Tx<'db> {
         self.after_commit(move || {
             notifier.bump();
         });
+        Ok(())
+    }
+
+    /// Sends a signal's payload (D77) once the outermost transaction
+    /// commits, to the [`Signals`] sinks of this process and, on Postgres,
+    /// of every process listening to the engine's signal channel, in the
+    /// order sent; a savepoint that rolls back drops it. A read-only
+    /// transaction may send one: it writes nothing. A payload longer than
+    /// [`MAX_SIGNAL_BYTES`] is refused.
+    pub fn signal(&self, payload: &str) -> Result<()> {
+        if payload.len() > MAX_SIGNAL_BYTES {
+            return Err(Error::usage(format!(
+                "a signal's payload is at most {MAX_SIGNAL_BYTES} bytes, got {}",
+                payload.len()
+            )));
+        }
+        let backend = self.inner.backend.as_ref();
+        if let Some(channel) = backend.signal_channel() {
+            let tagged = self.inner.signals.tag(payload);
+            self.statement(
+                &Sql::from("SELECT pg_notify(?, ?)"),
+                &[SqlValue::from(channel), SqlValue::from(tagged.as_str())],
+            )?;
+            if backend.listens() {
+                return Ok(());
+            }
+        }
+        let signals = Arc::clone(&self.inner.signals);
+        let payload = payload.to_owned();
+        self.after_commit(move || signals.deliver(&payload));
         Ok(())
     }
 

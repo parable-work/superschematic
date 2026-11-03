@@ -1,0 +1,24 @@
+{
+  "dialect": "postgres",
+  "from": "c6787cdef058267033f38e38e6c4e788b8fc54fcc00776b78d8b4db345c93d96",
+  "hash": "def6fbe63611bb28847cc69ac557e4bcc04e33255ade5cf6d1cd279e9fcf65ca",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createIndex",
+      "phase": "expand",
+      "recovery": [
+        "DROP INDEX CONCURRENTLY IF EXISTS idx_product_title_trgm"
+      ],
+      "statements": [
+        "CREATE INDEX CONCURRENTLY idx_product_title_trgm ON product USING GIN (title gin_trgm_ops)"
+      ],
+      "subject": "table/product/index/idx_product_title_trgm",
+      "transactional": false
+    }
+  ],
+  "to": "e9e3a09f33613c585be22493e30589e816bf26827e36bb4f77a1e020dba31ffc",
+  "toModel": null,
+  "version": 1
+}

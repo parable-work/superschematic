@@ -30,7 +30,7 @@ mod engine;
 {{- end }}
 
 use std::process::ExitCode;
-{{- if .Buckets }}
+{{- if or .Buckets .MemoryStores }}
 use std::sync::Arc;
 {{- end }}
 use std::time::Instant;
@@ -93,6 +93,14 @@ async fn run() -> Result<(), Failure> {
 {{- range .Engines }}
     {{ .Var }}.shutdown().await;
 {{- end }}
+{{- end }}
+{{- if .MemoryStores }}
+    // Each memory store closes once the job ends.
+{{- range .MemoryStores }}
+    {{ .Var }}.close().await;
+{{- end }}
+{{- end }}
+{{- if .Closes }}
     ran
 {{- end }}
 }

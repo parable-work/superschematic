@@ -58,6 +58,12 @@ fn plain_target() -> DescribeTarget {
     operations.extend(lease_operations());
     operations.push(operation("comment", Some("Comments"), true));
     operations.push(operation("listComments", Some("Comments"), false));
+    // An operation beside the instance (D77) asks Lease's guard nothing,
+    // so its guidance names no refusal of Lease's.
+    operations.push(DescribedTypeOperation {
+        beside: true,
+        ..operation("post", Some("Comments"), true)
+    });
     DescribeTarget {
         operations,
         ..target(&["Workflow", "Lease", "Comments"], json!({}))

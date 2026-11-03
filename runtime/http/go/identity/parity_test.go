@@ -48,6 +48,7 @@ type parityFile struct {
 	PermissionNames      []permissionCase   `json:"permissionNames"`
 	EffectivePermissions []effectiveCase    `json:"effectivePermissions"`
 	Grants               []grantCase        `json:"grants"`
+	UserWrites           []userWriteCase    `json:"userWrites"`
 	Capabilities         capabilitiesTable  `json:"capabilities"`
 }
 
@@ -210,6 +211,16 @@ type grantWant struct {
 	Uncovered []string `json:"uncovered"`
 }
 
+// userWriteCase: a caller holding held may set the password of, disable or
+// enable a user holding roles when allowed; uncovered lists what held does
+// not cover of the roles' effective permissions.
+type userWriteCase struct {
+	Name  string       `json:"name"`
+	Held  []string     `json:"held"`
+	Roles []parityRole `json:"roles"`
+	Want  grantWant    `json:"want"`
+}
+
 // capabilitiesTable: for each caller, an authenticated principal holding
 // permissions, capabilities over routes answers want.
 type capabilitiesTable struct {
@@ -338,6 +349,12 @@ func TestParityVectors(t *testing.T) {
 			check(t, c.Name, grantWant{Allowed: len(uncovered) == 0, Uncovered: uncovered}, c.Want)
 		}
 	})
+	t.Run("userWrites", func(t *testing.T) {
+		for _, c := range unique(t, file.UserWrites, func(c userWriteCase) string { return c.Name }) {
+			uncovered := identity.UncoveredUser(c.Held, sessionRoles(c.Roles))
+			check(t, c.Name, grantWant{Allowed: len(uncovered) == 0, Uncovered: uncovered}, c.Want)
+		}
+	})
 	t.Run("capabilities", func(t *testing.T) {
 		for _, c := range unique(t, file.Capabilities.Callers, func(c capabilityCase) string { return c.Name }) {
 			roles := []session.Role{{Name: "caller", Permissions: c.Permissions}}
@@ -456,6 +473,7 @@ func parityCorpus(t *testing.T) parityFile {
 		PermissionNames:      permissionCorpus(t),
 		EffectivePermissions: effectiveCorpus(),
 		Grants:               grantCorpus(),
+		UserWrites:           userWriteCorpus(),
 		Capabilities:         capabilitiesCorpus(),
 	}
 }
@@ -854,6 +872,24 @@ func grantCorpus() []grantCase {
 	}
 	for i := range cases {
 		uncovered := identity.Uncovered(cases[i].Held, cases[i].Given)
+		cases[i].Want = grantWant{Allowed: len(uncovered) == 0, Uncovered: uncovered}
+	}
+	return cases
+}
+
+func userWriteCorpus() []userWriteCase {
+	cases := []userWriteCase{
+		{Name: "a user with no roles", Held: []string{"identity.users.write"}, Roles: []parityRole{}},
+		{Name: "a user whose role carries nothing", Held: []string{"identity.users.write"}, Roles: []parityRole{{"empty", []string{}}}},
+		{Name: "a caller covering each role", Held: []string{"identity.users", "orders"}, Roles: []parityRole{{"clerk", []string{"orders.read", "orders.write"}}, {"helpdesk", []string{"identity.users.read"}}}},
+		{Name: "a role the caller does not cover", Held: []string{"identity.users"}, Roles: []parityRole{{"admin", []string{"identity", "orders"}}}},
+		{Name: "users.write does not cover the users' own permissions", Held: []string{"identity.users.write"}, Roles: []parityRole{{"helpdesk", []string{"identity.users.write", "identity.users.read"}}}},
+		{Name: "each role's uncovered permissions once, in the roles' order", Held: []string{"identity.users", "orders.read"}, Roles: []parityRole{{"clerk", []string{"stock.read", "orders.read"}}, {"auditor", []string{"audit.read", "stock.read"}}}},
+		{Name: "the identity prefix covers the identity permissions alone", Held: []string{"identity"}, Roles: []parityRole{{"manager", []string{"identity.roles.write", "orders.refund"}}}},
+		{Name: "comparison is exact in case", Held: []string{"identity.users", "Orders"}, Roles: []parityRole{{"clerk", []string{"orders.read"}}}},
+	}
+	for i := range cases {
+		uncovered := identity.UncoveredUser(cases[i].Held, sessionRoles(cases[i].Roles))
 		cases[i].Want = grantWant{Allowed: len(uncovered) == 0, Uncovered: uncovered}
 	}
 	return cases

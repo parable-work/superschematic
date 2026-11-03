@@ -2782,6 +2782,176 @@
       }
     }
   ],
+  "userWrites": [
+    {
+      "name": "a user with no roles",
+      "held": [
+        "identity.users.write"
+      ],
+      "roles": [],
+      "want": {
+        "allowed": true,
+        "uncovered": []
+      }
+    },
+    {
+      "name": "a user whose role carries nothing",
+      "held": [
+        "identity.users.write"
+      ],
+      "roles": [
+        {
+          "name": "empty",
+          "permissions": []
+        }
+      ],
+      "want": {
+        "allowed": true,
+        "uncovered": []
+      }
+    },
+    {
+      "name": "a caller covering each role",
+      "held": [
+        "identity.users",
+        "orders"
+      ],
+      "roles": [
+        {
+          "name": "clerk",
+          "permissions": [
+            "orders.read",
+            "orders.write"
+          ]
+        },
+        {
+          "name": "helpdesk",
+          "permissions": [
+            "identity.users.read"
+          ]
+        }
+      ],
+      "want": {
+        "allowed": true,
+        "uncovered": []
+      }
+    },
+    {
+      "name": "a role the caller does not cover",
+      "held": [
+        "identity.users"
+      ],
+      "roles": [
+        {
+          "name": "admin",
+          "permissions": [
+            "identity",
+            "orders"
+          ]
+        }
+      ],
+      "want": {
+        "allowed": false,
+        "uncovered": [
+          "identity",
+          "orders"
+        ]
+      }
+    },
+    {
+      "name": "users.write does not cover the users' own permissions",
+      "held": [
+        "identity.users.write"
+      ],
+      "roles": [
+        {
+          "name": "helpdesk",
+          "permissions": [
+            "identity.users.write",
+            "identity.users.read"
+          ]
+        }
+      ],
+      "want": {
+        "allowed": false,
+        "uncovered": [
+          "identity.users.read"
+        ]
+      }
+    },
+    {
+      "name": "each role's uncovered permissions once, in the roles' order",
+      "held": [
+        "identity.users",
+        "orders.read"
+      ],
+      "roles": [
+        {
+          "name": "clerk",
+          "permissions": [
+            "stock.read",
+            "orders.read"
+          ]
+        },
+        {
+          "name": "auditor",
+          "permissions": [
+            "audit.read",
+            "stock.read"
+          ]
+        }
+      ],
+      "want": {
+        "allowed": false,
+        "uncovered": [
+          "stock.read",
+          "audit.read"
+        ]
+      }
+    },
+    {
+      "name": "the identity prefix covers the identity permissions alone",
+      "held": [
+        "identity"
+      ],
+      "roles": [
+        {
+          "name": "manager",
+          "permissions": [
+            "identity.roles.write",
+            "orders.refund"
+          ]
+        }
+      ],
+      "want": {
+        "allowed": false,
+        "uncovered": [
+          "orders.refund"
+        ]
+      }
+    },
+    {
+      "name": "comparison is exact in case",
+      "held": [
+        "identity.users",
+        "Orders"
+      ],
+      "roles": [
+        {
+          "name": "clerk",
+          "permissions": [
+            "orders.read"
+          ]
+        }
+      ],
+      "want": {
+        "allowed": false,
+        "uncovered": [
+          "orders.read"
+        ]
+      }
+    }
+  ],
   "capabilities": {
     "routes": [
       {

@@ -137,7 +137,7 @@ and numbered by a fencing token.
 | Operations | `acquire({ ttlMs? })` -> `{ token, expiresAt, heartbeatMs }`; `heartbeat({ acknowledge? })` -> `{ expiresAt, directives }`; `release({ abandon? })` -> `{}`; `expire({ holder?, notRenewedAfter? })` -> `{ expired, reason? }`; `direct({ name, data?, dedupeKey? })` -> `{ id, created }`; `acknowledge({ ids })` -> `{}`; `resetExpiries()` -> `{ expiries }`; schema-level `expireHolder({ holder, notRenewedAfter? })` -> `{ expired, reasons, ids }`. All write; `heartbeat`, `acknowledge` and the holder's `release` present the token |
 | Schedules | `expire`, every `sweepMs`, on the engine's runner |
 | Reactions | with `directOn`, on the runner: a link's target's new revision or release sends the holder of each instance it moves on the entry's directive ("Directives"); off without `directOn` |
-| Guards | a write that presents a token other than the current one, whoever calls (`token_stale`); while a lease is active, an update, a delete or a writing operation of another behavior by any principal but the holder (`held_by_another`), except an `exempt` operation, a read-only one, Queue's `refresh` and a principal with `overridePermission`; with `requireToken`, such a write by the holder that presents no token (`token_required`); once the lease has lapsed, the holder's writes (`lapsed`); while a lease is held, a change to `maxHoldField` without `overridePermission` (`hold_limit_fixed`); a principal's `direct` needs its permission (below). All `vetoed` |
+| Guards | a write that presents a token other than the current one, whoever calls (`token_stale`); while a lease is active, an update, a delete or a writing operation of another behavior by any principal but the holder (`held_by_another`), except an `exempt` operation, a read-only one, one beside the instance (D77: Comments' posts, reactions and the rest ask no other behavior's guard), Queue's `refresh` and a principal with `overridePermission`; with `requireToken`, such a write by the holder that presents no token (`token_required`); once the lease has lapsed, the holder's writes (`lapsed`); while a lease is held, a change to `maxHoldField` without `overridePermission` (`hold_limit_fixed`); a principal's `direct` needs its permission (below). All `vetoed` |
 | Refusals | `acquire` while a lease is active (`held_by_caller`, `held_by_another`) and at `maxExpiries` (`max_expiries`, details `{ expiries, maxExpiries }`), without `acquirePermission` (`forbidden`), with a `ttlMs` past the config's (`invalid_argument`); `heartbeat` and `acknowledge` with no lease (`not_leased`), by another principal (`not_holder`), with no token (`token_required`) or once the lease has lapsed (`lapsed`); `release` with no lease (`not_leased`), by another principal (`forbidden` without `overridePermission` when the config names one, `not_holder` when it names none), by the holder with no token (`token_required`), once the lease has lapsed (`lapsed`); `direct` by a principal without its permission (`forbidden`) or with no permission in the config (`not_configured`), and with no active lease (`not_leased`, `lapsed`); `expire` with a `holder`, and `expireHolder`, without `overridePermission` (`forbidden`, the config naming none included), and `expire` with `notRenewedAfter` and no `holder` (`invalid_argument`); `acknowledge`, and `heartbeat`'s `acknowledge`, of an id not sent under the token (`invalid_argument`, and nothing is acknowledged); `resetExpiries` without `overridePermission` (`forbidden`, or `not_configured` when the config names none). Each code is a veto's (`vetoed`) |
 | Events | each operation's event; a heartbeat is a write, with its event; the event of a release, an abandon and an expiry carries `Lease.ended` in its patch, under `behaviors` |
 | `configChange` | any config may change, `directOn` included. Added to a schema with instances, which start free at token 0; not removed from one, since their leases and directives would stay behind |
@@ -149,7 +149,7 @@ and numbered by a fencing token.
     "onExpiry": { "transition": "queued", "from": ["running"] },
     "maxExpiries": 3,
     "escalate": { "transition": "failed", "from": ["running"] },
-    "exempt": ["Comments.comment"],
+    "exempt": ["Numbering.assignNumber"],
     "overridePermission": "jobs.override" } }
 ```
 
@@ -182,7 +182,7 @@ and over MCP the tools' `preconditions` argument
   `overridePermission` releases without one.
 - With `requireToken`, every other write under an active lease needs it
   too, the holder's own included (`token_required`). Exempt and read-only
-  operations, Queue's `refresh`, a request a behavior's own code makes,
+  operations, those beside the instance, Queue's `refresh`, a request a behavior's own code makes,
   Lease's own operations (the runner's `expire` among them) and a
   principal with `overridePermission` are not held to it. Without it, a
   write that presents no token is its caller's, and the guard checks who

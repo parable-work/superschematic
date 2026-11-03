@@ -1,6 +1,7 @@
 package sqlgen
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"text/template"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -42,11 +44,12 @@ func WriteProjections(schema *ir.Schema, output *DDLOutput, outputDir, migration
 		}
 	}
 	for _, view := range output.Projections {
-		for _, file := range []struct{ tmpl, name string }{
-			{"projection_up.tmpl", view.UpFileName},
-			{"projection_down.tmpl", view.DownFileName},
-		} {
-			if err := generateFile(file.tmpl, filepath.Join(migrationsDir, file.name), &view); err != nil {
+		files, err := ProjectionMigrationFiles(view)
+		if err != nil {
+			return err
+		}
+		for _, file := range files {
+			if err := os.WriteFile(filepath.Join(migrationsDir, file.Name), file.Content, 0o644); err != nil {
 				return err
 			}
 		}
@@ -68,6 +71,49 @@ func WriteProjections(schema *ir.Schema, output *DDLOutput, outputDir, migration
 	return nil
 }
 
+// MigrationFile is one file of a projection's migration pair: its name in
+// the migrations directory and the bytes WriteProjections writes there.
+type MigrationFile struct {
+	Name    string
+	Content []byte
+}
+
+// ProjectionMigrationFiles renders view's migration pair, the up file then
+// the down file, as WriteProjections writes them. A build records their
+// bytes under the stamp, which names them for good (D102).
+func ProjectionMigrationFiles(view ProjectionView) ([]MigrationFile, error) {
+	files := make([]MigrationFile, 0, 2)
+	for _, file := range []struct{ tmpl, name string }{
+		{"projection_up.tmpl", view.UpFileName},
+		{"projection_down.tmpl", view.DownFileName},
+	} {
+		content, err := renderTemplate(file.tmpl, &view)
+		if err != nil {
+			return nil, fmt.Errorf("projection %s: %w", view.Relation, err)
+		}
+		files = append(files, MigrationFile{Name: file.name, Content: content})
+	}
+	return files, nil
+}
+
+// renderTemplate executes templateName with the funcs generateFile gives
+// it and returns the bytes generateFile would write.
+func renderTemplate(templateName string, data any) ([]byte, error) {
+	text, err := templatesFS.ReadFile("templates/" + templateName)
+	if err != nil {
+		return nil, err
+	}
+	tmpl, err := template.New(templateName).Funcs(codegen.BaseTemplateFuncs()).Funcs(customTemplateFuncs()).Parse(string(text))
+	if err != nil {
+		return nil, fmt.Errorf("parse template %s: %w", templateName, err)
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return nil, fmt.Errorf("execute template %s: %w", templateName, err)
+	}
+	return buf.Bytes(), nil
+}
+
 func generateFile(templateName, outputPath string, data any) error {
 	cfg := codegen.NewFileConfig(templatesFS, templateName, outputPath, data, customTemplateFuncs())
 	return codegen.GenerateFile(cfg)
@@ -86,10 +132,49 @@ func oneLine(doc string) string {
 	return strings.Join(strings.Fields(doc), " ")
 }
 
+// rawSQLSection is the raw SQL create.sql runs at one place.
+type rawSQLSection struct {
+	Where  string
+	Pieces []sqlutil.RawSQL
+}
+
+// rawSQLAt is the section of the pieces that run at position: after the
+// tables, or after every object the schema declares.
+func rawSQLAt(pieces []sqlutil.RawSQL, position string) rawSQLSection {
+	section := rawSQLSection{Where: "after the tables"}
+	if position == ir.RawSQLAfterIndexes {
+		section.Where = "after every object above"
+	}
+	for _, piece := range pieces {
+		if piece.Position == position {
+			section.Pieces = append(section.Pieces, piece)
+		}
+	}
+	return section
+}
+
+// rawSQLDowns lists the pieces with a down, the last one to run first.
+func rawSQLDowns(pieces []sqlutil.RawSQL) []sqlutil.RawSQL {
+	var out []sqlutil.RawSQL
+	for i := len(pieces) - 1; i >= 0; i-- {
+		if len(pieces[i].Down) > 0 {
+			out = append(out, pieces[i])
+		}
+	}
+	return out
+}
+
 func customTemplateFuncs() template.FuncMap {
 	return template.FuncMap{
-		"searchTextExpr":    SearchTextExpr,
+		"searchTextExpr": SearchTextExpr,
+		// quote spells a derived name, an index's, a constraint's, a
+		// function's or a trigger's, as a statement must: quoted when a
+		// mixed-case @table or @column puts capitals in it (D85).
+		"quote":             sqlutil.QuoteIdentifier,
+		"searchIndexName":   SearchIndexName,
 		"projectionViewDDL": projectionViewDDL,
+		"rawSQLAt":          rawSQLAt,
+		"rawSQLDowns":       rawSQLDowns,
 		"reverse": func(tables []Table) []Table {
 			reversed := make([]Table, len(tables))
 			for i, t := range tables {

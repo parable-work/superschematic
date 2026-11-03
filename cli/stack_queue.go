@@ -32,7 +32,9 @@ import (
 // target it runs against the Postgres container stack dev runs; on a cloud
 // target, through the target's queue runner, on the deployed run's
 // database (D68, amended): on gcp an execution of the migration job, which
-// hands the result back through the state bucket.
+// hands the result back through the state bucket; on cloudflare the
+// migration runner on this machine, on the origin of a database on
+// Hyperdrive, as the database's migrations run (D96).
 
 func init() { registerStackCommands(newStackQueueCmd) }
 
@@ -97,18 +99,24 @@ reads once and deletes, and which the bucket's lifecycle deletes after a
 day when the command does not. A deleted result stays restorable for the
 bucket's soft-delete window, seven days by default. A listing's messages
 may hold personal data, so they are never written to the execution's
-logs. A target with no queue runner is refused, as is a
-run that was never deployed. --timeout bounds the wait; an execution it
-stops waiting for may still finish.`
+logs. On cloudflare the runner runs on this machine, on the origin of
+the queue's database, a Postgres outside Cloudflare reached through
+Hyperdrive, with the connection string $HYPERDRIVE_ORIGIN_<DB> holds
+(HYPERDRIVE_ORIGIN_SHOP_DB for shop-db), as the deploy's migrations do:
+it first reads the database's Hyperdrive config, with the token in
+$CLOUDFLARE_API_TOKEN, and refuses a connection string whose host, port,
+database or user is not the config's. A target with no queue runner is
+refused, as is a run that was never deployed. --timeout bounds the wait;
+an execution it stops waiting for may still finish.`
 
 func newStackQueueCmd(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "queue",
-		Short: "List, retry and drop the dead messages of a queue",
+		Short: "List, retry and drop the dead messages of a queue, and backfill it",
 		Long:  stackQueueLong,
 		Args:  cobra.NoArgs,
 	}
-	cmd.AddCommand(newStackQueueDeadCmd(a), newStackQueueRetryCmd(a), newStackQueueDropCmd(a))
+	cmd.AddCommand(newStackQueueDeadCmd(a), newStackQueueRetryCmd(a), newStackQueueDropCmd(a), newStackQueueBackfillCmd(a))
 	return cmd
 }
 
@@ -268,6 +276,12 @@ func runStackQueue(cmd *cobra.Command, a *app, flags *queueFlags, environment, r
 		return err
 	}
 	req := request(service, queue)
+	req.Key, req.Table = c.queueKey(service, queue), c.queueTable(service, queue)
+	if req.Operation == queueops.Backfill {
+		if req.Backfills, err = c.queueBackfills(service, queue); err != nil {
+			return err
+		}
+	}
 	doc, err := queueops.Document(req)
 	if err != nil {
 		return err
@@ -364,6 +378,28 @@ func (c *deployContext) checkQueue(service, queue string) (string, error) {
 	return host.Name, nil
 }
 
+// queueKey is the quoted key column of the queue of the DB service when it
+// keeps one ready message per key (D80), else "".
+func (c *deployContext) queueKey(service, queue string) string {
+	for _, svc := range c.services {
+		if svc.Name == service {
+			return svc.QueueKeys[queue]
+		}
+	}
+	return ""
+}
+
+// queueTable is the table of service's queue, as its class names it
+// (D85), or "" when the service is not among the stack's.
+func (c *deployContext) queueTable(service, queue string) string {
+	for _, svc := range c.services {
+		if svc.Name == service {
+			return svc.QueueTables[queue]
+		}
+	}
+	return ""
+}
+
 // writeQueueText prints what a queue operation did for a person.
 func writeQueueText(w io.Writer, environment, ref string, r *queueops.Result) error {
 	var b strings.Builder
@@ -405,6 +441,8 @@ func writeQueueText(w io.Writer, environment, ref string, r *queueops.Result) er
 		for _, id := range r.IDs {
 			fmt.Fprintf(&b, "  %s\n", id)
 		}
+	case queueops.Backfill:
+		writeBackfillText(&b, environment, ref, r)
 	}
 	_, err := io.WriteString(w, b.String())
 	return err

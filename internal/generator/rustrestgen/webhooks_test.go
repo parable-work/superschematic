@@ -45,7 +45,8 @@ func TestWriteRustAPIGoldenWebhooks(t *testing.T) {
 // the rate limit, the permission check, the handler and its body extractor,
 // the handler receives the body the verifier read, the manual route runs
 // the verifier once the service wraps it in webhook_verified, and a route
-// that is not a webhook runs none.
+// that is not a webhook runs none. A webhook's input drops the keys its
+// type does not declare unless the type is @strictJSON (D87).
 func TestWebhooksAPICrateBuildsAndRoutes(t *testing.T) {
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, webhooksService))
 	if err != nil {
@@ -64,7 +65,8 @@ use std::sync::{Arc, Mutex};
 
 use API_CRATE::{
     build_router, types, webhook_verified, EventGetEventArgs, EventImplementation, Implementations,
-    WebhookImplementation, WebhookReceiveGithubEventArgs, WebhookReceiveStripeEventArgs, WebhookVerifier,
+    WebhookImplementation, WebhookReceiveGithubEventArgs, WebhookReceiveLedgerEventArgs,
+    WebhookReceivePlaidEventArgs, WebhookReceiveStripeEventArgs, WebhookVerifier,
 };
 use RUNTIME_CRATE::{bearer_token, error_response, ApiError, Authenticator, Principal, RequestContext};
 use async_trait::async_trait;
@@ -156,6 +158,15 @@ impl WebhookImplementation for Events {
         let caller = ctx.principal.map(|principal| principal.subject).unwrap_or_default();
         self.log.lock().unwrap().push(format!("receive_github_event {} {} from {caller}", args.id, args.action));
         Ok(receipt(args.id))
+    }
+    async fn receive_plaid_event(&self, _ctx: RequestContext, args: WebhookReceivePlaidEventArgs) -> Result<types::EventReceipt, ApiError> {
+        let event = serde_json::to_string(&args.input).unwrap();
+        self.log.lock().unwrap().push(format!("receive_plaid_event {event}"));
+        Ok(receipt(args.input.item_id))
+    }
+    async fn receive_ledger_event(&self, _ctx: RequestContext, args: WebhookReceiveLedgerEventArgs) -> Result<types::EventReceipt, ApiError> {
+        self.log.lock().unwrap().push(format!("receive_ledger_event {}", args.input.id));
+        Ok(receipt(args.input.id))
     }
 }
 
@@ -301,6 +312,48 @@ async fn a_route_that_is_not_a_webhook_runs_no_verifier() {
     let (status, _) = send(router(&log), "GET", "/api/webhooks/stripe", "", None, None).await;
     assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
     assert_eq!(entries(&log), vec!["get_event"]);
+}
+
+// A webhook's input drops the keys its type does not declare, at the top
+// level and in a nested @allowUnknownFields type, and checks the ones it
+// declares (D87).
+#[tokio::test]
+async fn a_webhook_input_drops_the_keys_its_type_does_not_declare() {
+    let log = Log::default();
+    let body = r#"{"webhook_type":"TRANSACTIONS","webhook_code":"SYNC_UPDATES_AVAILABLE","item_id":"item-1","environment":"sandbox","Item_Id":"another","error":{"error_code":"ITEM_LOGIN_REQUIRED","error_message":"the login changed"}}"#;
+    let (status, envelope) = send(router(&log), "POST", "/api/webhooks/plaid", body, None, None).await;
+    assert_eq!(status, StatusCode::OK, "{envelope}");
+    let entry = entries(&log).pop().unwrap();
+    let event: Value = serde_json::from_str(entry.strip_prefix("receive_plaid_event ").unwrap()).unwrap();
+    assert_eq!(
+        event,
+        json!({"webhook_type": "TRANSACTIONS", "webhook_code": "SYNC_UPDATES_AVAILABLE", "item_id": "item-1", "error": {"error_code": "ITEM_LOGIN_REQUIRED"}})
+    );
+
+    let missing = r#"{"webhook_type":"TRANSACTIONS","webhook_code":"SYNC_UPDATES_AVAILABLE","environment":"sandbox"}"#;
+    let (status, envelope) = send(router(&log), "POST", "/api/webhooks/plaid", missing, None, None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(envelope["details"]["reason"], "validation failed", "{envelope}");
+    assert_eq!(envelope["errors"]["item_id"][0]["validator"], "required", "{envelope}");
+    let mistyped = r#"{"webhook_type":"TRANSACTIONS","webhook_code":7,"item_id":"item-1","environment":"sandbox"}"#;
+    let (status, envelope) = send(router(&log), "POST", "/api/webhooks/plaid", mistyped, None, None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(envelope["errors"]["webhook_code"][0]["validator"], "type", "{envelope}");
+    assert_eq!(entries(&log).len(), 1);
+}
+
+// A webhook's input whose type is @strictJSON refuses a key the type does
+// not declare (D87).
+#[tokio::test]
+async fn a_strict_json_webhook_input_refuses_a_key_its_type_does_not_declare() {
+    let log = Log::default();
+    let body = r#"{"id":"ledger-1","environment":"sandbox"}"#;
+    let (status, envelope) = send(router(&log), "POST", "/api/webhooks/ledger", body, None, None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(envelope["details"]["reason"], "unknown fields: environment", "{envelope}");
+    let (status, _) = send(router(&log), "POST", "/api/webhooks/ledger", r#"{"id":"ledger-1"}"#, None, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(entries(&log), vec!["receive_ledger_event ledger-1"]);
 }
 
 // webhook.receiveRawGithubEvent is @manualRouteRegistration: build_router

@@ -146,6 +146,19 @@ the core's static archive through cgo; the
 [Go install page](/superschematic/install/go/#requirements) says how to
 build it.
 
+### `rules_go_module`
+
+Default: `github.com/parable-work/superschematic/runtime/rules/go`
+
+Go module path of the behaviors' core's Go binding and adapter (D103). A
+generated Go ORM requires it when its schema has a table that composes
+behaviors, on its fields or by `implements`: its repositories run their
+creates, updates, deletes, each use's operations, each due deadline and
+each change of a table's change queue through the core. The module links the core's static
+archive through cgo: a release's archives tarball holds it and its header
+(`CGO_LDFLAGS=-L<dir>/lib`), and in a checkout `scripts/rules-archive.sh`
+builds it where cargo is (D82).
+
 ### `versiongraph_rust_crate`
 
 Default: `superschematic-versiongraph-engine`
@@ -185,6 +198,17 @@ build, the engine, its Postgres adapter and the facade base. A generated
 TypeScript types package whose schema declares a version graph imports
 the facade base from its `/facade` entry point and lists the package as a
 dependency ([Use the engine from TypeScript](/superschematic/reference/version-graphs/#use-the-engine-from-typescript)).
+
+### `rules_npm_package`
+
+Default: `@superschematic/rules`
+
+npm package name of the behaviors' core built for WebAssembly (D103). A
+generated TypeScript types package whose database has a table that
+composes behaviors (`status: Workflow<{ ... }>`, `implements Timers<Ticket,
+{ ... }>`) imports its `initSync`
+in `orm.ts`, which passes the core to the HTTP runtime's adapter, and
+lists the package as a dependency.
 
 ### `versiongraph_pypi_dist`
 
@@ -464,6 +488,25 @@ Default: unset. This repository's own file sets `runtime/versiongraph/go`.
 
 Directory of the version-graph core's Go binding module.
 
+### `paths.rules_go`
+
+Default: unset. This repository's own file sets `runtime/rules/go`.
+
+Directory of the behaviors' core's Go module (D103). With this key set, a
+generated Go ORM whose schema has a table that composes behaviors
+replaces the module with the checkout, where the module links the archive
+`scripts/rules-archive.sh` stages under its `lib/<goos>_<goarch>`, and so
+do a Go API over such a database and the server, job or worker that
+serves it, a `@behaviorWorker` that runs its deadlines and changes among them. A Go
+server's image then builds the archive in a `rules` stage, from the
+engine's Cargo workspace of the checkout the module lies
+in (its `runtime/engine/rust`), and generated CI stages it with the
+checkout's `scripts/rules-archive.sh` before it builds the server.
+Unset, each requires the module's pinned version, as a release's build
+does, whose archives tarball holds the archive; a build from a checkout
+(one that sets `scalar_go`) then writes such a server no Dockerfile and
+says why.
+
 ### `paths.versiongraph_typescript`
 
 Default: unset. This repository's own file sets
@@ -548,6 +591,32 @@ project's engine crate's `napi` member expands into the addon a
 TypeScript server loads. Unset, it names the crate's version instead of a
 path.
 
+### `paths.rules_adapter_rust`
+
+Default: unset. This repository's own file sets
+`runtime/engine/rust/rules-adapter`.
+
+Directory of the behaviors' adapter for a Rust server,
+`superschematic-rules-adapter` (D103). A generated Rust API crate that
+serves a table's behavior operations
+([A table's behavior operations](/superschematic/guides/api-routes/#a-tables-behavior-operations))
+or runs a table's deadlines and changes from a `@behaviorWorker`
+([The worker](/superschematic/guides/api-routes/#the-worker))
+depends on it by path, with its `postgres` feature, and the image of its
+server and of the worker holds the adapter's Cargo workspace. The crate
+is unpublished, so the build refuses such an API while this key is
+unset.
+
+### `paths.rules_behaviors_rust`
+
+Default: unset. This repository's own file sets
+`runtime/engine/rust/rules-behaviors`.
+
+Directory of the behaviors ported onto the core,
+`superschematic-rules-behaviors` (D103), whose core the same Rust API
+crate runs its behavior operations on, beside `rules_adapter_rust`.
+Unpublished too: the build refuses such an API while this key is unset.
+
 ### `paths.engine_go`
 
 Default: unset. This repository's own file sets `runtime/engine/go`.
@@ -620,6 +689,25 @@ runtime first (`bun install && bun run build` in
 `runtime/http/typescript`). Unset, the install fetches the package, which
 fails with a 404 until it is published.
 
+### `paths.rules_typescript`
+
+Default: unset. This repository's own file sets
+`runtime/rules/typescript`.
+
+Directory of the behaviors' core's npm package (`package.json`, D103). A
+generated TypeScript types package whose database has a table that
+composes behaviors depends on `@superschematic/rules` with `*`; with this
+key set, the output root's Bun workspace overrides that with a `file:`
+path to the checkout, which the install copies from its `dist/`, so build
+it first (`bun install && bun run build` in `runtime/rules/typescript`,
+which builds the core's wasm module with cargo). A TypeScript server or
+worker that opens such a database's repositories, a `@behaviorWorker`
+among them, needs it for its image, which builds
+the wasm module in a `rules` stage from the engine's Cargo workspace of
+the checkout the package lies in and emits the package's `dist/`;
+unset, the build writes the server no Dockerfile and says why. Generated
+CI builds the package before it checks such a server.
+
 ### `paths.ptr`
 
 Default: unset.
@@ -657,14 +745,15 @@ part of the build cache key: moving the copy rebuilds nothing.
 ## `[derived_fields]`
 
 How the config fields an API's edges derive in a stack are named: the
-API's database connection, the endpoint of each API it `calls`, and the
-connection of each bucket it lists in `buckets`
+API's database connection, the endpoint of each API it `calls`, the
+connection of each bucket it lists in `buckets`, and of each memory store
+it lists in `memoryStores`
 (see [What an API gets from its edges](/superschematic/guides/stacks/#what-an-api-gets-from-its-edges)). In each template `{SERVICE}` is the
-DB, called API or Bucket service's name in upper snake case, and the rest
+DB, called API, Bucket or MemoryStore service's name in upper snake case, and the rest
 of the template holds upper-case letters, digits and underscores. A
 platform sets each field as one environment variable per member of its
 value (`SHOP_DB_DATABASE_URL`, `SHOP_API_SERVICE_CREDENTIAL_SOURCE`,
-`SHOP_MEDIA_BUCKET_NAME`), and the loader refuses an `@envVars` field
+`SHOP_MEDIA_BUCKET_NAME`, `SHOP_CACHE_MEMORY_STORE_URL`), and the loader refuses an `@envVars` field
 named after one.
 
 ### `derived_fields.database`
@@ -686,6 +775,32 @@ Default: `{SERVICE}_BUCKET`
 
 The field of each bucket an API lists in `buckets`
 ([Buckets](/superschematic/guides/buckets/)).
+
+### `derived_fields.memory_store`
+
+Default: `{SERVICE}_MEMORY_STORE`
+
+The field of each memory store an API lists in `memoryStores`, its
+`rateLimitStore` among them
+([Memory stores](/superschematic/guides/memory-stores/#what-an-api-gets)).
+Its variables are the field's name followed by `_STORE`, `_URL`, `_CA`,
+`_AUTH` and `_MEMBER`: `SHOP_CACHE_MEMORY_STORE_URL`, and so on. None
+set is a disabled store.
+
+A MemoryStore service's definitions take the names of its types output,
+since they are that output (D75):
+
+| Language | Name | `shop-cache` with the defaults |
+| --- | --- | --- |
+| Go | the module `<go_module_root>/types/go/<name>`, its package the name without hyphens or underscores | `example.com/schemas/types/go/shop-cache`, package `shopcache` |
+| TypeScript | the package `<npm_scope>/<name>-types` | `@schemas/shop-cache-types` |
+| Rust | the crate `<rust_crate_prefix><name>-types` | `schemas-shop-cache-types`, `schemas_shop_cache_types` in a `use` |
+
+No key of the naming file changes the names the store holds. A full name
+is the store's name, then `:` and the declaration's name, then `:` and
+each part's wire string: `shop-cache:product-changed:<productId>`. In a
+member of a parameterized environment the store's name is followed by
+`@` and the member's: `shop-cache@pr123:product-changed:<productId>`.
 
 ## `[implementation_paths]`
 
@@ -725,6 +840,23 @@ The scaffold writes it once, a `Cargo.toml` and `src/lib.rs`, never into a
 directory that holds a `Cargo.toml`. It names the crate
 `<rust_crate_prefix><service>-implementation`, a name you may change, and
 depends on the API crate and the HTTP runtime by path.
+
+### `implementation_paths.rust_app`
+
+Default: `apps/{app}`
+
+The crate of an app of a Rust API (D78), the program a stack runs for an
+`@app` class: `{app}` is the class's name in kebab case, and `{service}`,
+when the template holds it, the API's name. The template must hold
+`{app}`, since each app has a crate of its own. The crate is a library
+that exports `pub async fn serve(parts: <api crate>::apps::<App>Parts) ->
+std::io::Result<()>`. A stack's build writes it once when it is missing,
+a `Cargo.toml` naming it `<rust_crate_prefix><api>-<app>-app` and a
+`src/lib.rs` whose `serve` answers every request with 501, and refuses
+one whose `src/lib.rs` declares no `serve`. Each build copies it into
+the output root's `impl/`, its path dependencies re-based there, and the
+app's entrypoint depends on that copy
+([Apps](/superschematic/guides/stacks/#apps)).
 
 ### `implementation_paths.site`
 

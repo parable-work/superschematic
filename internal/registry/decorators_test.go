@@ -14,9 +14,9 @@ import (
 func TestNewRegistersCoreDecoratorsForEveryWalkerCase(t *testing.T) {
 	reg := New(naming.Naming{})
 	want := map[DecoratorTarget][]string{
-		TargetType:         {"trait", "source", "envVars", "jsonField", "denyUnknownFields", "strictJSON", "versioned", "optimistic", "versionGraph", "graphMember", "index", "projection", "join", "behavior", "display", "stack", "server", "database", "environment", "job", "queue", "worker"},
-		TargetField:        {"key", "unique", "searchField", "jsonField", "uiHidden", "internalMetadata", "temporalFormat", "conflictUnit", "virtual", "sourceMustProject", "docs", "purpose", "icon", "uiControl", "display", "column"},
-		TargetOperationSet: {"rateLimit", "bodyLimit", "timeout", "requireService", "allowService", "userSessions", "userAdministration"},
+		TargetType:         {"trait", "source", "envVars", "jsonField", "denyUnknownFields", "strictJSON", "allowUnknownFields", "versioned", "optimistic", "versionGraph", "graphMember", "index", "rawSql", "table", "projection", "join", "behavior", "display", "stack", "server", "database", "environment", "job", "queue", "worker", "enqueueOnChange", "query", "seedRoles", "deriver", "channel", "key", "app", "behaviorWorker"},
+		TargetField:        {"key", "unique", "searchField", "jsonField", "uiHidden", "internalMetadata", "temporalFormat", "conflictUnit", "virtual", "decrypted", "sourceMustProject", "docs", "purpose", "icon", "uiControl", "display", "column"},
+		TargetOperationSet: {"rateLimit", "bodyLimit", "timeout", "requireService", "allowService", "userSessions", "userAdministration", "behaviorOperations", "auth", "publicRoute", "requirePermission"},
 		TargetOperation:    {"rest", "requirePermission", "requireOwnership", "auth", "encrypted", "publicRoute", "webhook", "hmacVerified", "manualRouteRegistration", "rateLimit", "bodyLimit", "timeout", "requireService", "allowService", "paginated", "docs", "mcp", "icon"},
 	}
 	total := 0
@@ -276,6 +276,30 @@ func TestCoreApplyBodiesReproduceWalkerBehaviour(t *testing.T) {
 	if err := apply("rest", TargetOperation, Node{Field: op}, "FETCH"); err == nil || err.Error() != `unsupported HTTP method "FETCH"` {
 		t.Errorf("rest error = %v", err)
 	}
+	// A :name segment is a router's parameter, which OpenAPI and every
+	// generated router read as text: the path is refused, at the argument,
+	// with the braces written in (D100). A colon inside a segment is text.
+	for path, want := range map[string]string{
+		"businesses/:businessId/export":     `@rest path "businesses/:businessId/export" writes a path parameter as ":businessId", which OpenAPI and the generated routers read as text; write it in braces: "businesses/{businessId}/export"`,
+		"/orgs/:org/members/:member/":       `@rest path "/orgs/:org/members/:member/" writes path parameters as ":org" and ":member", which OpenAPI and the generated routers read as text; write it in braces: "/orgs/{org}/members/{member}/"`,
+		"a/:b/c/:d/:e":                      `@rest path "a/:b/c/:d/:e" writes path parameters as ":b", ":d" and ":e", which OpenAPI and the generated routers read as text; write it in braces: "a/{b}/c/{d}/{e}"`,
+		"orders/{orderId}:cancel":           "",
+		"orders/{orderId}/notes/:":          "",
+		"reports/{year}/v1:summary/{month}": "",
+	} {
+		pathOp := &ir.FieldDef{}
+		err := apply("rest", TargetOperation, Node{Field: pathOp}, "GET", path)
+		switch {
+		case want == "" && (err != nil || pathOp.RestPath != path):
+			t.Errorf("rest %q = %q, err %v", path, pathOp.RestPath, err)
+		case want != "" && (err == nil || err.Error() != want || pathOp.RestPath != ""):
+			t.Errorf("rest %q error = %v, RestPath %q; want %s", path, err, pathOp.RestPath, want)
+		}
+		var argErr *ArgError
+		if want != "" && (!errors.As(err, &argErr) || argErr.Index != 1) {
+			t.Errorf("rest %q error %v locates no path argument", path, err)
+		}
+	}
 	if err := apply("requirePermission", TargetOperation, Node{Field: op}, []any{}); err == nil || err.Error() != "@requirePermission requires a non-empty array of permission strings" {
 		t.Errorf("requirePermission error = %v", err)
 	}
@@ -383,6 +407,19 @@ func TestIdentityRoutesApply(t *testing.T) {
 		{map[string]any{"path": "account", "register": true}, ir.UserSessionsConfig{Path: "account", Register: true}},
 		{map[string]any{"login": true, "register": false}, ir.UserSessionsConfig{}},
 		{map[string]any{"login": false}, ir.UserSessionsConfig{NoLogin: true}},
+		// D81: registration, defaultRoles and firstUser; "open" is the
+		// default and leaves Registration empty.
+		{map[string]any{"register": true, "registration": "open"}, ir.UserSessionsConfig{Register: true}},
+		{
+			map[string]any{
+				"register": true, "registration": "approval", "defaultRoles": []any{"member", "viewer"},
+				"firstUser": map[string]any{"role": "admin", "permissions": []any{"identity", "finances"}},
+			},
+			ir.UserSessionsConfig{
+				Register: true, Registration: ir.IdentityRegistrationApproval, DefaultRoles: []string{"member", "viewer"},
+				FirstUser: &ir.IdentityFirstUser{Role: "admin", Permissions: []string{"identity", "finances"}},
+			},
+		},
 	} {
 		set := &ir.OperationSet{}
 		var args []any
@@ -424,7 +461,17 @@ func TestIdentityRoutesApply(t *testing.T) {
 		want string
 	}{
 		{"userSessions", map[string]any{"login": false, "register": true}, "@userSessions: register needs the login; drop register: true or login: false"},
-		{"userSessions", map[string]any{"roles": true}, `@userSessions config has unknown key "roles"; it takes login, path and register`},
+		{"userSessions", map[string]any{"roles": true}, `@userSessions config has unknown key "roles"; it takes defaultRoles, firstUser, login, path, register and registration`},
+		{"userSessions", map[string]any{"registration": "approval"}, "@userSessions: registration configures register, so it needs register: true"},
+		{"userSessions", map[string]any{"defaultRoles": []any{"member"}, "firstUser": map[string]any{"role": "admin", "permissions": []any{"identity"}}}, "@userSessions: defaultRoles and firstUser configure register, so they need register: true"},
+		{"userSessions", map[string]any{"register": true, "registration": "invite"}, `@userSessions registration must be "open" or "approval"`},
+		{"userSessions", map[string]any{"register": true, "defaultRoles": "member"}, "@userSessions defaultRoles must be a list of strings"},
+		{"userSessions", map[string]any{"register": true, "defaultRoles": []any{"member", ""}}, "@userSessions defaultRoles holds an empty string"},
+		{"userSessions", map[string]any{"register": true, "defaultRoles": []any{"member", "member"}}, `@userSessions defaultRoles names "member" twice`},
+		{"userSessions", map[string]any{"register": true, "firstUser": "admin"}, "@userSessions firstUser must be an object literal: { role, permissions }"},
+		{"userSessions", map[string]any{"register": true, "firstUser": map[string]any{"permissions": []any{"identity"}}}, "@userSessions firstUser needs role, the name of the administrator's role"},
+		{"userSessions", map[string]any{"register": true, "firstUser": map[string]any{"role": "admin"}}, "@userSessions firstUser needs permissions, at least one, which the role carries when register creates it"},
+		{"userSessions", map[string]any{"register": true, "firstUser": map[string]any{"role": "admin", "permissions": []any{"identity"}, "roles": []any{}}}, `@userSessions firstUser has unknown key "roles"; it takes role and permissions`},
 		{"userSessions", map[string]any{"login": "yes"}, "@userSessions login must be true or false"},
 		{"userSessions", map[string]any{"path": 1.0}, "@userSessions path must be a string literal"},
 		{"userSessions", "auth", "@userSessions config must be an object literal"},
@@ -442,5 +489,93 @@ func TestIdentityRoutesApply(t *testing.T) {
 	}
 	if err := apply("userSessions", &ir.OperationSet{}, map[string]any{}, map[string]any{}); err == nil || err.Error() != "@userSessions takes at most one config object" {
 		t.Errorf("two configs: %v", err)
+	}
+}
+
+// TestBehaviorOperationsApply: @behaviorOperations(Type) records the table
+// a set serves (D103), once per class and not beside a user model's route
+// set; the set's @auth, @publicRoute and @requirePermission write its
+// clause, with the operation's checks; and @requireOwnership has no class
+// form.
+func TestBehaviorOperationsApply(t *testing.T) {
+	reg := New(naming.Naming{})
+	apply := func(name string, set *ir.OperationSet, args ...any) error {
+		spec, ok := reg.Decorator(name, TargetOperationSet)
+		if !ok {
+			t.Fatalf("no core decorator @%s for an operation set", name)
+		}
+		if spec.Args != nil || !spec.DeclaredIn("@superschematic/api") {
+			t.Errorf("@%s: Args must stay nil and the package be @superschematic/api: %+v", name, spec)
+		}
+		return spec.Apply(Node{OperationSet: set}, args, Site{})
+	}
+
+	set := &ir.OperationSet{}
+	if err := apply("behaviorOperations", set, map[string]any{"class": "Order"}); err != nil {
+		t.Fatal(err)
+	}
+	if want := (&ir.BehaviorOperationsConfig{Type: "Order"}); !reflect.DeepEqual(set.BehaviorOperations, want) || !set.IsBehaviorOperations() {
+		t.Errorf("behaviorOperations(Order) = %+v, want %+v", set.BehaviorOperations, want)
+	}
+	if err := apply("behaviorOperations", set, map[string]any{"class": "Shipment"}); err == nil || err.Error() != "@behaviorOperations appears twice on the class: a set serves one table" {
+		t.Errorf("twice on one class: %v", err)
+	}
+	if err := apply("userSessions", set); err == nil || err.Error() != "@userSessions contradicts @behaviorOperations on the same class: a class takes one of them" {
+		t.Errorf("@userSessions beside it: %v", err)
+	}
+	if err := apply("userAdministration", set); err == nil || err.Error() != "@userAdministration contradicts @behaviorOperations on the same class: a class takes one of them" {
+		t.Errorf("@userAdministration beside it: %v", err)
+	}
+	for _, other := range []string{"userSessions", "userAdministration"} {
+		routes := &ir.OperationSet{}
+		if err := apply(other, routes); err != nil {
+			t.Fatal(err)
+		}
+		want := "@behaviorOperations contradicts @" + other + " on the same class: a class takes one of them"
+		if err := apply("behaviorOperations", routes, map[string]any{"class": "Order"}); err == nil || err.Error() != want {
+			t.Errorf("after @%s: %v, want %q", other, err, want)
+		}
+	}
+
+	for _, args := range [][]any{nil, {map[string]any{"class": "Order"}, map[string]any{"class": "Shipment"}}} {
+		err := apply("behaviorOperations", &ir.OperationSet{}, args...)
+		if err == nil || err.Error() != "@behaviorOperations takes one argument, the table whose behaviors' operations the set serves, imported from the API's database: @behaviorOperations(Order)" {
+			t.Errorf("behaviorOperations(%v): %v", args, err)
+		}
+	}
+	err := apply("behaviorOperations", &ir.OperationSet{}, "Order")
+	var argErr *ArgError
+	if !errors.As(err, &argErr) || argErr.Index != 0 || !strings.HasPrefix(argErr.Msg, "@behaviorOperations takes the table as a class, imported from the API's database: want a class") {
+		t.Errorf("behaviorOperations(\"Order\") = %v, want the class error", err)
+	}
+
+	clause := &ir.OperationSet{}
+	if err := apply("auth", clause); err != nil {
+		t.Fatal(err)
+	}
+	if err := apply("publicRoute", clause); err != nil {
+		t.Fatal(err)
+	}
+	if err := apply("requirePermission", clause, []any{"orders.write", "orders.read"}); err != nil {
+		t.Fatal(err)
+	}
+	if !clause.Auth || !clause.Public || !reflect.DeepEqual(clause.Permissions, []string{"orders.write", "orders.read"}) {
+		t.Errorf("the set's clause = auth %v, public %v, permissions %v", clause.Auth, clause.Public, clause.Permissions)
+	}
+	for _, tc := range []struct {
+		args []any
+		want string
+	}{
+		{nil, "@requirePermission takes exactly one array argument"},
+		{[]any{[]any{}}, "@requirePermission requires a non-empty array of permission strings"},
+		{[]any{"orders.write"}, "@requirePermission requires a non-empty array of permission strings"},
+		{[]any{[]any{1.0}}, "@requirePermission entries must be string literals"},
+	} {
+		if err := apply("requirePermission", &ir.OperationSet{}, tc.args...); err == nil || err.Error() != tc.want {
+			t.Errorf("requirePermission(%v) on a set = %v, want %q", tc.args, err, tc.want)
+		}
+	}
+	if _, ok := reg.Decorator("requireOwnership", TargetOperationSet); ok {
+		t.Error("@requireOwnership is registered for an operation set; it has no class form (D103)")
 	}
 }

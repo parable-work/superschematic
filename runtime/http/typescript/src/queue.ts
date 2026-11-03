@@ -2,9 +2,11 @@ import pg from 'pg';
 import {
   canonicalUUID,
   ClaimLostError,
+  conflictOf,
   errorMessage,
   UNREADABLE,
   formatDuration,
+  jsonMemberValue,
   parseDuration,
   unset,
   type PostgresQueue,
@@ -99,7 +101,7 @@ export async function enqueue<M>(client: QueueQueryable, queue: QueueDefinition<
   const text =
     columns.length === 0
       ? `${queue.statements.insert} DEFAULT VALUES`
-      : `${queue.statements.insert} (${columns.join(', ')}) VALUES (${columns.map((_, i) => `$${i + 1}`).join(', ')})`;
+      : `${queue.statements.insert} (${columns.join(', ')}) VALUES (${columns.map((_, i) => `$${i + 1}`).join(', ')})${conflictOf(queue.statements)}`;
   try {
     await client.query({ text, values });
   } catch (error) {
@@ -117,12 +119,33 @@ function columnValue(value: unknown, field: QueueField): unknown {
   return value;
 }
 
+/**
+ * Whether error is the unique violation of a queue's index of claimed or of ready messages by key (D80): a claim
+ * on a queue that holds one claim per key meets it when another worker's claim of the key commits first, and a
+ * fail or a release on a queue that keeps one ready message per key when a concurrent enqueue of the key does.
+ * The claim then takes nothing, and the fail or the release runs once more, when the ready message it sees takes
+ * its place, as the Go ORM's and the Rust client's do.
+ */
+function keyHeld(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === '23505';
+}
+
+/** Runs query once more when it meets a key another write holds (keyHeld). */
+async function onceMoreOnKeyHeld<T>(query: () => Promise<T>): Promise<T> {
+  try {
+    return await query();
+  } catch (error) {
+    if (!keyHeld(error)) throw error;
+    return query();
+  }
+}
+
 /** The claims of queue over pool, for a worker. */
 export function postgresQueue<M>(pool: QueueQueryable, queue: QueueDefinition<M>): PostgresQueue<M> {
   const update = async (what: string, statement: string, id: string, token: string, extra: unknown[] = []): Promise<void> => {
     let result: { rowCount: number | null };
     try {
-      result = await pool.query({ text: statement, values: [id, token, ...extra] });
+      result = await onceMoreOnKeyHeld(() => pool.query({ text: statement, values: [id, token, ...extra] }));
     } catch (error) {
       throw new Error(`${what} message ${id} on ${queue.table}: ${errorMessage(error)}`, { cause: error });
     }
@@ -138,6 +161,7 @@ export function postgresQueue<M>(pool: QueueQueryable, queue: QueueDefinition<M>
         await pool.query({ text: queue.statements.expire, values: [queue.retries] });
         ({ rows } = await pool.query({ text: queue.statements.claim, values: [n, leaseSeconds], rowMode: 'array', types: queueTypes }));
       } catch (error) {
+        if (keyHeld(error)) return [];
         throw new Error(`claim on ${queue.table}: ${errorMessage(error)}`, { cause: error });
       }
       // Each row is claimed already: one that does not read fails alone.
@@ -155,10 +179,12 @@ export function postgresQueue<M>(pool: QueueQueryable, queue: QueueDefinition<M>
     async fail(id, token, cause) {
       let rows: unknown[];
       try {
-        ({ rows } = await pool.query({
-          text: queue.statements.fail,
-          values: [id, token, queue.retries, queue.backoffSeconds, cause, queue.maxBackoffSeconds],
-        }));
+        ({ rows } = await onceMoreOnKeyHeld(() =>
+          pool.query({
+            text: queue.statements.fail,
+            values: [id, token, queue.retries, queue.backoffSeconds, cause, queue.maxBackoffSeconds],
+          })
+        ));
       } catch (error) {
         throw new Error(`fail message ${id} on ${queue.table}: ${errorMessage(error)}`, { cause: error });
       }
@@ -188,11 +214,13 @@ function claimOf<M>(queue: QueueDefinition<M>, row: readonly unknown[]): QueueCl
   queue.fields.forEach((field, i) => {
     let value = row[3 + i];
     if (value === null || value === undefined) return;
-    if (field.json && typeof value === 'string') {
+    if (field.json) {
+      // By the column's type, not the value's: queueTypes leaves a json or jsonb column's text unparsed, so its
+      // JSON is decoded here once, a JSON string among it.
       try {
-        value = JSON.parse(value);
+        value = jsonMemberValue(value, field);
       } catch (error) {
-        throw new Error(`message ${String(id)} of ${queue.table}: field ${field.name} holds no JSON: ${errorMessage(error)}`, { cause: error });
+        throw new Error(`message ${String(id)} of ${queue.table}: field ${field.name}: ${errorMessage(error)}`, { cause: error });
       }
     } else if (field.list && typeof value === 'string') {
       // A list of a type pg does not know, such as citext[], arrives as its text.
@@ -209,11 +237,15 @@ function claimOf<M>(queue: QueueDefinition<M>, row: readonly unknown[]): QueueCl
  * TypeScript types hold Generic.Int64 and every integer scalar, a date
  * its YYYY-MM-DD text, Temporal.Date's, where pg would make a Date at local
  * midnight, a POINT the location {lat, lon}, Geo.Location's, where pg would
- * make {x, y}, and an INTERVAL the canonical text of its duration,
- * Temporal.Duration's, where pg would make an object of its parts.
+ * make {x, y}, an INTERVAL the canonical text of its duration,
+ * Temporal.Duration's, where pg would make an object of its parts, and a
+ * json or jsonb column its text, which claimOf decodes once by the field.
  */
 const overrides: Readonly<Record<number, (value: string) => unknown>> = {
   20: value => Number(value),
+  // pg would decode json and jsonb itself, and a JSON string, "1", would then be decoded twice.
+  114: value => value,
+  3802: value => value,
   600: value => parsePoint(value),
   1016: value => parseArray(value).map(element => (element === null ? null : Number(element))),
   1082: value => value,

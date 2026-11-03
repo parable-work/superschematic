@@ -123,7 +123,7 @@ func Plan(ctx context.Context, o PlanOptions) (*PlanResult, error) {
 	images := map[string]string{}
 	if prev != nil {
 		for server, image := range prev.Images {
-			if d := s.env.Deployable(server); d != nil && d.HasImage() {
+			if d := s.env.Deployable(server); d != nil && runsImage(d) {
 				images[server] = image
 			}
 		}
@@ -384,7 +384,7 @@ func (s *session) deployedRequest(ctx context.Context, place bool) (registry.Pro
 	if prev != nil {
 		images := map[string]string{}
 		for server, image := range prev.Images {
-			if d := s.env.Deployable(server); d != nil && d.HasImage() {
+			if d := s.env.Deployable(server); d != nil && runsImage(d) {
 				images[server] = image
 			}
 		}

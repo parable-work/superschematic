@@ -61,12 +61,12 @@ const (
 
 // tsOrder is the order a build-all builds the TypeScript fixture in,
 // tsCloudStack left out: ts-shop calls ts-pricing, so it builds after
-// ts-pricing's SDK. ts-media, the bucket ts-shop lists, builds nothing
-// (D54).
-var tsOrder = []string{"ts-db", "ts-media", "ts-pricing", "ts-shop", "ts-stack"}
+// ts-pricing's SDK. ts-media, the bucket ts-shop lists, builds nothing,
+// and ts-cache, the memory store both list, its inventory alone (D54, D75).
+var tsOrder = []string{"ts-db", "ts-media", "ts-cache", "ts-pricing", "ts-shop", "ts-stack"}
 
 // tsAPIs are the services of tsOrder the stacks serve.
-var tsAPIs = tsOrder[2 : len(tsOrder)-1]
+var tsAPIs = tsOrder[3 : len(tsOrder)-1]
 
 // loadTypeScriptFixture loads every TypeScript fixture service, as
 // loadFixture loads the Go one.
@@ -514,8 +514,9 @@ func TestTypeScriptEntrypointCompilesAndServes(t *testing.T) {
 	}
 	f := loadTypeScriptFixture(t)
 	// ts-db's TypeScript types export the queue ts-shop's implementation
-	// enqueues on and its worker claims (D53).
-	f.build(t, repoRoot, paths, append([]string{"ts-db"}, append(slices.Clone(tsAPIs), "ts-stack", tsMergedStack)...)...)
+	// enqueues on and its worker claims (D53), and ts-cache's the
+	// definitions both implementations depend on (D75).
+	f.build(t, repoRoot, paths, append([]string{"ts-db", "ts-cache"}, append(slices.Clone(tsAPIs), "ts-stack", tsMergedStack)...)...)
 	names := naming.Default()
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	run := func(dir, name string, args ...string) {
@@ -725,9 +726,11 @@ func TestTheTypeScriptDockerfileBuildsAnImageThatServes(t *testing.T) {
 	}
 	f := loadTypeScriptFixture(t)
 	// ts-shop's package depends on ts-db's TypeScript types, for the
-	// message its worker handles (D53), so the workspace installs only
+	// message its worker handles (D53), and both implementations on
+	// ts-cache's definitions (D75), so each root's workspace installs only
 	// with them built.
-	f.build(t, repoRoot, tsFakePaths(repoRoot), append([]string{"ts-db"}, append(slices.Clone(tsAPIs), tsCloudStack)...)...)
+	services := append([]string{"ts-db", "ts-cache"}, append(slices.Clone(tsAPIs), tsCloudStack)...)
+	f.build(t, repoRoot, tsFakePaths(repoRoot), services...)
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	install := exec.Command(bun, "install")
 	install.Dir = out
@@ -738,7 +741,7 @@ func TestTheTypeScriptDockerfileBuildsAnImageThatServes(t *testing.T) {
 	serveTypeScriptImage(t, repoRoot, filepath.Join(servergen.ServerDir(out, tsCloudStack, "ts-shop"), servergen.DockerFile))
 
 	other := filepath.Join(repoRoot, "schemas", "dist-b")
-	if err := buildTSInto(f, repoRoot, tsFakePaths(repoRoot), other, append([]string{"ts-db"}, append(slices.Clone(tsAPIs), tsCloudStack)...)...); err != nil {
+	if err := buildTSInto(f, repoRoot, tsFakePaths(repoRoot), other, services...); err != nil {
 		t.Fatal(err)
 	}
 	install = exec.Command(bun, "install")

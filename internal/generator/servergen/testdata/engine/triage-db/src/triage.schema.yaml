@@ -1,0 +1,36 @@
+name: triage-db
+kind: DB
+description: "The deriver fixture's database (D74): tickets a model triages and notes no model fills."
+enums:
+  Category:
+    name: Category
+    description: Where a ticket goes.
+    values:
+      - { name: Billing, serializedAs: billing }
+      - { name: Shipping, serializedAs: shipping }
+      - { name: Other, serializedAs: other }
+types:
+  Ticket:
+    name: Ticket
+    description: A ticket whose category and summary a model fills from its subject and body.
+    role: DBTable
+    behaviors:
+      - name: Derived
+        config:
+          fields:
+            category: { from: [subject, body], instruction: Classify the ticket., model: standard }
+            summary: { from: [body], instruction: Summarize it in one sentence., model: simple }
+          permission: tickets.derive
+    fields:
+      - { name: subject, typeRef: { name: string }, required: true }
+      - { name: body, typeRef: { name: string } }
+      - { name: category, typeRef: { name: Category } }
+      - { name: summary, typeRef: { name: string } }
+  Note:
+    name: Note
+    description: A note that collects comments, which no model fills.
+    role: DBTable
+    behaviors:
+      - name: Comments
+    fields:
+      - { name: text, typeRef: { name: string }, required: true }

@@ -52,6 +52,9 @@ type fakeCloud struct {
 	// whose payload is the one given ends; instances are those started.
 	workflows map[string]func(payload map[string]string) cloudflare.WorkflowInstance
 	instances map[string]*fakeInstance
+
+	// hyperdrive are the account's Hyperdrive configs, by id (D92).
+	hyperdrive map[string]*cloudflare.HyperdriveConfig
 }
 
 // fakeInstance is a Workflow instance: running at its first read, then
@@ -75,6 +78,7 @@ var permissionGroups = func() []cloudflare.PermissionGroup {
 		"Workers Scripts Write", "Workers Scripts Read", "D1 Write", "D1 Read",
 		"Workers R2 Storage Write", "Workers R2 Storage Read", "Secrets Store Write", "Secrets Store Read",
 		"Account API Tokens Write", "Account API Tokens Read", "Account Settings Read",
+		"Hyperdrive Write", "Hyperdrive Read",
 	}
 	zone := []string{"Workers Routes Write", "Workers Routes Read", "DNS Write", "DNS Read", "Zone Read"}
 	bucket := []string{"Workers R2 Storage Bucket Item Write", "Workers R2 Storage Bucket Item Read"}
@@ -110,15 +114,30 @@ func groupIDOf(name string) string {
 
 func newFakeCloud() *fakeCloud {
 	return &fakeCloud{
-		subdomain: "acme",
-		groups:    permissionGroups,
-		secrets:   map[string]map[string]*fakeSecret{},
-		buckets:   map[string]bool{},
-		objects:   map[string][]byte{},
-		meta:      map[string]map[string]string{},
-		workflows: map[string]func(map[string]string) cloudflare.WorkflowInstance{},
-		instances: map[string]*fakeInstance{},
+		subdomain:  "acme",
+		groups:     permissionGroups,
+		secrets:    map[string]map[string]*fakeSecret{},
+		buckets:    map[string]bool{},
+		objects:    map[string][]byte{},
+		meta:       map[string]map[string]string{},
+		workflows:  map[string]func(map[string]string) cloudflare.WorkflowInstance{},
+		instances:  map[string]*fakeInstance{},
+		hyperdrive: map[string]*cloudflare.HyperdriveConfig{},
 	}
+}
+
+func (c *fakeCloud) HyperdriveConfig(_ context.Context, account, id string) (*cloudflare.HyperdriveConfig, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.checkAccount(account); err != nil {
+		return nil, err
+	}
+	config := c.hyperdrive[id]
+	if config == nil {
+		return nil, fmt.Errorf("fake: no Hyperdrive config %s: %w", id, fs.ErrNotExist)
+	}
+	out := *config
+	return &out, nil
 }
 
 func (c *fakeCloud) CreateWorkflowInstance(_ context.Context, account, workflow string, params any) (string, error) {

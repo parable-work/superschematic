@@ -558,12 +558,12 @@ fn a_specs_new_revision_moves_the_work_pinned_to_an_earlier_one_as_the_runner() 
     for target in targets("revised_moves") {
         let engine = open(&target);
         specs(&engine);
-        // A comment is no revision.
+        // A post is no revision.
         invoke(
             &engine,
             "Spec",
             "sp1",
-            "comment",
+            "post",
             json!({"body": "Looks right"}),
         );
         run_due(&engine);

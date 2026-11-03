@@ -1,0 +1,12 @@
+[package]
+name = "schemas-shop-cache-types"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.99.0"
+description = "Generated Rust definitions of the channels and keys of the shop-cache memory store"
+license = "UNLICENSED"
+
+[dependencies]
+schemas-shop-cache-common-types = { path = "../shop-cache-common" }
+superscalar = "0.1.0"
+superschematic-http-runtime = "0.0.0"
