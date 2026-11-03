@@ -55,7 +55,9 @@ type QueueStatements struct {
 	// then the message's columns in field order. On a queue that
 	// serializes its keys (D80) it takes, of each key, only the message at
 	// the head of its line: one whose claim expired, else the first due
-	// ready one, and none while another claim holds the key.
+	// ready one, or, on a queue that keeps its lines in order (a table's
+	// change queue, D103), the first written ready one when it is due, and
+	// none while another claim holds the key.
 	Claim string
 
 	// Complete marks message $1 done while token $2 claims it, or, for a
@@ -111,6 +113,13 @@ const queueBackoffDoublings = 40
 // quoted column of the field that keys a message (QueueKeyColumn), with
 // what an enqueue does on a key a ready message holds and whether claims
 // hold one message per key at a time (D80).
+//
+// InOrder, on a queue that serializes its keys, keeps each key's line in
+// the order its messages were written, by when each was created and then
+// its ID, rather than by due time: a message that waits a failure's
+// backoff holds its key's later messages until it runs or is dead. A
+// table's change queue keeps it (D103), so one row's writes are heard in
+// the order they were made.
 type QueueSpec struct {
 	Table       string
 	Columns     []string
@@ -118,16 +127,19 @@ type QueueSpec struct {
 	Key         string
 	OnDuplicate string
 	Serialize   bool
+	InOrder     bool
 }
 
 // QueueSpecOf is the spec of the queue td declares, whose table and
-// columns are given quoted.
+// columns are given quoted. A table's change queue (D103) keeps its line
+// in the order written.
 func QueueSpecOf(td *ir.TypeDef, table string, columns []string, keepDone bool) QueueSpec {
 	spec := QueueSpec{Table: table, Columns: columns, KeepDone: keepDone}
 	if td != nil && td.Queue != nil {
 		spec.Key = QueueKeyColumn(td)
 		spec.OnDuplicate = td.Queue.OnDuplicate
 		spec.Serialize = td.Queue.Serialize
+		spec.InOrder = td.BehaviorQueue != nil && td.BehaviorQueue.Kind == ir.BehaviorQueueChanges
 	}
 	return spec
 }
@@ -196,17 +208,23 @@ func queuePending(s QueueSpec) string {
 // takes it, with now the dialect's clock: ready and due, or claimed past
 // its claim's expiry. On a queue that serializes its keys, it is also the
 // head of its key's line: no other claim holds the key, and, for a ready
-// message, no ready one of the key is due before it, by due time and ID,
-// the order a claim takes them in.
+// message, no ready one of the key comes before it: by due time and ID,
+// the order a claim takes them in, so the first due; or, on a queue that
+// keeps its lines in order, by when each was created and ID, due or not,
+// so the first written.
 func queueDue(s QueueSpec, m, now string) string {
 	due := fmt.Sprintf("(%[1]sstate = '%[2]s' AND %[1]sdue_at <= %[3]s) OR (%[1]sstate = '%[4]s' AND %[1]sclaim_expires_at <= %[3]s)", m, ir.QueueStateReady, now, ir.QueueStateClaimed)
 	if !s.Serializes() {
 		return due
 	}
+	order := "due_at"
+	if s.InOrder {
+		order = "created_at"
+	}
 	return lines(
 		"("+due+")",
 		fmt.Sprintf("    AND NOT EXISTS (SELECT 1 FROM %s AS o WHERE o.%s = m.%s AND o.id <> m.id", s.Table, s.Key, s.Key),
-		fmt.Sprintf("      AND (o.state = '%[1]s' OR (m.state = '%[2]s' AND o.state = '%[2]s' AND (o.due_at, o.id) < (m.due_at, m.id))))", ir.QueueStateClaimed, ir.QueueStateReady),
+		fmt.Sprintf("      AND (o.state = '%[1]s' OR (m.state = '%[2]s' AND o.state = '%[2]s' AND (o.%[3]s, o.id) < (m.%[3]s, m.id))))", ir.QueueStateClaimed, ir.QueueStateReady, order),
 	)
 }
 
@@ -553,6 +571,24 @@ func SQLiteQueueRefusal(sqlType string) string {
 		return "is a BYTEA column, a BLOB on SQLite, which the SQLite queue clients do not hold yet"
 	}
 	return ""
+}
+
+// IsBinaryType reports whether a column of SQL type sqlType holds bytes, a
+// BYTEA (a BLOB on SQLite), or a list of them.
+func IsBinaryType(sqlType string) bool {
+	return queueBaseType(sqlType) == "BYTEA"
+}
+
+// HasEquality reports whether Postgres compares two values of a column of
+// SQL type sqlType with =, and so with IS DISTINCT FROM: a POINT and the
+// PostGIS types, GEOGRAPHY and GEOMETRY, with or without their modifiers,
+// and lists of them, have no equality operator.
+func HasEquality(sqlType string) bool {
+	switch queueBaseType(sqlType) {
+	case "POINT", "GEOGRAPHY", "GEOMETRY":
+		return false
+	}
+	return true
 }
 
 // queueBaseType is a SQL type without its length or precision and its

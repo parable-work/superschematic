@@ -136,6 +136,7 @@ var symbolPackages = map[string]string{
 	"User": "@superschematic/db", "UserRole": "@superschematic/db",
 	// @superschematic/api
 	"Authenticated": "@superschematic/api", "Encrypted": "@superschematic/api",
+	"auth": "@superschematic/api", "publicRoute": "@superschematic/api",
 	"bodyLimit": "@superschematic/api", "manualRouteRegistration": "@superschematic/api",
 	"rateLimit": "@superschematic/api", "requireOwnership": "@superschematic/api",
 	"requirePermission": "@superschematic/api", "rest": "@superschematic/api",
@@ -144,8 +145,8 @@ var symbolPackages = map[string]string{
 	"HttpMethod": "@superschematic/api", "EncryptedField": "@superschematic/api", "QueryParam": "@superschematic/api",
 	"RefersTo": "@superschematic/api", "SearchQuery": "@superschematic/api", "SortBy": "@superschematic/api",
 	"FileUpload": "@superschematic/api", "FileDownload": "@superschematic/api",
-	"mcp": "@superschematic/api", "userSessions": "@superschematic/api", "userAdministration": "@superschematic/api",
-	"job": "@superschematic/api", "worker": "@superschematic/api", "deriver": "@superschematic/api", "app": "@superschematic/api",
+	"mcp": "@superschematic/api", "userSessions": "@superschematic/api", "userAdministration": "@superschematic/api", "behaviorOperations": "@superschematic/api",
+	"job": "@superschematic/api", "worker": "@superschematic/api", "behaviorWorker": "@superschematic/api", "deriver": "@superschematic/api", "app": "@superschematic/api",
 	"paginated": "@superschematic/api",
 	// @superschematic/schema-config
 	"envVars": "@superschematic/schema-config",
@@ -296,6 +297,10 @@ func (e *emitter) emitWorker(worker *ir.Worker) {
 	if worker == nil {
 		return
 	}
+	if worker.BehaviorWorker != nil {
+		e.emitBehaviorWorker(worker)
+		return
+	}
 	imported := false
 	for _, imp := range e.doc.Imports {
 		if slices.Contains(imp.Types, worker.Queue) {
@@ -317,6 +322,42 @@ func (e *emitter) emitWorker(worker *ir.Worker) {
 	e.body.WriteString("\n")
 	e.comment("", worker.Comment)
 	fmt.Fprintf(&e.body, "@%s(%s)\nexport abstract class %s {}\n", e.use("worker"), objectLiteral(parts), e.ident(worker.Name, "worker"))
+}
+
+// emitBehaviorWorker renders a behavior worker as the class the reader
+// reads it from (D103): `@behaviorWorker(Ticket, { concurrency, grace,
+// permissions })`, each option only when set, on an abstract class with no
+// members. Its queue is the loader's, which it never writes.
+func (e *emitter) emitBehaviorWorker(worker *ir.Worker) {
+	table := worker.BehaviorWorker.Type
+	imported := false
+	for _, imp := range e.doc.Imports {
+		if slices.Contains(imp.Types, table) {
+			e.importSymbol(imp.Package, table)
+			imported = true
+			break
+		}
+	}
+	if !imported {
+		e.failf("worker %s: table %s is not covered by the document's imports", worker.Name, table)
+	}
+	args := e.ident(table, "type")
+	var parts []string
+	if worker.Concurrency != 0 {
+		parts = append(parts, fmt.Sprintf("concurrency: %d", worker.Concurrency))
+	}
+	if worker.Grace != "" {
+		parts = append(parts, "grace: "+quote(worker.Grace))
+	}
+	if len(worker.BehaviorWorker.Permissions) > 0 {
+		parts = append(parts, "permissions: "+stringListLiteral(worker.BehaviorWorker.Permissions))
+	}
+	if len(parts) > 0 {
+		args += ", " + objectLiteral(parts)
+	}
+	e.body.WriteString("\n")
+	e.comment("", worker.Comment)
+	fmt.Fprintf(&e.body, "@%s(%s)\nexport abstract class %s {}\n", e.use("behaviorWorker"), args, e.ident(worker.Name, "worker"))
 }
 
 // queueArgs renders @queue's argument (D53): the options it sets, or none.

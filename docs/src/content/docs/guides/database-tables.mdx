@@ -1034,8 +1034,28 @@ Three reference pages cover what a DB schema can add on top of this guide:
   type-checked SQL with `@query`, verified on Postgres into a lock and run
   by both ORMs as typed functions.
 
-A type of a DB schema that composes a behavior, `@behavior("Workflow",
-...)` say, is no table: it is an engine type, whose instances the engine
-keeps, so the build writes it no table, no repository and no migration,
-and writes the schema's engine document instead
-([Engine types](/superschematic/guides/engine-behaviors/#engine-types)).
+A type of a DB schema that composes a behavior with `@behavior`,
+`@behavior("Workflow", ...)` say, is no table: it is an engine type, whose
+instances the engine keeps, so the build writes it no table, no
+repository and no migration, and writes the schema's engine document
+instead
+([Engine types](/superschematic/guides/engine-behaviors/#engine-types)). A
+table that types a field as a behavior, `status: Workflow<{ ... }>`, or
+implements one, `implements Timers<Ticket, { ... }>` or `implements
+Reactions<Project, { ... }>`, stays a table: the behavior's fields are its
+columns, its sub-tables, its deadline queue and its change queue are
+tables beside it, and its operations change them through the behaviors'
+core
+([A table's behavior operations](/superschematic/guides/api-routes/#a-tables-behavior-operations),
+[A table's deadlines](/superschematic/guides/api-routes/#a-tables-deadlines-timers-and-its-worker),
+[A table's reactions](/superschematic/guides/api-routes/#a-tables-reactions-and-its-change-queue)).
+A table whose writes a behavior hears (`Timers`, `Reactions`, or another
+table's `Reactions` through a to-one relation of it) gets a change queue,
+`<table>_change_queue`, and a trigger that writes a message to it for
+every insert, update and delete of a row, whoever makes it: the
+repositories, a bulk, hard or soft delete, a script or psql. The trigger
+never refuses a write, and the API's `@behaviorWorker` of the table runs
+the messages after the commit, one row's in the order they were written.
+No behavior worker claims on SQLite or D1 yet, where the messages
+accumulate until one does. Such a table has no upserts when its behaviors
+keep sub-tables or arm deadlines.

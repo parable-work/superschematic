@@ -627,8 +627,21 @@ func (r run) checkJobs(stackName string, jobs []*ir.ResolvedDeployable, services
 // create_workers (D65), as checkJobs refuses one without its jobs: the
 // implementation is the engineer's, and the build writes into it no more.
 // It refuses a Rust worker of a queue the Rust types of its database leave
-// out of src/queues.rs too (checkRustQueue).
+// out of src/queues.rs too (checkRustQueue). A behavior worker's handler is
+// generated (D103): it needs no method of the implementation, the methods
+// these refusals list leave it out, and an API whose workers are all
+// behavior workers needs no constructor of them.
 func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, services []stack.Service, scaffolding, tsScaffolding, rustScaffolding map[string]bool) error {
+	// implemented are the workers of each API whose implementation runs
+	// them, @worker classes: every one but a behavior worker.
+	implemented := map[string][]ir.Worker{}
+	for _, svc := range services {
+		for _, worker := range svc.Workers {
+			if worker.BehaviorWorker == nil {
+				implemented[svc.Name] = append(implemented[svc.Name], worker)
+			}
+		}
+	}
 	checked := map[string]bool{}
 	for _, w := range workers {
 		if w.Language == APILanguageRust {
@@ -637,7 +650,7 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 			}
 		}
 		api := w.Worker.API
-		if checked[api] {
+		if checked[api] || len(implemented[api]) == 0 {
 			continue
 		}
 		checked[api] = true
@@ -646,12 +659,8 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 				continue
 			}
 			var methods []string
-			for _, svc := range services {
-				if svc.Name == api {
-					for _, worker := range svc.Workers {
-						methods = append(methods, fmt.Sprintf("      async fn %s(&self, message: %s::%s) -> Result<(), BoxError> {\n          // handle a message of %s\n      }", rustutil.Identifier(worker.Name, "handle"), rustrestgen.DatabaseTypesModule, worker.Queue, worker.Queue))
-					}
-				}
+			for _, worker := range implemented[api] {
+				methods = append(methods, fmt.Sprintf("      async fn %s(&self, message: %s::%s) -> Result<(), BoxError> {\n          // handle a message of %s\n      }", rustutil.Identifier(worker.Name, "handle"), rustrestgen.DatabaseTypesModule, worker.Queue, worker.Queue))
 			}
 			if err := r.checkRustFunc(stackName, api, "workers", rustrestgen.WorkersFunc, "Workers", methods, "Deps, Workers, BoxError and "+rustrestgen.DatabaseTypesModule+", the Rust types of the database that declares each queue, are %s's", "8.8"); err != nil {
 				return err
@@ -663,12 +672,8 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 				continue
 			}
 			var methods []string
-			for _, svc := range services {
-				if svc.Name == api {
-					for _, worker := range svc.Workers {
-						methods = append(methods, fmt.Sprintf("    async %s(message, signal) {\n      // handle a message of %s\n    },", tsutil.ToCamelCase(worker.Name), worker.Queue))
-					}
-				}
+			for _, worker := range implemented[api] {
+				methods = append(methods, fmt.Sprintf("    async %s(message, signal) {\n      // handle a message of %s\n    },", tsutil.ToCamelCase(worker.Name), worker.Queue))
 			}
 			if err := r.checkTypeScriptExport(stackName, api, "workers", tsrestgen.WorkersFunc, "WorkersConstructor", methods, "8.8"); err != nil {
 				return err
@@ -704,9 +709,9 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 					db = dep.Name
 				}
 			}
-			for _, worker := range svc.Workers {
-				methods = append(methods, fmt.Sprintf("\t%s(ctx context.Context, msg %s.%s) error", goutil.GoPublicIdentifier(worker.Name), toGoPackageName(db), worker.Queue))
-			}
+		}
+		for _, worker := range implemented[api] {
+			methods = append(methods, fmt.Sprintf("\t%s(ctx context.Context, msg %s.%s) error", goutil.GoPublicIdentifier(worker.Name), toGoPackageName(db), worker.Queue))
 		}
 		return fmt.Errorf("stack %s: %s declares workers, and its implementation at %s, which the build no longer writes into, declares no %s; add\n\n"+
 			"\tfunc %s(deps api.Deps) (api.Workers, error)\n\n"+
@@ -1049,7 +1054,7 @@ func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL
 		in.Worker = &servergen.WorkerInput{Name: s.Worker.Name, GraceSeconds: s.Worker.GraceSeconds}
 	}
 	var scaffolds []scaffold
-	var versionGraph bool
+	var versionGraph, rules bool
 	var modules []servergen.Module
 	for _, ref := range s.Services {
 		output, err := r.servedAPI(stackName, s.Name, ref.Name)
@@ -1078,6 +1083,7 @@ func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL
 		if (output.IsPublic && output.UpstreamVersionGraph) || output.Deps.VersionGraph {
 			versionGraph = true
 		}
+		rules = rules || output.Deps.Rules
 		if output.Engine != nil {
 			in.EngineGo = r.Options.Paths.EngineGo
 			if s.Kind == ir.DeployableServer && output.IsPublic && !output.Auth.Identity {
@@ -1101,6 +1107,9 @@ func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL
 	in.Modules = modules
 	if versionGraph {
 		in.VersionGraphGo = r.Options.Paths.VersionGraphGo
+	}
+	if rules {
+		in.RulesGo = r.Options.Paths.RulesGo
 	}
 	server, err := servergen.Plan(in)
 	if err != nil {
@@ -1528,7 +1537,8 @@ func (r run) implementation(service string) (impl servergen.Implementation, newM
 // goServerModules lists the modules a Go API server's build reads, each
 // with its directory: its own module, the types modules it reaches, the
 // ORM of its database, the SDK of each API it calls, and the runtime
-// modules. The API module and the packages its Deps imports are direct,
+// modules, the rules module among them when its database's tables' fields
+// are behaviors (D103). The API module and the packages its Deps imports are direct,
 // and so are its database's Go types when it authenticates with the
 // identity runtime, whose store a server's main.go builds from their
 // descriptor; a job's, which builds none, reaches them through the ORM.
@@ -1597,6 +1607,11 @@ func (r run) goServerModules(o *apigen.APIOutput, job bool) []servergen.Module {
 	)
 	if (o.IsPublic && o.UpstreamVersionGraph) || o.Deps.VersionGraph {
 		modules = append(modules, runtimeModule(n.VersionGraphGoModule, paths.VersionGraphGo, false))
+	}
+	if o.Deps.Rules {
+		// The ORM of a database whose tables' fields are behaviors requires
+		// the rules module, which links the behaviors' core (D103).
+		modules = append(modules, runtimeModule(n.RulesGoModule, paths.RulesGo, false))
 	}
 	return modules
 }

@@ -1,8 +1,9 @@
-// Command linkcheck links the three static archives a generated Go server
-// can link into one binary, superscalar's, the version graph's and the
-// engine's (D58), and calls each: a binary that defined a symbol twice, or
-// linked archives two Rust releases built, would not link or would fail
-// here. scripts/engine-link-check.sh builds the archives and runs it.
+// Command linkcheck links the four static archives a generated Go server
+// can link into one binary, superscalar's, the version graph's, the
+// engine's (D58) and the behaviors' core's (D103), and calls each: a binary
+// that defined a symbol twice, or linked archives two Rust releases built,
+// would not link or would fail here. scripts/engine-link-check.sh builds
+// the archives and runs it.
 package main
 
 import (
@@ -14,6 +15,7 @@ import (
 
 	scalars "github.com/parable-work/superscalar/go"
 	engine "github.com/parable-work/superschematic/runtime/engine/go"
+	rules "github.com/parable-work/superschematic/runtime/rules/go"
 	versiongraph "github.com/parable-work/superschematic/runtime/versiongraph/go"
 )
 
@@ -27,6 +29,12 @@ const descriptor = `{"version":3,"root":{"table":"recipe","key":"id"},` +
 
 const schema = `{"kind": "General", "name": "Note", "types": {"Note": {"name": "Note", "role": "EmbeddedStruct",
 	"fields": [{"name": "body", "typeRef": {"name": "string"}, "required": true}]}}}`
+
+// order is a type whose status is a Workflow, which the behaviors' core's
+// define check takes.
+const order = `{"name": "Order", "uses": [{"behavior": "Workflow",
+	"config": {"states": ["draft", "paid"], "transitions": [{"from": "draft", "to": "paid"}]},
+	"anchor": {"field": "status"}}]}`
 
 func main() {
 	if err := run(); err != nil {
@@ -71,5 +79,23 @@ func run() error {
 	}
 	info := e.Info()
 	fmt.Printf("engine: %s on %s, %d behaviors, created %s\n", info.Project, info.Dialect, len(info.Behaviors), created)
+
+	core := rules.Native()
+	var spec rules.TypeSpec
+	if err := json.Unmarshal([]byte(order), &spec); err != nil {
+		return fmt.Errorf("rules: %w", err)
+	}
+	refusals, err := core.Check([]rules.TypeSpec{spec})
+	if err != nil {
+		return fmt.Errorf("rules: check: %w", err)
+	}
+	if len(refusals) != 1 || refusals[0] != nil {
+		return fmt.Errorf("rules: the core refused Order: %+v", refusals)
+	}
+	declarations, err := core.Declarations()
+	if err != nil {
+		return fmt.Errorf("rules: declarations: %w", err)
+	}
+	fmt.Printf("rules: %d behaviors, Order checked\n", len(declarations))
 	return nil
 }

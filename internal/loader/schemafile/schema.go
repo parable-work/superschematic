@@ -122,6 +122,10 @@ func generateDefinition(reg *registry.Registry) ([]byte, error) {
 		return nil, err
 	}
 
+	if err := behaviorWorkerQueue(defs); err != nil {
+		return nil, err
+	}
+
 	if err := replaceDisplayDefs(defs, reg); err != nil {
 		return nil, err
 	}
@@ -442,7 +446,9 @@ func closeExtensionSlots(defs map[string]any, reg *registry.Registry) error {
 
 // closeBehaviors replaces the reflected $defs/BehaviorRef, whose config is
 // any JSON, with one closed to the registry's behaviors: name is one of the
-// registered names, and each behavior's config is checked against its
+// registered names, field names the anchor field of a field-anchored use
+// and implements marks a use a table implements (D103), and each
+// behavior's config is checked against its
 // config schema, as a decorator's argument is checked against its Args. A
 // behavior without a config schema takes none, which the empty closed
 // object expresses ({} is also how an absent config is stored). A config
@@ -493,14 +499,43 @@ func closeBehaviors(defs map[string]any, reg *registry.Registry) error {
 		"additionalProperties": false,
 		"required":             []any{"name"},
 		"properties": map[string]any{
-			"name":   name,
-			"config": map[string]any{},
+			"name":       name,
+			"field":      map[string]any{"type": "string"},
+			"implements": map[string]any{"type": "boolean"},
+			"config":     map[string]any{},
 		},
 	}
 	if len(branches) > 0 {
 		def["allOf"] = branches
 	}
 	defs["BehaviorRef"] = def
+	return nil
+}
+
+// behaviorWorkerQueue makes a worker's queue required unless it is a
+// behavior worker (D103), whose queue the build adds: the reflected
+// $defs/Worker requires queue, as an authored @worker names one. A
+// behavior worker that names a queue too is the verification pass's to
+// refuse, in its words.
+func behaviorWorkerQueue(defs map[string]any) error {
+	def, ok := defs["Worker"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("generated schema is missing the Worker definition")
+	}
+	props, _ := def["properties"].(map[string]any)
+	if _, ok := props["behaviorWorker"]; !ok {
+		return fmt.Errorf("$defs/Worker has no behaviorWorker property")
+	}
+	required, _ := def["required"].([]any)
+	kept := []any{}
+	for _, name := range required {
+		if name != "queue" {
+			kept = append(kept, name)
+		}
+	}
+	def["required"] = kept
+	def["if"] = map[string]any{"not": map[string]any{"required": []any{"behaviorWorker"}}}
+	def["then"] = map[string]any{"required": []any{"queue"}}
 	return nil
 }
 

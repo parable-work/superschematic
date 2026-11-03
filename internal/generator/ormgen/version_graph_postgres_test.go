@@ -115,11 +115,7 @@ func generateORMModuleAt(t *testing.T, serviceDir, fixture string, configure ...
 // binding, so it needs the core's archive (make versiongraph).
 func runORMModule(t *testing.T, ormDir string) string {
 	t.Helper()
-	tidy := exec.Command("go", "mod", "tidy")
-	tidy.Dir = ormDir
-	if out, err := tidy.CombinedOutput(); err != nil {
-		t.Skipf("go mod tidy failed (likely offline): %v\n%s", err, out)
-	}
+	tidyGeneratedModule(t, ormDir)
 	var testOutput string
 	for _, args := range [][]string{{"build", "./..."}, {"vet", "./..."}, {"test", "-count=1", "-v", "./..."}} {
 		// No cmd.Env: exec then sets PWD to cmd.Dir, which keeps the

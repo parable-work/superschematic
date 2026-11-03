@@ -93,6 +93,12 @@ func buildTSPackages(t *testing.T, cases []tsPackageCase) (typesRoot, bunPath st
 			// declarations are its dist/ (D79).
 			testpaths.BuildHTTPRuntime(t, bunPath, paths)
 		}
+		if output.ORM != nil && output.ORM.Rules != nil {
+			// orm.ts of a table whose fields are behaviors imports the
+			// rules package's initSync, whose declarations and wasm module
+			// are its dist/ (D103), rebuilt when the core's crates change.
+			testpaths.BuildRulesPackage(t, bunPath, paths)
+		}
 		if err := WriteTypes(output, outDir); err != nil {
 			t.Fatalf("write %s: %v", tc.name, err)
 		}

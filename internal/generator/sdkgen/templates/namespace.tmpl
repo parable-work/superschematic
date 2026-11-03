@@ -176,6 +176,10 @@ export class {{.Namespace.ClassName}} {
   {{- if .Namespace.IsScopedNS}}
   private readonly {{.Namespace.ScopeParamName}}: string;
   {{- end}}
+  {{- range .Namespace.Members}}
+  /** {{behavior_member_doc .Type .Use .Behavior}} */
+  public readonly {{.Name}}: {{.ClassName}};
+  {{- end}}
 
   constructor(
     private readonly client: HttpClient
@@ -186,8 +190,25 @@ export class {{.Namespace.ClassName}} {
     {{- if .Namespace.IsScopedNS}}
     this.{{.Namespace.ScopeParamName}} = {{.Namespace.ScopeParamName}};
     {{- end}}
+    {{- range .Namespace.Members}}
+    this.{{.Name}} = new {{.ClassName}}(client);
+    {{- end}}
   }
+  {{- template "methods" .}}
+}
+{{- range .Namespace.Members}}
 
+/**
+ * {{.ClassName}} - {{behavior_member_phrase .Type .Use .Behavior}}
+ */
+export class {{.ClassName}} {
+  constructor(private readonly client: HttpClient) {}
+  {{- template "methods" ($.MemberData .)}}
+}
+{{- end}}
+{{- define "methods"}}
+  {{- $valueImports := value_imports .Namespace.Imports}}
+  {{- $lazy := and .SDK.LazyValidation $valueImports}}
   {{- range .Namespace.Endpoints}}
   {{- $endpoint := .}}
   {{- if .HasFileUpload}}
@@ -991,4 +1012,4 @@ export class {{.Namespace.ClassName}} {
   {{- end}}
   {{- end}}
   {{- end}}
-}
+{{- end}}

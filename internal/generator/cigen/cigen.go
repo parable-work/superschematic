@@ -344,6 +344,7 @@ func stackOf(c registry.GenerateContext, name string, envs []*ir.ResolvedEnviron
 			}
 		}
 	}
+	rulesOf(c, name, &out, envs, rel)
 	if runsEngine {
 		if checkout := engineCheckout(c.Options.Paths); checkout != "" {
 			if dir, err := rel("the engine's checkout", checkout); err == nil {
@@ -388,7 +389,7 @@ func projectEngine(c registry.GenerateContext, db string) bool {
 		return false
 	}
 	for _, td := range codegen.EngineTypes(schema) {
-		for _, ref := range td.Behaviors {
+		for _, ref := range td.TypeBehaviors() {
 			declared, ok := c.Registry.Behavior(ref.Name)
 			if !ok || declared.Extension != "" || declared.Package != registry.EnginePackage {
 				return true

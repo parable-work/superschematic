@@ -6,8 +6,11 @@ import (
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/loader/behaviorfields"
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -24,6 +27,47 @@ const (
 	// sqlgenFixtures holds the services sqlgen's goldens are built from.
 	sqlgenFixtures = "../loader/tsreader/testdata/services"
 )
+
+// implementTimers has Product implement Timers with a deadline that starts
+// at its create (D103), and adds what the loader adds for it: its
+// sub-table, its deadline queue, its change queue, Timers hearing its
+// writes, and _version, with their scalars.
+func implementTimers(s *ir.Schema) {
+	reg := registry.New(naming.Default())
+	product := typeNamed(s, "Product")
+	product.Behaviors = append(product.Behaviors, ir.BehaviorRef{Name: "Timers", Implements: true,
+		Config: []byte(`{"deadlines":{"restock":{"afterMs":86400000,"start":{"create":true}}}}`)})
+	if _, err := behaviorfields.Expand(s, reg); err != nil {
+		panic(err)
+	}
+	if err := loader.HydrateScalars(s, reg.Scalars()); err != nil {
+		panic(err)
+	}
+}
+
+// productPhase gives Product a Workflow on its field phase and, with
+// reactions, has it implement Reactions too, which hears its writes
+// (D103), and adds what the loader adds for them: the owned columns,
+// _version and, with reactions, the change queue the change trigger
+// writes.
+func productPhase(reactions bool) func(*ir.Schema) {
+	return func(s *ir.Schema) {
+		reg := registry.New(naming.Default())
+		product := typeNamed(s, "Product")
+		if reactions {
+			product.Behaviors = append(product.Behaviors, ir.BehaviorRef{Name: "Reactions", Implements: true,
+				Config: []byte(`{"rules":[{"then":{"transition":"retired"},"when":{"changes":{"field":"price","to":0}}}]}`)})
+		}
+		product.Behaviors = append(product.Behaviors, ir.BehaviorRef{Name: "Workflow", Field: "phase",
+			Config: []byte(`{"states":["draft","listed","retired"],"transitions":[{"from":"draft","to":"listed"},{"from":"listed","to":"retired"}]}`)})
+		if _, err := behaviorfields.Expand(s, reg); err != nil {
+			panic(err)
+		}
+		if err := loader.HydrateScalars(s, reg.Scalars()); err != nil {
+			panic(err)
+		}
+	}
+}
 
 type planCase struct {
 	name string
@@ -423,12 +467,27 @@ var planCases = []planCase{
 			fieldNamed(s, "Order", "total").TypeRef = ir.TypeRef{Name: "number"}
 			fieldNamed(s, "OrderSummary", "total").TypeRef = ir.TypeRef{Name: "number"}
 		}},
-	{name: "optimistic-on", noSQLite: "sqlite does not support @optimistic", after: func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true }},
-	{name: "optimistic-off", noSQLite: "sqlite does not support @optimistic", before: func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true }},
-	{name: "optimistic-to-versioned", noSQLite: "sqlite does not support @optimistic or @versioned",
+	// A table gains a behavior that keeps a sub-table and arms deadlines
+	// (D103): the sub-table, the deadline queue and _version.
+	{name: "add-behavior-tables", after: implementTimers},
+	// A table gains a behavior that hears its writes (D103): its change
+	// queue, the queue's D80 indexes, and its change trigger, after the
+	// queue's table. An own field it gains replaces the trigger's function
+	// in place on Postgres and its triggers on SQLite, whose image holds
+	// the field; and the behavior going drops the trigger, its function and
+	// the queue.
+	{name: "add-change-trigger", before: productPhase(false), after: productPhase(true)},
+	{name: "change-change-trigger", before: productPhase(true), after: func(s *ir.Schema) {
+		addField(s, "Product", &ir.FieldDef{Name: "note", TypeRef: ir.TypeRef{Name: "string"}})
+		productPhase(true)(s)
+	}, rows: heardProductWrites},
+	{name: "drop-change-trigger", before: productPhase(true), after: productPhase(false)},
+	{name: "optimistic-on", after: func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true }},
+	{name: "optimistic-off", before: func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true }},
+	{name: "optimistic-to-versioned", noSQLite: "sqlite does not support @versioned",
 		before: func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true },
 		after:  func(s *ir.Schema) { versioned(s, "Product", nil) }},
-	{name: "versioned-to-optimistic", noSQLite: "sqlite does not support @optimistic or @versioned",
+	{name: "versioned-to-optimistic", noSQLite: "sqlite does not support @versioned",
 		before: func(s *ir.Schema) { versioned(s, "Product", nil) },
 		after:  func(s *ir.Schema) { typeNamed(s, "Product").Optimistic = true }},
 
@@ -689,6 +748,25 @@ var backfilledOrders = extraRows{
 			SQL: `SELECT count(*) = 2 AND count(DISTINCT q."order_id") = 2 FROM "order_shipped_queue" q JOIN "order" o ON q."order_id" = o."id" WHERE q."state" = 'ready' AND q."note" = o."note"`},
 		{Name: "the order with no note waits not at all",
 			SQL: `SELECT count(*) = 0 FROM "order_shipped_queue" q JOIN "order" o ON q."order_id" = o."id" WHERE o."code" = 'plain'`},
+	},
+}
+
+// heardProductWrites are writes of a product that its change trigger hears
+// (D103), beside the seeded product's insert: an insert, an update of a
+// column of the image, an update of _version alone, which writes no
+// message (as SQLite's bump of the version after the first update writes
+// none), and a delete.
+var heardProductWrites = extraRows{
+	seed: []string{
+		`INSERT INTO "product" ("title", "price", "phase") VALUES ('Lamp', 3, 'draft')`,
+		`UPDATE "product" SET "price" = 4 WHERE "title" = 'Lamp'`,
+		`UPDATE "product" SET "_version" = "_version" + 5 WHERE "title" = 'Lamp'`,
+		`DELETE FROM "product" WHERE "title" = 'Lamp'`,
+	},
+	checks: []seedCheck{
+		{Name: "each insert is heard", SQL: `SELECT count(*) = 2 FROM "product_change_queue" WHERE "write" = 'insert' AND "before" IS NULL AND "after" IS NOT NULL`},
+		{Name: "the update of a column of the image is heard, and the update of _version alone is not", SQL: `SELECT count(*) = 1 FROM "product_change_queue" WHERE "write" = 'update' AND "before" IS NOT NULL AND "after" IS NOT NULL`},
+		{Name: "the delete is heard", SQL: `SELECT count(*) = 1 FROM "product_change_queue" WHERE "write" = 'delete' AND "before" IS NOT NULL AND "after" IS NULL AND "at" > 0`},
 	},
 }
 

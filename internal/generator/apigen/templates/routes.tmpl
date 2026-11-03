@@ -7,7 +7,7 @@ package {{ toPackageName .SchemaName }}
 
 {{- /* regexp is imported only when at least one @validatePattern produces a MatchString call. Predicates below mirror the usage sites so no orphan regexp.MustCompile declaration is emitted (Go error: "declared and not used"). */ -}}
 {{- $hasPatternValidation := false }}
-{{- range .Endpoints }}
+{{- range .HandlerEndpoints }}
 {{- range .ArgQueryParams }}
 {{- if and .ValidatePattern .IsString (not .IsArray) }}
 {{- $hasPatternValidation = true }}
@@ -69,6 +69,8 @@ import (
 {{- end }}
 {{- if .IsPublic }}
 	orm "{{ .ORMModule }}"
+{{- else if .HasBehaviorEndpoints }}
+	orm "{{ .Deps.ORMModule }}"
 {{- end }}
 {{- if .RoutesNeedTypes }}
 	types "{{ .TypesModule }}"
@@ -93,8 +95,15 @@ const (
 type Config struct {
 {{- if .IsPublic }}
 	// DB is the database connection for middleware operations (auth, request context, etc.)
+{{- if .HasBehaviorEndpoints }}
+	// The behavior operations run through it too (D103).
+{{- end }}
 	DB orm.DatabaseInterface
 {{- authSnippet "routesConfigStores" . }}
+{{- else if .HasBehaviorEndpoints }}
+	// DB is the ORM of {{ .Deps.Database }}, the API's database: the behavior
+	// operations run through it (D103).
+	DB orm.DatabaseInterface
 {{- end }}
 
 	// Logger is the base logger for request-scoped logging
@@ -181,7 +190,11 @@ type ManualRoutes struct {
 // Validate checks that all required dependencies are provided.
 // Returns an error if any required field is nil.
 func (c *Config) Validate() error {
-{{- if .IsPublic }}
+{{- if .HasBehaviorEndpoints }}
+	if c.DB == nil {
+		return fmt.Errorf("Config.DB is required: it runs the behavior operations of {{ .SchemaName }} (D103)")
+	}
+{{- else if .IsPublic }}
 	if c.DB == nil {
 		return fmt.Errorf("Config.DB is required")
 	}
@@ -248,6 +261,9 @@ func (c *Config) Validate() error {
 //		PayloadDecryptor:            payloadDecryptor,
 {{- end }}
 {{- else }}
+{{- if .HasBehaviorEndpoints }}
+//		DB:     db,
+{{- end }}
 //		Logger: logger,
 {{- if .Auth.Identity }}
 //		Identity: identityService,
@@ -411,9 +427,10 @@ func utilityRoutes(apiVersion, baseURL string) []runtimerouting.Route {
 		},
 {{- end }}
 
-{{- /* routeHandler is a route's handler: the identity runtime's for a user model operation (D50), the handler factory over the implementation for every other. */ -}}
+{{- /* routeHandler is a route's handler: the identity runtime's for a user model operation (D50), the handler factory over the ORM for a behavior operation (D103), the handler factory over the implementation for every other. */ -}}
 {{- define "routeHandler" }}
 {{- if .IdentityOperation }}identityHandler(cfg.Identity, {{ printf "%q" .IdentityOperation }})
+{{- else if .BehaviorOperation }}create{{ .HandlerName }}(cfg.DB)
 {{- else }}create{{ .HandlerName }}(cfg.Implementations.{{ toGoName .Namespace }})
 {{- end }}
 {{- end }}
@@ -552,8 +569,12 @@ func manualHandler(handler gohttp.Handler, operation string) gohttp.Handler {
 // =============================================================================
 // Each handler factory creates a handler that calls the corresponding
 // implementation method. This allows for dependency injection and testing.
+{{- if .BehaviorEndpoints }}
+// The factory of a behavior operation calls the ORM's operation instead
+// (D103).
+{{- end }}
 
-{{- range .Endpoints }}
+{{- range .HandlerEndpoints }}
 {{- $endpointMethod := .Method }}{{/* Used in scalar-arg impl call site below to choose local var vs requestBody.Field */}}
 
 // create{{ .HandlerName }} creates a handler for {{ .Method }} {{ .Path }}
@@ -573,7 +594,17 @@ func manualHandler(handler gohttp.Handler, operation string) gohttp.Handler {
 // {{ $line }}
 {{- end }}
 {{- end }}
+{{- with .BehaviorOperation }}
+//
+// It runs {{ .Type }}'s {{ .Use }} {{ .Operation }}, {{ behaviorArticle .Behavior }} (D103), through the
+// ORM of {{ .Database }}, which runs it through the behaviors' core in a
+// transaction: no implementation method serves it.
+{{- end }}
+{{- if .BehaviorOperation }}
+func create{{ .HandlerName }}(db orm.DatabaseInterface) gohttp.HandlerFunc {
+{{- else }}
 func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) gohttp.HandlerFunc {
+{{- end }}
 	{{- /* The predicates below mirror the MatchString call sites further down so we never emit an orphan regex declaration (Go error: "declared and not used"). */ -}}
 	{{- range .ArgQueryParams }}
 	{{- if and .ValidatePattern .IsString (not .IsArray) }}
@@ -1424,6 +1455,21 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 			return
 		}
 
+		{{- if .BehaviorOperation }}
+
+		// Run the operation through the ORM, as the request's caller (D103)
+		var result {{ .BehaviorResultGoType }}
+		if err := runBehaviorOperation(r.Context(), db.{{ .BehaviorRepositoryCall }}{{- range .PathParams }}, {{ .GoName }}{{- end }}, {{ if .HasInput }}input{{ else }}nil{{ end }}, &result); err != nil {
+			respondBehaviorError(w, r, err)
+			return
+		}
+		{{- if .OutputIsArray }}
+		RespondCollectionEnvelope(w, gohttp.StatusOK, result, r)
+		{{- else }}
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+		{{- end }}
+		{{- else }}
+
 		// Call implementation
 		result, err := impl.{{ .ShortImplName }}({{ if $.Deps.Database }}callerContext(r.Context()){{ else }}r.Context(){{ end }}{{- range .PathParams }}, {{ .GoName }}{{- end }}{{- range .ArgQueryParams }}, {{ .GoName }}{{- end }}{{- if .Filterable }}, filters{{- end }}{{- if .HasInput }}, &input{{- else if .ScalarArgs }}{{- range .ScalarArgs }}{{- if eq $endpointMethod "GET" }}, {{ .GoName }}{{- else }}, requestBody.{{ .GoName }}{{- end }}{{- end }}{{- end }}{{- if .HasFileUpload }}, files{{- end }}{{- if .Page }}, page{{- end }})
 		if err != nil {
@@ -1469,6 +1515,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 		RespondCollectionEnvelope(w, gohttp.StatusOK, result, r)
 		{{- else }}
 		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+		{{- end }}
 		{{- end }}
 	}
 }

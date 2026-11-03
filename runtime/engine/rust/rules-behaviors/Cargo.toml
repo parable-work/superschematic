@@ -1,0 +1,21 @@
+[package]
+name = "superschematic-rules-behaviors"
+description = "The behaviors ported onto the pure core (D103), each a Behavior over logical names, with no I/O"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# Like the core, nothing here does I/O (D103), so the crate builds for
+# wasm32-unknown-unknown.
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+# The engine's JSON features (D58): a number keeps its text, an object its
+# members' order.
+serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
+superschematic-rules = { path = "../rules" }
+
+[lints]
+workspace = true

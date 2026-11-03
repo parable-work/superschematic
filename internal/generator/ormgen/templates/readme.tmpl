@@ -14,6 +14,9 @@ Generated at: {{ .Timestamp }}
 {{- if .HasSearch }}
 - `search.go` -- the words of a filter's `SearchText` and their `LIKE` patterns
 {{- end }}
+{{- if .Rules }}
+- `rules.go` -- the layout of the tables whose fields are behaviors (`RulesLayout`) and `WithBehaviorCaller`
+{{- end }}
 {{- range .Repositories }}
 - `repository_{{ toSnakeCase .TypeName }}.go` -- {{ .TypeName }} repository
 {{- end }}
@@ -78,6 +81,30 @@ does. `Parse<Type>Sort` reads a page request's sort, `name` or `-name`, and
 refuses a field the table cannot sort by. A page reads fastest with an index
 on the sort's column, then the primary key, after any column the filter
 compares by equality.
+{{- if .Rules }}
+
+## Tables whose fields are behaviors
+
+A table whose fields are behaviors (D103) stays a table: each field a
+behavior owns is a column its row holds, which `<Type>Create`, its create
+and upsert input, and `<Type>Update` leave out. Creates, updates, deletes
+and each field's operations{{ with .RulesExample }}
+(`{{ . }}`){{ end }}
+run through the behaviors' core in a transaction over `RulesLayout`, as
+the context's user holding no permissions unless `WithBehaviorCaller` names
+a caller. An upsert inserts a new row with what the core's create gives it,
+and updates a row the key holds by its own fields alone. `UpdateMany` and
+`DeleteMany` do not go through the core, and a table whose fields are
+behaviors has no `UpdateOneIfVersion` or `DeleteOneIfVersion`: its version
+is the fence every write through the core holds. A refusal of the core's is
+a `*rules.Refusal`, and one of an operation on a key no live row holds wraps
+`ErrNotFound` too. A raw SQL write of an owned column (`Tx.Exec`) is never
+refused. The module requires `{{ .Naming.RulesGoModule }}`,
+which links the core's static archive through cgo: build it from a
+superschematic checkout with `make rules-archive` (a `replace` directive to
+that checkout finds it), or put a release's archives in `CGO_LDFLAGS` as
+`-L<dir>/lib`.
+{{- end }}
 {{- if .VersionGraphs }}
 
 ## Version graphs

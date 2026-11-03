@@ -164,6 +164,11 @@
         "maxItems": 64,
         "minItems": 1,
         "type": "array"
+      },
+      "status": {
+        "description": "The field of the type whose Workflow the rules read and move: an enters rule's, a changes rule's on the status, and a then without a link. Implied when the type has one Workflow; needed when it has several. A type anchored Workflow is named Workflow.",
+        "minLength": 1,
+        "type": "string"
       }
     },
     "required": [
@@ -173,5 +178,6 @@
   },
   "requires": [
     "Workflow"
-  ]
+  ],
+  "hearsChanges": true
 }

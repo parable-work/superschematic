@@ -12,8 +12,9 @@ name: release
 # build-archives, beside verify, packs per runner the static archives a
 # generated Go server links through cgo, which no module the module proxy
 # serves carries: superscalar's, built from the pinned checkout, the
-# version graph's and the engine's (with its C ABI's header), all with
-# tools.env's Rust, so they link into one binary, which the runner's link
+# version graph's, the engine's and the behaviors' core's (each of the last
+# two with its C ABI's header; D58, D103), all with tools.env's Rust, so
+# they link into one binary, which the runner's link
 # check proves on each of the four platforms (scripts/release-archives.sh,
 # scripts/engine-link-check.sh; docs/stack-model.md, section 8.2; D47,
 # amended; D58), and packs the engine's prebuilt Node-API addon for its
@@ -36,7 +37,7 @@ name: release
 # records the commit too. assemble refuses a set whose binaries and archives
 # disagree on that commit, writes SHA256SUMS over every tarball, the two
 # CLIs' among them, packs the npm tarballs beside
-# the four addon packages, seventeen in all, @superschematic/engine naming the
+# the four addon packages, eighteen in all, @superschematic/engine naming the
 # addon packages as optional dependencies at the release's version, and
 # builds the PyPI sdist and wheel.
 # github-release attaches everything to a GitHub release with build provenance
@@ -209,11 +210,11 @@ jobs:
           NAME: ${{ matrix.name }}
         run: scripts/release-archives.sh "$VERSION" "$NAME" dist
 
-      - name: Link check (one binary over the three archives, on this platform)
+      - name: Link check (one binary over the four archives, on this platform)
         # The archives the tarball packed, already built: each defines its
         # own C functions alone, and one Go binary that imports the
-        # superscalar, version graph and engine bindings links them and
-        # runs.
+        # superscalar, version graph, engine and rules bindings links them
+        # and runs.
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
           CGO_ENABLED: "1"
@@ -538,7 +539,7 @@ jobs:
       - name: Install Rust toolchain
         # The schema runtime's TypeScript build links the superscalar binding
         # from the pinned checkout (scripts/link-local-deps.mjs), and the
-        # version-graph package ships the core built for wasm32.
+        # version-graph and rules packages ship their cores built for wasm32.
         run: |
           rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown
           rustup default "$RUST_VERSION"
@@ -600,8 +601,10 @@ jobs:
         # The five authoring packages ship their TypeScript source; the
         # schema runtime, the http runtime, the engine and the engine's
         # work-queue package ship their compiled dist; the version-graph
-        # package ships its compiled dist and the core's wasm module; the
-        # schema IR ships its declarations and the schema-file JSON Schema.
+        # package ships its compiled dist and the core's wasm module, and
+        # the rules package its compiled dist and the behaviors' core's
+        # wasm module (D103); the schema IR ships its declarations and the
+        # schema-file JSON Schema.
         # The four addon packages, @superschematic/engine-<target>, which
         # build-archives packed on each platform's runner, ship the core's
         # Node-API addon for their platform; the engine names each as an
@@ -635,13 +638,14 @@ jobs:
           (cd runtime/schema/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           (cd runtime/http/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           (cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
+          (cd runtime/rules/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           (cd runtime/engine/typescript && bun install --frozen-lockfile && bun run build \
             && npm pkg set "${optional[@]}" \
             && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           (cd runtime/engine-workqueue/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           (cd runtime/engine-commerce/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           ls -l release-assets/npm
-          test "$(ls release-assets/npm/*.tgz | wc -l)" -eq 17
+          test "$(ls release-assets/npm/*.tgz | wc -l)" -eq 18
           python3 scripts/npm_local_specs.py release-assets/npm/*.tgz
 
       - name: Build the PyPI sdist and wheel
@@ -718,12 +722,12 @@ jobs:
             echo "## Artifacts"
             echo
             echo "The CLI is \`superschematic_${VERSION}_<platform>.tar.gz\`, the CLI with the Topcoat extension linked too \`superschematic-topcoat_${VERSION}_<platform>.tar.gz\`, the identity runner \`superschematic-identity_${VERSION}_<platform>.tar.gz\` and the migration runner \`superschematic-migrate_${VERSION}_<platform>.tar.gz\`, for linux-x64, linux-arm64, darwin-x64 and darwin-arm64."
-            echo "\`superschematic-archives_${VERSION}_<platform>.tar.gz\` holds the static archives a generated Go server links through cgo, superscalar's, the version graph's and the engine's, under \`lib/\`, and the engine's C ABI header under \`include/\`: build with \`CGO_LDFLAGS=-L<dir>/lib\`. The CLI pins each one's digest in the Dockerfiles and workflows it generates."
+            echo "\`superschematic-archives_${VERSION}_<platform>.tar.gz\` holds the static archives a generated Go server links through cgo, superscalar's, the version graph's, the engine's and the behaviors' core's, under \`lib/\`, and the engine's and the behaviors' core's C ABI headers under \`include/\`: build with \`CGO_LDFLAGS=-L<dir>/lib\`. The CLI pins each one's digest in the Dockerfiles and workflows it generates."
             echo "\`@superschematic/engine\` installs the engine's prebuilt Node-API addon from \`@superschematic/engine-<target>\`, one npm package per platform: darwin-arm64, darwin-x64, linux-x64-gnu and linux-arm64-gnu."
             echo "Every binary was built from commit \`$GITHUB_SHA\` and is listed in \`SHA256SUMS\`."
             echo "Verify provenance with: \`gh attestation verify <asset> --repo ${GITHUB_REPOSITORY}\`."
             echo
-            echo "Go modules: \`go get github.com/${GITHUB_REPOSITORY}@$TAG\`, \`.../ir@$TAG\`, \`.../runtime/schema/go@$TAG\`, \`.../runtime/http/go@$TAG\`, \`.../runtime/versiongraph/go@$TAG\`, \`.../runtime/engine/go@$TAG\`, \`.../runtime/migrate/go@$TAG\`."
+            echo "Go modules: \`go get github.com/${GITHUB_REPOSITORY}@$TAG\`, \`.../ir@$TAG\`, \`.../runtime/schema/go@$TAG\`, \`.../runtime/http/go@$TAG\`, \`.../runtime/versiongraph/go@$TAG\`, \`.../runtime/engine/go@$TAG\`, \`.../runtime/rules/go@$TAG\`, \`.../runtime/migrate/go@$TAG\`."
           } > notes.md
           flags=()
           if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
@@ -747,7 +751,7 @@ jobs:
   publish-npm:
     name: publish npm
     # Registration (npmjs.com -> package -> Settings -> Trusted Publisher, once
-    # per package; the seventeen exact names are
+    # per package; the eighteen exact names are
     #   @superschematic/schema
     #   @superschematic/db
     #   @superschematic/api
@@ -758,6 +762,7 @@ jobs:
     #   @superschematic/schema-runtime
     #   @superschematic/http-runtime
     #   @superschematic/versiongraph
+    #   @superschematic/rules
     #   @superschematic/engine-darwin-arm64
     #   @superschematic/engine-darwin-x64
     #   @superschematic/engine-linux-x64-gnu
@@ -800,7 +805,7 @@ jobs:
           name: release-assets
           path: release-assets
 
-      - name: Publish the seventeen packages
+      - name: Publish the eighteen packages
         # The tarballs are the attested release assets, byte for byte. Order:
         # @superschematic/schema first, since the other authoring packages
         # name it in their docs, @superschematic/stack after it and
@@ -810,7 +815,7 @@ jobs:
         # four addon packages, its optional dependencies at the release's
         # version, which an install that finds none skips, and the engine's
         # work-queue and commerce packages last, after the engine, their
-        # peer; no other package of the seventeen depends on another at
+        # peer; no other package of the eighteen depends on another at
         # install time.
         env:
           DIST_TAG: ${{ needs.preflight.outputs.npm_dist_tag }}
@@ -821,7 +826,7 @@ jobs:
           npm --version
           node -e 'const [maj, min, pat] = process.versions.npm.split(".").map(Number); if (maj < 11 || (maj === 11 && (min < 5 || (min === 5 && pat < 1)))) { console.error("npm >= 11.5.1 is required for trusted publishing"); process.exit(1); }'
           cd release-assets/npm
-          for name in schema db api schema-config stack memory-store schema-ir schema-runtime http-runtime versiongraph \
+          for name in schema db api schema-config stack memory-store schema-ir schema-runtime http-runtime versiongraph rules \
             engine-darwin-arm64 engine-darwin-x64 engine-linux-x64-gnu engine-linux-arm64-gnu engine engine-workqueue engine-commerce; do
             tgz="superschematic-${name}-${VERSION}.tgz"
             echo "==> $tgz"

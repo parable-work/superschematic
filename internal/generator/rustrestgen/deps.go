@@ -12,6 +12,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/rustgen"
@@ -66,6 +67,12 @@ type DepsInfo struct {
 	// Engine is the engine of the API's engine database (D58), which Deps
 	// holds when the database's types compose behaviors; nil otherwise.
 	Engine *DepsEngine
+
+	// Behaviors is what the crate runs its behavior operations with
+	// (D103), when its @behaviorOperations sets serve tables of Database
+	// whose fields are behaviors: the layout of Database's tables and the
+	// paths of the adapter's and the behaviors' crates. Nil otherwise.
+	Behaviors *DepsBehaviors
 }
 
 // DepsEngine is the engine Deps holds: the engine database's, opened in
@@ -210,6 +217,47 @@ type WorkerInfo struct {
 	// its running handlers finish.
 	Concurrency  int
 	GraceSeconds int
+
+	// Behavior is set for a @behaviorWorker (D103): the worker runs its
+	// table's behavior queues through the behaviors' core, by functions
+	// src/behaviors.rs holds, so the Workers trait has no method for it
+	// and Method is empty. BehaviorQueues are those queues as
+	// src/behaviors.rs names them, deadlines first.
+	Behavior       *apigen.BehaviorWorkerInfo
+	BehaviorQueues []BehaviorQueue
+}
+
+// BehaviorQueue is a queue a behavior worker runs (D103), as
+// src/behaviors.rs names it.
+type BehaviorQueue struct {
+	// Queue is the queue's class in the database, the message's type in
+	// its Rust types (TicketDeadline), and Const the constant that holds
+	// its descriptor there (TICKET_DEADLINE_QUEUE).
+	Queue string
+	Const string
+
+	// Kind is what the queue holds: ir.BehaviorQueueDeadlines, the
+	// table's deadlines, or ir.BehaviorQueueChanges, the writes of its
+	// rows its behaviors hear.
+	Kind string
+
+	// Func is the function that opens the queue on a pool of the
+	// database, and Handler the one that runs a message claimed from it
+	// (ticket_timers_deadlines and run_ticket_timers_deadline,
+	// ticket_timers_changes and run_ticket_timers_change), which the
+	// worker's main hands to the HTTP runtime's claim loop.
+	Func    string
+	Handler string
+}
+
+// Changes reports whether the queue is a table's change queue, whose
+// handler runs the core's change command, rather than its deadline queue.
+func (q BehaviorQueue) Changes() bool { return q.Kind == ir.BehaviorQueueChanges }
+
+// CallerFunc is the function of src/behaviors.rs that gives the caller a
+// behavior worker's commands run as: ticket_timers_caller.
+func (w WorkerInfo) CallerFunc() string {
+	return rustutil.ToSnakeCase(w.Name) + "_caller"
 }
 
 // jobsOf reads the API's jobs, sorted by name.
@@ -240,27 +288,55 @@ func jobsOf(schema *ir.Schema) ([]JobInfo, error) {
 	return jobs, nil
 }
 
-// workersOf reads the API's workers, sorted by name.
-func workersOf(schema *ir.Schema) ([]WorkerInfo, error) {
-	var workers []WorkerInfo
+// workersOf reads the API's workers, sorted by name: its @worker classes,
+// and apart its @behaviorWorker classes (D103), whose handlers
+// src/behaviors.rs holds, each with its table's deadline queue and change
+// queue, deadlines first, and the behaviors that arm and hear them from
+// its database among deps (apigen.BehaviorWorkerOf).
+func workersOf(schema *ir.Schema, deps map[string]*ir.Schema) (workers, behaviorWorkers []WorkerInfo, err error) {
 	for _, w := range schema.Workers {
 		if w == nil {
 			continue
 		}
 		if err := registry.CheckWorker(w); err != nil {
-			return nil, fmt.Errorf("rustrestgen: worker %s: %w", w.Name, err)
+			return nil, nil, fmt.Errorf("rustrestgen: worker %s: %w", w.Name, err)
 		}
-		workers = append(workers, WorkerInfo{
+		info := WorkerInfo{
 			Name:         w.Name,
 			Method:       rustutil.Identifier(w.Name, "handle"),
 			Queue:        w.Queue,
 			QueueConst:   rustgen.QueueConst(w.Queue),
 			Concurrency:  registry.WorkerConcurrency(w),
 			GraceSeconds: registry.WorkerGraceSeconds(w),
-		})
+		}
+		if b := w.BehaviorWorker; b != nil {
+			info.Method = ""
+			info.Behavior = apigen.BehaviorWorkerOf(schema, deps, w)
+			if info.Behavior == nil || len(info.Behavior.Queues) == 0 {
+				return nil, nil, fmt.Errorf("rustrestgen: @behaviorWorker %s runs %s's behaviors (D103), and the loader gave it no queue: load the schema with its verification, which adds %s's deadline and change queues", w.Name, b.Type, b.Type)
+			}
+			stem := rustutil.ToSnakeCase(w.Name)
+			for _, queue := range info.Behavior.Queues {
+				q := BehaviorQueue{Queue: queue, Const: rustgen.QueueConst(queue)}
+				switch queue {
+				case info.Behavior.DeadlineQueue:
+					q.Kind, q.Func, q.Handler = ir.BehaviorQueueDeadlines, stem+"_deadlines", "run_"+stem+"_deadline"
+				case info.Behavior.ChangeQueue:
+					q.Kind, q.Func, q.Handler = ir.BehaviorQueueChanges, stem+"_changes", "run_"+stem+"_change"
+				default:
+					return nil, nil, fmt.Errorf("rustrestgen: @behaviorWorker %s runs %s, which is neither %s's deadline queue nor its change queue (D103)", w.Name, queue, b.Type)
+				}
+				info.BehaviorQueues = append(info.BehaviorQueues, q)
+			}
+			behaviorWorkers = append(behaviorWorkers, info)
+			continue
+		}
+		workers = append(workers, info)
 	}
-	slices.SortFunc(workers, func(a, b WorkerInfo) int { return strings.Compare(a.Name, b.Name) })
-	return workers, nil
+	byName := func(a, b WorkerInfo) int { return strings.Compare(a.Name, b.Name) }
+	slices.SortFunc(workers, byName)
+	slices.SortFunc(behaviorWorkers, byName)
+	return workers, behaviorWorkers, nil
 }
 
 // HasJobs reports whether the API declares a job, for which deps.rs
@@ -329,11 +405,18 @@ func (o *APIOutput) DepsExports() string {
 	return strings.TrimPrefix(rustutil.UseLine("deps", names), "use ")
 }
 
+// HasDatabaseTypes reports whether the crate re-exports its database's
+// Rust types as database_types: for its workers' messages and queues,
+// a behavior worker's among them (D65, D103).
+func (o *APIOutput) HasDatabaseTypes() bool {
+	return o.Deps != nil && o.Deps.DatabaseTypesCrate != "" && (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0)
+}
+
 // DatabaseTypesDependency is the Cargo.toml dependency on the database's
-// Rust types for an API with workers, nil without one or when the crate
-// depends on them already for a dependency's validators.
+// Rust types for an API with workers or derivers, nil without one or when
+// the crate depends on them already for a dependency's validators.
 func (o *APIOutput) DatabaseTypesDependency() *DependencyCrate {
-	if (!o.HasWorkers() && !o.HasDerivers()) || o.Deps.DatabaseTypesCrate == "" {
+	if (!o.HasDatabaseTypes() && !o.HasDerivers()) || o.Deps.DatabaseTypesCrate == "" {
 		return nil
 	}
 	for _, crate := range o.DependencyCrates {
@@ -370,11 +453,14 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 		}
 		seen[m.Field] = m.Service
 	}
-	if len(o.Workers) > 0 && deps.DatabaseTypesCrate == "" {
+	if (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0) && deps.DatabaseTypesCrate == "" {
 		return fmt.Errorf("rustrestgen: %s declares workers, whose messages are its database's Rust types, and its Deps names none", o.SchemaName)
 	}
 	if len(o.Derivers) > 0 && (deps.DatabaseTypesCrate == "" || deps.Engine == nil) {
 		return fmt.Errorf("rustrestgen: %s declares derivers, whose methods its database's Rust types type and whose engine its Deps holds, and its Deps names neither", o.SchemaName)
+	}
+	if err := o.checkBehaviorDeps(&deps); err != nil {
+		return err
 	}
 	o.Deps = &deps
 	return nil
@@ -484,8 +570,9 @@ func (o *APIOutput) DepsUses() []string {
 
 // NewSignature is the signature of Implementations::new, indented as a
 // method of an impl: the handlers, the identity runtime's authenticator for
-// an API over the user model (D50) and the service authenticator for an
-// API with a service clause (D37), on one line when it fits.
+// an API over the user model (D50), the service authenticator for an API
+// with a service clause (D37) and the pool of its database for an API with
+// behavior operations (D103), on one line when it fits.
 func (o *APIOutput) NewSignature() string {
 	params := []string{"handlers: Handlers"}
 	if o.Identity != nil {
@@ -493,6 +580,9 @@ func (o *APIOutput) NewSignature() string {
 	}
 	if o.HasServiceCallers {
 		params = append(params, "service_authenticator: Arc<dyn ServiceAuthenticator>")
+	}
+	if o.HasBehaviorOperations() {
+		params = append(params, "db: Pool")
 	}
 	return rustFn("    ", "pub fn new", params, "Self")
 }
@@ -543,6 +633,8 @@ func (o *APIOutput) RuntimeFeatures() []string {
 	if o.Deps == nil {
 		return features
 	}
+	// Deps.db's pool is the one the behavior operations run on (D103), so
+	// a crate with them has a database.
 	if o.Deps.Database != "" {
 		features = append(features, "postgres")
 		if o.Identity != nil {
@@ -631,7 +723,7 @@ func (s ImplementationScaffold) CrateIdent() string {
 // UsesTypes reports whether a method signature of the implementation names
 // the types crate.
 func (s ImplementationScaffold) UsesTypes() bool {
-	for _, endpoint := range s.Endpoints {
+	for _, endpoint := range s.ImplementedEndpoints() {
 		if endpoint.UsesTypes() {
 			return true
 		}
@@ -647,7 +739,7 @@ func (s ImplementationScaffold) APIUse() string {
 	for _, ns := range s.Namespaces {
 		names = append(names, rustutil.ToPascalCase(ns)+"Implementation")
 	}
-	for _, endpoint := range s.Endpoints {
+	for _, endpoint := range s.ImplementedEndpoints() {
 		if endpoint.HasArgs() {
 			names = append(names, endpoint.ArgsName)
 		}

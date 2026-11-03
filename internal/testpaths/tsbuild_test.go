@@ -399,3 +399,45 @@ func writeFile(t *testing.T, path, content string) {
 		t.Fatal(err)
 	}
 }
+
+// TestInputsDigestReadsSources: a build's sources outside its package, a
+// directory and a file named by a path relative to it, are among what its
+// stamp holds it read, so an edit to one makes the next build run, as the
+// behaviors' core's crates do for its npm package (rulesSources); a source
+// that is not there reads as none.
+func TestInputsDigestReadsSources(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "pkg")
+	writeFile(t, filepath.Join(dir, "package.json"), `{"name": "pkg"}`)
+	writeFile(t, filepath.Join(root, "crate", "src", "lib.rs"), "pub fn core() {}\n")
+	writeFile(t, filepath.Join(root, "Cargo.lock"), "version = 4\n")
+	in := buildInputs{tools: "bun 1 node 1", sources: []string{"../crate/src", "../Cargo.lock", "../gone"}}
+	digest := func() string {
+		t.Helper()
+		d, err := inputsDigest(dir, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	first := digest()
+	if again := digest(); again != first {
+		t.Fatal("the digest of unchanged inputs changed")
+	}
+	writeFile(t, filepath.Join(root, "crate", "src", "lib.rs"), "pub fn core() { todo!() }\n")
+	edited := digest()
+	if edited == first {
+		t.Error("an edit to a file of a source directory left the digest as it was")
+	}
+	writeFile(t, filepath.Join(root, "Cargo.lock"), "version = 4\n# moved\n")
+	if digest() == edited {
+		t.Error("an edit to a source file left the digest as it was")
+	}
+	without, err := inputsDigest(dir, buildInputs{tools: in.tools})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if without == digest() {
+		t.Error("the digest without sources is the digest with them")
+	}
+}

@@ -546,6 +546,7 @@ func (r run) generateORM() error {
 			ModuleClosure: closure,
 			SQLite:        r.Outputs.SQLDialect(registry.SQLDialectSQLite),
 			Actor:         r.ormActor(),
+			Registry:      r.Registry,
 			Clock:         r.Options.Clock,
 		})
 		return err
@@ -1221,7 +1222,10 @@ func (r run) goServerOutput() (*apigen.APIOutput, error) {
 // (D54). It also returns their schemas, whose Go types modules the server
 // reaches through the ORM and the SDKs. A dependency whose config the
 // build has must generate what Deps imports: the database its Go types,
-// and so its ORM, and each callee its Go SDK.
+// and so its ORM, and each callee its Go SDK. A database a table of which
+// composes a behavior, by implements or on a field (D103), has an ORM that
+// requires the rules module, which go.mod then requires and replaces too
+// (DepsInfo.Rules).
 func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, error) {
 	var deps apigen.DepsInfo
 	var roots []*ir.Schema
@@ -1256,6 +1260,7 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 		deps.Database = db
 		deps.ORMModule = r.Options.Naming.GoORMModule(db)
 		deps.VersionGraph = apigen.DeclaresVersionGraph(schema)
+		deps.Rules = apigen.DeclaresTableBehaviors(schema)
 		// The ORM opens with the keys of the database's Encrypted<T>
 		// fields, which the API's config holds (D85).
 		keys, err := r.fieldKeysField(db, schema)
@@ -1591,6 +1596,9 @@ func (r run) rustDeps(schemas map[string]*ir.Schema) (rustrestgen.DepsInfo, erro
 		}
 	} else if len(r.Schema.Workers) > 0 {
 		return deps, fmt.Errorf("generator: %s declares workers, and connects to no database, which holds their queues; set its authDb to the DB service that declares them (D53)", r.Config.Name)
+	}
+	if err := r.rustBehaviorDeps(apiDir, &deps); err != nil {
+		return deps, err
 	}
 	engine, err := r.engineDatabase(schemas)
 	if err != nil {
