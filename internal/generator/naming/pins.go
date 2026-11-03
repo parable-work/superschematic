@@ -38,6 +38,7 @@ func (n Naming) ReleasePins(paths LocalPaths, rel release.Release) Pins {
 		{n.SchemaRuntimeGoModule, d.SchemaRuntimeGoModule, paths.SchemaRuntimeGo},
 		{n.HTTPRuntimeGoModule, d.HTTPRuntimeGoModule, paths.HTTPRuntimeGo},
 		{n.VersionGraphGoModule, d.VersionGraphGoModule, paths.VersionGraphGo},
+		{n.RulesGoModule, d.RulesGoModule, paths.RulesGo},
 		{n.EngineGoModule, d.EngineGoModule, paths.EngineGo},
 	} {
 		if m.dir == "" && m.module == m.published {

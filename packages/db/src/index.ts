@@ -47,6 +47,23 @@ export type {
   VersionedOptions,
   VersionGraphOptions,
 } from "./decorators";
-export type { AutoGenerate, Encrypted, HasMany, JsonField, ManyToMany, OnDeleteAction, Relation, RelationOptions } from "./wrappers";
+export type {
+  AutoGenerate,
+  Encrypted,
+  HasMany,
+  JsonField,
+  ManyToMany,
+  OnDeleteAction,
+  ReactionRuleOn,
+  Reactions,
+  ReactionsOn,
+  Relation,
+  RelationOptions,
+  Timers,
+  TimersDeadlineOn,
+  TimersOn,
+  Workflow,
+  WorkflowConfig,
+} from "./wrappers";
 export type { RoleSeed, User, UserConfig, UserRole } from "./user";
 export { seedRoles } from "./user";

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/behaviorlayout"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
@@ -89,6 +90,26 @@ type ORMInfo struct {
 	// RequireUpdatedBy is outputs.sql.requireUpdatedBy.
 	SystemActor      *ORMSystemActor
 	RequireUpdatedBy bool
+
+	// Rules is the layout document of the database's tables whose fields
+	// are behaviors (D103), which orm.ts embeds as RulesConst and the
+	// HTTP runtime's adapter reads; nil for a database with none.
+	Rules      *behaviorlayout.Layout
+	RulesConst string
+}
+
+// HearsChanges reports whether a table of the layout keeps a change queue
+// (D103), which orm.ts's comment then describes.
+func (o *ORMInfo) HearsChanges() bool {
+	if o == nil || o.Rules == nil {
+		return false
+	}
+	for _, table := range o.Rules.Types {
+		if table != nil && table.Changes != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // ORMSystemActor is outputs.sql.systemActor as orm.ts writes it.
@@ -151,6 +172,23 @@ type ORMTable struct {
 	// names it.
 	View     bool
 	Relation string
+
+	// Uses are the table's behaviors (D103), each one it implements and
+	// each field that is one, each one's operations a member of its
+	// repository under its member; none for a table with none.
+	Uses []ORMUse
+
+	// Deadlines is a table whose behaviors arm deadlines (D103), whose
+	// repository runs a due one (runDeadline). NoUpserts is a table whose
+	// behaviors keep sub-tables or arm deadlines, whose repository has no
+	// upserts: an upsert's insert applies no change set, and the core's
+	// create of such a row writes more than the row.
+	Deadlines bool
+	NoUpserts bool
+
+	// Changes is a table whose writes its behaviors hear (D103), whose
+	// repository runs a change its trigger wrote (runChange).
+	Changes bool
 }
 
 // ORMRelation is a to-one relation as orm.ts writes it: Field, the
@@ -204,8 +242,12 @@ type ORMColumn struct {
 	// Encrypted is an Encrypted<T> field's column (D85), which a row holds
 	// as a SecretValue and a write takes as a string or a SecretValue.
 	Encrypted bool
-	Audit     string
-	Relation  string
+	// Owned is a column of a field a behavior owns (D103), which a row
+	// holds and only the behavior's operations change: a create, an
+	// update and an upsert leave it out.
+	Owned    bool
+	Audit    string
+	Relation string
 	// Default is the JSON of the schema's default, which a create that
 	// leaves the member unset writes; empty without one.
 	Default string
@@ -311,6 +353,10 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 			keyTypes[t.Type] = qualifyTypes(fieldType(info, key.Field), known)
 		}
 	}
+	rules, err := typeScriptRules(schema, opts.Registry)
+	if err != nil {
+		return nil, err
+	}
 	clauses := sqlutil.PostgresClauses()
 	out := &ORMInfo{
 		Name:              ORMTypeName(opts.SchemaName),
@@ -322,11 +368,26 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 		RequireUpdatedBy:  opts.Actor.RequireUpdatedBy,
 	}
 	out.Const = lowerFirst(out.Name) + "Orm"
+	if rules != nil {
+		out.Rules, out.RulesConst = rules.layout, lowerFirst(out.Name)+"Rules"
+	}
 	if opts.Actor.SystemSet {
 		out.SystemActor = &ORMSystemActor{ID: opts.Actor.SystemID, Name: opts.Actor.SystemName}
 	}
+	// A behavior's sub-table has no definition or repository (D103): only
+	// the behavior's operations write it, and no read of its rows is
+	// generated, so no relation reaches it either.
+	owned := map[string]bool{}
+	for _, t := range tables {
+		if td := schema.Types[t.Type]; td != nil && td.BehaviorTable != nil {
+			owned[t.Type] = true
+		}
+	}
 	for i := range tables {
 		t := &tables[i]
+		if owned[t.Type] {
+			continue
+		}
 		info := types[t.Type]
 		member := lowerFirst(t.Type)
 		if slices.Contains(ormMembers, member) {
@@ -361,6 +422,19 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 				table.Statements = append(table.Statements, sqlutil.NamedStatement{Name: name, SQL: statements[name]})
 			}
 		}
+		if rules != nil {
+			table.Uses = rules.uses[t.Type]
+			if layout := rules.layout.Types[t.Type]; layout != nil {
+				table.Deadlines = layout.Deadlines != nil
+				table.Changes = layout.Changes != nil
+				table.NoUpserts = table.Deadlines
+				for _, use := range layout.Uses {
+					if len(use.Tables) > 0 {
+						table.NoUpserts = true
+					}
+				}
+			}
+		}
 		if statements["nearest"] != "" {
 			table.Statements = append(table.Statements, sqlutil.NamedStatement{Name: "nearest", SQL: statements["nearest"]})
 			out.NearestMetrics, out.DefaultNearestK = sqlutil.NearestMetrics(), sqlutil.DefaultNearestK
@@ -374,15 +448,29 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 			if err != nil {
 				return nil, fmt.Errorf("tsgen: table %s: %w", t.Type, err)
 			}
+			// An owned field's type is its declaration's, which its use's
+			// config may narrow: a state machine's states.
+			if rules != nil && column.Owned {
+				if narrowed := rules.types[t.Type][column.Field]; narrowed != "" {
+					column.Type = narrowed
+					column.FilterType = filterType(c.Filter, narrowed)
+					if column.FilterType != "" && column.Nullable {
+						column.FilterType += " & NullFilter"
+					}
+				}
+			}
 			table.Columns = append(table.Columns, column)
 		}
 		for _, k := range t.UniqueKeys {
 			table.UniqueKeys = append(table.UniqueKeys, ORMUniqueKey{Name: k.Name, Fields: k.Fields, Conflict: k.Conflict, Keep: k.Keep, Rows: k.Rows, Expression: k.Expression})
 		}
-		if err := ormRelations(&table, t); err != nil {
+		if err := ormRelations(&table, t, owned); err != nil {
 			return nil, err
 		}
 		for _, ref := range t.ReferencedBy {
+			if owned[ref.Source] {
+				continue
+			}
 			probe := sqlutil.ReferenceProbeOf(t, ref)
 			table.ReferencedBy = append(table.ReferencedBy, ORMReference{
 				Member: lowerFirst(ref.Filter),
@@ -420,7 +508,7 @@ func ormViews(schema *ir.Schema, opts Options, out *ORMInfo, projections []TypeI
 	}
 	taken := map[string]string{}
 	for _, t := range out.Tables {
-		for _, suffix := range []string{"Row", "Create", "Update", "Filter", "OrderField", "SortField", "UniqueKey", "PageKey", "Relations", "Repository", "VectorField"} {
+		for _, suffix := range []string{"Row", "Create", "Update", "Filter", "OrderField", "SortField", "UniqueKey", "PageKey", "Relations", "Repository", "VectorField", "Uses"} {
 			taken[t.Type+suffix] = t.Type
 		}
 		taken[t.Member] = t.Type
@@ -476,10 +564,11 @@ func ormViews(schema *ir.Schema, opts Options, out *ORMInfo, projections []TypeI
 }
 
 // ormRelations gives table, as orm.ts writes it, the relations t, as
-// sqlutil models it, includes and filters through (D90). An include's
-// member is a member of the row it loads into, so one that a column
-// already holds is refused.
-func ormRelations(table *ORMTable, t *sqlutil.TableModel) error {
+// sqlutil models it, includes and filters through (D90), but those to a
+// behavior's sub-table, owned, which orm.ts does not define (D103). An
+// include's member is a member of the row it loads into, so one that a
+// column already holds is refused.
+func ormRelations(table *ORMTable, t *sqlutil.TableModel, owned map[string]bool) error {
 	members := map[string]bool{}
 	for _, c := range table.Columns {
 		members[c.Member] = true
@@ -504,6 +593,9 @@ func ormRelations(table *ORMTable, t *sqlutil.TableModel) error {
 		})
 	}
 	for _, many := range t.ToMany {
+		if owned[many.Source] {
+			continue
+		}
 		if members[many.Name] {
 			return fmt.Errorf("tsgen: table %s: the relation %s would include its rows as the member %s, which a column holds", t.Type, many.Name, many.Name)
 		}
@@ -542,6 +634,7 @@ func ormColumn(c sqlutil.ColumnModel, info *TypeInfo, known map[string]bool, uui
 		Required:  c.Required,
 		Internal:  c.Internal,
 		Encrypted: c.Encrypted,
+		Owned:     c.Def.Owned(),
 		Audit:     c.Audit,
 		Relation:  c.Relation,
 		Filter:    sqlutil.FilterOps(c.Filter),
@@ -708,6 +801,9 @@ func (o *ORMInfo) RuntimeTypes() []string {
 	if len(o.Queries) > 0 {
 		used["QueryDefinition"] = true
 	}
+	if o.Rules != nil {
+		used["RulesLayout"] = true
+	}
 	for _, q := range o.Queries {
 		if q.Page != nil {
 			used["QueryPageOptions"] = true
@@ -735,6 +831,18 @@ func (o *ORMInfo) RuntimeTypes() []string {
 		}
 		if len(t.VectorFields) > 0 {
 			used["VectorRepository"] = true
+		}
+		if len(t.Uses) > 0 {
+			used["UseOperations"] = true
+		}
+		if t.Deadlines {
+			used["BehaviorDeadlines"] = true
+		}
+		if t.Changes {
+			used["BehaviorChanges"] = true
+		}
+		if t.NoUpserts {
+			used["WithoutUpserts"] = true
 		}
 		for _, c := range t.Columns {
 			if c.FilterType == "" {
@@ -801,11 +909,12 @@ func (o *ModuleOutput) HasORM() bool {
 }
 
 // CreateColumns are the columns a create may set: every column but the
-// audit fields, which the repository stamps, and internal metadata.
+// audit fields, which the repository stamps, internal metadata, and the
+// fields a behavior owns, which its core sets (D103).
 func (t ORMTable) CreateColumns() []ORMColumn {
 	var out []ORMColumn
 	for _, c := range t.Columns {
-		if c.Internal || c.Audit != "" {
+		if c.Internal || c.Audit != "" || c.Owned {
 			continue
 		}
 		out = append(out, c)
@@ -820,11 +929,12 @@ func (c ORMColumn) CreateOptional() bool {
 }
 
 // UpdateColumns are the columns an update may set: every column but the
-// key, the audit fields and internal metadata.
+// key, the audit fields, internal metadata and the fields a behavior owns,
+// which only its operations change (D103).
 func (t ORMTable) UpdateColumns() []ORMColumn {
 	var out []ORMColumn
 	for _, c := range t.Columns {
-		if c.Key || c.Internal || c.Audit != "" {
+		if c.Key || c.Internal || c.Audit != "" || c.Owned {
 			continue
 		}
 		out = append(out, c)

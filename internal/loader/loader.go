@@ -18,6 +18,8 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/loader/behaviorfields"
+	"github.com/parable-work/superschematic/internal/loader/behaviorops"
 	"github.com/parable-work/superschematic/internal/loader/identity"
 	"github.com/parable-work/superschematic/internal/loader/jsonreader"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
@@ -242,6 +244,9 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 				return nil, nil, err
 			}
 			vin.AuthDB = authDB
+			if vin.Database, err = o.databaseFor(servicePath, schema, authDB, reg); err != nil {
+				return nil, nil, err
+			}
 			if vin.DependencySchemas, err = o.referenceDependenciesFor(servicePath, schema, vin.Dependencies, reg); err != nil {
 				return nil, nil, err
 			}
@@ -346,6 +351,9 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		return nil, nil, err
 	}
 	vin.AuthDB = authDB
+	if vin.Database, err = o.databaseFor(servicePath, schema, authDB, reg); err != nil {
+		return nil, nil, err
+	}
 	if vin.DependencySchemas, err = o.referenceDependenciesFor(servicePath, schema, vin.Dependencies, reg); err != nil {
 		return nil, nil, err
 	}
@@ -397,6 +405,55 @@ func (o *loadOptions) authDBFor(servicePath string, schema *ir.Schema, reg *regi
 		return nil, fmt.Errorf("%s: reading the authDb %s, %s: %w", schema.Name, schema.AuthDB, reads, err)
 	}
 	return authDB, nil
+}
+
+// databaseFor reads the API's database (ir.Schema.Database), whose tables
+// its @behaviorOperations sets and @behaviorWorker classes name (D103):
+// authDB when the database is the authDb and it is read already, else
+// through the dependency loader (WithDependencyLoader) or as the service
+// of that name beside this one. It reads nothing for a schema with no such
+// set or worker, one that is not an API, one that connects to no one
+// database, or the load of a database itself; the verification pass
+// refuses the ones that need it.
+func (o *loadOptions) databaseFor(servicePath string, schema, authDB *ir.Schema, reg *registry.Registry) (*ir.Schema, error) {
+	if o.authDBRead || schema.Kind != ir.SchemaKindAPI {
+		return nil, nil
+	}
+	why := ""
+	for _, worker := range schema.Workers {
+		if worker != nil && worker.BehaviorWorker != nil {
+			why = "whose tables its @behaviorWorker classes name"
+		}
+	}
+	for _, set := range schema.OperationSets {
+		if set.IsBehaviorOperations() {
+			why = "whose tables its @behaviorOperations sets name"
+		}
+	}
+	if why == "" {
+		return nil, nil
+	}
+	db, _, ok := schema.Database()
+	if !ok || db == schema.Name {
+		return nil, nil
+	}
+	if db == schema.AuthDB && authDB != nil {
+		return authDB, nil
+	}
+	load := o.loadDependency
+	if load == nil {
+		load = func(name string) (*ir.Schema, error) {
+			return LoadService(filepath.Join(servicePath, "..", name),
+				WithRegistry(reg), WithNaming(o.naming), WithProfiler(o.profile),
+				WithSchemaCatalog(o.schemaCatalog), WithTSProgramCache(o.tsProgramCache), WithModuleRunner(o.runModule),
+				func(nested *loadOptions) { nested.authDBRead = true })
+		}
+	}
+	database, err := load(db)
+	if err != nil {
+		return nil, fmt.Errorf("%s: reading the database %s, %s: %w", schema.Name, db, why, err)
+	}
+	return database, nil
 }
 
 // referenceDependenciesFor reads the dependencies whose types the API's
@@ -497,13 +554,65 @@ func (o *loadOptions) referenceDependenciesFor(servicePath string, schema *ir.Sc
 
 // runVerify executes the format-agnostic verification pass on the assembled
 // schema: warnings go to WithWarnings's function or print to
-// [WarningWriter], errors fail the load. A schema that verifies has its
-// version graphs expanded into ordinary types, the
-// tables its User and UserRole traits own added and its user model route
-// sets filled from its authDb (D50), any scalar only the generated fields
-// use is hydrated from the registry, and the services its stack
-// declarations name join its references (D41).
+// [WarningWriter], errors fail the load. The fields its field-anchored
+// behaviors own join their tables before the pass (D103,
+// behaviorfields.Expand), once the behaviors' own checks hold what that
+// relies on (verify.CheckBehaviors), so an index, a uniqueness, a display
+// field, a projection's column and @enqueueOnChange may name one as they
+// name the table's own; when those checks fail, the pass runs over the
+// schema as written and reports them among its findings. The API's
+// @behaviorOperations sets are filled from its database the same way
+// (D103, behaviorops.Expand), once their checks pass
+// (verify.CheckBehaviorOperations), and its @behaviorWorker classes are
+// given their table's deadline queue (behaviorops.ExpandWorkers), once
+// theirs do (verify.CheckBehaviorWorkers). A schema that
+// verifies has its version graphs expanded into ordinary types, the tables
+// its User and UserRole traits own added and its user model route sets
+// filled from its authDb (D50), any scalar only the generated fields use
+// is hydrated from the registry, and the services its stack declarations
+// name join its references (D41).
 func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema, error) {
+	reg := vin.Registry
+	if reg == nil {
+		reg = registry.New(vin.Naming.OrDefault())
+	}
+	// A @source view of another service's table reads the fields its
+	// behaviors own as the table's own (D103).
+	behaviorfields.ExpandExternal(vin.ExternalTypes, reg)
+	if verify.CheckBehaviors(schema, vin).Err() == nil {
+		owned, err := behaviorfields.Expand(schema, reg)
+		if err != nil {
+			return nil, err
+		}
+		// The pass reads the owned fields' scalars as it reads the
+		// table's own.
+		if len(owned) > 0 {
+			if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+				return nil, err
+			}
+		}
+	}
+	// The operations of a table's behaviors join their @behaviorOperations
+	// sets before the pass (D103), once those sets' checks hold what the
+	// expansion relies on, so each meets every check an authored
+	// operation meets.
+	if verify.CheckBehaviorOperations(schema, vin).Err() == nil {
+		added, err := behaviorops.Expand(schema, vin.Database, reg)
+		if err != nil {
+			return nil, err
+		}
+		if len(added) > 0 {
+			if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+				return nil, err
+			}
+		}
+	}
+	// A @behaviorWorker runs its table's deadline queue, which the
+	// database's load added (D103): it becomes an ordinary worker of that
+	// queue before the pass, once its checks hold that the queue is there.
+	if verify.CheckBehaviorWorkers(schema, vin).Err() == nil {
+		behaviorops.ExpandWorkers(schema, vin.Database)
+	}
 	res := verify.Run(schema, vin)
 	for _, warning := range res.Warnings {
 		if o.warn != nil {
@@ -519,10 +628,6 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	added = append(added, identity.Expand(schema)...)
 	added = append(added, identity.ExpandRoutes(schema, vin.AuthDB, vin.Naming.OrDefault().IdentityPermissionPrefix)...)
 	if len(added) > 0 {
-		reg := vin.Registry
-		if reg == nil {
-			reg = registry.New(vin.Naming.OrDefault())
-		}
 		if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
 			return nil, err
 		}

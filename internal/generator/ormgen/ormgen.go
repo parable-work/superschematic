@@ -25,6 +25,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -199,6 +200,17 @@ type ORMOutput struct {
 	// Queries are the database's declared queries (D86), which queries.go
 	// runs; none for a database that declares none.
 	Queries []Query
+
+	// Rules are the schema's tables whose fields are behaviors (D103), nil
+	// for a schema with none: rules.go embeds their layout document, go.mod
+	// requires the rules Go module (Naming.RulesGoModule), and each such
+	// repository runs its writes and its uses' operations through the core.
+	Rules *Rules
+
+	// RulesReplacePath is the go.mod replace target for the rules Go module,
+	// relative to the output directory; empty omits the directive. It is only
+	// written when Rules is set.
+	RulesReplacePath string
 }
 
 // TxStatements are sqlutil's statements of a transaction of options and a
@@ -345,6 +357,43 @@ type Repository struct {
 	// collects the distance Nearest selects.
 	VectorFields []Field
 
+	// HasBehaviors is a table that composes behaviors as a table, on its
+	// fields or by implements (D103): its repository reads the owned
+	// fields, leaves them out of <Type>Create, its create and upsert input,
+	// and of <Type>Update, and runs its creates, updates, deletes and each
+	// use's operations through the core in a transaction. Uses are its
+	// uses, in the type's list order, each of whose operations hang under
+	// a method named for its member, its field or its behavior;
+	// OwnedFields the fields they own, which an upsert fills from the
+	// core's create; and CoreOwn its own columns as the core reads them,
+	// in the layout's order, an encrypted one left out. All are empty for
+	// any other table.
+	HasBehaviors bool
+	Uses         []RepositoryUse
+	OwnedFields  []RepositoryOwnedField
+	CoreOwn      []CoreOwnColumn
+
+	// DeadlineQueue is the deadline queue of a table whose behaviors arm
+	// deadlines (D103), its message's type (TicketDeadline), whose
+	// RunDeadline runs one; "" for any other table. NoUpsert is a table
+	// whose behaviors keep sub-tables or arm deadlines, which has no
+	// upsert: an upsert inserts the row the core's create gives it and
+	// applies no change set, and such a create writes sub-table rows or
+	// arms a deadline (D103, Left for later).
+	DeadlineQueue string
+	NoUpsert      bool
+
+	// Deadline is how RunDeadline reads a message of DeadlineQueue; nil
+	// for a table without one.
+	Deadline *DeadlineMessage
+
+	// ChangeQueue is the change queue of a table whose writes behaviors
+	// hear (D103), its message's type (TicketChange), whose RunChange runs
+	// one; "" for any other table. Change is how RunChange reads a message
+	// of it; nil for a table without one.
+	ChangeQueue string
+	Change      *ChangeMessage
+
 	// Import requirements computed from the field/relationship shapes so the
 	// repository template emits exactly the imports it uses.
 	NeedsTime               bool
@@ -431,6 +480,10 @@ type Field struct {
 	// IsEncrypted is an Encrypted<T> field (D85), whose column holds its
 	// envelope: a write seals it and a read opens it (encrypted.go).
 	IsEncrypted bool
+	// IsOwned is a field a behavior owns (D103, ir.FieldDef.Owned): its row
+	// and its filter hold it, and <Type>Create and <Type>Update leave it
+	// out, since only the behavior's operations change it.
+	IsOwned bool
 
 	// Sortable is true when FindPage can order the table's rows by the
 	// field's column (D60, amended), as sqlutil's column says
@@ -880,6 +933,11 @@ type Options struct {
 	// registry.DefaultSystemActorID.
 	Actor sqlutil.Actor
 
+	// Registry declares the behaviors the schema's tables compose on their
+	// fields (D103): their operations, owned fields and layout. It is
+	// required when a table's fields are behaviors.
+	Registry *registry.Registry
+
 	// Clock stamps the generated output.
 	Clock codegen.Clock
 }
@@ -916,6 +974,11 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 
 	repositories := make([]Repository, 0, len(tableTypes))
 	for i, typeDef := range tableTypes {
+		if typeDef.BehaviorTable != nil {
+			// A behavior's sub-table has no repository: only its behavior's
+			// operations write it, through the core (D103).
+			continue
+		}
 		repo, err := extractRepository(typeDef, schema, scalarMap, unionNames, enumNames, uuidGoType)
 		if err != nil {
 			return nil, fmt.Errorf("failed to extract table from type %s: %w", typeDef.Name, err)
@@ -928,6 +991,10 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 
 	attachInboundReferences(repositories)
 	markNestedCycles(repositories)
+	rules, err := attachRules(schema, repositories, opts.Registry)
+	if err != nil {
+		return nil, err
+	}
 
 	graphs, err := versionGraphs(schema, repositories)
 	if err != nil {
@@ -935,6 +1002,12 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	}
 	queues, err := queuesOf(schema, scalarMap, unionNames, enumNames, opts.SQLite)
 	if err != nil {
+		return nil, err
+	}
+	if err := attachDeadlines(repositories, queues); err != nil {
+		return nil, err
+	}
+	if err := attachChanges(repositories, queues); err != nil {
 		return nil, err
 	}
 	queries, err := queriesOf(schema, scalarMap, unionNames, opts.Dependencies)
@@ -1091,6 +1164,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		NearestSettingsStatement: sqlutil.NearestSettings,
 		Projections:              projections,
 		Queries:                  queries,
+		Rules:                    rules,
 	}
 
 	return output, nil
@@ -1158,14 +1232,20 @@ func SetReplacePaths(output *ORMOutput, paths naming.LocalPaths, outputDir strin
 			return fmt.Errorf("schema runtime replace path: %w", err)
 		}
 	}
+	if output.Rules != nil {
+		if output.RulesReplacePath, err = naming.RelPath(outputDir, paths.RulesGo); err != nil {
+			return fmt.Errorf("rules module replace path: %w", err)
+		}
+	}
 	return nil
 }
 
 // SetReleasePins keeps the pins (naming.Naming.ReleasePins) of the runtime
 // modules the ORM reaches: the scalar library, the schema IR and, when the
-// schema has a version graph, the version-graph binding. go.mod requires
-// each pinned module at its pin and replaces every version of it with that
-// pin.
+// schema has a version graph, the version-graph binding, when it has an
+// encrypted field, the schema runtime, and when a table's fields are
+// behaviors, the rules module. go.mod requires each pinned module at its
+// pin and replaces every version of it with that pin.
 func SetReleasePins(output *ORMOutput, pins naming.Pins) {
 	modules := []string{output.Naming.ScalarGoModule, output.Naming.SchemaIRGoModule}
 	if len(output.VersionGraphs) > 0 {
@@ -1173,6 +1253,9 @@ func SetReleasePins(output *ORMOutput, pins naming.Pins) {
 	}
 	if output.HasEncryptedFields {
 		modules = append(modules, output.Naming.SchemaRuntimeGoModule)
+	}
+	if output.Rules != nil {
+		modules = append(modules, output.Naming.RulesGoModule)
 	}
 	output.Pins = pins.Of(modules...)
 }
@@ -1573,6 +1656,7 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 		IsEnum:                    isEnum,
 		IsSecret:                  fieldDef.Secret || fieldDef.EncryptedAtRest,
 		IsEncrypted:               fieldDef.EncryptedAtRest,
+		IsOwned:                   fieldDef.Owned(),
 		PreservesExplicitJSONNull: preservesExplicitJSONNull,
 		IsGenericJSONList:         class.AnyJSON && isArray && !isMap,
 	}

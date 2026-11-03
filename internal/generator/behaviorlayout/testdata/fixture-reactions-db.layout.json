@@ -1,0 +1,322 @@
+{
+  "types": {
+    "Project": {
+      "type": "Project",
+      "table": "project",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "name",
+          "column": "name",
+          "type": "string"
+        }
+      ],
+      "uses": [
+        {
+          "id": "Reactions",
+          "behavior": "Reactions",
+          "member": "reactions",
+          "fields": [],
+          "operations": []
+        },
+        {
+          "id": "status",
+          "behavior": "Workflow",
+          "anchor": "status",
+          "member": "status",
+          "fields": [
+            {
+              "name": "status",
+              "field": "status",
+              "column": "status",
+              "type": "string",
+              "value": true
+            },
+            {
+              "name": "enteredAt",
+              "field": "statusEnteredAt",
+              "column": "status_entered_at",
+              "type": "Temporal.DateTime",
+              "convert": "epochMillis"
+            }
+          ],
+          "operations": [
+            {
+              "name": "transition",
+              "writes": true
+            }
+          ]
+        }
+      ],
+      "changes": {
+        "queue": "ProjectChange",
+        "table": "project_change_queue",
+        "rowKey": "row_key",
+        "write": "write",
+        "at": "at",
+        "before": "before",
+        "after": "after"
+      },
+      "spec": {
+        "name": "Project",
+        "uses": [
+          {
+            "behavior": "Reactions",
+            "config": {
+              "rules": [
+                {
+                  "then": {
+                    "transition": "done"
+                  },
+                  "when": {
+                    "allTerminal": {
+                      "link": "project",
+                      "outcomes": [
+                        "success"
+                      ],
+                      "schema": "Task"
+                    }
+                  }
+                },
+                {
+                  "then": {
+                    "transition": "failed"
+                  },
+                  "when": {
+                    "anyTerminal": {
+                      "link": "project",
+                      "outcomes": [
+                        "failure"
+                      ],
+                      "schema": "Task"
+                    }
+                  }
+                }
+              ]
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Workflow",
+            "config": {
+              "outcomes": {
+                "cancelled": "neutral",
+                "done": "success",
+                "failed": "failure"
+              },
+              "states": [
+                "planned",
+                "active",
+                "done",
+                "failed",
+                "cancelled"
+              ],
+              "transitions": [
+                {
+                  "from": "planned",
+                  "to": "active"
+                },
+                {
+                  "from": "planned",
+                  "to": "cancelled"
+                },
+                {
+                  "from": "active",
+                  "to": "done"
+                },
+                {
+                  "from": "active",
+                  "to": "failed"
+                },
+                {
+                  "from": "active",
+                  "to": "cancelled"
+                }
+              ]
+            },
+            "anchor": {
+              "field": "status"
+            }
+          }
+        ],
+        "fields": [
+          {
+            "name": "name",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "Task": {
+      "type": "Task",
+      "table": "task",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "title",
+          "column": "title",
+          "type": "string"
+        },
+        {
+          "field": "priority",
+          "column": "priority",
+          "type": "string"
+        },
+        {
+          "field": "projectId",
+          "column": "project_id",
+          "type": "Identity.UUID"
+        }
+      ],
+      "uses": [
+        {
+          "id": "Reactions",
+          "behavior": "Reactions",
+          "member": "reactions",
+          "fields": [],
+          "operations": []
+        },
+        {
+          "id": "status",
+          "behavior": "Workflow",
+          "anchor": "status",
+          "member": "status",
+          "fields": [
+            {
+              "name": "status",
+              "field": "status",
+              "column": "status",
+              "type": "string",
+              "value": true
+            },
+            {
+              "name": "enteredAt",
+              "field": "statusEnteredAt",
+              "column": "status_entered_at",
+              "type": "Temporal.DateTime",
+              "convert": "epochMillis"
+            }
+          ],
+          "operations": [
+            {
+              "name": "transition",
+              "writes": true
+            }
+          ]
+        }
+      ],
+      "changes": {
+        "queue": "TaskChange",
+        "table": "task_change_queue",
+        "rowKey": "row_key",
+        "write": "write",
+        "at": "at",
+        "before": "before",
+        "after": "after"
+      },
+      "spec": {
+        "name": "Task",
+        "uses": [
+          {
+            "behavior": "Reactions",
+            "config": {
+              "rules": [
+                {
+                  "then": {
+                    "link": "project",
+                    "transition": "active"
+                  },
+                  "when": {
+                    "enters": "doing"
+                  }
+                },
+                {
+                  "then": {
+                    "transition": "doing"
+                  },
+                  "when": {
+                    "changes": {
+                      "field": "priority",
+                      "to": "urgent"
+                    }
+                  }
+                }
+              ]
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Workflow",
+            "config": {
+              "outcomes": {
+                "done": "success",
+                "dropped": "neutral",
+                "failed": "failure"
+              },
+              "states": [
+                "todo",
+                "doing",
+                "done",
+                "failed",
+                "dropped"
+              ],
+              "transitions": [
+                {
+                  "from": "todo",
+                  "to": "doing"
+                },
+                {
+                  "from": "todo",
+                  "to": "dropped"
+                },
+                {
+                  "from": "doing",
+                  "to": "done"
+                },
+                {
+                  "from": "doing",
+                  "to": "failed"
+                },
+                {
+                  "from": "doing",
+                  "to": "dropped"
+                }
+              ]
+            },
+            "anchor": {
+              "field": "status"
+            }
+          }
+        ],
+        "fields": [
+          {
+            "name": "title",
+            "type": "string"
+          },
+          {
+            "name": "priority",
+            "type": "string"
+          },
+          {
+            "name": "projectId",
+            "type": "Identity.UUID",
+            "relation": {
+              "name": "project",
+              "type": "Project"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

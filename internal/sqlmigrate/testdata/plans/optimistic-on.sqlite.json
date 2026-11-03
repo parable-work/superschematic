@@ -1,0 +1,31 @@
+{
+  "dialect": "sqlite",
+  "from": "d9697f8b128d88e9877145068feef31d9bdfa8a6c367bd3cdbd76a76318119f0",
+  "hash": "ae0cec4487303c76035d211c674777b1da8646a4b51bda4d85b497b54dca1f8e",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"product\" ADD COLUMN \"_version\" INTEGER DEFAULT 1 NOT NULL"
+      ],
+      "subject": "table/product/column/_version",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "createTrigger",
+      "phase": "expand",
+      "statements": [
+        "CREATE TRIGGER \"trg_product_bump_version\" AFTER UPDATE ON \"product\" FOR EACH ROW WHEN NEW._version = OLD._version BEGIN UPDATE \"product\" SET _version = OLD._version + 1 WHERE rowid = NEW.rowid; END"
+      ],
+      "subject": "trigger/product/trg_product_bump_version",
+      "transactional": true
+    }
+  ],
+  "to": "f8f00bebd93bb8cf0b3d1e2abde36b206fb8dc30b2b24769828f671087a39515",
+  "toModel": null,
+  "version": 1
+}

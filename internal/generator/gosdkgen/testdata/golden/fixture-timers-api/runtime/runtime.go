@@ -1,0 +1,82 @@
+package runtime
+
+import (
+	"encoding/json"
+	"fmt"
+	"mime"
+	"net/url"
+)
+
+// DownloadedFile is the file a FileDownload operation answers (D81): its
+// bytes, the filename Content-Disposition offered, "" for none, and the
+// Content-Type it was sent with.
+type DownloadedFile struct {
+	Body        []byte
+	Filename    string
+	ContentType string
+}
+
+// FilenameOf is the filename a Content-Disposition offers: filename*, the
+// name in UTF-8 (RFC 8187), before filename; "" for none.
+func FilenameOf(disposition string) string {
+	_, params, err := mime.ParseMediaType(disposition)
+	if err != nil {
+		return ""
+	}
+	return params["filename"]
+}
+
+type PublicEncryptionKey struct {
+	PublicKey string
+	Algorithm string
+	KeyID     string
+}
+
+type EncryptedRequestOptions struct {
+	PublicEncryptionKey *PublicEncryptionKey
+}
+
+type EncryptedPayloadEnvelope struct {
+	Algorithm    string `json:"algorithm"`
+	Payload      string `json:"payload"`
+	EncryptedKey string `json:"encryptedKey,omitempty"`
+	IV           string `json:"iv,omitempty"`
+	KeyID        string `json:"keyId"`
+}
+
+type UploadFile struct {
+	Filename    string
+	Reader      []byte
+	ContentType string
+}
+
+type MultipartBody struct {
+	JSONData any
+	Files    map[string]UploadFile
+}
+
+func StripFieldsForMultipart(input any, fieldNames []string) (any, error) {
+	if input == nil || len(fieldNames) == 0 {
+		return input, nil
+	}
+
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return nil, fmt.Errorf("marshal multipart input: %w", err)
+	}
+	result := map[string]any{}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal multipart input: %w", err)
+	}
+	for _, fieldName := range fieldNames {
+		delete(result, fieldName)
+	}
+	return result, nil
+}
+
+func AddQueryParam(values url.Values, key string, value any) {
+	if value == nil {
+		return
+	}
+	values.Set(key, fmt.Sprintf("%v", value))
+}

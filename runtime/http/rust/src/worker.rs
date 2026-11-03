@@ -34,7 +34,10 @@
 //!
 //! The loop knows no database: it claims through a [`WorkerQueue`], which
 //! [`PostgresQueue`](crate::queue::PostgresQueue) implements, so its tests
-//! run over a queue in memory.
+//! run over a queue in memory. A behavior worker's queue (D103) is a
+//! [`SelfCompleting`] one: its handler takes each message's id and claim
+//! token ([`Claimed`]) and completes the message in the transaction that
+//! runs it, so the loop's completion does nothing.
 //!
 //! It logs through `tracing`, in a span carrying `queue`, with the fields
 //! and messages of Go's and TypeScript's loops: `message`, `attempt`,
@@ -311,6 +314,97 @@ impl<M: DeserializeOwned + Send + 'static> WorkerQueue for SqliteQueue<M> {
 
     async fn prune(&self, limit: usize) -> Result<u64, QueueError> {
         SqliteQueue::prune(self, limit).await
+    }
+}
+
+/// A claimed message as a handler that completes it itself takes it (D103):
+/// the message's id and the claim's token beside the message, so the
+/// handler can complete the message in the transaction that does its work.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Claimed<M> {
+    pub id: String,
+    pub token: String,
+    pub message: M,
+}
+
+/// A queue whose handler completes each message itself, in the transaction
+/// that does the message's work (D103): a behavior worker's deadline queue,
+/// whose handler runs a deadline through the behaviors' core and spends its
+/// claim in the same commit, so a crash between the commit and a completion
+/// cannot run it twice. Each message is a [`Claimed`] of the queue's, and a
+/// completion of the loop's does nothing; every other call is the queue's,
+/// so a handler's error still fails its message, which is due again after
+/// the queue's backoff, and a stopping worker still releases the messages
+/// its handlers did not finish.
+#[derive(Clone, Debug)]
+pub struct SelfCompleting<Q> {
+    queue: Q,
+}
+
+impl<Q> SelfCompleting<Q> {
+    /// The queue, its messages completed by their handler.
+    pub fn new(queue: Q) -> Self {
+        Self { queue }
+    }
+
+    /// The queue it claims from.
+    pub fn queue(&self) -> &Q {
+        &self.queue
+    }
+}
+
+#[async_trait]
+impl<Q: WorkerQueue> WorkerQueue for SelfCompleting<Q> {
+    type Message = Claimed<Q::Message>;
+
+    fn name(&self) -> &str {
+        self.queue.name()
+    }
+
+    fn lease(&self) -> Duration {
+        self.queue.lease()
+    }
+
+    async fn claim(
+        &self,
+        n: usize,
+        lease: Duration,
+    ) -> Result<Vec<Claim<Self::Message>>, QueueError> {
+        let claims = self.queue.claim(n, lease).await?;
+        Ok(claims
+            .into_iter()
+            .map(|claim| Claim {
+                message: Claimed {
+                    id: claim.id.clone(),
+                    token: claim.token.clone(),
+                    message: claim.message,
+                },
+                id: claim.id,
+                token: claim.token,
+                attempt: claim.attempt,
+            })
+            .collect())
+    }
+
+    async fn extend(&self, id: &str, token: &str, lease: Duration) -> Result<(), QueueError> {
+        self.queue.extend(id, token, lease).await
+    }
+
+    /// Does nothing: the handler completed the message in its own commit.
+    async fn complete(&self, _id: &str, _token: &str) -> Result<(), QueueError> {
+        Ok(())
+    }
+
+    async fn fail(&self, id: &str, token: &str, cause: &str) -> Result<bool, QueueError> {
+        self.queue.fail(id, token, cause).await
+    }
+
+    async fn release(&self, id: &str, token: &str) -> Result<(), QueueError> {
+        self.queue.release(id, token).await
+    }
+
+    async fn prune(&self, limit: usize) -> Result<u64, QueueError> {
+        self.queue.prune(limit).await
     }
 }
 

@@ -171,7 +171,7 @@ func applyUserAdministration(args []any, set *ir.OperationSet) error {
 }
 
 // identityRoutesDeclared refuses a second route decorator on the class:
-// the same one again, or the other.
+// the same one again, the other, or @behaviorOperations (D103).
 func identityRoutesDeclared(name string, set *ir.OperationSet) error {
 	switch {
 	case name == "userSessions" && set.UserSessions != nil, name == "userAdministration" && set.UserAdministration != nil:
@@ -180,6 +180,8 @@ func identityRoutesDeclared(name string, set *ir.OperationSet) error {
 		return fmt.Errorf("@%s contradicts @userSessions on the same class: a class takes one of them", name)
 	case set.UserAdministration != nil:
 		return fmt.Errorf("@%s contradicts @userAdministration on the same class: a class takes one of them", name)
+	case set.BehaviorOperations != nil:
+		return fmt.Errorf("@%s contradicts @behaviorOperations on the same class: a class takes one of them", name)
 	}
 	return nil
 }

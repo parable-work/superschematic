@@ -1,0 +1,60 @@
+{
+  "dialect": "sqlite",
+  "expanded": "7eb90f31f01f1125bdd1f4345096380230ae45f3442bdfa9d2b8ee568be56457",
+  "from": "7eb90f31f01f1125bdd1f4345096380230ae45f3442bdfa9d2b8ee568be56457",
+  "hash": "90282370197dde14e755f1c7ce730eb6540b14ba0043bb29d4bcdb7298d8e973",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropTrigger",
+      "phase": "contract",
+      "statements": [
+        "DROP TRIGGER IF EXISTS \"trg_product_changes_delete\""
+      ],
+      "subject": "trigger/product/trg_product_changes_delete",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "dropTrigger",
+      "phase": "contract",
+      "statements": [
+        "DROP TRIGGER IF EXISTS \"trg_product_changes_insert\""
+      ],
+      "subject": "trigger/product/trg_product_changes_insert",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "dropTrigger",
+      "phase": "contract",
+      "statements": [
+        "DROP TRIGGER IF EXISTS \"trg_product_changes_update\""
+      ],
+      "subject": "trigger/product/trg_product_changes_update",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/product_change_queue",
+          "reason": "Dropping table product_change_queue deletes its rows (ProductChange).",
+          "subject": "table/product_change_queue"
+        }
+      ],
+      "index": 4,
+      "op": "dropTable",
+      "phase": "contract",
+      "statements": [
+        "DROP TABLE \"product_change_queue\""
+      ],
+      "subject": "table/product_change_queue",
+      "transactional": true
+    }
+  ],
+  "to": "4679485e3c48c419155006aff22fdb388e6ac74f16ea6146e1514370023820d5",
+  "toModel": null,
+  "version": 1
+}

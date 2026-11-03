@@ -398,6 +398,8 @@ func noCall(e registry.RustEndpoint, op *ir.FieldDef) string {
 		return "the service mounts it (@manualRouteRegistration)"
 	case e.IdentityOperation != "":
 		return "the identity runtime serves it, as one of the user model's operations (D50)"
+	case e.Behavior != nil:
+		return "the behaviors' core runs it, as an operation of a table's behavior that a @behaviorOperations set serves (D103)"
 	case op.Webhook && signed:
 		return "a third party calls it (@webhook), and its route checks the third party's signature first (@hmacVerified)"
 	case op.Webhook:

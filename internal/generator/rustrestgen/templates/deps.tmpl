@@ -135,7 +135,7 @@ pub struct Handlers {
 
 impl Implementations {
     /// The API's `Implementations`: the handlers the implementation's
-    /// `create` returns{{ if or .Identity .HasServiceCallers }}, with what the server's entrypoint builds{{ end }}.
+    /// `create` returns{{ if or .Identity .HasServiceCallers .HasBehaviorOperations }}, with what the server's entrypoint builds{{ end }}.
 {{- if .Identity }}
     ///
     /// `authenticator` is the identity runtime's (D50), which the
@@ -146,6 +146,11 @@ impl Implementations {
     ///
     /// `service_authenticator` verifies the calling services' credentials
     /// (D37); the entrypoint builds it from the API's callers field.
+{{- end }}
+{{- if .HasBehaviorOperations }}
+    ///
+    /// `db` is the pool of {{ .BehaviorDatabase }}, on which the behavior operations
+    /// run (D103): the pool `Deps.db` holds.
 {{- end }}
 {{ .NewSignature }}
 {{- if not $handlers }}
@@ -160,6 +165,9 @@ impl Implementations {
 {{- end }}
 {{- if .HasServiceCallers }}
             service_authenticator,
+{{- end }}
+{{- if .HasBehaviorOperations }}
+            behaviors: crate::behaviors::Behaviors::new(db),
 {{- end }}
         }
     }

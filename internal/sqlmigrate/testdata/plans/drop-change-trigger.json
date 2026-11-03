@@ -1,0 +1,50 @@
+{
+  "dialect": "postgres",
+  "expanded": "d56bacb22f9890f01a5f4fec8e8a03c8b37a3d2ab95b339b5b9d7dbb23ce099b",
+  "from": "d56bacb22f9890f01a5f4fec8e8a03c8b37a3d2ab95b339b5b9d7dbb23ce099b",
+  "hash": "e779f2db1f2ef54c151645c35d57dfabc667f0b20d0047b4105c366596ce0f64",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "dropTrigger",
+      "phase": "contract",
+      "statements": [
+        "DROP TRIGGER trg_product_changes ON product"
+      ],
+      "subject": "trigger/product/trg_product_changes",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "dropFunction",
+      "phase": "contract",
+      "statements": [
+        "DROP FUNCTION product_changes()"
+      ],
+      "subject": "function/product_changes",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:table/product_change_queue",
+          "reason": "Dropping table product_change_queue deletes its rows (ProductChange).",
+          "subject": "table/product_change_queue"
+        }
+      ],
+      "index": 3,
+      "op": "dropTable",
+      "phase": "contract",
+      "statements": [
+        "DROP TABLE product_change_queue"
+      ],
+      "subject": "table/product_change_queue",
+      "transactional": true
+    }
+  ],
+  "to": "dcc47bc016540e5251e186c60e9ebc92c93fb0cefa16fea83cee6a355313f3fa",
+  "toModel": null,
+  "version": 1
+}

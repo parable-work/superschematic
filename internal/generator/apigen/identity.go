@@ -25,22 +25,34 @@ import (
 // wires its auth middleware. The
 // OpenAPI document it embeds still describes every route. output itself is
 // unchanged, and an output without such an operation is returned as it is.
+//
+// A table's behavior operations (D103, EndpointInfo.BehaviorOperation) go
+// to BehaviorEndpoints in the same way: the generated handlers run them
+// through the ORM of the API's database, so the interfaces and the
+// scaffold have no method for them, and a namespace whose every operation
+// is a behavior's has no implementation. The router mounts them, so the
+// flags it reads count them, the permission check's imports included.
 func ImplementedOutput(output *APIOutput) (*APIOutput, error) {
-	identity := false
+	identity, behavior := false, false
 	for _, endpoint := range output.Endpoints {
 		identity = identity || endpoint.IdentityOperation != ""
+		behavior = behavior || endpoint.BehaviorOperation() != nil
 	}
-	if !identity {
+	if !identity && !behavior {
 		return output, nil
 	}
 	view := *output
 	view.Endpoints = make([]EndpointInfo, 0, len(output.Endpoints))
 	view.IdentityEndpoints = nil
+	view.BehaviorEndpoints = nil
 	for _, endpoint := range output.Endpoints {
-		if endpoint.IdentityOperation == "" {
-			view.Endpoints = append(view.Endpoints, endpoint)
-		} else {
+		switch {
+		case endpoint.IdentityOperation != "":
 			view.IdentityEndpoints = append(view.IdentityEndpoints, endpoint)
+		case endpoint.BehaviorOperation() != nil:
+			view.BehaviorEndpoints = append(view.BehaviorEndpoints, endpoint)
+		default:
+			view.Endpoints = append(view.Endpoints, endpoint)
 		}
 	}
 	if err := view.summarizeEndpoints(); err != nil {
@@ -56,7 +68,12 @@ func ImplementedOutput(output *APIOutput) (*APIOutput, error) {
 		view.summarizeRoute(endpoint)
 		view.HasPermissionEndpoints = permissions
 	}
-	imports, err := rawBodyCheckImports(view.Endpoints)
+	// A behavior operation's route checks its permissions as the
+	// project's routes do, with the provider's routePermissions.
+	for _, endpoint := range view.BehaviorEndpoints {
+		view.summarizeRoute(endpoint)
+	}
+	imports, err := rawBodyCheckImports(view.HandlerEndpoints())
 	if err != nil {
 		return nil, err
 	}

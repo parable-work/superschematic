@@ -24,6 +24,11 @@ type RepositoryOutput struct {
 	// RequireUpdatedBy is outputs.sql.requireUpdatedBy (D87): a write that
 	// would leave a nullable updatedBy as it was refuses one without a user.
 	RequireUpdatedBy bool
+
+	// RulesGoModule is the rules Go module (naming.Naming.RulesGoModule),
+	// whose adapter a table whose fields are behaviors runs its writes
+	// through (D103).
+	RulesGoModule string
 }
 
 // VersionGraphOutput wraps one version graph with module-level metadata for
@@ -144,6 +149,16 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 	} else if err := os.Remove(nearestFile); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove nearest.go: %w", err)
 	}
+	// rules.go embeds the layout of the tables whose fields are behaviors
+	// (D103); a schema without one has none.
+	rulesFile := filepath.Join(outputDir, "rules.go")
+	if output.Rules != nil {
+		if err := generateFile(generator, "rules.tmpl", rulesFile, output); err != nil {
+			return fmt.Errorf("failed to write rules.go: %w", err)
+		}
+	} else if err := os.Remove(rulesFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove rules.go: %w", err)
+	}
 	// projections.go reads the schema's projections with a key (D90); a
 	// schema without one has none.
 	projectionsFile := filepath.Join(outputDir, "projections.go")
@@ -171,6 +186,7 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 				UserIDGoType: output.UserIDGoType,
 			}
 			repoOutput.RequireUpdatedBy = output.Actor.RequireUpdatedBy
+			repoOutput.RulesGoModule = output.Naming.RulesGoModule
 			if err := generateFile(generator, "repository.tmpl", filepath.Join(outputDir, filename), repoOutput); err != nil {
 				return fmt.Errorf("failed to write %s: %w", filename, err)
 			}
@@ -271,6 +287,7 @@ func templateFuncs() template.FuncMap {
 			return strings.TrimSuffix(s, "ID")
 		},
 		"goRawString": goRawString,
+		"docComment":  docComment,
 	}
 }
 

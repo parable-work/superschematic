@@ -20,6 +20,18 @@ func TestQueueSpecOfReadsTheKey(t *testing.T) {
 	if plain.Key != "" || plain.Dedupes() || plain.Serializes() {
 		t.Errorf("QueueSpecOf of a queue with no key = %+v", plain)
 	}
+	// A table's change queue keeps its lines in the order written (D103);
+	// its deadline queue, and a queue a schema declares, by due time.
+	change := &ir.TypeDef{Name: "TaskChange", Queue: &ir.QueueDef{Key: "rowKey", OnDuplicate: ir.QueueOnDuplicateAppend, Serialize: true},
+		BehaviorQueue: &ir.BehaviorQueue{Row: "Task", Kind: ir.BehaviorQueueChanges}}
+	if spec := QueueSpecOf(change, "task_change_queue", nil, false); !spec.InOrder || !spec.Serializes() || spec.Dedupes() {
+		t.Errorf("QueueSpecOf of a change queue = %+v", spec)
+	}
+	deadlines := &ir.TypeDef{Name: "TicketDeadline", Queue: &ir.QueueDef{Key: "rowKey", OnDuplicate: ir.QueueOnDuplicateReplace},
+		BehaviorQueue: &ir.BehaviorQueue{Row: "Ticket", Kind: ir.BehaviorQueueDeadlines}}
+	if spec.InOrder || QueueSpecOf(deadlines, "ticket_deadline_queue", nil, false).InOrder {
+		t.Errorf("a queue a schema declares, or a deadline queue, keeps its lines in order")
+	}
 	keyword := &ir.TypeDef{Name: "Shipped", Queue: &ir.QueueDef{Key: "order"}, Fields: []*ir.FieldDef{{Name: "order", TypeRef: ir.TypeRef{Name: "string"}, Required: true}}}
 	if got := QueueKeyColumn(keyword); got != `"order"` {
 		t.Errorf("QueueKeyColumn quotes a keyword as %s", got)
@@ -122,6 +134,30 @@ func TestQueueClaimTakesTheHeadOfEachKey(t *testing.T) {
 	sqlite := SQLiteQueueStatements(spec)
 	if !strings.Contains(sqlite.Claim, head) || !strings.Contains(sqlite.Due, head) {
 		t.Errorf("SQLite claim and due lack the head of the key:\n%s\n%s", sqlite.Claim, sqlite.Due)
+	}
+}
+
+// TestQueueClaimKeepsAChangeQueuesLinesInOrder: on a queue that keeps its
+// lines in order, a table's change queue (D103), a key's head is its first
+// written ready message, by created_at and ID, due or not, so one that
+// waits a failure's backoff holds the key's later messages; a claim still
+// takes it only when it is due (D80, D68).
+func TestQueueClaimKeepsAChangeQueuesLinesInOrder(t *testing.T) {
+	spec := QueueSpec{Table: "task_change_queue", Columns: []string{"row_key"}, Key: "row_key", Serialize: true, InOrder: true}
+	head := lines(
+		"    AND NOT EXISTS (SELECT 1 FROM task_change_queue AS o WHERE o.row_key = m.row_key AND o.id <> m.id",
+		"      AND (o.state = 'claimed' OR (m.state = 'ready' AND o.state = 'ready' AND (o.created_at, o.id) < (m.created_at, m.id))))",
+	)
+	pg := PostgresQueueStatements(spec)
+	if !strings.Contains(pg.Claim, "  WHERE ((m.state = 'ready' AND m.due_at <= now()) OR (m.state = 'claimed' AND m.claim_expires_at <= now()))\n"+head) {
+		t.Errorf("Postgres claim of a change queue lacks its line's order:\n%s", pg.Claim)
+	}
+	sqlite := SQLiteQueueStatements(spec)
+	if !strings.Contains(sqlite.Claim, head) || !strings.Contains(sqlite.Due, head) {
+		t.Errorf("SQLite claim and due of a change queue lack its line's order:\n%s\n%s", sqlite.Claim, sqlite.Due)
+	}
+	if strings.Contains(pg.Fail, "created_at") {
+		t.Errorf("a change queue's fail moves its message's place in line:\n%s", pg.Fail)
 	}
 }
 

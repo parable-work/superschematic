@@ -53,6 +53,22 @@ type OperationSet struct {
 	// [UserAdministrationConfig].
 	UserAdministration *UserAdministrationConfig `json:"userAdministration,omitempty" yaml:"userAdministration,omitempty"`
 
+	// BehaviorOperations is @behaviorOperations(Type) on a class with no
+	// methods (D103): the loader fills Operations with the operations of
+	// the table's behaviors. Nil for every other set. See
+	// [BehaviorOperationsConfig].
+	BehaviorOperations *BehaviorOperationsConfig `json:"behaviorOperations,omitempty" yaml:"behaviorOperations,omitempty"`
+
+	// Auth, Permissions and Public are a @behaviorOperations set's user
+	// clause, @auth, @requirePermission and @publicRoute on its class
+	// (D103), which each operation the loader adds takes as its own. Every
+	// other set's user clause is its operations' (an Authenticated base
+	// reaches them as Auth), and the verification pass refuses these on
+	// one.
+	Auth        bool     `json:"auth,omitempty" yaml:"auth,omitempty"`
+	Permissions []string `json:"permissions,omitempty" yaml:"permissions,omitempty"`
+	Public      bool     `json:"public,omitempty" yaml:"public,omitempty"`
+
 	// Extensions holds extension decorator data keyed by extension name; see
 	// [Schema.Extensions].
 	Extensions map[string]json.RawMessage `json:"extensions,omitempty" yaml:"extensions,omitempty"`

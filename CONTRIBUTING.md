@@ -86,9 +86,10 @@ By making a contribution to this project, I certify that:
 | [`docs/`](docs/) | The docs site, the decision log and the design documents |
 | [`superschematic.toml`](superschematic.toml) | The default naming file, every key written out |
 
-The repository has twelve Go modules: the root (the compiler), `ir`,
+The repository has thirteen Go modules: the root (the compiler), `ir`,
 `runtime/schema/go`, `runtime/http/go`, `runtime/versiongraph/go`,
-`runtime/engine/go` (the engine's binding),
+`runtime/engine/go` (the engine's binding), `runtime/rules/go` (the
+behaviors' core's binding and adapter, D103),
 `runtime/migrate/go` (the migration runner), `extensions/gcp`,
 `extensions/cloudflare`, `extensions/pulumi`, `extensions/topcoat` and
 `cmd/superschematic` (the installed binary). Generated code imports the
@@ -264,7 +265,7 @@ agent or a bot with write access counts.
 | `make cli`            | `bin/superschematic` and `bin/superschematic-migrate` alone, over superscalar's archive, built or, with no `cargo` on `PATH`, prebuilt ([Without Rust](#without-rust)) |
 | `make cli-smoke`      | `bin/superschematic-core`, the core with no extension linked (`internal/cmd/superschematic-core`, never shipped), builds the DB, API and General fixtures |
 | `make example-migrations` | `examples/migrations/scripts/check.sh`: `migrate plan` between the example's two versions for Postgres and SQLite, its hazard gate, and `superschematic-migrate` applying it to SQLite, and to Postgres when `SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL` is set; the outputs the docs quote match `testdata/generated/` there |
-| `make ts`             | `packages/`, `runtime/schema/typescript`, `runtime/http/typescript`, `runtime/versiongraph/typescript`, `runtime/engine/typescript`, `runtime/engine-workqueue/typescript` and `runtime/engine-commerce/typescript` typecheck, build and test; the version-graph package builds the version-graph core for wasm32 and runs every vector through the package, and every scenario on SQLite, and the SQLite adapter's tests under Bun and Node.js; the engine's, the work-queue package's and the commerce package's tests run under Node.js and Bun, and so do the end-to-end tests of `examples/engine-notes` and `examples/engine-jobs` (`scripts/check.sh` in each) |
+| `make ts`             | `packages/`, `runtime/schema/typescript`, `runtime/rules/typescript`, `runtime/http/typescript`, `runtime/versiongraph/typescript`, `runtime/engine/typescript`, `runtime/engine-workqueue/typescript` and `runtime/engine-commerce/typescript` typecheck, build and test; the rules package builds the behaviors' core for wasm32 and runs its loader's and contract's tests under Bun and a smoke under Node.js, and the http runtime's adapter replays the core's transcript on bun:sqlite (and on Postgres when `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL` names one); the version-graph package builds the version-graph core for wasm32 and runs every vector through the package, and every scenario on SQLite, and the SQLite adapter's tests under Bun and Node.js; the engine's, the work-queue package's and the commerce package's tests run under Node.js and Bun, and so do the end-to-end tests of `examples/engine-notes` and `examples/engine-jobs` (`scripts/check.sh` in each) |
 | `make python`         | `runtime/schema/python` pytest; `runtime/versiongraph/python` fmt, clippy `-D warnings`, the PyO3 extension built by uv with maturin, and every core vector and the engine's tests that need no database through the package under the default Python and 3.9 |
 | `make rust`           | `runtime/http/rust`, `runtime/schema/rust` and `runtime/versiongraph/rust` fmt, clippy `-D warnings` (the core for native and wasm32), test; the schema runtime's and the version-graph crates' tests again with the serde_json features superscalar turns on |
 | `make versiongraph`   | Builds the version-graph core's static archive the Go binding links (`scripts/versiongraph-archive.sh`) |
@@ -488,8 +489,8 @@ building anything. `0.0.0` means unreleased.
 The Go modules are versioned by tags, one per module because each is its own
 module: `vX.Y.Z` (root), `ir/vX.Y.Z`, `runtime/schema/go/vX.Y.Z`,
 `runtime/http/go/vX.Y.Z`, `runtime/versiongraph/go/vX.Y.Z`,
-`runtime/engine/go/vX.Y.Z`, `runtime/migrate/go/vX.Y.Z`,
-`extensions/gcp/vX.Y.Z`,
+`runtime/engine/go/vX.Y.Z`, `runtime/rules/go/vX.Y.Z`,
+`runtime/migrate/go/vX.Y.Z`, `extensions/gcp/vX.Y.Z`,
 `extensions/cloudflare/vX.Y.Z`, `extensions/pulumi/vX.Y.Z`,
 `extensions/topcoat/vX.Y.Z` and
 `cmd/superschematic/vX.Y.Z` (`bump_version.py go-modules` lists them, and
@@ -567,6 +568,7 @@ A release is three steps, each started by a person. For the first release,
    `runtime/http/go/v0.1.0-alpha.1`,
    `runtime/versiongraph/go/v0.1.0-alpha.1`,
    `runtime/engine/go/v0.1.0-alpha.1`,
+   `runtime/rules/go/v0.1.0-alpha.1`,
    `runtime/migrate/go/v0.1.0-alpha.1` and the extension and
    `cmd/superschematic` tags on the same commit. `release.yml` runs
    the full CI and builds the CLI (`cmd/superschematic`, the core with the
@@ -594,7 +596,7 @@ A release is three steps, each started by a person. For the first release,
 After the release, `go get github.com/parable-work/superschematic@v0.1.0-alpha.1`
 (and `.../ir@`, `.../runtime/schema/go@`, `.../runtime/http/go@`,
 `.../runtime/versiongraph/go@`, `.../runtime/engine/go@`,
-`.../runtime/migrate/go@`,
+`.../runtime/rules/go@`, `.../runtime/migrate/go@`,
 `.../extensions/gcp@`, `.../extensions/pulumi@` and
 `.../extensions/topcoat@` at the same version) resolves, so a downstream
 distribution can link the official extensions. The migration runner needs no cgo. The other Go modules

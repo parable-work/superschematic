@@ -19,6 +19,10 @@
 // Nor are the user model's operations (D50), which the identity runtime
 // serves.
 {{- end }}
+{{- if .HasBehaviors }}
+// Nor are the operations of the @behaviorOperations sets (D103), which the
+// router runs through RouterOptions.orm, the repositories of {{ .Deps.Database }}.
+{{- end }}
 
 import type { {{ if .HasDownloads }}FileDownload, {{ end }}OperationResult, {{ if .HasPages }}Page, PageRequest, {{ end }}RequestContext } from '{{ .RuntimePackage }}';
 {{- if .WebhookProviders }}

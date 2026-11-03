@@ -3,6 +3,8 @@ package registry
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -975,6 +977,64 @@ func TestCommentsBlockParams(t *testing.T) {
 		}
 		if err := compiled.Validate(decoded); (err == nil) != c.ok {
 			t.Errorf("Comments.%s %s: error %v, want ok %v", c.operation, c.params, err, c.ok)
+		}
+	}
+}
+
+// RulesBehaviors are the behaviors the core of every transcript registers
+// (runtime/engine/testdata/rules), in its order, and each is a core
+// behavior whose declaration types each field a table holds.
+func TestRulesBehaviorsAreTheTranscripts(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join("..", "..", "runtime", "engine", "testdata", "rules", "*.transcript.json"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no transcript under runtime/engine/testdata/rules: %v", err)
+	}
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var transcript struct {
+			Behaviors []string `json:"behaviors"`
+		}
+		if err := json.Unmarshal(data, &transcript); err != nil {
+			t.Fatalf("%s: %v", file, err)
+		}
+		if !slices.Equal(transcript.Behaviors, RulesBehaviors) {
+			t.Errorf("%s records the behaviors %v, and RulesBehaviors is %v", filepath.Base(file), transcript.Behaviors, RulesBehaviors)
+		}
+	}
+	reg := New(naming.Default())
+	finalizeWithCoreGenerators(t, reg)
+	for _, name := range RulesBehaviors {
+		b, ok := reg.Behavior(name)
+		if !ok || b.Extension != "" {
+			t.Errorf("%s is not a core behavior", name)
+		}
+	}
+}
+
+// BehaviorListens reads the tables a Reactions use hears through a relation
+// of theirs, in rule order, each once: an allTerminal and an anyTerminal
+// rule over one link are one listen; any other behavior, and a config that
+// does not read, listens to none (D103).
+func TestBehaviorListens(t *testing.T) {
+	config := json.RawMessage(`{"rules": [
+		{"when": {"allTerminal": {"schema": "Task", "link": "project", "outcomes": ["success"]}}, "then": {"transition": "done"}},
+		{"when": {"enters": "active"}, "then": {"transition": "done"}},
+		{"when": {"anyTerminal": {"schema": "Task", "link": "project", "outcomes": ["failure"]}}, "then": {"transition": "failed"}},
+		{"when": {"anyTerminal": {"schema": "Milestone", "link": "owner", "outcomes": ["failure"]}}, "then": {"transition": "failed"}}
+	]}`)
+	want := []BehaviorListen{{Type: "Task", Link: "project"}, {Type: "Milestone", Link: "owner"}}
+	if got := BehaviorListens("Reactions", config); !slices.Equal(got, want) {
+		t.Errorf("BehaviorListens = %+v, want %+v", got, want)
+	}
+	for _, tc := range []struct {
+		name   string
+		config string
+	}{{"Timers", `{"deadlines": {}}`}, {"Reactions", ``}, {"Reactions", `[1]`}, {"Reactions", `{"rules": [{"when": {"enters": "a"}}]}`}} {
+		if got := BehaviorListens(tc.name, json.RawMessage(tc.config)); len(got) != 0 {
+			t.Errorf("BehaviorListens(%s, %s) = %+v, want none", tc.name, tc.config, got)
 		}
 	}
 }

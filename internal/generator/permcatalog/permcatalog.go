@@ -97,7 +97,9 @@ type Operation struct {
 	// ID is the operation's OpenAPI operation id.
 	ID string
 	// Permissions are the permissions its route requires
-	// (@requirePermission, or the administration route's own).
+	// (@requirePermission, or the administration route's own), and for a
+	// behavior operation the ones its behavior's config names, which the
+	// behaviors' core checks (D103).
 	Permissions []string
 	// Identity: it is an operation of the user model's routes, which the
 	// identity runtime serves.
