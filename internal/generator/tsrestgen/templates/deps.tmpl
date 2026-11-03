@@ -142,7 +142,7 @@ export type AuthenticatorFactory = (deps: Deps) => Authenticator | Promise<Authe
 export interface ManualRoutes {
 {{- range .ManualEndpoints }}
   /** {{ .Method }} {{ .Path }} */
-  {{ .Name }}: ManualRouteHandler;
+  {{ .Key }}: ManualRouteHandler;
 {{- end }}
 }
 
@@ -187,7 +187,7 @@ export type JobsConstructor = (deps: Deps) => Jobs | Promise<Jobs>;
  * worker dies holding it, so a method is idempotent.
  */
 export interface Workers {
-{{- range .Workers }}
+{{- range .OrdinaryWorkers }}
   /** Handles a message of the queue {{ .Queue }}, {{ if eq .Concurrency 1 }}one at a time{{ else }}{{ .Concurrency }} at a time{{ end }} unless an environment changes the worker's concurrency. */
   {{ .Method }}(message: {{ .Queue }}, signal: AbortSignal): Promise<void>;
 {{- end }}

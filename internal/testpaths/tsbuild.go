@@ -44,6 +44,34 @@ func BuildHTTPRuntime(t testing.TB, bun string, paths naming.LocalPaths) {
 	BuildTypeScriptPackage(t, bun, paths.HTTPRuntimeTypeScript)
 }
 
+// rulesSources are what the behaviors' core's npm package
+// (runtime/rules/typescript) builds its wasm module from, by a path
+// relative to the package: the crates scripts/build-wasm.mjs compiles,
+// the declarations the behaviors' crate reads in place, and the
+// workspace's lock file (D103).
+var rulesSources = []string{
+	"../../engine/rust/Cargo.lock",
+	"../../engine/rust/Cargo.toml",
+	"../../engine/rust/rules/Cargo.toml",
+	"../../engine/rust/rules/src",
+	"../../engine/rust/rules-behaviors/Cargo.toml",
+	"../../engine/rust/rules-behaviors/src",
+	"../../engine/rust/rules-wasm/Cargo.toml",
+	"../../engine/rust/rules-wasm/src",
+	"../../engine/rust/behaviors/declarations",
+}
+
+// BuildRulesPackage builds the behaviors' core's npm package
+// (paths.RulesTypeScript), whose dist/ a generated orm.ts of a table whose
+// fields are behaviors imports its core from (D103), as
+// BuildTypeScriptPackage does, reading the Rust sources its wasm module is
+// built from (rulesSources) among its inputs, so a change to the core or
+// to a behavior rebuilds it.
+func BuildRulesPackage(t testing.TB, bun string, paths naming.LocalPaths) {
+	t.Helper()
+	buildPackage(t, bun, paths.RulesTypeScript, buildInputs{sources: rulesSources})
+}
+
 // BuildTypeScriptPackage runs `bun install --frozen-lockfile` and `bun run
 // build` in dir, a TypeScript package of this checkout other tests read,
 // holding a lock on dir that other test processes take too. It does
@@ -62,8 +90,15 @@ func BuildHTTPRuntime(t testing.TB, bun string, paths naming.LocalPaths) {
 // goes stale when it is rebuilt.
 func BuildTypeScriptPackage(t testing.TB, bun, dir string, copies ...string) {
 	t.Helper()
+	buildPackage(t, bun, dir, buildInputs{copies: copies})
+}
+
+// buildPackage is BuildTypeScriptPackage with in, the inputs a build reads
+// besides the package's own files; it fills in.tools.
+func buildPackage(t testing.TB, bun, dir string, in buildInputs) {
+	t.Helper()
 	installFailed := false
-	in := buildInputs{tools: toolVersions(bun), copies: copies}
+	in.tools = toolVersions(bun)
 	_, err := buildOnce(dir, in, func() error {
 		install := exec.Command(bun, "install", "--frozen-lockfile")
 		install.Dir = dir
@@ -106,6 +141,10 @@ type buildInputs struct {
 	tools string
 	// copies are the packages whose dist/ the build copies in.
 	copies []string
+	// sources are files and directories outside the package that its build
+	// compiles, by a path relative to it, each hashed by its files'
+	// contents.
+	sources []string
 }
 
 // buildOnce runs build under dir's cross-process lock unless dir's stamp
@@ -114,7 +153,8 @@ type buildInputs struct {
 //
 // The stamp holds what the build read: the package's manifest, lock file,
 // tsconfigs, src/ and scripts/, the files outside it its build script
-// names (scripts/build-dist.mjs), in.tools, and each of in.copies' dist/.
+// names (scripts/build-dist.mjs), the files of in.sources, in.tools, and
+// each of in.copies' dist/.
 // And what it left: dist/, by each file's path, size and modification
 // time, which another build (make ts, a developer's bun run build) that
 // changes it changes, and node_modules' symlinks (link-local-deps'), by
@@ -187,7 +227,7 @@ func inputsDigest(dir string, in buildInputs) (string, error) {
 	for _, c := range configs {
 		files = append(files, filepath.Base(c))
 	}
-	for _, sub := range []string{"src", "scripts"} {
+	for _, sub := range append([]string{"src", "scripts"}, in.sources...) {
 		err := filepath.WalkDir(filepath.Join(dir, sub), func(path string, d fs.DirEntry, err error) error {
 			if errors.Is(err, fs.ErrNotExist) && path == filepath.Join(dir, sub) {
 				return filepath.SkipDir

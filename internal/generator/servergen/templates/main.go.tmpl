@@ -145,11 +145,11 @@ func run(logger *zap.Logger) error {
 	{{ .Var }}Router.Use(runtimemiddleware.Logger({{ .Var }}Logger, {{ .Package }}.ContextWithLogger))
 {{- end }}
 	err = {{ .Package }}.RegisterRoutes({{ .Var }}Router, {{ .Package }}.Config{
-{{- if .Public }}
+{{- if or .Public .Behaviors }}
 		DB: {{ .Database.Var }},
-{{- if not .Identity }}
-		AuthMiddleware: {{ .Var }}Auth,
 {{- end }}
+{{- if and .Public (not .Identity) }}
+		AuthMiddleware: {{ .Var }}Auth,
 {{- end }}
 {{- if .Identity }}
 		Identity: {{ .Var }}Identity,

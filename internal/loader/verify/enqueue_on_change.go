@@ -170,11 +170,7 @@ func checkOneEnqueueOnChange(schema *ir.Schema, td *ir.TypeDef, def *ir.EnqueueO
 // comparable reports whether IS DISTINCT FROM compares a column of type
 // sqlType: a POINT and the PostGIS types have no equality operator.
 func comparable(sqlType string) bool {
-	switch strings.ToUpper(strings.TrimSuffix(sqlType, "[]")) {
-	case "POINT", "GEOGRAPHY", "GEOMETRY":
-		return false
-	}
-	return true
+	return sqlutil.HasEquality(sqlType)
 }
 
 // equalsFits checks a condition's literal against its field: an enum's

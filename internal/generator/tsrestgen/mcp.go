@@ -57,7 +57,8 @@ type MCPInfo struct {
 // name, the @docs title and description, tools/schema.json's parameters as
 // the input schema, whether its @docs replay mode only reads, and its _meta
 // with the invocation policy), and the operation whose route a call runs
-// through, with where each argument goes in that route's request, and
+// through, by its key in the router's operation table (EndpointInfo.Key),
+// with where each argument goes in that route's request, and
 // whether a call runs only once the person confirms it: its policy is one
 // the build's policy confirms (D93).
 type MCPTool struct {
@@ -215,7 +216,7 @@ func routeTool(tool sdkgen.ToolDefinition, endpoint EndpointInfo) (MCPTool, erro
 		InputSchema: parameters,
 		Annotations: MCPToolAnnotations{ReadOnlyHint: tool.ReplayMode == "read_only"},
 		Meta:        meta,
-		Operation:   endpoint.Name,
+		Operation:   endpoint.Key,
 		Arguments:   []MCPToolArgument{},
 	}
 	for _, argument := range tool.MCPBinding.Arguments {

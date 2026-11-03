@@ -98,6 +98,13 @@ type Naming struct {
 	// graph. It links the core's static archive through cgo.
 	VersionGraphGoModule string `toml:"versiongraph_go_module"`
 
+	// RulesGoModule is the Go binding and adapter of the behaviors' core
+	// (D103), which a generated Go ORM requires when its schema has a
+	// table whose fields are behaviors: its repositories run their writes
+	// and each use's operations through the core. It links the core's
+	// static archive through cgo.
+	RulesGoModule string `toml:"rules_go_module"`
+
 	// EngineGoModule is the Go binding of the behavior engine (D58), which
 	// the entrypoint of a Go server whose API's database holds engine
 	// types imports to open the engine and mount its routes. It links the
@@ -117,6 +124,12 @@ type Naming struct {
 	// the engine, its Postgres adapter and the facade base the generated
 	// TypeScript types import when their schema declares a graph.
 	VersionGraphNpmPackage string `toml:"versiongraph_npm_package"`
+
+	// RulesNpmPackage is the behaviors' core built for WebAssembly (D103):
+	// the generated TypeScript repositories of a database whose tables'
+	// fields are behaviors import its initSync and pass the core to the
+	// HTTP runtime's adapter.
+	RulesNpmPackage string `toml:"rules_npm_package"`
 
 	// EngineNpmPackage is the engine (D16), whose ./client subpath the
 	// module `superschematic engine-client` writes imports (D49).
@@ -454,6 +467,10 @@ type PathsConfig struct {
 	SchemaRuntimeRust string `toml:"schema_runtime_rust"`
 	// VersionGraphGo holds the version-graph core's Go binding module.
 	VersionGraphGo string `toml:"versiongraph_go"`
+	// RulesGo holds the behaviors' core's Go module (D103): its binding of
+	// the core's static archive and the adapter a generated Go ORM runs
+	// over.
+	RulesGo string `toml:"rules_go"`
 	// VersionGraphTypeScript holds the version-graph runtime's npm package
 	// (its package.json).
 	VersionGraphTypeScript string `toml:"versiongraph_typescript"`
@@ -482,6 +499,17 @@ type PathsConfig struct {
 	// project's engine crate's napi member expands: the addon a TypeScript
 	// server loads in the core's place.
 	EngineNapiRust string `toml:"engine_napi_rust"`
+	// RulesAdapterRust holds the behaviors' adapter for a Rust server,
+	// superschematic-rules-adapter (D103), which a Rust API crate whose
+	// @behaviorOperations sets serve a table's behavior operations depends
+	// on, with its postgres feature, to run each through the core on a
+	// transaction of its database's pool. The crate is unpublished, so a
+	// Rust server with behavior operations builds only in a checkout.
+	RulesAdapterRust string `toml:"rules_adapter_rust"`
+	// RulesBehaviorsRust holds the behaviors ported onto the core,
+	// superschematic-rules-behaviors (D103), whose core() the same API
+	// crate builds its core with, beside RulesAdapterRust. Unpublished too.
+	RulesBehaviorsRust string `toml:"rules_behaviors_rust"`
 	// EngineGo holds the behavior engine's Go binding module (D58), which
 	// a Go server whose API's database holds engine types requires. A
 	// server's checkout Dockerfile builds the engine's static archive from
@@ -509,6 +537,10 @@ type PathsConfig struct {
 	// package.json), which the output root's Bun workspace overrides the
 	// generated packages' dependency on it with (D51).
 	HTTPRuntimeTypeScript string `toml:"http_runtime_typescript"`
+	// RulesTypeScript holds the behaviors' core's npm package (its
+	// package.json, D103), which the output root's Bun workspace overrides
+	// the generated types packages' dependency on it with.
+	RulesTypeScript string `toml:"rules_typescript"`
 	// Ptr holds the ptr Go module when it is a module of its own rather
 	// than a package of the schema runtime.
 	Ptr string `toml:"ptr"`
@@ -531,6 +563,7 @@ type LocalPaths struct {
 	SchemaRuntimeGo        string
 	SchemaRuntimeRust      string
 	VersionGraphGo         string
+	RulesGo                string
 	VersionGraphTypeScript string
 	VersionGraphRust       string
 	EngineRust             string
@@ -539,12 +572,15 @@ type LocalPaths struct {
 	EngineCommerceRust     string
 	EngineABIRust          string
 	EngineNapiRust         string
+	RulesAdapterRust       string
+	RulesBehaviorsRust     string
 	EngineGo               string
 	EngineTypeScript       string
 	VersionGraphPython     string
 	HTTPRuntimeGo          string
 	HTTPRuntimeRust        string
 	HTTPRuntimeTypeScript  string
+	RulesTypeScript        string
 	Ptr                    string
 	BuildContext           string
 }
@@ -565,6 +601,7 @@ func (n Naming) LocalPaths(repoRoot string) LocalPaths {
 		SchemaRuntimeGo:        resolve(n.Paths.SchemaRuntimeGo),
 		SchemaRuntimeRust:      resolve(n.Paths.SchemaRuntimeRust),
 		VersionGraphGo:         resolve(n.Paths.VersionGraphGo),
+		RulesGo:                resolve(n.Paths.RulesGo),
 		VersionGraphTypeScript: resolve(n.Paths.VersionGraphTypeScript),
 		VersionGraphRust:       resolve(n.Paths.VersionGraphRust),
 		EngineRust:             resolve(n.Paths.EngineRust),
@@ -573,12 +610,15 @@ func (n Naming) LocalPaths(repoRoot string) LocalPaths {
 		EngineCommerceRust:     resolve(n.Paths.EngineCommerceRust),
 		EngineABIRust:          resolve(n.Paths.EngineABIRust),
 		EngineNapiRust:         resolve(n.Paths.EngineNapiRust),
+		RulesAdapterRust:       resolve(n.Paths.RulesAdapterRust),
+		RulesBehaviorsRust:     resolve(n.Paths.RulesBehaviorsRust),
 		EngineGo:               resolve(n.Paths.EngineGo),
 		EngineTypeScript:       resolve(n.Paths.EngineTypeScript),
 		VersionGraphPython:     resolve(n.Paths.VersionGraphPython),
 		HTTPRuntimeGo:          resolve(n.Paths.HTTPRuntimeGo),
 		HTTPRuntimeRust:        resolve(n.Paths.HTTPRuntimeRust),
 		HTTPRuntimeTypeScript:  resolve(n.Paths.HTTPRuntimeTypeScript),
+		RulesTypeScript:        resolve(n.Paths.RulesTypeScript),
 		Ptr:                    resolve(n.Paths.Ptr),
 		BuildContext:           resolve(n.Paths.BuildContext),
 	}
@@ -605,6 +645,7 @@ func (p PathsConfig) checkRelative() error {
 		{"schema_runtime_go", p.SchemaRuntimeGo},
 		{"schema_runtime_rust", p.SchemaRuntimeRust},
 		{"versiongraph_go", p.VersionGraphGo},
+		{"rules_go", p.RulesGo},
 		{"versiongraph_typescript", p.VersionGraphTypeScript},
 		{"versiongraph_rust", p.VersionGraphRust},
 		{"engine_rust", p.EngineRust},
@@ -613,12 +654,15 @@ func (p PathsConfig) checkRelative() error {
 		{"engine_commerce_rust", p.EngineCommerceRust},
 		{"engine_abi_rust", p.EngineABIRust},
 		{"engine_napi_rust", p.EngineNapiRust},
+		{"rules_adapter_rust", p.RulesAdapterRust},
+		{"rules_behaviors_rust", p.RulesBehaviorsRust},
 		{"engine_go", p.EngineGo},
 		{"engine_typescript", p.EngineTypeScript},
 		{"versiongraph_python", p.VersionGraphPython},
 		{"http_runtime_go", p.HTTPRuntimeGo},
 		{"http_runtime_rust", p.HTTPRuntimeRust},
 		{"http_runtime_typescript", p.HTTPRuntimeTypeScript},
+		{"rules_typescript", p.RulesTypeScript},
 		{"ptr", p.Ptr},
 		{"build_context", p.BuildContext},
 	} {
@@ -775,6 +819,7 @@ func Default() Naming {
 		SchemaRuntimeGoModule:    "github.com/parable-work/superschematic/runtime/schema/go",
 		SchemaRuntimeRustCrate:   "superschematic-schema-runtime",
 		VersionGraphGoModule:     "github.com/parable-work/superschematic/runtime/versiongraph/go",
+		RulesGoModule:            "github.com/parable-work/superschematic/runtime/rules/go",
 		VersionGraphRustCrate:    "superschematic-versiongraph-engine",
 		EngineGoModule:           "github.com/parable-work/superschematic/runtime/engine/go",
 		HTTPRuntimeGoModule:      "github.com/parable-work/superschematic/runtime/http/go",
@@ -782,6 +827,7 @@ func Default() Naming {
 		PtrGoModule:              "github.com/parable-work/superschematic/runtime/schema/go/ptr",
 		HTTPRuntimeNpmPackage:    "@superschematic/http-runtime",
 		VersionGraphNpmPackage:   "@superschematic/versiongraph",
+		RulesNpmPackage:          "@superschematic/rules",
 		EngineNpmPackage:         "@superschematic/engine",
 		VersionGraphPyPIDist:     "superschematic-versiongraph",
 		VersionGraphPythonModule: "superschematic_versiongraph",
@@ -840,6 +886,7 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.SchemaRuntimeGoModule, d.SchemaRuntimeGoModule)
 	fill(&n.SchemaRuntimeRustCrate, d.SchemaRuntimeRustCrate)
 	fill(&n.VersionGraphGoModule, d.VersionGraphGoModule)
+	fill(&n.RulesGoModule, d.RulesGoModule)
 	fill(&n.VersionGraphRustCrate, d.VersionGraphRustCrate)
 	fill(&n.EngineGoModule, d.EngineGoModule)
 	fill(&n.HTTPRuntimeGoModule, d.HTTPRuntimeGoModule)
@@ -847,6 +894,7 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.PtrGoModule, d.PtrGoModule)
 	fill(&n.HTTPRuntimeNpmPackage, d.HTTPRuntimeNpmPackage)
 	fill(&n.VersionGraphNpmPackage, d.VersionGraphNpmPackage)
+	fill(&n.RulesNpmPackage, d.RulesNpmPackage)
 	fill(&n.EngineNpmPackage, d.EngineNpmPackage)
 	fill(&n.VersionGraphPyPIDist, d.VersionGraphPyPIDist)
 	fill(&n.VersionGraphPythonModule, d.VersionGraphPythonModule)

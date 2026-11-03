@@ -264,8 +264,11 @@ type DDLOutput struct {
 	// EnqueueTriggers are the tables' @enqueueOnChange declarations, by
 	// table and queue (enqueue.go, D80).
 	EnqueueTriggers []EnqueueTrigger
-	Projections     []ProjectionView
-	Timestamp       string
+	// ChangeTriggers are the change triggers of the tables whose writes
+	// behaviors hear, by table (changes.go, D103).
+	ChangeTriggers []ChangeTrigger
+	Projections    []ProjectionView
+	Timestamp      string
 
 	// RawSQL is the schema's raw SQL that runs on Postgres, in the order it
 	// runs (sqlutil.OrderRawSQL, D83): the pieces that run after the tables,
@@ -529,6 +532,10 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 	if err != nil {
 		return nil, err
 	}
+	changeTriggers, err := buildChangeTriggers(tableTypes, tables, schema)
+	if err != nil {
+		return nil, err
+	}
 	roleSeeds, err := buildRoleSeeds(tableTypes, tables)
 	if err != nil {
 		return nil, err
@@ -581,6 +588,7 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 		HistoryTables:    historyTables,
 		OptimisticTables: optimisticTables,
 		EnqueueTriggers:  enqueueTriggers,
+		ChangeTriggers:   changeTriggers,
 		RoleSeeds:        roleSeeds,
 		Projections:      projections,
 		Timestamp:        opts.Clock.RFC3339(),
@@ -610,7 +618,9 @@ func tableTypeDefs(schema *ir.Schema) ([]*ir.TypeDef, error) {
 	var tables []*ir.TypeDef
 	for _, typeDef := range defs {
 		if typeDef.Role != ir.RoleDBTable || typeDef.JsonField || baseTypes[typeDef.Name] {
-			if len(typeDef.Indexes) > 0 {
+			// The deadline queue a table's behaviors keep (D103) gets its
+			// queue's table, with the indexes the loader gave it.
+			if len(typeDef.Indexes) > 0 && typeDef.BehaviorQueue == nil {
 				return nil, fmt.Errorf("type %s declares an @index but gets no table", typeDef.Name)
 			}
 			continue

@@ -79,8 +79,10 @@ type TypeDef struct {
 
 	// Behaviors lists the behaviors this type composes, in the order their
 	// checks run. A trait's fields are copied onto a type when it is read;
-	// a behavior adds fields, operations, checks and storage when an engine
-	// runs the schema. See [BehaviorRef].
+	// a type-anchored behavior adds fields, operations, checks and storage
+	// when an engine runs the schema, and a field-anchored one adds its
+	// fields as columns the loader appends to Fields (D103). See
+	// [BehaviorRef].
 	Behaviors []BehaviorRef `json:"behaviors,omitempty" yaml:"behaviors,omitempty"`
 
 	// Display is what a UI reads to render the type's instances, declared
@@ -152,7 +154,10 @@ type TypeDef struct {
 	// Optimistic (@optimistic) gives a DB table the _version column, the
 	// BEFORE UPDATE trigger that bumps it and the fenced writes
 	// UpdateOneIfVersion and DeleteOneIfVersion, with no history. Versioned
-	// implies it, so a type never carries both.
+	// implies it, so a type never carries both. The loader sets it on a
+	// table that composes a field-anchored behavior and is not Versioned:
+	// _version is the version the core's change sets hold each row to
+	// (D103).
 	Optimistic bool `json:"optimistic,omitempty" yaml:"optimistic,omitempty"`
 
 	// EnvVars indicates this type provides environment variable configuration.
@@ -186,9 +191,22 @@ type TypeDef struct {
 	SeedRoles []*RoleSeed `json:"seedRoles,omitempty" yaml:"seedRoles,omitempty"`
 
 	// Origin names the declaration the loader expanded this type from:
-	// [OriginVersionGraph] for the graph tables a version graph adds.
-	// Empty for every authored type. The data forms have no key for it.
+	// [OriginVersionGraph] for the graph tables a version graph adds, and
+	// [OriginBehavior] for the sub-tables and queues a table's behaviors
+	// add (D103). Empty for every authored type. The data forms have no
+	// key for it.
 	Origin string `json:"origin,omitempty" yaml:"origin,omitempty" jsonschema:"-"`
+
+	// BehaviorTable marks a sub-table the loader adds for a use's declared
+	// table (D103): a child table of the row, which only the behavior's
+	// operations write, and for which no repository is generated. Nil for
+	// every other type. See [BehaviorTable].
+	BehaviorTable *BehaviorTable `json:"behaviorTable,omitempty" yaml:"behaviorTable,omitempty" jsonschema:"-"`
+
+	// BehaviorQueue marks the queue the loader adds for a table whose
+	// behaviors arm deadlines (D103). Nil for every other type. See
+	// [BehaviorQueue].
+	BehaviorQueue *BehaviorQueue `json:"behaviorQueue,omitempty" yaml:"behaviorQueue,omitempty" jsonschema:"-"`
 
 	// Projection is the @projection declaration of a RoleProjection type: the
 	// view's address, the table it reads and the tables it joins, its row
@@ -593,6 +611,13 @@ type FieldDef struct {
 	// authored operation. The data forms have no key for it.
 	IdentityOperation string `json:"identityOperation,omitempty" yaml:"identityOperation,omitempty" jsonschema:"-"`
 
+	// BehaviorOperation marks an operation the loader added for a
+	// @behaviorOperations set (D103): a server routes it to a generated
+	// handler that runs it through the behaviors' core. Nil for every
+	// authored operation. The data forms have no key for it. See
+	// [BehaviorOperation].
+	BehaviorOperation *BehaviorOperation `json:"behaviorOperation,omitempty" yaml:"behaviorOperation,omitempty" jsonschema:"-"`
+
 	// HTTPMethod is the explicit HTTP method for operation fields
 	// ("GET", "POST", "PUT", "PATCH", "DELETE"). There is no
 	// Queries-versus-Mutations default inference in v2: every operation
@@ -638,6 +663,13 @@ type FieldDef struct {
 	// Origin is [OriginVersionGraph] for a field a version graph adds to a
 	// member type; empty for every authored field.
 	Origin string `json:"origin,omitempty" yaml:"origin,omitempty" jsonschema:"-"`
+
+	// Behavior marks a field a behavior owns (D103): a column the loader
+	// adds for a field-anchored use's declared field, which only the
+	// behavior's operations change. Nil for every other field, and for
+	// every field a reader writes; the data forms have no key for it. See
+	// [FieldBehavior].
+	Behavior *FieldBehavior `json:"behavior,omitempty" yaml:"behavior,omitempty" jsonschema:"-"`
 
 	// DistinctNull marks an optional field whose null is a state of its own,
 	// not its type's zero value. The Go generators, which render an optional

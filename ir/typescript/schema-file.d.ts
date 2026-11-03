@@ -62,6 +62,10 @@ export interface ArgumentDef {
   validatePattern?: string;
 }
 
+export interface BehaviorOperationsConfig {
+  type: string;
+}
+
 export interface BehaviorRef {
   /**
    * The type's config of the behavior, which the registry holds to the
@@ -69,11 +73,29 @@ export interface BehaviorRef {
    */
   config?: unknown;
   /**
+   * The anchor field of a field-anchored use (D103): the field whose type is
+   * the behavior, which holds its value and names its columns and operations.
+   * Absent for a use on the whole type.
+   */
+  field?: string;
+  /**
+   * True for a use a DB table implements (D103), `implements Timers<Ticket,
+   * Config>`: anchored on the type, on a table that stays a table. A use on
+   * the whole type without it is @behavior's, which makes the type an engine
+   * type.
+   */
+  implements?: boolean;
+  /**
    * The behavior's registered name: bare for a core behavior,
    * <extension>.<Name> for an extension's. A registry admits the behaviors it
    * registers.
    */
   name: string;
+}
+
+export interface BehaviorWorkerConfig {
+  permissions?: string[];
+  type: string;
 }
 
 export interface DNSPlacement {
@@ -449,6 +471,8 @@ export interface OperationPage {
 }
 
 export interface OperationSet {
+  auth?: boolean;
+  behaviorOperations?: BehaviorOperationsConfig;
   comment?: string;
   description?: string;
   encrypted?: boolean;
@@ -456,12 +480,16 @@ export interface OperationSet {
   middleware?: MiddlewareConfig;
   name: string;
   operations: FieldDef[];
+  permissions?: string[];
+  public?: boolean;
   serviceCallers?: ServiceCallers;
   userAdministration?: UserAdministrationConfig;
   userSessions?: UserSessionsConfig;
 }
 
 export interface OperationSetFile {
+  auth?: boolean;
+  behaviorOperations?: BehaviorOperationsConfig;
   comment?: string;
   description?: string;
   encrypted?: boolean;
@@ -470,6 +498,8 @@ export interface OperationSetFile {
   middleware?: MiddlewareConfig;
   name: string;
   operations: FieldDef[];
+  permissions?: string[];
+  public?: boolean;
   serviceCallers?: ServiceCallers;
   userAdministration?: UserAdministrationConfig;
   userSessions?: UserSessionsConfig;
@@ -824,9 +854,10 @@ export interface VersionedConfig {
 }
 
 export interface Worker {
+  behaviorWorker?: BehaviorWorkerConfig;
   comment?: string;
   concurrency?: number;
   grace?: string;
   name: string;
-  queue: string;
+  queue?: string;
 }

@@ -32,6 +32,12 @@
 //! data, and who may send it: a caller who may read the schema (`read`),
 //! one who may write it (`write`), or the behavior's own operations alone
 //! (`operation`).
+//! A declaration may name its value field (`value`) and give each field the
+//! type of the column it takes on a table (`type`), which the pure core and
+//! a build-time table read (D103) and the engine does not: it checks that
+//! each is a string, the value one of the fields, and leaves both out of
+//! the declaration's JSON it answers with ([`BehaviorDeclaration::json`]),
+//! so its answers read as the recordings hold them.
 //! The compiler's registry refuses the same declarations, with the same
 //! wording.
 //!
@@ -55,7 +61,7 @@ pub const BUILTIN_OPERATIONS: [&str; 6] = ["create", "get", "list", "update", "d
 /// characters.
 pub const VETO_CODE: &str = "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$";
 
-const DECLARATION_KEYS: [&str; 11] = [
+const DECLARATION_KEYS: [&str; 15] = [
     "name",
     "description",
     "configSchema",
@@ -63,13 +69,18 @@ const DECLARATION_KEYS: [&str; 11] = [
     "requires",
     "conflicts",
     "fields",
+    "value",
+    "tables",
+    "armsDeadlines",
+    "hearsChanges",
     "operations",
     "signals",
     "preconditionSchema",
     "vetoes",
 ];
 const SIGNAL_KEYS: [&str; 4] = ["name", "description", "paramsSchema", "access"];
-const FIELD_KEYS: [&str; 4] = ["name", "description", "volatile", "perReader"];
+const FIELD_KEYS: [&str; 5] = ["name", "description", "volatile", "perReader", "type"];
+const TABLE_KEYS: [&str; 4] = ["name", "description", "key", "fields"];
 const VETO_KEYS: [&str; 2] = ["code", "description"];
 const OPERATION_KEYS: [&str; 10] = [
     "name",
@@ -203,7 +214,8 @@ impl SignalAccess {
 /// engine reads of it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BehaviorDeclaration {
-    /// The declaration's JSON, as given.
+    /// The declaration's JSON, as given, without the members only a table's
+    /// layout reads (D103): `value` and each field's `type`.
     pub json: Value,
     /// Bare (`Workflow`) for a core behavior, `<extension>.<Name>` for an
     /// extension's.
@@ -387,7 +399,7 @@ impl BehaviorDeclaration {
                     description: text(veto, "description"),
                 })
                 .collect(),
-            json: value,
+            json: without_layout_members(value),
         })
     }
 
@@ -402,6 +414,29 @@ impl BehaviorDeclaration {
     pub fn signal(&self, name: &str) -> Option<&SignalDeclaration> {
         self.signals.iter().find(|signal| signal.name == name)
     }
+}
+
+/// A declaration without the members only a table's layout reads (D103):
+/// its `value`, its `tables`, `armsDeadlines` and `hearsChanges`, and each
+/// field's `type`,
+/// which the engine, keeping no table, never answers with. It shifts them
+/// out, so the members after them keep the order the declaration writes
+/// them in.
+fn without_layout_members(mut value: Value) -> Value {
+    if let Value::Object(members) = &mut value {
+        members.shift_remove("value");
+        members.shift_remove("tables");
+        members.shift_remove("armsDeadlines");
+        members.shift_remove("hearsChanges");
+        if let Some(Value::Array(fields)) = members.get_mut("fields") {
+            for field in fields {
+                if let Value::Object(field) = field {
+                    field.shift_remove("type");
+                }
+            }
+        }
+    }
+    value
 }
 
 /// A value as `JSON.stringify` writes it in a message; `undefined` for an
@@ -456,6 +491,20 @@ pub fn check_declaration(value: &Value) -> Vec<String> {
         }
     }
     check_fields(members.get("fields"), &mut problems);
+    check_value(members, &mut problems);
+    check_tables(members.get("tables"), &mut problems);
+    if members
+        .get("armsDeadlines")
+        .is_some_and(|arms| !arms.is_boolean())
+    {
+        problems.push("armsDeadlines is a boolean".to_owned());
+    }
+    if members
+        .get("hearsChanges")
+        .is_some_and(|hears| !hears.is_boolean())
+    {
+        problems.push("hearsChanges is a boolean".to_owned());
+    }
     check_operations(members.get("operations"), &mut problems);
     check_beside_fields(members, &mut problems);
     check_signals(members.get("signals"), &mut problems);
@@ -532,17 +581,86 @@ fn check_vetoes(vetoes: Option<&Value>, problems: &mut Vec<String>) {
     }
 }
 
+/// The value field, when the declaration names one, is one of its fields
+/// (D103).
+fn check_value(members: &Map<String, Value>, problems: &mut Vec<String>) {
+    let Some(value) = members.get("value") else {
+        return;
+    };
+    let Some(name) = value.as_str() else {
+        problems.push("value is a string".to_owned());
+        return;
+    };
+    let declared = members
+        .get("fields")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|field| field.get("name").and_then(Value::as_str) == Some(name));
+    if !declared {
+        problems.push(format!(
+            "value {} is not one of its fields",
+            json::quote(name)
+        ));
+    }
+}
+
+/// The sub-tables a behavior keeps per row on a table (D103), which the
+/// engine checks for their shape alone and answers with none of: each an
+/// object of a name, a description, a key and its fields, each field as a
+/// behavior's field is.
+fn check_tables(tables: Option<&Value>, problems: &mut Vec<String>) {
+    let Some(tables) = tables else {
+        return;
+    };
+    let Value::Array(tables) = tables else {
+        problems.push("tables is a list".to_owned());
+        return;
+    };
+    for (index, table) in tables.iter().enumerate() {
+        let at = format!("tables[{index}]");
+        let Value::Object(members) = table else {
+            problems.push(format!("{at} is an object"));
+            continue;
+        };
+        unknown_keys(members, &TABLE_KEYS, &at, problems);
+        if !members
+            .get("name")
+            .and_then(Value::as_str)
+            .is_some_and(is_field_name)
+        {
+            problems.push(format!(
+                "{at}.name {} is not an identifier",
+                shown(members.get("name"))
+            ));
+        }
+        optional_string(
+            members.get("description"),
+            &format!("{at}.description"),
+            problems,
+        );
+        if !members.get("key").is_some_and(Value::is_string) {
+            problems.push(format!("{at}.key is a string"));
+        }
+        check_field_list(members.get("fields"), &format!("{at}.fields"), problems);
+    }
+}
+
 fn check_fields(fields: Option<&Value>, problems: &mut Vec<String>) {
+    check_field_list(fields, "fields", problems);
+}
+
+fn check_field_list(fields: Option<&Value>, list: &str, problems: &mut Vec<String>) {
     let Some(fields) = fields else {
         return;
     };
     let Value::Array(fields) = fields else {
-        problems.push("fields is a list".to_owned());
+        problems.push(format!("{list} is a list"));
         return;
     };
     let mut seen: Vec<&str> = Vec::new();
     for (index, field) in fields.iter().enumerate() {
-        let at = format!("fields[{index}]");
+        let at = format!("{list}[{index}]");
         let Value::Object(members) = field else {
             problems.push(format!("{at} is an object"));
             continue;
@@ -553,6 +671,7 @@ fn check_fields(fields: Option<&Value>, problems: &mut Vec<String>) {
             &format!("{at}.description"),
             problems,
         );
+        optional_string(members.get("type"), &format!("{at}.type"), problems);
         if members
             .get("volatile")
             .is_some_and(|volatile| !volatile.is_boolean())
@@ -887,6 +1006,129 @@ mod tests {
             assert!(!is_veto_code(code), "{code}");
         }
         assert!(!is_veto_code(&"x".repeat(65)));
+    }
+
+    /// A declaration may name its value field and type its fields for a
+    /// table (D103): the engine checks both and answers with neither.
+    #[test]
+    fn the_layout_members_are_checked_and_left_out_of_its_json() {
+        let declared = BehaviorDeclaration::from_json(json!({
+            "name": "test.Gauge",
+            "fields": [{"name": "level", "type": "number"}, {"name": "readAt", "description": "when", "type": "Temporal.DateTime"}],
+            "value": "level"
+        }))
+        .expect("the declaration is sound");
+        assert_eq!(
+            declared.json,
+            json!({"name": "test.Gauge", "fields": [{"name": "level"}, {"name": "readAt", "description": "when"}]})
+        );
+        assert_eq!(declared.fields.len(), 2);
+        assert_eq!(
+            check_declaration(&json!({
+                "name": "test.Gauge",
+                "fields": [{"name": "level", "type": 1}],
+                "value": "reading"
+            })),
+            [
+                "fields[0].type is a string",
+                "value \"reading\" is not one of its fields"
+            ]
+        );
+        assert_eq!(
+            check_declaration(&json!({"name": "test.Gauge", "value": true})),
+            ["value is a string"]
+        );
+        // The engine's Workflow reads its file, which names both.
+        let workflow = BehaviorDeclaration::parse(include_str!(
+            "../../../behaviors/declarations/Workflow.behavior.json"
+        ))
+        .expect("Workflow's declaration is sound");
+        assert!(workflow.json.get("value").is_none());
+        assert!(workflow.json["fields"][1].get("type").is_none());
+        // What follows them keeps its place, as the corpus records it.
+        let members: Vec<&str> = workflow
+            .json
+            .as_object()
+            .expect("an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            members,
+            [
+                "name",
+                "description",
+                "configSchema",
+                "fields",
+                "operations",
+                "vetoes"
+            ]
+        );
+        let field: Vec<&str> = workflow.json["fields"][1]
+            .as_object()
+            .expect("an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(field, ["name", "description"]);
+    }
+
+    /// A declaration may declare the sub-tables a table's row keeps, whether
+    /// it arms deadlines and whether it hears its table's writes (D103): the
+    /// engine checks their shape and answers with none of them, so its
+    /// Timers and Reactions answer as they did.
+    #[test]
+    fn the_sub_tables_and_deadlines_are_checked_and_left_out_of_its_json() {
+        assert_eq!(
+            check_declaration(&json!({
+                "name": "test.Clock",
+                "tables": [
+                    {"name": "ticks", "key": "at", "fields": [{"name": "at", "type": "string"}]},
+                    {"name": "1x", "key": 2, "fields": [{"name": "a", "x": 1}], "y": true},
+                    "z"
+                ],
+                "armsDeadlines": "yes",
+                "hearsChanges": 1
+            })),
+            [
+                "tables[1] has the unknown key \"y\"",
+                "tables[1].name \"1x\" is not an identifier",
+                "tables[1].key is a string",
+                "tables[1].fields[0] has the unknown key \"x\"",
+                "tables[2] is an object",
+                "armsDeadlines is a boolean",
+                "hearsChanges is a boolean"
+            ]
+        );
+        assert_eq!(
+            check_declaration(&json!({"name": "test.Clock", "tables": {}})),
+            ["tables is a list"]
+        );
+        let timers = BehaviorDeclaration::parse(include_str!(
+            "../../../behaviors/declarations/Timers.behavior.json"
+        ))
+        .expect("Timers' declaration is sound");
+        assert!(timers.json.get("tables").is_none());
+        assert!(timers.json.get("armsDeadlines").is_none());
+        assert!(timers.json.get("hearsChanges").is_none());
+        let members: Vec<&str> = timers
+            .json
+            .as_object()
+            .expect("an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            members,
+            [
+                "name",
+                "description",
+                "configSchema",
+                "fields",
+                "operations",
+                "vetoes"
+            ]
+        );
     }
 
     #[test]

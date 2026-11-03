@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "api": "fixture-timers-api",
+  "permissions": [
+    {
+      "name": "tickets.timers",
+      "identity": false,
+      "operations": [
+        "TicketTimersFireTimerHandler",
+        "TicketTimersResetTimerHandler",
+        "TicketTimersSnoozeTimerHandler"
+      ]
+    },
+    {
+      "name": "tickets.write",
+      "identity": false,
+      "operations": [
+        "TicketStatusTransitionHandler",
+        "TicketTimersFireTimerHandler",
+        "TicketTimersResetTimerHandler",
+        "TicketTimersSnoozeTimerHandler"
+      ]
+    }
+  ]
+}

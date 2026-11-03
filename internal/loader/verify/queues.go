@@ -50,7 +50,7 @@ func checkQueues(schema *ir.Schema, r *Result) {
 			r.errorf(td.Owner, "%s has role %s; a queue's class is its message, role %s, and no table", where, td.Role, ir.RoleEmbeddedStruct)
 		case len(td.Fields) == 0:
 			r.errorf(td.Owner, "%s has no fields; a queue's class holds its message's fields", where)
-		case td.JsonField || td.Versioned || td.Optimistic || td.VersionGraph != nil || td.GraphMember != nil || td.Projection != nil || len(td.Indexes) > 0:
+		case td.JsonField || td.Versioned || td.Optimistic || td.VersionGraph != nil || td.GraphMember != nil || td.Projection != nil || (len(td.Indexes) > 0 && td.BehaviorQueue == nil):
 			r.errorf(td.Owner, "%s is also a @jsonField, @versioned, @optimistic, version graph, projection or indexed class; a queue's class declares the message and nothing else", where)
 		case extended[td.Name]:
 			r.errorf(td.Owner, "%s is extended by another class; a queue's message is no base class", where)
@@ -183,10 +183,17 @@ func checkWorkers(schema *ir.Schema, r *Result) {
 		case schema.Job(worker.Name) != nil:
 			r.errorf("", "worker %s takes the name of a job of the schema, and both would be the deployable %s; give one of them another name", worker.Name, ir.WorkerDeployableName(schema.Name, worker.Name))
 		}
+		seen[worker.Name] = true
+		// A behavior worker's queue is the one the build added to the
+		// API's database for its table, which the API does not import,
+		// and its handler is generated, no method of the API's Workers
+		// (checkBehaviorWorkers, D103).
+		if worker.BehaviorWorker != nil {
+			continue
+		}
 		if !imported[worker.Queue] {
 			r.errorf("", "worker %s handles queue %s, which the schema does not import; a queue is a @queue class of the API's database, which the schema imports from it", worker.Name, worker.Queue)
 		}
-		seen[worker.Name] = true
 		method := goutil.GoPublicIdentifier(worker.Name)
 		if other, clash := methods[method]; clash {
 			r.errorf("", "workers %s and %s are both the method %s of the API's Workers interface; give one of them another name", other, worker.Name, method)

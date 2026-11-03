@@ -30,6 +30,15 @@ type walker struct {
 	// heritage chains and @source targets resolve once.
 	classFields map[*astNode][]*ir.FieldDef
 
+	// classUses holds, beside classFields, the behaviors each class
+	// declaration composes on its own fields (D103), in field order.
+	classUses map[*astNode][]fieldUse
+
+	// classImplements holds, beside classFields, the behaviors each class
+	// declaration implements (D103), in the order of its implements
+	// clause.
+	classImplements map[*astNode][]fieldUse
+
 	// imports accumulates cross-service named imports: package -> symbols.
 	imports map[string]map[string]bool
 
@@ -81,18 +90,20 @@ type walker struct {
 
 func newWalker(sp *serviceProgram, cfg *SchemaConfig, schema *ir.Schema, packages *packageIndex, reg *registry.Registry) *walker {
 	return &walker{
-		checker:       sp.checker(),
-		packages:      packages,
-		schema:        schema,
-		cfg:           cfg,
-		sp:            sp,
-		servicePath:   sp.servicePath,
-		reg:           reg,
-		classFields:   make(map[*astNode][]*ir.FieldDef),
-		imports:       make(map[string]map[string]bool),
-		externals:     make(map[string]bool),
-		externalTypes: make(map[string]*ir.TypeDef),
-		externalEnums: make(map[string]*ir.EnumDef),
+		checker:         sp.checker(),
+		packages:        packages,
+		schema:          schema,
+		cfg:             cfg,
+		sp:              sp,
+		servicePath:     sp.servicePath,
+		reg:             reg,
+		classFields:     make(map[*astNode][]*ir.FieldDef),
+		classUses:       make(map[*astNode][]fieldUse),
+		classImplements: make(map[*astNode][]fieldUse),
+		imports:         make(map[string]map[string]bool),
+		externals:       make(map[string]bool),
+		externalTypes:   make(map[string]*ir.TypeDef),
+		externalEnums:   make(map[string]*ir.EnumDef),
 
 		relationTargets: make(map[*ir.FieldDef]*astNode),
 
@@ -656,9 +667,12 @@ func (w *walker) walkClass(node *astNode) {
 	name := node.Name().Text()
 	decorators := w.decoratorsOf(node)
 
-	// A user model route set (D50) is a class with no methods that the
-	// loader fills.
+	// A user model route set (D50) and a table's behavior operations
+	// (D103) are each a class with no methods that the loader fills.
 	routes := identityRoutesDecorator(decorators)
+	if routes == nil {
+		routes = behaviorOperationsDecorator(decorators)
+	}
 	if classHasMethods(node) || routes != nil {
 		if !w.kindSpec().AllowsOperationSets {
 			if routes != nil {
@@ -788,15 +802,17 @@ func (w *walker) walkStructClass(node *astNode, name string, decorators []decora
 
 	// After the decorators, which settle the role and @jsonField.
 	w.checkIdentityTraitPlacement(node, td)
+	w.applyFieldBehaviors(node, td)
 
 	// A @job class declares a job of the API, which @job's Apply recorded
 	// in Schema.Jobs: it is no type (D52). A @worker class is no type
-	// either: @worker's Apply recorded it in Schema.Workers (D53), nor is
+	// either: @worker's Apply recorded it in Schema.Workers (D53), as
+	// @behaviorWorker's recorded its own (D103), nor is
 	// a @deriver class: @deriver's Apply recorded it in Schema.Derivers
 	// (D74), nor an @app class: @app's Apply recorded it in Schema.Apps
 	// (D78). Nor is an @channel or @key class of a MemoryStore schema,
 	// which their Apply recorded in Schema.MemoryStoreDeclarations (D75).
-	if findDecorator(decorators, "job") != nil || findDecorator(decorators, "worker") != nil || findDecorator(decorators, "deriver") != nil || findDecorator(decorators, "app") != nil || hasMemoryStoreDecorator(decorators) {
+	if findDecorator(decorators, "job") != nil || findDecorator(decorators, "worker") != nil || findDecorator(decorators, "behaviorWorker") != nil || findDecorator(decorators, "deriver") != nil || findDecorator(decorators, "app") != nil || hasMemoryStoreDecorator(decorators) {
 		return
 	}
 
@@ -826,6 +842,12 @@ func (w *walker) applyHeritage(node *astNode, td *ir.TypeDef) {
 				}
 				td.Extends = id.name
 			} else {
+				// A behavior a table implements is a use, read with the
+				// class's fields (resolveClassFieldDefs), not a TraitRef,
+				// and RawHeritage leaves it out (D103).
+				if _, _, carrier := w.implementsCarrier(t); carrier {
+					continue
+				}
 				// The user model's traits are core IR, not TraitRefs, and
 				// RawHeritage leaves them out (users.go).
 				if trait, core := w.identityTraitEntry(t); core {
@@ -1030,8 +1052,9 @@ func heritageClauses(node *astNode) []*astNode {
 
 // resolveClassFieldDefs returns the flattened fields of a class: base-class
 // and trait fields first (with InheritedFrom set to the declaring type), then
-// the class's own properties. Results are memoized; heritage must stay within
-// classes the program can see.
+// the class's own properties. A property whose type is a behavior is no
+// field: its use goes to classUses (behaviorFieldOf). Results are memoized;
+// heritage must stay within classes the program can see.
 func (w *walker) resolveClassFieldDefs(node *astNode) ([]*ir.FieldDef, bool) {
 	if fields, ok := w.classFields[node]; ok {
 		return fields, true
@@ -1041,6 +1064,7 @@ func (w *walker) resolveClassFieldDefs(node *astNode) ([]*ir.FieldDef, bool) {
 	w.classFields[node] = nil
 
 	var fields []*ir.FieldDef
+	var implemented []fieldUse
 	ok := true
 
 	for _, clause := range heritageClauses(node) {
@@ -1051,6 +1075,18 @@ func (w *walker) resolveClassFieldDefs(node *astNode) ([]*ir.FieldDef, bool) {
 			if hc.Token == kindExtendsKeyword {
 				id, idOK = w.identityOf(t.AsExpressionWithTypeArguments().Expression)
 			} else {
+				// A behavior the table implements carries no fields: its
+				// use is the class's (D103).
+				if behavior, carrierID, carrier := w.implementsCarrier(t); carrier {
+					use, serr := w.behaviorImplementsOf(node, t, behavior, carrierID)
+					if serr != nil {
+						w.addErr(serr)
+						ok = false
+						continue
+					}
+					implemented = append(implemented, use)
+					continue
+				}
 				// The user model's traits carry no fields.
 				if _, core := w.identityTraitEntry(t); core {
 					continue
@@ -1085,6 +1121,16 @@ func (w *walker) resolveClassFieldDefs(node *astNode) ([]*ir.FieldDef, bool) {
 				ok = false
 				continue
 			}
+			if serr := w.inheritedBehaviorField(className(node), t, id.decl, id.name); serr != nil {
+				w.addErr(serr)
+				ok = false
+				continue
+			}
+			if serr := w.inheritedBehaviorImplements(className(node), t, id.decl, id.name); serr != nil {
+				w.addErr(serr)
+				ok = false
+				continue
+			}
 			for _, bf := range baseFields {
 				inherited := *bf
 				if inherited.InheritedFrom == "" {
@@ -1098,10 +1144,20 @@ func (w *walker) resolveClassFieldDefs(node *astNode) ([]*ir.FieldDef, bool) {
 		}
 	}
 
+	var uses []fieldUse
 	for _, m := range node.AsClassDeclaration().Members.Nodes {
 		if m.Kind != kindPropertyDeclaration {
 			w.addErr(errorAtNode(m, "only property declarations are allowed on data types"))
 			ok = false
+			continue
+		}
+		if use, handled, serr := w.behaviorFieldOf(className(node), m); handled {
+			if serr != nil {
+				w.addErr(serr)
+				ok = false
+				continue
+			}
+			uses = append(uses, use)
 			continue
 		}
 		fd, serr := w.fieldFromProperty(m)
@@ -1114,7 +1170,18 @@ func (w *walker) resolveClassFieldDefs(node *astNode) ([]*ir.FieldDef, bool) {
 	}
 
 	w.classFields[node] = fields
+	w.classUses[node] = uses
+	w.classImplements[node] = implemented
 	return fields, ok
+}
+
+// className is a class declaration's name, for an error; a class the walk
+// reads is named.
+func className(node *astNode) string {
+	if name := node.Name(); name != nil {
+		return name.Text()
+	}
+	return "(anonymous class)"
 }
 
 // fieldFromProperty converts a property declaration into a FieldDef.
@@ -1258,7 +1325,14 @@ func (w *walker) applySource(td *ir.TypeDef, src *decoratorRef) {
 
 	target := targetService + "." + id.name
 	if external {
-		w.externalTypes[target] = &ir.TypeDef{Name: id.name, Fields: sourceFields}
+		var uses []ir.BehaviorRef
+		for _, use := range w.classImplements[id.decl] {
+			uses = append(uses, use.ref)
+		}
+		for _, use := range w.classUses[id.decl] {
+			uses = append(uses, use.ref)
+		}
+		w.externalTypes[target] = &ir.TypeDef{Name: id.name, Fields: sourceFields, Behaviors: uses}
 		w.flattenRelatedTypes(targetService, sourceFields)
 	}
 
@@ -1339,6 +1413,8 @@ func (w *walker) resolveDetached(decl *astNode) []*ir.FieldDef {
 	for node := range w.classFields {
 		if !classes[node] {
 			delete(w.classFields, node)
+			delete(w.classUses, node)
+			delete(w.classImplements, node)
 		}
 	}
 	for name := range w.schema.Scalars {
@@ -1484,6 +1560,17 @@ func (w *walker) walkOperationSet(node *astNode, name string, decorators []decor
 	for _, d := range decorators {
 		w.addErr(w.applyDecorator(d, registry.TargetOperationSet, registry.Node{Schema: w.schema, OperationSet: set}))
 	}
+
+	if set.IsBehaviorOperations() {
+		w.checkBehaviorOperationsClass(node, set, bases)
+		// No operations, as the data forms write it; the loader adds them.
+		set.Operations = []*ir.FieldDef{}
+		w.schema.OperationSets = append(w.schema.OperationSets, set)
+		return
+	}
+	// The class-level @auth, @requirePermission and @publicRoute are a
+	// @behaviorOperations set's alone (D103).
+	w.checkSetClause(set, decorators)
 
 	if set.IsIdentityRoutes() {
 		w.checkIdentityRoutesClass(node, set, decorators, bases)
