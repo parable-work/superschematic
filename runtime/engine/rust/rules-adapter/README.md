@@ -90,7 +90,10 @@ brief:
    field by its IR name (`statusEnteredAt`) is refused (`invalid_instance`,
    rule `owned`); the anchor field itself is left to the core.
 3. The core runs. A `row` read selects the row by its key, each own and
-   owned column converted to the core's JSON and a NULL column absent;
+   owned column converted to the core's JSON and a NULL column absent; the
+   layout's audit columns (`createdBy`, D104) are read the same way after
+   the own columns and held among the row's own fields, and no command
+   writes one: a change set that names one is `internal`;
    `hasRows` asks whether the table has a row; `spec` answers from the
    layout. A soft-deletable table's reads and writes see its live rows
    alone (`live`), so a row the repository holds deleted is `not_found`.
@@ -255,7 +258,12 @@ create deadline from the write's time; the message spent; a claim lost; a
 soft-deleted, a hard-deleted and a returned row; a refused change leaving
 its message claimed); and `Held`, Timers with a toy `Hold` whose guard
 vetoes `fireTimer`, which holds the vetoed release
-(`a_vetoed_fire_is_released_counting_no_attempt`). `tests/transcript.rs`
+(`a_vetoed_fire_is_released_counting_no_attempt`); and `Question`, a
+Workflow whose `by` names `askedOf` and `createdBy`, which holds the audit
+read (`a_row_read_holds_the_audit_fields`): a stamped and an unstamped
+`createdBy`, `by` on each field, a field with no value naming no one, a
+repeat leaving `_version` and `enteredAt` where they were, and an update of
+`createdBy` refused with the stamp kept. `tests/transcript.rs`
 replays the transcripts in `runtime/engine/testdata/rules` on rusqlite and
 on Postgres, each command over a layout of every type of its database:
 `core-workflow.transcript.json`, 96 steps (34 commands, 61 checks, 1 raw
@@ -263,8 +271,11 @@ write); `core-timers.transcript.json`, 125 steps (75 commands, 10 of them
 deadlines and 25 changes, and 50 checks); `core-reactions.transcript.json`,
 586 steps (476 commands, 252 of them changes, and 110 checks); and
 `core-reactions-changes.transcript.json`, 60 steps (48 commands, 24 of them
-changes, and 12 checks); each held to a floor of its step count, its
-`expect.others` compared on every command step, 0 mismatches each.
+changes, and 12 checks); and the hand-written
+`core-workflow-principals.transcript.json` (D104), 92 steps (58 commands,
+each compared with its row's `expect.version`, and 34 checks); each held to
+a floor of its step count, its `expect.others` compared on every command
+step, 0 mismatches each.
 
 The Postgres cases read `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL`, each in a
 schema of its own (`rules_rs_<pid>_<nanos>_<n>`, dropped after), and are

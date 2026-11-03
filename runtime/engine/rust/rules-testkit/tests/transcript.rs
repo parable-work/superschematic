@@ -6,13 +6,19 @@
 //! its recording, so a change to the core, a behavior or the replayer that
 //! changes an answer changes the file in the same commit.
 //! `UPDATE_TRANSCRIPTS=1 cargo test -p superschematic-rules-testkit --test
-//! transcript` rewrites them; review the diff before keeping them.
+//! transcript` rewrites them; review the diff before keeping them. So are
+//! the transcripts of the hand-written scenario files
+//! (`runtime/engine/testdata/rules/scenarios`, D104), which hold each
+//! command's row version beside what it answers.
 
+use std::collections::BTreeMap;
 use std::fs;
 
-use superschematic_engine_testkit::load;
+use superschematic_engine_testkit::{load, ScenarioFile};
+use superschematic_rules::Core;
 use superschematic_rules_testkit::{
-    ported, scenario_path, transcript, transcript_path, Transcript, TranscriptStep,
+    hand_written_path, hand_written_transcript, ported, scenario_path, transcript, transcript_path,
+    Transcript, TranscriptStep,
 };
 
 /// The steps `core-workflow.transcript.json` holds, of `core-workflow.json`'s
@@ -72,6 +78,17 @@ const REACTIONS_FLOOR: usize = 586;
 /// holds its own count to this one.
 const REACTIONS_CHANGES_FLOOR: usize = 60;
 
+/// The steps `core-workflow-principals.transcript.json` holds, of the
+/// hand-written `core-workflow-principals.json`'s 122 (D104): 34 define
+/// and publish checks, twelve of them refused, and 58 commands, creates and
+/// transitions, five of them repeats answered unchanged, each holding the
+/// version of its row's command before it, in the 9 scenarios the core an
+/// adapter embeds runs. test.Gate's scenario holds none, since the
+/// reference host runs test.Gate as a fixture; the rest of the 30 left out
+/// are the opens, the reads of rows and the read of the event log. An
+/// adapter's replay holds its own count to this one.
+const WORKFLOW_PRINCIPALS_FLOOR: usize = 92;
+
 #[test]
 fn the_checked_in_transcripts_are_what_the_writer_writes() {
     for (name, floor) in [
@@ -80,7 +97,7 @@ fn the_checked_in_transcripts_are_what_the_writer_writes() {
         ("core-reactions", REACTIONS_FLOOR),
         ("core-reactions-changes", REACTIONS_CHANGES_FLOOR),
     ] {
-        let written = written(name);
+        let written = written(name, &scenario_path(name), transcript);
         let kinds = |kind: fn(&TranscriptStep) -> bool| {
             written
                 .scenarios
@@ -107,11 +124,82 @@ fn the_checked_in_transcripts_are_what_the_writer_writes() {
     }
 }
 
-// written writes a recording's transcript, rewrites the checked-in file when
-// UPDATE_TRANSCRIPTS=1, and holds the checked-in file to it.
-fn written(name: &str) -> Transcript {
-    let file = load(&scenario_path(name)).unwrap_or_else(|error| panic!("{error}"));
-    let written = transcript(&file, &ported).unwrap_or_else(|error| panic!("{error}"));
+/// A hand-written file's transcript holds each command's row version after
+/// the step, and a command a repeat answered unchanged holds the version of
+/// its row's command before it: it wrote nothing.
+#[test]
+fn the_hand_written_transcripts_are_what_the_writer_writes() {
+    for (name, floor) in [("core-workflow-principals", WORKFLOW_PRINCIPALS_FLOOR)] {
+        let written = written(name, &hand_written_path(name), hand_written_transcript);
+        let mut repeats = 0;
+        for scenario in &written.scenarios {
+            // The version each row's last command left it at.
+            let mut last: BTreeMap<(String, String), Option<i64>> = BTreeMap::new();
+            for step in &scenario.steps {
+                let TranscriptStep::Command {
+                    type_name,
+                    command,
+                    expect,
+                    ..
+                } = step
+                else {
+                    continue;
+                };
+                let at = (
+                    type_name.clone(),
+                    command.action.key().unwrap_or_default().to_owned(),
+                );
+                assert!(
+                    expect.version.is_some() || expect.row.is_none(),
+                    "{}: a command on a row that is there holds its version",
+                    scenario.name
+                );
+                if expect.result.get("unchanged") == Some(&serde_json::Value::Bool(true)) {
+                    repeats += 1;
+                    assert_eq!(
+                        Some(&expect.version),
+                        last.get(&at),
+                        "{}: a repeat of {} {} moved its version",
+                        scenario.name,
+                        at.0,
+                        at.1
+                    );
+                }
+                last.insert(at, expect.version);
+            }
+        }
+        let checks = written
+            .scenarios
+            .iter()
+            .flat_map(|scenario| &scenario.steps)
+            .filter(|step| matches!(step, TranscriptStep::Check { .. }))
+            .count();
+        println!(
+            "{}: {} scenarios, {} steps ({} commands, {} checks, {repeats} repeats), {} left out",
+            written.file,
+            written.scenarios.len(),
+            written.steps(),
+            written.steps() - checks,
+            checks,
+            written.skipped()
+        );
+        assert!(repeats > 0, "{name}'s transcript holds no repeat");
+        assert!(
+            written.steps() >= floor,
+            "{name}'s transcript holds {} steps, under the floor of {floor}",
+            written.steps()
+        );
+    }
+}
+
+// The writer of a scenario file's transcript.
+type Writer = fn(&ScenarioFile, &dyn Fn() -> Core) -> Result<Transcript, String>;
+
+// written writes a scenario file's transcript, rewrites the checked-in file
+// when UPDATE_TRANSCRIPTS=1, and holds the checked-in file to it.
+fn written(name: &str, source: &std::path::Path, write: Writer) -> Transcript {
+    let file = load(source).unwrap_or_else(|error| panic!("{error}"));
+    let written = write(&file, &ported).unwrap_or_else(|error| panic!("{error}"));
     let text = written.render();
     let path = transcript_path(name);
     if std::env::var("UPDATE_TRANSCRIPTS").is_ok_and(|value| value == "1") {

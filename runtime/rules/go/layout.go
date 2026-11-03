@@ -85,6 +85,14 @@ type Table struct {
 	// Own are the own fields the core reads (a row's own) and a create and
 	// an update write, in column order.
 	Own []Column `json:"own"`
+	// Audit are the audit fields the core reads beside the own fields and
+	// no command writes: createdBy (D87), which the repositories stamp with
+	// an operation's caller and a Workflow transition's by may name (D104).
+	// A row read holds each among its own fields, converted as an own
+	// column is; a write never sets one, so a change set naming one is
+	// refused as an own field the layout lacks. Absent for a table without
+	// a scalar createdBy.
+	Audit []Column `json:"audit,omitempty"`
 	// Uses are the table's uses, each implements use and each field use,
 	// in the type's list order.
 	Uses []Use `json:"uses"`

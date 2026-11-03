@@ -235,7 +235,7 @@ method per operation; no SDK has a flat method for them:
 | Go | `sdk.OrderNamespace.Status.Transition(ctx, id, types.OrderStatusTransitionInput{To: types.OrderStatusState_Paid})` |
 | TypeScript | `await sdk.order.status.transition(id, { to: OrderStatusState.Paid })` |
 | Python | `sdk.order.status.transition(id, OrderStatusTransitionInput(to=OrderStatusState.Paid))` |
-| Rust | `sdk.order.status.transition(id, OrderStatusTransitionInput { to: OrderStatusState::Paid }, None).await` |
+| Rust | `sdk.order.status.transition(id, OrderStatusTransitionInput { to: OrderStatusState::Paid, from: None }, None).await` |
 
 The member is the field's name in each language's case (`paymentStatus`
 in TypeScript, `payment_status` in Python and Rust, `PaymentStatus` in
@@ -246,6 +246,15 @@ for reading; only the operations change them. A refusal of the core
 reaches the SDK as any error does ([Errors](#errors)), with the core's
 status, `code` and message: a 409 `vetoed` for a move no transition
 allows, a 403 `forbidden` for one the caller lacks a permission for.
+
+A table's `transition` also takes an optional `from`, the state the caller
+read, typed by the same enum (`from: Some(OrderStatusState::Draft)` in
+Rust, `From: types.InputField[*types.OrderStatusState]{Set: true, Value:
+&state}` in Go, `from_=` in Python), and its result an optional
+`unchanged`, true when the config's `repeat` answered a move to the state
+the row is in as no change (D104, [Who may move a
+row](/superschematic/guides/api-routes/#who-may-move-a-row-and-a-move-that-changes-nothing)).
+An SDK leaves an unset `from` out of the body.
 
 A behavior the table implements, rather than one on a field, puts its
 operations under a member named for the behavior, in each language's case

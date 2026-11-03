@@ -302,7 +302,11 @@ impl<'r, C> Cx<'r, C> {
     /// call out of the log. Honored for the command's own operation; in a
     /// call, a deadline, an initializer or an after-change hook it does
     /// nothing, since the command writes what the rest of its run writes.
-    /// A write in the same run, before it or after it, is a defect.
+    /// A write in the same run, before it or after it, is a defect. A
+    /// handler says it after every guard allowed the call; a use that
+    /// answers its own operation as no change before any guard is asked,
+    /// so that no other use's gate refuses it, does so in
+    /// [`crate::Behavior::settle`] (D104).
     pub fn unchanged(&self) -> Hook<()> {
         if !self.own {
             return Ok(());

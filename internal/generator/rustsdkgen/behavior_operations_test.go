@@ -220,6 +220,7 @@ async fn a_transition_is_a_method_of_its_field() {
     let (base_url, requests) = serve(vec![
         json!({"from": "draft", "to": "paid"}),
         json!({"from": "paid", "to": "refunded"}),
+        json!({"from": "paid", "to": "paid", "unchanged": true}),
     ]);
     let sdk = FixtureWorkflowApiSdk::new(ClientConfig::with_base_url(base_url, None, None)).unwrap();
     let id: types::IdentityUUID = ORDER_ID.parse().unwrap();
@@ -227,24 +228,41 @@ async fn a_transition_is_a_method_of_its_field() {
     let moved = sdk
         .order
         .status
-        .transition(id, types::OrderStatusTransitionInput { to: types::OrderStatusState::Paid }, None)
+        .transition(id, types::OrderStatusTransitionInput { from: None, to: types::OrderStatusState::Paid }, None)
         .await
         .unwrap();
     let (method, path, body) = requests.recv().unwrap();
     assert_eq!(method, "POST");
     assert_eq!(path, format!("/api/order/{}/status/transition", id));
+    // An unset from is left out of the body, never null (D104).
     assert_eq!(body, json!({"to": "paid"}));
     assert_eq!(moved.from, types::OrderStatusState::Draft);
     assert_eq!(moved.to, types::OrderStatusState::Paid);
+    assert_eq!(moved.unchanged, None);
 
     let refunded = sdk
         .shipment
         .payment_status
-        .transition(id, types::ShipmentPaymentStatusTransitionInput { to: types::ShipmentPaymentStatusState::Refunded }, None)
+        .transition(
+            id,
+            types::ShipmentPaymentStatusTransitionInput { from: Some(types::ShipmentPaymentStatusState::Paid), to: types::ShipmentPaymentStatusState::Refunded },
+            None,
+        )
         .await
         .unwrap();
-    let (_, path, _) = requests.recv().unwrap();
+    let (_, path, body) = requests.recv().unwrap();
     assert_eq!(path, format!("/api/shipment/{}/payment-status/transition", id));
+    assert_eq!(body, json!({"from": "paid", "to": "refunded"}));
     assert_eq!(refunded.to, types::ShipmentPaymentStatusState::Refunded);
+
+    // A move to the state the row is in answers unchanged (D104).
+    let repeated = sdk
+        .order
+        .status
+        .transition(id, types::OrderStatusTransitionInput { from: None, to: types::OrderStatusState::Paid }, None)
+        .await
+        .unwrap();
+    let _ = requests.recv().unwrap();
+    assert_eq!(repeated.unchanged, Some(true));
 }
 `

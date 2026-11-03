@@ -140,18 +140,26 @@ export interface InvoiceUses {
   readonly status: UseOperations<{
     /** Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it. */
     transition: {
-      params: { to: 'draft' | 'issued' | 'void' };
-      result: { from: 'draft' | 'issued' | 'void'; to: 'draft' | 'issued' | 'void' };
+      params: { from?: 'draft' | 'issued' | 'void'; to: 'draft' | 'issued' | 'void' };
+      result: {
+        from: 'draft' | 'issued' | 'void';
+        to: 'draft' | 'issued' | 'void';
+        unchanged?: boolean;
+      };
     };
   }, T.IdentityUUID>;
   /** The operations of payment, a Workflow. */
   readonly payment: UseOperations<{
     /** Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it. */
     transition: {
-      params: { to: 'unpaid' | 'overdue' | 'paid' };
+      params: {
+        from?: 'unpaid' | 'overdue' | 'paid';
+        to: 'unpaid' | 'overdue' | 'paid';
+      };
       result: {
         from: 'unpaid' | 'overdue' | 'paid';
         to: 'unpaid' | 'overdue' | 'paid';
+        unchanged?: boolean;
       };
     };
   }, T.IdentityUUID>;
@@ -309,10 +317,14 @@ export interface TicketUses {
   readonly status: UseOperations<{
     /** Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it. */
     transition: {
-      params: { to: 'open' | 'waiting' | 'escalated' | 'closed' };
+      params: {
+        from?: 'open' | 'waiting' | 'escalated' | 'closed';
+        to: 'open' | 'waiting' | 'escalated' | 'closed';
+      };
       result: {
         from: 'open' | 'waiting' | 'escalated' | 'closed';
         to: 'open' | 'waiting' | 'escalated' | 'closed';
+        unchanged?: boolean;
       };
     };
   }, T.IdentityUUID>;

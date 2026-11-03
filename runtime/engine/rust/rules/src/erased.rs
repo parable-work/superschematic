@@ -55,6 +55,7 @@ pub(crate) trait Erased: Send + Sync {
         params: &Value,
     ) -> Option<Vec<SchemaIssue>>;
     fn initialize(&self, scope: Scope<'_>, params: &Value) -> Hook<()>;
+    fn settle(&self, scope: Scope<'_>, operation: &str, params: &Value) -> Hook<Option<Value>>;
     fn guard(&self, scope: Scope<'_>, request: &GuardRequest<'_>) -> Hook<Option<Veto>>;
     fn validate(
         &self,
@@ -168,6 +169,10 @@ impl<B: Behavior> Erased for Typed<B> {
 
     fn initialize(&self, scope: Scope<'_>, params: &Value) -> Hook<()> {
         self.0.initialize(&self.cx(scope)?, params)
+    }
+
+    fn settle(&self, scope: Scope<'_>, operation: &str, params: &Value) -> Hook<Option<Value>> {
+        self.0.settle(&self.view(scope)?, operation, params)
     }
 
     fn guard(&self, scope: Scope<'_>, request: &GuardRequest<'_>) -> Hook<Option<Veto>> {

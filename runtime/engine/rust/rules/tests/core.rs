@@ -5,7 +5,8 @@
 //! the define check, each command's change set, locks and the answers made
 //! before them, deadlines, a call on another type's row and a create of
 //! one, the keys a behavior makes, a use's sub-table rows as the run reads
-//! them, an operation that writes nothing, the fields a read of a row
+//! them, an operation that writes nothing, an operation its use settles
+//! before any guard, the fields a read of a row
 //! computes, the defects the core holds a behavior to, and the change
 //! command a write from the outbox runs: the uses that hear it, the
 //! listeners a relation reaches, a row found gone and the linked read.
@@ -716,6 +717,98 @@ impl Behavior for Picker {
     }
 }
 
+// Latch: a state that moves only through set, whose use settles a set to
+// the state it holds as no change before any guard is asked, and refuses a
+// set whose read is not the state it holds before any guard too (D104). It
+// emits an event after every change of its row.
+struct Latch;
+
+fn latched(view: &View<'_, ()>) -> Option<String> {
+    view.get("state")
+        .and_then(|state| state.as_str().map(str::to_owned))
+}
+
+impl Behavior for Latch {
+    type Config = ();
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Latch")
+            .value("state")
+            .operation("set", true)
+            .veto("stale")
+    }
+
+    fn parse_config(&self, _raw: &Value, _target: &ConfigTarget<'_>) -> Result<(), ConfigError> {
+        Ok(())
+    }
+
+    fn initialize(&self, cx: &Cx<'_, ()>, _params: &Value) -> Hook<()> {
+        cx.set("state", "off")
+    }
+
+    fn settle(&self, view: &View<'_, ()>, operation: &str, params: &Value) -> Hook<Option<Value>> {
+        if operation != "set" {
+            return Ok(None);
+        }
+        let held = latched(view);
+        if let Some(read) = params.get("read").and_then(Value::as_str) {
+            if held.as_deref() != Some(read) {
+                return Err(view.veto(
+                    Veto::new(format!(
+                        "it is {}, not {read}",
+                        held.as_deref().unwrap_or("unset")
+                    ))
+                    .with_code("stale"),
+                ));
+            }
+        }
+        let to = params.get("to").and_then(Value::as_str);
+        if to.is_some() && to == held.as_deref() {
+            return Ok(Some(json!({ "state": to, "unchanged": true })));
+        }
+        Ok(None)
+    }
+
+    fn operation(&self, cx: &Cx<'_, ()>, _name: &str, params: &Value) -> Hook<Value> {
+        let to = params.get("to").cloned().unwrap_or(Value::Null);
+        cx.set("state", to.clone())?;
+        Ok(json!({ "state": to }))
+    }
+
+    fn after_change(&self, cx: &Cx<'_, ()>, change: &Change<'_>) -> Hook<()> {
+        cx.emit("latched", json!({ "change": change.kind() }))
+    }
+}
+
+// Nudge: sets a Switch row's Latch through call_on and counts its nudges.
+struct Nudge;
+
+impl Behavior for Nudge {
+    type Config = ();
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Nudge")
+            .field("nudges")
+            .operation("nudge", true)
+    }
+
+    fn parse_config(&self, _raw: &Value, _target: &ConfigTarget<'_>) -> Result<(), ConfigError> {
+        Ok(())
+    }
+
+    fn operation(&self, cx: &Cx<'_, ()>, _name: &str, params: &Value) -> Hook<Value> {
+        let key = params
+            .get("switch")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let to = params.get("to").cloned().unwrap_or(Value::Null);
+        let result = cx.call_on("Switch", key, "Latch", "set", &json!({ "to": to }))?;
+        let nudges = cx.get("nudges").and_then(|n| n.as_i64()).unwrap_or(0);
+        cx.set("nudges", nudges + 1)?;
+        Ok(result)
+    }
+}
+
 // ---- the harness ----
 
 fn core() -> superschematic_rules::Core {
@@ -730,6 +823,8 @@ fn core() -> superschematic_rules::Core {
         .with(Picker)
         .with(Ledger)
         .with(Bell)
+        .with(Latch)
+        .with(Nudge)
 }
 
 fn alice() -> Caller {
@@ -1931,13 +2026,13 @@ fn define_refuses_an_unknown_behavior_a_repeated_id_and_a_config_it_cannot_parse
         refusal.details.as_deref().map(|d| d["issues"].clone()),
         Some(json!([
             {"use": "Counter", "index": 1, "behavior": "Counter", "kind": "use", "path": "", "message": "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one"},
-            {"use": "likes", "index": 2, "behavior": "Nope", "kind": "use", "path": "", "message": "type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell)"},
+            {"use": "likes", "index": 2, "behavior": "Nope", "kind": "use", "path": "", "message": "type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge)"},
             {"use": "views", "index": 3, "behavior": "Counter", "kind": "schema", "path": "/config/max", "message": "must be integer"}
         ]))
     );
     assert_eq!(
         refusal.message,
-        "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one; type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell); type Order: field views: behavior Counter config: /max: must be integer"
+        "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one; type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge); type Order: field views: behavior Counter config: /max: must be integer"
     );
     // With every shape sound, the rules.
     let rules = TypeSpec::new("Order")
@@ -2336,6 +2431,125 @@ fn unchanged_writes_nothing_and_runs_no_after_change_hook() {
         }]
     ));
     assert_eq!(changes.events[0].kind, "changed");
+}
+
+// switch is a Switch type, Freeze's gate before Latch, and a row of it:
+// frozen, so Freeze vetoes every write of it, its latch on.
+fn switch() -> (TypeSpec, Memory) {
+    let spec = TypeSpec::new("Switch")
+        .with(UseSpec::on_type("Freeze", json!({})))
+        .with(UseSpec::on_type("Latch", json!({})));
+    let memory = Memory::default().with_spec(spec.clone()).with(
+        "Switch",
+        "s1",
+        row(
+            json!({"title": "Hall", "frozen": true}),
+            json!({"Latch": {"state": "on"}}),
+            4,
+        ),
+    );
+    (spec, memory)
+}
+
+/// An operation its use settles answers before any guard is asked, Freeze's
+/// before it in list order among them: the result is the settle's, the
+/// change set writes no row, so the row's version does not move, and no
+/// handler and no after-change hook runs. One it does not settle goes on to
+/// the guards, which refuse it.
+#[test]
+fn settle_answers_an_operation_before_any_guard_and_writes_nothing() {
+    let core = core();
+    let (spec, mut memory) = switch();
+    let set = |to: &str| command(alice(), invoke("s1", "Latch", "set", json!({ "to": to })));
+    let changes = changed(core.drive(&spec, &set("on"), &mut memory));
+    assert_eq!(changes.result, json!({"state": "on", "unchanged": true}));
+    assert!(changes.rows.is_empty());
+    assert!(changes.events.is_empty() && changes.sub_rows.is_empty());
+    assert!(changes.deadlines.is_empty());
+    assert_eq!(
+        refused(core.drive(&spec, &set("off"), &mut memory)).message,
+        "behavior Freeze vetoes set of Switch s1: it is frozen"
+    );
+    // On a row Freeze lets through, the set runs its handler and the row's
+    // after-change hooks, Freeze's and Latch's.
+    let mut thawed = Memory::default().with(
+        "Switch",
+        "s1",
+        row(
+            json!({"title": "Hall"}),
+            json!({"Latch": {"state": "on"}}),
+            4,
+        ),
+    );
+    let moved = changed(core.drive(&spec, &set("off"), &mut thawed));
+    assert_eq!(moved.result, json!({"state": "off"}));
+    assert_eq!(moved.rows[0].expected_version(), Some(4));
+    let kinds: Vec<&str> = moved.events.iter().map(|e| e.kind.as_str()).collect();
+    assert_eq!(kinds, ["operation", "latched"]);
+}
+
+/// A use's settle may refuse its operation before any guard is asked: a
+/// veto with its own code, which comes before the gate Freeze would put
+/// first.
+#[test]
+fn settle_may_refuse_before_any_guard() {
+    let core = core();
+    let (spec, mut memory) = switch();
+    let stale = command(
+        alice(),
+        invoke("s1", "Latch", "set", json!({"to": "off", "read": "off"})),
+    );
+    let refusal = refused(core.drive(&spec, &stale, &mut memory));
+    assert_eq!(refusal.code, Code::Vetoed);
+    assert_eq!(
+        refusal.message,
+        "behavior Latch vetoes set of Switch s1: it is on, not off"
+    );
+    assert_eq!(
+        refusal.details.as_deref().and_then(|d| d.get("vetoCode")),
+        Some(&json!("stale"))
+    );
+}
+
+/// A call on another row that the called use settles writes nothing of
+/// that row and runs none of its after-change hooks; the calling row's own
+/// writes stay.
+#[test]
+fn a_settled_call_on_another_row_writes_nothing() {
+    let core = core();
+    let (_, memory) = switch();
+    let spec = TypeSpec::new("Order").with(UseSpec::on_type("Nudge", json!({})));
+    let mut memory = memory.with(
+        "Order",
+        "o1",
+        row(json!({"title": "Desk"}), json!({"Nudge": {"nudges": 0}}), 2),
+    );
+    let nudge = |to: &str| {
+        command(
+            alice(),
+            invoke("o1", "Nudge", "nudge", json!({"switch": "s1", "to": to})),
+        )
+    };
+    let changes = changed(core.drive(&spec, &nudge("on"), &mut memory));
+    assert_eq!(changes.result, json!({"state": "on", "unchanged": true}));
+    assert_eq!(
+        changes.rows,
+        [RowWrite::Update {
+            type_name: "Order".into(),
+            key: "o1".into(),
+            expected_version: 2,
+            own: Map::new(),
+            owned: [("Nudge".to_owned(), object(json!({"nudges": 1})))]
+                .into_iter()
+                .collect(),
+        }]
+    );
+    assert!(changes.events.is_empty());
+    // A call it does not settle meets the row's guards.
+    assert_eq!(
+        refused(core.drive(&spec, &nudge("off"), &mut memory)).message,
+        "behavior Freeze vetoes set of Switch s1: it is frozen"
+    );
 }
 
 /// A behavior whose declaration arms no deadlines arms and clears none.

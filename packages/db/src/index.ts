@@ -64,6 +64,7 @@ export type {
   TimersOn,
   Workflow,
   WorkflowConfig,
+  WorkflowTransitionOn,
 } from "./wrappers";
 export type { RoleSeed, User, UserConfig, UserRole } from "./user";
 export { seedRoles } from "./user";

@@ -82,6 +82,22 @@ test('an operation reads its row, and with the answer writes it held to the vers
   expect(core.run(order, transition('paid'), answered)).toEqual(changed);
 });
 
+test("a move to the state the row is in, with repeat unchanged, is a change set that writes nothing and carries the use's answer (D104)", () => {
+  const repeating: TypeSpec = { name: 'Order', uses: [{ behavior: 'Workflow', config: { ...flow, repeat: 'unchanged' }, anchor: { field: 'status' } }] };
+  const unchanged: Step = {
+    done: {
+      changed: {
+        rows: [],
+        subRows: [],
+        events: [],
+        deadlines: [],
+        result: { from: 'draft', to: 'draft', unchanged: true },
+      },
+    },
+  };
+  expect(core.run(repeating, transition('draft'), answered)).toEqual(unchanged);
+});
+
 test('an answer made before the latest lock is asked for again, and one made under it is decided on', () => {
   const read: Step = { read: [{ kind: 'row', type: 'Order', key: 'o1' }] };
   const before: Answers = { reads: [{ ...answered.reads![0]!, held: 0 }], locks: ['Order/o1'] };

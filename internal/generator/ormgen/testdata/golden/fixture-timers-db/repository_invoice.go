@@ -190,6 +190,11 @@ const (
 
 // InvoiceStatusTransitionParams are the parameters of status's transition.
 type InvoiceStatusTransitionParams struct {
+	// From is the state the caller read the instance in. An instance in another
+	// state refuses the move as the veto stale, before anything else is checked,
+	// so a retry that finds its move made is stale with the state it moved to. A
+	// table's alone: an engine type refuses it.
+	From *InvoiceStatusState `json:"from,omitempty"`
 	// To is the state to move to.
 	To InvoiceStatusState `json:"to"`
 }
@@ -200,6 +205,9 @@ type InvoiceStatusTransitionResult struct {
 	From InvoiceStatusState `json:"from"`
 	// To is the state it is in now.
 	To InvoiceStatusState `json:"to"`
+	// Unchanged is true when the instance was already in to and the config's
+	// repeat is unchanged, so nothing was written; absent otherwise.
+	Unchanged *bool `json:"unchanged,omitempty"`
 }
 
 // InvoiceStatusOperations are the operations of Invoice's status, a Workflow
@@ -249,6 +257,11 @@ const (
 
 // InvoicePaymentTransitionParams are the parameters of payment's transition.
 type InvoicePaymentTransitionParams struct {
+	// From is the state the caller read the instance in. An instance in another
+	// state refuses the move as the veto stale, before anything else is checked,
+	// so a retry that finds its move made is stale with the state it moved to. A
+	// table's alone: an engine type refuses it.
+	From *InvoicePaymentState `json:"from,omitempty"`
 	// To is the state to move to.
 	To InvoicePaymentState `json:"to"`
 }
@@ -259,6 +272,9 @@ type InvoicePaymentTransitionResult struct {
 	From InvoicePaymentState `json:"from"`
 	// To is the state it is in now.
 	To InvoicePaymentState `json:"to"`
+	// Unchanged is true when the instance was already in to and the config's
+	// repeat is unchanged, so nothing was written; absent otherwise.
+	Unchanged *bool `json:"unchanged,omitempty"`
 }
 
 // InvoicePaymentOperations are the operations of Invoice's payment, a

@@ -29,6 +29,14 @@
 //! guard, which checks every transition request, a caller's or another
 //! behavior's `call()`, before any handler runs.
 //!
+//! What only a table's Workflow takes (D104), whose declaration the engine
+//! shares, the engine refuses rather than ignores: a transition's `by`, the
+//! config's `overridePermission` and `repeat`, each at define, naming the
+//! table form, and `transition`'s `from`, as a bad parameter. Ignoring a
+//! rule of who may move an instance would be a hole, and an engine type can
+//! be defined at run time, past any build's check. The engine never answers
+//! `unchanged`, `not_principal` or `stale`.
+//!
 //! configChange: while the schema has instances, a new version keeps every
 //! state of the old config, since an instance may be in any of them; with
 //! none it may drop any. Transitions, their permissions, the initial state
@@ -52,6 +60,10 @@ use superschematic_engine::{
 };
 
 const NAME: &str = "Workflow";
+
+// How a refusal of what only a table's Workflow takes names the table form
+// (D104).
+const TABLE_FORM: &str = "status: Workflow<{ ... }> on a DB table, D104";
 
 /// One transition of a Workflow config.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -200,8 +212,12 @@ impl Behavior for Workflow {
         include_str!("../declarations/Workflow.behavior.json")
     }
 
-    // The configSchema holds the shape; this holds the states together.
+    // The configSchema holds the shape; this holds the states together,
+    // after refusing what only a table's Workflow takes.
     fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<WorkflowConfig> {
+        if let Some(reason) = table_member(raw) {
+            return Err(Error::config(reason));
+        }
         let raw: RawConfig = json_config(raw)?;
         let states = raw.states;
         let has = |state: &str| states.iter().any(|known| known == state);
@@ -332,6 +348,45 @@ impl Behavior for Workflow {
     }
 }
 
+// table_member says why a config names a member only a table's Workflow
+// takes (D104), the first of each transition's by, in config order, then
+// overridePermission, then repeat; None for a config that names none. It
+// runs before the config is read into its struct, whose transitions refuse
+// an unknown member in serde's words and whose config drops one silently.
+fn table_member(raw: &Value) -> Option<String> {
+    let by = raw
+        .get("transitions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|transition| transition.get("by").is_some());
+    if let Some(transition) = by {
+        let end = |key: &str| {
+            transition
+                .get(key)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        };
+        return Some(format!(
+            "the transition from \"{}\" to \"{}\" names by, which a table's Workflow takes ({TABLE_FORM}): an engine type's transition names who may make it by its permission alone",
+            end("from"),
+            end("to")
+        ));
+    }
+    if raw.get("overridePermission").is_some() {
+        return Some(format!(
+            "overridePermission is a table's Workflow's ({TABLE_FORM}): an engine type's transitions name no by for it to move a caller past"
+        ));
+    }
+    if raw.get("repeat").is_some() {
+        return Some(format!(
+            "repeat is a table's Workflow's ({TABLE_FORM}): on an engine type a transition to the state an instance is in stays the veto already_in_state"
+        ));
+    }
+    None
+}
+
 fn config_change(
     _: &Workflow,
     before: Option<&WorkflowConfig>,
@@ -382,6 +437,18 @@ fn guard(
     else {
         return Ok(None);
     };
+    // from, the state a caller read, is a table's Workflow's (D104).
+    if params.get("from").is_some() {
+        return Err(EngineError::operation_params(
+            NAME,
+            "transition",
+            vec![SchemaIssue::new(
+                "/from",
+                format!("from is a table's Workflow's ({TABLE_FORM}): an engine type's transition takes to alone"),
+            )],
+        )
+        .into());
+    }
     let config = view.config();
     let to = params.get("to").and_then(Value::as_str).unwrap_or_default();
     if !config.states.iter().any(|state| state == to) {

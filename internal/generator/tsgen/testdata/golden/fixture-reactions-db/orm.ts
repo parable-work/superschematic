@@ -119,10 +119,14 @@ export interface ProjectUses {
   readonly status: UseOperations<{
     /** Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it. */
     transition: {
-      params: { to: 'planned' | 'active' | 'done' | 'failed' | 'cancelled' };
+      params: {
+        from?: 'planned' | 'active' | 'done' | 'failed' | 'cancelled';
+        to: 'planned' | 'active' | 'done' | 'failed' | 'cancelled';
+      };
       result: {
         from: 'planned' | 'active' | 'done' | 'failed' | 'cancelled';
         to: 'planned' | 'active' | 'done' | 'failed' | 'cancelled';
+        unchanged?: boolean;
       };
     };
   }, T.IdentityUUID>;
@@ -268,10 +272,14 @@ export interface TaskUses {
   readonly status: UseOperations<{
     /** Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it. */
     transition: {
-      params: { to: 'todo' | 'doing' | 'done' | 'failed' | 'dropped' };
+      params: {
+        from?: 'todo' | 'doing' | 'done' | 'failed' | 'dropped';
+        to: 'todo' | 'doing' | 'done' | 'failed' | 'dropped';
+      };
       result: {
         from: 'todo' | 'doing' | 'done' | 'failed' | 'dropped';
         to: 'todo' | 'doing' | 'done' | 'failed' | 'dropped';
+        unchanged?: boolean;
       };
     };
   }, T.IdentityUUID>;

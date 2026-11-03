@@ -22,7 +22,7 @@
       "audience": "",
       "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
       "replay": null,
-      "inputSchemaDigest": "sha256:a9a844ca78ee53897aa21e72e3f42a3f6865be9d6c6ec8ce7359b847a47e8a31",
+      "inputSchemaDigest": "sha256:4b2c8f9e996d2c288cbbbea5be6e55016663910a322f0fe0e6a6b875c1da5a4d",
       "bindingStatus": "ready"
     },
     {

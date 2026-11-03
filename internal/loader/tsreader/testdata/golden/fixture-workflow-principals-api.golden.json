@@ -1,0 +1,97 @@
+{
+  "name": "fixture-workflow-principals-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-workflow-principals-db",
+      "types": [
+        "Question"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-workflow-principals-db",
+      "kind": "DB"
+    }
+  ],
+  "scalars": {
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "languagePrimitive": "string",
+      "typeMappings": {
+        "sql": "UUID"
+      }
+    }
+  },
+  "types": {
+    "QuestionAssignment": {
+      "name": "QuestionAssignment",
+      "owner": "src/questions.schema.ts",
+      "comment": "Who a question is asked of, as reassignQuestion takes it: a view of the\ntable that carries askedOf, which status's Workflow names in by, so the\nbuild warns that a caller who may reassign a question may then answer it.",
+      "role": "APIView",
+      "source": {
+        "target": "fixture-workflow-principals-db.Question",
+        "omittedFromSource": [
+          "id",
+          "prompt",
+          "createdBy"
+        ]
+      },
+      "fields": [
+        {
+          "name": "askedOf",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        }
+      ]
+    }
+  },
+  "operationSets": [
+    {
+      "name": "QuestionActions",
+      "comment": "A question's status and review operations (D104), for any signed-in\ncaller: the core decides who may make each move from the row itself.",
+      "operations": [],
+      "behaviorOperations": {
+        "type": "Question"
+      },
+      "auth": true
+    },
+    {
+      "name": "QuestionAdmin",
+      "comment": "Moderation of questions, for callers who hold questions.moderate.",
+      "operations": [
+        {
+          "name": "reassignQuestion",
+          "typeRef": {
+            "name": "Question"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "QuestionAssignment"
+              },
+              "required": true
+            }
+          ],
+          "permissions": [
+            "questions.moderate"
+          ],
+          "httpMethod": "PATCH",
+          "restPath": "questions/{id}/asked-of"
+        }
+      ]
+    }
+  ]
+}

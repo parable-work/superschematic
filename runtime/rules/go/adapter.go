@@ -441,17 +441,17 @@ func readRow(ctx context.Context, store Store, table *Table, key string) (*Row, 
 	return rowOf(table, rows[0], key)
 }
 
-// rowSelect is a row read's select list: each own column, each use's owned
-// column, each under an alias of its place so no two columns' names meet in
-// the row, and the version.
+// rowSelect is a row read's select list: each own column, each audit
+// column, each use's owned column, each under an alias of its place so no
+// two columns' names meet in the row, and the version.
 func rowSelect(table *Table) []string {
-	selected := make([]string, 0, len(table.Own)+1)
+	selected := make([]string, 0, len(table.Own)+len(table.Audit)+1)
 	at := 0
 	alias := func(column string) {
 		selected = append(selected, fmt.Sprintf("%s AS c%d", quote(column), at))
 		at++
 	}
-	for _, column := range table.Own {
+	for _, column := range ownAndAudit(table) {
 		alias(column.Column)
 	}
 	for _, use := range table.Uses {
@@ -463,10 +463,10 @@ func rowSelect(table *Table) []string {
 }
 
 // rowOf is the row of key as the core reads it from the values of
-// rowSelect's columns: its own and owned fields, each column with no value
-// absent, and its version.
+// rowSelect's columns: its own fields, its audit fields among them (D104),
+// and its owned fields, each column with no value absent, and its version.
 func rowOf(table *Table, values []any, key string) (*Row, error) {
-	want := len(table.Own) + 1
+	want := len(table.Own) + len(table.Audit) + 1
 	for _, use := range table.Uses {
 		want += len(use.Fields)
 	}
@@ -475,7 +475,7 @@ func rowOf(table *Table, values []any, key string) (*Row, error) {
 	}
 	row := &Row{Own: map[string]json.RawMessage{}, Owned: map[string]map[string]json.RawMessage{}}
 	at := 0
-	for _, column := range table.Own {
+	for _, column := range ownAndAudit(table) {
 		value, present, err := fromColumn(values[at], column, table)
 		if err != nil {
 			return nil, err
@@ -507,6 +507,15 @@ func rowOf(table *Table, values []any, key string) (*Row, error) {
 	}
 	row.Version = version
 	return row, nil
+}
+
+// ownAndAudit is the columns a row read holds among a row's own fields:
+// each own column, then each audit column.
+func ownAndAudit(table *Table) []Column {
+	if len(table.Audit) == 0 {
+		return table.Own
+	}
+	return append(append(make([]Column, 0, len(table.Own)+len(table.Audit)), table.Own...), table.Audit...)
 }
 
 // commandOf is the command a wrapper builds: the caller, the host's time

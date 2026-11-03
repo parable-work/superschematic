@@ -56,6 +56,11 @@ const (
 
 // ShipmentStatusTransitionParams are the parameters of status's transition.
 type ShipmentStatusTransitionParams struct {
+	// From is the state the caller read the instance in. An instance in another
+	// state refuses the move as the veto stale, before anything else is checked,
+	// so a retry that finds its move made is stale with the state it moved to. A
+	// table's alone: an engine type refuses it.
+	From *ShipmentStatusState `json:"from,omitempty"`
 	// To is the state to move to.
 	To ShipmentStatusState `json:"to"`
 }
@@ -66,6 +71,9 @@ type ShipmentStatusTransitionResult struct {
 	From ShipmentStatusState `json:"from"`
 	// To is the state it is in now.
 	To ShipmentStatusState `json:"to"`
+	// Unchanged is true when the instance was already in to and the config's
+	// repeat is unchanged, so nothing was written; absent otherwise.
+	Unchanged *bool `json:"unchanged,omitempty"`
 }
 
 // ShipmentStatusOperations are the operations of Shipment's status, a
@@ -116,6 +124,11 @@ const (
 // ShipmentPaymentStatusTransitionParams are the parameters of paymentStatus's
 // transition.
 type ShipmentPaymentStatusTransitionParams struct {
+	// From is the state the caller read the instance in. An instance in another
+	// state refuses the move as the veto stale, before anything else is checked,
+	// so a retry that finds its move made is stale with the state it moved to. A
+	// table's alone: an engine type refuses it.
+	From *ShipmentPaymentStatusState `json:"from,omitempty"`
 	// To is the state to move to.
 	To ShipmentPaymentStatusState `json:"to"`
 }
@@ -127,6 +140,9 @@ type ShipmentPaymentStatusTransitionResult struct {
 	From ShipmentPaymentStatusState `json:"from"`
 	// To is the state it is in now.
 	To ShipmentPaymentStatusState `json:"to"`
+	// Unchanged is true when the instance was already in to and the config's
+	// repeat is unchanged, so nothing was written; absent otherwise.
+	Unchanged *bool `json:"unchanged,omitempty"`
 }
 
 // ShipmentPaymentStatusOperations are the operations of Shipment's

@@ -60,7 +60,9 @@ func TestORMRefusesAUseOnARepositoryMember(t *testing.T) {
 		t.Fatal(err)
 	}
 	order := output.ORM.Tables[0]
-	if len(order.Uses) != 1 || order.Uses[0].ID != "status" || order.Uses[0].Operations[0].Params != "{ to: 'draft' | 'paid' }" {
+	// A transition takes from, a state, beside to, and answers unchanged
+	// on a repeat (D104).
+	if len(order.Uses) != 1 || order.Uses[0].ID != "status" || order.Uses[0].Operations[0].Params != "{ from?: 'draft' | 'paid'; to: 'draft' | 'paid' }" || order.Uses[0].Operations[0].Result != "{ from: 'draft' | 'paid'; to: 'draft' | 'paid'; unchanged?: boolean }" {
 		t.Fatalf("Order's uses = %+v", order.Uses)
 	}
 	for _, c := range order.CreateColumns() {

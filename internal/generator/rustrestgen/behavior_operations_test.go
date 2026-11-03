@@ -390,9 +390,9 @@ tokio = { version = "1.52.2", features = ["test-util"] }
 }
 
 // cargoInBehaviorCrate runs cargo with args in the crate, in
-// CARGO_TARGET_DIR when it is set, and fails the test with its output when
-// it fails.
-func cargoInBehaviorCrate(t *testing.T, cargo string, crate behaviorCrate, args ...string) {
+// CARGO_TARGET_DIR when it is set, fails the test with its output when it
+// fails, and returns its output.
+func cargoInBehaviorCrate(t *testing.T, cargo string, crate behaviorCrate, args ...string) string {
 	t.Helper()
 	targetDir := os.Getenv("CARGO_TARGET_DIR")
 	if targetDir == "" {
@@ -406,6 +406,7 @@ func cargoInBehaviorCrate(t *testing.T, cargo string, crate behaviorCrate, args 
 		t.Fatalf("cargo %s on the generated API crate: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	t.Logf("cargo %s:\n%s", strings.Join(args, " "), out)
+	return string(out)
 }
 
 // TestBehaviorOperationsAPICrateBuilds lints fixture-workflow-api's crate
@@ -600,7 +601,7 @@ fn refusal(err: SDKError) -> (u16, String, String, Option<Value>) {
 }
 
 fn order_to(to: types::OrderStatusState) -> types::OrderStatusTransitionInput {
-    types::OrderStatusTransitionInput { to }
+    types::OrderStatusTransitionInput { to, from: None }
 }
 
 /// The cases run in a task of their own, so the schema is dropped whether
@@ -672,19 +673,19 @@ async fn cases(db: Arc<Database>) {
     println!("a table's two Workflows move apart");
     lee.shipment
         .status
-        .transition(shipment, types::ShipmentStatusTransitionInput { to: types::ShipmentStatusState::Packed }, None)
+        .transition(shipment, types::ShipmentStatusTransitionInput { to: types::ShipmentStatusState::Packed, from: None }, None)
         .await
         .unwrap();
     lee.shipment
         .payment_status
-        .transition(shipment, types::ShipmentPaymentStatusTransitionInput { to: types::ShipmentPaymentStatusState::Paid }, None)
+        .transition(shipment, types::ShipmentPaymentStatusTransitionInput { to: types::ShipmentPaymentStatusState::Paid, from: None }, None)
         .await
         .unwrap();
     assert_eq!(db.row("shipment", "status, payment_status", &shipment_text).await, ["packed", "paid"]);
     let err = lee
         .shipment
         .payment_status
-        .transition(shipment, types::ShipmentPaymentStatusTransitionInput { to: types::ShipmentPaymentStatusState::Refunded }, None)
+        .transition(shipment, types::ShipmentPaymentStatusTransitionInput { to: types::ShipmentPaymentStatusState::Refunded, from: None }, None)
         .await
         .unwrap_err();
     let (status, code, message, _) = refusal(err);

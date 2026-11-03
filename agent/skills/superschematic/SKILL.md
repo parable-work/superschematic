@@ -262,6 +262,33 @@ Most are load errors; knowing them saves a build round-trip:
   model, so for any other API it refuses a set that needs a caller: make
   the API public, give it an authDb with a `User` table, or mount its
   `RegisterRoutes` behind your own authentication in a server you write.
+- When a row says who may move it (only the person a question is asked of
+  answers it, only its asker withdraws it), name the fields in the
+  transition's `by` rather than writing a permission per row or a guard of
+  your own: `{ from: "open"; to: "answered"; by: ["askedOf"] }`, with
+  `createdBy` for the row's creator (D104). A `by` field is an own field of
+  type `string`, `Identity.UUID` or `Identity.UserID`, a to-one relation's
+  `<relation>Id`, or `createdBy`; never a relation by its name,
+  `updatedBy`, a list or a `seat:` entry (Seats is not built). Add
+  `overridePermission: "<perm>"` for moderators, who still need a
+  transition's own `permission`; it is matched as any permission, so a
+  parent grant (`questions` for `questions.moderate`) overrides `by` too,
+  and a set whose routes require one passes every caller past `by` (the
+  build warns). Keep every field a `by` names out of any update input a
+  caller who should not make the move can write (an update operation's
+  `@source` view, a `PATCH`), or the caller sets it to itself and moves the
+  row: the build only warns of a `@source` input of an operation that
+  updates a row (a `PUT`, a `PATCH`, or one that takes the key), and sees
+  no other write.
+  `createdBy` is safe, since the repositories stamp it. For agents and
+  other callers that retry a call whose answer they lost, set `repeat:
+  "unchanged"`, so a move to the state the row is in answers `{ from, to,
+  unchanged: true }` and writes nothing instead of the veto
+  `already_in_state`; and have a caller that must not act on a stale read
+  send `from`, the state it read, and treat `stale` whose
+  `vetoDetails.status` equals its `to` as its own retry having landed.
+  These are a table's Workflow's alone: an engine type's
+  `@behavior("Workflow", ...)` refuses all four.
 - For deadlines on a table's rows (an SLA, an expiring hold, a reminder),
   implement Timers on the table, its first type argument the table itself:
   `export abstract class Ticket implements Timers<Ticket, { deadlines: {

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -154,7 +155,13 @@ func TestGenerateBehaviorOperations(t *testing.T) {
 		}
 		got := *route
 		got.Key = ParamInfo{}
-		if got != *want.route {
+		// A transition's from is optional (D104), and its handler leaves a
+		// null of it out.
+		if !slices.Equal(got.Optional, []string{"from"}) {
+			t.Errorf("%s's optional members = %v, want [from]", key, got.Optional)
+		}
+		got.Optional = nil
+		if !reflect.DeepEqual(got, *want.route) {
 			t.Errorf("%s's route = %+v, want %+v", key, got, *want.route)
 		}
 		if ep.Method != "POST" || !ep.HasInput || ep.Manual() {
@@ -214,7 +221,9 @@ func TestGenerateBehaviorOperations(t *testing.T) {
 	if tool.Operation != "orderStatusTransition" || tool.Annotations.ReadOnlyHint || tool.Confirm {
 		t.Errorf("order_status_transition = %+v", tool)
 	}
-	if want := []MCPToolArgument{{Key: "id", In: "path", Name: "id"}, {Key: "to", In: "body", Name: "to"}}; !slices.Equal(tool.Arguments, want) {
+	// from, the state the caller read (D104), is an optional argument of
+	// the body beside to.
+	if want := []MCPToolArgument{{Key: "id", In: "path", Name: "id"}, {Key: "from", In: "body", Name: "from"}, {Key: "to", In: "body", Name: "to"}}; !slices.Equal(tool.Arguments, want) {
 		t.Errorf("order_status_transition's arguments = %+v, want %+v", tool.Arguments, want)
 	}
 	var schema struct {
@@ -226,7 +235,10 @@ func TestGenerateBehaviorOperations(t *testing.T) {
 	if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(schema.Properties["to"].Enum, []string{"draft", "paid", "shipped"}) || !slices.Equal(slices.Sorted(slices.Values(schema.Required)), []string{"id", "to"}) {
+	// from takes null, as every optional member of a tool's input does,
+	// which the route leaves out as its absence.
+	states := []string{"draft", "paid", "shipped"}
+	if !slices.Equal(schema.Properties["to"].Enum, states) || !slices.Equal(schema.Properties["from"].Enum, append(slices.Clone(states), "")) || !slices.Equal(slices.Sorted(slices.Values(schema.Required)), []string{"id", "to"}) {
 		t.Errorf("order_status_transition's input schema = %s", tool.InputSchema)
 	}
 	if got := tools["shipment_status_transition"].Operation; got != "shipmentStatusTransition" {

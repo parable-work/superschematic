@@ -93,6 +93,21 @@
 //! "others": [{"type": "Project", "key": "p1", "row": {"own": {"title": "Launch"}, "owned": {"Workflow": {"status": "active", "enteredAt": 1001000}}}}]
 //! ```
 //!
+//! A transcript written from a hand-written scenario file
+//! ([`hand_written_transcript`], `runtime/engine/testdata/rules/scenarios`,
+//! D104), which holds cases the engine recorded none of, also holds each
+//! command's row version after the step, as the host holds it, in its
+//! `expect`:
+//!
+//! ```json
+//! "expect": {"result": {"from": "answered", "to": "answered", "unchanged": true}, "row": {...}, "version": 2}
+//! ```
+//!
+//! absent after a delete, and in a recording's transcript. An adapter
+//! compares it, when present, with the `_version` it reads back after the
+//! step, so a command that writes nothing (a repeat answered unchanged) is
+//! held to leaving the row's version where it was.
+//!
 //! A recording's Links is each type's to-one relations: a link with one
 //! target is an own field `<link>Id`, in `fields` as a string, whose
 //! versions' specs name the relation (`relation: {name, type}`); an adapter
@@ -323,6 +338,11 @@ pub struct TranscriptExpect {
     /// absent when it was deleted); absent when none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub others: Vec<TranscriptOther>,
+    /// The row's version after the step, as the host holds it: written for
+    /// a hand-written transcript's commands (D104), whose repeats are held
+    /// to writing nothing; absent in a recording's, and after a delete.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<i64>,
 }
 
 /// A row other than the command's own that its change set wrote, read back
@@ -378,6 +398,17 @@ pub fn transcript_path(name: &str) -> PathBuf {
         .join(format!("{name}.transcript.json"))
 }
 
+/// The path of a hand-written scenario file by its name
+/// (`core-workflow-principals`):
+/// `runtime/engine/testdata/rules/scenarios/<name>.json`, cases written by
+/// hand in the recorded format for what the engine recorded none of (D104),
+/// never re-recorded.
+pub fn hand_written_path(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../testdata/rules/scenarios")
+        .join(format!("{name}.json"))
+}
+
 impl Transcript {
     /// The document as it is checked in: two-space indented JSON with a
     /// final newline.
@@ -411,7 +442,40 @@ impl Transcript {
 /// whose answer differs from the recording's, since a transcript holds
 /// only answers the replay has held to the engine's.
 pub fn transcript(file: &ScenarioFile, make_core: &dyn Fn() -> Core) -> Result<Transcript, String> {
-    let (report, recorded) = replay_recording(file, make_core, true);
+    written(
+        file,
+        make_core,
+        false,
+        format!("runtime/engine/testdata/scenarios/{}.json", file.name),
+    )
+}
+
+/// Writes a hand-written scenario file's transcript ([`hand_written_path`],
+/// D104) as [`transcript`] writes a recording's, its source the file under
+/// `runtime/engine/testdata/rules/scenarios`, with each command's row
+/// version after the step in its `expect`. It fails on a step whose answer
+/// differs from the one the file writes.
+pub fn hand_written_transcript(
+    file: &ScenarioFile,
+    make_core: &dyn Fn() -> Core,
+) -> Result<Transcript, String> {
+    written(
+        file,
+        make_core,
+        true,
+        format!("runtime/engine/testdata/rules/scenarios/{}.json", file.name),
+    )
+}
+
+// written writes a scenario file's transcript from its source, with each
+// command's row version when `versions` is set.
+fn written(
+    file: &ScenarioFile,
+    make_core: &dyn Fn() -> Core,
+    versions: bool,
+    source: String,
+) -> Result<Transcript, String> {
+    let (report, recorded) = replay_recording(file, make_core, Some(versions));
     if !report.mismatches().is_empty() {
         return Err(format!(
             "the replay answered otherwise than the recording, so it writes no transcript:\n{}",
@@ -490,7 +554,7 @@ pub fn transcript(file: &ScenarioFile, make_core: &dyn Fn() -> Core) -> Result<T
     }
     Ok(Transcript {
         file: file.name.clone(),
-        source: format!("runtime/engine/testdata/scenarios/{}.json", file.name),
+        source,
         behaviors: superschematic_rules_behaviors::NAMES
             .iter()
             .map(|name| (*name).to_owned())
@@ -568,9 +632,21 @@ pub(crate) struct Recorded {
     steps: Vec<TranscriptStep>,
     /// Steps the replayer made that the transcript leaves out, with why.
     left_out: Vec<TranscriptSkip>,
+    /// Whether each command's row version is written, as a hand-written
+    /// file's transcript holds it.
+    versions: bool,
 }
 
 impl Recorded {
+    /// What a transcript holds of a scenario, each command's row version
+    /// with it when `versions` is set.
+    pub(crate) fn new(versions: bool) -> Self {
+        Recorded {
+            versions,
+            ..Recorded::default()
+        }
+    }
+
     /// An engine opened on a clock.
     pub(crate) fn opened(&mut self, clock: TranscriptClock) {
         self.clock.get_or_insert(clock);
@@ -670,12 +746,14 @@ impl Recorded {
             });
             return;
         };
+        let row_version = row.filter(|_| self.versions).map(|row| row.version);
         let expect = match outcome {
             Err(refusal) => TranscriptExpect {
                 refused: Some(refusal.clone()),
                 row: row.map(row_of),
                 sub_rows,
                 deadlines,
+                version: row_version,
                 ..TranscriptExpect::default()
             },
             Ok(applied) => TranscriptExpect {
@@ -686,6 +764,7 @@ impl Recorded {
                 sub_rows,
                 deadlines,
                 others: others_of(type_name, &applied.key, &applied.changes.rows, store),
+                version: row_version,
             },
         };
         self.steps.push(TranscriptStep::Command {

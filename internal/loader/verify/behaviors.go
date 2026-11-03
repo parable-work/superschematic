@@ -100,6 +100,11 @@ func checkTypeBehaviors(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool
 			// reads and moves the Workflow it names; the engine's Reactions
 			// reads its one Workflow and would ignore it (D103).
 			r.errorf(td.Owner, "type %s: @behavior Reactions names status, the Workflow field a table's Reactions reads (implements Reactions<%s, C>, D103); an engine type's Reactions reads its one Workflow, so leave status out", td.Name, td.Name)
+		} else if ref.Name == workflowBehavior && !ref.FieldAnchored() && !ref.Implements {
+			// Workflow's declaration takes by, overridePermission and
+			// repeat for a table, whose core runs them; the engine's
+			// Workflow refuses each (D104).
+			checkEngineWorkflowConfig(td, ref, r)
 		}
 		if ref.FieldAnchored() || ref.Implements {
 			uses[id] = behavior
@@ -197,8 +202,9 @@ var fieldName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // itself, so td declares no field of its name, and a table that composes
 // behaviors keeps its version in _version (@optimistic), which no own
 // column may take. A Timers use's config is held to the table
-// (checkTimersConfig), and a Reactions use's to the table and the tables
-// of its database (checkReactionsConfig).
+// (checkTimersConfig), a Reactions use's to the table and the tables of
+// its database (checkReactionsConfig), and a Workflow use's by to the
+// table's fields (checkWorkflowConfig).
 func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, uses map[string]registry.Behavior, r *Result) {
 	if schema.Kind != ir.SchemaKindDB || !hasTable(td, bases) {
 		if implemented := td.ImplementsBehaviors(); len(implemented) > 0 {
@@ -271,6 +277,9 @@ func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, us
 			if behavior.Value == "" {
 				r.errorf(td.Owner, "%s names no value field in its declaration, so it is not anchored on a field; compose it on the type (D103)", where)
 				continue
+			}
+			if ref.Name == workflowBehavior && behavior.ValidateConfig(ref.Config) == nil {
+				checkWorkflowConfig(schema, td, ref, r)
 			}
 		} else {
 			where = fmt.Sprintf("type %s: implements %s", td.Name, ref.Name)

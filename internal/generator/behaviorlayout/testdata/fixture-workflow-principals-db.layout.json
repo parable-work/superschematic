@@ -1,0 +1,173 @@
+{
+  "types": {
+    "Question": {
+      "type": "Question",
+      "table": "question",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "prompt",
+          "column": "prompt",
+          "type": "string"
+        },
+        {
+          "field": "askedOf",
+          "column": "asked_of",
+          "type": "Identity.UUID"
+        }
+      ],
+      "audit": [
+        {
+          "field": "createdBy",
+          "column": "created_by",
+          "type": "Identity.UUID"
+        }
+      ],
+      "uses": [
+        {
+          "id": "status",
+          "behavior": "Workflow",
+          "anchor": "status",
+          "member": "status",
+          "fields": [
+            {
+              "name": "status",
+              "field": "status",
+              "column": "status",
+              "type": "string",
+              "value": true
+            },
+            {
+              "name": "enteredAt",
+              "field": "statusEnteredAt",
+              "column": "status_entered_at",
+              "type": "Temporal.DateTime",
+              "convert": "epochMillis"
+            }
+          ],
+          "operations": [
+            {
+              "name": "transition",
+              "writes": true
+            }
+          ]
+        },
+        {
+          "id": "review",
+          "behavior": "Workflow",
+          "anchor": "review",
+          "member": "review",
+          "fields": [
+            {
+              "name": "status",
+              "field": "review",
+              "column": "review",
+              "type": "string",
+              "value": true
+            },
+            {
+              "name": "enteredAt",
+              "field": "reviewEnteredAt",
+              "column": "review_entered_at",
+              "type": "Temporal.DateTime",
+              "convert": "epochMillis"
+            }
+          ],
+          "operations": [
+            {
+              "name": "transition",
+              "writes": true
+            }
+          ]
+        }
+      ],
+      "spec": {
+        "name": "Question",
+        "uses": [
+          {
+            "behavior": "Workflow",
+            "config": {
+              "overridePermission": "questions.moderate",
+              "repeat": "unchanged",
+              "states": [
+                "open",
+                "answered",
+                "withdrawn",
+                "closed"
+              ],
+              "transitions": [
+                {
+                  "by": [
+                    "askedOf"
+                  ],
+                  "from": "open",
+                  "to": "answered"
+                },
+                {
+                  "by": [
+                    "createdBy"
+                  ],
+                  "from": "open",
+                  "to": "withdrawn"
+                },
+                {
+                  "by": [
+                    "askedOf",
+                    "createdBy"
+                  ],
+                  "from": "answered",
+                  "permission": "questions.close",
+                  "to": "closed"
+                },
+                {
+                  "from": "answered",
+                  "to": "open"
+                }
+              ]
+            },
+            "anchor": {
+              "field": "status"
+            }
+          },
+          {
+            "behavior": "Workflow",
+            "config": {
+              "states": [
+                "pending",
+                "reviewed"
+              ],
+              "transitions": [
+                {
+                  "from": "pending",
+                  "to": "reviewed"
+                }
+              ]
+            },
+            "anchor": {
+              "field": "review"
+            }
+          }
+        ],
+        "fields": [
+          {
+            "name": "prompt",
+            "type": "string"
+          },
+          {
+            "name": "askedOf",
+            "type": "Identity.UUID"
+          },
+          {
+            "name": "createdBy",
+            "type": "Identity.UUID"
+          }
+        ]
+      }
+    }
+  }
+}

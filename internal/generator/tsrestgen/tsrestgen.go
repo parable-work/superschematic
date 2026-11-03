@@ -209,6 +209,24 @@ type BehaviorRoute struct {
 	// Key is the path parameter that holds the row's key, which the
 	// repository's method takes first.
 	Key ParamInfo
+	// Optional are the input's optional members, by their wire names in
+	// the input type's order: the members the API's types take null for as
+	// their absence, which the handler leaves out of the repository's
+	// parameters when they are null (behaviorParams, D104), as the Go
+	// ORM's typed parameters omit one that is none, since a behavior's
+	// paramsSchema types an optional parameter without null (Workflow's
+	// from). None for an input without one.
+	Optional []string
+}
+
+// OptionalList is Optional as router.ts writes it: a TypeScript array of
+// the members' names.
+func (r *BehaviorRoute) OptionalList() string {
+	names := make([]string, len(r.Optional))
+	for i, name := range r.Optional {
+		names[i] = tsString(name)
+	}
+	return "[" + strings.Join(names, ", ") + "]"
 }
 
 // Method is the repository's method the route calls, under RouterOptions.orm:
@@ -559,14 +577,29 @@ func (o *APIOutput) HasBehaviors() bool {
 	return len(o.BehaviorRoutes()) > 0
 }
 
+// BehaviorsTakeOptional reports whether a behavior operation the API
+// serves takes an optional member (D104), whose null its handler leaves out
+// with behaviorParams.
+func (o *APIOutput) BehaviorsTakeOptional() bool {
+	for _, route := range o.BehaviorRoutes() {
+		if len(route.Optional) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // RuntimeImport is router.ts's import from the runtime's main entry: the
-// helpers of the behavior operations' handlers (D103), the page helpers
-// (D60) and the dropper of undeclared keys (D87) the router calls, and the
-// operation table's types.
+// helpers of the behavior operations' handlers (D103, D104), the page
+// helpers (D60) and the dropper of undeclared keys (D87) the router calls,
+// and the operation table's types.
 func (o *APIOutput) RuntimeImport() string {
 	var values []string
 	if o.HasBehaviors() {
 		values = append(values, "behaviorCaller", "behaviorOperation")
+		if o.BehaviorsTakeOptional() {
+			values = append(values, "behaviorParams")
+		}
 	}
 	if o.HasPages && o.HasSortedPages {
 		values = append(values, "bindPage")
@@ -899,6 +932,15 @@ func (b *builder) behaviorEndpoint(ep apigen.EndpointInfo, op *ir.BehaviorOperat
 		return endpoint, fmt.Errorf("tsrestgen: behavior operation %s.%s is routed at %s %s, which has no path parameter %s, the key of %s", ep.Namespace, ep.Name, endpoint.Method, endpoint.Path, op.Key, op.Type)
 	}
 	route.Key = endpoint.PathParams[key]
+	if endpoint.HasInput {
+		if input := b.findType(ep.InputType); input != nil {
+			for _, field := range input.Fields {
+				if field != nil && !field.Required {
+					route.Optional = append(route.Optional, field.Name)
+				}
+			}
+		}
+	}
 	endpoint.Behavior = route
 
 	// The handler hands the repository the decoded input as its

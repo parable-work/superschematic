@@ -5,7 +5,9 @@
 //! (`testBehaviors`) or registers when it opens an engine, each
 //! acting as its TypeScript fixture does with none of its hooks set, and
 //! the permission matchers a test opens an engine with
-//! (`permissionMatcher`, which the recording names `js`). What a fixture
+//! (`permissionMatcher`, which the recording names `js`), and the test
+//! behaviors a hand-written file composes (D104), which no TypeScript test
+//! wrote and this kit defines for it. What a fixture
 //! does that the core has no notion of (SQL of its own) is not run: the
 //! replayer skips the step with [`unported_operation`]'s reason.
 
@@ -23,6 +25,7 @@ pub fn register(file: &str, name: &str, core: &mut Core) -> bool {
         ("core-workflow", "test.Dispatch") => core.push(Dispatch),
         ("core-timers", "test.Bounce") => core.push(Bounce),
         ("core-timers", "test.Hold") => core.push(FireHold),
+        ("core-workflow-principals", "test.Gate") => core.push(Gate),
         _ => return false,
     }
     true
@@ -228,5 +231,43 @@ impl Behavior for FireHold {
             Some(Value::String(title)) if title.starts_with("stuck")
         );
         Ok(held.then(|| Veto::new("the test holds it").with_code("held")))
+    }
+}
+
+/// test.Gate of the hand-written `core-workflow-principals.json` (D104):
+/// vetoes every Workflow transition of its row (`gated`), as a gate another
+/// behavior keeps would, so a scenario shows which moves reach the guards.
+/// A repeat Workflow answers as no change before any guard is asked passes
+/// it; one that is the veto already_in_state, and any other move, meet it.
+/// Its config is none, or `{}`.
+pub struct Gate;
+
+impl Behavior for Gate {
+    type Config = ();
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("test.Gate").veto("gated")
+    }
+
+    fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<(), ConfigError> {
+        match raw.as_object() {
+            Some(members) if members.is_empty() => Ok(()),
+            _ => Err(ConfigError::Schema(vec![SchemaIssue::new(
+                "",
+                "must NOT have additional properties",
+            )])),
+        }
+    }
+
+    fn guard(&self, _view: &View<'_, ()>, request: &GuardRequest<'_>) -> Hook<Option<Veto>> {
+        let gated = matches!(
+            request,
+            GuardRequest::Operation {
+                behavior: "Workflow",
+                operation: "transition",
+                ..
+            }
+        );
+        Ok(gated.then(|| Veto::new("the gate is closed").with_code("gated")))
     }
 }

@@ -61,6 +61,11 @@ type Narrowing struct {
 	Preconditions any
 	// Variants is a Variants config, which types the instance's own fields.
 	Variants *Variants
+	// Vetoes are the codes of the declaration's vetoes a caller of the type
+	// may meet, in declaration order: all of them, but for a code the
+	// type's form never answers (an engine type's Workflow answers no
+	// not_principal or stale, D104).
+	Vetoes []string
 }
 
 // Variants is Variants' config: Field holds the type Types names for the
@@ -124,6 +129,9 @@ func Narrow(declaration registry.Behavior, config json.RawMessage, target Target
 	n := Narrowing{Fields: map[string]FieldShape{}, Params: map[string]any{}, Results: map[string]any{}, Signals: map[string]any{}}
 	for _, field := range declaration.Fields {
 		n.Fields[field.Name] = FieldShape{Schema: map[string]any{"description": field.Description}}
+	}
+	for _, veto := range declaration.Vetoes {
+		n.Vetoes = append(n.Vetoes, veto.Code)
 	}
 	for _, op := range declaration.Operations {
 		params, err := decodeSchema(op.ParamsSchema)
@@ -265,6 +273,10 @@ func setField(n *Narrowing, name string, schema map[string]any, present bool) er
 
 // Workflow: the status and transition's states are the config's; when the
 // status was entered is absent on an instance from before Workflow kept it.
+// On a table, the state transition's caller read (from) is one of them too,
+// and unchanged keeps its declared boolean (D104); an engine type's
+// Workflow refuses from and never answers unchanged, not_principal or
+// stale, so its types have none of them.
 func narrowWorkflow(n *Narrowing, config map[string]any, target Target) error {
 	states := stringsOf(config["states"])
 	state := target.Base + "State"
@@ -283,7 +295,19 @@ func narrowWorkflow(n *Narrowing, config map[string]any, target Target) error {
 			return err
 		}
 	}
-	return nil
+	if target.Instance == nil || target.Instance.IsEngineType() {
+		// An engine type's Workflow refuses from and never answers
+		// unchanged (D104): its generated clients offer neither.
+		if err := deleteProperty(n.Params["transition"], "from"); err != nil {
+			return fmt.Errorf("operation transition: %w", err)
+		}
+		if err := deleteProperty(n.Results["transition"], "unchanged"); err != nil {
+			return fmt.Errorf("operation transition: %w", err)
+		}
+		n.Vetoes = slices.DeleteFunc(n.Vetoes, func(code string) bool { return code == "not_principal" || code == "stale" })
+		return nil
+	}
+	return setOperationProperty(n.Params, "transition", nil, "from", ref(state, ""))
 }
 
 // commentsMessageResults are Comments' operations whose result is one

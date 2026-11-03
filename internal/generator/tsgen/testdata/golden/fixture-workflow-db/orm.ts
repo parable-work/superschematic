@@ -114,8 +114,15 @@ export interface OrderUses {
   readonly status: UseOperations<{
     /** Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it. */
     transition: {
-      params: { to: 'draft' | 'paid' | 'shipped' };
-      result: { from: 'draft' | 'paid' | 'shipped'; to: 'draft' | 'paid' | 'shipped' };
+      params: {
+        from?: 'draft' | 'paid' | 'shipped';
+        to: 'draft' | 'paid' | 'shipped';
+      };
+      result: {
+        from: 'draft' | 'paid' | 'shipped';
+        to: 'draft' | 'paid' | 'shipped';
+        unchanged?: boolean;
+      };
     };
   }, T.IdentityUUID>;
 }
@@ -248,10 +255,14 @@ export interface ShipmentUses {
   readonly status: UseOperations<{
     /** Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it. */
     transition: {
-      params: { to: 'pending' | 'packed' | 'sent' };
+      params: {
+        from?: 'pending' | 'packed' | 'sent';
+        to: 'pending' | 'packed' | 'sent';
+      };
       result: {
         from: 'pending' | 'packed' | 'sent';
         to: 'pending' | 'packed' | 'sent';
+        unchanged?: boolean;
       };
     };
   }, T.IdentityUUID>;
@@ -259,10 +270,14 @@ export interface ShipmentUses {
   readonly paymentStatus: UseOperations<{
     /** Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it. */
     transition: {
-      params: { to: 'unpaid' | 'paid' | 'refunded' };
+      params: {
+        from?: 'unpaid' | 'paid' | 'refunded';
+        to: 'unpaid' | 'paid' | 'refunded';
+      };
       result: {
         from: 'unpaid' | 'paid' | 'refunded';
         to: 'unpaid' | 'paid' | 'refunded';
+        unchanged?: boolean;
       };
     };
   }, T.IdentityUUID>;

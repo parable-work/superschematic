@@ -57,6 +57,11 @@ const (
 
 // OrderStatusTransitionParams are the parameters of status's transition.
 type OrderStatusTransitionParams struct {
+	// From is the state the caller read the instance in. An instance in another
+	// state refuses the move as the veto stale, before anything else is checked,
+	// so a retry that finds its move made is stale with the state it moved to. A
+	// table's alone: an engine type refuses it.
+	From *OrderStatusState `json:"from,omitempty"`
 	// To is the state to move to.
 	To OrderStatusState `json:"to"`
 }
@@ -67,6 +72,9 @@ type OrderStatusTransitionResult struct {
 	From OrderStatusState `json:"from"`
 	// To is the state it is in now.
 	To OrderStatusState `json:"to"`
+	// Unchanged is true when the instance was already in to and the config's
+	// repeat is unchanged, so nothing was written; absent otherwise.
+	Unchanged *bool `json:"unchanged,omitempty"`
 }
 
 // OrderStatusOperations are the operations of Order's status, a Workflow

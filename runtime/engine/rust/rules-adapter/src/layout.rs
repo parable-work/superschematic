@@ -3,7 +3,8 @@
 //! writes it and a generated ORM embeds it. Each table that composes
 //! behaviors, by its type's name: the table, its key column and IR type,
 //! the version column, a soft-deletable table's `deletedAt` column, its own
-//! fields' columns, each use's owned columns, operations and sub-tables, the
+//! fields' columns and the audit columns read beside them (`createdBy`,
+//! D104), each use's owned columns, operations and sub-tables, the
 //! queue its deadlines are armed in, the queue its change trigger writes
 //! its writes to, and the type as the core runs it.
 
@@ -138,6 +139,15 @@ pub struct Table {
     /// column order.
     #[serde(default)]
     pub own: Vec<Column>,
+    /// The audit fields the core reads beside the own fields and no command
+    /// writes: `createdBy` (D87), a column the repositories stamp with an
+    /// operation's caller, which a Workflow transition's `by` may name
+    /// (D104). A row read holds each among its own fields, converted as an
+    /// own column is; a change set that writes one is refused as internal,
+    /// as one that names a field the layout has no own column for. Empty
+    /// for a table without one, and in a document written before it was.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub audit: Vec<Column>,
     /// The uses on the table, field-anchored and implemented, in the
     /// type's list order.
     #[serde(default)]
@@ -508,6 +518,77 @@ mod tests {
             ("ticket_deadline_queue", "row_key", "use_id")
         );
         assert_eq!(serde_json::to_value(&layout).expect("it writes"), document);
+    }
+
+    /// A table's audit fields (D104) read as the generator writes them,
+    /// after its own fields, and write back so; a table without one writes
+    /// none.
+    #[test]
+    fn a_tables_audit_fields_read_as_the_generator_writes_them() {
+        let document = json!({
+            "types": {
+                "Question": {
+                    "type": "Question",
+                    "table": "question",
+                    "key": {"field": "id", "column": "id", "type": "Identity.UUID"},
+                    "version": "_version",
+                    "own": [
+                        {"field": "prompt", "column": "prompt", "type": "string"},
+                        {"field": "askedOf", "column": "asked_of", "type": "Identity.UUID"}
+                    ],
+                    "audit": [{"field": "createdBy", "column": "created_by", "type": "Identity.UUID"}],
+                    "uses": [],
+                    "spec": {"name": "Question", "uses": []}
+                }
+            }
+        });
+        let layout = Layout::from_json(&document.to_string()).expect("it reads");
+        let question = layout.table("Question").expect("Question");
+        assert_eq!(
+            question.audit,
+            [Column::new("createdBy", "created_by", "Identity.UUID")]
+        );
+        assert_eq!(serde_json::to_value(&layout).expect("it writes"), document);
+        let mut without = document;
+        without["types"]["Question"]
+            .as_object_mut()
+            .expect("a table")
+            .remove("audit");
+        let layout = Layout::from_json(&without.to_string()).expect("it reads");
+        assert!(layout.table("Question").expect("Question").audit.is_empty());
+        assert_eq!(serde_json::to_value(&layout).expect("it writes"), without);
+    }
+
+    /// The document behaviorlayout writes for fixture-workflow-principals-db,
+    /// as its test holds it, reads: Question's createdBy among its audit
+    /// fields, a UUID, after its own fields, and among its spec's fields,
+    /// which a Workflow transition's by names (D104).
+    #[test]
+    fn the_generators_document_of_a_table_with_created_by_reads_its_audit_field() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../../../internal/generator/behaviorlayout/testdata/fixture-workflow-principals-db.layout.json",
+        );
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        let layout = Layout::from_json(&text).expect("it reads");
+        let question = layout.table("Question").expect("Question");
+        let audit: Vec<(&str, &str)> = question
+            .audit
+            .iter()
+            .map(|column| (column.field.as_str(), column.type_name.as_str()))
+            .collect();
+        assert_eq!(audit, [("createdBy", "Identity.UUID")]);
+        assert!(question
+            .own
+            .iter()
+            .all(|column| column.field != "createdBy"));
+        assert_eq!(
+            question
+                .spec
+                .field("createdBy")
+                .map(|field| field.type_name.as_str()),
+            Some("Identity.UUID")
+        );
     }
 
     /// The document behaviorlayout writes for fixture-timers-db, as its

@@ -514,6 +514,7 @@ mod tests {
             version: "_version".into(),
             live: None,
             own: Vec::new(),
+            audit: Vec::new(),
             uses: Vec::new(),
             deadlines: None,
             changes: None,

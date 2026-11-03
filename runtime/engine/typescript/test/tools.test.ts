@@ -675,7 +675,17 @@ describe("the core's behaviors", () => {
     assert.equal(transition.httpPath, '/namespaces/default/schemas/documents/instances/{id}/operations/transition');
     assert.deepEqual((transition.parameters.properties as Record<string, unknown>).params, {
       additionalProperties: false,
-      properties: { to: { description: 'The state to move to.', minLength: 1, type: 'string' } },
+      properties: {
+        // A table's Workflow's (D104): the declaration is shared, so an
+        // engine type's tool advertises it, and the engine refuses it.
+        from: {
+          description:
+            "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
+          minLength: 1,
+          type: 'string',
+        },
+        to: { description: 'The state to move to.', minLength: 1, type: 'string' },
+      },
       required: ['to'],
       type: 'object',
     });

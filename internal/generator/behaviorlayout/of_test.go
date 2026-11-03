@@ -286,6 +286,92 @@ func TestOfReactions(t *testing.T) {
 	}
 }
 
+// principalsFixture is the DB service whose Question's status Workflow
+// names who makes its transitions, by its own askedOf and its audit
+// createdBy, and whose review Workflow has no repeat (D104).
+const principalsFixture = "../../loader/tsreader/testdata/services/fixture-workflow-principals-db"
+
+// A table with a scalar createdBy that a Workflow transition's by names
+// names it in the layout's audit, which an adapter reads into a row's own
+// fields and never writes, and its spec's fields list it after the own
+// fields (D104); the own fields, the image and OwnFields leave it out. A
+// table no by names it of has no audit, though AuditFields, what a by may
+// name, still lists it.
+// testdata/fixture-workflow-principals-db.layout.json is the document.
+func TestLayoutReadsCreatedByAsAnAuditField(t *testing.T) {
+	layout := layoutOfFixture(t, principalsFixture, "fixture-workflow-principals-db")
+	question := layout.Types["Question"]
+	if question == nil || len(question.Uses) != 2 {
+		t.Fatalf("Question's layout = %+v, want its status and its review", question)
+	}
+	audit, _ := json.Marshal(question.Audit)
+	if string(audit) != `[{"field":"createdBy","column":"created_by","type":"Identity.UUID"}]` {
+		t.Errorf("Question's audit = %s", audit)
+	}
+	own, _ := json.Marshal(question.Own)
+	if string(own) != `[{"field":"prompt","column":"prompt","type":"string"},{"field":"askedOf","column":"asked_of","type":"Identity.UUID"}]` {
+		t.Errorf("Question's own = %s", own)
+	}
+	fields, _ := json.Marshal(question.Spec.Fields)
+	if string(fields) != `[{"name":"prompt","type":"string"},{"name":"askedOf","type":"Identity.UUID"},{"name":"createdBy","type":"Identity.UUID"}]` {
+		t.Errorf("Question's spec fields = %s", fields)
+	}
+	reg := registry.New(naming.Default())
+	schema, err := loader.LoadService(filepath.FromSlash(principalsFixture), loader.WithRegistry(reg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	td := schema.Types["Question"]
+	if got := behaviorlayout.AuditFields(schema, td); len(got) != 1 || got[0] != question.Audit[0] {
+		t.Errorf("AuditFields = %+v, want the layout's audit", got)
+	}
+	var names []string
+	for _, c := range behaviorlayout.OwnFields(schema, td) {
+		names = append(names, c.Field)
+	}
+	if got := strings.Join(names, ","); got != "prompt,askedOf" {
+		t.Errorf("Question's own fields = %s, want prompt,askedOf", got)
+	}
+	if got := strings.Join(behaviorlayout.ImageColumns(schema, td), ","); strings.Contains(got, "created_by") {
+		t.Errorf("Question's image = %s, which holds an audit column", got)
+	}
+
+	// A table whose Workflow names createdBy in no by has no audit, so its
+	// row reads convert none, though a by may name it.
+	for i, ref := range td.Behaviors {
+		td.Behaviors[i].Config = json.RawMessage(strings.ReplaceAll(string(ref.Config), `"createdBy"`, `"prompt"`))
+	}
+	unread := layoutOf(t, schema).Types["Question"]
+	if unread.Audit != nil {
+		t.Errorf("Question's audit with no by naming createdBy = %+v, want none", unread.Audit)
+	}
+	if fields, _ := json.Marshal(unread.Spec.Fields); string(fields) != `[{"name":"prompt","type":"string"},{"name":"askedOf","type":"Identity.UUID"}]` {
+		t.Errorf("Question's spec fields with no by naming createdBy = %s", fields)
+	}
+	if got := behaviorlayout.AuditFields(schema, td); len(got) != 1 || got[0].Field != "createdBy" {
+		t.Errorf("AuditFields with no by naming createdBy = %+v, want createdBy", got)
+	}
+
+	// A table whose createdBy is a relation, or that has none, has no audit.
+	shipment, _ := load(t)
+	if got := behaviorlayout.AuditFields(shipment, shipment.Types["Order"]); got != nil {
+		t.Errorf("Order's audit fields = %+v, want none", got)
+	}
+	if data, _ := json.Marshal(layoutOf(t, shipment).Types["Order"]); strings.Contains(string(data), `"audit"`) {
+		t.Errorf("Order's layout = %s, want no audit", data)
+	}
+}
+
+// layoutOf is the layout document of schema, loaded with load's registry.
+func layoutOf(t *testing.T, schema *ir.Schema) *behaviorlayout.Layout {
+	t.Helper()
+	layout, err := behaviorlayout.Of(schema, registry.New(naming.Default()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return layout
+}
+
 // The image a change trigger writes is the layout's own columns and each
 // use's owned columns: no key, no _version, no audit column.
 func TestImageColumns(t *testing.T) {

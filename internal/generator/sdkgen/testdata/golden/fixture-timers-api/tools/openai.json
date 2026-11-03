@@ -7,6 +7,7 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "from": {"description":"A TicketStatusState value","enum":["open","waiting","escalated","closed",null],"type":["string","null"]},
           "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
           "to": {"description":"A TicketStatusState value","enum":["open","waiting","escalated","closed"],"type":"string"}
         },
