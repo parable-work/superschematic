@@ -34,6 +34,18 @@ pub struct Person {
     pub name: String,
 }
 
+/// A request a model triages and a person reviews: Derived and Provenance narrow by their configs' fields.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Request {
+    pub subject: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+}
+
 /// A ticket that moves through its states, links to its project, its spec and its reviewers, and keeps deadlines.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Ticket {

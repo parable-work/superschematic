@@ -183,8 +183,18 @@ func removeStaleEngineDocument(path string) error {
 // when the API names it among them; one its config names as its authDb
 // alone is loaded. Nil when the API connects to no database, its database
 // holds no engine type, or the build cannot load it, which the generators
-// that need it report.
+// that need it report; an API with a deriver is refused then (D74). Its
+// Derivers are the API's (deriversOf).
 func (r run) engineDatabase(deps map[string]*ir.Schema) (*apigen.EngineInfo, error) {
+	info, err := r.engineDatabaseOf(deps)
+	if err == nil && info == nil && len(r.Schema.Derivers) > 0 {
+		return nil, fmt.Errorf("generator: %s declares deriver %s, which fills the Derived fields of engine types of its database, and %s connects to no engine database; set its authDb to the DB service whose types compose Derived (D74)", r.Config.Name, r.Schema.Derivers[0].Name, r.Config.Name)
+	}
+	return info, err
+}
+
+// engineDatabaseOf is engineDatabase without the refusal of a deriver.
+func (r run) engineDatabaseOf(deps map[string]*ir.Schema) (*apigen.EngineInfo, error) {
 	db, _, ok := r.Schema.Database()
 	if !ok {
 		return nil, nil
@@ -245,6 +255,9 @@ func (r run) engineDatabase(deps map[string]*ir.Schema) (*apigen.EngineInfo, err
 	}
 	for _, b := range enginedoc.Behaviors(types, r.Registry) {
 		info.Behaviors = append(info.Behaviors, apigen.EngineBehavior{Name: b.Name, Extension: b.Extension, Package: b.Package})
+	}
+	if info.Derivers, err = deriversOf(r.Schema, db, types, info.Policy); err != nil {
+		return nil, err
 	}
 	return info, nil
 }

@@ -70,6 +70,38 @@ class FilePart:
             )
 
 
+@dataclass(slots=True)
+class DownloadedFile:
+    """The file a FileDownload operation answers (D81).
+
+    content holds its bytes, filename the name its Content-Disposition
+    offered (filename* before filename), None when it offered none, and
+    content_type the Content-Type it was sent with.
+    """
+
+    content: bytes
+    filename: str | None
+    content_type: str
+
+
+def filename_of(disposition: str | None) -> str | None:
+    """Read the filename a Content-Disposition offers: filename*, the name
+    in UTF-8 (RFC 8187), before filename, quoted or not; None for none."""
+    if not disposition:
+        return None
+    extended = re.search(r"(?:^|;)\s*filename\*\s*=\s*([^']*)'[^']*'([^;]*)", disposition, re.IGNORECASE)
+    if extended and extended.group(1).strip().lower() == "utf-8":
+        try:
+            return parse.unquote(extended.group(2).strip(), encoding="utf-8", errors="strict")
+        except UnicodeDecodeError:
+            pass
+    quoted = re.search(r'(?:^|;)\s*filename\s*=\s*"((?:[^"\\]|\\.)*)"', disposition, re.IGNORECASE)
+    if quoted:
+        return re.sub(r"\\(.)", r"\1", quoted.group(1))
+    token = re.search(r"(?:^|;)\s*filename\s*=\s*([^;\s]+)", disposition, re.IGNORECASE)
+    return token.group(1) if token else None
+
+
 class Logger(Protocol):
     def debug(self, msg: str, *args: Any) -> None:
         ...
@@ -181,6 +213,7 @@ class SyncHTTPClient:
         requires_auth: bool = False,
         timeout_seconds: float | None = None,
         extra_headers: Mapping[str, str] | None = None,
+        response_file: bool = False,
     ) -> Any:
         return self._request_with_retry(
             method=method,
@@ -191,6 +224,7 @@ class SyncHTTPClient:
             timeout_seconds=timeout_seconds,
             extra_headers=extra_headers,
             is_multipart=False,
+            response_file=response_file,
         )
 
     def request_multipart(
@@ -204,6 +238,7 @@ class SyncHTTPClient:
         requires_auth: bool = False,
         timeout_seconds: float | None = None,
         extra_headers: Mapping[str, str] | None = None,
+        response_file: bool = False,
     ) -> Any:
         return self._request_with_retry(
             method=method,
@@ -214,6 +249,7 @@ class SyncHTTPClient:
             timeout_seconds=timeout_seconds,
             extra_headers=extra_headers,
             is_multipart=True,
+            response_file=response_file,
         )
 
     def prepare_multipart_data(self, input_data: Any, strip_fields: list[str]) -> dict[str, Any]:
@@ -327,6 +363,7 @@ class SyncHTTPClient:
         timeout_seconds: float | None,
         extra_headers: Mapping[str, str] | None,
         is_multipart: bool,
+        response_file: bool = False,
         is_retry: bool = False,
         _rate_limit_attempt: int = 0,
         _network_attempt: int = 0,
@@ -366,6 +403,7 @@ class SyncHTTPClient:
                 timeout_seconds,
                 method=request_context.method,
                 path=request_context.path,
+                response_file=response_file,
             )
         except AuthenticationError as err:
             if err.status_code == 401 and self._problem_code(err.payload) == "service_unauthorized":
@@ -384,6 +422,7 @@ class SyncHTTPClient:
                     timeout_seconds=timeout_seconds,
                     extra_headers=extra_headers,
                     is_multipart=is_multipart,
+                    response_file=response_file,
                     is_retry=is_retry,
                     _rate_limit_attempt=_rate_limit_attempt,
                     _network_attempt=_network_attempt,
@@ -402,6 +441,7 @@ class SyncHTTPClient:
                     timeout_seconds=timeout_seconds,
                     extra_headers=extra_headers,
                     is_multipart=is_multipart,
+                    response_file=response_file,
                     is_retry=True,
                     _rate_limit_attempt=_rate_limit_attempt,
                     _network_attempt=_network_attempt,
@@ -430,6 +470,7 @@ class SyncHTTPClient:
                 timeout_seconds=timeout_seconds,
                 extra_headers=extra_headers,
                 is_multipart=is_multipart,
+                response_file=response_file,
                 is_retry=is_retry,
                 _rate_limit_attempt=_rate_limit_attempt + 1,
                 _network_attempt=_network_attempt,
@@ -458,6 +499,7 @@ class SyncHTTPClient:
                 timeout_seconds=timeout_seconds,
                 extra_headers=extra_headers,
                 is_multipart=is_multipart,
+                response_file=response_file,
                 is_retry=is_retry,
                 _rate_limit_attempt=_rate_limit_attempt,
                 _network_attempt=_network_attempt + 1,
@@ -545,6 +587,7 @@ class SyncHTTPClient:
         *,
         method: str,
         path: str,
+        response_file: bool = False,
     ) -> Any:
         timeout = self._timeout_seconds if timeout_seconds is None else timeout_seconds
         self._log_debug("Sending HTTP request", method=method, url=req.full_url)
@@ -552,6 +595,15 @@ class SyncHTTPClient:
         try:
             with request.urlopen(req, timeout=timeout) as response:
                 raw = response.read()
+                if response_file:
+                    # A FileDownload result (D81): the body is the file, not
+                    # the envelope.
+                    self._log_debug("Received HTTP response", method=method, status_code=response.status, path=path)
+                    return DownloadedFile(
+                        content=raw,
+                        filename=filename_of(response.headers.get("Content-Disposition")),
+                        content_type=response.headers.get("Content-Type", ""),
+                    )
                 decoded_payload = None
                 if raw:
                     decoded_payload = self._decode_success_payload(

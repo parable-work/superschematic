@@ -14,7 +14,7 @@ through it; `runtime/engine/README.md` is the reference.
 | `src/server.ts` | Opens the engine over one SQLite file, publishes the schema, and serves the HTTP API, the event stream and the MCP endpoint on one Hono app with `@hono/node-server` |
 | `src/main.ts` | Runs the server on port 8787 (`PORT`) over `notes.db` (`NOTES_DB`) |
 | `src/notes.client.ts` | Generated: the typed wrappers `superschematic engine-client` writes for the schema (D49), `notesClient` over the engine's client with the note's own fields, its behaviors' fields, states, operations and veto codes |
-| `test/notes.test.ts` | End to end over a listening server: create, transition (refused without the permission, then allowed), comment, propose and approve, the event log as JSON and as a stream from a cursor, MCP tools listed and called with the official client, the same calls through `notesClient`, a refused draft, and a restart that keeps the notes and publishes a compatible change |
+| `test/notes.test.ts` | End to end over a listening server: create, transition (refused without the permission, then allowed), a post beside the note, propose and approve, the event log as JSON and as a stream from a cursor, MCP tools listed and called with the official client, the same calls through `notesClient`, a refused draft, and a restart that keeps the notes and publishes a compatible change |
 | `scripts/link.sh` | Links the engine and the packages the example imports into `node_modules` |
 | `scripts/check.sh` | Builds the runtimes and the engine, links them, type-checks, and runs the test on Node.js and Bun |
 
@@ -61,7 +61,7 @@ superschematic engine-client --out examples/engine-notes/src/notes.client.ts exa
 misspelled field, state or parameter fails the typecheck. A read returns a
 note's own fields in `data`, typed `Note`, and its behaviors' fields in
 `behaviors`, typed `NoteBehaviors`, each under its behavior's name:
-`behaviors.Workflow.status`, `behaviors.Comments.commentCount`,
+`behaviors.Workflow.status`, `behaviors.Comments.messages`,
 `behaviors.Revisions.revision`. The file is a golden of
 `internal/generator/engineclientgen`: its test fails when the file is not
 what the schema generates, and `go test
@@ -75,7 +75,7 @@ what the schema generates, and `go test
 |---|---|---|---|
 | `alice-token` | alice | `notes.read`, `notes.write` | read and write notes, and move them between draft and review |
 | `bob-token` | bob | `notes` | everything under `notes`: publish, archive, approve and reject proposals |
-| `carol-token` | carol | `notes.read` | read notes, comment and propose changes |
+| `carol-token` | carol | `notes.read` | read notes, post, reply and react, and propose changes |
 | `dana-token` | dana | `schemas` | define and publish schemas; read no notes |
 
 The server publishes `schemas/notes.schema.json` as `engine-notes` each

@@ -6,7 +6,7 @@ import importlib
 import re
 from typing import TYPE_CHECKING, Any, Mapping, TypedDict
 
-from ..client import EncryptedRequestOptions, FilePart, SyncHTTPClient, path_segment
+from ..client import DownloadedFile, EncryptedRequestOptions, FilePart, SyncHTTPClient, path_segment
 from ..errors import SDKError, ValidationError
 
 _BUILTIN_VALIDATION_TYPES: dict[str, Any] = {
@@ -380,6 +380,19 @@ class AccountAdminNamespace:
 
         if field_errors:
             raise ValidationError({field_name: field_errors})
+    def approve_user(self, id: str, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> IdentityUser:
+        path = f"/api/auth/admin/users/{path_segment(id)}/approve"
+        query_params: dict[str, Any] | None = None
+        response = self._client.request(
+            method="POST",
+            path=path,
+            body=None,
+            query_params=query_params,
+            requires_auth=True,
+            timeout_seconds=timeout_seconds,
+            extra_headers=extra_headers,
+        )
+        return self._coerce_response(response, "IdentityUser", False)
     def create_role(self, input_data: RoleInput, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> IdentityRole:
         path = "/api/auth/admin/roles"
         if input_data is None:
@@ -496,9 +509,15 @@ class AccountAdminNamespace:
             extra_headers=extra_headers,
         )
         return self._coerce_response(response, "IdentityRole", True)
-    def list_users(self, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> list[IdentityUser]:
+    def list_users(self, pending: bool | None = None, timeout_seconds: float | None = None, extra_headers: Mapping[str, str] | None = None) -> list[IdentityUser]:
         path = "/api/auth/admin/users"
         query_params: dict[str, Any] | None = None
+        if pending is not None:
+            self._validate_scalar_argument(pending, "bool", "pending")
+        if query_params is None:
+            query_params = {}
+        if pending is not None:
+            query_params["pending"] = pending
         response = self._client.request(
             method="GET",
             path=path,

@@ -4,7 +4,7 @@
 // driver is the one the runner uses (runtime/migrate/go).
 module example.com/superschematic/sqliteconverge
 
-go 1.26.4
+go 1.27.3
 
 require modernc.org/sqlite v1.57.0
 

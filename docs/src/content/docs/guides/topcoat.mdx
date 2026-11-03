@@ -27,20 +27,33 @@ line's product from the catalog `shop-orders` lists, filters their orders
 at `/orders` and pages through them, and cancels one from its page,
 `/orders/{id}`, each page's input taken through a form the crate builds.
 The crate also generates a console of the shop's resources at `/console`
-([Generated pages](#generated-pages)). The pages and the console show a
+([Generated pages](#generated-pages)), with a back office beside them:
+`shop-db`'s engine types at `/console/engine` ([Engine
+pages](#engine-pages)) and the shop's users and roles ([Sign-in and admin
+pages](#sign-in-and-admin-pages)). The pages and the console show a
 shopper their own orders alone, since the implementations list, read
 and cancel no other customer's, and staff, who hold `orders.any`, every
-customer's.
+customer's. They show the shop's amounts as money, `GBP 39.98`
+([Money](#money)).
 
 ## Build the crate
 
 The extension is a Go module of its own, `extensions/topcoat`. The
 installed `superschematic` binary does not link it, since Topcoat is
-before 1.0; `superschematic-topcoat` is the core with it linked:
+before 1.0; `superschematic-topcoat` is the installed binary with it
+linked beside the official extensions (gcp, cloudflare and pulumi), so
+it builds and deploys everything `superschematic` does. Each release
+ships it beside `superschematic`, as
+`superschematic-topcoat_<version>_<platform>.tar.gz`, listed in the same
+`SHA256SUMS`; download it, or build it from a checkout:
 
 ```bash
 cd extensions/topcoat && go build -o superschematic-topcoat ./cmd/superschematic-topcoat
 ```
+
+A binary built from a checkout names no release, so a stack's workflow it
+writes cannot install one; write the workflow with the released binary
+([Generated CI](/superschematic/guides/stacks/#generated-ci)).
 
 The crate needs the Rust server. A service turns it on with
 `outputs.topcoat: { enabled: true }` in its config, or by being listed in
@@ -572,6 +585,45 @@ it by its classes (`ss-detail`, `ss-table`, `ss-list`, `ss-map`,
 field's JSON key. Every value is text, which the view escapes, so a
 review's body never becomes markup.
 
+## Money
+
+An amount in a schema is a whole number of a currency's minor units:
+acme's prices are pence, in `Generic.Int64` fields named `*Cents`. A
+field says which currency it holds with `@display({ currency })`
+([Currency](/superschematic/reference/documentation/#display-currency--on-a-field)):
+a code, `"GBP"`, or another field of the same type that holds one.
+`shop-orders` gives a literal code to its products' prices, its orders'
+totals and lines and its refunds, and a checkout's payment names its
+own currency field:
+
+<Snippet file="schemas/services/shop-orders/src/checkouts.schema.ts" symbol="CheckoutPayment" />
+
+A display component then shows the amount as money: the code, then the
+amount over its minor units with that many decimals and its whole part
+grouped in threes, in a `<data>` whose `value` is the amount as the API
+sends it, `<data value="3998">GBP 39.98</data>`. A currency field is read
+per record, so each row of a table shows its own. A `Finance.Money` field
+without the hint whose type has one `Finance.Currency` field takes it.
+The text is the same for every reader, and needs no locale: the minor
+units come from superscalar, the scalar crate the types already link,
+which the crate's `Cargo.toml` names when it shows money.
+`views::money_text(amount, currency)` writes it for a page's own markup.
+An amount whose currency is unknown, or not an active ISO 4217 code,
+shows as a number, and the build log names each amount a component shows
+that way, and why.
+
+A form's amount in a literal currency is a decimal control, labeled with
+its code (`Deposit (GBP)`), with `inputmode="decimal"` and a pattern of at
+most the currency's decimals. Its reader writes the minor units, so
+`4.50` posts 450, and refuses at the control text that is no amount, a
+third decimal for GBP or any for JPY, a sign the field's bounds refuse,
+and a value past `i64`. An edit page fills the control with `4.50`, not
+`450`. The app's choices do not apply to it, since a choice's value is
+in minor units. An amount whose currency is another field stays a
+whole-number input, with the hint "In minor units of Currency", since
+the other field may change in the same form, and it refuses `12.00`,
+which a number input would send for twelve pounds.
+
 ## Generated pages
 
 An app over an API whose operations list, read, create, edit, delete and
@@ -789,6 +841,137 @@ runtime's script. Without one it says so and serves the pages without the
 runtime, and the console's lists are the GET forms and links they are
 without it.
 
+## Engine pages
+
+When the API's database is an engine database ([The
+engine](/superschematic/guides/engine-behaviors/)), and the crate's pages
+are on and a route of the API authenticates a caller, the console pages
+the engine's types under `<prefix>/engine`, with no code of the app's:
+
+| Page | Path |
+| --- | --- |
+| The engine's types the caller may read | `/console/engine` |
+| A type's instances, a page at a time, and the type's own operations | `/console/engine/{schema}` |
+| An instance: its fields, a panel per behavior, and its operations | `/console/engine/{schema}/{id}` |
+| An operation of a type or an instance: a read's GET, a write's POST | `.../operations/{operation}` |
+
+Every page calls the engine in-process, as the page's caller, the one
+the `PageAuthenticator` establishes, so the engine's policy decides what
+each page shows and what each form may do. No page acts as the engine's
+system principal, so a signed-out caller is 401, with a link to sign in.
+A post another site sent is refused (403). The
+pages read each type's describe document, so a type published after the
+build has its pages too. A list is paged as the console's lists are, by
+the engine's cursor, with its title and summary fields as columns. An
+instance's page shows its own fields, an amount as money in the
+currency its `@display` names, then a section per behavior, then the
+operations no section shows.
+
+An operation's form is built from its parameters' JSON Schema. A write
+sends the instance's `expectedSeq`, so a page read before another write
+is 409 rather than a write over what the reader did not see. A read
+renders its result on the page. A refusal renders as the console's do: a
+parameter at its control (422), a behavior's veto as its code and
+message (409, `approvals_missing: Refund needs 2 sign-offs for approved,
+and has 1`), an operation the caller's policy refuses 403, and one the
+deployment hides from its tools 404.
+
+A behavior the crate knows has a panel:
+
+- **Workflow**: the state by its display label, a button for each move
+  the display labels, and a select of the other moves the caller may
+  make.
+- **Approvals**: each gate's sign-offs against its count, who signed,
+  and the caller's own sign-off or withdrawal.
+- **Branches**: the refs, a ref's history 50 commits at a time, a diff of
+  two commits, the release log, and the branch, save, commit, merge and
+  discard forms.
+- **Stock**: on hand, held, available and low, the receive, adjust and
+  count forms, and the movements.
+- **Calendar**: the time zone, the opening hours as a week, the closures,
+  and the bookings of a range of dates.
+- **Holds**: the items with their unit prices, and the total, as money.
+- **Payments**: what is due, authorized, captured and refunded, as money
+  in the payment's currency, the attempts, and how the instance is
+  refunded: a link to the type whose sign-offs refund it, or a refund
+  form.
+
+Any other behavior, a project's own among them, gets a generic panel: its
+fields as the read returns them, and its operations as forms. Comments
+is one: its counts, `unread` the caller's own, and its instance
+operations, `markRead` and `follow` among them. A behavior's namespace
+operations, Comments' `inbox` and deliveries, belong to no type, so no
+page shows them.
+
+acme's console pages `shop-db`'s `Inventory`, `CollectionPoint`,
+`Checkout` and `Refund` for staff. Ada, the demo's staff, holds the roles
+`shop-db`'s policy names (`stock.write`, `calendar.manage`,
+`refunds.approve`, beside `orders.any`), which the app grants her:
+
+<Snippet file="topcoat/src/lib.rs" symbol="add_back_office" />
+
+The app sells nothing through its engine, which has no payment adapter:
+the shop's checkouts are the stack's ([Commerce](/superschematic/guides/commerce/#the-back-office)).
+Its tests seed one of each type, as the stack's `shop-orders` and
+acmepay's adapter would, and keep the back office through the console.
+Ada receives a delivery through the Stock panel's form, and Grace, a
+shopper, is refused:
+
+<Snippet file="topcoat/tests/back_office.rs" symbol="stock_is_received_through_the_console" />
+
+A checkout's page shows its holds and its payment as money, and links to
+the refunds rather than refunding it, since a refund needs two members
+of staff to sign it off; `a_refund_is_refused_until_two_staff_sign_it_off_then_paid`
+signs one off twice and moves it to approved.
+
+`pages.engine: false` beside `enabled` in `outputs.topcoat.pages`, or
+`pages_engine = false` beside `pages_prefix` in the table, turns them
+off. The build log says why a crate has none: its API authenticates no
+caller, or a collection of the API's own is served at the path.
+
+## Sign-in and admin pages
+
+When the API's users are the core user model's ([Users and
+sessions](/superschematic/guides/users-and-sessions/)), and the pages are
+on, the console signs a caller in and out and administers the users and
+roles, through the identity runtime's `Service`:
+
+| Page | Path |
+| --- | --- |
+| Sign in, then back to `next`, a path of the app | `/console/sign-in` |
+| Sign out, a post that ends the session | `/console/sign-out` |
+| Sign up, only when the API registers users or the config asks | `/console/sign-up` |
+| The caller's account and roles, and the change-password form | `/console/account` |
+| The users, a new user, and a user's page | `/console/users`, `/console/users/new`, `/console/users/{id}` |
+| A user's grant, revoke, disable, enable and password posts | `/console/users/{id}/grant`, ... |
+| The roles, a new role, a role's page and its delete | `/console/roles`, `/console/roles/new`, `/console/roles/{id}`, `/console/roles/{id}/delete` |
+
+The nav shows Users to a caller who holds `identity.users.read` and Roles
+to one who holds `identity.roles.read`, then Account and a Sign out
+button, and a signed-out caller Sign in. Every call is the caller's, so
+the identity runtime decides: the administration permissions, and that no
+one grants a permission, or administers a user who holds one, they do
+not hold themselves. A refusal renders at its form. A password control
+never renders what was sent. Signing in, signing up and changing a
+password meet the same rate limit as the API's route that does the same,
+sharing its budget when the API serves the route, and answer 429 with
+`Retry-After` past it. Changing the password signs the caller out of
+every other session.
+
+Sign-up is served only when the API declares `@userSessions({ register:
+true })`, or `pages.identity` is `{ signUp: true }` (`pages_identity = {
+sign_up = true }` in the table). `pages.identity: false` turns the pages
+off.
+
+An app that has its own sign-in page names it in `pages::Settings`, and
+every link to sign in goes there. acme does, so its console links to
+`/sign-in`, which also signs a shopper in to the shop's own pages, and
+`/console/sign-in` is served but linked from nowhere. Its staff sign out
+at `/console/sign-out`, and Ada administers the users and roles at
+`/console/users` and `/console/roles`:
+
+<Snippet file="topcoat/src/lib.rs" symbol="console_settings" />
+
 ## Procedures
 
 Each operation is also a procedure on
@@ -883,6 +1066,108 @@ SQLite or in Postgres; the step fails on its first order. Delete a
 made before it with `superschematic stack dev --remove-data` once, which
 removes its containers and their data as it stops, after the failed
 migration too, then run `stack dev` again.
+
+## Run the app in a stack
+
+The app above keeps its shop outside any stack, in memory or in a SQLite
+file. A Topcoat app can instead run in a [stack](/superschematic/guides/stacks/#apps)
+beside its API's server, over the stack's database, with the API's
+identity and its engine on Postgres: an app the API declares (D78).
+Declare it on an empty class of the API, naming the extension its build
+needs:
+
+```ts
+import { app } from "@superschematic/api";
+
+@app({ extensions: ["topcoat"] })
+export abstract class Backoffice {}
+```
+
+The API must be Rust, and its build must link the extension: run the
+stack's commands with `superschematic-topcoat`. The installed
+`superschematic` still plans and inits the stack, and refuses to build
+it, saying to run `superschematic-topcoat`.
+
+The app's program is a library crate at the naming file's
+[`[implementation_paths] rust_app`](/superschematic/reference/naming/#implementation_pathsrust_app),
+`apps/{app}` by default, with `{app}` the class in kebab case. It
+exports one function, which the app's generated entrypoint calls once the
+API's `Deps`, its implementations and its engine are ready:
+
+```rust
+pub async fn serve(parts: <api crate>::apps::<App>Parts) -> std::io::Result<()>
+```
+
+`<App>Parts`, which the API crate's `apps` module declares, holds the
+API's `deps`, its `implementations`, with the authenticator its router
+takes, the `engine` of its engine database, open on the stack's database,
+and `addr`, every interface at `PORT`, 8080 when it is unset. The first
+build that finds no crate there writes one, whose `serve` listens on
+`parts.addr` and answers every request with 501 Not Implemented and
+`app Backoffice of shop-stock does not serve yet: write its serve`. The
+stack runs it, ready, until you write yours. The crate is yours from then
+on, and the build never writes it again.
+
+The Topcoat crate of an API that declares an app has two more setup
+methods, `<service>_with_parts(parts)` and
+`<service>_with_parts_and_api(parts)`. Each sets the crate up from the
+parts: the implementations, the engine the entrypoint opened, in place
+of `engine::open` on a SQLite file, and, for an API on the identity
+runtime, `IdentityPageAuthenticator::of` over the implementations. An API
+whose users are its own passes its `PageAuthenticator` after the parts.
+Each takes the parts through `AppParts`, which each app's parts convert
+into.
+
+`<service>_with_parts` serves the pages alone, as `<service>_without_api`
+does: they call the API and the engine in-process, and neither the JSON
+API nor the engine's routes are on the app's address. A stack exposes an
+app apart from its API, so an app that mounted them would serve an API
+the stack keeps internal, its operations that need no caller among them.
+`<service>_with_parts_and_api` mounts the JSON API at `/api` and the
+engine's routes at `/engine` too, as `<service>` does: use it when the
+stack exposes the API as well, or keeps the app internal.
+
+`serve` binds `parts.addr` itself and hands the listener to
+`topcoat::serve`. Never call `topcoat::start` there: it binds `HOST` and
+`PORT`, `127.0.0.1:3000` by default, so on Cloud Run the app would listen
+on the container's loopback and never pass its startup probe. acme's
+`Backoffice`, an app of `shop-stock`, is three lines:
+
+<Snippet file="apps/backoffice/src/lib.rs" symbol="serve" />
+
+Its crate depends on the API crate and the Topcoat crate by path, under
+the output root (`../../schemas/dist/topcoat/shop-stock`), and on
+`topcoat` and `tokio`. Each build copies the crate into the output
+root's `impl/`, its path dependencies re-based there, and the app's image
+takes in every crate it reaches by path. Its pages are under `/stock`,
+since `[extension.topcoat] pages_prefix` gives each listed service a path
+of its own:
+
+<Snippet file="schemas/superschematic.toml" from="[extension.topcoat]" to="pages_live" />
+
+The image carries no Topcoat asset bundle yet, so the lists are GET forms
+that load the page again rather than live lists. On gcp the app's Cloud
+Run service is internal-only unless the stack exposes it, which `stack
+init` does for every app; on `local` it is a process at its port.
+Run it from `examples/acme-shop` with `superschematic-topcoat stack dev
+schemas/services/shop-stack`, whose summary prints the app's address.
+Under it, `Backoffice` serves:
+
+| Path | What it is |
+| --- | --- |
+| `/stock`, `/stock/stock`, `/stock/stock/{productId}` | the index, the stock's list and a product's page, with the forms that set and receive its stock |
+| `/stock/engine` and below | the engine console over `shop-db`: each engine type the caller may read, an instance's behaviors in panels, and its operations as forms ([Engine pages](#engine-pages)) |
+| `/stock/sign-in`, `/stock/sign-out`, `/stock/account`, `/stock/users`, `/stock/roles` | the identity pages ([Sign-in and admin pages](#sign-in-and-admin-pages)) |
+
+The stack holds no seeded user, so sign in as a `shop-db` user who holds
+`stock.write`. `go/stack_dev_test.go` runs acme's stack with
+`superschematic-topcoat`, creates such a member of staff, signs them in
+at `/stock/sign-in`, and receives five units through the Stock panel's
+`receiveStock` form on `/stock/engine/Inventory/{id}`, which
+`shop-stock`'s `GetStock` then counts. `Backoffice` calls
+`shop_stock_with_parts`, so `shop-stock`'s JSON API and `shop-db`'s engine
+routes are not on its address, and the test sees `/api/stock` answer 404
+there.
 
 ## Test the app
 

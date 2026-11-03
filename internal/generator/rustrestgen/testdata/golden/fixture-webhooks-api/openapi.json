@@ -25,6 +25,19 @@
         ],
         "type": "object"
       },
+      "LedgerEvent": {
+        "additionalProperties": false,
+        "description": "A ledger event, a contract closed to new keys: @strictJSON keeps a\nwebhook's input refusing a key its type does not declare.",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
       "PaymentEvent": {
         "description": "An event a payment provider posts.",
         "properties": {
@@ -38,6 +51,52 @@
         "required": [
           "id",
           "type"
+        ],
+        "type": "object"
+      },
+      "PlaidError": {
+        "description": "The error a Plaid event may carry, which drops the keys it does not\ndeclare wherever it is decoded.",
+        "properties": {
+          "error_code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error_code"
+        ],
+        "type": "object"
+      },
+      "PlaidItemEvent": {
+        "description": "A Plaid item event. A provider adds keys to its payloads over time, so a\nwebhook's input drops the keys its type does not declare (D87).",
+        "properties": {
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlaidError"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          },
+          "item_id": {
+            "type": "string"
+          },
+          "webhook_code": {
+            "type": "string"
+          },
+          "webhook_type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "webhook_type",
+          "webhook_code",
+          "item_id"
         ],
         "type": "object"
       },
@@ -282,6 +341,134 @@
           }
         },
         "summary": "receiveRawGithubEvent",
+        "tags": [
+          "webhook"
+        ]
+      }
+    },
+    "/api/webhooks/ledger": {
+      "post": {
+        "description": "A ledger event, whose type refuses the keys it does not declare.",
+        "operationId": "WebhookReceiveLedgerEventHandler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LedgerEvent"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/EventReceipt"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "summary": "receiveLedgerEvent",
+        "tags": [
+          "webhook"
+        ]
+      }
+    },
+    "/api/webhooks/plaid": {
+      "post": {
+        "description": "A Plaid event, unsigned in this fixture.",
+        "operationId": "WebhookReceivePlaidEventHandler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaidItemEvent"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/EventReceipt"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          }
+        },
+        "summary": "receivePlaidEvent",
         "tags": [
           "webhook"
         ]

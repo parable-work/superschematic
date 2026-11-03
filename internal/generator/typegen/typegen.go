@@ -13,6 +13,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"path"
 	"path/filepath"
 	"slices"
@@ -103,6 +104,10 @@ type FieldInfo struct {
 	ScalarInfo       *ScalarInfo
 	Validations      []codegen.ValidationRule
 
+	// Digits are the field's digit rules (D84), which Validate checks on
+	// each value after the field's other checks; nil without any.
+	Digits *codegen.DigitRules
+
 	// ScalarRules are the rules copied from the field's scalar type (its
 	// lengths, pattern and range) when Validate hands the field's values to
 	// the scalar. validate<Symbol>Value checks them there and reports a
@@ -143,6 +148,9 @@ type TypeInfo struct {
 	IsInput     bool
 	IsJsonField bool
 	StrictJSON  bool
+	// AllowUnknownFields is @allowUnknownFields (D87): UnmarshalJSON drops
+	// each key the type does not declare, as spelled, before it decodes.
+	AllowUnknownFields bool
 	// OpenAPISchemaJSON is the quoted standalone OpenAPI schema of a
 	// @strictJSON type in a General schema; the template emits a
 	// <Type>OpenAPISchema() accessor for it. Empty emits none.
@@ -815,15 +823,16 @@ func convertTypes(codegenTypes []codegen.TypeInfo, scalars []ScalarInfo, isInput
 			}
 		}
 		types[i] = TypeInfo{
-			Name:        ct.Name,
-			Owner:       ct.Owner,
-			Role:        ct.Role,
-			Doc:         ct.Doc(),
-			Fields:      fields,
-			IsInput:     isInput,
-			IsJsonField: ct.JsonField,
-			StrictJSON:  ct.StrictJSON,
-			HasDefaults: hasDefaults,
+			Name:               ct.Name,
+			Owner:              ct.Owner,
+			Role:               ct.Role,
+			Doc:                ct.Doc(),
+			Fields:             fields,
+			IsInput:            isInput,
+			IsJsonField:        ct.JsonField,
+			StrictJSON:         ct.StrictJSON,
+			AllowUnknownFields: ct.AllowUnknownFields,
+			HasDefaults:        hasDefaults,
 		}
 	}
 	return types
@@ -940,6 +949,7 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 			Doc:              cf.Doc(),
 			ScalarInfo:       scalarInfo,
 			Validations:      cf.Validations,
+			Digits:           cf.Digits,
 		}
 
 		if cf.Default != nil {
@@ -973,11 +983,51 @@ func importAliasReplacements(imports []ModuleImport) map[string]string {
 	return replacements
 }
 
+// normalizeImportedGoType rewrites each service qualifier of goType,
+// `<service>.`, to the service's import alias. A qualifier matches only
+// where a name begins, the longest service name first, so `db.` never
+// rewrites the tail of `shop-db.`, whatever order the aliases are walked
+// in (D94).
 func normalizeImportedGoType(goType string, importAliases map[string]string) string {
-	for serviceName, alias := range importAliases {
-		goType = strings.ReplaceAll(goType, serviceName+".", alias+".")
+	if len(importAliases) == 0 {
+		return goType
 	}
-	return goType
+	services := slices.SortedFunc(maps.Keys(importAliases), func(a, b string) int {
+		if len(a) != len(b) {
+			return len(b) - len(a)
+		}
+		return strings.Compare(a, b)
+	})
+	var b strings.Builder
+	for i := 0; i < len(goType); {
+		if i == 0 || !isQualifierByte(goType[i-1]) {
+			if svc := matchQualifier(goType[i:], services); svc != "" {
+				b.WriteString(importAliases[svc] + ".")
+				i += len(svc) + 1
+				continue
+			}
+		}
+		b.WriteByte(goType[i])
+		i++
+	}
+	return b.String()
+}
+
+// matchQualifier returns the first of services that rest begins with as a
+// qualifier, `<service>.`, or "".
+func matchQualifier(rest string, services []string) string {
+	for _, svc := range services {
+		if strings.HasPrefix(rest, svc+".") {
+			return svc
+		}
+	}
+	return ""
+}
+
+// isQualifierByte reports whether c can be part of a service qualifier or
+// a selector before one: a letter, a digit, '_', '-' or '.'.
+func isQualifierByte(c byte) bool {
+	return c == '_' || c == '-' || c == '.' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }
 
 func buildScalarMap(scalars []ScalarInfo) map[string]*ScalarInfo {

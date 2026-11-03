@@ -72,8 +72,9 @@ var queueParitySubtests = []string{
 //     at a time, the messages the other two completed past the retention,
 //     and leaves one done within it and a dead one;
 //   - UnreadableRowFailsAlone: for each side, a claim of a good message and
-//     a row whose JSON column holds no JSON returns the good one and fails
-//     the other alone, recording Unreadable, so the batch is not stranded;
+//     a row whose JSON column holds no address returns the good one and
+//     fails the other alone, recording Unreadable, so the batch is not
+//     stranded;
 //   - Base62UUIDsGoHyphenated: each side enqueues a message whose UUID is
 //     base62, which every side writes hyphenated and reads back as the same
 //     UUID;
@@ -81,6 +82,10 @@ var queueParitySubtests = []string{
 //     locations and durations each enqueues, a duration truncated to its
 //     microseconds, and an interval written with days and months as their
 //     hours.
+//
+// Beside it, the generated TestQueueKeyParity (queueKeyParityORMTest) runs
+// the keyed queues' cases (D80): dedupe, serialization, the races each
+// client handles, and OrderLine's trigger.
 //
 // It needs Bun and cargo, builds the HTTP runtimes, and runs on the
 // database at SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL, skipping without
@@ -238,9 +243,25 @@ func runQueueParity(t *testing.T, dialect string) {
 	t.Setenv("QUEUE_PARITY_BUN", bun)
 	t.Setenv("QUEUE_PARITY_SCRIPT", filepath.Join(scriptDir, "parity.ts"))
 	t.Setenv("QUEUE_PARITY_RUST", rust)
+	// The keyed queues' cases (D80) are a file of their own beside the
+	// parity's, over its helpers.
+	if err := os.WriteFile(filepath.Join(ormDir, "key_parity_test.go"), []byte(queueKeyParityORMTest), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	out := runGeneratedORMModule(t, ormDir, filepath.Join(ddlDir, "create.sql"), "parity_test.go", queueParityORMTest)
 	if !strings.Contains(out, "--- PASS: TestQueueParity ") {
 		t.Fatal("the generated parity test did not pass")
+	}
+	if !strings.Contains(out, "--- PASS: TestQueueKeyParity ") {
+		t.Fatal("the generated keyed queues' parity test did not pass")
+	}
+	for _, subtest := range queueKeyParitySubtests {
+		if dialect == "sqlite" && queueKeyParityPostgresOnly[subtest] {
+			continue
+		}
+		if !strings.Contains(out, "--- PASS: TestQueueKeyParity/"+subtest+" ") {
+			t.Errorf("the generated keyed queues' parity test's %s did not pass", subtest)
+		}
 	}
 	for _, subtest := range queueParitySubtests {
 		if dialect == "sqlite" && subtest == "LocationsAndDurationsAgree" {
@@ -370,7 +391,10 @@ use superschematic_http_runtime::queue::{
     enqueue, enqueue_sqlite, PostgresQueue, QueueDefinition, QueueError, SqliteQueue,
 };
 use superschematic_http_runtime::stackconfig::Database;
-use types::{DeliveryPlanned, OrderPlaced, DELIVERY_PLANNED_QUEUE, ORDER_PLACED_QUEUE};
+use types::{
+    DeliveryPlanned, OrderChanged, OrderPlaced, StockChecked, SyncRequested, DELIVERY_PLANNED_QUEUE,
+    ORDER_CHANGED_QUEUE, ORDER_PLACED_QUEUE, STOCK_CHECKED_QUEUE, SYNC_REQUESTED_QUEUE,
+};
 
 /// The lease of a claim, the TypeScript script's.
 const LEASE: Duration = Duration::from_secs(60);
@@ -410,6 +434,9 @@ fn arg(args: &[String], i: usize) -> Result<&str, String> {
 async fn run(args: &[String]) -> Result<Value, String> {
     match std::env::var("QUEUE_PARITY_QUEUE").as_deref() {
         Ok("DeliveryPlanned") => run_on::<DeliveryPlanned>(DELIVERY_PLANNED_QUEUE, args).await,
+        Ok("OrderChanged") => run_on::<OrderChanged>(ORDER_CHANGED_QUEUE, args).await,
+        Ok("StockChecked") => run_on::<StockChecked>(STOCK_CHECKED_QUEUE, args).await,
+        Ok("SyncRequested") => run_on::<SyncRequested>(SYNC_REQUESTED_QUEUE, args).await,
         _ => run_on::<OrderPlaced>(ORDER_PLACED_QUEUE, args).await,
     }
 }
@@ -555,11 +582,17 @@ async fn run_on_sqlite<M: Serialize + DeserializeOwned + Send + 'static>(
 const queueParityScript = `import pg from 'pg';
 import { enqueue, postgresQueue } from '@superschematic/http-runtime/postgres';
 import { enqueueStatement, openSqlite, sqliteFile, sqliteQueue } from '@superschematic/http-runtime/sqlite';
-import { deliveryPlannedQueue, orderPlacedQueue } from '@TYPES@/queues';
+import { deliveryPlannedQueue, orderChangedQueue, orderPlacedQueue, stockCheckedQueue, syncRequestedQueue } from '@TYPES@/queues';
 
 const [step, url, ...args] = process.argv.slice(2);
 // The queue QUEUE_PARITY_QUEUE names, OrderPlaced when unset.
-const definition = (process.env.QUEUE_PARITY_QUEUE === 'DeliveryPlanned' ? deliveryPlannedQueue : orderPlacedQueue) as typeof orderPlacedQueue;
+const definitions: Record<string, unknown> = {
+  DeliveryPlanned: deliveryPlannedQueue,
+  OrderChanged: orderChangedQueue,
+  StockChecked: stockCheckedQueue,
+  SyncRequested: syncRequestedQueue,
+};
+const definition = (definitions[process.env.QUEUE_PARITY_QUEUE ?? ''] ?? orderPlacedQueue) as typeof orderPlacedQueue;
 const file = url.startsWith('sqlite:') ? openSqlite(sqliteFile(url)) : undefined;
 const pool = file === undefined ? new pg.Pool({ connectionString: url, max: 1 }) : undefined;
 try {
@@ -1190,7 +1223,10 @@ func TestQueueParity(t *testing.T) {
 }
 
 // testUnreadableRowFailsAlone: for each side, Go enqueues a message and SQL
-// writes a row whose ship_to, a JSON column, holds no JSON. The side's
+// writes a row whose ship_to, a JSON column, holds no address: on
+// Postgres, whose JSONB column refuses text that is not JSON (D83), a JSON
+// string, which Go's and Rust's types refuse and TypeScript's claim by the
+// field's shape, an object; on SQLite, text that is not JSON. The side's
 // claim of both returns the good message alone; the bad row, claimed and
 // unread, is failed with Unreadable and why, ready again after one
 // attempt, and its batch is not stranded.
@@ -1202,8 +1238,8 @@ func testUnreadableRowFailsAlone(t *testing.T) {
 			const good, bad = "6f1c2f2e-7d1a-4b4a-9d43-3c7a1b2c3d4e", "0c7a0e14-6a43-4f0e-8f1b-5d6c7e8f9a0b"
 			s.enqueue(orderJSON(good))
 			p.exec(p.dialectSQL(
-				"INSERT INTO order_placed_queue (order_id, priority, quantity, ship_to) VALUES ($1::uuid, 'low', 1, '{not json')",
-				"INSERT INTO order_placed_queue (order_id, priority, quantity, ship_to) VALUES (?1, 'low', 1, '{not json')",
+				"INSERT INTO order_placed_queue (order_id, placed_at, priority, quantity, ship_to) VALUES ($1::uuid, '2026-10-14T12:00:00.000Z', 'low', 1, '\"no address\"')",
+				"INSERT INTO order_placed_queue (order_id, placed_at, priority, quantity, ship_to) VALUES (?1, '2026-10-14T12:00:00.000Z', 'low', 1, '{not json')",
 			), bad)
 			claims := s.claim(5)
 			if len(claims) != 1 || !sameMessage(claims[0].Message, order(good)) {

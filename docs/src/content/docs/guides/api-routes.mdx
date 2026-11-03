@@ -1,6 +1,6 @@
 ---
 title: API routes
-description: Operation sets, paths, parameters, bodies, views, errors and traffic controls in an API schema, and what the generated Go server does with them.
+description: Operation sets, paths, parameters, bodies, views, errors, traffic controls and a table's behavior operations in an API schema, and what the generated Go server does with them.
 sidebar:
   order: 3
 ---
@@ -114,6 +114,13 @@ routers ([Rust](/superschematic/install/rust/#rust-servers)).
 A method's arguments say where each value comes from:
 
 - **Path**: an argument named in the path, such as `id` in `orders/{id}`.
+  A parameter is in braces, as OpenAPI writes it. The load refuses a
+  segment written as a router's `:id`, which every generator would publish
+  and route as the text `:id`, and gives the path in braces:
+
+  ```
+  src/businesses.schema.ts:12:25: @rest path "businesses/:businessId/export" writes a path parameter as ":businessId", which OpenAPI and the generated routers read as text; write it in braces: "businesses/{businessId}/export"
+  ```
 - **Query**: `QueryParam<T>`. `Nullable<T>` makes it optional, and the Go
   implementation receives a pointer (`minRating *float64`) or a nil slice. A
   list is read from repeated keys and comma-separated values
@@ -139,7 +146,9 @@ page places an order with
 Before a method runs, the server decodes every argument, checks it
 against its type and constraints, and answers 400 with every failure at
 once, keyed by path, as an RFC 9457 problem body. A top-level key an
-input type does not declare is refused too, by every server. A list of order lines
+input type does not declare is refused too, by every server, unless the
+type is `@allowUnknownFields` or the operation a `@webhook`, whose input
+drops it ([Webhooks](#webhooks)). A list of order lines
 must hold one to 50 lines, and a country must match `^[A-Z]{2}$`:
 
 <Snippet file="go/orders_test.go" symbol="TestValidation" />
@@ -304,6 +313,120 @@ those it keeps, and over SQLite it reads the row's value of a column of
 the list's own, so a price compares as a number. A cursor whose row is
 gone is the 400 of a cursor it cannot read.
 
+## Files
+
+### Uploads
+
+A field of an input type declared `FileUpload<C>` is a file. Its
+operation's body is `multipart/form-data`: each file is a part named as its
+field, and the input's other fields travel as JSON in a part named `data`.
+A JSON body, which holds no file, is read too. The storefront imports a
+cart's lines from a CSV:
+
+```ts
+import { FileUpload, HttpMethod, requirePermission, rest } from "@superschematic/api";
+
+// A CSV of lines to add to a cart: a header row, then one sku,quantity
+// row a line, at most 64 KiB.
+export abstract class ImportCartLinesInput {
+  lines: FileUpload<{ maxBytes: 65536; contentTypes: ["text/csv"]; extensions: [".csv"] }>;
+}
+
+export class CartMutations {
+  @rest(HttpMethod.POST, "carts/{cartId}/lines/import")
+  @requirePermission(["carts.write"])
+  importCartLines(cartId: Identity.UUID, input: ImportCartLinesInput): CartView {
+    throw new Error("schema declaration only");
+  }
+}
+```
+
+- `maxBytes` bounds the file, 100 MiB when unsaid. `contentTypes` lists
+  the media types the part's `Content-Type` may name, compared without
+  parameters, so `text/csv; charset=utf-8` is `text/csv`; a part without
+  one is `application/octet-stream`. `extensions` lists the endings its
+  filename may have, in any case. Each one unsaid admits any file, and
+  `Nullable<FileUpload>` makes the file optional.
+- Every server checks the files first, in the input's field order, then
+  reads the other fields as it reads a JSON input, setting aside the
+  errors at the file fields, which the JSON never holds. A file its field
+  does not admit is a [refused input](/superschematic/install/go/#serve-a-generated-api):
+  `errors` holds its error at its field, `required`, `uploadMaxBytes`,
+  `uploadContentType` or `uploadExtension`, and the implementation never
+  runs:
+
+  ```json
+  {"type": "about:blank", "title": "Bad Request", "status": 400, "code": "bad_request",
+   "detail": "Request body does not match the declared input",
+   "details": {"location": "body", "reason": "validation failed"},
+   "errors": {"lines": [{"validator": "uploadExtension", "message": "file name does not end in .csv"}]}}
+  ```
+
+  A body that is neither multipart nor JSON is "Request body is not
+  multipart/form-data". So is one of more than 1000 parts, or whose part
+  headers run past 10000 lines of file parts or 10 MiB in all: both
+  servers read multipart under the limits of Go's `ReadForm`.
+- `@bodyLimit` caps the whole body, and a larger one answers 413. Without
+  it, the TypeScript server caps it at its files' limits beside its JSON
+  cap, and the Go server does not cap it.
+- The Go method takes `files map[string]*FileUploadData` after the input,
+  each with its `Filename`, `ContentType`, `Size` and `Data`. The
+  TypeScript method takes `args.files`, each a `File`, and `args.input`
+  without the file fields. The Rust server refuses the operation unless it
+  is `@manualRouteRegistration` ([Rust](/superschematic/install/rust/#serve-a-generated-api)).
+- A file is one string field of a type that is only an operation's input,
+  the single input of a `POST`, `PUT` or `PATCH` that is not encrypted;
+  the build refuses any other. A field of an extension's upload scalar is a
+  file too, under the scalar's limits
+  ([Write an extension](/superschematic/extending/write-an-extension/#a-scalar-catalog)).
+- The SDKs send the file beside the input
+  ([Client SDKs](/superschematic/guides/client-sdks/#files)), and the
+  OpenAPI document describes the multipart body: the `data` part, each
+  file as binary with its limits, and its media types as the part's
+  `encoding`.
+
+### Downloads
+
+An operation whose result is `FileDownload<C>` answers a file, not the
+JSON envelope. The storefront exports a cart as the CSV its import reads:
+
+```ts
+export class CartQueries {
+  @rest(HttpMethod.GET, "carts/{cartId}/export")
+  @requirePermission(["carts.read"])
+  exportCart(cartId: Identity.UUID): FileDownload<{ contentType: "text/csv; charset=utf-8"; filename: "cart.csv" }> {
+    throw new Error("schema declaration only");
+  }
+}
+```
+
+- The implementation returns the file. In TypeScript it is
+  `{ body, filename?, headers? }`: the body is text, sent as UTF-8, bytes,
+  a `Blob`, or a `ReadableStream`, sent as the implementation writes it.
+  In Go it is `*FileDownload{Body, Filename, Header}`, whose `Body` the
+  route copies as it reads it and closes when it can.
+- The server sets `Content-Type` to C's `contentType`, and
+  `Content-Disposition` to an attachment under the implementation's
+  filename, or C's `filename` when it names none (RFC 6266):
+  `attachment; filename="M_rz.csv"; filename*=UTF-8''M%C3%A4rz.csv` for
+  a name with a letter outside ASCII. `filename` holds the name with each
+  such letter, and each of `"`, `\` and `%`, as `_`, and `filename*` the
+  name itself; a directory or a control character in the name is dropped.
+  The Go and TypeScript servers write the same header for every name
+  (`runtime/http/testdata/content_disposition_parity.json`). Its
+  `Cache-Control` is `no-store` unless the implementation sets one, and a
+  refusal is still a problem body.
+- The OpenAPI document describes the 200 as C's media type, a binary
+  string, with its `Content-Disposition` header.
+- The TypeScript SDK returns `{ blob, filename, contentType }`, and the
+  Go and Python SDKs a `DownloadedFile`
+  ([Client SDKs](/superschematic/guides/client-sdks/#files)). The Rust SDK
+  and the Rust server refuse the operation for now, naming it; support
+  follows.
+- A file is no tool result: the [tool documents](/superschematic/reference/mcp-tools/)
+  list the operation hidden, and the build refuses a visible `@mcp` on it.
+  A `FileDownload` result is never null, encrypted or `@paginated`.
+
 ## Errors
 
 An implementation returns an error to fail the call. The generated package
@@ -418,6 +541,39 @@ sends its own request from its own servers and no SDK holds the signing
 secret `@hmacVerified` checks. A route your own clients or services call
 is an ordinary route, not a webhook.
 
+A provider adds keys to its payloads over time, so a webhook's input
+reads only the keys its type declares and drops the others, in every
+server, where any other input refuses them (D87). The declared keys are
+checked as on any route, and the method gets its typed input with no
+manual route:
+
+```ts
+export abstract class PlaidWebhookEvent {
+  webhook_type: string;
+  webhook_code: string;
+  item_id: string;
+}
+
+export class PlaidWebhooks {
+  @webhook
+  @publicRoute
+  @hmacVerified({ provider: "plaid" })
+  @rest(HttpMethod.POST, "plaid/webhook")
+  plaidWebhook(input: PlaidWebhookEvent): Accepted {
+    throw new Error("schema declaration only");
+  }
+}
+```
+
+A body with an `environment` key reaches `plaidWebhook` as the three
+declared keys; one without `item_id` is refused. A key is declared only as
+the type spells it, so `Item_Id` is dropped too, in Go as elsewhere. A
+nested object's keys follow its own type: mark it `@allowUnknownFields` to
+drop them in every decoder of it
+([Modeling types](/superschematic/guides/modeling-types/#lenient-decoding)).
+A provider whose payload is a closed contract keeps the refusal with
+`@strictJSON` on the input type.
+
 `@hmacVerified({ provider: "stripe" })` puts a signature check in front of
 the route, in every server. `Implementations` gains a verifier for each
 provider the schema names, which you write, and the server does not start
@@ -446,15 +602,564 @@ Rust one's `build_router_with_manual_routes`. A service that mounts the
 route itself wraps it: in Go with the verifier from `WebhookVerifiers`,
 in Rust with `webhook_verified(route, verifier)`.
 
+### A JWT that carries the body's hash
+
+Some providers sign a webhook with a JWT instead of an HMAC. Plaid sends an
+ES256 JWT in `Plaid-Verification`: its `kid` names the key to ask
+`/webhook_verification_key/get` for, and its `request_body_sha256` claim
+is the SHA-256 of the raw body. Each runtime has this verifier built in:
+
+| Server | The verifier |
+|---|---|
+| Go | `webhook.JWTBodyHashVerifier(webhook.JWTBodyHashOptions{...})` from the runtime's `webhook` package, a `func(http.Handler) http.Handler` |
+| TypeScript | `jwtBodyHashVerifier({...})` from `@superschematic/http-runtime/hono` |
+| Rust | `JwtBodyHashVerifier::new(JwtBodyHashOptions {...})`, whose `verify(request, next)` your `WebhookVerifier` calls |
+
+It checks, in order:
+
+1. The header holds a compact JWS whose `alg` is the configured one
+   (`ES256`; `none` and every other `alg` are refused) and whose `kid`
+   names a key.
+2. The signature verifies with that key.
+3. `iat` is no older than the maximum age, and no further ahead than the
+   clock skew (60 seconds unless set).
+4. The claim equals the lowercase hex SHA-256 of the raw body, compared in
+   constant time.
+
+A refusal is 401 `invalid_signature`. When the key cannot be fetched and
+none is held, the answer is 503 `service_unavailable`, so the provider
+sends the webhook again. A body over the cap (1 MiB unless set) is 413.
+The route then reads the body as usual.
+
+The keys come from a lookup by `kid`, or from a JWKS URL fetched whole. A
+key is held for an hour. An unknown `kid` is looked up at once, but the
+provider is asked at most once a minute, so a flood of made-up kids costs
+one lookup a minute, and a held key keeps verifying meanwhile. A lookup
+has 10 seconds, and a JWKS URL's answer at most 1 MiB; past either, the
+lookup has failed. A token whose `alg` is not `ES256`, `none` among them,
+is refused before any key is looked up.
+
+```ts
+import { jwtBodyHashVerifier } from "@superschematic/http-runtime/hono";
+
+const implementations: Implementations = {
+  // ...one object per operation namespace
+  webhookVerifiers: {
+    plaid: jwtBodyHashVerifier({
+      header: "plaid-verification",
+      // The key with this kid, or null for one Plaid has expired.
+      jwks: async kid => {
+        const { key } = (await plaid.webhookVerificationKeyGet({ key_id: kid })).data;
+        return key.expired_at === null ? key : null;
+      },
+      alg: "ES256",
+      maxAge: "5m",
+      bodyHashClaim: "request_body_sha256",
+    }),
+  },
+};
+```
+
+In Go, `MaxAge` is a `time.Duration` and the lookup returns a
+`*serviceauth.JWK`, nil when there is no such key:
+
+```go
+plaidVerifier, err := webhook.JWTBodyHashVerifier(webhook.JWTBodyHashOptions{
+	Header:        "Plaid-Verification",
+	Keys:          plaidKey, // func(ctx context.Context, kid string) (*serviceauth.JWK, error)
+	Alg:           webhook.AlgES256,
+	MaxAge:        5 * time.Minute,
+	BodyHashClaim: "request_body_sha256",
+})
+```
+
+The three runtimes run the same vectors
+(`runtime/http/testdata/webhook_jwt_parity.json`).
+
+## A table's behavior operations
+
+A DB table may type a field as a behavior, `status: Workflow<{ ... }>`, or
+implement a behavior of the whole table, `implements Timers<Ticket, { ...
+}>` ([A table's deadlines](#a-tables-deadlines-timers-and-its-worker)) or
+`implements Reactions<Project, { ... }>` ([A table's
+reactions](#a-tables-reactions-and-its-change-queue)) (D103). The table
+stays a table: the behavior's fields are its columns (`status`,
+`status_entered_at`), the generated repositories read them and leave them
+out of their create, update and upsert inputs, and only the behavior's
+operations change them.
+
+```ts
+// shop-db
+export abstract class Order {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  status: Workflow<{
+    states: ["draft", "paid", "shipped"];
+    initial: "draft";
+    transitions: [{ from: "draft"; to: "paid" }, { from: "paid"; to: "shipped"; permission: "orders.ship" }];
+  }>;
+}
+```
+
+An API serves those operations with no code of yours: a class with no
+members, marked `@behaviorOperations` with the table, which it imports from
+its database, its `authDb` or its one DB dependency.
+
+```ts
+// shop-orders
+import { behaviorOperations, requirePermission } from "@superschematic/api";
+import { Order } from "@acme/shop-db";
+
+@behaviorOperations(Order)
+@requirePermission(["orders.write"])
+export abstract class OrderActions {}
+```
+
+The build adds to the set one operation for each operation of each
+behavior the table composes, those it implements first and then those on
+its fields, in field order:
+
+| | `Order`'s `status`, `transition` |
+| --- | --- |
+| Route | `POST /api/order/{id}/status/transition`: the row's key in the path, the operation's parameters as the body, `{ "to": "paid" }` |
+| Types | `OrderStatusTransitionInput` (`to`) and `OrderStatusTransitionResult` (`from`, `to`), typed by the enum of the config's states, `OrderStatusState` |
+| SDK | `sdk.order.status.transition(id, { to: OrderStatusState.Paid })` ([Client SDKs](/superschematic/guides/client-sdks/#a-tables-behavior-operations)) |
+| MCP tool | `order_status_transition`, with the behavior's invocation policy ([MCP tools](/superschematic/reference/mcp-tools/#a-tables-behavior-operations)) |
+| Handler | generated: it runs the operation through the database's repositories and the behaviors' core, in one transaction |
+
+The route and the tool follow the table, the field and the operation, in
+kebab and snake case (`shipment/{id}/payment-status/transition`,
+`shipment_payment_status_transition`); a behavior the table implements
+takes the field's place with its name (`ticket/{id}/timers/fire-timer`,
+`ticket_timers_fire_timer`). The SDK methods sit in the set's namespace,
+as every set's do ([Operation sets](#operation-sets)), under a member
+named for the field, or for the behavior the table implements (`timers`):
+name the set `<Table>Actions` to put them under the table's name. The
+OpenAPI document, the permission catalog and the tool documents list the
+operations as any other, and the document
+marks the fields a behavior owns `readOnly`, in the table's own component
+and in a `@source` view's that projects one.
+
+The class's decorators guard every route it serves, as a method's guard
+its route: `@auth`, `@requirePermission([...])` and `@publicRoute`, which
+go on a class only here, `@requireService` and `@allowService`, and
+`@rateLimit`, `@bodyLimit` and `@timeout`. `@requireOwnership` does not
+go on it, since no implementation of yours runs to check what the caller
+owns. A permission the behavior's config names, `orders.ship` on the move
+to `shipped`, is the core's to check, against the permissions the caller
+holds: a caller with `orders.write` alone moves an order to `paid`, and is
+refused the move to `shipped` with a 403 whose detail is the core's. The
+core matches by the default rule, a held permission covering itself and
+those nested under it (`orders` covers `orders.ship`), and not by a matcher
+your server gives its routes (`permissionMatcher`, `identity.WithMatcher`):
+a caller such a matcher admits by another rule is refused there. A calling
+service with no end user holds no permission there. The permission catalog
+lists `orders.ship` under the operation, and `@seedRoles`' coverage counts
+it.
+
+A stack's Go server authenticates a caller only for an API that is
+`public` or whose `authDb` holds the user model (see
+[Auth and permissions](/superschematic/guides/auth-and-permissions/)), so
+one whose set needs a caller (`@auth`, `@requirePermission`) is refused
+for any other API: the handlers are generated, and would run for anyone.
+A Go server you write mounts `RegisterRoutes` behind a middleware of your
+own that puts the caller on the request. A set that only services call
+(`@requireService`) publishes no tool: its operations' `@mcp` is hidden,
+since no end user's agent can call them (D37).
+
+A refusal of the core is the problem every route answers
+([Errors](#errors)), with its `code` and, where it has them, `details`:
+
+| Status | `code` | When |
+| --- | --- | --- |
+| 403 | `forbidden` | the caller lacks a permission the config names: `sam may not move Order <id>'s status from paid to shipped: the transition needs permission orders.ship` |
+| 404 | `not_found` | no row holds the key: `Order <id> does not exist` |
+| 409 | `vetoed` | the behavior refuses the change, a move no transition leads to, say; `details.vetoCode` names the rule (`transition_not_allowed`) |
+| 409 | `conflict` | a row the operation would write collides with one that exists |
+| 422 | `invalid_instance` | the behavior's validation refuses the fields the operation would store |
+| 503 | `busy` | the row kept changing while the operation ran again, and it gave up; try again |
+
+A malformed key or body is the 400 any route answers, before the core
+runs, and any other failure is the server's own 500.
+
+Each server takes the database's repositories and has no method for the
+operations in its implementation, nor a scaffold of one; a namespace
+whose every operation is a behavior's has no implementation at all:
+
+| Server | What it takes |
+| --- | --- |
+| Go | `Config.DB`, the ORM of the database, which `Validate` requires |
+| TypeScript | `RouterOptions.orm`, the database's `orm.ts` repositories over Postgres, which `buildRouter` requires |
+| Rust | the database's pool, the last argument of `Implementations::new`; the handlers call `superschematic-rules-adapter` on it |
+
+A stack's server passes each. The behaviors' core comes with them: the Go
+module links the rules module's archive (`[paths] rules_go` in a
+checkout), the TypeScript package depends on `@superschematic/rules`, and
+the Rust crate depends on `superschematic-rules-adapter` and
+`superschematic-rules-behaviors`, which are unpublished, so a Rust server
+with behavior operations builds only in a checkout that sets `[paths]
+rules_adapter_rust` and `rules_behaviors_rust`
+([Naming](/superschematic/reference/naming/#pathsrules_adapter_rust)). The
+TypeScript repositories run on Postgres alone, so a database that lists
+`sqlite` first has no behavior operations on a TypeScript server yet.
+
+A raw SQL write of an owned column is never refused, so an operator can
+repair a row, but it skips the behavior's rules: move a state through its
+operation.
+
+## A table's deadlines: Timers and its worker
+
+A table implements `Timers` to hold its rows to named deadlines: a first
+answer due four hours after a ticket opens, an invoice overdue after
+thirty days, a reminder a day before a visit (D103). The first type
+argument is the table itself, the second its config, a type literal or
+`typeof` a constant declared `as const`; `Timers` comes from
+`@superschematic/db` and, like `User`, adds no members to the class.
+
+```ts
+// support-db
+import { Identity, Temporal } from "superscalar";
+import { AutoGenerate, Timers, Workflow, key } from "@superschematic/db";
+
+export abstract class Ticket implements Timers<Ticket, {
+  deadlines: {
+    respond: { start: { create: true }; afterMs: 14400000; then: { transition: "escalated" }; until: { leaves: "open" } };
+    idle: { start: { enters: "waiting" }; afterMs: 86400000; then: { transition: "closed" } };
+    remind: { start: { field: "visitAt" }; afterMs: -86400000 };
+  };
+  permission: "tickets.timers";
+}> {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  visitAt?: Temporal.DateTime;
+  status: Workflow<{
+    states: ["open", "waiting", "escalated", "closed"];
+    transitions: [
+      { from: "open"; to: "waiting" },
+      { from: "waiting"; to: "open" },
+      { from: "open"; to: "escalated" },
+      { from: "open"; to: "closed" },
+      { from: "waiting"; to: "closed" },
+      { from: "escalated"; to: "closed" }
+    ];
+  }>;
+}
+```
+
+Each deadline starts from the row's create (`{ create: true }`), from the
+time its status enters a state (`{ enters: "waiting" }`, again at each
+entry) or from a date-time field (`{ field: "visitAt" }`, again whenever
+the field moves; a field left empty starts nothing), and falls due
+`afterMs` milliseconds after it, or before it when negative. When it falls
+due it fires, once, and its `then` moves the status to the state its
+`transition` names while the status is still in the state the deadline
+started in (`from` names others): the outcome is `moved`, or `skipped` for
+a row that moved on, and a guard's veto of the move or a permission the
+caller lacks records `vetoed` or `forbidden`, the deadline fired all the
+same. `until` cancels it while it is pending, when the status leaves a
+state (`{ leaves: "open" }`) or enters one of a list (`{ enters: ["closed"]
+}`). `enters`, `then` and `until` read a `Workflow`
+field: the table's one, or, when it has several, the one `status` names
+(`status: "payment"`). `permission` is the permission a caller needs to
+reset or snooze a deadline; with none, nobody may. The build checks that
+the Workflow and a field start's field are there, and that the field holds
+date-times; the rest of the config (a state the Workflow lacks, a
+transition that does not lead there) is the core's to refuse, at the
+first command on the table.
+
+The build adds, beside the table:
+
+| | For `Ticket` |
+| --- | --- |
+| A sub-table | `ticket_timers_deadlines` (`TicketTimersDeadlines`), one row per deadline started on a ticket: `base_at` (what it starts from), `armed_from`, `due_at` (empty once cancelled), `fired`, `fired_at` and `outcome` (`moved`, `skipped`, `vetoed` or `forbidden`), with a foreign key to the ticket, deleted with it |
+| A deadline queue | `ticket_deadline_queue` (`TicketDeadline`), one waiting message per ticket and deadline, due when the deadline falls due |
+| A change queue | `ticket_change_queue` (`TicketChange`), one message per insert, update and delete of a ticket, whoever makes it, which a trigger on `ticket` writes ([The change queue](#the-change-queue)) |
+| Operations | `timers.fireTimer`, `timers.resetTimer` and `timers.snoozeTimer`, which a `@behaviorOperations` set serves as it serves a field's |
+| A column | `_version`, the version every write through the behaviors' core holds the row to |
+
+Migrations plan the tables and the trigger as any other. The repositories
+have no table or write path of their own for the sub-table: SQL, reports
+and projections may read it. A table whose behaviors keep sub-tables or arm deadlines has
+no upserts in its repositories, since an upsert applies none of a
+behavior's rules.
+
+A create, an update and a delete through the repositories, and each
+behavior operation, arm and clear the row's deadlines in the same
+transaction: a ticket's create arms `respond`, a move to `waiting` cancels
+it by its `until` and arms `idle`, and a delete removes every message of
+the row. Every other write is heard after it commits, through the table's
+change queue: a raw SQL write (`UPDATE ticket SET visit_at = ...`, `DELETE
+FROM ticket ...`, from a script or psql) and the repositories' bulk and
+hard writes, which bypass the core (TypeScript's `updateMany`, `deleteMany`
+and `hardDeleteOne`, Go's `UpdateMany`, `DeleteMany` and `HardDeleteOne`).
+When the worker runs the write's change, Timers reconciles the row: a
+`visitAt` an `updateMany` moved re-arms `remind` at its new time, a raw
+insert arms `respond` from the insert's time, and a raw delete removes the
+row's deadline messages. Until the worker runs it, the old arming stands;
+a deadline that falls due first reconciles its row before it fires, so it
+is armed again at its new time rather than fired on its old arming. A write
+through the core is heard too, and changes nothing more: its deadlines are
+already as it left them.
+
+### The worker
+
+An API runs a table's deadlines and its change queue with a class with no
+members, marked `@behaviorWorker` with the table, imported from its
+database as `@behaviorOperations` imports it:
+
+```ts
+// support-api
+import { behaviorOperations, behaviorWorker, requirePermission } from "@superschematic/api";
+import { Ticket } from "@acme/support-db";
+
+@behaviorOperations(Ticket)
+@requirePermission(["tickets.write"])
+export abstract class TicketActions {}
+
+@behaviorWorker(Ticket, { concurrency: 2 })
+export abstract class TicketTimers {}
+```
+
+The class is a worker of the API, as a `@worker` class is
+([Queues and workers](/superschematic/guides/queues/#write-a-worker)): a
+deployable of kind worker named after the API and the class,
+`support-api-ticket-timers`, with a worker's settings, `stack dev`
+process, image and gcp worker pool. Its handler is generated, so your
+implementation has no method for it and the API's `Workers` lists none: it
+claims each message of the table's deadline queue as it falls due, and each
+message of its change queue, and runs it through the behaviors' core in one
+transaction with the message's completion, one claim loop per queue, the
+deadlines first. It runs as the worker, the subject
+`support-api/TicketTimers`, not as a user, holding the permissions the
+decorator gives it:
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `concurrency` | 1 | how many messages of each of the table's behavior queues an instance handles at a time; an environment's settings change it |
+| `grace` | `"8s"` | how long a stopping worker lets its running handlers finish before it gives their messages back |
+| `permissions` | none | the permissions the worker's commands hold: a `then` whose transition names a permission the worker lacks still fires, and records `forbidden` |
+
+A deadline re-armed or cancelled while the worker holds its message never
+fires on its old arming: the worker finds its claim gone, runs nothing and
+logs `deadline ran nothing` with why, `claim lost`. A deadline the fired
+command arms again, a status that re-enters `waiting`, survives the
+message's completion. A fire that a guard of the table's behaviors vetoes
+is released, not failed: the worker logs `deadline ran nothing` with why,
+`vetoed`, and the message is due again a minute later, counting no
+attempt, for as long as the guard holds it, its sub-table row pending all
+the while. A fire that fails otherwise (`busy`, a failure of the database)
+fails the message: it is due again after the queue's backoff (30 seconds,
+doubling to an hour) and dead after its sixth attempt, for `stack queue
+dead|retry|drop <env> support-db.TicketDeadline`. Nothing arms a dead
+deadline again: its sub-table row stays pending, unfired, until you retry
+the message, a caller with the config's `permission` resets or snoozes it,
+or what it starts from moves. A newer arming or a cancel of the same deadline deletes
+its dead message, so a retry of every dead message never meets a waiting
+one of the same deadline.
+
+One class runs a table's queues per API, and the build refuses one over a
+table whose behaviors arm no deadlines and hear no writes, which has
+nothing to run. Nothing refuses a table whose queues no worker runs: its
+deadlines fall due and its changes wait for one, and nothing that hears
+them runs until a worker does. An API that serves
+`@behaviorOperations(Ticket)` and declares no `@behaviorWorker(Ticket)`
+gets a warning; declare one on that API or on another over the same
+database. The worker claims on Postgres, as every worker does. A
+TypeScript one over a database that lists `sqlite` first is refused, as
+the TypeScript repositories run behaviors on Postgres alone, and so is
+one an environment places on Cloudflare Workers. A Rust one builds in a
+checkout that sets `[paths] rules_adapter_rust` and `rules_behaviors_rust`,
+as a Rust server with behavior operations does.
+
+### Its operations
+
+| | `Ticket`'s Timers, `fireTimer` |
+| --- | --- |
+| Route | `POST /api/ticket/{id}/timers/fire-timer`, the body `{ "deadline": "respond" }` |
+| Types | `TicketTimersFireTimerInput` (`deadline`, the enum `TicketTimersDeadline` of the config's deadlines) and `TicketTimersFireTimerResult` (`fired`, `outcome`) |
+| SDK | `sdk.ticket.timers.fireTimer(id, { deadline: TicketTimersDeadline.Respond })` |
+| MCP tool | `ticket_timers_fire_timer` |
+
+`fireTimer` fires a due deadline now, before the worker does, and spends
+its message; one not due, fired already or not started writes nothing and
+answers `{ "fired": false }`. `resetTimer` starts a deadline again from
+what it starts from and answers its new `dueAt`; `snoozeTimer` moves a
+started one to the `dueAt` it is given, and one that fired fires again
+then. Both are refused a deadline with no due time to give (`not_armed`),
+and both need the
+config's `permission` (`tickets.timers`), which the core checks after the
+set's own guard: a caller with `tickets.write` alone is refused with a 403
+`forbidden`. The permission catalog lists `tickets.timers` under each of
+the three, `fireTimer` too, though `fireTimer` never checks it: a caller
+needs it only to reset or snooze. A `dueAt` is epoch milliseconds, as the declaration has it,
+not a date-time. No route, SDK method or tool reads a row's deadlines yet;
+the operations' results and the sub-table are what there is.
+
+## A table's reactions and its change queue
+
+A table implements `Reactions` to move Workflow statuses when its rows, or
+the rows that point at it, are written (D103): a project that becomes
+active when a task starts, done once every task is done, failed once one
+fails, a task that starts when it is marked urgent. Each rule is one `when`
+and one `then`:
+
+```ts
+// projects-db
+import { Identity } from "superscalar";
+import { AutoGenerate, Reactions, Relation, Workflow, key } from "@superschematic/db";
+import { projectFlow, taskFlow } from "./flows";
+
+export abstract class Project implements Reactions<Project, {
+  rules: [
+    { when: { allTerminal: { schema: "Task"; link: "project"; outcomes: ["success"] } }; then: { transition: "done" } },
+    { when: { anyTerminal: { schema: "Task"; link: "project"; outcomes: ["failure"] } }; then: { transition: "failed" } }
+  ];
+}> {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  name: string;
+  status: Workflow<typeof projectFlow>;
+}
+
+export abstract class Task implements Reactions<Task, {
+  rules: [
+    { when: { enters: "doing" }; then: { link: "project"; transition: "active" } },
+    { when: { changes: { field: "priority"; to: "urgent" } }; then: { transition: "doing" } }
+  ];
+}> {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  priority?: string;
+  project: Relation<Project>;
+  status: Workflow<typeof taskFlow>;
+}
+```
+
+`projectFlow` and `taskFlow` are Workflow configs declared `as const`,
+whose terminal states each name an `outcome` (`success`, `failure` or
+`neutral`), which `allTerminal` and `anyTerminal` read.
+
+| `when` | Fires when |
+| --- | --- |
+| `{ enters: "doing" }` | the write moved the row's status into the state: a create or insert that leaves it there, or an update that left it in another state (or in the same one entered again) |
+| `{ changes: { field, to?, from? } }` | the write moved the field's value, to `to` and from `from` when given; an insert moves a field from empty, and a delete moves nothing. `field` names a field of the table: an own field, a to-one relation (`project`), or a field typed as a behavior (`status`), whose value it hears |
+| `{ allTerminal: { schema, link, outcomes? } }` | a write of a row of `schema`, the table whose to-one relation `link` points at this one, left every such row pointing here in a terminal state, at least one, each with an outcome the list holds (any outcome without one) |
+| `{ anyTerminal: { schema, link, outcomes } }` | a row of `schema` that points here through `link` entered a terminal state whose outcome the list holds, or was pointed here while in one |
+
+`then: { transition }` moves the row's own status to the state, and `then: {
+link, transition }` the status of the row its to-one relation `link` points
+at, through Workflow's `transition`, whose guards and permissions run. A
+rule acts only where it can: a target already in the state, one with no
+transition from where it is to the state, one whose guards veto the move,
+one that is gone, and a row that has moved on from the state its rule
+entered (or the value its `changes` rule named) are left as they are, and
+the write it heard is not refused. A move refused because the worker lacks
+a transition's permission fails the change's message, which the worker
+tries again after the queue's backoff. `status` names the Workflow field
+the rules read and move when the table has several (`status: "payment"`);
+with one, it is implied. A table may hold any number of rules; the build
+checks each against the table, its relations and the tables they name
+(`schema` a table of the same database, `link` its to-one relation to this
+one, each with one Workflow, a `then`'s state one of its target's), and
+the rest of the config (a state the Workflow lacks, a transition that
+cannot lead there, rules that move a row round its states for ever) is
+the core's to refuse at the first command on the table. `holds` and
+`revised`, which the engine's Reactions takes, are refused on a table until
+Rollups, Revisions and Branches come to it, and so are a dotted field
+name, a binary, vector or geometric field (a `Geo.Location`, which a
+write's image leaves out), and Workflow's `statusEnteredAt`, which every
+move of the status moves. Reactions has no operations: no route, SDK
+method or tool comes from it.
+
+### The change queue
+
+A table whose writes a behavior hears gets a change queue in its database:
+a table that implements `Timers` or `Reactions`, and a table another
+table's Reactions names in `allTerminal` or `anyTerminal` (`Task`, which
+`Project`'s rules hear through `task.project`).
+
+| | For `Task` |
+| --- | --- |
+| A change queue | `task_change_queue` (`TaskChange`), keyed by the row's key and claimed one message of a row at a time, in the order they were written: `row_key`, `write` (`insert`, `update` or `delete`), `at` (epoch milliseconds, the database's clock), and the row's columns `before` and `after` the write, as JSON |
+| A trigger | on `task`, after each insert, update and delete of a row, whoever makes it: the repositories, a raw SQL write, a script, psql. An update that changes none of the columns the behaviors read (`updated_at` alone, say) writes no message; a soft delete or a restore, which changes `deleted_at` alone, writes one |
+
+The trigger never refuses a write. The table's `@behaviorWorker` runs the
+queue beside its deadline queue, with no other decorator: a change of a
+`Task` runs `Task`'s own rules, then `Project`'s `allTerminal` and
+`anyTerminal` on the project the task points at, now, after the write and
+before it. So declare a worker for each table with a change queue, even
+one that only another table's rules hear; the build warns an API that
+serves `Project`'s operations and declares no worker of `Task`:
+
+```ts
+// projects-api
+@behaviorWorker(Project)
+export abstract class ProjectReactions {}
+
+@behaviorWorker(Task, { concurrency: 2 })
+export abstract class TaskReactions {}
+```
+
+A rule runs after the write commits, when the worker claims its change: a
+raw `UPDATE task SET status = 'doing'` moves the task's project to
+`active` as a move through the API does, a moment later. A rule that moves
+another table's row runs as the worker of the table whose write it heard
+(`TaskReactions` moves a project), with that worker's `permissions`. A
+change of a row that is gone completes its message, and the change of a
+row a repository already wrote changes nothing that write did not set off.
+A soft delete is heard as the row going: its deadlines go, and the rules
+that read the rows pointing at a project no longer count it. A change
+refused for any other reason, or a failure of the database, fails its
+message, which is due again after the queue's backoff and dead after its
+last attempt (about fifteen minutes); the row's later changes wait behind
+it, so one row's changes always run in the order they were written. Nothing
+refuses a table whose change queue no worker runs: its messages wait, and
+no rule runs and no raw write's deadline moves until a worker claims them.
+On a database that lists `sqlite` first, and on D1, no behavior worker
+claims yet, so a hearing table's change queue grows by a message per
+write, each holding the row's columns, until one does; an operator may
+delete them, and the writes they held then go unheard. A table's rows
+written before its trigger existed have no messages; their deadlines
+reconcile at their next write.
+
 ## OpenAPI
 
-The build writes `api/<service>/openapi.json`, and the Go and Rust servers
-serve it at `GET /api/openapi.json` with a browsable page at
-`GET /api/docs`. The TypeScript router serves neither; its package exports
-the document as `<package>/openapi.json` for you to serve. Each
+The build writes `api/<service>/openapi.json`, and every server serves it
+at `GET /api/openapi.json` as `application/json`, with a browsable
+[RapiDoc](https://rapidocweb.com/) page at `GET /api/docs`. Each
 schema comment becomes a description, and each constraint the matching
 JSON Schema keyword: `minLength`, `pattern`, `minimum`, and `minItems` and
 `maxItems` for `listMin` and `listMax`.
+
+The served document states version `1.0.0` and one server,
+`http://localhost:8080`, unless the service says otherwise. The Rust and
+TypeScript routers can also serve neither route:
+
+| Server | Version | Server URL | Neither route |
+| --- | --- | --- | --- |
+| Go | `Config.OpenAPIVersion` | `Config.OpenAPIBaseURL` | always served |
+| Rust | `RouterOptions.openapi_version` | `RouterOptions.openapi_base_url` | `serve_openapi: false` |
+| TypeScript | `openAPIVersion` | `openAPIBaseURL` | `serveOpenAPI: false` |
+
+The TypeScript package embeds the document in `openapi.ts`, so serving it
+reads no file, on Bun, Node.js and Workers alike. It still exports
+`openapi.json` as `<package>/openapi.json`. A server that serves several
+APIs answers both routes from the first API's router.
+
+With `outputs.api.mcp` on, a TypeScript API also serves its MCP tools at
+`POST /api/mcp`
+([An API's MCP endpoint](/superschematic/reference/mcp-tools/#an-apis-mcp-endpoint)).
+A tool whose `@mcp` says `invocationPolicy: "ask"` runs there only once
+the person confirms the call, by MCP elicitation or a two-step token, so
+the API's config names the secret the endpoint signs confirmations with,
+`outputs.api.mcpConfirmationKey`
+([Confirming a tool that asks](/superschematic/reference/mcp-tools/#confirming-a-tool-that-asks)).
+The endpoint asks only about a call the tool's route would run: a call
+the route refuses, for its arguments or for its caller, gets the route's
+error at once.
 
 ## The TypeScript server
 

@@ -1,0 +1,124 @@
+{
+  "version": 1,
+  "store": "shop-cache",
+  "declarations": [
+    {
+      "symbol": "RateLimit",
+      "kind": "counter",
+      "name": "rate-limit",
+      "namePattern": "{store}:rate-limit:{service}:{operation}:{window}:{client}",
+      "parts": [
+        {
+          "name": "service",
+          "type": "string",
+          "format": "string"
+        },
+        {
+          "name": "operation",
+          "type": "string",
+          "format": "string"
+        },
+        {
+          "name": "window",
+          "type": "Generic.Int64",
+          "format": "integer"
+        },
+        {
+          "name": "client",
+          "type": "string",
+          "format": "string"
+        }
+      ],
+      "maxTtlSeconds": 86405,
+      "doc": "The counters of the shared rate limit of each API whose rateLimitStore this store is: one per service, operation, window and client.",
+      "reserved": true
+    },
+    {
+      "symbol": "ReceiptSent",
+      "kind": "claim",
+      "name": "receipt-sent",
+      "namePattern": "{store}:receipt-sent:{orderId}",
+      "parts": [
+        {
+          "name": "orderId",
+          "type": "Identity.UUID",
+          "format": "string"
+        }
+      ],
+      "ttlSeconds": 600,
+      "file": "src/cache.schema.yaml",
+      "doc": "One receipt email per order."
+    },
+    {
+      "symbol": "StockChanged",
+      "kind": "channel",
+      "name": "stock-changed",
+      "namePattern": "{store}:stock-changed:{productId}",
+      "parts": [
+        {
+          "name": "productId",
+          "type": "Identity.UUID",
+          "format": "string"
+        }
+      ],
+      "signal": true,
+      "file": "src/cache.schema.yaml",
+      "doc": "A product's stock changed; a waiter rereads it."
+    },
+    {
+      "symbol": "StockSamples",
+      "kind": "channel",
+      "name": "stock-samples",
+      "namePattern": "{store}:stock-samples:{productId}",
+      "parts": [
+        {
+          "name": "productId",
+          "type": "Identity.UUID",
+          "format": "string"
+        }
+      ],
+      "payload": {
+        "type": "StockLevel",
+        "service": "shop-cache-common"
+      },
+      "file": "src/cache.schema.yaml",
+      "doc": "Stock samples for a product page."
+    },
+    {
+      "symbol": "ProductViews",
+      "kind": "counter",
+      "name": "views",
+      "namePattern": "{store}:views:{productId}:{day}:{region}:{mobile}:{label}",
+      "parts": [
+        {
+          "name": "productId",
+          "type": "Identity.UUID",
+          "format": "string"
+        },
+        {
+          "name": "day",
+          "type": "Generic.Int64",
+          "format": "integer"
+        },
+        {
+          "name": "region",
+          "type": "Region",
+          "format": "enum"
+        },
+        {
+          "name": "mobile",
+          "type": "boolean",
+          "format": "boolean"
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "format": "string"
+        }
+      ],
+      "maxTtlSeconds": 86400,
+      "file": "src/cache.schema.yaml",
+      "doc": "Views of a product a day, by region, device and label."
+    }
+  ]
+}

@@ -1,0 +1,101 @@
+{
+  "dialect": "sqlite",
+  "from": "4679485e3c48c419155006aff22fdb388e6ac74f16ea6146e1514370023820d5",
+  "hash": "c4310322489e4eadef368705eb87f6b251c34406b386ae0057fba8ffa2959e56",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "createTable",
+      "phase": "expand",
+      "statements": [
+        "CREATE TABLE \"product_change_queue\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"row_key\" TEXT NOT NULL,\n  \"write\" TEXT NOT NULL,\n  \"at\" INTEGER NOT NULL,\n  \"before\" TEXT,\n  \"after\" TEXT,\n  \"state\" TEXT DEFAULT 'ready' NOT NULL,\n  \"attempts\" INTEGER DEFAULT 0 NOT NULL,\n  \"due_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  \"claim_expires_at\" TEXT,\n  \"claim_token\" TEXT,\n  \"last_error\" TEXT,\n  \"created_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  \"updated_at\" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,\n  PRIMARY KEY (\"id\")\n)"
+      ],
+      "subject": "table/product_change_queue",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX \"idx_product_change_queue_claim_expires_at\" ON \"product_change_queue\" (\"claim_expires_at\") WHERE state = 'claimed'"
+      ],
+      "subject": "table/product_change_queue/index/idx_product_change_queue_claim_expires_at",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX \"idx_product_change_queue_due_at\" ON \"product_change_queue\" (\"due_at\") WHERE state = 'ready'"
+      ],
+      "subject": "table/product_change_queue/index/idx_product_change_queue_due_at",
+      "transactional": true
+    },
+    {
+      "index": 4,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX \"idx_product_change_queue_ready_key\" ON \"product_change_queue\" (\"row_key\") WHERE state = 'ready'"
+      ],
+      "subject": "table/product_change_queue/index/idx_product_change_queue_ready_key",
+      "transactional": true
+    },
+    {
+      "index": 5,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX \"idx_product_change_queue_updated_at\" ON \"product_change_queue\" (\"updated_at\") WHERE state = 'done'"
+      ],
+      "subject": "table/product_change_queue/index/idx_product_change_queue_updated_at",
+      "transactional": true
+    },
+    {
+      "index": 6,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE UNIQUE INDEX \"uq_product_change_queue_claimed_key\" ON \"product_change_queue\" (\"row_key\") WHERE state = 'claimed'"
+      ],
+      "subject": "table/product_change_queue/index/uq_product_change_queue_claimed_key",
+      "transactional": true
+    },
+    {
+      "index": 7,
+      "op": "createTrigger",
+      "phase": "expand",
+      "statements": [
+        "CREATE TRIGGER \"trg_product_changes_delete\" AFTER DELETE ON \"product\" FOR EACH ROW\nBEGIN\n  INSERT INTO \"product_change_queue\" (\"row_key\", \"write\", \"at\", \"before\", \"after\")\n  VALUES (OLD.\"id\", 'delete', (CAST(strftime('%s', 'now') AS INTEGER) * 1000 + CAST(substr(strftime('%f', 'now'), 4) AS INTEGER)), json_object('title', CASE WHEN typeof(OLD.\"title\") = 'blob' THEN hex(OLD.\"title\") ELSE OLD.\"title\" END, 'price', CASE WHEN typeof(OLD.\"price\") = 'blob' THEN hex(OLD.\"price\") ELSE OLD.\"price\" END, 'phase', CASE WHEN typeof(OLD.\"phase\") = 'blob' THEN hex(OLD.\"phase\") ELSE OLD.\"phase\" END, 'phase_entered_at', CASE WHEN typeof(OLD.\"phase_entered_at\") = 'blob' THEN hex(OLD.\"phase_entered_at\") ELSE OLD.\"phase_entered_at\" END), NULL);\nEND"
+      ],
+      "subject": "trigger/product/trg_product_changes_delete",
+      "transactional": true
+    },
+    {
+      "index": 8,
+      "op": "createTrigger",
+      "phase": "expand",
+      "statements": [
+        "CREATE TRIGGER \"trg_product_changes_insert\" AFTER INSERT ON \"product\" FOR EACH ROW\nBEGIN\n  INSERT INTO \"product_change_queue\" (\"row_key\", \"write\", \"at\", \"before\", \"after\")\n  VALUES (NEW.\"id\", 'insert', (CAST(strftime('%s', 'now') AS INTEGER) * 1000 + CAST(substr(strftime('%f', 'now'), 4) AS INTEGER)), NULL, json_object('title', CASE WHEN typeof(NEW.\"title\") = 'blob' THEN hex(NEW.\"title\") ELSE NEW.\"title\" END, 'price', CASE WHEN typeof(NEW.\"price\") = 'blob' THEN hex(NEW.\"price\") ELSE NEW.\"price\" END, 'phase', CASE WHEN typeof(NEW.\"phase\") = 'blob' THEN hex(NEW.\"phase\") ELSE NEW.\"phase\" END, 'phase_entered_at', CASE WHEN typeof(NEW.\"phase_entered_at\") = 'blob' THEN hex(NEW.\"phase_entered_at\") ELSE NEW.\"phase_entered_at\" END));\nEND"
+      ],
+      "subject": "trigger/product/trg_product_changes_insert",
+      "transactional": true
+    },
+    {
+      "index": 9,
+      "op": "createTrigger",
+      "phase": "expand",
+      "statements": [
+        "CREATE TRIGGER \"trg_product_changes_update\" AFTER UPDATE ON \"product\" FOR EACH ROW\nWHEN OLD.\"title\" IS NOT NEW.\"title\" OR OLD.\"price\" IS NOT NEW.\"price\" OR OLD.\"phase\" IS NOT NEW.\"phase\" OR OLD.\"phase_entered_at\" IS NOT NEW.\"phase_entered_at\"\nBEGIN\n  INSERT INTO \"product_change_queue\" (\"row_key\", \"write\", \"at\", \"before\", \"after\")\n  VALUES (NEW.\"id\", 'update', (CAST(strftime('%s', 'now') AS INTEGER) * 1000 + CAST(substr(strftime('%f', 'now'), 4) AS INTEGER)), json_object('title', CASE WHEN typeof(OLD.\"title\") = 'blob' THEN hex(OLD.\"title\") ELSE OLD.\"title\" END, 'price', CASE WHEN typeof(OLD.\"price\") = 'blob' THEN hex(OLD.\"price\") ELSE OLD.\"price\" END, 'phase', CASE WHEN typeof(OLD.\"phase\") = 'blob' THEN hex(OLD.\"phase\") ELSE OLD.\"phase\" END, 'phase_entered_at', CASE WHEN typeof(OLD.\"phase_entered_at\") = 'blob' THEN hex(OLD.\"phase_entered_at\") ELSE OLD.\"phase_entered_at\" END), json_object('title', CASE WHEN typeof(NEW.\"title\") = 'blob' THEN hex(NEW.\"title\") ELSE NEW.\"title\" END, 'price', CASE WHEN typeof(NEW.\"price\") = 'blob' THEN hex(NEW.\"price\") ELSE NEW.\"price\" END, 'phase', CASE WHEN typeof(NEW.\"phase\") = 'blob' THEN hex(NEW.\"phase\") ELSE NEW.\"phase\" END, 'phase_entered_at', CASE WHEN typeof(NEW.\"phase_entered_at\") = 'blob' THEN hex(NEW.\"phase_entered_at\") ELSE NEW.\"phase_entered_at\" END));\nEND"
+      ],
+      "subject": "trigger/product/trg_product_changes_update",
+      "transactional": true
+    }
+  ],
+  "to": "7eb90f31f01f1125bdd1f4345096380230ae45f3442bdfa9d2b8ee568be56457",
+  "toModel": null,
+  "version": 1
+}

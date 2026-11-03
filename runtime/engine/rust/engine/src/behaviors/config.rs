@@ -174,6 +174,16 @@ impl<'a> ConfigTarget<'a> {
         &self.fields
     }
 
+    /// The JSON keys of the type's own fields that the schema marks
+    /// secret (`Secret<T>`), in the type's order.
+    pub fn secret_fields(&self) -> Vec<String> {
+        fields_of(&self.model.document, &self.model.instance_type)
+            .iter()
+            .filter(|field| flag(field, "secret"))
+            .map(|field| json_key(field).to_owned())
+            .collect()
+    }
+
     /// The JSON Schema of each of the type's own fields, by JSON key, as
     /// the describe document writes an instance's properties (without the
     /// scalar key): a field that is not required also takes null.

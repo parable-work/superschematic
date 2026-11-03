@@ -1,6 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import { createLogger } from './logger';
-import { PRUNE_BATCH, runWorker, workerConcurrency, WORKER_CONCURRENCY_VARIABLE, type WorkerMessage, type WorkerQueue } from './worker';
+import {
+  PRUNE_BATCH,
+  runWorker,
+  workerConcurrency,
+  workerDrainSeconds,
+  WORKER_CONCURRENCY_VARIABLE,
+  WORKER_DRAIN_SECONDS_VARIABLE,
+  type WorkerMessage,
+  type WorkerQueue,
+} from './worker';
 
 /** A queue in memory: messages to claim, and what the loop did with each, as the Go loop's tests keep it. */
 class FakeQueue {
@@ -239,5 +248,15 @@ describe('workerConcurrency', () => {
     expect(workerConcurrency(4, { [WORKER_CONCURRENCY_VARIABLE]: '7' })).toBe(7);
     expect(() => workerConcurrency(4, { [WORKER_CONCURRENCY_VARIABLE]: '0' })).toThrow('WORKER_CONCURRENCY is "0"; it is a whole number, one or more');
     expect(() => workerConcurrency(4, { [WORKER_CONCURRENCY_VARIABLE]: '2.5' })).toThrow('a whole number');
+  });
+});
+
+describe('workerDrainSeconds', () => {
+  test("reads a firing's window, or the default, and refuses one under a second", () => {
+    expect(workerDrainSeconds(50, {})).toBe(50);
+    expect(workerDrainSeconds(50, { [WORKER_DRAIN_SECONDS_VARIABLE]: '' })).toBe(50);
+    expect(workerDrainSeconds(50, { [WORKER_DRAIN_SECONDS_VARIABLE]: '20' })).toBe(20);
+    expect(() => workerDrainSeconds(50, { [WORKER_DRAIN_SECONDS_VARIABLE]: '0' })).toThrow('WORKER_DRAIN_SECONDS is "0"; it is a whole number of seconds, one or more');
+    expect(() => workerDrainSeconds(50, { [WORKER_DRAIN_SECONDS_VARIABLE]: '1m' })).toThrow('a whole number of seconds');
   });
 });

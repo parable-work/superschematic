@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/parable-work/superschematic/internal/stack"
 	"github.com/parable-work/superschematic/internal/stack/local"
 	ir "github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/registry"
@@ -63,6 +64,42 @@ func TestSiteWiring(t *testing.T) {
 	for _, step := range dev.DeployOrder {
 		if step.Step == ir.StepRollout && strings.Contains(strings.Join(step.Resources, ","), "shop-web.site") && step.Wave < 2 {
 			t.Errorf("shop-web rolls out in wave %d, before shop-api, which it calls", step.Wave)
+		}
+	}
+}
+
+// TestOriginSiteWiring: with shop-web serving shop-api on its origin
+// (D91) and shop-api in no expose, the site's config names shop-api under
+// /api/shop-api on the site's own loopback origin, its node holds shop-api's
+// loopback URL for its proxy to forward to, and shop-api's process sets no
+// CORS origins.
+func TestOriginSiteWiring(t *testing.T) {
+	reg := assemble(t)
+	s := stacktest.WithSite(shop())
+	s.Expose = nil
+	s.Origins = []*ir.Origin{{Site: stacktest.ShopWeb}}
+	dev := resolve(t, reg, s, stacktest.SiteShop(), "Dev")
+	site, api := dev.Deployable("shop-web"), dev.Deployable("shop-api")
+	if api.Exposed || api.PublicAddress != nil {
+		t.Fatalf("shop-api is exposed %v at %v, want reached through shop-web's origin alone", api.Exposed, api.PublicAddress)
+	}
+	var node *ir.Resource
+	for _, res := range dev.Resources.Resources {
+		if res.ID == "shop-web.site" {
+			node = res
+		}
+	}
+	if node == nil {
+		t.Fatal("shop-web has no node")
+	}
+	origin := site.PublicAddress.(string)
+	if !equalJSON(t, node.Properties["config"], map[string]any{"apis": map[string]any{"shop-api": map[string]any{"url": origin + "/api/shop-api"}}}) ||
+		!equalJSON(t, node.Properties["origin"], map[string]any{"shop-api": api.Address}) {
+		t.Fatalf("shop-web's node: config %s, origin %s; want shop-api on %s and its loopback URL %v", mustJSON(t, node.Properties["config"]), mustJSON(t, node.Properties["origin"]), origin, api.Address)
+	}
+	for _, b := range api.Bindings {
+		if b.CORSOf != "" {
+			t.Errorf("shop-api has the CORS field %s, though shop-web calls it from its own origin", b.Field)
 		}
 	}
 }
@@ -132,4 +169,57 @@ func TestSiteHandler(t *testing.T) {
 			}
 		})
 	}
+}
+
+// devShop is SiteShop with shop-web's dev server set (D82), on port when
+// it is not zero.
+func devShop(port int) []stack.Service {
+	services := stacktest.SiteShop()
+	for i := range services {
+		if services[i].Name == "shop-web" {
+			site := *services[i].Site
+			site.Dev = &ir.SiteDevConfig{Command: "dev", Port: port}
+			services[i].Site = &site
+		}
+	}
+	return services
+}
+
+// TestADevSiteLowersItsDevServer: a site with a dev server (D82) keeps its
+// node, its port and its config as a built site's, and the node holds the
+// dev server's command and a port of its own: the config's, or one derived
+// from the site's name, which differs from the site's own. A dev port that
+// meets another listener's is refused by local-distinct-ports.
+func TestADevSiteLowersItsDevServer(t *testing.T) {
+	reg := assemble(t)
+	env := registry.StackEnvironment{Stack: "shop-stack", Name: "Dev", SchemasRoot: checkoutRoot}
+	for _, port := range []int{0, 5173} {
+		dev := resolve(t, reg, stacktest.WithSite(shop()), devShop(port), "Dev")
+		site := dev.Deployable("shop-web")
+		var node *ir.Resource
+		for _, res := range dev.Resources.Resources {
+			if res.ID == "shop-web.site" {
+				node = res
+			}
+		}
+		if node == nil {
+			t.Fatal("shop-web has no node")
+		}
+		want := local.SiteDevPort(env, *site)
+		if port != 0 && want != port {
+			t.Fatalf("SiteDevPort = %d, want the config's %d", want, port)
+		}
+		if want == local.ServerPort(env, *site) {
+			t.Fatalf("the dev server's port %d is the site's own", want)
+		}
+		if !equalJSON(t, node.Properties["dev"], map[string]any{"command": "dev", "port": want}) {
+			t.Fatalf("port %d: the node's dev = %v, want the command dev on %d", port, node.Properties["dev"], want)
+		}
+		if site.Site.Dev == nil || site.Site.Dev.Command != "dev" {
+			t.Fatalf("the resolved site's dev = %+v", site.Site.Dev)
+		}
+	}
+	s := stacktest.WithSite(shop())
+	wantFailure(t, resolveErr(t, s, devShop(local.ServerPort(env, *resolve(t, reg, stacktest.WithSite(shop()), stacktest.SiteShop(), "Dev").Deployable("shop-api"))), "Dev"),
+		stack.CodePolicy, "server shop-api and the dev server of site shop-web listen on one port")
 }

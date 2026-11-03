@@ -540,7 +540,8 @@ func (r *BoardRepository) FindOne(ctx context.Context, filter *BoardFilter, opts
 	return result, nil
 }
 
-// FindMany retrieves multiple Board records matching the filter
+// FindMany retrieves multiple Board records matching the filter, and how
+// many it matches in all, -1 when the options skip the count
 func (r *BoardRepository) FindMany(ctx context.Context, filter *BoardFilter, opts *BoardFindOptions) ([]*types.Board, int, error) {
 	if opts == nil || opts.Fields.IsZero() {
 		return nil, 0, fmt.Errorf("fields must be specified in FindOptions for performance")
@@ -573,18 +574,20 @@ func (r *BoardRepository) FindMany(ctx context.Context, filter *BoardFilter, opt
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM board%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
 
-	// Get total count
-	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM board%s`, whereClause)
+	// Get total count, unless the options skip it (D89)
+	totalCount := -1
+	if !opts.SkipCount {
+		countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM board%s`, whereClause)
 
-	var totalCount int
-	var countRow pgx.Row
-	if r.tx != nil {
-		countRow = r.tx.QueryRow(ctx, countQuery, args...)
-	} else {
-		countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
-	}
-	if err := countRow.Scan(&totalCount); err != nil {
-		return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		var countRow pgx.Row
+		if r.tx != nil {
+			countRow = r.tx.QueryRow(ctx, countQuery, args...)
+		} else {
+			countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
+		}
+		if err := countRow.Scan(&totalCount); err != nil {
+			return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		}
 	}
 
 	results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
@@ -592,6 +595,30 @@ func (r *BoardRepository) FindMany(ctx context.Context, filter *BoardFilter, opt
 		return nil, 0, err
 	}
 	return results, totalCount, nil
+}
+
+// findRelated reads the rows filter finds as FindMany reads them, with no
+// count: the read that loads a relation's rows for the rows of another
+// table's read (D90), which counts nothing, as the TypeScript
+// repositories' include does.
+func (r *BoardRepository) findRelated(ctx context.Context, filter *BoardFilter, opts *BoardFindOptions) ([]*types.Board, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in FindOptions for performance")
+	}
+	fieldStrings := boardFieldStrings(opts.Fields)
+	if err := validateFields(fieldStrings, BoardAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "board")
+	if selectFields == "" {
+		return nil, fmt.Errorf("no valid fields specified")
+	}
+	var args []interface{}
+	whereClause := filter.buildWhereClause(&args, 0)
+	orderByClause := buildBoardOrderByClause(opts.OrderBy, `board`)
+	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
+	query := fmt.Sprintf(`SELECT %s FROM board%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
+	return r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
 }
 
 // boardFieldStrings are the columns fields selects, in OrderedMembers
@@ -963,6 +990,622 @@ func (r *BoardRepository) CreateOne(ctx context.Context, input *types.Board) (*t
 	// Set relationship IDs from scanned FK values
 
 	return result, nil
+}
+
+// boardUniqueKeys are the conflict targets of Board's unique keys, and
+// the assignment an upsert that sets nothing writes, so the row it
+// conflicts with is returned (sqlutil.UniqueKey, D79); the read of the rows
+// that hold keys, which an upsert only if changed reads back, empty for a
+// key over an expression, and the key's columns as a batch insert's cells
+// name them (D89).
+var boardUniqueKeys = map[BoardUniqueKey]struct {
+	conflict, keep, rows string
+	columns              []string
+}{
+	BoardUniqueById: {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "labels", "states", "walls", "scores" FROM board WHERE (id) IN (%s)`, []string{`id`}},
+}
+
+// boardKeyOf is the text of row's values of the unique key on, as
+// UpsertMany matches the rows a statement returns to its inputs, or false
+// when the insert leaves one of them to the database (D89).
+func boardKeyOf(on BoardUniqueKey, row *types.Board) (string, bool) {
+	switch on {
+	case BoardUniqueById:
+		return upsertKeyText(upsertKeyValue(row.Id, false))
+	}
+	return "", false
+}
+
+// database is the Database the repository runs on.
+func (r *BoardRepository) database() *Database {
+	if r.txDB != nil {
+		return r.txDB
+	}
+	return r.db
+}
+
+// scanReturned scans a row of every column of Board, as a write returns
+// it, and, with inserted, the flag an upsert returns after them (D89).
+func (r *BoardRepository) scanReturned(row pgx.Row, inserted *bool) (*types.Board, error) {
+	result := &types.Board{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	var tempLabels []byte
+	var tempStates []byte
+	var tempWalls []byte
+	var tempScores []byte
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+
+	// Scan all fields in schema order (matches DDL column order)
+	dest := []any{
+
+		&result.Id,
+
+		&tempLabels,
+
+		&tempStates,
+
+		&tempWalls,
+
+		&tempScores,
+	}
+	if inserted != nil {
+		dest = append(dest, inserted)
+	}
+	if err := row.Scan(dest...); err != nil {
+		return nil, err
+	}
+
+	// Copy nullable fields when present
+
+	if len(tempLabels) > 0 {
+		if err := unmarshalJSONListFieldValue(tempLabels, &result.Labels, "labels", 2); err != nil {
+			return nil, fmt.Errorf("failed to decode JSON field labels: %w", err)
+		}
+	}
+	if len(tempStates) > 0 {
+		if err := unmarshalJSONListFieldValue(tempStates, &result.States, "states", 2); err != nil {
+			return nil, fmt.Errorf("failed to decode JSON field states: %w", err)
+		}
+	}
+	if len(tempWalls) > 0 {
+		if err := unmarshalJSONListFieldValue(tempWalls, &result.Walls, "walls", 2); err != nil {
+			return nil, fmt.Errorf("failed to decode JSON field walls: %w", err)
+		}
+	}
+	if len(tempScores) > 0 {
+		if err := unmarshalJSONListFieldValue(tempScores, &result.Scores, "scores", 2); err != nil {
+			return nil, fmt.Errorf("failed to decode JSON field scores: %w", err)
+		}
+	}
+
+	// Set relationship IDs from scanned FK values
+
+	return result, nil
+}
+
+// UpsertOne inserts input, or, when a row already holds its value of the
+// unique key on, applies update to that row instead, and returns the row
+// (D79). The insert writes what CreateOne writes and the update what
+// UpdateOne writes, updated_at and updated_by among it, but an update that
+// sets no field leaves the row as it is.
+func (r *BoardRepository) UpsertOne(ctx context.Context, input *types.Board, on BoardUniqueKey, update *BoardUpdate) (*types.Board, error) {
+	result, err := r.UpsertOneResult(ctx, input, on, update, nil)
+	if err != nil {
+		return nil, err
+	}
+	return result.Row, nil
+}
+
+// UpsertOneResult is UpsertOne, and what it did with the row: inserted it,
+// updated the row that held the key, or left that row as it was (D89).
+// With opts.OnlyIfChanged it updates the row only when a field the update
+// sets differs from what the row holds, which it reads back otherwise. A write that
+// may take more than one statement runs in a transaction of its own when
+// none is open.
+func (r *BoardRepository) UpsertOneResult(ctx context.Context, input *types.Board, on BoardUniqueKey, update *BoardUpdate, opts *UpsertOptions) (UpsertResult[*types.Board], error) {
+	var none UpsertResult[*types.Board]
+	key, ok := boardUniqueKeys[on]
+	if !ok {
+		return none, fmt.Errorf("orm: Board has no unique key %q", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if opts.OnlyIfChanged && key.rows == "" {
+		return none, upsertExpressionKey("UpsertOneResult", "Board", string(on))
+	}
+	if update == nil {
+		update = &BoardUpdate{}
+	}
+	write := func(repo *BoardRepository) (UpsertResult[*types.Board], error) {
+		result, err := repo.upsertRow(ctx, input, on, update, opts.OnlyIfChanged)
+		if err != nil {
+			return none, err
+		}
+		return *result, nil
+	}
+	if !opts.OnlyIfChanged {
+		return write(r)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (UpsertResult[*types.Board], error) {
+		return write(&BoardRepository{tx: tx, txDB: r.database()})
+	})
+}
+
+// upsertRow is UpsertOneResult on the repository's connection: the upsert,
+// a read of the row it left as it was, only if changed, and the second
+// statement of an encrypted field.
+func (r *BoardRepository) upsertRow(ctx context.Context, input *types.Board, on BoardUniqueKey, update *BoardUpdate, onlyIfChanged bool) (*UpsertResult[*types.Board], error) {
+	key := boardUniqueKeys[on]
+	// Set audit fields
+
+	// Build INSERT query
+	var fields []string
+	var placeholders []string
+	var values []interface{}
+	paramNum := 0
+	// Schema-owned identities may supply a stable UUID. A zero value keeps the
+	// database-generated default used by ordinary creates.
+	{
+		var zeroPrimaryKey types.IdentityUUID
+		if primaryKey, ok := boardUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+			fields = append(fields, `id`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, primaryKey.ToUUID())
+		}
+	}
+	// Required field: labels
+	fields = append(fields, `labels`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	jsonValueLabels, err := marshalArrayOfArraysFieldValue(input.Labels)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal JSON field labels: %w", err)
+	}
+	values = append(values, jsonValueLabels)
+	// Required field: states
+	fields = append(fields, `states`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	jsonValueStates, err := marshalArrayOfArraysFieldValue(input.States)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal JSON field states: %w", err)
+	}
+	values = append(values, jsonValueStates)
+	// Required field: walls
+	fields = append(fields, `walls`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	jsonValueWalls, err := marshalArrayOfArraysFieldValue(input.Walls)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal JSON field walls: %w", err)
+	}
+	values = append(values, jsonValueWalls)
+	// Optional field: scores - only add if set
+	{
+		if !reflect.ValueOf(input.Scores).IsZero() {
+			fields = append(fields, `scores`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			jsonValueScores, err := marshalArrayOfArraysFieldValue(input.Scores)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal JSON field scores: %w", err)
+			}
+			values = append(values, jsonValueScores)
+		}
+	}
+
+	// Handle relationship foreign key columns
+
+	// Build the update of the row the key conflicts with, its placeholders
+	// numbered after the insert's
+	var setClauses, compareCurrent, compareNext []string
+	if update.Labels != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`labels = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `board.labels`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		jsonValueLabels, err := marshalArrayOfArraysFieldValue(*update.Labels)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal JSON field labels: %w", err)
+		}
+		values = append(values, jsonValueLabels)
+	}
+	if update.States != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`states = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `board.states`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		jsonValueStates, err := marshalArrayOfArraysFieldValue(*update.States)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal JSON field states: %w", err)
+		}
+		values = append(values, jsonValueStates)
+	}
+	if update.Walls != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`walls = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `board.walls`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		jsonValueWalls, err := marshalArrayOfArraysFieldValue(*update.Walls)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal JSON field walls: %w", err)
+		}
+		values = append(values, jsonValueWalls)
+	}
+	if update.Scores != nil && update.ScoresSetNull {
+		return nil, fmt.Errorf("scores cannot be updated with both value and null assignment")
+	}
+	if update.ScoresSetNull {
+		setClauses = append(setClauses, `scores = NULL`)
+		compareCurrent = append(compareCurrent, `board.scores`)
+		compareNext = append(compareNext, `NULL`)
+	} else if update.Scores != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`scores = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `board.scores`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		jsonValueScores, err := marshalArrayOfArraysFieldValue(*update.Scores)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal JSON field scores: %w", err)
+		}
+		values = append(values, jsonValueScores)
+	}
+
+	assigned := len(setClauses)
+	if assigned == 0 {
+		// An update that sets no field leaves the row as it is, stamps and
+		// all, and returns it.
+		setClauses = append(setClauses, key.keep)
+	} else {
+		// Set updated_at
+
+		// Set updated_by
+
+	}
+
+	query := fmt.Sprintf(
+		`INSERT INTO board (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "labels", "states", "walls", "scores", (xmax = 0) AS _inserted`,
+		strings.Join(fields, ", "),
+		"("+strings.Join(placeholders, ", ")+")",
+		key.conflict,
+		strings.Join(setClauses, ", "),
+		upsertWhere(``, compareCurrent, compareNext, onlyIfChanged),
+	)
+
+	// Execute query
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, values...)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, values...)
+	}
+	var inserted bool
+	scanned, err := r.scanReturned(row, &inserted)
+	var upserted *UpsertResult[*types.Board]
+	switch {
+	case err == nil:
+		status := UpsertUnchanged
+		if inserted {
+			status = UpsertInserted
+		} else if assigned > 0 {
+			status = UpsertUpdated
+		}
+		upserted = &UpsertResult[*types.Board]{Row: scanned, Status: status}
+	case err != pgx.ErrNoRows:
+		return nil, fmt.Errorf("failed to scan result: %w", err)
+	case !onlyIfChanged:
+		// The row the key conflicts with is soft-deleted.
+		return nil, ErrNotFound
+	default:
+		// The row the key conflicts with already held the update's values.
+		keyValues, ok := upsertCellValues(upsertCells(fields, values), key.columns)
+		if !ok {
+			return nil, fmt.Errorf("no Board row holds an unset %s: %w", string(on), ErrNotFound)
+		}
+		found, err := r.rowsOfKeys(ctx, on, [][]any{keyValues}, []*types.Board{input})
+		if err != nil {
+			return nil, err
+		}
+		upserted = &UpsertResult[*types.Board]{Row: found[0], Status: UpsertUnchanged}
+	}
+	return upserted, nil
+}
+
+// UpsertMany inserts each input, or, when a row already holds its value of
+// the unique key on, sets each field update names of that row to the value
+// the input would have inserted, and returns each input's row and what it
+// did with it, in the inputs' order (D89). One statement writes a batch of
+// rows, opts.Batch or as many as Postgres binds the parameters of, and more
+// rows take a statement per batch, in one transaction; a write that may
+// take more than one statement runs in a transaction of its own when none
+// is open. An update that names no field leaves each row that holds a key
+// as it is. Two inputs of one batch that hold one key fail
+// the statement, and a key over an expression, whose rows the statement's
+// cannot be matched to the inputs by, is refused.
+func (r *BoardRepository) UpsertMany(ctx context.Context, inputs []*types.Board, on BoardUniqueKey, update BoardFields, opts *UpsertOptions) ([]UpsertResult[*types.Board], error) {
+	key, ok := boardUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: Board has no unique key %q", string(on))
+	}
+	if key.rows == "" {
+		return nil, upsertExpressionKey("UpsertMany", "Board", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if update.Id {
+		return nil, fmt.Errorf("orm: UpsertMany of Board sets the fields an update sets, not id")
+	}
+	batch, err := upsertBatch("Board", opts.Batch, 13106)
+	if err != nil {
+		return nil, err
+	}
+	if len(inputs) == 0 {
+		return []UpsertResult[*types.Board]{}, nil
+	}
+	if len(inputs) <= batch && !opts.OnlyIfChanged {
+		return r.upsertBatches(ctx, inputs, on, update, batch, false)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]UpsertResult[*types.Board], error) {
+		return (&BoardRepository{tx: tx, txDB: r.database()}).upsertBatches(ctx, inputs, on, update, batch, opts.OnlyIfChanged)
+	})
+}
+
+// upsertBatches is UpsertMany on the repository's connection, a batch at a
+// time: each batch's statement, a read of the rows it left as they were,
+// only if changed, and the second statement of each encrypted field.
+func (r *BoardRepository) upsertBatches(ctx context.Context, inputs []*types.Board, on BoardUniqueKey, update BoardFields, batch int, onlyIfChanged bool) ([]UpsertResult[*types.Board], error) {
+	key := boardUniqueKeys[on]
+
+	// Set audit fields
+
+	// Each field update names takes the value the input would have
+	// inserted, which an upsert only if changed compares with the row's.
+	var setClauses, compareCurrent, compareNext []string
+	if update.Labels {
+		setClauses = append(setClauses, `labels = EXCLUDED.labels`)
+		compareCurrent = append(compareCurrent, `board.labels`)
+		compareNext = append(compareNext, `EXCLUDED.labels`)
+	}
+	if update.States {
+		setClauses = append(setClauses, `states = EXCLUDED.states`)
+		compareCurrent = append(compareCurrent, `board.states`)
+		compareNext = append(compareNext, `EXCLUDED.states`)
+	}
+	if update.Walls {
+		setClauses = append(setClauses, `walls = EXCLUDED.walls`)
+		compareCurrent = append(compareCurrent, `board.walls`)
+		compareNext = append(compareNext, `EXCLUDED.walls`)
+	}
+	if update.Scores {
+		setClauses = append(setClauses, `scores = EXCLUDED.scores`)
+		compareCurrent = append(compareCurrent, `board.scores`)
+		compareNext = append(compareNext, `EXCLUDED.scores`)
+	}
+
+	results := make([]UpsertResult[*types.Board], 0, len(inputs))
+	for start := 0; start < len(inputs); start += batch {
+		chunk := inputs[start:min(start+batch, len(inputs))]
+		prepared := chunk
+
+		// The batch's rows, as CreateMany writes them.
+		rows := make([][]batchInsertCell, 0, len(prepared))
+		for _, input := range prepared {
+			var row []batchInsertCell
+			// Primary key: id. Schema-owned identities may supply a stable
+			// UUID, matching CreateOne; a row without one takes the generated default.
+			{
+				cell := batchInsertCell{column: `id`}
+				var zeroPrimaryKey types.IdentityUUID
+				if primaryKey, ok := boardUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+					cell.value, cell.set = primaryKey.ToUUID(), true
+				}
+				row = append(row, cell)
+			}
+			// Required field: labels
+			{
+				cell := batchInsertCell{column: `labels`, set: true}
+				jsonValue, err := marshalArrayOfArraysFieldValue(input.Labels)
+				if err != nil {
+					return nil, fmt.Errorf("failed to marshal JSON field labels: %w", err)
+				}
+				cell.value = jsonValue
+				row = append(row, cell)
+			}
+			// Required field: states
+			{
+				cell := batchInsertCell{column: `states`, set: true}
+				jsonValue, err := marshalArrayOfArraysFieldValue(input.States)
+				if err != nil {
+					return nil, fmt.Errorf("failed to marshal JSON field states: %w", err)
+				}
+				cell.value = jsonValue
+				row = append(row, cell)
+			}
+			// Required field: walls
+			{
+				cell := batchInsertCell{column: `walls`, set: true}
+				jsonValue, err := marshalArrayOfArraysFieldValue(input.Walls)
+				if err != nil {
+					return nil, fmt.Errorf("failed to marshal JSON field walls: %w", err)
+				}
+				cell.value = jsonValue
+				row = append(row, cell)
+			}
+			// Optional field: scores
+			{
+				cell := batchInsertCell{column: `scores`}
+				if !reflect.ValueOf(input.Scores).IsZero() {
+					jsonValue, err := marshalArrayOfArraysFieldValue(input.Scores)
+					if err != nil {
+						return nil, fmt.Errorf("failed to marshal JSON field scores: %w", err)
+					}
+					cell.value = jsonValue
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
+
+			// Relationship foreign key columns, matching CreateOne
+			rows = append(rows, row)
+		}
+		fieldNames, valuePlaceholders, values := buildBatchInsert(rows)
+		assignments := append([]string(nil), setClauses...)
+		if len(setClauses) == 0 {
+			// An update that names no field leaves each row as it is.
+			assignments = append(assignments, key.keep)
+		} else {
+		}
+		query := fmt.Sprintf(
+			`INSERT INTO board (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "labels", "states", "walls", "scores", (xmax = 0) AS _inserted`,
+			strings.Join(fieldNames, ", "),
+			strings.Join(valuePlaceholders, ", "),
+			key.conflict,
+			strings.Join(assignments, ", "),
+			upsertWhere(``, compareCurrent, compareNext, onlyIfChanged),
+		)
+		returned, inserted, err := r.upsertReturned(ctx, query, values)
+		if err != nil {
+			return nil, err
+		}
+
+		// A row is its input's by the key's values; an input that sets none
+		// of them, whose key the database generates, takes the next row whose
+		// key no input holds, as the rows come back in the inputs' order.
+		keys := make([]string, len(prepared))
+		set := make([]bool, len(prepared))
+		for i, input := range prepared {
+			keys[i], set[i] = boardKeyOf(on, input)
+		}
+		matcher := newUpsertMatcher(keys, set)
+		matched := make([]*UpsertResult[*types.Board], len(prepared))
+		for n, row := range returned {
+			text, ok := boardKeyOf(on, row)
+			i := matcher.take(text, ok)
+			if i < 0 {
+				return nil, fmt.Errorf("orm: UpsertMany of Board wrote a row whose %s no input holds", string(on))
+			}
+			status := UpsertUnchanged
+			if inserted[n] {
+				status = UpsertInserted
+			} else if len(setClauses) > 0 {
+				status = UpsertUpdated
+			}
+			matched[i] = &UpsertResult[*types.Board]{Row: row, Status: status}
+		}
+
+		// A row it did not return is one it left as it was, only if changed,
+		// which it reads back by its key, or a deleted one.
+		var left []int
+		for i := range matched {
+			if matched[i] == nil {
+				left = append(left, i)
+			}
+		}
+		if len(left) > 0 {
+			if !onlyIfChanged {
+				return nil, fmt.Errorf("the Board row that holds the %s of input %d is deleted: %w", string(on), start+left[0], ErrNotFound)
+			}
+			keyValues := make([][]any, len(left))
+			wanted := make([]*types.Board, len(left))
+			for n, i := range left {
+				cells, ok := upsertCellValues(rows[i], key.columns)
+				if !ok {
+					return nil, fmt.Errorf("no Board row holds an unset %s: %w", string(on), ErrNotFound)
+				}
+				keyValues[n], wanted[n] = cells, prepared[i]
+			}
+			found, err := r.rowsOfKeys(ctx, on, keyValues, wanted)
+			if err != nil {
+				return nil, err
+			}
+			for n, i := range left {
+				matched[i] = &UpsertResult[*types.Board]{Row: found[n], Status: UpsertUnchanged}
+			}
+		}
+		for _, result := range matched {
+			results = append(results, *result)
+		}
+	}
+	return results, nil
+}
+
+// upsertReturned runs an upsert's statement, query with values, and scans
+// each row it returns and whether it inserted it.
+func (r *BoardRepository) upsertReturned(ctx context.Context, query string, values []any) ([]*types.Board, []bool, error) {
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to execute upsert: %w", err)
+	}
+	defer rows.Close()
+	var returned []*types.Board
+	var inserted []bool
+	for rows.Next() {
+		var flag bool
+		row, err := r.scanReturned(rows, &flag)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		returned = append(returned, row)
+		inserted = append(inserted, flag)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	return returned, inserted, nil
+}
+
+// rowsOfKeys reads the rows that hold keys, each the values of the unique
+// key on an input's insert binds, among the rows the key's index holds, in
+// the inputs' order: the rows an upsert only if changed left as they were
+// (D89). A key no live row holds is ErrNotFound.
+func (r *BoardRepository) rowsOfKeys(ctx context.Context, on BoardUniqueKey, keys [][]any, inputs []*types.Board) ([]*types.Board, error) {
+	tuples, values := upsertKeyTuples(keys)
+	query := fmt.Sprintf(boardUniqueKeys[on].rows, strings.Join(tuples, ", "))
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the rows the upsert left: %w", err)
+	}
+	defer rows.Close()
+	found := map[string]*types.Board{}
+	for rows.Next() {
+		row, err := r.scanReturned(rows, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		if text, ok := boardKeyOf(on, row); ok {
+			found[text] = row
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	out := make([]*types.Board, len(inputs))
+	for i, input := range inputs {
+		text, _ := boardKeyOf(on, input)
+		row := found[text]
+		if row == nil {
+			return nil, fmt.Errorf("the Board row that holds the key %s is deleted: %w", string(on), ErrNotFound)
+		}
+		out[i] = row
+	}
+	return out, nil
 }
 
 // CreateMany inserts multiple Board records in a single statement

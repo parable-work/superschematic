@@ -94,6 +94,9 @@ func Run(schema *ir.Schema, cfg *schemaconfig.SchemaConfig, opts Options) (*Resu
 	if err := refuseORMWithoutGoTypes(kind.Name, outputs, reg); err != nil {
 		return nil, fmt.Errorf("schema config for %s: %w", cfg.Name, err)
 	}
+	if len(opts.RewriteMigrations) > 0 && schema.Kind != ir.SchemaKindDB {
+		return nil, fmt.Errorf("generator: --rewrite-migration names a projection's migration stamp, and %s is of kind %s; a DB service declares projections", cfg.Name, schema.Kind)
+	}
 
 	r, _ := newRun(schema, cfg, outputs, opts, reg)
 
@@ -223,13 +226,18 @@ func (r run) runPipeline(pipeline []registry.GeneratorSpec) error {
 
 // refuseBehaviors fails, before any generator runs, when a type of the
 // schema composes a behavior and either the schema is an API, whose own
-// types never compose one, or an enabled generator does not render
-// behaviors (GeneratorSpec.RendersBehaviors): that generator would write
-// the type without the fields and operations its behaviors add. The error
-// names the first such generator, the type and the behavior; types, which
-// renders behaviors' fields, and the generators of a DB schema, whose
-// engine types the engine keeps (D58), are never it. build --emit-ir,
-// format and json-schema run no generator and accept the schema (D16).
+// types never compose one, or an enabled generator does not render what
+// it adds: a behavior on the type (GeneratorSpec.RendersBehaviors), whose
+// generator would write the type without the fields and operations it
+// adds, or one a table that stays a table implements or carries on a field
+// (GeneratorSpec.RendersFieldBehaviors, D103), whose generator would write
+// the fields it owns as any field and drop its operations, sub-tables and
+// deadlines. The error names the first such generator, the type, the
+// field or the implements use and the behavior; types, which renders
+// behaviors' fields, and the generators of a DB schema, whose engine types
+// the engine keeps (D58), are never it for a behavior on the type, and
+// sql, orm and types never for a table's. build --emit-ir, format and
+// json-schema run no generator and accept the schema (D16).
 func refuseBehaviors(schema *ir.Schema, enabled []registry.GeneratorSpec) error {
 	typeName, behavior, found := schema.FindBehavior()
 	if !found {
@@ -238,12 +246,49 @@ func refuseBehaviors(schema *ir.Schema, enabled []registry.GeneratorSpec) error 
 	if schema.Kind == ir.SchemaKindAPI {
 		return fmt.Errorf("generator: type %s of API %s composes behavior %s, but behaviors compose on DB types: a DB type that composes one is an engine type, whose instances the engine keeps, and an API reaches it through its DB service (D58)", typeName, schema.Name, behavior)
 	}
-	for _, gen := range enabled {
-		if !gen.RendersBehaviors {
-			return fmt.Errorf("generator: %s does not render behaviors yet: type %s composes behavior %s", gen.Name, typeName, behavior)
+	if typeName, behavior, found := findTypeBehavior(schema); found {
+		for _, gen := range enabled {
+			if !gen.RendersBehaviors {
+				return fmt.Errorf("generator: %s does not render behaviors yet: type %s composes behavior %s", gen.Name, typeName, behavior)
+			}
+		}
+	}
+	if typeName, use, found := schema.FindTableBehavior(); found {
+		for _, gen := range enabled {
+			if !gen.RendersFieldBehaviors {
+				return fmt.Errorf("generator: %s does not render behaviors yet: type %s %s (D103)", gen.Name, typeName, tableUse(use))
+			}
 		}
 	}
 	return nil
+}
+
+// tableUse says how a table composes the use, for a refusal: "composes
+// behavior Workflow on its field status", "implements behavior Timers".
+func tableUse(use ir.BehaviorRef) string {
+	if use.FieldAnchored() {
+		return fmt.Sprintf("composes behavior %s on its field %s", use.Name, use.Field)
+	}
+	return "implements behavior " + use.Name
+}
+
+// findTypeBehavior returns the first type, in name order over Types and
+// then Inputs, that composes a behavior on the type (D16), with the name
+// of its first such behavior.
+func findTypeBehavior(schema *ir.Schema) (typeName, behavior string, found bool) {
+	for _, types := range []map[string]*ir.TypeDef{schema.Types, schema.Inputs} {
+		names := make([]string, 0, len(types))
+		for name := range types {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			if uses := types[name].TypeBehaviors(); len(uses) > 0 {
+				return types[name].Name, uses[0].Name, true
+			}
+		}
+	}
+	return "", "", false
 }
 
 // hasEngineTypes reports whether the schema's kind keeps its structs in
@@ -276,15 +321,20 @@ func (r run) refuseEngineTypes() error {
 }
 
 // refuseImportedEngineTypes fails, before any generator runs, when the
-// schema uses a type of a DB service that composes a behavior, an engine
-// type, and an enabled generator does not render behaviors: the API
-// generators do not serve an engine type yet (D58). A type is used when
-// the schema imports it or a type of the schema projects it (@source).
-// The error names the first such generator. A dependency the build cannot
-// load is left to the generators, which report it.
+// schema uses a type of a DB service that composes a behavior and an
+// enabled generator does not render it: an engine type, which composes
+// one on the type, for a generator without RendersBehaviors, since the API
+// generators do not serve an engine type yet (D58); a table whose fields
+// are behaviors, for a generator without RendersFieldBehaviors (an
+// extension's: api and sdks render it, D103), which would write the fields
+// the behaviors own as any field. A type is used when the schema imports
+// it or a type of the schema projects it (@source). The error names the
+// first such generator. A dependency the build cannot load is left to the
+// generators, which report it.
 func (r run) refuseImportedEngineTypes(enabled []registry.GeneratorSpec) error {
-	i := slices.IndexFunc(enabled, func(gen registry.GeneratorSpec) bool { return !gen.RendersBehaviors })
-	if i < 0 {
+	engine := slices.IndexFunc(enabled, func(gen registry.GeneratorSpec) bool { return !gen.RendersBehaviors })
+	fields := slices.IndexFunc(enabled, func(gen registry.GeneratorSpec) bool { return !gen.RendersFieldBehaviors })
+	if engine < 0 && fields < 0 {
 		return nil
 	}
 	used := usedDependencyTypes(r.Schema)
@@ -295,8 +345,18 @@ func (r run) refuseImportedEngineTypes(enabled []registry.GeneratorSpec) error {
 	if err != nil {
 		return nil
 	}
-	if use, found := findEngineType(used, deps); found {
-		return fmt.Errorf("generator: %s does not render engine types yet: %s %s, which composes behavior %s (D58)", enabled[i].Name, use.how, use.qualified(), use.behavior)
+	if engine >= 0 {
+		if use, found := findEngineType(used, deps); found {
+			return fmt.Errorf("generator: %s does not render engine types yet: %s %s, which composes behavior %s (D58)", enabled[engine].Name, use.how, use.qualified(), use.behavior)
+		}
+	}
+	if fields >= 0 {
+		if use, found := findFieldBehaviorType(used, deps); found {
+			if use.field == "" {
+				return fmt.Errorf("generator: %s does not render behaviors yet: %s %s, which implements behavior %s (D103)", enabled[fields].Name, use.how, use.qualified(), use.behavior)
+			}
+			return fmt.Errorf("generator: %s does not render behaviors yet: %s %s, which composes behavior %s on its field %s (D103)", enabled[fields].Name, use.how, use.qualified(), use.behavior, use.field)
+		}
 	}
 	return nil
 }
@@ -307,6 +367,9 @@ type dependencyTypeUse struct {
 	// how says how the schema uses it, for a message.
 	how      string
 	behavior string
+	// field is the field the behavior is anchored on, for a table whose
+	// fields are behaviors (D103).
+	field string
 }
 
 func (u dependencyTypeUse) qualified() string { return u.service + "." + u.typeName }
@@ -354,7 +417,24 @@ func findEngineType(used []dependencyTypeUse, deps map[string]*ir.Schema) (depen
 			continue
 		}
 		if td := dep.Types[use.typeName]; codegen.IsEngineType(td) {
-			use.behavior = td.Behaviors[0].Name
+			use.behavior = td.TypeBehaviors()[0].Name
+			return use, true
+		}
+	}
+	return dependencyTypeUse{}, false
+}
+
+// findFieldBehaviorType returns the first of used that is a table of a DB
+// service among deps that composes behaviors as a table, by implements or
+// on its fields (D103).
+func findFieldBehaviorType(used []dependencyTypeUse, deps map[string]*ir.Schema) (dependencyTypeUse, bool) {
+	for _, use := range used {
+		dep := deps[use.service]
+		if dep == nil || dep.Kind != ir.SchemaKindDB {
+			continue
+		}
+		if uses := dep.Types[use.typeName].TableBehaviors(); len(uses) > 0 {
+			use.behavior, use.field = uses[0].Name, uses[0].Field
 			return use, true
 		}
 	}

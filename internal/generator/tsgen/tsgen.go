@@ -21,6 +21,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/behaviortypes"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -104,6 +105,10 @@ type FieldInfo struct {
 	ScalarInfo       *ScalarInfo
 	Validations      []codegen.ValidationRule
 
+	// Digits are the field's digit rules (D84), which its validator checks
+	// on each value after the field's other checks; nil without any.
+	Digits *codegen.DigitRules
+
 	// IsArrayOfArrays marks T[][]: IsArray is also set, TSType is T[][] and
 	// Type is the innermost element type. Validators check every innermost
 	// element, list bounds apply to the outer list, and an inner list must
@@ -138,6 +143,11 @@ type TypeInfo struct {
 	// key and validates nested object fields, and parse<Type>FromJSON runs
 	// the strict JSON parser.
 	StrictJSON bool
+
+	// AllowUnknownFields is set by @allowUnknownFields (D87): every parser
+	// of the type drops the keys it does not declare, where parse<Type>Json
+	// would refuse them.
+	AllowUnknownFields bool
 
 	// HasDefaults is true when at least one field has a usable
 	// DefaultLiteral. Templates use this flag to decide whether to emit a
@@ -288,6 +298,12 @@ type ModuleOutput struct {
 	// left out, with why.
 	Queues []QueueInfo
 
+	// ORM is the schema's repositories (D79), which orm.ts writes and
+	// package.json exports as "./orm", nil for a schema with no table or a
+	// database that lists no postgres dialect. With one, the package
+	// depends on the HTTP runtime, whose ormOf runs them.
+	ORM *ORMInfo
+
 	// Naming supplies the scalar package name the templates import from
 	// and the scalar JSDoc tag types.ts writes above scalar fields.
 	Naming naming.Naming
@@ -423,6 +439,15 @@ type Options struct {
 	// (D53, amended).
 	SQLite bool
 
+	// NoPostgres is whether the DB service lists no postgres dialect: its
+	// package then writes no orm.ts, whose repositories run on Postgres
+	// alone (D79).
+	NoPostgres bool
+
+	// Actor is the DB service's system actor and whether an update needs
+	// an acting user (D87), which orm.ts's definition carries.
+	Actor sqlutil.Actor
+
 	// Clock stamps the generated output.
 	Clock codegen.Clock
 }
@@ -523,6 +548,14 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	}
 	if output.Queues, err = TypeScriptQueues(schema, opts.SQLite); err != nil {
 		return nil, err
+	}
+	if !opts.NoPostgres {
+		// A projection's row is the ORM's type alone (D90): its fields'
+		// types are written as a table's are, and no ./types entry holds it.
+		projections := convertTypes(codegen.ExtractTypes(schema, codegenScalars, extraction, ir.RoleProjection), output.Scalars, enumLookup, unionNames)
+		if output.ORM, err = typeScriptORM(schema, opts, output, projections); err != nil {
+			return nil, err
+		}
 	}
 
 	return output, nil
@@ -706,13 +739,14 @@ func convertTypes(codegenTypes []codegen.TypeInfo, scalars []ScalarInfo, enumLoo
 			}
 		}
 		types[i] = TypeInfo{
-			Name:        t.Name,
-			Owner:       t.Owner,
-			Role:        t.Role,
-			Doc:         t.Doc(),
-			Fields:      fields,
-			StrictJSON:  t.StrictJSON,
-			HasDefaults: hasDefaults,
+			Name:               t.Name,
+			Owner:              t.Owner,
+			Role:               t.Role,
+			Doc:                t.Doc(),
+			Fields:             fields,
+			StrictJSON:         t.StrictJSON,
+			AllowUnknownFields: t.AllowUnknownFields,
+			HasDefaults:        hasDefaults,
 		}
 	}
 	return types
@@ -742,6 +776,7 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 			Doc:              f.Doc(),
 			ScalarInfo:       scalarInfo,
 			Validations:      f.Validations,
+			Digits:           f.Digits,
 			IsUnion:          !f.IsScalar && (f.IsUnion || unionNames[f.Type]),
 		}
 

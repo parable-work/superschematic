@@ -191,10 +191,12 @@ type typeScriptEnvConfig struct {
 	HasDatabaseConnection bool
 	HasService            bool
 	HasBucket             bool
+	HasMemoryStore        bool
 	Callers               string
 	CallersLiteral        string
-	// Background is true for an API with a callers field and a job or a
-	// worker: loadEnvConfig and loadBackgroundEnvConfig, which leaves the
+	// Background is true for an API with a callers field and a job, a
+	// worker or a deriver: loadEnvConfig and loadBackgroundEnvConfig,
+	// which leaves the
 	// callers field without issuers, share readEnvConfig, which reads it
 	// or not (D65).
 	Background bool
@@ -216,9 +218,10 @@ type typeScriptDerivedField struct {
 // derives for it and its callers field, and loadEnvConfig, which reads
 // them all from the environment through the HTTP runtime's stackconfig
 // readers (D51; docs/stack-model.md, sections 3.4 and 8.6). Deps holds it.
-// An API with a callers field and a job or a worker gets
+// An API with a callers field and a job, a worker or a deriver gets
 // loadBackgroundEnvConfig too, which their entrypoints call: a stack gives
-// neither a callers field, so it leaves the field without issuers (D65).
+// none of them a callers field, so it leaves the field without issuers
+// (D65, D74).
 func WriteTypeScriptEnvConfig(output *ConfigOutput, apiDir string) error {
 	n := output.Naming.OrDefault()
 	view := typeScriptEnvConfig{
@@ -253,6 +256,14 @@ func WriteTypeScriptEnvConfig(output *ConfigOutput, apiDir string) error {
 			derived.Reader, derived.Type = "loadBucket", "BucketConnection"
 			derived.Doc = fmt.Sprintf("How the server reaches %s, a bucket the API lists. It is read from %s_*.", field.Service, field.Key)
 			view.HasBucket = true
+		case ir.EdgeMemoryStore:
+			uses := "lists"
+			if field.From == "rateLimitStore" {
+				uses = "counts its rate limits in"
+			}
+			derived.Reader, derived.Type = "loadMemoryStore", "MemoryStoreConnection | null"
+			derived.Doc = fmt.Sprintf("How the server reaches %s, a memory store the API %s (D75). It is read from %s_*; null when none of them is set, a disabled store.", field.Service, uses, field.Key)
+			view.HasMemoryStore = true
 		default:
 			derived.Reader, derived.Type = "loadService", "Service"
 			derived.Doc = fmt.Sprintf("The endpoint of %s, which the API calls. It is read from %s_*.", field.Service, field.Key)

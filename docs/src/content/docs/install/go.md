@@ -14,7 +14,7 @@ and a Go SDK. The build refuses the config without it.
 
 ## Requirements
 
-- Go 1.26.4 (`GOTOOLCHAIN=go1.26.4`).
+- Go 1.27.3 (`GOTOOLCHAIN=go1.27.3`).
 - `CGO_ENABLED=1` and a C compiler. The compiler links
   [superscalar](https://github.com/parable-work/superscalar) through cgo
   against a static archive.
@@ -58,7 +58,7 @@ binary for linux and darwin on x64 and arm64, as
 `darwin-x64`, `darwin-arm64`). Until then, build it from a checkout:
 
 ```
-export GOTOOLCHAIN=go1.26.4
+export GOTOOLCHAIN=go1.27.3
 eval "$(scripts/superscalar-dep.sh --export)"
 cd cmd/superschematic
 go build -trimpath -buildvcs=false -o ../../bin/superschematic .
@@ -67,6 +67,14 @@ go build -trimpath -buildvcs=false -o ../../bin/superschematic .
 `make setup && make build` does the same. The binary links superscalar's
 static archive, so it runs without `CGO_LDFLAGS`; compiling the Go code it
 generates still needs them (above).
+
+`make cli` builds the binary, and the migration runner beside it, with no
+Rust toolchain: where `cargo` is missing, `scripts/superscalar-dep.sh`
+downloads superscalar's archive prebuilt, checks it against the digest
+the checkout pins, and stages it where the build expects it (D82;
+[a TypeScript project without Rust](/superschematic/install/typescript/#a-typescript-project-without-rust)).
+`scripts/versiongraph-archive.sh` does the same for the version-graph
+core's archive.
 
 ## Write a schema
 
@@ -326,7 +334,8 @@ failed` with `enum` at its path beside the other rules the body breaks, as
 the TypeScript and Rust servers, which validate before they decode, answer
 it: the route reads the body again with each such string replaced by one
 of the enum's values (`bodyargs.DecodeRefusal`). The `data` part of a
-multipart input is answered the same way. Any other body the type's
+multipart input is answered the same way, once its files pass their
+fields' checks ([Files](/superschematic/guides/api-routes/#files)). Any other body the type's
 decoder refuses, a value of the wrong JSON type among them, is `does not
 match the declared type`. A top-level key the type does not declare is
 refused, `unknown` at its key:

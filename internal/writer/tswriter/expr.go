@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
@@ -139,6 +140,13 @@ func (e *emitter) fieldTypeExpr(fd *ir.FieldDef, owner string, kind fieldKind) s
 	}
 
 	expr := e.refersTo(e.renderTypeName(fd.TypeRef.Name, owner), fd.References, owner)
+	if fd.FileUpload != nil {
+		// FileUpload<C> (D81) is the string field it marks.
+		if fd.TypeRef != (ir.TypeRef{Name: "string"}) {
+			e.failf("%s: a FileUpload on a field that is not a single string has no TypeScript authoring form", owner)
+		}
+		expr = e.fileUploadExpr(fd.FileUpload)
+	}
 
 	if fd.Default != nil {
 		expr = fmt.Sprintf("%s<%s, %s>", e.use("Default"), expr, e.defaultLiteral(fd, owner))
@@ -146,7 +154,14 @@ func (e *emitter) fieldTypeExpr(fd *ir.FieldDef, owner string, kind fieldKind) s
 	if cfg := validateConfigExpr(fd); cfg != "" {
 		expr = fmt.Sprintf("%s<%s, %s>", e.use("Validate"), expr, cfg)
 	}
-	if fd.Secret {
+	switch {
+	case fd.EncryptedAtRest:
+		// Encrypted<T> implies Secret<T> (D85). The name is @superschematic/db's;
+		// @superschematic/api's Encrypted, an operation set's base, never
+		// meets it in one file.
+		e.importSymbol(naming.Active().Specifier("@superschematic/db"), "Encrypted")
+		expr = fmt.Sprintf("Encrypted<%s>", expr)
+	case fd.Secret:
 		expr = fmt.Sprintf("%s<%s>", e.use("Secret"), expr)
 	}
 
@@ -329,6 +344,10 @@ func (e *emitter) defaultLiteral(fd *ir.FieldDef, owner string) string {
 	case "string":
 		return quote(value)
 	}
+	// "now" on a date or time is the time of the insert (D88).
+	if !fd.TypeRef.IsArray && !fd.TypeRef.IsMap && codegen.IsDefaultNow(base, fd.Default) {
+		return quote(value)
+	}
 
 	e.failf("%s: a default on type %q has no TypeScript authoring form (Default's value must be a literal of the base type)", owner, base)
 	return quote(value)
@@ -376,6 +395,15 @@ func validateConfigExpr(fd *ir.FieldDef) string {
 	}
 	if fd.ValidatePattern != "" {
 		add("pattern", quote(fd.ValidatePattern))
+	}
+	if fd.ValidatePrecision != nil {
+		add("precision", strconv.Itoa(*fd.ValidatePrecision))
+	}
+	if fd.ValidateScale != nil {
+		add("scale", strconv.Itoa(*fd.ValidateScale))
+	}
+	if fd.ValidateDimensions != nil {
+		add("dimensions", strconv.Itoa(*fd.ValidateDimensions))
 	}
 	if len(parts) == 0 {
 		return ""

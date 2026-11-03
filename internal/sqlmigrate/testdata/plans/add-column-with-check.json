@@ -1,0 +1,41 @@
+{
+  "dialect": "postgres",
+  "from": "c6787cdef058267033f38e38e6c4e788b8fc54fcc00776b78d8b4db345c93d96",
+  "hash": "c98eb75bdada80089212fbd8af19be3c035938e2a7995d2b559313d97fc99331",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "addColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" ADD COLUMN status TEXT"
+      ],
+      "subject": "table/order/column/status",
+      "transactional": true
+    },
+    {
+      "index": 2,
+      "op": "addCheck",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" ADD CONSTRAINT ck_order_status CHECK (status IN ('placed', 'shipped')) NOT VALID"
+      ],
+      "subject": "table/order/constraint/ck_order_status",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "validateCheck",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"order\" VALIDATE CONSTRAINT ck_order_status"
+      ],
+      "subject": "table/order/constraint/ck_order_status",
+      "transactional": true
+    }
+  ],
+  "to": "ae5c744ddcfe8cceb624d759c560efadcc3ee006d350e2eddd692c0a67e14675",
+  "toModel": null,
+  "version": 1
+}

@@ -136,6 +136,14 @@ pub async fn can_account_admin_get_user(cx: &Cx) -> Result<Option<Principal>, Ap
     crate::admit(cx, &operations::ACCOUNT_ADMIN_GET_USER).await
 }
 
+/// Admits the caller of account-admin.approveUser as its route does: 401 without one, 403
+/// without one of identity.users.write. The caller, for the implementation.
+/// It has no in-process call: the identity runtime serves it, as one of the
+/// user model's operations (D50).
+pub async fn can_account_admin_approve_user(cx: &Cx) -> Result<Option<Principal>, ApiError> {
+    crate::admit(cx, &operations::ACCOUNT_ADMIN_APPROVE_USER).await
+}
+
 /// Admits the caller of account-admin.disableUser as its route does: 401 without one, 403
 /// without one of identity.users.write. The caller, for the implementation.
 /// It has no in-process call: the identity runtime serves it, as one of the

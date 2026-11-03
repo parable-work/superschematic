@@ -125,6 +125,10 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     router = router.route("/api/auth/admin/users/{id}", route);
     let route = RouteControls::new()
         .authorize(Arc::clone(&authenticator), &[])
+        .apply(identity_handler(&identity_service, identity::OP_APPROVE_USER));
+    router = router.route("/api/auth/admin/users/{id}/approve", route);
+    let route = RouteControls::new()
+        .authorize(Arc::clone(&authenticator), &[])
         .apply(identity_handler(&identity_service, identity::OP_DISABLE_USER));
     router = router.route("/api/auth/admin/users/{id}/disable", route);
     let route = RouteControls::new()

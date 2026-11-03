@@ -14,6 +14,19 @@ import (
 	types "{{ .TypesModule }}"
 )
 
+{{ if .HasFileDownloads -}}
+// FileDownload is what an implementation returns for a FileDownload result
+// (D81): the file's body, its filename, and headers beside it.
+type FileDownload = runtimeresponse.FileDownload
+
+// RespondFileDownload answers a FileDownload result: the file with
+// contentType and the Content-Disposition of its filename, or
+// defaultFilename when it names none.
+func RespondFileDownload(w http.ResponseWriter, r *http.Request, contentType, defaultFilename string, file *FileDownload) {
+	runtimeresponse.File(w, r, contentType, defaultFilename, file)
+}
+
+{{ end -}}
 // RespondJSON sends a bare JSON response (used for non-enveloped endpoints like health checks).
 func RespondJSON(w http.ResponseWriter, status int, data interface{}) {
 	runtimeresponse.JSON(w, status, data)

@@ -45,6 +45,7 @@ CREATE TABLE "user_credential" (
   "password_hash" TEXT NOT NULL,
   "password_changed_at" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
   "disabled_at" TEXT,
+  "pending_at" TEXT,
   PRIMARY KEY ("id"),
   FOREIGN KEY ("user_id") REFERENCES "user" ("id") ON DELETE CASCADE
 );

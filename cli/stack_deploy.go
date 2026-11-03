@@ -148,6 +148,23 @@ type deployContext struct {
 	prepared *stackdeploy.Prepared
 }
 
+// checkAppExtensions refuses, as the stack's build does (D78), a stack
+// with an app that needs an extension this binary does not link: a
+// command that builds its deployables' images, stack build, deploy and
+// prepare, would build the app's from an entrypoint this binary never
+// wrote, or from a stale one an earlier build left.
+func checkAppExtensions(reg *registry.Registry, st *ir.Stack, services []stack.Service) error {
+	apps, err := stack.Apps(stack.Input{Stack: st, Services: services})
+	if err != nil {
+		return err
+	}
+	var linked []string
+	if reg != nil {
+		linked = reg.Extensions()
+	}
+	return stack.CheckAppExtensions(apps, linked)
+}
+
 func (c *deployContext) close() {
 	for i := len(c.cleanup) - 1; i >= 0; i-- {
 		c.cleanup[i]()
@@ -794,7 +811,9 @@ It prints each image as a stack deploy --image flag, each site's files as
 a --site flag and each bundle as a --bundle flag; --format json prints the
 result, and --out writes it to a file. --deployable builds the servers,
 jobs and sites it names only, and --force builds one whose context or
-files did not change. A build writes no deploy manifest.`,
+files did not change. A build writes no deploy manifest. A stack with an
+app that needs an extension this binary does not link is refused, as
+build-all refuses it: run the binary that links it (D78).`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if format != "text" && format != "json" {
@@ -809,6 +828,9 @@ files did not change. A build writes no deploy manifest.`,
 				return err
 			}
 			defer c.close()
+			if err := checkAppExtensions(c.reg, c.stack, c.services); err != nil {
+				return err
+			}
 			src, err := c.sources()
 			if err != nil {
 				return err
@@ -897,7 +919,9 @@ site back. A server, job or worker whose platform runs a bundle builds
 with bun bundle.ts in its package, and its files are kept under their
 digest when they are new; --bundle runs a bundle a deploy or a build
 published before, fetched from the target, which rolls it back (D64). The
-builds run before anything changes. --no-build builds nothing. Every secret needs a value before the first step after
+builds run before anything changes. --no-build builds nothing. A stack
+with an app that needs an extension this binary does not link is refused
+unless --no-build, as build-all refuses it (D78). Every secret needs a value before the first step after
 infrastructure; at a terminal, deploy asks for each one missing. A
 migration hazard of a --fail-on class stops the deploy unless --allow
 names it, and --expect refuses migration plans other than the ones stack
@@ -958,6 +982,9 @@ removes.`,
 			}
 			var src *stackdeploy.Sources
 			if !noBuild {
+				if err := checkAppExtensions(c.reg, c.stack, c.services); err != nil {
+					return err
+				}
 				if src, err = c.sources(); err != nil {
 					return err
 				}

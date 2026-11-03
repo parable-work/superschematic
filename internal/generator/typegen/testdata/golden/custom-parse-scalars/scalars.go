@@ -33,6 +33,40 @@ func ParseFinanceMoney(s string) (FinanceMoney, error) {
 	return FinanceMoney(parsed), nil
 }
 
+// Finance.SignedMoney - Signed monetary amount in smallest currency unit (e.g., cents for USD)
+type FinanceSignedMoney = scalars.FinanceSignedMoney
+
+// ParseFinanceSignedMoney parses a string and returns a Finance.SignedMoney scalar.
+func ParseFinanceSignedMoney(s string) (FinanceSignedMoney, error) {
+	canonical, err := scalars.ParseFinanceSignedMoney(s)
+	if err != nil {
+		var zero FinanceSignedMoney
+		return zero, err
+	}
+	parsed, err := strconv.ParseInt(canonical, 10, 64)
+	if err != nil {
+		var zero FinanceSignedMoney
+		return zero, err
+	}
+	return FinanceSignedMoney(parsed), nil
+}
+
+// Generic.Decimal - Exact decimal number in plain notation, carried as a string
+type GenericDecimal = scalars.GenericDecimal
+
+// GenericDecimalPattern is the validation pattern for Generic.Decimal.
+var GenericDecimalPattern = scalars.GenericDecimalPattern
+
+// ParseGenericDecimal parses a string and returns a Generic.Decimal scalar.
+func ParseGenericDecimal(s string) (GenericDecimal, error) {
+	parsed, err := scalars.ParseGenericDecimal(s)
+	if err != nil {
+		var zero GenericDecimal
+		return zero, err
+	}
+	return GenericDecimal(parsed), nil
+}
+
 // Generic.Int64 - Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.
 type GenericInt64 = scalars.GenericInt64
 

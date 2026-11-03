@@ -14,17 +14,78 @@ APIs.
 {{- if .Database }}
     db: {{ .Database.Var }},
 {{- end }}
+{{- if .ORM }}
+    orm: {{ .Database.ORM }}({{ .Database.Var }}{{ if .ORMFieldKeys }}, { fieldKeys: {{ .ORMFieldKeys }} }{{ end }}),
+{{- end }}
 {{- range .Calls }}
     {{ .Field }}: {{ .Client.Var }},
 {{- end }}
 {{- range .Buckets }}
     {{ .Field }}: {{ .Bucket.Var }},
 {{- end }}
+{{- range .MemoryStores }}
+    {{ .Field }}: {{ .Store.Var }},
+{{- end }}
 {{- if .Engine }}
     engine: {{ .Engine.Var }}.background,
 {{- end }}
     logger: logger.child({ api: {{ tsQuote .Service }} }),
   };
+{{- end }}
+
+{{- define "ts-orm-imports" -}}
+{{- range .Databases }}
+{{- if .ORM }}
+import { createOrm as {{ .ORM }} } from '{{ .ORMModule }}';
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- define "ts-memory-stores" }}
+{{- if .MemoryStores }}
+
+  // One memory store per store, shared by every API that lists it (D75):
+  // on Redis, or disabled when its field is unset. Opening never waits for a
+  // store that is down, which reconnects in the background, and readiness
+  // never asks for one.
+{{- range .MemoryStores }}
+  const {{ .Var }} = await openMemoryStore({{ tsQuote .Service }}, {{ tsQuote .Field }}, {{ .From }});
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- define "ts-workers-memory-stores" }}
+{{- if .MemoryStores }}
+
+  // One memory store per store, disabled: a Worker reaches no memory store,
+  // so every call takes its fallback path (D75).
+{{- range .MemoryStores }}
+  const {{ .Var }} = disabledMemoryStore({{ tsQuote .Service }});
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- define "ts-open-memory-store" -}}
+/**
+ * Opens the memory store service from the memory store field named field,
+ * connection (D75): on Redis, through the HTTP runtime's ./redis entry,
+ * which pings it once within a second and otherwise reconnects in the
+ * background. An unset field is a disabled store, and so is a connection
+ * the runtime refuses, which logs one error line: the {{ .Kind }} runs without
+ * the store, and each call takes its fallback path.
+ */
+async function openMemoryStore(service: string, field: string, connection: MemoryStoreConnection | null): Promise<MemoryStore> {
+  if (connection === null) {
+    logger.info('memory store disabled: its field is unset', { memoryStore: service, field });
+    return disabledMemoryStore(service);
+  }
+  try {
+    return await openRedisMemoryStore(connection, { logger });
+  } catch (error) {
+    logger.error('memory store refused; running without it', { memoryStore: service, field, error });
+    return disabledMemoryStore(service);
+  }
+}
 {{- end }}
 
 {{- define "ts-configure" -}}
@@ -104,6 +165,29 @@ function openDatabase(service: string, field: string, db: DatabaseConnection): S
   } catch (error) {
     throw new Error(`database ${service}, from ${field}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
+}
+{{- end }}
+
+{{- define "ts-hyperdrive" -}}
+/**
+ * The pool of the database field named field, whose DB service lists
+ * postgres first: over the hyperdrive binding its value names, which the
+ * Worker's platform writes beside the field's variables (D92). It connects
+ * within a scope withHyperdrive runs alone, a request or a firing, and the
+ * scope's end ends its connections. A connection string, a Cloud SQL
+ * configuration and a D1 binding are refused: a Worker reaches a Postgres
+ * database through Hyperdrive alone.
+ */
+function hyperdriveDatabase(service: string, field: string, db: DatabaseConnection): Pool {
+  if (!('hyperdrive' in db)) {
+    const what = 'url' in db ? 'a connection string' : 'cloudSql' in db ? 'a Cloud SQL connector configuration' : 'a D1 binding';
+    throw new Error(
+      `${field} is ${what}, and a Worker reaches database ${service} through a Hyperdrive binding alone: set ${field}_HYPERDRIVE_BINDING and ${field}_HYPERDRIVE_CONFIG`
+    );
+  }
+  return hyperdrivePool(binding(env, db.hyperdrive.binding, 'hyperdrive'), {
+    onIdleError: error => logger.warn('an idle database connection failed', { database: service, error }),
+  });
 }
 {{- end }}
 
@@ -218,6 +302,10 @@ function {{ .Constructor }}(endpoint: Service, fetch: Telemetry['fetch']): {{ .M
 {{- range .Buckets }}
   const {{ .Var }} = openBucket({{ .From }});
 {{- end }}
+{{- end }}
+{{- template "ts-memory-stores" . }}
+{{- range .MemoryStores }}
+  pools.push({ end: () => {{ .Var }}.close() });
 {{- end }}
 {{- end }}
 

@@ -1,6 +1,7 @@
 # The Topcoat extension's API over an engine database (D58): its crate
 # opens fixture-engine-db's engine in-process on SQLite and mounts it at
-# /engine, behind the API's authenticator.
+# /engine, behind the API's authenticator. Its notes are a resource the
+# pages list, and its pages are on, beside the engine's.
 name: fixture-engine-api
 kind: API
 dependencies:
@@ -9,3 +10,6 @@ outputs:
   types:
     rust: { enabled: true }
   api: { enabled: true, language: RUST }
+  topcoat:
+    enabled: true
+    pages: { enabled: true }

@@ -146,6 +146,17 @@ const schemaConfigJSON = `{
 // rule checks only a value of its own JSON type, so a mistyped value is one
 // "type" error.
 //
+// DigitMatrix holds the digit rules (D84): a Generic.Decimal's precision
+// and scale and an Embedding.Vector's dimensions, on a single value and
+// every element of a list, and Finance.SignedMoney, an integer either side
+// of zero. A decimal's digits count on its canonical form: no sign, no
+// leading zero before the point (0 holds none) and no trailing zero after
+// it. More before the point than precision less scale is "precision", more
+// after it than scale is "scale", and a value may fail both. A vector of
+// another length is "dimensions", the JSON array or the one its JSON text
+// holds. A value the scalar refuses is the scalar's to report, and the
+// digit rules do not count it.
+//
 // PatternMatrix holds field patterns that match one character at a time
 // (".", "\W", a negated class with a count), on a builtin string, a list,
 // a list of lists and a string scalar. A pattern matches code points in
@@ -202,6 +213,14 @@ const parityMatrixSchemaJSON = `{
     "Temporal.Duration": {
       "name": "Temporal.Duration",
       "languagePrimitive": "string"
+    },
+    "Generic.Decimal": {
+      "name": "Generic.Decimal",
+      "languagePrimitive": "string"
+    },
+    "Finance.SignedMoney": {
+      "name": "Finance.SignedMoney",
+      "languagePrimitive": "number"
     }
   },
   "enums": {
@@ -479,6 +498,51 @@ const parityMatrixSchemaJSON = `{
         {
           "name": "locList",
           "typeRef": { "name": "Geo.Location", "isArray": true }
+        }
+      ]
+    },
+    "DigitMatrix": {
+      "name": "DigitMatrix",
+      "role": "EmbeddedStruct",
+      "jsonField": true,
+      "fields": [
+        {
+          "name": "reqDec",
+          "typeRef": { "name": "Generic.Decimal" },
+          "required": true,
+          "validatePrecision": 5,
+          "validateScale": 2
+        },
+        {
+          "name": "optDec",
+          "typeRef": { "name": "Generic.Decimal" },
+          "validatePrecision": 3
+        },
+        {
+          "name": "decList",
+          "typeRef": { "name": "Generic.Decimal", "isArray": true },
+          "validatePrecision": 4,
+          "validateScale": 1
+        },
+        {
+          "name": "reqDim",
+          "typeRef": { "name": "Embedding.Vector" },
+          "required": true,
+          "validateDimensions": 3
+        },
+        {
+          "name": "optDim",
+          "typeRef": { "name": "Embedding.Vector" },
+          "validateDimensions": 2
+        },
+        {
+          "name": "dimList",
+          "typeRef": { "name": "Embedding.Vector", "isArray": true },
+          "validateDimensions": 2
+        },
+        {
+          "name": "amount",
+          "typeRef": { "name": "Finance.SignedMoney" }
         }
       ]
     },
@@ -1510,6 +1574,80 @@ var vectors = []parityVector{
 		decodeRejects: []string{"go", "python"},
 	},
 
+	// The digit rules (D84) bound a decimal's digits and a vector's length.
+	{
+		name:     "digits_within_bounds",
+		typeName: "DigitMatrix",
+		payload: `{"reqDec": "123.45", "optDec": "-999", "decList": ["0.5", "999.9", "-0"],
+			"reqDim": [0.5, -1, 2], "optDim": [1, 2], "dimList": [[1, 2], [3, 4.5]], "amount": -1250}`,
+		want: map[string][]string{},
+	},
+	{
+		// Digits count on the canonical form: a sign, leading zeros and
+		// trailing fraction zeros hold none, and zero has no digit before
+		// the point.
+		name:     "digits_count_the_canonical_form",
+		typeName: "DigitMatrix",
+		payload:  `{"reqDec": "+000123.4500", "optDec": "0.000", "decList": ["-0.0", "0999.90"], "reqDim": [1, 2, 3]}`,
+		want:     map[string][]string{},
+	},
+	{
+		name:     "digits_too_many_before_the_point",
+		typeName: "DigitMatrix",
+		payload:  `{"reqDec": "1234", "optDec": "-1000", "decList": ["12345", "999.9"], "reqDim": [1, 2, 3]}`,
+		want:     map[string][]string{"reqDec": {"precision"}, "optDec": {"precision"}, "decList[0]": {"precision"}},
+	},
+	{
+		// optDec has a precision alone, so its scale is 0.
+		name:     "digits_too_many_after_the_point",
+		typeName: "DigitMatrix",
+		payload:  `{"reqDec": "1.234", "optDec": "1.5", "decList": ["1.25", "0.1"], "reqDim": [1, 2, 3]}`,
+		want:     map[string][]string{"reqDec": {"scale"}, "optDec": {"scale"}, "decList[0]": {"scale"}},
+	},
+	{
+		name:     "digits_too_many_either_side",
+		typeName: "DigitMatrix",
+		payload:  `{"reqDec": "-1234.567", "reqDim": [1, 2, 3]}`,
+		want:     map[string][]string{"reqDec": {"precision", "scale"}},
+	},
+	{
+		// A value the scalar refuses is its pattern's, and its digits are
+		// not counted.
+		name:     "digits_of_no_decimal",
+		typeName: "DigitMatrix",
+		payload:  `{"reqDec": "1e30", "optDec": "1234.5678", "decList": ["NaN"], "reqDim": [1, 2, 3]}`,
+		want:     map[string][]string{"reqDec": {"pattern"}, "optDec": {"precision", "scale"}, "decList[0]": {"pattern"}},
+	},
+	{
+		name:     "dimensions_of_another_length",
+		typeName: "DigitMatrix",
+		payload:  `{"reqDec": "1", "reqDim": [1, 2], "optDim": [], "dimList": [[1, 2], [1, 2, 3]]}`,
+		want:     map[string][]string{"reqDim": {"dimensions"}, "optDim": {"dimensions"}, "dimList[1]": {"dimensions"}},
+	},
+	{
+		// The JSON text of a vector counts its array. The Go decoder takes
+		// only the array; the Rust validator refuses the payload before
+		// serde, which takes only the array too, can.
+		name:          "dimensions_of_the_json_text",
+		typeName:      "DigitMatrix",
+		payload:       `{"reqDec": "1", "reqDim": "[1, 2]", "optDim": "[1, 2]", "dimList": ["[1]"]}`,
+		want:          map[string][]string{"reqDim": {"dimensions"}, "dimList[0]": {"dimensions"}},
+		decodeRejects: []string{"go"},
+	},
+	{
+		name:     "digits_required_absent",
+		typeName: "DigitMatrix",
+		payload:  `{}`,
+		want:     map[string][]string{"reqDec": {"required"}, "reqDim": {"required"}},
+	},
+	{
+		// Finance.SignedMoney holds -(2^53 - 1) to 2^53 - 1.
+		name:     "signed_money_at_its_bounds",
+		typeName: "DigitMatrix",
+		payload:  `{"reqDec": "1", "reqDim": [1, 2, 3], "amount": -9007199254740991}`,
+		want:     map[string][]string{},
+	},
+
 	// A scalar field's own rules follow the scalar's validation. The
 	// generated TypeScript validator dropped them: {"reqAmount": -1} passed
 	// Validate<Generic.Int64, { min: 0 }> there and failed "min" elsewhere.
@@ -1968,6 +2106,8 @@ func newParityValue(typeName string) parityValidatable {
 		return &LocationMatrix{}
 	case "ScalarRuleMatrix":
 		return &ScalarRuleMatrix{}
+	case "DigitMatrix":
+		return &DigitMatrix{}
 	case "PatternMatrix":
 		return &PatternMatrix{}
 	}
@@ -2037,6 +2177,7 @@ func TestValidationParityDriver(t *testing.T) {
 
 const tsDriver = `import { readFileSync, writeFileSync } from 'node:fs';
 import {
+  validateDigitMatrix,
   validateJsonMatrix,
   validateListMatrix,
   validateLocationMatrix,
@@ -2068,6 +2209,7 @@ const validators: Record<string, (value: never) => true | Errors> = {
   LocationMatrix: validateLocationMatrix as never,
   ScalarRuleMatrix: validateScalarRuleMatrix as never,
   PatternMatrix: validatePatternMatrix as never,
+  DigitMatrix: validateDigitMatrix as never,
 };
 const vectors = JSON.parse(readFileSync(process.env.PARITY_VECTORS as string, 'utf8'));
 const results: Record<string, Record<string, string[]>> = {};
@@ -2124,6 +2266,7 @@ fn check(type_name: &str, payload: Value) -> Verdicts {
         "LocationMatrix" => verdicts(validators::parse_location_matrix(payload, Allow)),
         "ScalarRuleMatrix" => verdicts(validators::parse_scalar_rule_matrix(payload, Allow)),
         "PatternMatrix" => verdicts(validators::parse_pattern_matrix(payload, Allow)),
+        "DigitMatrix" => verdicts(validators::parse_digit_matrix(payload, Allow)),
         other => panic!("unknown type {other}"),
     }
 }

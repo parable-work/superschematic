@@ -22,7 +22,7 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { GenericInt64, IdentityUUID, TemporalDateTime, Priority, Address, Order, OrderPlaced, Ping,  } from '@schemas/fixture-queue-db-types/types';
+import type { GenericInt64, IdentityUUID, TemporalDateTime, Priority, Address, Order, OrderChanged, OrderLine, OrderPlaced, Ping, Product, StockChecked, SyncRequested,  } from '@schemas/fixture-queue-db-types/types';
 
 // Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-queue-db-types';
@@ -107,16 +107,31 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 
 
-### Types (4)
+### Types (9)
 
 
 - **Address** - Where an order ships, kept as JSON wherever it is stored.
 
 - **Order** - An order of the shop.
 
+- **OrderChanged** - Sent when an order's lines change: a newer change replaces the one that
+waits, and the worker handles one order's changes at a time.
+
+- **OrderLine** - A line of an order. Whatever writes it, a change to its product or its
+quantity enqueues the order's OrderChanged, as does a new line or a
+deleted one, once it names a product.
+
 - **OrderPlaced** - Placed when an order is: the worker that fulfils orders handles it.
 
 - **Ping** - Sent when nobody asked for anything in particular.
+
+- **Product** - A product an order's line may name.
+
+- **StockChecked** - Sent when a stock count is asked for: one waits per SKU, and a later ask
+while it waits adds nothing.
+
+- **SyncRequested** - Sent when an account's records are to be synced: every request is kept,
+and the worker syncs one account at a time.
 
 
 

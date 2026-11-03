@@ -1,0 +1,78 @@
+{
+  "token": "gcp:networkconnectivity/serviceConnectionPolicy:ServiceConnectionPolicy",
+  "terraform": {
+    "type": "google_network_connectivity_service_connection_policy",
+    "renames": {
+      "deletionPolicy": "deletion_policy",
+      "pscConfig": "psc_config",
+      "pscConfig.allowedGoogleProducersResourceHierarchyLevels": "allowed_google_producers_resource_hierarchy_level",
+      "pscConfig.producerInstanceLocation": "producer_instance_location",
+      "serviceClass": "service_class"
+    }
+  },
+  "inputProperties": {
+    "deletionPolicy": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "location": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "network": {
+      "type": "string"
+    },
+    "project": {
+      "type": "string"
+    },
+    "pscConfig": {
+      "$ref": "#/types/gcp:networkconnectivity/ServiceConnectionPolicyPscConfig:ServiceConnectionPolicyPscConfig"
+    },
+    "serviceClass": {
+      "type": "string"
+    }
+  },
+  "requiredInputs": [
+    "location",
+    "network",
+    "serviceClass"
+  ],
+  "types": {
+    "gcp:networkconnectivity/ServiceConnectionPolicyPscConfig:ServiceConnectionPolicyPscConfig": {
+      "type": "object",
+      "properties": {
+        "allowedGoogleProducersResourceHierarchyLevels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "limit": {
+          "type": "string"
+        },
+        "producerInstanceLocation": {
+          "type": "string"
+        },
+        "subnetworks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "subnetworks"
+      ]
+    }
+  }
+}

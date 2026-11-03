@@ -184,15 +184,15 @@ func calleeStack() (*ir.Stack, []stack.Service) {
 	stock := ir.ServiceRef{Name: "stock-api", Kind: ir.SchemaKindAPI}
 	orders := ir.ServiceRef{Name: "orders-api", Kind: ir.SchemaKindAPI}
 	return &ir.Stack{
-			Name:         "Callee",
-			Deploy:       []ir.ServiceRef{stock, orders},
-			Environments: []*ir.Environment{{Name: "Dev", Target: "callee"}},
-		}, []stack.Service{
-			{Name: "stock-api", Kind: ir.SchemaKindAPI, Operations: []stack.Operation{{
-				Name: "Stock.reindex", ServiceCallers: &ir.ServiceCallers{Mode: ir.ServiceCallersRequire},
-			}}},
-			{Name: "orders-api", Kind: ir.SchemaKindAPI, Calls: []ir.ServiceRef{stock}, Operations: []stack.Operation{{Name: "Orders.place", UserClause: true}}},
-		}
+		Name:         "Callee",
+		Deploy:       []ir.ServiceRef{stock, orders},
+		Environments: []*ir.Environment{{Name: "Dev", Target: "callee"}},
+	}, []stack.Service{
+		{Name: "stock-api", Kind: ir.SchemaKindAPI, Operations: []stack.Operation{{
+			Name: "Stock.reindex", ServiceCallers: &ir.ServiceCallers{Mode: ir.ServiceCallersRequire},
+		}}},
+		{Name: "orders-api", Kind: ir.SchemaKindAPI, Calls: []ir.ServiceRef{stock}, Operations: []stack.Operation{{Name: "Orders.place", UserClause: true}}},
+	}
 }
 
 // keyIssuer is the entry a key-pair connector gives the callee for the

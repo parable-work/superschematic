@@ -13,6 +13,7 @@ const (
 	dataDependent = HazardDataDependent
 	apiBreaking   = HazardAPIBreaking
 	history       = HazardHistory
+	rawSQL        = HazardRawSQL
 )
 
 // TestHazardClasses checks the hazard classes of each operation: every
@@ -40,6 +41,8 @@ func TestHazardClasses(t *testing.T) {
 		{plan: "retype-column", op: "alterColumnType", phase: Expand, want: []HazardClass{compat, apiBreaking}},
 		{plan: "retype-column-cast", op: "alterColumnType", phase: Expand, want: []HazardClass{blockingClass, compat, dataDependent}},
 		{plan: "retype-column-narrow", op: "alterColumnType", phase: Expand, want: []HazardClass{destructive, blockingClass, compat}},
+		{plan: "retype-text-to-jsonb", op: "alterColumnType", phase: Expand, want: []HazardClass{blockingClass, compat, dataDependent},
+			reason: "Order.shipTo changes from TEXT to JSONB: the cast fails on a value JSONB cannot hold."},
 		{plan: "make-column-required", op: "addNotNullCheck", phase: Contract},
 		{plan: "make-column-required", op: "validateNotNullCheck", phase: Contract, want: []HazardClass{dataDependent}},
 		{plan: "make-column-required", op: "setNotNull", phase: Contract},
@@ -55,6 +58,19 @@ func TestHazardClasses(t *testing.T) {
 		{plan: "rename-table", op: "renameColumn", phase: Expand, want: []HazardClass{compat}},
 		{plan: "rename-table-with-dependents", op: "renameTable", subject: "table/purchase", phase: Expand,
 			want: []HazardClass{compat, apiBreaking}},
+		// A changed @table or @column renames as a --rename does, and says
+		// what it follows (D85).
+		{plan: "rename-table-by-override", op: "renameTable", subject: "table/purchaseOrder", phase: Expand,
+			want: []HazardClass{compat, apiBreaking}, reason: "Table order is renamed to purchaseOrder, following Order's @table"},
+		{plan: "rename-table-by-override", op: "renameColumn", phase: Expand, want: []HazardClass{compat}, reason: "following Order's @table"},
+		{plan: "rename-column-by-override", op: "renameColumn", subject: "table/customer/column/emailAddress", phase: Expand,
+			want: []HazardClass{compat}, reason: "customer.email is renamed to customer.emailAddress, following Customer.email's @column"},
+		{plan: "rename-column-by-override", op: "renameColumn", subject: "table/order/column/customerId", phase: Expand,
+			want: []HazardClass{compat}, reason: "following Order.customer's @column"},
+		{plan: "rename-column-by-override", op: "renameConstraint", phase: Expand},
+		{plan: "rename-versioned-table-by-override", op: "renameColumn", subject: "table/purchaseOrder/column/orderNote", phase: Expand,
+			want: []HazardClass{compat, history}},
+		{plan: "rename-versioned-table-by-override", op: "renameFunction", phase: Expand},
 		{plan: "rename-versioned-table", op: "renameFunction", phase: Expand},
 		{plan: "rename-versioned-table", op: "renameTrigger", phase: Expand},
 		{plan: "rename-versioned-table", op: "replaceFunction", phase: Expand},
@@ -71,6 +87,7 @@ func TestHazardClasses(t *testing.T) {
 		{plan: "relation-on-existing-column", op: "addForeignKey", phase: Contract},
 		{plan: "relation-on-existing-column", op: "validateForeignKey", phase: Contract, want: []HazardClass{dataDependent}},
 		{plan: "change-on-delete", op: "replaceForeignKey", phase: Contract},
+		{plan: "change-on-delete-to-set-null", op: "replaceForeignKey", phase: Contract},
 		{plan: "drop-relation", op: "dropForeignKey", phase: Contract},
 		{plan: "add-join-table", op: "createTable", phase: Expand},
 		{plan: "drop-join-table", op: "dropTable", phase: Contract, want: []HazardClass{destructive}},
@@ -96,6 +113,66 @@ func TestHazardClasses(t *testing.T) {
 		{plan: "optimistic-off", op: "dropTrigger", phase: Contract},
 		{plan: "optimistic-to-versioned", op: "seedHistory", phase: Expand, want: []HazardClass{blockingClass}},
 		{plan: "versioned-to-optimistic", op: "replaceTrigger", phase: Contract},
+
+		{plan: "add-default", op: "setDefault", phase: Expand},
+		{plan: "drop-default", op: "dropDefault", phase: Contract},
+		{plan: "add-enum-check", op: "addCheck", phase: Contract},
+		{plan: "add-enum-check", op: "validateCheck", phase: Contract, want: []HazardClass{dataDependent},
+			reason: "Order.status gets a CHECK in the database: validating ck_order_status fails when a row of order holds a value other than 'placed', 'shipped'."},
+		{plan: "add-column-with-check", op: "addColumn", phase: Expand},
+		{plan: "add-column-with-check", op: "addCheck", phase: Expand},
+		{plan: "add-column-with-check", op: "validateCheck", phase: Expand},
+		{plan: "widen-enum-check", op: "replaceCheck", phase: Expand},
+		{plan: "widen-enum-check", op: "validateCheck", phase: Expand},
+		{plan: "narrow-enum-check", op: "replaceCheck", phase: Contract},
+		{plan: "narrow-enum-check", op: "validateCheck", phase: Contract, want: []HazardClass{dataDependent}, reason: "holds 'cancelled'"},
+		{plan: "change-validate-check", op: "dropCheck", phase: Expand},
+		{plan: "change-validate-check", op: "addCheck", phase: Contract},
+		{plan: "change-validate-check", op: "validateCheck", phase: Contract, want: []HazardClass{dataDependent}, reason: "longer than 50 characters"},
+		{plan: "drop-validate-check", op: "dropCheck", phase: Expand},
+		{plan: "drop-checked-column", op: "dropColumn", phase: Contract, want: []HazardClass{destructive}},
+
+		{plan: "add-expression-index", op: "createIndex", phase: Expand},
+		{plan: "add-index-in-transaction", op: "createIndex", phase: Expand, want: []HazardClass{blockingClass}, reason: "concurrently: false"},
+		{plan: "add-partial-brin-index", op: "createIndex", phase: Expand},
+		{plan: "add-opclass-index", op: "createIndex", phase: Expand},
+
+		{plan: "add-raw-sql", op: "runRawSQL", phase: Expand, want: []HazardClass{rawSQL}, reason: "runs for the first time"},
+		{plan: "change-raw-sql", op: "runRawSQL", phase: Expand, want: []HazardClass{rawSQL}, reason: "changed: the step runs its statements again"},
+		{plan: "drop-raw-sql", op: "undoRawSQL", phase: Contract, want: []HazardClass{rawSQL}, reason: "the step runs its down"},
+		{plan: "drop-raw-sql-without-down", op: "undoRawSQL", subject: "rawSql/order_code_lower", phase: Contract, want: []HazardClass{rawSQL},
+			reason: "has no down: nothing undoes what it made"},
+
+		{plan: "add-queue-key", op: "createIndex", subject: "table/order_shipped_queue/index/uq_order_shipped_queue_ready_key", phase: Expand,
+			want: []HazardClass{destructive, compat, dataDependent}, reason: "but one per order_id, the latest enqueued, which replace keeps"},
+		{plan: "add-queue-key", op: "createIndex", subject: "table/order_shipped_queue/index/uq_order_shipped_queue_claimed_key", phase: Expand,
+			want: []HazardClass{dataDependent}, reason: "while two claims hold one order_id"},
+		{plan: "change-queue-key", op: "createIndex", phase: Expand},
+		{plan: "change-queue-key", op: "dropIndex", phase: Contract},
+		{plan: "add-enqueue-on-change", op: "createFunction", phase: Expand},
+		{plan: "add-enqueue-on-change", op: "createTrigger", phase: Expand},
+		{plan: "change-enqueue-on-change", op: "replaceFunction", phase: Expand},
+		{plan: "change-enqueue-on-change", op: "replaceTrigger", phase: Expand},
+		{plan: "drop-enqueue-on-change", op: "dropTrigger", phase: Contract},
+		{plan: "drop-enqueue-on-change", op: "dropFunction", phase: Contract},
+		// The backfill holds the new trigger's lock while it enqueues a
+		// message per row (D88).
+		{plan: "add-enqueue-on-change-backfill", op: "createTrigger", phase: Expand, want: []HazardClass{blockingClass},
+			reason: "stack queue backfill"},
+		{plan: "add-enqueue-on-change-backfill-per-key", op: "createTrigger", phase: Expand, want: []HazardClass{blockingClass}},
+
+		// A required timestamp's DEFAULT now is declared (D88): dropping
+		// the one a compiler before gave it, and adding a declared one,
+		// take no hazard.
+		{plan: "drop-implied-now-default", op: "dropDefault", phase: Contract},
+		{plan: "add-now-default", op: "setDefault", phase: Expand},
+
+		// The roles @seedRoles keeps (D88): an insert takes no hazard; an
+		// update replaces the role's permissions, in expand when it only
+		// gains and in contract when it loses one.
+		{plan: "add-seed-roles", op: "seedRole", phase: Expand},
+		{plan: "seed-roles-gain", op: "updateRole", phase: Expand, want: []HazardClass{destructive}, reason: "gains identity.users.write"},
+		{plan: "seed-roles-lose", op: "updateRole", phase: Contract, want: []HazardClass{destructive}, reason: "loses identity.users.write"},
 
 		{plan: "add-projection", op: "createView", phase: Expand},
 		{plan: "change-projection", op: "replaceView", phase: Expand, want: []HazardClass{apiBreaking}},

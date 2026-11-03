@@ -1,0 +1,29 @@
+{
+  "dialect": "sqlite",
+  "from": "d9697f8b128d88e9877145068feef31d9bdfa8a6c367bd3cdbd76a76318119f0",
+  "hash": "cf953285ea1d715821b8e39f7f663f2a5dab999234fe130ab99731fdbb6d8fe4",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/customer/index/idx_customer_email_lower",
+          "reason": "Building the index holds the database's write lock for time that grows with customer.",
+          "subject": "table/customer/index/idx_customer_email_lower"
+        }
+      ],
+      "index": 1,
+      "op": "createIndex",
+      "phase": "expand",
+      "statements": [
+        "CREATE INDEX \"idx_customer_email_lower\" ON \"customer\" ((lower(email)))"
+      ],
+      "subject": "table/customer/index/idx_customer_email_lower",
+      "transactional": true
+    }
+  ],
+  "to": "97e9c05f6e65d549d2be12f3c1931960b5c1cbc9c7ce7db589d812a7f582a6b2",
+  "toModel": null,
+  "version": 1
+}

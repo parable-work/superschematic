@@ -28,11 +28,11 @@ func TestRoundTripsUserRoutes(t *testing.T) {
 	contains := map[Format][]string{
 		FormatTS: {
 			`import { Authenticated, HttpMethod, rest, userAdministration, userSessions } from "@superschematic/api";`,
-			"// Signs users in and out, and lets anyone register.\n@userSessions({ register: true })\nexport class Account {}\n",
+			"// administrator (D81).\n@userSessions({ register: true, registration: \"approval\", defaultRoles: [\"member\"], firstUser: { role: \"admin\", permissions: [\"identity\"] } })\nexport class Account {}\n",
 			"@userAdministration()\nexport class AccountAdmin {}\n",
 		},
-		FormatJSON: {`"userSessions": {`, `"register": true`, `"userAdministration": {}`, `"operations": []`},
-		FormatYAML: {"userSessions:\n", "register: true", "userAdministration: {}", "operations: []"},
+		FormatJSON: {`"userSessions": {`, `"register": true`, `"registration": "approval"`, `"defaultRoles": [`, `"firstUser": {`, `"userAdministration": {}`, `"operations": []`},
+		FormatYAML: {"userSessions:\n", "register: true", "registration: approval", "defaultRoles:", "firstUser:", "userAdministration: {}", "operations: []"},
 	}
 	for _, format := range []Format{FormatTS, FormatJSON, FormatYAML} {
 		t.Run(string(format), func(t *testing.T) {

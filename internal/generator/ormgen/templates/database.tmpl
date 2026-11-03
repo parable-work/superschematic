@@ -4,8 +4,8 @@ package orm
 
 import (
 	"context"
-{{- if .VersionGraphs }}
 	"encoding/json"
+{{- if .VersionGraphs }}
 	"errors"
 {{- end }}
 	"fmt"
@@ -24,6 +24,9 @@ import (
 	"{{ .Naming.VersionGraphGoModule }}/engine"
 	"{{ .Naming.VersionGraphGoModule }}/postgres"
 {{- end }}
+{{- if .HasEncryptedFields }}
+	"{{ .Naming.SchemaRuntimeGoModule }}/fieldcrypt"
+{{- end }}
 )
 
 // contextKey is a custom type for context keys to avoid collisions
@@ -37,16 +40,32 @@ const (
 // Database represents the ORM database connection
 type Database struct {
 	pool *pgxpool.Pool
+	{{- if .HasEncryptedFields }}
+	// fieldKeys seal and open the Encrypted<T> fields (WithFieldKeys, D85).
+	fieldKeys *fieldcrypt.Keyring
+	{{- end }}
 	{{- range .Repositories }}
 	{{ .TypeName }} *{{ .Name }}
+	{{- end }}
+	{{- if .HasQueries }}
+	// Queries runs the declared queries on the pool (D86).
+	Queries *Queries
 	{{- end }}
 }
 
 // Tx represents a database transaction with repositories
 type Tx struct {
 	tx pgx.Tx
+	// db is the Database the transaction runs on, and depth the savepoints
+	// it is nested in, 0 for a transaction of its own (D89).
+	db    *Database
+	depth int
 	{{- range .Repositories }}
 	{{ .TypeName }} *{{ .Name }}
+	{{- end }}
+	{{- if .HasQueries }}
+	// Queries runs the declared queries in the transaction (D86).
+	Queries *Queries
 	{{- end }}
 }
 
@@ -60,8 +79,8 @@ type Config struct {
 	SSLMode  string
 }
 
-// Connect creates a new database connection
-func Connect(ctx context.Context, connString string) (*Database, error) {
+// Connect creates a new database connection{{ if .HasEncryptedFields }}, configured by options{{ end }}
+func Connect(ctx context.Context, connString string{{ if .HasEncryptedFields }}, options ...Option{{ end }}) (*Database, error) {
 	pool, err := pgxpool.New(ctx, connString)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create connection pool: %w", err)
@@ -74,10 +93,19 @@ func Connect(ctx context.Context, connString string) (*Database, error) {
 	}
 
 	db := &Database{pool: pool}
+	{{- if .HasEncryptedFields }}
+	if err := applyOptions(db, options); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	{{- end }}
 
 	// Initialize repositories
 	{{- range .Repositories }}
 	db.{{ .TypeName }} = &{{ .Name }}{db: db}
+	{{- end }}
+	{{- if .HasQueries }}
+	db.Queries = &Queries{runner: pool}
 	{{- end }}
 
 	return db, nil
@@ -92,14 +120,23 @@ func ConnectWithConfig(ctx context.Context, cfg *Config) (*Database, error) {
 	return Connect(ctx, connString)
 }
 
-// ConnectWithPool creates a Database using an existing pgxpool.Pool.
+// ConnectWithPool creates a Database using an existing pgxpool.Pool{{ if .HasEncryptedFields }},
+// configured by options{{ end }}.
 // Use this when you need custom pool configuration not supported by Connect.
-func ConnectWithPool(pool *pgxpool.Pool) (*Database, error) {
+func ConnectWithPool(pool *pgxpool.Pool{{ if .HasEncryptedFields }}, options ...Option{{ end }}) (*Database, error) {
 	db := &Database{pool: pool}
+	{{- if .HasEncryptedFields }}
+	if err := applyOptions(db, options); err != nil {
+		return nil, err
+	}
+	{{- end }}
 
 	// Initialize repositories
 	{{- range .Repositories }}
 	db.{{ .TypeName }} = &{{ .Name }}{db: db}
+	{{- end }}
+	{{- if .HasQueries }}
+	db.Queries = &Queries{runner: pool}
 	{{- end }}
 
 	return db, nil
@@ -133,11 +170,14 @@ func (db *Database) Transaction(ctx context.Context, fn func(TxInterface) error)
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 
-	txWrapper := &Tx{tx: tx}
+	txWrapper := &Tx{tx: tx, db: db}
 
 	// Initialize transaction repositories with parent database reference
 	{{- range .Repositories }}
 	txWrapper.{{ .TypeName }} = &{{ .Name }}{tx: tx, txDB: db}
+	{{- end }}
+	{{- if .HasQueries }}
+	txWrapper.Queries = &Queries{runner: tx}
 	{{- end }}
 
 	defer func() {
@@ -195,6 +235,66 @@ func HasUserID(ctx context.Context) bool {
 	_, ok := ctx.Value(userContextKey).({{ .UserIDGoType }})
 	return ok
 }
+
+// WithCaller returns ctx acting as the caller of a request, the principal
+// whose ID is id, as a generated route binds the context of each operation
+// it runs (D87): a write the implementation makes with ctx stamps
+// createdBy, updatedBy and deletedBy with the caller. ctx keeps a user it
+// already has, and an id that is not a user ID binds no one.
+func WithCaller(ctx context.Context, id string) context.Context {
+	if id == "" || HasUserID(ctx) {
+		return ctx
+	}
+	userID, err := ParseUserID(id)
+	if err != nil {
+		return ctx
+	}
+	return WithUserID(ctx, userID)
+}
+
+// ParseUserID reads a user ID from its text, as a principal's ID holds it:
+// a UUID's base62 wire form, or hyphenated.
+func ParseUserID(text string) ({{ .UserIDGoType }}, error) {
+	var userID {{ .UserIDGoType }}
+	quoted, err := json.Marshal(text)
+	if err != nil {
+		return userID, err
+	}
+	if err := json.Unmarshal(quoted, &userID); err != nil {
+		return userID, fmt.Errorf("user ID %q: %w", text, err)
+	}
+	return userID, nil
+}
+
+{{- if .Actor.SystemSet }}
+// SystemActorID is the user AsSystem acts as (D87), the DB service's
+// outputs.sql.systemActor. An audit field holds a user's ID with no
+// foreign key, so it needs no row of the user table.
+{{- else }}
+// SystemActorID is the user AsSystem acts as (D87): the DB service's
+// outputs.sql.systemActor names none, so it is the ID the generated Go APIs
+// export as SystemUserID. An audit field holds a user's ID with no foreign
+// key, so it needs no row of the user table.
+{{- end }}
+var SystemActorID = mustParseUserID({{ printf "%q" .Actor.SystemID }})
+
+// SystemActorName is the name an app shows for SystemActorID.
+const SystemActorName = {{ printf "%q" .Actor.SystemName }}
+
+// AsSystem returns ctx acting as the system actor, SystemActorID, for a
+// write no request's caller makes, a job's or a worker's: it stamps
+// createdBy, updatedBy and deletedBy with SystemActorID (D87).
+func AsSystem(ctx context.Context) context.Context {
+	return WithUserID(ctx, SystemActorID)
+}
+
+func mustParseUserID(text string) {{ .UserIDGoType }} {
+	userID, err := ParseUserID(text)
+	if err != nil {
+		panic(err)
+	}
+	return userID
+}
 {{- if .HasHistoryActor }}
 
 // historyActorCTE prefixes a generated hard delete of a versioned table that
@@ -202,10 +302,7 @@ func HasUserID(ctx context.Context) bool {
 // {{ .Naming.HistoryActorSetting }}, to $1; the history trigger reads the
 // delete tombstone's actor from it, and an empty value keeps the row's own.
 // The DELETE names history_actor in its USING clause so the CTE runs.
-const historyActorCTE = `WITH history_actor AS MATERIALIZED (
-	SELECT set_config('{{ .Naming.HistoryActorSetting }}', COALESCE($1::text, ''), true) AS _history_actor
-)
-`
+const historyActorCTE = {{ goRawString .HistoryActorCTE }}
 
 // historyActor is the $1 argument of historyActorCTE: the context user, or nil
 // when the context carries none.
@@ -220,7 +317,7 @@ func historyActor(ctx context.Context) any {
 // an open transaction, so a later statement in it does not record the same
 // actor. Outside a transaction the setting ends with the statement.
 func clearHistoryActor(ctx context.Context, tx pgx.Tx) error {
-	if _, err := tx.Exec(ctx, `SELECT set_config('{{ .Naming.HistoryActorSetting }}', '', true)`); err != nil {
+	if _, err := tx.Exec(ctx, {{ goRawString .ClearHistoryActor }}); err != nil {
 		return fmt.Errorf("failed to clear the history actor: %w", err)
 	}
 	return nil

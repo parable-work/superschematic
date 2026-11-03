@@ -1,6 +1,11 @@
 package ir
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
+)
 
 // OperationSet represents a named group of API operations with shared
 // middleware. It replaces the v1 Queries/Mutations split: the set name (the
@@ -47,6 +52,22 @@ type OperationSet struct {
 	// roles and grants. Nil for every other set. See
 	// [UserAdministrationConfig].
 	UserAdministration *UserAdministrationConfig `json:"userAdministration,omitempty" yaml:"userAdministration,omitempty"`
+
+	// BehaviorOperations is @behaviorOperations(Type) on a class with no
+	// methods (D103): the loader fills Operations with the operations of
+	// the table's behaviors. Nil for every other set. See
+	// [BehaviorOperationsConfig].
+	BehaviorOperations *BehaviorOperationsConfig `json:"behaviorOperations,omitempty" yaml:"behaviorOperations,omitempty"`
+
+	// Auth, Permissions and Public are a @behaviorOperations set's user
+	// clause, @auth, @requirePermission and @publicRoute on its class
+	// (D103), which each operation the loader adds takes as its own. Every
+	// other set's user clause is its operations' (an Authenticated base
+	// reaches them as Auth), and the verification pass refuses these on
+	// one.
+	Auth        bool     `json:"auth,omitempty" yaml:"auth,omitempty"`
+	Permissions []string `json:"permissions,omitempty" yaml:"permissions,omitempty"`
+	Public      bool     `json:"public,omitempty" yaml:"public,omitempty"`
 
 	// Extensions holds extension decorator data keyed by extension name; see
 	// [Schema.Extensions].
@@ -126,4 +147,28 @@ func EffectiveServiceCallers(set *OperationSet, op *FieldDef) *ServiceCallers {
 // or @requireOwnership.
 func (f *FieldDef) HasUserClause() bool {
 	return f.Auth || len(f.Permissions) > 0 || f.RequireOwnership
+}
+
+// ValidateRestPath refuses a path segment of an operation's rest path
+// written as :name, a parameter in Express's and Hono's routes, which
+// OpenAPI and every generated router read as text: a path parameter is
+// {name} (D100). The message gives the path with each such segment
+// rewritten. A colon inside a segment ("orders:cancel") is text.
+func ValidateRestPath(path string) error {
+	segments := strings.Split(path, "/")
+	var colons []string
+	for i, segment := range segments {
+		if name, ok := strings.CutPrefix(segment, ":"); ok && name != "" {
+			colons = append(colons, strconv.Quote(segment))
+			segments[i] = "{" + name + "}"
+		}
+	}
+	if len(colons) == 0 {
+		return nil
+	}
+	what := "a path parameter as " + colons[0]
+	if len(colons) > 1 {
+		what = "path parameters as " + strings.Join(colons[:len(colons)-1], ", ") + " and " + colons[len(colons)-1]
+	}
+	return fmt.Errorf("@rest path %q writes %s, which OpenAPI and the generated routers read as text; write it in braces: %q", path, what, strings.Join(segments, "/"))
 }

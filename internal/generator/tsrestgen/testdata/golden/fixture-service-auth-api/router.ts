@@ -12,7 +12,9 @@ import {
   mountOperation,
   type RouterRuntimeOptions,
 } from '@superschematic/http-runtime/hono';
+import { mountOpenAPI, type OpenAPIOptions } from '@superschematic/http-runtime/openapi';
 import type { Implementations } from './interfaces';
+import { openAPIJSON } from './openapi';
 
 export type OperationName =
   | 'listReservations'
@@ -122,7 +124,7 @@ export const operationSpecs = {
   },
 } as const satisfies Record<OperationName, OperationSpec>;
 
-export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions {
+export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions, OpenAPIOptions {
   /** Per-operation JSON body caps in bytes; overrides the schema's @bodyLimit and bodyLimitBytes. */
   bodyLimits?: Partial<Record<OperationName, number>>;
   /** Per-operation requests per minute; overrides the schema's @rateLimit (0 disables). The store and key are `rateLimit`. */
@@ -137,6 +139,9 @@ export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions
  */
 export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E> = {}): Hono<E> {
   const router = new Hono<E>();
+  // The OpenAPI document at GET /api/openapi.json and its page at GET
+  // /api/docs, as the Go and Rust servers serve them (D81).
+  mountOpenAPI(router, openAPIJSON, 'fixture-service-auth-api', options);
   mountOperation(
     router,
     operationSpecs.listReservations,

@@ -43,6 +43,46 @@ type QueueDef struct {
 	// stay whatever it says, for an operator. Empty is
 	// DefaultQueueRetainSeconds.
 	Retain string `json:"retain,omitempty" yaml:"retain,omitempty"`
+
+	// Key names the field of the message that keys it (D80): a required
+	// scalar field, whose column holds the key. Empty for a queue whose
+	// messages have none.
+	Key string `json:"key,omitempty" yaml:"key,omitempty"`
+
+	// OnDuplicate is what an enqueue does when a ready message holds its
+	// key (D80): QueueOnDuplicateAppend adds another message, Replace
+	// overwrites the ready one, and Skip leaves it and adds none. Empty is
+	// append. Replace and skip need a key.
+	OnDuplicate string `json:"onDuplicate,omitempty" yaml:"onDuplicate,omitempty"`
+
+	// Serialize holds the queue to one claim per key at a time (D80): a
+	// claim takes no message whose key another claim holds, and of a key's
+	// ready messages takes the first due. It needs a key.
+	Serialize bool `json:"serialize,omitempty" yaml:"serialize,omitempty"`
+}
+
+// What an enqueue does when a ready message holds its key (D80).
+const (
+	// QueueOnDuplicateAppend adds another message, as a queue with no key
+	// does: the default.
+	QueueOnDuplicateAppend = "append"
+	// QueueOnDuplicateReplace overwrites the ready message with the new
+	// one: its fields, due at once, with no attempts and no last error.
+	QueueOnDuplicateReplace = "replace"
+	// QueueOnDuplicateSkip leaves the ready message as it is and adds
+	// none.
+	QueueOnDuplicateSkip = "skip"
+)
+
+// Dedupes reports whether the queue keeps at most one ready message per
+// key: its onDuplicate is replace or skip.
+func (q *QueueDef) Dedupes() bool {
+	return q != nil && q.Key != "" && (q.OnDuplicate == QueueOnDuplicateReplace || q.OnDuplicate == QueueOnDuplicateSkip)
+}
+
+// Serializes reports whether the queue holds one claim per key at a time.
+func (q *QueueDef) Serializes() bool {
+	return q != nil && q.Key != "" && q.Serialize
 }
 
 // The defaults of a queue and a worker that leave an argument out (D53).
@@ -81,6 +121,12 @@ const (
 	// DefaultWorkerInstances is how many instances of a worker an
 	// environment runs unless its settings say otherwise.
 	DefaultWorkerInstances = 1
+
+	// DefaultWorkerDrainSeconds is how long each firing of the Cron
+	// Trigger of a worker on Cloudflare Workers claims unless its settings
+	// say otherwise (D92): within the minute between firings, with room
+	// for the default grace.
+	DefaultWorkerDrainSeconds = 50
 )
 
 // WorkerConcurrencyVariable is the environment variable a worker platform
@@ -88,6 +134,12 @@ const (
 // gives it (ResolvedWorker.Concurrency), which the worker's entrypoint
 // reads (runtime/http/go/worker.ConcurrencyVariable).
 const WorkerConcurrencyVariable = "WORKER_CONCURRENCY"
+
+// WorkerDrainSecondsVariable is the variable, a binding on Workers, the
+// cloudflare target sets on a worker's Worker to how long each firing of
+// its Cron Trigger claims, which its drain.ts reads (D92; the TypeScript
+// runtime's ./worker workerDrainSeconds).
+const WorkerDrainSecondsVariable = "WORKER_DRAIN_SECONDS"
 
 // The states of a queue's message, in its table's state column.
 const (
@@ -152,8 +204,16 @@ type Worker struct {
 
 	// Queue is the name of the `@queue` class whose messages the worker
 	// handles. It is a class of the DB service the API connects to, its
-	// authDb or its one DB dependency, which the schema imports.
-	Queue string `json:"queue" yaml:"queue"`
+	// authDb or its one DB dependency, which the schema imports. A
+	// behavior worker's is the first of its Queues (D103), which the
+	// loader fills.
+	Queue string `json:"queue,omitempty" yaml:"queue,omitempty"`
+
+	// Queues are a behavior worker's queues, deadlines first: its table's
+	// deadline queue and its change queue, each when the database holds it
+	// (D103). The loader fills it with Queue, which is its first; the data
+	// forms have no key for it.
+	Queues []string `json:"queues,omitempty" yaml:"queues,omitempty" jsonschema:"-"`
 
 	// Concurrency is how many messages an instance handles at a time.
 	// Zero is DefaultWorkerConcurrency; an environment's settings change
@@ -164,7 +224,36 @@ type Worker struct {
 	// finish before it gives their messages back, a duration of whole
 	// seconds. Empty is DefaultWorkerGraceSeconds.
 	Grace string `json:"grace,omitempty" yaml:"grace,omitempty"`
+
+	// BehaviorWorker is @behaviorWorker(Type, options) (D103): the worker
+	// runs the table's behavior queues through the behaviors' core, by a
+	// handler the API's generator writes; the API's Workers has no method
+	// for it. The loader fills Queues with the table's deadline queue and
+	// change queue, and Queue with the first.
+	BehaviorWorker *BehaviorWorkerConfig `json:"behaviorWorker,omitempty" yaml:"behaviorWorker,omitempty"`
+
+	// Origin is [OriginBehavior] once the loader filled Queue from
+	// BehaviorWorker; the data forms have no key for it.
+	Origin string `json:"origin,omitempty" yaml:"origin,omitempty" jsonschema:"-"`
 }
+
+// BehaviorWorkerConfig is what @behaviorWorker names (D103): the table
+// whose behaviors' queues the worker runs, and the permissions its
+// commands hold.
+type BehaviorWorkerConfig struct {
+	// Type is the table, as the API imports it from its database.
+	Type string `json:"type" yaml:"type"`
+
+	// Permissions are the permissions the worker's commands hold, which
+	// the core checks a move's permission against (a Workflow transition's
+	// that a Timers deadline's then makes). None unless set.
+	Permissions []string `json:"permissions,omitempty" yaml:"permissions,omitempty"`
+}
+
+// BehaviorWorkerSubject is the subject a behavior worker's commands run as
+// (D103): the API service's name and the worker's class, so a deadline
+// runs as the system, not a user.
+func BehaviorWorkerSubject(api, worker string) string { return api + "/" + worker }
 
 // Worker returns the worker named name, or nil.
 func (s *Schema) Worker(name string) *Worker {

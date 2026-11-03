@@ -13,11 +13,14 @@ import { environment, stack } from "@superschematic/stack";
 // Rust server over shop-db too, which shop-orders' server tells what a
 // checkout sold; shop-cart, a shopper's cart and the pickup slots, and
 // shop-storefront, each on a TypeScript server that Bun runs; and shop-web,
-// the static site whose browser code calls shop-api. Shoppers and staff
-// call every API, so all five are exposed; a site always is.
+// the static site whose browser code calls shop-api. shop-stock's app
+// Backoffice (D78), the Topcoat app staff receive stock in, runs beside its
+// server, a deployable of its own over shop-db. Shoppers and staff call
+// every API, so all five are exposed, and staff open the Backoffice, so it
+// is too; a site always is.
 @stack({
   deploy: [ShopApi, ShopCart, ShopOrders, ShopStock, ShopStorefront, ShopWeb],
-  expose: [ShopApi, ShopCart, ShopOrders, ShopStock, ShopStorefront]
+  expose: [ShopApi, ShopCart, ShopOrders, ShopStock, ShopStorefront, { of: ShopStock, app: "Backoffice" }]
 })
 export abstract class Shop {}
 
@@ -30,7 +33,9 @@ export abstract class Shop {}
 // shop-stock's worker ReorderStock, a Rust process, files a restock request
 // for each product a sale runs low, and its job OrderRestocks runs only
 // when `superschematic stack run` asks, so each request stays open until
-// then. acmepay's keys are this environment's secrets
+// then. shop-cart's deriver TriageTickets, a Bun process, fills in each
+// support ticket's category, priority and summary seconds after it is
+// opened (D74). acmepay's keys are this environment's secrets
 // (`superschematic stack secrets set Dev`), and acmepay itself is go/acmepay's
 // command, at the address shop-orders' ACMEPAY_URL defaults to.
 @environment({

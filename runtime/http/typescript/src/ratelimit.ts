@@ -7,7 +7,8 @@ key is the transport's peer address (remoteAddressKey), as the Go runtime
 falls back to the socket and the Rust runtime to axum's ConnectInfo: no
 header the client can write chooses its bucket. A service behind a proxy it
 trusts keys by the client IP the proxy reports instead (keyOf:
-clientIpKey). The adapter composes the key as `<operation>:<key>` so one
+clientIpKey). The adapter composes the key as `<namespace>.<name>:<key>`,
+the operation's kebab-case namespace and its name, so one
 store can serve every operation, and refuses with 429 Too Many Requests.
 
 The default store is a per-process token bucket. A deployment with several

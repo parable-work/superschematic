@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/parable-work/superschematic/internal/generator/cigen"
+	"github.com/parable-work/superschematic/internal/generator/memorystoregen"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/generator/sitegen"
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
@@ -22,7 +23,23 @@ var sqlOutputSchema = json.RawMessage(`{
 		"migrationsDir": {"type": "string"},
 		"viewOwner": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
 		"sourceSchema": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
-		"dialects": {"type": "array", "items": {"type": "string"}}
+		"dialects": {"type": "array", "items": {"type": "string"}},
+		"encryption": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["key"],
+			"properties": {"key": {"type": "string"}}
+		},
+		"systemActor": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["id"],
+			"properties": {
+				"id": {"type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"},
+				"name": {"type": "string", "minLength": 1}
+			}
+		},
+		"requireUpdatedBy": {"type": "boolean"}
 	}
 }`)
 
@@ -69,8 +86,12 @@ func RegisterCore(reg *registry.Registry) error {
 			// Each language's types write <T>Behaviors for a type that
 			// composes behaviors: each behavior's fields as a read
 			// returns them, narrowed by the type's config (D58). The
-			// own-field type stays the instance's data.
-			RendersBehaviors: true,
+			// own-field type stays the instance's data. A table whose
+			// fields are behaviors (D103) holds their owned fields as
+			// fields of its own, and its TypeScript repositories read
+			// them and run the behaviors' operations through the core.
+			RendersBehaviors:      true,
+			RendersFieldBehaviors: true,
 			Dirs: func(c registry.GenerateContext) []string {
 				var dirs []string
 				for _, lang := range c.Outputs.EnabledTypeLanguages() {
@@ -90,9 +111,12 @@ func RegisterCore(reg *registry.Registry) error {
 			Name:         "sql",
 			OutputKey:    "sql",
 			OutputSchema: sqlOutputSchema,
-			// An engine type, a DB type that composes a behavior, gets
-			// no table: the engine keeps its instances (D58).
-			RendersBehaviors: true,
+			// An engine type, a DB type that composes a behavior on the
+			// type, gets no table: the engine keeps its instances (D58).
+			// A table whose fields are behaviors gets their owned fields'
+			// columns and @optimistic's _version (D103).
+			RendersBehaviors:      true,
+			RendersFieldBehaviors: true,
 			Dirs: func(c registry.GenerateContext) []string {
 				return []string{SQLDir(c.Options.OutputRoot, c.Config.Name)}
 			},
@@ -103,8 +127,13 @@ func RegisterCore(reg *registry.Registry) error {
 		},
 		{
 			Name: ormGenerator,
-			// An engine type gets no repository (D58).
-			RendersBehaviors: true,
+			// An engine type gets no repository (D58). A table whose
+			// fields are behaviors (D103) is rendered: its repository
+			// reads the owned fields, leaves them out of its inputs and
+			// runs creates, updates, deletes and each use's operations
+			// through the core.
+			RendersBehaviors:      true,
+			RendersFieldBehaviors: true,
 			Dirs: func(c registry.GenerateContext) []string {
 				return []string{ORMDir(c.Options.OutputRoot, c.Config.Name)}
 			},
@@ -117,6 +146,12 @@ func RegisterCore(reg *registry.Registry) error {
 			Name:       "api",
 			OutputKey:  "api",
 			ReadsCalls: true,
+			// A table whose fields are behaviors (D103) is rendered: the
+			// API's types carry its owned fields, and its
+			// @behaviorOperations sets' operations are generated handlers
+			// that run them through the core. An engine type is not
+			// served yet (D58).
+			RendersFieldBehaviors: true,
 			Dirs: func(c registry.GenerateContext) []string {
 				return []string{APIDir(c.Options.OutputRoot, c.Config.Name)}
 			},
@@ -131,6 +166,11 @@ func RegisterCore(reg *registry.Registry) error {
 		{
 			Name:      "sdks",
 			OutputKey: "sdk",
+			// A table whose fields are behaviors (D103) is rendered: the
+			// SDKs' types read its owned fields, which no generated input
+			// carries, and each @behaviorOperations set's operations sit
+			// under their field (sdk.order.status.transition).
+			RendersFieldBehaviors: true,
 			Dirs: func(c registry.GenerateContext) []string {
 				var dirs []string
 				for _, lang := range c.Outputs.EnabledSDKLanguages() {
@@ -150,7 +190,8 @@ func RegisterCore(reg *registry.Registry) error {
 			// It reads the @envVars class alone, which composes no
 			// behavior, so a General schema whose types compose
 			// behaviors builds: its types write <T>Behaviors (D58).
-			RendersBehaviors: true,
+			RendersBehaviors:      true,
+			RendersFieldBehaviors: true,
 			Dirs: func(c registry.GenerateContext) []string {
 				return []string{APIDir(c.Options.OutputRoot, c.Config.Name)}
 			},
@@ -187,6 +228,22 @@ func RegisterCore(reg *registry.Registry) error {
 			Generate: func(c registry.GenerateContext) error {
 				r := run{c}
 				return r.measure("output.server", r.generateServers)
+			},
+		},
+		{
+			// The MemoryStore kind's one generator (D75): the store's
+			// inventory.json at memorystore/<service>, and the typed
+			// definitions of each language outputs.types enables at
+			// types/<lang>/<service> (internal/generator/memorystoregen).
+			// It reads outputs.types, which the types generator claims,
+			// and so takes no output key of its own.
+			Name:  memorystoregen.Name,
+			Kinds: []string{string(ir.SchemaKindMemoryStore)},
+			Dirs: func(c registry.GenerateContext) []string {
+				return memorystoregen.Dirs(c, TypesDir)
+			},
+			Generate: func(c registry.GenerateContext) error {
+				return run{c}.measure("output.memorystore", func() error { return memorystoregen.Generate(c, TypesDir) })
 			},
 		},
 		{
@@ -235,9 +292,10 @@ func RegisterCore(reg *registry.Registry) error {
 			// a schema leaves absent would keep a cached service from
 			// being up to date. It removes the crate itself when the
 			// schema no longer needs one.
-			Name:             projectengineGenerator,
-			Kinds:            []string{string(ir.SchemaKindDB), string(ir.SchemaKindGeneral)},
-			RendersBehaviors: true,
+			Name:                  projectengineGenerator,
+			Kinds:                 []string{string(ir.SchemaKindDB), string(ir.SchemaKindGeneral)},
+			RendersBehaviors:      true,
+			RendersFieldBehaviors: true,
 			Generate: func(c registry.GenerateContext) error {
 				r := run{c}
 				return r.measure("output.engine-rust", r.generateProjectEngine)
@@ -252,10 +310,11 @@ func RegisterCore(reg *registry.Registry) error {
 			// schema with no engine type, and claims no directory: the
 			// document sits in the Go types module, which the types
 			// generator claims. outputs.engine names the namespace.
-			Name:             enginedocGenerator,
-			OutputKey:        "engine",
-			OutputSchema:     engineOutputSchema,
-			RendersBehaviors: true,
+			Name:                  enginedocGenerator,
+			OutputKey:             "engine",
+			OutputSchema:          engineOutputSchema,
+			RendersBehaviors:      true,
+			RendersFieldBehaviors: true,
 			Generate: func(c registry.GenerateContext) error {
 				r := run{c}
 				return r.measure("output.engine", r.generateEngineDocument)

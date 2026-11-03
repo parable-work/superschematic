@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';
 
 import { BehaviorError, BehaviorVetoError, InstanceValidationError, type Engine } from '../dist/index.js';
-import { defineBehavior, type FrozenJSON, type GuardRequest, type InstanceChange } from '../dist/testing/index.js';
+import { defineBehavior, type FieldAttribution, type FrozenJSON, type GuardRequest, type InstanceChange } from '../dist/testing/index.js';
 import { flag, openMetaSchema, publishItem } from './behavior-fixtures.ts';
 import { alice, cleanup, drivers, fieldsOf, openTestEngine, thrown } from './helpers.ts';
 
@@ -39,6 +39,8 @@ const editor = defineBehavior({
       { name: 'check', paramsSchema: { type: 'object', additionalProperties: false, properties: { patch: { type: 'object' } } }, resultSchema: true },
       { name: 'renameInRead', paramsSchema: titleParams, resultSchema: true },
       { name: 'notAPatch', paramsSchema: noParams, resultSchema: true, writes: true },
+      { name: 'attribute', paramsSchema: { type: 'object', additionalProperties: false, properties: { steps: { type: 'array' } } }, resultSchema: true, writes: true },
+      { name: 'attributeNotJSON', paramsSchema: noParams, resultSchema: true, writes: true },
     ],
   },
   migrations: [{ version: 1, name: 'renames', columns: { renames: { type: 'integer', notNull: true, default: 0 } } }],
@@ -89,6 +91,16 @@ const editor = defineBehavior({
     },
     notAPatch(context) {
       return context.update([1] as unknown as FrozenJSON);
+    },
+    // Each step is { patch, attribution? }, applied with update().
+    attribute(context, params) {
+      for (const step of (params.steps ?? []) as Array<{ patch: FrozenJSON; attribution?: Record<string, FieldAttribution> }>) {
+        context.update(step.patch, step.attribution === undefined ? undefined : { attribution: step.attribution });
+      }
+      return context.data;
+    },
+    attributeNotJSON(context) {
+      return context.update({ title: 'Table' }, { attribution: { title: { confidence: 1n as unknown as number } } });
     },
   },
   fields: { renames: (view) => view.columns.get().renames },
@@ -234,6 +246,56 @@ for (const driver of drivers) {
       assert.deepEqual(fieldsOf(engine.instances.get(alice, 'Item', 'a')), { data: { title: 'Desk', note: 'oak' }, behaviors: { 'test.Editor': { renames: 0 } } });
       assert.equal(seen.changes.length, 1);
       assert.equal((seen.changes[0] as { before?: unknown }).before, undefined);
+    });
+
+    test('an attributed update carries its entries, with the behavior named, into afterChange and the event (D16, amended)', () => {
+      const engine = open();
+      const steps = [
+        { patch: { title: 'Table', note: 'pine' }, attribution: { title: { confidence: 0.6, source: 'model-x@3' }, note: { confidence: 0.2 } } },
+        // A later write of the note without an attribution removes its entry.
+        { patch: { note: 'elm' } },
+      ];
+      engine.instances.invoke(alice, 'Item', 'a', 'attribute', { steps });
+      const attribution = { title: { behavior: 'test.Editor', confidence: 0.6, source: 'model-x@3' } };
+      assert.deepEqual(seen.changes, [
+        {
+          kind: 'operation',
+          behavior: 'test.Editor',
+          operation: 'attribute',
+          params: { steps },
+          before: { title: 'Desk', note: 'oak' },
+          attribution,
+        },
+      ]);
+      const events = engine.events.read(alice, { schema: 'Item', instanceId: 'a' }).events;
+      const change = events.at(-1)?.change as { patch: unknown; attribution?: unknown };
+      assert.deepEqual(change.patch, { data: { title: 'Table', note: 'elm' } });
+      assert.deepEqual(change.attribution, attribution);
+      assert.deepEqual(replay(engine, 'a'), fieldsOf(engine.instances.get(alice, 'Item', 'a')));
+
+      // An operation that attributes nothing logs no attribution.
+      engine.instances.invoke(alice, 'Item', 'a', 'rename', { title: 'Chair' });
+      const plain = engine.instances.get(alice, 'Item', 'a');
+      assert.equal(plain?.seq, 3);
+      assert.equal('attribution' in (engine.events.read(alice, { schema: 'Item', instanceId: 'a' }).events.at(-1)?.change as object), false);
+    });
+
+    test('a malformed attribution, or one that is not JSON, is a BehaviorError and writes nothing', () => {
+      const engine = open();
+      for (const [attribution, message] of [
+        [{ note: {} }, /attributes note, which its patch does not write/],
+        [{ title: { confidence: 2 } }, /a number from 0 to 1/],
+        [{ title: { source: 'x'.repeat(201) } }, /at most 200 characters/],
+        [{ title: { behavior: 'test.Other' } }, /it takes confidence and source/],
+      ] as const) {
+        const error = thrown(() => engine.instances.invoke(alice, 'Item', 'a', 'attribute', { steps: [{ patch: { title: 'Table' }, attribution }] }), BehaviorError);
+        assert.equal(error.behavior, 'test.Editor');
+        assert.match(error.message, message);
+      }
+      assert.match(thrown(() => engine.instances.invoke(alice, 'Item', 'a', 'attributeNotJSON'), BehaviorError).message, /attribution is not JSON/);
+      const instance = engine.instances.get(alice, 'Item', 'a');
+      assert.equal(instance?.seq, 1);
+      assert.equal(instance?.data.title, 'Desk');
     });
 
     test('validateUpdate reports without writing; a read-only operation cannot update; a patch is an object', () => {

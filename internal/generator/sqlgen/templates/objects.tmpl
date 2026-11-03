@@ -6,7 +6,7 @@ never disagree.
 */ -}}
 
 {{- define "captureFunction" }}{{ $history := . -}}
-CREATE OR REPLACE FUNCTION {{ $history.FunctionName }}() RETURNS trigger AS $$
+CREATE OR REPLACE FUNCTION {{ quote $history.FunctionName }}() RETURNS trigger AS $$
 BEGIN
   IF (TG_WHEN = 'BEFORE') THEN
     -- BEFORE UPDATE: the stored row takes the next version.
@@ -51,7 +51,7 @@ $$ LANGUAGE plpgsql
 {{- end }}
 
 {{- define "pruneFunction" }}{{ $history := . -}}
-CREATE OR REPLACE FUNCTION {{ $history.PruneFunctionName }}(retention_days INTEGER DEFAULT {{ $history.RetentionDays }}, max_rows INTEGER DEFAULT NULL) RETURNS BIGINT AS $$
+CREATE OR REPLACE FUNCTION {{ quote $history.PruneFunctionName }}(retention_days INTEGER DEFAULT {{ $history.RetentionDays }}, max_rows INTEGER DEFAULT NULL) RETURNS BIGINT AS $$
 DECLARE
   deleted_count BIGINT;
 BEGIN
@@ -88,7 +88,7 @@ $$ LANGUAGE plpgsql
 {{- end }}
 
 {{- define "bumpFunction" }}{{ $optimistic := . -}}
-CREATE OR REPLACE FUNCTION {{ $optimistic.FunctionName }}() RETURNS trigger AS $$
+CREATE OR REPLACE FUNCTION {{ quote $optimistic.FunctionName }}() RETURNS trigger AS $$
 BEGIN
   -- BEFORE UPDATE: the stored row takes the next version.
   NEW._version := OLD._version + 1;
@@ -98,7 +98,7 @@ $$ LANGUAGE plpgsql
 {{- end }}
 
 {{- define "trigger" }}{{ $trigger := . -}}
-CREATE TRIGGER {{ $trigger.Name }}
+CREATE TRIGGER {{ quote $trigger.Name }}
   {{ $trigger.Timing }} ON {{ $trigger.QuotedTable }}
-  FOR EACH ROW EXECUTE FUNCTION {{ $trigger.Function }}()
+  FOR EACH ROW EXECUTE FUNCTION {{ quote $trigger.Function }}()
 {{- end }}

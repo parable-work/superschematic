@@ -1,0 +1,3 @@
+name: users-ts-agent-stack
+kind: Stack
+outputs: {}

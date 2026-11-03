@@ -25,7 +25,7 @@ const (
 	Contract Phase = "contract"
 )
 
-// HazardClass is one of the seven hazard classes of D27.
+// HazardClass is one of the seven hazard classes of D27, or raw-sql (D83).
 type HazardClass string
 
 const (
@@ -50,12 +50,16 @@ const (
 	// HazardHistory: the step changes the shape of rows a history table
 	// keeps.
 	HazardHistory HazardClass = "history"
+	// HazardRawSQL: the step runs raw SQL the schema declares, or would undo
+	// it, which the planner cannot judge (D83).
+	HazardRawSQL HazardClass = "raw-sql"
 )
 
-// HazardClasses lists every class in the order D27 gives them.
+// HazardClasses lists every class in the order D27 gives them, then
+// raw-sql (D83).
 var HazardClasses = []HazardClass{
 	HazardDestructive, HazardBlocking, HazardCompat, HazardDataDependent,
-	HazardCopyTable, HazardAPIBreaking, HazardHistory,
+	HazardCopyTable, HazardAPIBreaking, HazardHistory, HazardRawSQL,
 }
 
 // Plan is the migration from one model to another. Its JSON form is the
@@ -114,6 +118,7 @@ type Step struct {
 	//   view/<schema>.<view>
 	//   schema/<schema>
 	//   extension/<extension>
+	//   rawSql/<id>
 	// Names are the database's, unquoted, in the new version for a create
 	// or a rename and in the previous one for a drop.
 	Subject string `json:"subject"`

@@ -18,14 +18,16 @@ export CGO_LDFLAGS="$(scripts/engine-archive.sh --print)"
 cd runtime/engine/go && go test ./...
 ```
 
-A Go binary that links superscalar's archive and the version graph's too
-puts all three `-L` flags in `CGO_LDFLAGS` (`scripts/superscalar-dep.sh
---print`, `scripts/versiongraph-archive.sh --print`). The three are built
-with one Rust release, each defines its own C functions alone, and
-`scripts/engine-link-check.sh` proves they link into one binary. Outside
-this checkout, a release's `superschematic-archives_<version>_<platform>.tar.gz`
-holds the three under `lib/` and the header under `include/`: build with
-`CGO_LDFLAGS=-L<dir>/lib`.
+A Go binary that links superscalar's archive, the version graph's and the
+behaviors' core's too (`runtime/rules/go`, D103) puts all four `-L` flags
+in `CGO_LDFLAGS` (`scripts/superscalar-dep.sh --print`,
+`scripts/versiongraph-archive.sh --print`, `scripts/rules-archive.sh
+--print`). The four are built with one Rust release, each defines its own
+C functions alone, and `scripts/engine-link-check.sh` proves they link
+into one binary. Outside this checkout, a release's
+`superschematic-archives_<version>_<platform>.tar.gz` holds the four under
+`lib/` and the engine's and the behaviors' core's headers under
+`include/`: build with `CGO_LDFLAGS=-L<dir>/lib`.
 
 The core's archive (`runtime/engine/rust/ffi`) runs the core's behaviors
 (`superschematic_engine_behaviors::core()`). A project whose schemas
@@ -163,6 +165,7 @@ the event stream's frames, and MCP's JSON-RPC.
 | `Stream`, `MCP` | The event stream's page size and heartbeat; the MCP endpoint's server info and instructions. |
 | `Serve` | `ServeAll` (the default), `ServeAPI` or `ServeMCP`. |
 | `Done` | Closed when the host stops serving: every event stream ends then, so a server's shutdown waits for none (`http.Server.RegisterOnShutdown`). |
+| `ActingFor` | Whether a request's `Acting-For` header is honored (D77): given the engine's principal for the caller, the subject and the request. Nil, the default, ignores the header; `HonorActingFor` honors it for every caller, and the access policy decides. The header is read by `ActingForSubject`'s rule, the engine's: ASCII whitespace around it trimmed, and two headers, a comma, a control or any other whitespace refused with 400 `invalid_argument`; the subject the function approves is passed to the engine as `HTTPOptions.ActingFor`, which acts for exactly it. |
 
 `enginehttp.Background(b, options)` serves the routes of a `Background`
 engine: every request under the prefix is 503 `unavailable` ("The engine
@@ -173,7 +176,8 @@ serves the engine (`docs/stack-model.md`, section 8.1).
 An event stream lifts the connection's write deadline, writes each frame
 and flushes it (`http.ResponseController`). It polls the engine without
 waiting whenever the engine's one waiter goroutine, blocked in `eng_wait`,
-sees a commit (`Engine.Changed`; on Postgres a commit in any process), or a
+sees a commit or a signal (`Engine.Changed`; on Postgres a commit or a
+signal in any process), or a
 quarter of the heartbeat passes, and ends when the engine ends it, the
 client goes away or the engine closes. `WriteProblem` writes a problem
 document as the engine writes one, for a host's own refusals.
@@ -183,7 +187,7 @@ document as the engine writes one, for a host's own refusals.
 ```
 make engine-archive && cd runtime/engine/go && CGO_LDFLAGS="$(../../../scripts/engine-archive.sh --print)" go test ./...
 make engine-go               # the replays over the test kit's archive
-make engine-link-check       # one binary over the three archives
+make engine-link-check       # one binary over the four archives
 ```
 
 `enginehttp/replay_test.go` replays the HTTP corpus

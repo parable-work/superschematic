@@ -32,6 +32,10 @@ pub mod identity;
 mod jws;
 mod jwt;
 mod loopback;
+// The memory store an API lists (D75): the interface, a disabled and an
+// in-process store and the typed channels and keys, and with the
+// `memorystore-redis` feature the Redis client.
+pub mod memorystore;
 // A stack server's JSON-line log (D57), with the `logging` feature.
 #[cfg(feature = "logging")]
 pub mod logging;
@@ -66,6 +70,8 @@ pub mod telemetry;
 mod token_source;
 #[cfg(any(feature = "identity", feature = "postgres", feature = "sqlite"))]
 mod uuid62;
+// A webhook verifier over a JWT carrying the body's SHA-256 (D81).
+mod webhook;
 // A worker's claim loop (D53, D65), with the `postgres` or `sqlite`
 // feature.
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
@@ -113,4 +119,7 @@ pub use service_auth::{
 pub use shutdown::{CancellationToken, Shutdown};
 pub use token_source::{
     GoogleIdTokenSource, HttpGetter, SignedKeySource, TokenFileSource, TokenFuture, TokenSource,
+};
+pub use webhook::{
+    JwtBodyHashOptions, JwtBodyHashVerifier, WebhookKeyLookup, WebhookKeys, INVALID_SIGNATURE_CODE,
 };

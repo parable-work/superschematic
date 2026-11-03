@@ -21,8 +21,10 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
 superschematic-engine = { path = "../engine", default-features = false }
 # The builtin scalar catalog's value classes, which a Branches kind's field
-# of a catalog scalar takes (D32). Not published, so a path dependency.
-superschematic-schema-ir = { path = "../../../schema/rust-ir" }
+# of a catalog scalar takes (D32), and its ajv feature's JSON Schema, which
+# decides whether Comments' draft has text as post's body pattern does.
+# Not published, so a path dependency.
+superschematic-schema-ir = { path = "../../../schema/rust-ir", features = ["ajv"] }
 # The version graph's engine (D32, D58), which Branches runs over the fixed
 # layout in the call's transaction (src/graph.rs). Not published, so a path
 # dependency; without its default features it builds neither the

@@ -11,11 +11,16 @@ type {{.SDKStructName}} struct {
 	{{- range .Namespaces}}
 	{{- if not .IsScopedNS}}
 	// {{.StructName}} exposes {{.Name}} namespace operations.
-	{{- if .Endpoints}}
+	{{- if .AllEndpoints}}
 	//
 	// Endpoints:
 	{{- range .Endpoints}}
 	// - {{.MethodName}}: {{docLine .Description (printf "%s endpoint." .MethodName)}}{{if .RequiresAuth}} Requires authentication.{{end}}
+	{{- end}}
+	{{- range $member := .Members}}
+	{{- range .Endpoints}}
+	// - {{$member.FieldName}}.{{.MethodName}}: {{docLine .Description (printf "%s endpoint." .MethodName)}}{{if .RequiresAuth}} Requires authentication.{{end}}
+	{{- end}}
 	{{- end}}
 	{{- end}}
 	{{.StructName}} *namespaces.{{.StructName}}

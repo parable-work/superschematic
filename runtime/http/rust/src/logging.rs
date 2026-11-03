@@ -85,6 +85,9 @@ pub const WORKER: &str = "worker";
 /// as Go's runner logger names it.
 pub const RUNNER: &str = "runner";
 
+/// The field that names a deriver on every line of its log (D74).
+pub const DERIVER: &str = "deriver";
+
 /// The span of one API of the server: each line written in it carries
 /// `"api": api`. The generated `Deps` holds one, and the entrypoint runs the
 /// API's work in it (`span.in_scope`, or `tracing::Instrument::instrument`

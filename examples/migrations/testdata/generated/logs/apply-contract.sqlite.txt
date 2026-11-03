@@ -1,3 +1,3 @@
-resuming plan 01966f0f87eb965d67fd5b1b065cb7be784406f4eda0758e7b36119195f2caaf for service tasks-db
-step 3/3 contract table/comment/column/legacy_id: done in ...
-plan 01966f0f87eb965d67fd5b1b065cb7be784406f4eda0758e7b36119195f2caaf applied: service tasks-db is at model 1c45865ddcb6c5199a6527a5ff24f2d1606f6bce578f88208022df1ca4337b8d
+resuming plan 6500e9f6f4eb3fbb6b1cdc16309e474e425f93608beb7e266a7293316bc57b8c for service tasks-db
+step 4/4 contract table/comment/column/legacy_id: done in ...
+plan 6500e9f6f4eb3fbb6b1cdc16309e474e425f93608beb7e266a7293316bc57b8c applied: service tasks-db is at model 90b86dd1598f2aa16a543dabf48c1b96a8e578ad9575b62d6387781bfeec0297

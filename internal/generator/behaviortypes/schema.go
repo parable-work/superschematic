@@ -70,6 +70,12 @@ func ScalarJSONType(scalar *ir.ScalarDef) string {
 	return "string"
 }
 
+// DecodeSchema decodes a declaration's JSON Schema into the tree
+// TSRenderer renders: nil for an absent schema.
+func DecodeSchema(raw json.RawMessage) (any, error) {
+	return decodeSchema(raw)
+}
+
 // decodeSchema decodes a declaration's JSON Schema into a tree the
 // narrowings copy and change.
 func decodeSchema(raw json.RawMessage) (any, error) {

@@ -113,7 +113,7 @@ func TestMigratePlanFlagErrors(t *testing.T) {
 		{[]string{"--from", "a", "--from-ref", "main"}, "--from and --from-ref both name the previous version"},
 		{[]string{"--format", "yaml"}, `--format "yaml": want json, sql or markdown`},
 		{[]string{"--dialect", "mysql"}, `--dialect "mysql": want postgres or sqlite`},
-		{[]string{"--fail-on", "destructive,oops"}, `--fail-on "oops" is not a hazard class: want destructive, blocking, compat, data-dependent, copy-table, api-breaking, history, or all`},
+		{[]string{"--fail-on", "destructive,oops"}, `--fail-on "oops" is not a hazard class: want destructive, blocking, compat, data-dependent, copy-table, api-breaking, history, raw-sql, or all`},
 		{[]string{"--allow", "table/order"}, `--allow "table/order" is not a hazard id`},
 		{[]string{"--allow", "oops:table/order"}, `--allow "oops:table/order" is not a hazard id`},
 		{[]string{"--rename", "order.total=amount"}, "--rename: rename \"order.total=amount\": want old=new for a table (purchase=order) or oldTable.oldColumn=newTable.newColumn for a column (order.total=order.amount)"},

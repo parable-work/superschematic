@@ -228,6 +228,66 @@ pub fn parse_person(value: Value, unknown_fields: rt::UnknownFields) -> Result<c
     serde_json::from_value(value).map_err(rt::ParseError::Decode)
 }
 
+/// The fields `Request` declares, by their wire names.
+pub const REQUEST_FIELDS: &[&str] = &["subject", "body", "category", "summary"];
+
+/// Validates a JSON value as `Request`. A null value passes; the errors
+/// are empty when the value is valid.
+pub fn validate_request(value: &Value) -> ValidationErrors {
+    let mut errors = ValidationErrors::new();
+    if value.is_null() {
+        return errors;
+    }
+    {
+        let field = value.get("subject");
+        if rt::is_absent(field) {
+            errors.push("subject", ValidationError::required());
+        }
+        rt::expect_string(&mut errors, "subject", field);
+    }
+    {
+        let field = value.get("body");
+        rt::expect_string(&mut errors, "body", field);
+    }
+    {
+        let field = value.get("category");
+        rt::expect_string(&mut errors, "category", field);
+    }
+    {
+        let field = value.get("summary");
+        rt::expect_string(&mut errors, "summary", field);
+    }
+    errors
+}
+
+/// Validates a `Request` object that must be present: its errors are one
+/// `object` error.
+pub fn validate_request_required(value: Option<&Value>) -> rt::ScalarResult {
+    rt::require_object(value, validate_request)
+}
+
+/// Prepares a JSON value as `Request`: fills its `@default` values,
+/// refuses undeclared keys when asked and validates it, returning the value
+/// `parse_request` decodes.
+pub fn prepare_request(value: Value, unknown_fields: rt::UnknownFields) -> Result<Value, rt::ParseError> {
+    let Value::Object(object) = value else {
+        return Err(rt::ParseError::NotAnObject);
+    };
+    rt::check_unknown_fields(&object, REQUEST_FIELDS, unknown_fields)?;
+    let value = Value::Object(object);
+    let errors = validate_request(&value);
+    if !errors.is_empty() {
+        return Err(rt::ParseError::Invalid(errors));
+    }
+    Ok(value)
+}
+
+/// Parses a JSON value as `Request`: `prepare_request`, then decodes it.
+pub fn parse_request(value: Value, unknown_fields: rt::UnknownFields) -> Result<crate::types::Request, rt::ParseError> {
+    let value = prepare_request(value, unknown_fields)?;
+    serde_json::from_value(value).map_err(rt::ParseError::Decode)
+}
+
 /// The fields `Ticket` declares, by their wire names.
 pub const TICKET_FIELDS: &[&str] = &["title", "body"];
 

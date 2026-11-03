@@ -54,7 +54,7 @@ func TestInvalidOperationDocsIsALocatedSchemaError(t *testing.T) {
 		t.Fatal("expected schema errors")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, `invalid @docs config: capability "GetNote" must contain at least two dot-separated lowercase segments`) {
+	if !strings.Contains(msg, `invalid @docs config: capability "GetNote" holds "G" at character 1; a capability is two or more dot-separated segments of lowercase letters, digits and hyphens, such as "orders.returns.create"`) {
 		t.Fatalf("unexpected error: %s", msg)
 	}
 	if !regexp.MustCompile(`broken\.schema\.ts:\d+:\d+:`).MatchString(msg) {

@@ -9,12 +9,14 @@ import type {
   LoginInput,
   LoginResult,
   RegisterInput,
+  RegisterResult,
   ValidationResult,
 } from '@schemas/fixture-user-routes-api-types';
 import {
   parseCapabilitiesFromJSON,
   parseCurrentUserFromJSON,
   parseLoginResultFromJSON,
+  parseRegisterResultFromJSON,
   validateChangePasswordInput,
   validateLoginInput,
   validateRegisterInput,
@@ -153,10 +155,10 @@ export class AccountNamespace {
   }
 
   /**
-   * Creates a user with the login, name and password given and signs them in, as login does.
+   * Creates a user with the login, name and password given, who waits for an administrator's approval: it answers 202 with pending true and starts no session. The first administrator, when the set names one, is signed in as login does.
    * @param input - Request payload
    * @param signal - Optional AbortSignal, or RequestOptions with a signal and an end user to forward
-   * @returns LoginResult
+   * @returns RegisterResult
    * @throws {ValidationError} if input validation fails
    * @throws {ApiError} if the API request fails
    */
@@ -164,7 +166,7 @@ export class AccountNamespace {
     input: RegisterInput,
     signal?: any,
     ...extraArgs: any[]
-  ): Promise<LoginResult> {
+  ): Promise<RegisterResult> {
     if (input === null || input === undefined) {
       throw new ValidationError({ '': [{ validator: 'required', message: 'input is required' }] });
     }
@@ -174,11 +176,11 @@ export class AccountNamespace {
       throw new ValidationError(validationErrors);
     }
     // Make POST request
-    const result = await this.client.post<LoginResult>(
+    const result = await this.client.post<RegisterResult>(
       `/api/auth/register`,
       input,
       { ...toRequestOptions(signal) }
     );
-    return parseLoginResultFromJSON(result);
+    return parseRegisterResultFromJSON(result);
   }
 }

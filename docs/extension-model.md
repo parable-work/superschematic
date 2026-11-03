@@ -763,13 +763,15 @@ spell its own way, so a registry holds one `ToolInvocationPolicy`
 | `Key` | the key inside `@mcp({...})`, in the data forms' `mcp` record, in the IR and in every tool document |
 | `Values` | the allowed values, in the order `tools/index.ts` types them |
 | `Default` | the value a visible tool gets when `@mcp` omits `Key` |
+| `Confirm` | the values whose tools an API's MCP endpoint runs only once the person confirms the call (D93); empty confirms every value but `Default` |
 
-The core's is `invocationPolicy`, `auto` or `ask`, `auto` by default.
+The core's is `invocationPolicy`, `auto` or `ask`, `auto` by default, `ask`
+confirmed.
 `RegisterToolInvocationPolicy` replaces it. A second registration is an
 error that names both extensions, so two extensions that disagree fail
 assembly. `Registry.ToolInvocationPolicy()` returns the one in force.
 
-The policy is read in four places, all through the registry:
+The policy is read in five places, all through the registry:
 
 - The core `@mcp` decorator's `Apply` accepts `Key` with a value from
   `Values`, fills in `Default` for a visible tool, and names the build's
@@ -781,6 +783,8 @@ The policy is read in four places, all through the registry:
   the tool hooks, for IR that did not come through the loader.
 - The SDK generators write `Key` at fixed positions and type it in
   `tools/index.ts` as the union of `Values`.
+- The TypeScript API generator marks each tool of `mcp.ts` whose value
+  `Confirm` lists, and the endpoint confirms its calls (D93).
 
 In the IR the policy is `OperationMCP.Invocation`, an `ir.MCPInvocation`
 holding the key and the value, which `OperationMCP`'s JSON and YAML
@@ -892,25 +896,63 @@ shape is `BehaviorDeclaration`:
 | `configSchema` | the JSON Schema of the config a type gives the behavior; absent, the behavior takes none |
 | `createParamsSchema` | the JSON Schema of the parameters a create gives the behavior for the new instance, which an engine passes to its `initialize`: an object schema whose `additionalProperties` is `false` or a schema; absent, a create gives it none |
 | `requires`, `conflicts` | behaviors a type that lists this one must also list, or may not |
-| `fields` | the fields it adds: `name`, `description` and `volatile`, true for a field that can move without an event of its own instance |
-| `operations` | the operations it adds: `name` (camelCase), `description`, `paramsSchema` (an object schema with `"additionalProperties": false`), `resultSchema`, `writes`, `scope` (`instance`, the default, or `schema`), and `invocationPolicy`, a value of the registry's policy (section 3.15) or absent for its default |
+| `fields` | the fields it adds: `name`, `description`, `volatile`, true for a field that can move without an event of its own instance, `perReader`, true for a volatile one whose value is the caller's, and `type`, the column it takes on a table (below) |
+| `value` | the field that holds the behavior's value when a type carries it on a field (D103): one of `fields`, which takes the anchor field's name and column; absent, the behavior cannot be anchored on a field |
+| `tables` | the sub-tables it keeps per row on a table that composes it (D103): each `name` (camelCase, unique among its tables), `description`, `key`, the field whose value keys a row within its row, of type `string`, and `fields`, each typed, the key among them and none named `id`; the loader adds each as a child table of the row, deleted with it, which only the behavior's operations write |
+| `armsDeadlines` | true for a behavior that arms deadlines: a table that composes it gets a deadline queue, `<Type>Deadline`, which an API's `@behaviorWorker` runs (D103) |
+| `hearsChanges` | true for a behavior that hears the writes of its table's rows: a table that composes it gets a change queue, `<Type>Change`, which its change trigger writes on every insert, update and delete, whoever makes it, and an API's `@behaviorWorker` runs (D103) |
+| `operations` | the operations it adds: `name` (camelCase), `description`, `paramsSchema` (an object schema with `"additionalProperties": false`), `resultSchema`, `writes`, `scope` (`instance`, the default, `schema` or `namespace`), `beside`, `log` and `asks` (below), and `invocationPolicy`, a value of the registry's policy (section 3.15) or absent for its default |
+| `signals` | the messages about an instance an engine delivers to the event streams open on it and keeps nowhere (D77): `name` (camelCase, unique among its signals), `description`, `paramsSchema` (the JSON Schema of its data) and `access`, who may send it: `read` or `write`, a caller the policy lets read or write the schema, or `operation`, the behavior's own operations alone |
 | `preconditionSchema` | the JSON Schema of the entry a caller sends for the behavior in the preconditions of an update, a delete or an operation, which an engine checks and hands to the behavior's guard: an object schema with `"additionalProperties": false`; absent, the behavior takes none |
 | `vetoes` | the codes its refusals carry, each `code` (lowercase snake case, at most 64 characters) and `description`; an engine refuses a veto whose code is not listed |
 
 An operation's `scope` says what a call names: `instance`, one instance
 by id, or `schema`, the schema as a whole with no instance, which an
 engine serves at `POST /namespaces/{ns}/schemas/{name}/operations/{op}`
-and as a tool that takes its parameters and no `id` (D16, amended).
-`RegisterBehavior` refuses any other value, and the engine does too.
+and as a tool that takes its parameters and no `id` (D16, amended); or
+`namespace`, the behavior's own tables across every schema of a
+namespace that composes it, with no instance and no schema, which an
+engine calls by the behavior's name, at `POST
+/namespaces/{ns}/behaviors/{behavior}/operations/{op}` and as a tool of
+the behavior's (D77; "Namespace operations" under "Behaviors" in
+`runtime/engine/README.md`). A namespace operation sets neither `beside`
+nor `log`. `RegisterBehavior` refuses any other value, and the engine
+does too.
 
-A field carries a name, a description and whether it is volatile, no
-type. A field's type can depend on the behavior's config, and the loader
-needs only the name to refuse a collision. A volatile field
+An instance operation that writes may say `"beside": true`: it writes
+only its behavior's own tables and columns, so an engine moves no
+sequence of the instance for it, asks no other behavior's guard, and
+appends an operation event of no sequence; with `"log": false` it
+appends none (D77; "Instances and events" under "Behaviors" in
+`runtime/engine/README.md`). `RegisterBehavior` refuses a beside
+operation that does not write or has scope `schema`, `"log": false` on
+one that is not beside, and a behavior with a beside operation and a
+field that is not volatile, and the engine does too. A beside operation
+with `"log": false` that writes only its caller's own state, a read
+marker, may say `"asks": "read"`: an engine asks the access policy
+`read` for it rather than `write`. `RegisterBehavior` refuses any other
+value of `asks`, and `asks` on any other operation.
+
+A field carries a name, a description and whether it is volatile. On an
+engine type it needs no type: its type can depend on the behavior's
+config, and the loader needs only the name to refuse a collision. On a
+table, which a field-anchored use keeps (D103), each field is a column, and
+its `type` says which: a builtin (`string`, `number`, `boolean`) or a
+scalar of the registry's catalog, which the generators map as an own
+field's; a date-time scalar is epoch milliseconds in the core. Finalize
+refuses a type that is neither, and `RegisterBehavior` refuses a type on a
+volatile field and a `value` that names no field; the engine checks both
+and leaves them out of the declaration it answers with. A volatile field
 (`"volatile": true`) can move without an event of its own instance: it
 is computed when the instance is read, from other instances, the clock
 or the config, as `Rollups.values` and `Dependencies.blocked` are. No
 event records such a move, so `Reactions`' `changes`, which hears a
-field through its instance's events, refuses one (D56).
+field through its instance's events, refuses one (D56). A volatile field
+whose value is the caller's, not the instance's, as Comments' `unread`
+is, also says `"perReader": true` (D77): an engine computes it at each
+read for that reader, and leaves it out of every event and of the moves
+a referring behavior hears. `RegisterBehavior` refuses `perReader` on a
+field that is not volatile, and the engine does too.
 
 `RegisterBehavior` rejects what section 3.2 lists. The name after the dot
 follows the bare-name rule (`^[A-Z][A-Za-z0-9]*$`), and the prefix is the
@@ -992,6 +1034,57 @@ must include the augmentation, through an import of the authoring package
 or a `tsconfig.json` `include` entry. The registry still decides: a
 declared name the binary does not register fails the load. `format
 --to=ts` writes one `@behavior` per entry, in list order.
+
+A behavior whose declaration names a `value` is also a field's type on a
+DB table (D103): `status: Workflow<{ states: ["draft", "paid"]; ... }>`,
+where `@superschematic/db` exports the field type under the behavior's
+name and the walker knows it by the symbol's package, as it knows
+`Relation`. The use's entry names the field (`{ name, field, config }`),
+and the table stays a table. The walker reads the config, a type argument
+of literal types, through the checker: object types, tuples, string,
+number and boolean literal types and null, nested to any depth, a union of
+literals (alone or as an array's element, `("a" | "b")[]`,
+`Array<"a" | "b">`, or through a type alias of either) as the list of its
+members in the order written, and `typeof` a constant declared `as
+const`; anything else fails at the member, with its path in the config,
+and so does a union of literals whose written order the walker cannot
+find, since the checker's order is not the schema's. It writes no field
+for the anchor: the loader adds each declared field as a column once the
+behaviors' checks pass and before the rest of verify, the anchor's value
+field among them, for every authoring form alike, so an index, a display
+field, a projection's column and `@enqueueOnChange` name one as they name
+a field of the table's own. A type's uses are its `@behavior`s, then its field
+types in field order. The walker refuses, at the field, a field type on a
+type that is not a DB table, one for a behavior that names no `value`, an
+optional or decorated one, one inside a wrapper or a list, one a class
+inherits from a base class or a trait, and a config its schema rejects;
+verify refuses a type that composes behaviors both ways. `format --to=ts`
+writes each field-anchored use back as its field's type, after the class's
+own fields, and leaves out the fields the loader added and the
+`@optimistic` they imply.
+
+A behavior the behaviors' core runs and whose declaration names no `value`
+(Timers, Reactions) is implemented by a DB table as a whole (D103): `export abstract
+class Ticket implements Timers<Ticket, { ... }>`, where `@superschematic/db`
+exports the carrier, which resolves to the empty object type as `User`
+does. Its first type argument is the table itself, and the walker reads
+its second, the config, as it reads a field type's. The use's entry is
+`{ name, implements: true, config }`, anchored on the type and marked
+apart from a `@behavior` use, which makes an engine type; a type's uses
+list its implements uses before its field types. The loader adds a typed
+declared field of the use as a column, `<storage key>_<field>`, each of
+its `tables` as a child table `<Type><Behavior><Table>`, when it
+`armsDeadlines`, the table's deadline queue, and, when it `hearsChanges`,
+the table's change queue and its trigger, which a table also gets when
+another table's Reactions hears it through a to-one relation of it. The
+engine's declaration parser takes `hearsChanges` and shifts it out, as it
+does `armsDeadlines`. The walker refuses it on a
+type that is not a DB table, with a first type argument that is not the
+table, with a config it cannot read, and inherited from a base class or a
+trait; verify refuses it for a behavior the core does not run or one that
+names a `value`. `format --to=ts` writes it
+back in the class's heading, after `extends`, and leaves out the tables
+and the queues the loader added.
 
 The loader checks every type's list in every frontend (verify, after the
 core checks and before the kind's `Verify`), and each failure names the
@@ -1141,7 +1234,7 @@ engine; without them the engine refuses a schema that composes one.
 | Behavior | Config | Fields | Operations |
 | --- | --- | --- | --- |
 | `Workflow` | `states`, `initial`, `transitions` (`from`, `to`, `permission`), `outcomes` (by terminal state: `success`, `failure` or `neutral`); required | `status`, `enteredAt` | `transition` |
-| `Comments` | none | `commentCount` | `comment`, `listComments` |
+| `Comments` | `maxBodyLength`, `editWindowMs`, `blocks` (`ref`, `action`), `moderatePermission`, `pinPermission`, `resolvePermission`, optional | `messages`, `lastMessageAt`, `threads` (all volatile) | `post`, `edit`, `deleteMessage`, `purge`, `react`, `unreact`, `pin`, `unpin`, `resolve`, `reopen`, each beside the instance (D77), and `listMessages`, `getMessage`, `listEdits`, `listReactions` |
 | `Revisions` | `review` (`permission`), optional | `revision`, `pendingProposals` | `listRevisions`, `getRevision`, `propose`, `approve`, `reject`, `listProposals` |
 | `Dependencies` | `schemas`, `gatedStates`, `satisfiedBy`, optional; requires `Workflow` | `blocked` | `addBlocker`, `removeBlocker`, `listBlockers`, `listDependents` |
 | `Links` | `links` (by name: `schema`, `required`, `pinned`: a revision or a release); required | `links` | `link`, `unlink`, and `listLinked`, of scope `schema` |

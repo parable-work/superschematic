@@ -188,7 +188,7 @@ func (b *builder) params(ep apigen.EndpointInfo, info *EndpointInfo) error {
 	}
 
 	if ep.HasInput {
-		input, err := b.input(ep.InputType, ep.InputRequired)
+		input, err := b.input(ep.InputType, ep.InputRequired, ep.InputAllowsUnknownFields)
 		if err != nil {
 			return fmt.Errorf("rustrestgen: operation %s.%s: %w", ep.Namespace, ep.Name, err)
 		}
@@ -410,8 +410,11 @@ func (b *builder) scalarConstraints(scalar *ir.ScalarDef, name, kind string) str
 	return "ScalarConstraints::new(" + rustString(name) + ")" + strings.Join(calls, "")
 }
 
-// input resolves an operation's input type and its parse function.
-func (b *builder) input(typeName string, required bool) (*InputInfo, error) {
+// input resolves an operation's input type and its parse function. An
+// input that allows unknown fields (D87) is parsed with them allowed:
+// serde drops a key the type does not declare, and a type that is
+// @allowUnknownFields drops it in its prepare_<type> whatever it is asked.
+func (b *builder) input(typeName string, required, allowsUnknownFields bool) (*InputInfo, error) {
 	if !b.declares(typeName) {
 		return nil, fmt.Errorf("input type %s is not declared by the schema or its dependencies", typeName)
 	}
@@ -422,6 +425,9 @@ func (b *builder) input(typeName string, required bool) (*InputInfo, error) {
 	if validators, ok := b.validatorsOf(typeName); ok {
 		input.Parse = validators + "::parse_" + codegen.ToSnakeCase(typeName)
 		input.Prepare = validators + "::prepare_" + codegen.ToSnakeCase(typeName)
+		if allowsUnknownFields {
+			input.Parse = "|value, _| " + input.Parse + "(value, schema::UnknownFields::Allow)"
+		}
 	} else {
 		// A type its crate emits without validators is only decoded.
 		b.usesSchemaRef = true

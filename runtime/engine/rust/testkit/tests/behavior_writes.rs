@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Map, Value};
 
-use superschematic_engine::behaviors::{BehaviorMigration, ColumnSpec};
+use superschematic_engine::behaviors::{BehaviorMigration, ColumnSpec, OperationFn};
 use superschematic_engine::errors::{ValidationIssue, Veto};
 use superschematic_engine::storage::SqlValue;
 use superschematic_engine::{
@@ -501,6 +501,343 @@ fn validate_update_reports_without_writing_and_a_read_only_operation_cannot_upda
             fields_of(&get(engine, "a").unwrap()),
             json!({"data": {"title": "Desk", "note": "oak"}, "behaviors": {"test.Editor": {"renames": 0}}})
         );
+    }
+}
+
+// test.Scribe and test.Copyist (one behavior under two names) apply the
+// update()s a call's `steps` list, each `{ patch, attribution? }`, through
+// update_attributed when it gives an attribution (D16, amended). delegate
+// runs its own steps, then calls `to`'s `operation` with `inner`, and
+// carries on past a failure when `catch` is true.
+struct Scribe {
+    declaration: String,
+    changes: Seen,
+}
+
+impl Scribe {
+    fn named(name: &str, changes: &Seen) -> Scribe {
+        let steps = json!({"type": "object", "additionalProperties": false, "properties": {
+            "steps": {"type": "array"}, "to": {"type": "string"}, "operation": {"type": "string"},
+            "inner": {"type": "array"}, "catch": {"type": "boolean"}}});
+        Scribe {
+            declaration: json!({
+                "name": name,
+                "operations": [
+                    {"name": format!("{}Write", short(name)), "paramsSchema": steps, "resultSchema": true, "writes": true},
+                    {"name": format!("{}WriteThenFail", short(name)), "paramsSchema": steps, "resultSchema": true, "writes": true},
+                    {"name": format!("{}Delegate", short(name)), "paramsSchema": steps, "resultSchema": true, "writes": true}
+                ]
+            })
+            .to_string(),
+            changes: Arc::clone(changes),
+        }
+    }
+}
+
+// short is a behavior's name without its extension, lowercased: the prefix
+// of its operations, since two behaviors on a type share no operation name.
+fn short(name: &str) -> String {
+    name.rsplit('.').next().unwrap_or(name).to_lowercase()
+}
+
+fn write_steps(cx: &superschematic_engine::OperationCx<'_, Value>, steps: &Value) -> Result<()> {
+    for step in steps.as_array().into_iter().flatten() {
+        match step.get("attribution") {
+            Some(attribution) => cx.update_attributed(&step["patch"], attribution)?,
+            None => cx.update(&step["patch"])?,
+        };
+    }
+    Ok(())
+}
+
+impl Behavior for Scribe {
+    type Config = Value;
+
+    fn declaration(&self) -> &str {
+        &self.declaration
+    }
+
+    fn parse_config(&self, raw: &Value, _: &ConfigTarget<'_>) -> Result<Value> {
+        Ok(raw.clone())
+    }
+
+    fn hooks(&self) -> Hooks<Self> {
+        let write: OperationFn<Self> = |_, cx, params| {
+            write_steps(cx, &params["steps"])?;
+            Ok(Value::Object((*cx.data()?).clone()))
+        };
+        let write_then_fail: OperationFn<Self> = |_, cx, params| {
+            write_steps(cx, &params["steps"])?;
+            Err(Error::Internal("after the writes".into()))
+        };
+        let delegate: OperationFn<Self> = |_, cx, params| {
+            write_steps(cx, &params["steps"])?;
+            let called = cx.call(
+                params["to"].as_str().unwrap_or_default(),
+                params["operation"].as_str().unwrap_or_default(),
+                &json!({"steps": params["inner"]}),
+            );
+            if params["catch"] != json!(true) {
+                called?;
+            }
+            Ok(Value::Object((*cx.data()?).clone()))
+        };
+        let names = if self.name() == "test.Scribe" {
+            ["scribeWrite", "scribeWriteThenFail", "scribeDelegate"]
+        } else {
+            ["copyistWrite", "copyistWriteThenFail", "copyistDelegate"]
+        };
+        Hooks {
+            operations: names
+                .into_iter()
+                .zip([write, write_then_fail, delegate])
+                .collect(),
+            after_change: Some(|scribe, _, change| {
+                scribe.changes.lock().unwrap().push(change.to_json());
+                Ok(())
+            }),
+            ..Hooks::default()
+        }
+    }
+}
+
+impl Scribe {
+    fn name(&self) -> String {
+        serde_json::from_str::<Value>(&self.declaration).unwrap()["name"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned()
+    }
+}
+
+fn scribing(target: &support::Target) -> (Engine, Seen) {
+    let changes: Seen = Arc::default();
+    let engine = target.open(
+        BehaviorSet::new()
+            .with(Scribe::named("test.Scribe", &changes))
+            .with(Scribe::named("test.Copyist", &changes)),
+    );
+    support::publish_item_with(
+        &engine,
+        json!([{"name": "test.Scribe"}, {"name": "test.Copyist"}]),
+        json!([
+            {"name": "note", "typeRef": {"name": "string"}},
+            {"name": "size", "typeRef": {"name": "number"}, "validateMin": 1}
+        ]),
+    );
+    create(&engine, "a", json!({"title": "Desk", "note": "oak"})).unwrap();
+    (engine, changes)
+}
+
+fn last_change(engine: &Engine) -> Value {
+    item_events(engine, "a").last().unwrap().change.clone()
+}
+
+#[test]
+fn an_attributed_update_carries_its_entries_into_the_change_and_the_event() {
+    for target in targets("an_attributed_update_carries_its_entries") {
+        let (engine, changes) = scribing(&target);
+        let engine = &engine;
+        invoke(
+            engine,
+            "a",
+            "scribeWrite",
+            json!({"steps": [{"patch": {"title": "Table", "note": "pine"},
+                              "attribution": {"title": {"confidence": 0.6, "source": "model-x@3"}}}]}),
+        )
+        .unwrap();
+        let attribution =
+            json!({"title": {"behavior": "test.Scribe", "confidence": 0.6, "source": "model-x@3"}});
+        let change = changes.lock().unwrap().last().unwrap().clone();
+        assert_eq!(change["attribution"], attribution);
+        assert_eq!(change["behavior"], "test.Scribe");
+        assert_eq!(
+            last_change(engine),
+            json!({"behavior": "test.Scribe", "operation": "scribeWrite",
+                   "params": {"steps": [{"patch": {"title": "Table", "note": "pine"},
+                                         "attribution": {"title": {"confidence": 0.6, "source": "model-x@3"}}}]},
+                   "patch": {"data": {"title": "Table", "note": "pine"}},
+                   "attribution": attribution})
+        );
+        // The log replays to the instance; attribution is beside the patch.
+        let instance = get(engine, "a").unwrap();
+        assert_eq!(replay(engine, "a"), fields_of(&instance));
+        // An empty entry attributes the field to the behavior alone.
+        invoke(
+            engine,
+            "a",
+            "scribeWrite",
+            json!({"steps": [{"patch": {"note": "ash"}, "attribution": {"note": {}}}]}),
+        )
+        .unwrap();
+        assert_eq!(
+            last_change(engine)["attribution"],
+            json!({"note": {"behavior": "test.Scribe"}})
+        );
+    }
+}
+
+#[test]
+fn an_operation_that_attributes_nothing_logs_no_attribution() {
+    for target in targets("an_operation_that_attributes_nothing") {
+        let (engine, changes) = scribing(&target);
+        let engine = &engine;
+        invoke(
+            engine,
+            "a",
+            "scribeWrite",
+            json!({"steps": [{"patch": {"title": "Table"}}]}),
+        )
+        .unwrap();
+        assert_eq!(last_change(engine).get("attribution"), None);
+        assert_eq!(
+            changes.lock().unwrap().last().unwrap().get("attribution"),
+            None
+        );
+    }
+}
+
+#[test]
+fn the_last_write_of_a_field_decides_and_a_field_the_call_leaves_as_it_was_keeps_no_entry() {
+    for target in targets("the_last_write_of_a_field_decides") {
+        let (engine, _) = scribing(&target);
+        let engine = &engine;
+        // A later write that does not attribute the field removes its entry.
+        invoke(
+            engine,
+            "a",
+            "scribeWrite",
+            json!({"steps": [
+                {"patch": {"title": "Table", "note": "pine"},
+                 "attribution": {"title": {"confidence": 0.5}, "note": {"confidence": 0.5}}},
+                {"patch": {"title": "Chair"}}]}),
+        )
+        .unwrap();
+        assert_eq!(
+            last_change(engine)["attribution"],
+            json!({"note": {"behavior": "test.Scribe", "confidence": 0.5}})
+        );
+        // A later attributed write replaces the entry.
+        invoke(
+            engine,
+            "a",
+            "scribeWrite",
+            json!({"steps": [
+                {"patch": {"title": "Stool"}, "attribution": {"title": {"confidence": 0.2}}},
+                {"patch": {"title": "Bench"}, "attribution": {"title": {"confidence": 0.9}}}]}),
+        )
+        .unwrap();
+        assert_eq!(
+            last_change(engine)["attribution"],
+            json!({"title": {"behavior": "test.Scribe", "confidence": 0.9}})
+        );
+        // A field written and written back is not in the patch, so it has
+        // no entry; the other field keeps its own.
+        invoke(
+            engine,
+            "a",
+            "scribeWrite",
+            json!({"steps": [
+                {"patch": {"note": "elm", "title": "Desk"},
+                 "attribution": {"note": {"confidence": 1}, "title": {"confidence": 1}}},
+                {"patch": {"note": "pine"}, "attribution": {"note": {"confidence": 1}}}]}),
+        )
+        .unwrap();
+        let change = last_change(engine);
+        assert_eq!(change["patch"], json!({"data": {"title": "Desk"}}));
+        assert_eq!(
+            change["attribution"],
+            json!({"title": {"behavior": "test.Scribe", "confidence": 1}})
+        );
+    }
+}
+
+#[test]
+fn a_called_operation_attributes_as_its_own_behavior_and_a_failed_call_takes_its_entries_back() {
+    for target in targets("a_called_operation_attributes_as_its_own_behavior") {
+        let (engine, _) = scribing(&target);
+        let engine = &engine;
+        invoke(
+            engine,
+            "a",
+            "scribeDelegate",
+            json!({"steps": [{"patch": {"title": "Table"}, "attribution": {"title": {"confidence": 0.4}}}],
+                   "to": "test.Copyist", "operation": "copyistWrite",
+                   "inner": [{"patch": {"note": "pine"}, "attribution": {"note": {"source": "copy"}}}]}),
+        )
+        .unwrap();
+        let change = last_change(engine);
+        assert_eq!(change["behavior"], "test.Scribe");
+        assert_eq!(
+            change["attribution"],
+            json!({"title": {"behavior": "test.Scribe", "confidence": 0.4},
+                   "note": {"behavior": "test.Copyist", "source": "copy"}})
+        );
+        // The called operation fails after writing the title over: its
+        // savepoint takes back the value and the entry, and the caller's
+        // entry for the title stands.
+        invoke(
+            engine,
+            "a",
+            "scribeDelegate",
+            json!({"steps": [{"patch": {"title": "Chair"}, "attribution": {"title": {"confidence": 0.5}}}],
+                   "to": "test.Copyist", "operation": "copyistWriteThenFail", "catch": true,
+                   "inner": [{"patch": {"title": "Stool", "note": "elm"},
+                              "attribution": {"title": {"confidence": 0.9}, "note": {"confidence": 0.9}}}]}),
+        )
+        .unwrap();
+        let change = last_change(engine);
+        assert_eq!(change["patch"], json!({"data": {"title": "Chair"}}));
+        assert_eq!(
+            change["attribution"],
+            json!({"title": {"behavior": "test.Scribe", "confidence": 0.5}})
+        );
+        assert_eq!(get(engine, "a").unwrap().data["note"], "pine");
+    }
+}
+
+#[test]
+fn a_malformed_attribution_is_a_behavior_error_and_writes_nothing() {
+    for target in targets("a_malformed_attribution_is_a_behavior_error") {
+        let (engine, _) = scribing(&target);
+        let engine = &engine;
+        let long = "x".repeat(201);
+        for (attribution, message) in [
+            (json!(["title"]), "an object of entries by own field"),
+            (
+                json!({"note": {}}),
+                "attributes note, which its patch does not write",
+            ),
+            (
+                json!({"title": "high"}),
+                "an object of confidence and source",
+            ),
+            (
+                json!({"title": {"confidence": 1.5}}),
+                "a number from 0 to 1",
+            ),
+            (
+                json!({"title": {"confidence": "high"}}),
+                "a number from 0 to 1",
+            ),
+            (json!({"title": {"source": long}}), "at most 200 characters"),
+            (
+                json!({"title": {"behavior": "test.Other"}}),
+                "has behavior; it takes confidence and source",
+            ),
+        ] {
+            let (behavior, reason) = defect(invoke(
+                engine,
+                "a",
+                "scribeWrite",
+                json!({"steps": [{"patch": {"title": "Table"}, "attribution": attribution}]}),
+            ));
+            assert_eq!(behavior, "test.Scribe");
+            assert!(reason.contains(message), "{reason} should say {message}");
+        }
+        let instance = get(engine, "a").unwrap();
+        assert_eq!(instance.seq, 1);
+        assert_eq!(instance.data["title"], "Desk");
     }
 }
 

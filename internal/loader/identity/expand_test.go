@@ -90,6 +90,7 @@ func TestExpandAddsTheContractTables(t *testing.T) {
 			{name: ir.IdentityCredentialPasswordHashField, typeName: "string", required: true, secret: true},
 			{name: ir.IdentityCredentialPasswordChangedAtField, typeName: "Temporal.DateTime", required: true},
 			{name: ir.IdentityCredentialDisabledAtField, typeName: "Temporal.DateTime"},
+			{name: ir.IdentityCredentialPendingAtField, typeName: "Temporal.DateTime"},
 		},
 		ir.IdentityRoleGrantTable: {
 			id,

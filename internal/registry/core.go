@@ -65,5 +65,6 @@ func coreKinds() []KindSpec {
 		stackKind(),
 		siteKind(),
 		bucketKind(),
+		memoryStoreKind(),
 	}
 }

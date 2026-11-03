@@ -311,6 +311,9 @@ def _parse_field_def(
         validate_list_min=_as_int_or_none(field_obj.get("x-validateListMin")),
         validate_list_max=_as_int_or_none(field_obj.get("x-validateListMax")),
         validate_pattern=_as_string(field_obj.get("x-validatePattern")),
+        validate_precision=_as_int_or_none(field_obj.get("x-validatePrecision")),
+        validate_scale=_as_int_or_none(field_obj.get("x-validateScale")),
+        validate_dimensions=_as_int_or_none(field_obj.get("x-validateDimensions")),
         arguments=_parse_arguments(field_obj, path),
         key=_as_bool(field_obj.get("x-key")),
         unique=_as_bool(field_obj.get("x-unique")),
@@ -360,6 +363,7 @@ def _parse_type_definition(
         fields=fields,
         indexes=_parse_indexes(definition),
         env_vars=_as_bool(definition.get("x-envVars")),
+        allow_unknown_fields=_as_bool(definition.get("x-allowUnknownFields")),
     )
 
 

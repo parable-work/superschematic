@@ -74,6 +74,7 @@ impl Db {
             options.busy_timeout,
             options.busy_timeout,
             Arc::new(Notifier::new()),
+            Arc::new(crate::signals::Signals::new()),
             Vec::new(),
         ))
     }

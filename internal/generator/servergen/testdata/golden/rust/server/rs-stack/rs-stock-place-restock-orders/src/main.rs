@@ -28,6 +28,7 @@ use std::time::Instant;
 use superschematic_http_runtime::bucket::Bucket;
 use superschematic_http_runtime::gcs;
 use superschematic_http_runtime::logging::{self, tracing};
+use superschematic_http_runtime::memorystore;
 use superschematic_http_runtime::postgres::{self, Pool};
 use superschematic_http_runtime::stackconfig::{self, Database, Service};
 use superschematic_http_runtime::telemetry::{self, Defaults};
@@ -98,12 +99,22 @@ async fn run() -> Result<(), Failure> {
         &rs_stock_config.rs_media_bucket,
     )?;
 
+    // One memory store per MemoryStore service (D75), disabled while its
+    // field is unset or its connection refused.
+    let rs_cache_store = memorystore::redis::open_or_disabled(
+        "rs-cache",
+        "RS_CACHE_MEMORY_STORE",
+        rs_stock_config.rs_cache_memory_store.as_ref(),
+    )
+    .await;
+
     // rs-stock: its jobs, built from its Deps.
     let rs_stock_deps = rs_stock_api::Deps {
         config: rs_stock_config,
         db: rs_db_pool,
         rs_pricing: rs_pricing_client,
         rs_media: rs_media_bucket,
+        rs_cache: Arc::clone(&rs_cache_store),
         span: logging::api_span("rs-stock"),
     };
     let jobs = rs_stock_impl::create_jobs(rs_stock_deps)
@@ -114,7 +125,10 @@ async fn run() -> Result<(), Failure> {
         class = "PlaceRestockOrders",
         "job started"
     );
-    telemetry::job("PlaceRestockOrders", jobs.place_restock_orders(shutdown)).await
+    let ran = telemetry::job("PlaceRestockOrders", jobs.place_restock_orders(shutdown)).await;
+    // Each memory store closes once the job ends.
+    rs_cache_store.close().await;
+    ran
 }
 
 /// An API's configuration, or a failure naming the API and each variable

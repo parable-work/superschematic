@@ -27,6 +27,46 @@ export interface Order {
 }
 
 /**
+ * OrderChanged - Sent when an order's lines change: a newer change replaces the one that
+ * waits, and the worker handles one order's changes at a time.
+ */
+export interface OrderChanged {
+  orderId: IdentityUUID;
+  lineId?: IdentityUUID | null;
+  priority: Priority;
+}
+
+/**
+ * OrderChangedDefaults holds @default values declared in the schema. Defaults
+ * are typed as Partial<OrderChanged> so they can be merged into incoming
+ * payloads or used to bootstrap a new instance.
+ */
+export const OrderChangedDefaults: Partial<OrderChanged> = {
+  priority: "low" as Priority,
+};
+
+/**
+ * makeOrderChanged returns a OrderChanged initialised with @default values from
+ * the schema. Caller-provided overrides win over the declared defaults.
+ */
+export function makeOrderChanged(overrides?: Partial<OrderChanged>): OrderChanged {
+  return { ...OrderChangedDefaults, ...(overrides || {}) } as OrderChanged;
+}
+
+/**
+ * OrderLine - A line of an order. Whatever writes it, a change to its product or its
+ * quantity enqueues the order's OrderChanged, as does a new line or a
+ * deleted one, once it names a product.
+ */
+export interface OrderLine {
+  id?: IdentityUUID | null;
+  order: Order;
+  product?: Product | null;
+  quantity: GenericInt64;
+  note?: string | null;
+}
+
+/**
  * OrderPlaced - Placed when an order is: the worker that fulfils orders handles it.
  */
 export interface OrderPlaced {
@@ -61,4 +101,30 @@ export function makeOrderPlaced(overrides?: Partial<OrderPlaced>): OrderPlaced {
  */
 export interface Ping {
   sentAt?: TemporalDateTime | null;
+}
+
+/**
+ * Product - A product an order's line may name.
+ */
+export interface Product {
+  id?: IdentityUUID | null;
+  name: string;
+}
+
+/**
+ * StockChecked - Sent when a stock count is asked for: one waits per SKU, and a later ask
+ * while it waits adds nothing.
+ */
+export interface StockChecked {
+  sku: string;
+  quantity: GenericInt64;
+}
+
+/**
+ * SyncRequested - Sent when an account's records are to be synced: every request is kept,
+ * and the worker syncs one account at a time.
+ */
+export interface SyncRequested {
+  accountId: IdentityUUID;
+  reason?: string | null;
 }

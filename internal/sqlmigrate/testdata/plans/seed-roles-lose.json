@@ -1,0 +1,30 @@
+{
+  "dialect": "postgres",
+  "expanded": "73ea422016e8b274cde26fd493fc3150e031efea7dcfff2ffc577a2b4a033ead",
+  "from": "73ea422016e8b274cde26fd493fc3150e031efea7dcfff2ffc577a2b4a033ead",
+  "hash": "38dd9806b6b6216ca626fced3890e35117360fad5981e4c5e20df14991efde88",
+  "service": "fixture-user-model-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "destructive",
+          "id": "destructive:role/role/member",
+          "reason": "The role member loses identity.users.write: the step sets its permissions to the seed's (identity.roles.read), replacing any an administrator gave it since it was seeded.",
+          "subject": "role/role/member"
+        }
+      ],
+      "index": 1,
+      "op": "updateRole",
+      "phase": "contract",
+      "statements": [
+        "UPDATE role SET permissions = ARRAY['identity.roles.read']::TEXT[] WHERE \"name\" = 'member'"
+      ],
+      "subject": "role/role/member",
+      "transactional": true
+    }
+  ],
+  "to": "c9415cf956b80ecfd198e7bf75fb8c1aac8b4b74af6a4b23a4d84c07912aaead",
+  "toModel": null,
+  "version": 1
+}

@@ -19,6 +19,11 @@
 //! `remove:rooms[1]`), which `apply_action` applies without JavaScript.
 //! A form reads at most `MAX_PAIRS` pairs and one row past a list's
 //! limit, so what a post costs is bounded by the form, not by the post.
+{{- if not .HoldsForms }}
+//!
+//! This crate has no form: its pages read a refusal and its errors from
+//! here (`Refusal`, `FormErrors`), which an operation's error becomes.
+{{- end }}
 {{- if .FormsUse "picks" }}
 //!
 //! A control whose reference's options operation searches is a search
@@ -54,7 +59,9 @@ use crate::api::types;
 use crate::operations;
 use serde::de::DeserializeOwned;
 {{- end }}
+{{- if .HoldsForms }}
 use serde::{Deserialize, Deserializer};
+{{- end }}
 {{- if .Forms }}
 use serde_json::Map;
 {{- end }}
@@ -70,7 +77,9 @@ use topcoat::router::content::Form;
 use topcoat::router::request::uri;
 {{- end }}
 use topcoat::router::StatusCode;
+{{- if .HoldsForms }}
 use topcoat::view::{View, component, view};
+{{- end }}
 
 /// The values the app names for a field, which a text or number control
 /// they name offers as a `<select>`; `crate::choices`, also here.
@@ -195,6 +204,7 @@ impl FormErrors {
             }
         }
     }
+{{- if .HoldsForms }}
 
     /// The form's own messages, and those of a place the component shows
     /// no control for (an `@uiHidden` field, a hidden path argument, a key
@@ -208,6 +218,7 @@ impl FormErrors {
         }
         out
     }
+{{- end }}
 {{- if or (.FormsUse "argsInput") (.FormsUse "paged") }}
 {{ if .FormsUse "paged" }}
     /// Adds an embedded input form's errors, or a page's, to its argument
@@ -431,6 +442,7 @@ fn pick_control(name: &str, id: &str, required: bool, invalid: Option<&str>, val
     }
 }
 {{- end }}
+{{- if .HoldsForms }}
 
 /// A step of a control's name: a field's key, or a row's index.
 #[derive(Debug, Clone, PartialEq)]
@@ -579,6 +591,7 @@ impl Posted {
     }
 {{- end }}
 }
+{{- end }}
 {{- if .FormsUse "read" }}
 
 /// What one control sent, read as the input's JSON: nothing, a value, or
@@ -682,6 +695,110 @@ fn integer(value: Option<&str>) -> Read {
         }
         _ => Err("must be a whole number"),
     }
+}
+{{- end }}
+{{- if .FormsUse "minor_amount" }}
+
+/// An amount in the minor units of a currency another field names (D44,
+/// amended): digits, after a `-` or not, refused otherwise. A number input
+/// takes `12.00` and `1.2e1` for twelve, but a member of staff who types a
+/// point means a decimal, which this control does not read.
+fn minor_amount(value: Option<&str>) -> Read {
+    let Some(text) = value.map(str::trim) else {
+        return Ok(None);
+    };
+    let digits = text.strip_prefix('-').unwrap_or(text);
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err("must be a whole number of minor units");
+    }
+    text.parse::<i64>().map(|amount| Some(Value::from(amount))).map_err(|_| "is too large an amount")
+}
+{{- end }}
+{{- if .FormCurrencies }}
+
+/// The minor-unit exponent of `currency` (D44, amended), from superscalar's
+/// `Finance.Currency` table: 2 for GBP, 0 for JPY, 3 for BHD, and 0 for a
+/// code ISO 4217 gives none (XAU), whose amounts are whole numbers.
+fn minor_units(currency: &str) -> usize {
+    usize::from({{ .ScalarIdent }}::scalars::finance_currency::minor_units(currency).unwrap_or(0))
+}
+
+/// An amount typed as a decimal of `currency` (D44, amended), read as the
+/// whole number of its minor units the input holds: `4.5` and `4.50` of
+/// GBP are 450, and `4` is 400. It takes what its control's pattern
+/// (`decimal_pattern`) takes and refuses the rest: text that is no
+/// decimal, space around it, a sign when not `signed`, a point in an
+/// amount of a currency without decimals, and more decimals than the
+/// currency has. It refuses an amount past an i64 too.
+fn money(value: Option<&str>, currency: &str, signed: bool) -> Read {
+    let Some(text) = value else {
+        return Ok(None);
+    };
+    let places = minor_units(currency);
+    let (negative, digits) = match text.strip_prefix('-') {
+        Some(_) if !signed => return Err("must not be negative"),
+        Some(rest) => (true, rest),
+        None => (false, text),
+    };
+    let (whole, fraction) = digits.split_once('.').unwrap_or((digits, ""));
+    if whole.is_empty() && fraction.is_empty() || !whole.bytes().chain(fraction.bytes()).all(|byte| byte.is_ascii_digit()) {
+        return Err("must be an amount");
+    }
+    if places == 0 && digits.contains('.') || fraction.len() > places {
+        return Err(match places {
+            0 => "must be a whole amount",
+            1 => "must have at most 1 decimal place",
+            2 => "must have at most 2 decimal places",
+            3 => "must have at most 3 decimal places",
+            _ => "must have at most 4 decimal places",
+        });
+    }
+    let Ok(magnitude) = format!("{whole}{fraction:0<places$}").parse::<i128>() else {
+        return Err("is too large an amount");
+    };
+    let amount = if negative { -magnitude } else { magnitude };
+    i64::try_from(amount).map(|amount| Some(Value::from(amount))).map_err(|_| "is too large an amount")
+}
+{{- range .FormCurrencies }}
+
+/// An amount typed as a decimal of {{ .Code }}, {{ if .Signed }}with a sign or not{{ else }}without a sign{{ end }}, read as its minor units.
+fn {{ .Read }}(value: Option<&str>) -> Read {
+    money(value, {{ rustString .Code }}, {{ .Signed }})
+}
+{{- end }}
+
+/// The pattern of a decimal control of `currency` (D44, amended): digits,
+/// then a point and at most the currency's decimals, or digits alone for a
+/// currency of whole amounts; and a leading `-` when the field's bounds
+/// take a negative amount.
+pub fn decimal_pattern(currency: &str, signed: bool) -> String {
+    let sign = if signed { "-?" } else { "" };
+    match minor_units(currency) {
+        0 => format!(r"{sign}\d+"),
+        places => format!(r"{sign}(\d+(\.\d{{"{{"}}0,{places}{{"}}"}})?|\.\d{{"{{"}}1,{places}{{"}}"}})"),
+    }
+}
+
+/// An amount in `currency`'s minor units as its decimal control holds it:
+/// `decimal_text(450, "GBP")` is "4.50", ungrouped and without its code,
+/// as a new form's default and a page's form filled from an item hold it.
+pub fn decimal_text(amount: i64, currency: &str) -> String {
+    let places = minor_units(currency);
+    let digits = format!("{:0>width$}", amount.unsigned_abs(), width = places + 1);
+    let (whole, fraction) = digits.split_at(digits.len() - places);
+    let sign = if amount < 0 { "-" } else { "" };
+    if fraction.is_empty() {
+        format!("{sign}{whole}")
+    } else {
+        format!("{sign}{whole}.{fraction}")
+    }
+}
+
+/// An item's amount, as the API sends it, as its decimal control of
+/// `currency` holds it (`decimal_text`); none for a value that is no whole
+/// number.
+pub fn held_decimal(value: &Value, currency: &str) -> Option<String> {
+    value.as_i64().map(|amount| decimal_text(amount, currency))
 }
 {{- end }}
 {{- if .FormsUse "number" }}

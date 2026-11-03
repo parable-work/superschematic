@@ -48,8 +48,9 @@ when the case opened more than one. `options` are the options the test built
 it with: `authenticate` and `authenticateService`, the host's, are `"host"`,
 since each exchange records the caller they established; any other function
 (a `tools` filter, an `onError`) is `"custom"` and marks the case `js`
-(`app.tools`, `app.onError`). `stream.heartbeatMs` is the heartbeat the case
-ran with. Paths in exchanges are the parent app's, prefix and all.
+(`app.tools`, `app.onError`, `app.actingFor`). `actingFor: true` honors the
+`acting-for` request header (D77); absent or false, a replay ignores it.
+`stream.heartbeatMs` is the heartbeat the case ran with. Paths in exchanges are the parent app's, prefix and all.
 
 ### Exchange
 
@@ -62,7 +63,7 @@ ran with. Paths in exchanges are the parent app's, prefix and all.
 |---|---|
 | `request.method`, `request.path` | As the app received them. |
 | `request.query` | The query string without `?`, as sent; absent when none. |
-| `request.headers` | Those the engine reads, lowercase, as sent: `accept`, `authorization`, `content-type`, `if-match`, `last-event-id`, `mcp-protocol-version`, `mcp-session-id`, `origin`, `preconditions`, `service-authorization`, `x-request-id`. |
+| `request.headers` | Those the engine reads, lowercase, as sent: `accept`, `acting-for`, `authorization`, `content-type`, `if-match`, `last-event-id`, `mcp-protocol-version`, `mcp-session-id`, `origin`, `preconditions`, `service-authorization`, `x-request-id`. |
 | `request.body` | A JSON body parsed; any other as `{"text": "..."}`; absent when none. |
 | `request.caller` | Who the host established, which the engine's routes take as given: `principal`, what the deployment's Authenticator returned (`null` for none); `service`, what the service authenticator verified (D37; `null` for none); `serviceRefused`, `{status, code}` of the service authenticator's refusal. Absent when the request never reached authentication. The host keeps authentication, and the engine the rule for a service that brings no end user (`typescript/src/http/callers.ts`): with `service` and no `authorization` header, the service stands in. |
 | `response.status` | The status. |

@@ -38,6 +38,7 @@ use crate::registry::document::model_of;
 use crate::registry::{Catalog, Schemas};
 use crate::retention::RetentionOptions;
 use crate::runner::{Runner, RunnerCore, RunnerOptions};
+use crate::signals::{SignalHub, SignalOptions, Signals};
 use crate::tools::options::resolve_tool_options;
 use crate::tools::{ToolOptions, Tools, ToolsCore};
 use crate::values::{ValueOptions, ValueStore, Values};
@@ -322,6 +323,9 @@ pub struct EngineOptions {
     /// documents and the MCP tools are written with: the deployment's
     /// binary's registrations, the core's by default (D11, D58: config).
     pub tools: ToolOptions,
+    /// How many signals a principal may send on one instance each second
+    /// (D77): 20 when absent.
+    pub signals: SignalOptions,
 }
 
 impl std::fmt::Debug for EngineOptions {
@@ -337,6 +341,7 @@ impl std::fmt::Debug for EngineOptions {
             .field("runner", &self.runner)
             .field("retention", &self.retention)
             .field("tools", &self.tools)
+            .field("signals", &self.signals)
             .finish_non_exhaustive()
     }
 }
@@ -358,6 +363,7 @@ impl EngineOptions {
             runner: None,
             retention: None,
             tools: ToolOptions::default(),
+            signals: SignalOptions::default(),
         }
     }
 
@@ -518,6 +524,8 @@ pub struct Engine {
     this: OnceLock<Weak<Engine>>,
     /// The event streams the JSON calls hold open, by id.
     pub(crate) streams: crate::api::stream::OpenStreams,
+    /// The signals the engine's streams hear, and its callers' rate (D77).
+    pub(crate) signals: SignalHub,
 }
 
 impl std::fmt::Debug for Engine {
@@ -569,6 +577,7 @@ impl Engine {
             clock.now(),
         )?;
         values.settle(&db);
+        let signals = SignalHub::new(&db, options.signals);
         let engine = Engine {
             db,
             namespaces,
@@ -587,6 +596,7 @@ impl Engine {
             tools: ToolsCore::new(tools),
             this: OnceLock::new(),
             streams: crate::api::stream::OpenStreams::default(),
+            signals,
         };
         engine.behaviors().register_set(options.behaviors)?;
         engine.check_operation_invocations()?;
@@ -665,6 +675,12 @@ impl Engine {
     /// The runner of reactions and schedules, and of retention.
     pub fn runner(&self) -> Runner<'_> {
         Runner { engine: self }
+    }
+
+    /// The signals of instances (D77): what a caller sends to the event
+    /// streams open on one.
+    pub fn signals(&self) -> Signals<'_> {
+        Signals { engine: self }
     }
 
     /// The describe and tools documents, the tool calls and the behaviors

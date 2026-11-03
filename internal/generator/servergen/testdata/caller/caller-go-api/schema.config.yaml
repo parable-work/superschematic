@@ -1,0 +1,13 @@
+# A public Go API over caller-db's user model (D87): its operations write
+# notes through Deps.DB with the request's context, so the caller records
+# them, and its worker writes notes as the system actor.
+name: caller-go-api
+kind: API
+public: true
+authDb: caller-db
+dependencies:
+  - { name: caller-db, kind: DB }
+outputs:
+  types:
+    go: { enabled: true }
+  api: { enabled: true }

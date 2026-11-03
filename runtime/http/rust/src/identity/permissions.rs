@@ -56,6 +56,18 @@ pub fn uncovered(held: &[String], given: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// The permissions a user holds through `roles` that no permission of
+/// `held` covers: [`uncovered`] of their [`effective_permissions`]. A
+/// caller may set the user's password, disable them or enable them only
+/// when it is empty: no one takes over, or locks out, a user who holds
+/// what they do not.
+pub fn uncovered_user<'a, I>(held: &[String], roles: I) -> Vec<String>
+where
+    I: IntoIterator<Item = &'a [String]>,
+{
+    uncovered(held, &effective_permissions(roles))
+}
+
 /// What capabilities needs to know of one operation of the API: the route
 /// requirements of the router's operation table, keyed by the operation's
 /// OpenAPI operation id.

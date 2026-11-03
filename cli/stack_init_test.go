@@ -445,3 +445,34 @@ esac
 	t.Setenv("PATH", t.TempDir())
 	assert.Equal(t, "", readGcloudConfig(ctx, "project"))
 }
+
+// TestStackInitExposesEveryApp: init exposes each @app of a deployed API
+// after the services, as { of, app }, since an app is a program people use
+// and one not exposed reaches no one on gcp; the summary says so, and the
+// stack resolves with the app exposed (D78).
+func TestStackInitExposesEveryApp(t *testing.T) {
+	exts := withFakeCloud(t)
+	project := prepareInitProject(t)
+	dropSite(t, project)
+	api := filepath.Join(project, "schemas", "services", "notes-api")
+	edit := func(path, old, new string) {
+		t.Helper()
+		data := readFile(t, path)
+		require.Contains(t, data, old)
+		require.NoError(t, os.WriteFile(path, []byte(strings.Replace(data, old, new, 1)), 0o644))
+	}
+	edit(filepath.Join(api, "src", "notes.schema.ts"), `import { HttpMethod, rest } from "@superschematic/api";`,
+		`import { HttpMethod, app, rest } from "@superschematic/api";`+"\n\n// The staff's own pages over notes-api.\n@app()\nexport abstract class Backoffice {}")
+	edit(filepath.Join(api, "schema.config.ts"), "types: { [TargetLanguage.Go]: { enabled: true } },\n    api: { enabled: true },",
+		"types: { [TargetLanguage.Go]: { enabled: true }, [TargetLanguage.Rust]: { enabled: true } },\n    api: { enabled: true, language: \"RUST\" },")
+	t.Chdir(filepath.Join(project, "schemas"))
+	out, err := runStackInitCmd(t, exts, "services", "--name", "notes", "--gcp-project", "notes-staging", "--region", "us-east1")
+	require.NoError(t, err, out)
+
+	dir := filepath.Join(project, "schemas", "services", "notes")
+	schema := readFile(t, filepath.Join(dir, "src", "stack.schema.ts"))
+	assert.Contains(t, schema, `@stack({ deploy: [NotesApi, NotesIndex], expose: [NotesApi, { of: NotesApi, app: "Backoffice" }] })`)
+	assert.Contains(t, schema, "// It exposes every app of those APIs too")
+	assert.Contains(t, out, "  An app is always exposed: Backoffice of notes-api.\n")
+	assert.NotContains(t, out, "does not resolve", out)
+}

@@ -45,7 +45,7 @@ use superschematic_engine::behaviors::{
     Reference, SqlReader, SqlWriter, ValidationRequest, ValueReader, Values,
 };
 use superschematic_engine::behaviors::{
-    PublishCx, ReactionCx, ReferenceCx, ScheduleCx, SchemaCx, ValidationCx,
+    NamespaceCx, PublishCx, ReactionCx, ReferenceCx, ScheduleCx, SchemaCx, ValidationCx,
 };
 use superschematic_engine::storage::behavior::{BehaviorMigration, BehaviorSql};
 use superschematic_engine::storage::{ColumnSpec, ColumnType, Row, RunResult, SqlValue};
@@ -95,6 +95,7 @@ enum Live {
     Operation(*const OperationCx<'static, JsConfig>),
     Validation(*const ValidationCx<'static, JsConfig>),
     Schema(*const SchemaCx<'static, JsConfig>),
+    Namespace(*const NamespaceCx<'static, JsConfig>),
     Reaction(*const ReactionCx<'static, JsConfig>, *const EngineEvent),
     Schedule(*const ScheduleCx<'static, JsConfig>),
     Publish(*const PublishCx<'static, JsConfig>),
@@ -289,6 +290,7 @@ impl JsBehavior {
             watches: flag("watches"),
             operations: names("operations"),
             schema_operations: names("schemaOperations"),
+            namespace_operations: names("namespaceOperations"),
             fields: names("fields"),
             filters,
             schedules,
@@ -909,6 +911,33 @@ impl DynamicBehavior for JsBehavior {
             .unwrap_or(Value::Null))
     }
 
+    fn namespace_operation(
+        &self,
+        name: &str,
+        cx: &NamespaceCx<'_, JsConfig>,
+        params: &Value,
+    ) -> EngineResult<Value> {
+        let mut info = Map::new();
+        info.insert("behavior".into(), Value::from(cx.behavior()));
+        info.insert("namespace".into(), Value::from(cx.namespace()));
+        info.insert(
+            "principal".into(),
+            serde_json::to_value(cx.principal()).unwrap_or(Value::Null),
+        );
+        info.insert("now".into(), Value::from(cx.now()));
+        let pointer = std::ptr::from_ref(cx).cast::<NamespaceCx<'static, JsConfig>>();
+        Ok(self
+            .ask(
+                "namespaceOperation",
+                Some(name),
+                Some(Live::Namespace(pointer)),
+                Some(Value::Object(info)),
+                None,
+                vec![params.clone()],
+            )?
+            .unwrap_or(Value::Null))
+    }
+
     fn field(&self, name: &str, view: &InstanceView<'_, JsConfig>) -> EngineResult<Option<Value>> {
         let pointer = std::ptr::from_ref(view).cast::<InstanceView<'static, JsConfig>>();
         Ok(self
@@ -1145,6 +1174,9 @@ fn describe_target(target: &DescribeTarget) -> Value {
                 out.insert("behavior".into(), Value::from(behavior.as_str()));
             }
             out.insert("writes".into(), Value::Bool(operation.writes));
+            if operation.beside {
+                out.insert("beside".into(), Value::Bool(true));
+            }
             out.insert("scope".into(), Value::from(operation.scope.as_str()));
             Value::Object(out)
         }).collect::<Vec<_>>(),
@@ -1198,6 +1230,14 @@ impl SqlHandle<'_> {
             SqlHandle::Reader(sql) => sql.instances(),
             SqlHandle::Writer(sql) => sql.instances(),
             SqlHandle::Migration(sql) => Ok(sql.instances()?),
+        }
+    }
+
+    fn readable(&self) -> EngineResult<String> {
+        match self {
+            SqlHandle::Reader(sql) => sql.readable(),
+            SqlHandle::Writer(sql) => sql.readable(),
+            SqlHandle::Migration(sql) => Ok(sql.readable()?),
         }
     }
 
@@ -1385,6 +1425,7 @@ fn dispatch(live: Live, method: &str, args: &[Value]) -> EngineResult<Option<Val
                 Live::Instance(cx) => SqlHandle::Writer((*cx).sql()),
                 Live::Operation(cx) => SqlHandle::Writer((*cx).sql()),
                 Live::Schema(cx) => SqlHandle::Writer((*cx).sql()),
+                Live::Namespace(cx) => SqlHandle::Writer((*cx).sql()),
                 Live::Schedule(cx) => SqlHandle::Writer((*cx).sql()),
                 Live::Publish(cx) => SqlHandle::Writer((*cx).sql()),
                 Live::Migration(sql) => SqlHandle::Migration(&*sql),
@@ -1396,6 +1437,7 @@ fn dispatch(live: Live, method: &str, args: &[Value]) -> EngineResult<Option<Val
                 Live::View(view) => ValuesHandle::Reader((*view).values()),
                 Live::Reference(cx) => ValuesHandle::Reader((*cx).values()),
                 Live::Reaction(cx, _) => ValuesHandle::Reader((*cx).values()),
+                Live::Namespace(cx) => ValuesHandle::Reader((*cx).values()),
                 Live::Instance(cx) => ValuesHandle::Writer((*cx).values()),
                 Live::Operation(cx) => ValuesHandle::Writer((*cx).values()),
                 Live::Schema(cx) => ValuesHandle::Writer((*cx).values()),
@@ -1411,6 +1453,7 @@ fn dispatch(live: Live, method: &str, args: &[Value]) -> EngineResult<Option<Val
             return match sql {
                 "table" => Ok(Some(Value::from(handle.table(text(args, 0))?))),
                 "instances" => Ok(Some(Value::from(handle.instances()?))),
+                "readable" => Ok(Some(Value::from(handle.readable()?))),
                 "get" => Ok(Some(
                     handle
                         .get(text(args, 0), &sql_params(args.get(1))?)?
@@ -1453,6 +1496,11 @@ fn dispatch(live: Live, method: &str, args: &[Value]) -> EngineResult<Option<Val
                 }
                 _ => Err(refused()),
             };
+        }
+        // A namespace operation's context (D77) has no scope: its members
+        // are its own.
+        if let Live::Namespace(cx) = live {
+            return namespace_dispatch(&*cx, method, args).unwrap_or_else(|| Err(refused()));
         }
         // The rest is a scope's, an instance's or an operation's.
         let scope = scope_of(live).ok_or_else(refused)?;
@@ -1593,7 +1641,13 @@ fn dispatch(live: Live, method: &str, args: &[Value]) -> EngineResult<Option<Val
         let operation = &*operation;
         match method {
             "update" => Ok(Some(Value::Object(
-                (*operation.update(arg(args, 0))?).clone(),
+                (*match args.get(1) {
+                    Some(attribution) if !attribution.is_null() => {
+                        operation.update_attributed(arg(args, 0), attribution)?
+                    }
+                    _ => operation.update(arg(args, 0))?,
+                })
+                .clone(),
             ))),
             "validateUpdate" => to_json(serde_json::to_value(
                 operation.validate_update(arg(args, 0))?,
@@ -1602,15 +1656,106 @@ fn dispatch(live: Live, method: &str, args: &[Value]) -> EngineResult<Option<Val
                 operation.unchanged();
                 Ok(None)
             }
+            "signal" => {
+                operation.signal(text(args, 0), arg(args, 1))?;
+                Ok(None)
+            }
             _ => Err(refused()),
         }
     }
+}
+
+// namespace_dispatch calls one method of a namespace operation's context
+// (D77) that is not its SQL's or its value store's; None for one it has
+// not.
+fn namespace_dispatch(
+    cx: &NamespaceCx<'_, JsConfig>,
+    method: &str,
+    args: &[Value],
+) -> Option<EngineResult<Option<Value>>> {
+    Some((|| {
+        match method {
+        "can" => Ok(Some(Value::Bool(cx.can(text(args, 0))?))),
+        "configs" => Ok(Some(Value::Array(
+            cx.configs()?
+                .into_iter()
+                .map(|(schema, config)| {
+                    serde_json::json!({ "schema": schema, "config": config.token })
+                })
+                .collect(),
+        ))),
+        "instances.get" => {
+            let fields = fields_of(args.get(2));
+            let names: Option<Vec<&str>> = fields
+                .as_ref()
+                .map(|list| list.iter().map(String::as_str).collect());
+            Ok(Some(
+                match cx
+                    .instances()
+                    .get(text(args, 0), text(args, 1), names.as_deref())?
+                {
+                    None => Value::Null,
+                    Some(record) => serde_json::to_value(record).unwrap_or(Value::Null),
+                },
+            ))
+        }
+        "instances.getMany" => {
+            let ids: Vec<String> = strings(args.get(1));
+            let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+            let fields = fields_of(args.get(2));
+            let names: Option<Vec<&str>> = fields
+                .as_ref()
+                .map(|list| list.iter().map(String::as_str).collect());
+            let found = cx
+                .instances()
+                .get_many(text(args, 0), &id_refs, names.as_deref())?;
+            Ok(Some(Value::Array(
+                found
+                    .into_iter()
+                    .map(|(id, record)| {
+                        Value::Array(vec![
+                            Value::from(id),
+                            serde_json::to_value(record).unwrap_or(Value::Null),
+                        ])
+                    })
+                    .collect(),
+            )))
+        }
+        "instances.invoke" => {
+            let preconditions = Some(arg(args, 4)).filter(|value| !value.is_null());
+            Ok(Some(cx.instances().invoke(
+                text(args, 0),
+                text(args, 1),
+                text(args, 2),
+                arg(args, 3),
+                preconditions,
+            )?))
+        }
+        "instances.invokeSchema" => Ok(Some(cx.instances().invoke_schema(
+            text(args, 0),
+            text(args, 1),
+            arg(args, 2),
+        )?)),
+        "instances.create" => {
+            let behaviors = Some(arg(args, 3)).filter(|value| !value.is_null());
+            let record =
+                cx.instances()
+                    .create(text(args, 0), arg(args, 1), opt_text(args, 2), behaviors)?;
+            to_json(serde_json::to_value(record))
+        }
+        _ => Err(Failed::behavior(
+            cx.behavior(),
+            format!("a namespace operation's context has no {method}"),
+        )),
+    }
+    })())
 }
 
 fn behavior_of(live: Live) -> String {
     // SAFETY: as in dispatch.
     unsafe {
         match live {
+            Live::Namespace(cx) => (*cx).behavior().to_owned(),
             Live::Validation(cx) => (*cx).behavior().to_owned(),
             Live::Publish(cx) => (*cx).behavior().to_owned(),
             other => scope_of(other).map_or_else(String::new, |scope| scope.behavior().to_owned()),
@@ -1695,12 +1840,14 @@ fn event_of(value: &Value) -> EngineEvent {
             .and_then(Value::as_str)
             .map(str::to_owned),
         seq: value.get("seq").and_then(Value::as_i64),
+        beside: value.get("beside") == Some(&Value::Bool(true)),
         version: value.get("version").and_then(Value::as_i64),
         actor: text("actor"),
         service: value
             .get("service")
             .and_then(Value::as_str)
             .map(str::to_owned),
+        for_subject: value.get("for").and_then(Value::as_str).map(str::to_owned),
         at: value.get("at").and_then(Value::as_i64).unwrap_or(0),
         change: value.get("change").cloned().unwrap_or(Value::Null),
         cause: None,

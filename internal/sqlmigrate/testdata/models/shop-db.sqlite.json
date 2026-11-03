@@ -119,7 +119,6 @@
           "type": "TEXT"
         },
         {
-          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
           "name": "placed_at",
           "origin": "Order.placedAt",
           "type": "TEXT"

@@ -19,7 +19,7 @@
             ]
           }
         },
-        { "name": "Comments" },
+        { "name": "Comments", "config": { "editWindowMs": 900000, "moderatePermission": "documents.moderate" } },
         { "name": "Revisions", "config": { "review": { "permission": "documents.review" } } }
       ],
       "fields": [

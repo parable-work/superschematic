@@ -177,7 +177,9 @@ function walkTypeDef(
     if (!Object.prototype.hasOwnProperty.call(data, key)) continue;
     out[key] = walkField(ctx, field, data[key], errors, key);
   }
-  if (ctx.strict) {
+  // A type that is @allowUnknownFields accepts the keys it does not declare,
+  // in strict mode too, and the output holds only its own (D87).
+  if (ctx.strict && !td.allowUnknownFields) {
     for (const k of Object.keys(data)) {
       if (known.has(k)) continue;
       addFieldError(errors, k, 'unknown_field', 'unknown field');

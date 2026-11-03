@@ -1,0 +1,40 @@
+scalars:
+  Identity.UUID:
+    name: Identity.UUID
+    languagePrimitive: string
+  Generic.Int64:
+    name: Generic.Int64
+    languagePrimitive: number
+enums:
+  Region:
+    name: Region
+    comment: Where a product is stocked.
+    values:
+      - { name: North, serializedAs: north }
+      - { name: South, serializedAs: south }
+types:
+  StockLevel:
+    name: StockLevel
+    role: EmbeddedStruct
+    comment: A product's stock at one moment.
+    fields:
+      - name: productId
+        typeRef: { name: Identity.UUID }
+        required: true
+      - name: onHand
+        typeRef: { name: Generic.Int64 }
+        required: true
+      - name: bins
+        typeRef: { name: StockBin, isArray: true }
+        required: true
+  StockBin:
+    name: StockBin
+    role: EmbeddedStruct
+    comment: Where some of a product's stock sits.
+    fields:
+      - name: bin
+        typeRef: { name: string }
+        required: true
+      - name: count
+        typeRef: { name: Generic.Int64 }
+        required: true

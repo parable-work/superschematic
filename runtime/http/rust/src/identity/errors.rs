@@ -30,6 +30,27 @@ pub const CODE_CONFLICT: &str = "conflict";
 /// A role's permission is not dotted segments of letters, digits, `_` and
 /// `-`. 422, with the permissions in `details`.
 pub const CODE_INVALID_PERMISSION: &str = "invalid_permission";
+/// A login whose password verifies for a user who waits for an
+/// administrator's approval (D81). 403.
+pub const CODE_PENDING_APPROVAL: &str = "pending_approval";
+/// `approveUser` for a user who is not waiting for approval (D81). 409.
+pub const CODE_NOT_PENDING: &str = "not_pending";
+
+pub(crate) fn pending_approval() -> ApiError {
+    ApiError::new(
+        StatusCode::FORBIDDEN,
+        CODE_PENDING_APPROVAL,
+        "The user waits for an administrator's approval",
+    )
+}
+
+pub(crate) fn not_pending() -> ApiError {
+    ApiError::new(
+        StatusCode::CONFLICT,
+        CODE_NOT_PENDING,
+        "The user is not waiting for approval",
+    )
+}
 
 pub(crate) fn invalid_credentials() -> ApiError {
     ApiError::new(
@@ -50,6 +71,13 @@ pub(crate) fn forbidden(message: &str) -> ApiError {
 /// A grant of permissions the caller does not hold, listing them.
 pub(crate) fn not_held(permissions: Vec<String>) -> ApiError {
     ApiError::forbidden("No one grants a permission they do not hold")
+        .with_details(json!({ "permissions": permissions }))
+}
+
+/// A write to a user who holds permissions the caller does not, listing
+/// them.
+pub(crate) fn not_covered(permissions: Vec<String>) -> ApiError {
+    ApiError::forbidden("No one administers a user holding a permission they do not hold")
         .with_details(json!({ "permissions": permissions }))
 }
 
@@ -90,6 +118,7 @@ pub(crate) fn store_error(err: StoreError, what: &str) -> ApiError {
         StoreError::NoRoles => ApiError::not_found("The schema has no roles"),
         StoreError::RoleNameTaken => ApiError::conflict("The role name is taken"),
         StoreError::LoginTaken => ApiError::conflict("The login is taken"),
+        StoreError::NotPending => not_pending(),
         other => internal(&other),
     }
 }

@@ -16,16 +16,21 @@ CREATE TABLE "order" (
   updated_at TIMESTAMPTZ,
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
   customer_id UUID NOT NULL,
-  status TEXT NOT NULL,
+  status TEXT DEFAULT 'placed' NOT NULL,
   placed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
-  shipping_address TEXT NOT NULL,
+  shipping_address JSONB NOT NULL,
   cancel_reason TEXT,
   checkout_id UUID,
   total_cents BIGINT NOT NULL,
-  UNIQUE (checkout_id)
+  UNIQUE (checkout_id),
+  CONSTRAINT ck_order_status CHECK (status IN ('placed', 'fulfilled', 'shipped', 'cancelled')),
+  CONSTRAINT ck_order_cancel_reason CHECK (length(cancel_reason) <= 500)
 );
 
-COMMENT ON TABLE "order" IS 'A shopper''s order. Staff look orders up by customer, newest first.';
+COMMENT ON TABLE "order" IS 'A shopper''s order. Staff look orders up by customer, newest first. An
+order put back to placed, by staff or by a script in psql, is fulfilled
+again: the database''s trigger enqueues its OrderPlaced, whatever wrote
+the row.';
 
 CREATE TABLE order_line (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
@@ -44,9 +49,10 @@ CREATE TABLE product (
   sku CITEXT NOT NULL,
   "name" VARCHAR(80) NOT NULL,
   price_cents BIGINT NOT NULL,
-  in_stock BOOLEAN NOT NULL,
+  in_stock BOOLEAN DEFAULT true NOT NULL,
   image_object TEXT,
-  UNIQUE (sku)
+  UNIQUE (sku),
+  CONSTRAINT ck_product_image_object CHECK (length(image_object) <= 1024)
 );
 
 -- Add search_text generated column for trigram search
@@ -61,10 +67,11 @@ CREATE TABLE restock_request (
   updated_at TIMESTAMPTZ,
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
   product_id UUID NOT NULL,
-  status TEXT NOT NULL,
+  status TEXT DEFAULT 'open' NOT NULL,
   quantity BIGINT NOT NULL,
   open_product_id UUID,
-  ordered_at TIMESTAMPTZ
+  ordered_at TIMESTAMPTZ,
+  CONSTRAINT ck_restock_request_status CHECK (status IN ('open', 'ordered'))
 );
 
 COMMENT ON TABLE restock_request IS 'A request to the supplier for more of a product: shop-stock''s worker
@@ -84,7 +91,9 @@ CREATE TABLE review (
   title TEXT NOT NULL,
   body TEXT NOT NULL,
   deleted_at TIMESTAMPTZ,
-  deleted_by UUID
+  deleted_by UUID,
+  CONSTRAINT ck_review_rating CHECK (rating >= 1 AND rating <= 5),
+  CONSTRAINT ck_review_title CHECK (length(title) <= 120)
 );
 
 -- Add search_text generated column for trigram search
@@ -146,6 +155,7 @@ CREATE TABLE user_credential (
   password_hash TEXT NOT NULL,
   password_changed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
   disabled_at TIMESTAMPTZ,
+  pending_at TIMESTAMPTZ,
   UNIQUE (user_id)
 );
 
@@ -173,9 +183,11 @@ CREATE TABLE order_placed_queue (
   updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
-COMMENT ON TABLE order_placed_queue IS 'Placed with each order, in the transaction that writes it: shop-orders''
-worker FulfilOrders handles each message, and a message whose handler
-fails is retried every half minute, five times at most.';
+COMMENT ON TABLE order_placed_queue IS 'Placed with each order, in the transaction that writes it, and by the
+trigger on an order put back to placed: shop-orders'' worker FulfilOrders
+handles each message, and a message whose handler fails is retried every
+half minute, five times at most. One waits per order: an order placed
+again while its message waits adds none.';
 
 CREATE TABLE stock_low_queue (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
@@ -196,9 +208,11 @@ COMMENT ON TABLE stock_low_queue IS 'Enqueued by shop-stock when a sale leaves a
 available units at or below its reorderAt (Stock.low, D70), and by its
 job OrderRestocks for one a count left low: shop-stock''s worker
 ReorderStock files a restock request for the product. The message holds
-the units available and the reorder level as the sale left them. A
-message whose handler fails is retried every half minute, five times at
-most.';
+the units available and the reorder level as the sale left them. One
+waits per product: a later sale that leaves the product low replaces it,
+so the worker reads the latest level, and the worker handles one
+product''s message at a time. A message whose handler fails is retried
+every half minute, five times at most.';
 
 -- Add foreign key constraints
 
@@ -284,8 +298,35 @@ CREATE INDEX idx_order_placed_queue_claim_expires_at ON order_placed_queue USING
 
 CREATE INDEX idx_order_placed_queue_updated_at ON order_placed_queue USING BTREE (updated_at) WHERE state = 'done';
 
+CREATE UNIQUE INDEX uq_order_placed_queue_ready_key ON order_placed_queue USING BTREE (order_id) WHERE state = 'ready';
+
 CREATE INDEX idx_stock_low_queue_due_at ON stock_low_queue USING BTREE (due_at) WHERE state = 'ready';
 
 CREATE INDEX idx_stock_low_queue_claim_expires_at ON stock_low_queue USING BTREE (claim_expires_at) WHERE state = 'claimed';
 
 CREATE INDEX idx_stock_low_queue_updated_at ON stock_low_queue USING BTREE (updated_at) WHERE state = 'done';
+
+CREATE UNIQUE INDEX uq_stock_low_queue_ready_key ON stock_low_queue USING BTREE (product_id) WHERE state = 'ready';
+
+CREATE UNIQUE INDEX uq_stock_low_queue_claimed_key ON stock_low_queue USING BTREE (product_id) WHERE state = 'claimed';
+
+-- Create the functions and triggers that enqueue a queue's message after a
+-- write to a table's rows, whatever writes it
+
+CREATE OR REPLACE FUNCTION order_enqueue_order_placed() RETURNS trigger AS $$
+BEGIN
+  -- Enqueues a message of OrderPlaced after a write to order (D80).
+  IF TG_OP = 'UPDATE' AND NOT (OLD.status IS DISTINCT FROM NEW.status) THEN
+    RETURN NULL;
+  END IF;
+  IF NEW.status = 'placed' THEN
+    INSERT INTO order_placed_queue (order_id) VALUES (NEW.id)
+      ON CONFLICT (order_id) WHERE state = 'ready' DO NOTHING;
+  END IF;
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_order_enqueue_order_placed
+  AFTER UPDATE ON "order"
+  FOR EACH ROW EXECUTE FUNCTION order_enqueue_order_placed();

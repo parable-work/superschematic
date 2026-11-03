@@ -719,6 +719,193 @@ class Person(BaseModel):
         return self.model_copy(update={
         })
 
+class Request(BaseModel):
+    """
+    A request a model triages and a person reviews: Derived and Provenance narrow by their configs' fields.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        validate_assignment=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    subject: str = Field(..., alias="subject", serialization_alias="subject")
+
+    body: Optional[str] = Field(default=None, alias="body", serialization_alias="body")
+
+    category: Optional[str] = Field(default=None, alias="category", serialization_alias="category")
+
+    summary: Optional[str] = Field(default=None, alias="summary", serialization_alias="summary")
+
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
+        """
+        Perform comprehensive validation and return all errors.
+
+        Every generated model a field holds, in a list, a list of lists or
+        a map too, is validated as well, its errors under the path that
+        reaches it (lines[0].quantity, extras.gift.quantity).
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names, nested models' fields included.
+
+        Returns:
+            ValidationErrors object containing any validation errors.
+            If no errors, the errors dict will be empty.
+        """
+        errors = ValidationErrors()
+
+        # Validate subject
+        if self.subject is None:
+            errors.add_field_error("subject", "required", "required field")
+
+        # Validate body
+        if self.body is not None:
+            try:
+                TypeAdapter(str).validate_python(self.body)
+            except PydanticValidationError as e:
+                errors.add_field_error("body", "invalid", str(e))
+
+        # Validate category
+        if self.category is not None:
+            try:
+                TypeAdapter(str).validate_python(self.category)
+            except PydanticValidationError as e:
+                errors.add_field_error("category", "invalid", str(e))
+
+        # Validate summary
+        if self.summary is not None:
+            try:
+                TypeAdapter(str).validate_python(self.summary)
+            except PydanticValidationError as e:
+                errors.add_field_error("summary", "invalid", str(e))
+
+        return errors
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert the model to a dictionary.
+
+        Returns:
+            Dictionary representation of the model.
+        """
+        return self.model_dump(mode='python', exclude_none=False)
+
+    def to_json_dict(self) -> Dict[str, Any]:
+        """
+        Convert the model to a JSON-serializable dictionary.
+
+        Returns:
+            JSON-serializable dictionary representation.
+        """
+        return self.model_dump(mode='json', exclude_none=False)
+
+    def to_json(self) -> str:
+        """
+        Convert the model to a stable JSON string.
+
+        Returns:
+            JSON string representation.
+        """
+        return self.model_dump_json(exclude_none=False)
+
+    @classmethod
+    def from_dict(cls, input_data: Dict[str, Any]) -> "Request":
+        """
+        Parse a model from a dictionary using strict validation.
+
+        Args:
+            input_data: Dictionary payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        return cls.model_validate(input_data, strict=True)
+
+    @classmethod
+    def from_dict_non_strict(cls, input_data: Dict[str, Any]) -> "Request":
+        """
+        Parse a model from a dictionary using non-strict validation.
+
+        Args:
+            input_data: Dictionary payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        return cls.model_validate(input_data, strict=False)
+
+    @classmethod
+    def from_json(cls, input_data: str | bytes) -> "Request":
+        """
+        Parse a model from JSON text/bytes using strict validation.
+
+        Args:
+            input_data: JSON payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = json.loads(input_data)
+        if not isinstance(parsed_data, dict):
+            raise ValueError("JSON content must decode to an object")
+        return cls.from_dict(parsed_data)
+
+    @classmethod
+    def from_json_non_strict(cls, input_data: str | bytes) -> "Request":
+        """
+        Parse a model from JSON text/bytes using non-strict validation.
+
+        Args:
+            input_data: JSON payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = json.loads(input_data)
+        if not isinstance(parsed_data, dict):
+            raise ValueError("JSON content must decode to an object")
+        return cls.from_dict_non_strict(parsed_data)
+
+    @classmethod
+    def from_yaml(cls, input_data: str | bytes) -> "Request":
+        """
+        Parse a model from YAML text/bytes using strict validation.
+
+        Args:
+            input_data: YAML payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = _safe_load_yaml(input_data)
+        return cls.from_dict(parsed_data)
+
+    @classmethod
+    def from_yaml_non_strict(cls, input_data: str | bytes) -> "Request":
+        """
+        Parse a model from YAML text/bytes using non-strict validation.
+
+        Args:
+            input_data: YAML payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = _safe_load_yaml(input_data)
+        return cls.from_dict_non_strict(parsed_data)
+
+    def mask_secrets(self) -> "Request":
+        """
+        Return a copy of this object with secret fields masked.
+        """
+        return self.model_copy(update={
+        })
+
 class Ticket(BaseModel):
     """
     A ticket that moves through its states, links to its project, its spec and its reviewers, and keeps deadlines.

@@ -835,6 +835,7 @@ fn describe_target(schema: &str, operations: &[&str]) -> DescribeTarget {
                 name: (*name).to_owned(),
                 behavior: Some("Links".to_owned()),
                 writes: true,
+                beside: false,
                 scope: OperationScope::Instance,
             })
             .collect(),

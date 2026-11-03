@@ -1,0 +1,7 @@
+# A memory store deps-orders, deps-ts-shop and deps-rust-shop use (D75):
+# deps-orders lists it in memoryStores, deps-ts-shop names it its
+# rateLimitStore, and deps-rust-shop lists it. Its schema declares nothing
+# of its own, so it holds the core's rate-limit declaration alone.
+name: deps-cache
+kind: MemoryStore
+outputs: {}

@@ -87,6 +87,8 @@ pub struct CredentialColumns {
     pub password_hash: String,
     pub password_changed_at: String,
     pub disabled_at: String,
+    /// Set while a user waits for an administrator's approval (D81).
+    pub pending_at: String,
 }
 
 /// The table with the `UserRole` trait.
@@ -186,6 +188,7 @@ impl Descriptor {
                 &c.columns.password_changed_at,
             ),
             ("credential.columns.disabledAt", &c.columns.disabled_at),
+            ("credential.columns.pendingAt", &c.columns.pending_at),
         ];
         if let (Some(r), Some(g)) = (&self.role, &self.role_grant) {
             names.extend([

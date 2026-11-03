@@ -27,7 +27,8 @@ pub use client::{Client, ClientError, Conn, Dialect, SqlValue};
 use super::descriptor::{quote, Descriptor};
 use super::scalars::{KeyCodec, Scalars};
 use super::store::{
-    LoginRecord, NewSession, NewUser, Role, Session, SessionRecord, Store, StoreError, User,
+    LoginRecord, NewSession, NewUser, NewUserGrants, Role, Session, SessionRecord, Store,
+    StoreError, User,
 };
 use super::time::{format_sqlite, parse_timestamp};
 
@@ -67,6 +68,7 @@ struct Names {
     password_hash: String,
     password_changed_at: String,
     disabled: String,
+    pending: String,
     role: String,
     role_key: String,
     role_name: String,
@@ -240,6 +242,7 @@ impl SqlStore {
             password_hash: quote(&c.columns.password_hash),
             password_changed_at: quote(&c.columns.password_changed_at),
             disabled: quote(&c.columns.disabled_at),
+            pending: quote(&c.columns.pending_at),
             ..Names::default()
         };
         if let (Some(r), Some(g)) = (&descriptor.role, &descriptor.role_grant) {
@@ -398,16 +401,17 @@ impl SqlStore {
         }
     }
 
-    /// Selects a user's key, login, name, `disabledAt` and password hash,
-    /// the credential joined when there is one.
+    /// Selects a user's key, login, name, `disabledAt`, `pendingAt` and
+    /// password hash, the credential joined when there is one.
     fn user_select(&self) -> String {
         let t = &self.t;
         format!(
-            "SELECT u.{}, u.{}, u.{}, c.{}, c.{} FROM {} u LEFT JOIN {} c ON c.{} = u.{}",
+            "SELECT u.{}, u.{}, u.{}, c.{}, c.{}, c.{} FROM {} u LEFT JOIN {} c ON c.{} = u.{}",
             t.user_key,
             t.user_login,
             t.user_name,
             t.disabled,
+            t.pending,
             t.password_hash,
             t.user,
             t.credential,
@@ -423,9 +427,10 @@ impl SqlStore {
                 login: text(row, 1)?,
                 name: text(row, 2)?,
                 disabled: optional_time(row, 3)?.is_some(),
+                pending: optional_time(row, 4)?.is_some(),
                 roles: Vec::new(),
             },
-            password_hash: optional_text(row, 4)?.unwrap_or_default(),
+            password_hash: optional_text(row, 5)?.unwrap_or_default(),
         })
     }
 
@@ -514,6 +519,7 @@ impl SqlStore {
         name: &str,
         password_hash: &str,
         at: SystemTime,
+        pending: bool,
     ) -> Result<String, StoreError> {
         let t = &self.t;
         let (columns, values, mut args) = if self.name_is_login {
@@ -534,13 +540,112 @@ impl SqlStore {
             Some(row) => text(row, 0)?,
             None => return Err(StoreError::LoginTaken),
         };
-        args = vec![key.as_str().into(), password_hash.into(), self.time_arg(at)];
+        let pending_at = if pending {
+            self.time_arg(at)
+        } else {
+            SqlValue::Null
+        };
+        args = vec![
+            key.as_str().into(),
+            password_hash.into(),
+            self.time_arg(at),
+            pending_at,
+        ];
         let query = format!(
-            "INSERT INTO {} ({}, {}, {}) VALUES (?, ?, ?)",
-            t.credential, t.credential_user, t.password_hash, t.password_changed_at
+            "INSERT INTO {} ({}, {}, {}, {}) VALUES (?, ?, ?, ?)",
+            t.credential, t.credential_user, t.password_hash, t.password_changed_at, t.pending
         );
         q.run(&self.sql(&query), &args).await?;
         Ok(key)
+    }
+
+    /// Whether no role grant exists.
+    async fn no_grant(&self, q: &mut dyn Run) -> Result<bool, StoreError> {
+        let query = format!("SELECT 1 FROM {} LIMIT 1", self.t.grant);
+        Ok(q.rows(&query, &[]).await?.is_empty())
+    }
+
+    /// Creates the user with `grants` in `q`, a transaction, and returns
+    /// their database key, whether they are pending, and the roles they
+    /// hold, by name.
+    async fn create_user_with_in(
+        &self,
+        q: &mut dyn Run,
+        user: (&str, &str, &NewUser),
+        grants: &NewUserGrants,
+        first: bool,
+    ) -> Result<(String, bool, Vec<Role>), StoreError> {
+        let (login, name, new) = user;
+        let t = &self.t;
+        // Two first users at once make one administrator, as two
+        // bootstraps do (D81). On Postgres the lock conflicts with itself
+        // and with every write to the grants, so a second waits for the
+        // first to commit and then finds its grant. On SQLite the
+        // transaction holds the database's one write lock from its BEGIN
+        // IMMEDIATE.
+        if first && self.dialect == Dialect::Postgres {
+            let lock = format!("LOCK TABLE {} IN SHARE ROW EXCLUSIVE MODE", t.grant);
+            q.run(&lock, &[]).await?;
+        }
+        let key = self
+            .create_user_in(q, login, name, &new.password_hash, new.at, grants.pending)
+            .await?;
+        let mut pending = grants.pending;
+        let mut roles: Vec<(&str, &[String])> = grants
+            .roles
+            .iter()
+            .map(|role| (role.as_str(), &[] as &[String]))
+            .collect();
+        if let Some(admin) = grants.first.as_ref().filter(|_| first) {
+            if self.no_grant(q).await? {
+                if pending {
+                    let query = format!(
+                        "UPDATE {} SET {} = NULL WHERE {} = ?",
+                        t.credential, t.pending, t.credential_user
+                    );
+                    q.run(&self.sql(&query), &[key.as_str().into()]).await?;
+                    pending = false;
+                }
+                roles.push((admin.role.as_str(), admin.permissions.as_slice()));
+            }
+        }
+        let mut held: Vec<Role> = Vec::new();
+        for (role, permissions) in roles {
+            let create = format!(
+                "INSERT INTO {} ({}, {}) VALUES (?, ?) ON CONFLICT ({}) DO NOTHING",
+                t.role, t.role_name, t.role_permissions, t.role_name
+            );
+            q.run(
+                &self.sql(&create),
+                &[role.into(), self.permissions_arg(permissions)],
+            )
+            .await?;
+            let find = format!("{} WHERE r.{} = ?", self.role_select(), t.role_name);
+            let rows = q.rows(&self.sql(&find), &[role.into()]).await?;
+            let stored = self
+                .scan_roles(&rows, false)?
+                .into_iter()
+                .next()
+                .map(|(_, role)| role)
+                .ok_or_else(|| {
+                    StoreError::database(format!("role {role} is missing once created"))
+                })?;
+            let role_key = self.role_key(&stored.id)?;
+            let grant = format!(
+                "INSERT INTO {} ({}, {}, {}) VALUES (?, ?, ?) ON CONFLICT ({}, {}) DO NOTHING",
+                t.grant, t.grant_user, t.grant_role, t.granted_at, t.grant_user, t.grant_role
+            );
+            q.run(
+                &self.sql(&grant),
+                &[key.as_str().into(), role_key.into(), self.time_arg(new.at)],
+            )
+            .await?;
+            if !held.iter().any(|r| r.name == stored.name) {
+                held.push(stored);
+            }
+        }
+        sort_roles(&mut held);
+        Ok((key, pending, held))
     }
 
     async fn set_password_in(
@@ -769,6 +874,14 @@ impl Store for SqlStore {
     }
 
     async fn create_user(&self, new: NewUser) -> Result<User, StoreError> {
+        self.create_user_with(new, NewUserGrants::default()).await
+    }
+
+    async fn create_user_with(
+        &self,
+        new: NewUser,
+        grants: NewUserGrants,
+    ) -> Result<User, StoreError> {
         let login = self.parse_login(&new.login)?;
         let name = if new.name.is_empty() || self.name_is_login {
             login.clone()
@@ -787,18 +900,44 @@ impl Store for SqlStore {
                 None => new.name.clone(),
             }
         };
+        if (!grants.roles.is_empty() || grants.first.is_some()) && !self.has_roles() {
+            return Err(StoreError::NoRoles);
+        }
+        // A grant seen now rules out the first administrator without the
+        // lock, so only the registrations of an empty database take it.
+        let first = grants.first.is_some() && self.no_grant(&mut self.direct()).await?;
         let mut tx = self.begin().await?;
         let result = self
-            .create_user_in(&mut tx, &login, &name, &new.password_hash, new.at)
+            .create_user_with_in(&mut tx, (&login, &name, &new), &grants, first)
             .await;
-        let key = finish(tx, result).await?;
+        let (key, pending, roles) = finish(tx, result).await?;
         Ok(User {
             id: self.user_key.to_wire(&key),
             login,
             name,
             disabled: false,
-            roles: Vec::new(),
+            pending,
+            roles,
         })
+    }
+
+    async fn approve_user(&self, user_id: &str) -> Result<(), StoreError> {
+        let key = self.user_key(user_id)?;
+        let t = &self.t;
+        let mut tx = self.begin().await?;
+        let result = async {
+            self.require(&mut tx, &t.user, &t.user_key, &key).await?;
+            let query = format!(
+                "UPDATE {} SET {} = NULL WHERE {} = ? AND {} IS NOT NULL",
+                t.credential, t.pending, t.credential_user, t.pending
+            );
+            if tx.run(&self.sql(&query), &[key.as_str().into()]).await? == 0 {
+                return Err(StoreError::NotPending);
+            }
+            Ok(())
+        }
+        .await;
+        finish(tx, result).await
     }
 
     async fn set_password(
@@ -887,7 +1026,7 @@ impl Store for SqlStore {
     async fn find_session(&self, token_hash: &str) -> Result<SessionRecord, StoreError> {
         let t = &self.t;
         let query = format!(
-            "SELECT s.{}, s.{}, s.{}, s.{}, s.{}, s.{}, u.{}, u.{}, c.{} FROM {} s JOIN {} u ON u.{} = s.{} LEFT JOIN {} c ON c.{} = s.{} WHERE s.{} = ?",
+            "SELECT s.{}, s.{}, s.{}, s.{}, s.{}, s.{}, u.{}, u.{}, c.{}, c.{} FROM {} s JOIN {} u ON u.{} = s.{} LEFT JOIN {} c ON c.{} = s.{} WHERE s.{} = ?",
             t.session_id,
             t.session_user,
             t.created_at,
@@ -897,6 +1036,7 @@ impl Store for SqlStore {
             t.user_login,
             t.user_name,
             t.disabled,
+            t.pending,
             t.session,
             t.user,
             t.user_key,
@@ -926,6 +1066,7 @@ impl Store for SqlStore {
                 login: text(row, 6)?,
                 name: text(row, 7)?,
                 disabled: optional_time(row, 8)?.is_some(),
+                pending: optional_time(row, 9)?.is_some(),
                 roles: Vec::new(),
             },
         })

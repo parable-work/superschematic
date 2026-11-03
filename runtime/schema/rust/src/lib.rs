@@ -27,7 +27,9 @@ pub use json::{
 pub use nested::{
     check_nested, check_rows, require_elements, require_grid_elements, require_object,
 };
-pub use parse::{check_unknown_fields, fill_default, ParseError, UnknownFields};
+pub use parse::{
+    check_unknown_fields, drop_unknown_fields, fill_default, ParseError, UnknownFields,
+};
 pub use path::{bracket_key_path, index_path, key_path};
 pub use pattern::{translate_pattern, Pattern};
 pub use rules::{check_list_rules, check_value_rules, Rule};

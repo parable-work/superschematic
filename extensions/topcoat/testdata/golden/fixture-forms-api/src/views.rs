@@ -18,6 +18,10 @@
 //! value leaves its `<dd>` or `<td>` empty. Every value is text the view
 //! escapes. The markup has `ss-` classes and `data-field` attributes, the
 //! field's JSON key, for a stylesheet or a test, and no style of its own.
+//!
+//! An amount whose field names its currency (D44, amended), a code or a
+//! field of the same record, is a `<data>` of the amount in minor units
+//! whose text is the code and the amount in major units ("GBP 1,234.50").
 
 use crate::choices::Choices;
 use crate::records::{AccountKeyRecord, AccountViewRecord, BillingAddressRecord, BookingInputRecord, BookingViewRecord, GuestRecord, NoteInputRecord, RoomRequestRecord, SignupInputRecord};
@@ -172,6 +176,42 @@ fn digits(bytes: &[u8]) -> Option<u32> {
         .iter()
         .all(u8::is_ascii_digit)
         .then(|| bytes.iter().fold(0, |number, digit| number * 10 + u32::from(digit - b'0')))
+}
+
+/// An amount of `currency`'s minor units as a reader reads it (D44,
+/// amended): the code, a space, then the amount over `10^minor_units` with
+/// exactly that many decimals, its whole part grouped by `,` in threes, and
+/// `-` before a negative amount. `money_text(123456, "GBP")` is
+/// "GBP 1,234.56", `money_text(450, "JPY")` "JPY 450" and
+/// `money_text(-5, "BHD")` "BHD -0.005". A code ISO 4217 gives no minor
+/// units (XAU) shows the whole number after it. A currency that is no
+/// active ISO 4217 code, an absent currency field's empty one among them,
+/// shows the amount as a number. Each currency's minor units are
+/// superscalar's `Finance.Currency` table's.
+pub fn money_text(amount: i64, currency: &str) -> String {
+    let Some(found) = superscalar::scalars::finance_currency::lookup(currency) else {
+        return amount.to_string();
+    };
+    let places = usize::from(found.minor_units.unwrap_or(0));
+    let digits = format!("{:0>width$}", amount.unsigned_abs(), width = places + 1);
+    let (whole, fraction) = digits.split_at(digits.len() - places);
+    let mut text = String::with_capacity(currency.len() + digits.len() + digits.len() / 3 + 3);
+    text.push_str(currency);
+    text.push(' ');
+    if amount < 0 {
+        text.push('-');
+    }
+    for (index, digit) in whole.char_indices() {
+        if index > 0 && (whole.len() - index) % 3 == 0 {
+            text.push(',');
+        }
+        text.push(digit);
+    }
+    if !fraction.is_empty() {
+        text.push('.');
+        text.push_str(fraction);
+    }
+    text
 }
 
 /// Labels a value of `Amenity`: its member's title, else its name in
@@ -437,6 +477,7 @@ pub async fn billing_address_table(
 /// `choices` labels the values they name.
 #[component]
 pub async fn booking_input_detail(record: BookingInputRecord, #[default] choices: Choices) -> topcoat::Result<impl View> {
+    let currency_code = record.currency.clone();
     Ok(view! {
         <div class="ss-detail" data-type="BookingInput" role="group">
             <dl>
@@ -539,6 +580,33 @@ pub async fn booking_input_detail(record: BookingInputRecord, #[default] choices
                         }
                     </dd>
                 </div>
+                <div data-field="deposit">
+                    <dt>"Deposit"</dt>
+                    <dd>
+                        match record.deposit {
+                            Some(value) => <data value=(value.to_string())>(money_text(value, "GBP"))</data>,
+                            None => "",
+                        }
+                    </dd>
+                </div>
+                <div data-field="tip">
+                    <dt>"Tip"</dt>
+                    <dd>
+                        match record.tip {
+                            Some(value) => <data value=(value.to_string())>(money_text(value, "JPY"))</data>,
+                            None => "",
+                        }
+                    </dd>
+                </div>
+                <div data-field="extraCharge">
+                    <dt>"Extra charge"</dt>
+                    <dd>
+                        match record.extra_charge {
+                            Some(value) => <data value=(value.to_string())>(money_text(value, currency_code.as_deref().unwrap_or_default()))</data>,
+                            None => "",
+                        }
+                    </dd>
+                </div>
             </dl>
         </div>
     })
@@ -569,11 +637,15 @@ pub async fn booking_input_table(
                     <th scope="col" data-field="requests">"Requests"</th>
                     <th scope="col" data-field="preferences">"Preferences"</th>
                     <th scope="col" data-field="labels">"Labels"</th>
+                    <th scope="col" data-field="deposit">"Deposit"</th>
+                    <th scope="col" data-field="tip">"Tip"</th>
+                    <th scope="col" data-field="extraCharge">"Extra charge"</th>
                 </tr>
             </thead>
             <tbody>
                 for (index, row) in rows.into_iter().enumerate() {
                     let href = hrefs.get(index).filter(|href| !href.is_empty()).cloned();
+                    let currency_code = row.currency.clone();
                     <tr>
                         <td data-field="guest">
                             if let Some(href) = &href {
@@ -644,6 +716,24 @@ pub async fn booking_input_table(
                                         }
                                     </dl>
                                 },
+                                None => "",
+                            }
+                        </td>
+                        <td data-field="deposit">
+                            match row.deposit {
+                                Some(value) => <data value=(value.to_string())>(money_text(value, "GBP"))</data>,
+                                None => "",
+                            }
+                        </td>
+                        <td data-field="tip">
+                            match row.tip {
+                                Some(value) => <data value=(value.to_string())>(money_text(value, "JPY"))</data>,
+                                None => "",
+                            }
+                        </td>
+                        <td data-field="extraCharge">
+                            match row.extra_charge {
+                                Some(value) => <data value=(value.to_string())>(money_text(value, currency_code.as_deref().unwrap_or_default()))</data>,
                                 None => "",
                             }
                         </td>

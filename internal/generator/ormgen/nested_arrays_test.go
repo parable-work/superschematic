@@ -191,7 +191,7 @@ func TestArrayOfArraysJSONCodec(t *testing.T) {
 			t.Fatalf("remove %s: %v", entry.Name(), err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(outDir, "go.mod"), []byte("module arraysofarraystest\n\ngo 1.26.4\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(outDir, "go.mod"), []byte("module arraysofarraystest\n\ngo 1.27.3\n"), 0o644); err != nil {
 		t.Fatalf("write go.mod: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(outDir, "codec_test.go"), []byte(arrayOfArraysCodecPackageTest), 0o644); err != nil {
@@ -200,7 +200,7 @@ func TestArrayOfArraysJSONCodec(t *testing.T) {
 
 	cmd := exec.Command("go", "test", ".", "-count=1", "-run", "TestArrayOfArrays")
 	cmd.Dir = outDir
-	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=go1.26.4")
+	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=go1.27.3")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("go test array-of-arrays codec failed: %v\n%s", err, out)
 	}

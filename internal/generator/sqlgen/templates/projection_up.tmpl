@@ -4,8 +4,10 @@
 -- stamp; this file is immutable once applied.
 SET lock_timeout = '5s';
 SET statement_timeout = '5min';
+{{- if .QuotedPool }}
 
 CREATE SCHEMA IF NOT EXISTS {{ .QuotedPool }};
+{{- end }}
 {{- if .QuotedViewOwner }}
 
 -- Created as the owner role so the schema's default privileges for that

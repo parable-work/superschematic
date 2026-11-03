@@ -13,8 +13,9 @@ import (
 )
 
 // loadPatchedDisplay copies fixture-display into a temporary service next
-// to it, replaces old with replacement in its ticket schema, and loads it.
-func loadPatchedDisplay(t *testing.T, old, replacement string) (*ir.Schema, error) {
+// to it, replaces old with replacement in its ticket schema, then each
+// further pair's first with its second, and loads it.
+func loadPatchedDisplay(t *testing.T, old, replacement string, more ...string) (*ir.Schema, error) {
 	t.Helper()
 	dir, err := os.MkdirTemp(filepath.Join("testdata", "services"), "fixture-display-patched-")
 	if err != nil {
@@ -29,10 +30,15 @@ func loadPatchedDisplay(t *testing.T, old, replacement string) (*ir.Schema, erro
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(source), old) {
-		t.Fatalf("fixture has no %q to replace", old)
+	text := string(source)
+	pairs := append([]string{old, replacement}, more...)
+	for i := 0; i+1 < len(pairs); i += 2 {
+		if !strings.Contains(text, pairs[i]) {
+			t.Fatalf("fixture has no %q to replace", pairs[i])
+		}
+		text = strings.Replace(text, pairs[i], pairs[i+1], 1)
 	}
-	if err := os.WriteFile(filename, []byte(strings.Replace(string(source), old, replacement, 1)), 0o600); err != nil {
+	if err := os.WriteFile(filename, []byte(text), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	schema, _, err := LoadService(dir)
@@ -129,7 +135,8 @@ func TestAnEnumMemberTakesItsTitleFromJSDoc(t *testing.T) {
 // TestAMembersCommentIsReadAsLeadingCommentReadsIt: a member's comment,
 // which memberTitle reads comment by comment, is the one leadingComment
 // reads line by line from the same trivia, when each comment starts its
-// own line, as every other node's is.
+// own line, as every other node's is: the comments attached to it,
+// undecorated (D100).
 func TestAMembersCommentIsReadAsLeadingCommentReadsIt(t *testing.T) {
 	for _, trivia := range []string{
 		"",
@@ -141,15 +148,14 @@ func TestAMembersCommentIsReadAsLeadingCommentReadsIt(t *testing.T) {
 		"\n  /* One.\n   * Two.\n   */\n  // Three.\n  /** Four. */\n  ",
 		"\n  /**/\n  /***/\n  /** */\n  ",
 		"\r\n  // One.\r\n  /**\r\n   * Two.\r\n   */\r\n  ",
+		"\n  // ---- Plaid ----\n\n  // One.\n  ",
+		"\n  // ---- Plaid ----\n  //\n  /** One.\n   * -----\n   */\n  ",
+		"\r\n  /* ===== */\r\n  // =====\r\n  // Accounts\r\n  // =====\r\n  // One.\r\n  ",
+		"\n  /** One. */\n\n  ",
+		"\n  // One.\r\n\r\n  // Two.\n  ",
 	} {
-		var lines []string
-		for _, raw := range strings.Split(trivia, "\n") {
-			if s, ok := commentLine(strings.TrimSpace(raw)); ok {
-				lines = append(lines, s)
-			}
-		}
 		// leadingComment reads "/**/" as the comment "/".
-		want := strings.Join(slices.DeleteFunc(lines, func(s string) bool { return s == "/" }), "\n")
+		want := strings.Join(slices.DeleteFunc(strings.Split(triviaComment(trivia), "\n"), func(s string) bool { return s == "/" }), "\n")
 		title, got, err := triviaTitle(trivia)
 		if err != nil || title != "" || got != want {
 			t.Errorf("triviaTitle(%q) = %q, %q, %v; want the comment %q", trivia, title, got, err, want)
@@ -185,11 +191,55 @@ func TestDisplayIconAndMultilineLoadIntoIR(t *testing.T) {
 	}
 }
 
+// TestDisplayCurrencyLoadsIntoIR: @display({ currency }) on a field (D48,
+// amended) reads as a literal code or a sibling field, and a code that is
+// not three capital letters fails the read.
+func TestDisplayCurrencyLoadsIntoIR(t *testing.T) {
+	const fields = `@display({ multiline: true })
+  body?: string;
+
+  @display({ currency: "GBP" })
+  estimate?: Finance.Money;
+
+  @display({ currency: { field: "budgetCurrency" } })
+  budget: Generic.Int64[];
+
+  budgetCurrency?: Finance.Currency;`
+	load := func(t *testing.T, replacement string) (*ir.Schema, error) {
+		t.Helper()
+		const imports = `import { Validate, behavior, display, docs, icon } from "@superschematic/schema";`
+		return loadPatchedDisplay(t, "@display({ multiline: true })\n  body?: string;", replacement,
+			imports, `import { Finance, Generic } from "superscalar";`+"\n"+imports)
+	}
+	schema, err := load(t, fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]ir.DisplayCurrency{}
+	for _, f := range schema.Types["Ticket"].Fields {
+		if f.Display != nil && f.Display.Currency != nil {
+			got[f.Name] = *f.Display.Currency
+		}
+	}
+	want := map[string]ir.DisplayCurrency{"estimate": {Code: "GBP"}, "budget": {Field: "budgetCurrency"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("currencies = %+v, want %+v", got, want)
+	}
+
+	// A code is three capital letters, as the argument's JSON Schema
+	// says; whether it is an active code, and whether the field holds an
+	// amount, is the loader's check (verify.checkFieldDisplays).
+	if _, err := load(t, "body?: string;\n\n  @display({ currency: \"gbp\" })\n  fee?: Finance.Money;"); err == nil || !strings.Contains(err.Error(), "@display") {
+		t.Fatalf("a lower-case code loaded: %v", err)
+	}
+}
+
 // TestAMisplacedOrEmptyTitleIsRefused (D48, amended): a @title the reader
 // would not read as the member's whole title fails the load, each with its
 // message at the member: an empty one, one without a space, a second, one
 // that wraps, one in a // or /* */ comment, one that does not begin its
-// line, and one on a member with two JSDoc comments.
+// line, one on a member with two JSDoc comments, and one in a comment a
+// blank line parts from the member, which is not the member's (D100).
 func TestAMisplacedOrEmptyTitleIsRefused(t *testing.T) {
 	const prefix = "enum Priority member High: "
 	const (
@@ -197,6 +247,7 @@ func TestAMisplacedOrEmptyTitleIsRefused(t *testing.T) {
 		wrapped   = prefix + "@title must fit on its line"
 		midLine   = prefix + "@title must begin a line of the member's JSDoc comment"
 		blocks    = prefix + "@title is read from the member's only JSDoc comment, and it has more than one"
+		detached  = prefix + "@title is read from the member's own comment, and a blank line parts this one from the member"
 	)
 	for _, tc := range []struct{ name, comment, want string }{
 		{"an empty tag", "/** @title */", prefix + "@title needs the member's title after it"},
@@ -217,6 +268,8 @@ func TestAMisplacedOrEmptyTitleIsRefused(t *testing.T) {
 		{"a mention in a line of the JSDoc block", "/**\n   * Within the week, says (@title Needs attention).\n   */", midLine},
 		{"a tag in a second JSDoc block", "/** Within the week. */ /** @title Needs attention */", blocks},
 		{"a tag ahead of a second JSDoc block", "/** @title Needs attention */\n  /** Within the week. */", blocks},
+		{"a tag a blank line parts from the member", "/** @title Needs attention */\n\n  /** Within the week. */", detached},
+		{"a tag a blank line parts from the member's comment", "/** @title Needs attention */\n\n  // Within the week.", detached},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := loadPatchedDisplay(t, "/** @title Needs attention */", tc.comment)
@@ -289,5 +342,113 @@ export abstract class Triage {
 	}
 	if !reflect.DeepEqual(priority.Values, want) {
 		t.Fatalf("Priority values = %+v, want %+v", priority.Values, want)
+	}
+}
+
+// TestBannersAndDetachedCommentsAreNoDocs (D100): a node's comment is the
+// comments no blank line parts from it, without the rules and banners a
+// source file marks its sections with. A rule is three or more of
+// -=*#~_+/ alone; a banner a title framed by such runs, each set off by a
+// space; a title between two rules is a banner too. They are dropped at
+// the comment's head, with the empty lines after them, and a rule at its
+// tail; a rule between lines of text is Markdown's and stays, and so does
+// text that only holds dashes. // and /** */ read alike.
+func TestBannersAndDetachedCommentsAreNoDocs(t *testing.T) {
+	for _, tc := range []struct{ name, trivia, want string }{
+		{"a banner", "// ---- Plaid ----\n", ""},
+		{"a banner run to the margin", "// ---- Plaid -----------------------------------------------------------\n", ""},
+		{"a banner of another rule", "// === Accounts ===\n", ""},
+		{"a banner of hashes", "// #### Accounts ####\n", ""},
+		{"a banner in a block", "/* ----- Accounts ----- */\n", ""},
+		{"a rule", "// -----\n", ""},
+		{"a rule of equals", "// =====\n", ""},
+		{"a rule of stars in a block", "/* ***** */\n", ""},
+		{"a block that is a rule", "/*************/\n", ""},
+		{"a rule of slashes", "//////////////\n", ""},
+		{"a spaced rule", "// = = = = =\n", ""},
+		{"a title between rules", "// =====\n// Accounts\n// =====\n", ""},
+		{"a title between rules, then the doc", "// =====\n// Accounts\n// =====\n// Every account a user holds.\n", "Every account a user holds."},
+		{"a banner, then the doc", "// ---- Plaid ----\n// The state of a linked Plaid item.\n", "The state of a linked Plaid item."},
+		{"a banner, an empty line, then the doc", "// ---- the dashboard's filter ------\n//\n// Each is a nullable parameter:\n// null means no filter.\n", "Each is a nullable parameter:\nnull means no filter."},
+		{"a JSDoc block whose first line is a banner", "/**\n * ---- Plaid ----\n * The state of a linked Plaid item.\n */\n", "The state of a linked Plaid item."},
+		{"a block whose first line is a banner", "/* ---- Plaid ----\n * The state of a linked Plaid item.\n */\n", "The state of a linked Plaid item."},
+		{"a rule at the tail", "/**\n * The state of a linked Plaid item.\n *\n * -----------\n */\n", "The state of a linked Plaid item."},
+		{"a rule between lines of text", "/**\n * The state.\n *\n * ---\n *\n * Its history.\n */\n", "The state.\n---\nIts history."},
+		{"a dash in the text", "// Amount - in cents\n", "Amount - in cents"},
+		{"dashes in the text", "// Amount -- in cents --- or a refund\n", "Amount -- in cents --- or a refund"},
+		{"a run on one side", "/** ### Examples */\n", "### Examples"},
+		{"runs that are emphasis", "// ***Settled*** amounts only\n", "***Settled*** amounts only"},
+		{"runs with no space", "// ===Accounts===\n", "===Accounts==="},
+		{"a banner parted by a blank line", "// ---- Plaid ----\n\n", ""},
+		{"a banner parted from the doc", "// ---- Plaid ----\n\n// The state of a linked Plaid item.\n", "The state of a linked Plaid item."},
+		{"a note parted from the doc", "// TODO: fold into Account.\n\n/** The state of a linked Plaid item. */\n", "The state of a linked Plaid item."},
+		{"a doc parted from the node", "/** The state of a linked Plaid item. */\n\n", ""},
+		{"a doc parted by a blank line of spaces", "// One.\n   \t\n  // Two.\n  ", "Two."},
+		{"a doc parted by CRLF", "// One.\r\n\r\n// Two.\r\n", "Two."},
+		{"a blank line inside a block parts nothing", "/**\n * One.\n\n * Two.\n */\n", "One.\nTwo."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := triviaComment(tc.trivia); got != tc.want {
+				t.Errorf("triviaComment(%q) = %q, want %q", tc.trivia, got, tc.want)
+			}
+			// A member reads its comment alike.
+			if title, got, err := triviaTitle(tc.trivia); err != nil || title != "" || got != tc.want {
+				t.Errorf("triviaTitle(%q) = %q, %q, %v; want the comment %q", tc.trivia, title, got, err, tc.want)
+			}
+		})
+	}
+}
+
+// TestASectionBannerDocumentsNothing (D100): in a schema file, a banner
+// before an enum, a table and a field, parted from it by a blank line or
+// not, becomes none of their docs, where it was the enum's generated doc
+// and the table's COMMENT ON TABLE; the comment under a banner does.
+func TestASectionBannerDocumentsNothing(t *testing.T) {
+	dir := decoratorTestService(t, "DB", map[string]string{"src/a.schema.ts": `import { Identity } from "superscalar";
+import { key } from "@superschematic/db";
+
+// ---- Plaid -----------------------------------------------------------------
+
+export enum PlaidItemStatus {
+  Active = "active",
+  // ---- failures ----
+  LoginRequired = "login_required",
+}
+
+// ============================================================================
+// Plaid items
+// ============================================================================
+// A bank connection, one per institution a user links.
+export abstract class PlaidItem {
+  @key id: Identity.UUID;
+
+  // ---- sync -----------------------------------------------------------------
+
+  cursor: string;
+  // The status Plaid last reported - see PlaidItemStatus.
+  status: PlaidItemStatus;
+}
+`})
+	schema, _, err := LoadService(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := schema.Enums["PlaidItemStatus"].Comment; got != "" {
+		t.Errorf("PlaidItemStatus comment = %q, want none", got)
+	}
+	if got := schema.Enums["PlaidItemStatus"].Values[1].Comment; got != "" {
+		t.Errorf("PlaidItemStatus.LoginRequired comment = %q, want none", got)
+	}
+	item := schema.Types["PlaidItem"]
+	if item.Comment != "A bank connection, one per institution a user links." {
+		t.Errorf("PlaidItem comment = %q", item.Comment)
+	}
+	comments := map[string]string{}
+	for _, f := range item.Fields {
+		comments[f.Name] = f.Comment
+	}
+	want := map[string]string{"id": "", "cursor": "", "status": "The status Plaid last reported - see PlaidItemStatus."}
+	if !reflect.DeepEqual(comments, want) {
+		t.Errorf("PlaidItem field comments = %q, want %q", comments, want)
 	}
 }

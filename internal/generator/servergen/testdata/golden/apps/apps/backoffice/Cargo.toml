@@ -1,0 +1,22 @@
+# The program of app Backoffice of the desk-app-api API (D78).
+#
+# superschematic wrote this crate once, as a scaffold, because it was
+# missing, and never writes it again: it is yours, and so is its name. Each
+# build of a stack copies it into the output root's impl/, with its path
+# dependencies re-based there, and the app's entrypoint depends on that copy
+# and calls its `serve` with the app's parts.
+[package]
+name = "schemas-desk-app-api-backoffice-app"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.99.0"
+publish = false
+
+# The generated API crate, whose apps::BackofficeParts `serve` takes, and
+# the runtime the scaffold's `serve` listens on.
+[dependencies]
+schemas-desk-app-api-api = { path = "../../schemas/dist/api/desk-app-api" }
+tokio = { version = "1.52.2", features = ["io-util", "net", "rt"] }
+
+# Its own workspace, so no Cargo.toml above this directory claims it.
+[workspace]

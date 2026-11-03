@@ -11,8 +11,8 @@ import (
 // dialect is what one database contributes to a plan (D27). The diff is
 // shared: it matches two models, finds the changes, puts each in its phase
 // and order, and computes the hazards every dialect shares (destructive,
-// compat, data-dependent, api-breaking, history). A dialect supplies the
-// rest:
+// compat, data-dependent, api-breaking, history, raw-sql). A dialect
+// supplies the rest:
 //
 //   - the model: what its create.sql creates, with types in its spelling
 //     and the definitions of the derived objects;
@@ -76,6 +76,10 @@ type tableRebuild struct {
 	// each change to one of the tables but the renames of the tables and
 	// their columns, which run first and in place.
 	changes []*change
+	// triggers are the triggers the phase leaves on each table the step
+	// keeps, by table, which a dialect whose drop of a table drops its
+	// triggers creates again (D80).
+	triggers map[string][]*Trigger
 }
 
 // rebuiltTable is one table of a tableRebuild.

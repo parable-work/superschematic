@@ -35,6 +35,7 @@ use std::time::Duration;
 use superschematic_http_runtime::bucket::Bucket;
 use superschematic_http_runtime::gcs;
 use superschematic_http_runtime::logging::{self, tracing};
+use superschematic_http_runtime::memorystore;
 use superschematic_http_runtime::postgres::{self, Pool};
 use superschematic_http_runtime::queue::{PostgresQueue, QueueDefinition};
 use superschematic_http_runtime::stackconfig::{self, Database, Service};
@@ -115,12 +116,22 @@ async fn run() -> Result<(), Failure> {
         &rs_stock_config.rs_media_bucket,
     )?;
 
+    // One memory store per MemoryStore service (D75), disabled while its
+    // field is unset or its connection refused.
+    let rs_cache_store = memorystore::redis::open_or_disabled(
+        "rs-cache",
+        "RS_CACHE_MEMORY_STORE",
+        rs_stock_config.rs_cache_memory_store.as_ref(),
+    )
+    .await;
+
     // rs-stock: its workers, built from its Deps.
     let rs_stock_deps = rs_stock_api::Deps {
         config: rs_stock_config,
         db: rs_db_pool.clone(),
         rs_pricing: rs_pricing_client,
         rs_media: rs_media_bucket,
+        rs_cache: Arc::clone(&rs_cache_store),
         span: logging::api_span("rs-stock"),
     };
     let workers = rs_stock_impl::create_workers(rs_stock_deps)
@@ -147,7 +158,10 @@ async fn run() -> Result<(), Failure> {
         let workers = Arc::clone(&workers);
         async move { workers.reorder_stock(message).await }
     };
-    worker::run_worker(queue, handle, options, shutdown).await?;
+    let worked = worker::run_worker(queue, handle, options, shutdown).await;
+    // Each memory store closes once the worker stops.
+    rs_cache_store.close().await;
+    worked?;
     Ok(())
 }
 

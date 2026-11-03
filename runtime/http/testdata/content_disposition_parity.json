@@ -1,0 +1,75 @@
+{
+  "description": "The Content-Disposition a FileDownload result (D81) answers for the filename the implementation names, or the schema's: attachment, with filename, an ASCII fallback with each character outside printable ASCII and each of \", \\ and % as _, and filename*, the name in UTF-8 percent-encoded outside RFC 8187's attr-char (RFC 6266). The name loses its directories (what precedes the last / or \\) and its control characters first; an empty name, . or .. offers none. The TypeScript runtime's contentDisposition and the Go runtime's response.ContentDisposition answer each vector alike.",
+  "vectors": [
+    {
+      "name": "an ASCII name",
+      "filename": "statement.csv",
+      "header": "attachment; filename=\"statement.csv\"; filename*=UTF-8''statement.csv"
+    },
+    {
+      "name": "no name",
+      "filename": "",
+      "header": "attachment"
+    },
+    {
+      "name": "a space",
+      "filename": "my statement.csv",
+      "header": "attachment; filename=\"my statement.csv\"; filename*=UTF-8''my%20statement.csv"
+    },
+    {
+      "name": "a letter outside ASCII",
+      "filename": "\u00dcberweisung 2026.csv",
+      "header": "attachment; filename=\"_berweisung 2026.csv\"; filename*=UTF-8''%C3%9Cberweisung%202026.csv"
+    },
+    {
+      "name": "a character outside the basic plane",
+      "filename": "\ud83d\udcc8 export.csv",
+      "header": "attachment; filename=\"_ export.csv\"; filename*=UTF-8''%F0%9F%93%88%20export.csv"
+    },
+    {
+      "name": "a quote",
+      "filename": "a\"b.csv",
+      "header": "attachment; filename=\"a_b.csv\"; filename*=UTF-8''a%22b.csv"
+    },
+    {
+      "name": "a percent sign",
+      "filename": "100%.csv",
+      "header": "attachment; filename=\"100_.csv\"; filename*=UTF-8''100%25.csv"
+    },
+    {
+      "name": "an apostrophe",
+      "filename": "o'brien.csv",
+      "header": "attachment; filename=\"o'brien.csv\"; filename*=UTF-8''o%27brien.csv"
+    },
+    {
+      "name": "every attr-char",
+      "filename": "a!#$&+-.^_`|~.txt",
+      "header": "attachment; filename=\"a!#$&+-.^_`|~.txt\"; filename*=UTF-8''a!#$&+-.^_`|~.txt"
+    },
+    {
+      "name": "a directory",
+      "filename": "../exports/statement.csv",
+      "header": "attachment; filename=\"statement.csv\"; filename*=UTF-8''statement.csv"
+    },
+    {
+      "name": "a Windows directory",
+      "filename": "C:\\exports\\statement.csv",
+      "header": "attachment; filename=\"statement.csv\"; filename*=UTF-8''statement.csv"
+    },
+    {
+      "name": "control characters",
+      "filename": "state\r\nment\u007f.csv",
+      "header": "attachment; filename=\"statement.csv\"; filename*=UTF-8''statement.csv"
+    },
+    {
+      "name": "a directory alone",
+      "filename": "exports/",
+      "header": "attachment"
+    },
+    {
+      "name": "dot dot",
+      "filename": "..",
+      "header": "attachment"
+    }
+  ]
+}

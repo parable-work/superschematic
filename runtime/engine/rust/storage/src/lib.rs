@@ -29,6 +29,8 @@
 //!   SQLite and a `tsvector` with a GIN index on Postgres.
 //! - [`Tx::notify`] wakes waiters on the [`Notifier`] when the write
 //!   commits, in every process on Postgres.
+//! - [`Tx::signal`] hands a signal's payload to the [`Signals`] sinks when
+//!   the transaction commits, in every process on Postgres (D77).
 //!
 //! Nothing here is the engine's logic: the registry, instances, events
 //! and behaviors build on it.
@@ -47,6 +49,7 @@ mod migrations;
 mod notifier;
 #[cfg(feature = "postgres")]
 mod postgres;
+mod signals;
 #[cfg(feature = "sqlite")]
 mod sqlite;
 mod tokens;
@@ -77,6 +80,7 @@ pub use postgres::{
     PasswordProvider, PostgresOptions, DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT, DEFAULT_POOL_MAX,
     DEFAULT_SCHEMA,
 };
+pub use signals::{SignalSink, Signals, MAX_SIGNAL_BYTES};
 #[cfg(feature = "sqlite")]
 pub use sqlite::SqliteOptions;
 pub use tokens::postgres_placeholders;

@@ -84,7 +84,9 @@ var reachScopes = map[string]string{
 // account's Workers scripts, D1, R2, Secrets Store and account tokens,
 // since a bucket edge mints a token (section 18.7), and the Workers routes
 // and DNS of the account's zones; so it can grant itself more, as gcp's
-// deployer can. The planner reads the Workers scripts, D1, the Secrets
+// deployer can. It reads the account's Hyperdrive configs, which a deploy
+// checks against the origin it migrates (D92), and writes none: a person
+// makes each, with its origin's password. The planner reads the Workers scripts, D1, the Secrets
 // Store's names and the account's tokens, and writes the objects of the
 // state bucket alone, since a preview takes the stack's lock: it holds no
 // account-wide R2 group, whose read reaches every bucket's objects,
@@ -99,7 +101,7 @@ var reachScopes = map[string]string{
 // zones.
 var (
 	deployerPolicies = []tokenPolicy{
-		{reachAccount, []string{"Workers Scripts Write", "D1 Write", "Workers R2 Storage Write", "Secrets Store Write", "Account API Tokens Write"}},
+		{reachAccount, []string{"Workers Scripts Write", "D1 Write", "Workers R2 Storage Write", "Secrets Store Write", "Account API Tokens Write", "Hyperdrive Read"}},
 		{reachZones, []string{"Workers Routes Write", "DNS Write"}},
 	}
 	plannerPolicies = []tokenPolicy{
@@ -620,6 +622,11 @@ type ciSecret struct {
 	// token is the bootstrap graph's token the secret holds, deployer,
 	// planner or preview, or empty for the state's passphrase.
 	token string
+
+	// origin is the shell's variable that holds the secret's value, the
+	// origin connection string of a database on Hyperdrive (D92), or
+	// empty for a token or the passphrase.
+	origin string
 }
 
 // ciSecretsFor are the secrets the generated workflow reads for env: a
@@ -643,6 +650,11 @@ func ciSecretsFor(env *ir.ResolvedEnvironment) []ciSecret {
 			ciSecret{name: s.token, environment: s.environment, token: j.token},
 			ciSecret{name: s.passphrase, environment: s.environment},
 		)
+	}
+	// The deploy job's origin connection strings, beside its token (D92).
+	deployer := ciSecretsOf(env, registry.CIDeployer)
+	for _, origin := range originSecretsOf(env) {
+		out = append(out, ciSecret{name: origin.secret, environment: deployer.environment, origin: origin.variable})
 	}
 	return out
 }
@@ -672,7 +684,10 @@ func (b bootstrapper) storeCI(ctx context.Context, req registry.BootstrapRequest
 		tokens[s.token] = value
 	}
 	value := func(s ciSecret) []byte {
-		if s.token == "" {
+		switch {
+		case s.origin != "":
+			return []byte(b.ext.getenv(s.origin))
+		case s.token == "":
 			return []byte(passphrase)
 		}
 		return []byte(tokens[s.token])
@@ -694,6 +709,11 @@ func (b bootstrapper) storeCI(ctx context.Context, req registry.BootstrapRequest
 		logf("GitHub environment %s of %s: %s", s.environment, req.Repository, createdOrKept(created))
 	}
 	for _, s := range secrets {
+		if s.origin != "" && b.ext.getenv(s.origin) == "" {
+			// The shell holds no origin connection string to store.
+			logf("%s is not set in this shell, so %s is left as it is: set it to the origin's connection string with gh %s", s.origin, s.name, strings.Join(setSecretArgs(req.Repository, s.environment, s.name), " "))
+			continue
+		}
 		if err := gh.SetSecret(ctx, req.Repository, s.environment, s.name, value(s)); err != nil {
 			return err
 		}
@@ -730,11 +750,16 @@ func (b bootstrapper) printCI(req registry.BootstrapRequest, secrets []ciSecret,
 	fmt.Fprintf(&text, "\nThe state's passphrase, the one in %s:\n\n", PassphraseEnv)
 	var envs []string
 	for _, s := range secrets {
-		if s.token == "" {
+		if s.token == "" && s.origin == "" {
 			fmt.Fprintf(&text, "  gh %s\n", strings.Join(setSecretArgs(req.Repository, s.environment, s.name), " "))
 		}
 		if s.environment != "" && !slices.Contains(envs, s.environment) {
 			envs = append(envs, s.environment)
+		}
+	}
+	for _, s := range secrets {
+		if s.origin != "" {
+			fmt.Fprintf(&text, "\nThe origin connection string in %s, which the deploy migrates its database with:\n\n  gh %s\n", s.origin, strings.Join(setSecretArgs(req.Repository, s.environment, s.name), " "))
 		}
 	}
 	for _, env := range envs {

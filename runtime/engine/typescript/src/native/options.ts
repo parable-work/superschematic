@@ -27,6 +27,7 @@ import type { AnyBehaviorImplementation } from '../testing/behavior.js';
 import type { RetentionOptions } from '../types/events.js';
 import type { NamespaceOptions } from '../types/namespaces.js';
 import type { RunnerOptions } from '../types/runner.js';
+import type { SignalOptions } from '../types/signals.js';
 import type { ValueOptions } from '../types/values.js';
 import { UnsupportedError } from './errors.js';
 import type { ToolOptions } from './tool-options.js';
@@ -103,7 +104,8 @@ export interface EngineOptions {
   /**
    * The behaviors this engine runs besides the core's (Workflow, Comments,
    * Revisions, Dependencies, Links, Rollups, Search, Reactions, Constants,
-   * Variants, Branches, StateRules, Approvals, Numbering and Timers, which
+   * Variants, Branches, StateRules, Approvals, Numbering, Timers, Derived
+   * and Provenance, which
    * it registers first), by name: one the addon is built with, the work
    * queue's (Lease, Assignment, Queue, Presence, Blueprint, Budget and
    * Retries) in the core's addon, a project's own in the addon its engine
@@ -150,6 +152,12 @@ export interface EngineOptions {
    * keeps every event.
    */
   retention?: RetentionOptions;
+  /**
+   * The signals of instances (D77): how many a principal may send on one
+   * instance each second, 20 by default (runtime/engine/README.md, "The
+   * event stream").
+   */
+  signals?: SignalOptions;
 }
 
 /** What the engine's TypeScript side answers for the Rust engine, on this thread. */

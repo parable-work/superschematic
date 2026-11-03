@@ -3,7 +3,7 @@
 // this directory, adds the utils.go ormgen generated, and runs its test.
 module example.com/superschematic/pgarrays
 
-go 1.26.4
+go 1.27.3
 
 require github.com/jackc/pgx/v5 v5.11.0
 

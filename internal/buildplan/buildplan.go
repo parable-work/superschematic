@@ -36,8 +36,8 @@ type reference struct {
 	// name is the service named.
 	name string
 
-	// field is the config key that names it: dependencies, authDb, calls
-	// or buckets.
+	// field is the config key that names it: dependencies, authDb, calls,
+	// buckets, memoryStores or rateLimitStore.
 	field string
 
 	// kind is the kind the handle gives the service. It is empty for an
@@ -46,8 +46,9 @@ type reference struct {
 }
 
 // references lists every service the config names, in the order of its
-// fields: the declared dependencies, the authDb, the calls, then the
-// buckets. A service named by two fields appears once for each.
+// fields: the declared dependencies, the authDb, the calls, the buckets,
+// then the memory stores and the rate limit store. A service named by two
+// fields appears once for each.
 func (s Service) references() []reference {
 	refs := make([]reference, 0, len(s.Config.Dependencies))
 	for _, dep := range s.Config.Dependencies {
@@ -65,6 +66,15 @@ func (s Service) references() []reference {
 	for _, bucket := range s.Config.Buckets {
 		refs = append(refs, reference{name: bucket.Name, field: "buckets", kind: bucket.Kind})
 	}
+	// A MemoryStore service builds its definitions, which the API's
+	// implementation imports, so each orders a build step, as a
+	// dependency does (D75).
+	for _, store := range s.Config.MemoryStores {
+		refs = append(refs, reference{name: store.Name, field: "memoryStores", kind: store.Kind})
+	}
+	if store := s.Config.RateLimitStore; store != nil {
+		refs = append(refs, reference{name: store.Name, field: "rateLimitStore", kind: store.Kind})
+	}
 	return refs
 }
 
@@ -80,7 +90,9 @@ func (s Service) dependencyNames() []string {
 // API generator loads the authDb as the upstream auth schema and the
 // generated API module imports its ORM and types packages, so the authDb
 // is a build-order edge even when the config does not also declare it as
-// a dependency. A bucket is none: a Bucket service builds nothing (D54).
+// a dependency. A bucket is none: a Bucket service builds nothing (D54). A
+// memory store is one: the API's implementation imports its definitions
+// (D75).
 func (s Service) buildDependencyNames() []string {
 	return s.namesOf(func(ref reference) bool { return ref.field != "calls" && ref.field != "buckets" })
 }
@@ -364,6 +376,8 @@ func edgeVerb(field string) string {
 	switch field {
 	case "authDb":
 		return "authenticates against"
+	case "memoryStores", "rateLimitStore":
+		return "uses the memory store"
 	default:
 		return "depends on"
 	}
@@ -409,6 +423,46 @@ func Closure(services []Service, root string) ([]Service, error) {
 		}
 	}
 	return closure, nil
+}
+
+// Dependents returns the services named in changed and every service that
+// transitively depends on one of them, in the order services already
+// carries: what an edit to those services can change the load of. A
+// service depends on each service its config names (declared dependencies,
+// authDb, calls, buckets, memoryStores and rateLimitStore) and on each
+// service also lists for it, which
+// lets a caller add the edges only a load finds, such as the services a
+// schema's decorator arguments name (D41). A name in changed that is not
+// among services is ignored.
+func Dependents(services []Service, changed []string, also func(Service) []string) []Service {
+	dependents := make(map[string][]string, len(services))
+	for _, service := range services {
+		names := service.dependencyNames()
+		if also != nil {
+			names = append(names, also(service)...)
+		}
+		for _, name := range names {
+			dependents[name] = append(dependents[name], service.Name)
+		}
+	}
+	affected := make(map[string]bool, len(changed))
+	pending := append([]string(nil), changed...)
+	for len(pending) > 0 {
+		name := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		if affected[name] {
+			continue
+		}
+		affected[name] = true
+		pending = append(pending, dependents[name]...)
+	}
+	out := make([]Service, 0, len(affected))
+	for _, service := range services {
+		if affected[service.Name] {
+			out = append(out, service)
+		}
+	}
+	return out
 }
 
 // Stage is the part of one service's build a step runs.

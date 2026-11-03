@@ -885,7 +885,7 @@
               }
             }
           ],
-          "image": "orders",
+          "image": "images.fake.test/orders",
           "language": "go",
           "name": {
             "$concat": [
@@ -1167,7 +1167,7 @@
               }
             }
           ],
-          "image": "shop-api",
+          "image": "images.fake.test/shop-api",
           "language": "go",
           "name": {
             "$concat": [
@@ -1434,7 +1434,7 @@
               }
             }
           ],
-          "image": "shop-orders-fulfil-orders",
+          "image": "images.fake.test/shop-orders-fulfil-orders",
           "instances": 1,
           "language": "go",
           "name": {
@@ -1637,7 +1637,7 @@
               }
             }
           ],
-          "image": "shop-orders-ship-orders",
+          "image": "images.fake.test/shop-orders-ship-orders",
           "language": "go",
           "name": {
             "$concat": [

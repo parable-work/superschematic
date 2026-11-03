@@ -24,15 +24,17 @@ export RUSTUP_TOOLCHAIN ?= $(RUST_VERSION)
 # command that links a scalar-dependent package needs this in CGO_LDFLAGS.
 # The version-graph binding (runtime/versiongraph/go) links the core's static
 # archive, which scripts/versiongraph-archive.sh (make versiongraph) stages,
-# and the engine's (runtime/engine/go) the engine's, which
-# scripts/engine-archive.sh (make engine-archive) stages.
-export CGO_LDFLAGS := $(shell scripts/superscalar-dep.sh --print) $(shell scripts/versiongraph-archive.sh --print) $(shell scripts/engine-archive.sh --print)
+# the engine's (runtime/engine/go) the engine's, which
+# scripts/engine-archive.sh (make engine-archive) stages, and the behaviors'
+# core's (runtime/rules/go, D103) its own, which scripts/rules-archive.sh
+# (make rules-archive) stages.
+export CGO_LDFLAGS := $(shell scripts/superscalar-dep.sh --print) $(shell scripts/versiongraph-archive.sh --print) $(shell scripts/engine-archive.sh --print) $(shell scripts/rules-archive.sh --print)
 
 # Where make engine-go stages the test kit's engine archive, which the corpus
 # replay links in place of the core's (it is never shipped).
 ENGINE_REPLAY_LIB := $(CURDIR)/runtime/engine/go/lib/testkit/$(shell go env GOOS)_$(shell go env GOARCH)
 
-GO_MODULES := . ir runtime/schema/go runtime/http/go runtime/versiongraph/go runtime/engine/go runtime/migrate/go extensions/gcp extensions/cloudflare extensions/pulumi extensions/topcoat cmd/superschematic
+GO_MODULES := . ir runtime/schema/go runtime/http/go runtime/versiongraph/go runtime/engine/go runtime/rules/go runtime/migrate/go extensions/gcp extensions/cloudflare extensions/pulumi extensions/topcoat cmd/superschematic
 
 # Two programs, one CLI (docs/stack-model.md, section 13). BIN is the binary
 # a release ships and a user installs: cmd/superschematic, a Go module of its
@@ -50,10 +52,10 @@ CORE_BIN := bin/superschematic-core
 # cache entries, as they were. release.yml builds with the same two flags.
 GO_BUILD_FLAGS := -trimpath -buildvcs=false
 
-.PHONY: all setup build test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
+.PHONY: all setup build cli test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
         go-goldens catalog-check schema-file-types schema-file-types-check behaviors behaviors-check \
         gcp-schemas gcp-schemas-check cloudflare-schemas cloudflare-schemas-check generic-schemas generic-schemas-check ts python rust engine-rust acme-engine-rust \
-        engine-rust-soak engine-archive engine-go engine-link-check engine-servers \
+        engine-rust-soak engine-archive engine-go engine-link-check engine-servers rules-archive \
         versiongraph versiongraph-scenarios versiongraph-scenarios-ts versiongraph-scenarios-rust \
         versiongraph-scenarios-python docs cli-smoke example-migrations scrub versions clean
 
@@ -72,6 +74,7 @@ setup:
 	cd runtime/schema/typescript && bun install
 	cd runtime/http/typescript && bun install
 	cd runtime/versiongraph/typescript && bun install
+	cd runtime/rules/typescript && bun install
 	cd runtime/engine/typescript && bun install
 	cd runtime/engine-workqueue/typescript && bun install
 	cd runtime/engine-commerce/typescript && bun install
@@ -79,6 +82,16 @@ setup:
 	cd runtime/versiongraph/python && uv sync
 
 build: go-build $(BIN)
+
+# The CLI alone, for a checkout without Rust (D82): bin/superschematic and
+# the migration runner bin/superschematic-migrate, over superscalar's static
+# archive, the one thing the CLI links, which scripts/superscalar-dep.sh
+# --archive builds, or downloads prebuilt where cargo is missing. The
+# migration runner needs no cgo.
+cli:
+	scripts/superscalar-dep.sh --archive >/dev/null
+	cd cmd/superschematic && go build $(GO_BUILD_FLAGS) -o $(CURDIR)/$(BIN) .
+	cd runtime/migrate/go && CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -o $(CURDIR)/bin/superschematic-migrate ./cmd/superschematic-migrate
 
 $(BIN): FORCE
 	cd cmd/superschematic && go build $(GO_BUILD_FLAGS) -o $(CURDIR)/$(BIN) .
@@ -88,13 +101,13 @@ $(CORE_BIN): FORCE
 
 FORCE:
 
-go-build: versiongraph engine-archive
+go-build: versiongraph engine-archive rules-archive
 	@for m in $(GO_MODULES); do echo "==> go build $$m"; (cd $$m && go build ./...) || exit 1; done
 
 go-vet:
 	@for m in $(GO_MODULES); do echo "==> go vet $$m"; (cd $$m && go vet ./...) || exit 1; done
 
-go-test: versiongraph engine-archive
+go-test: versiongraph engine-archive rules-archive
 	@for m in $(GO_MODULES); do echo "==> go test $$m"; (cd $$m && go test -count=1 ./...) || exit 1; done
 
 go-fmt-check:
@@ -106,15 +119,19 @@ go-lint:
 
 # Rewrite every golden file from the generators, and the schema-file JSON
 # Schema and TypeScript types. Review the diff by eye. Each package's tests
-# run from the Go module that holds it.
+# run from the Go module that holds it, with an hour each: with the
+# TypeScript gates on, extensions/topcoat's alone outrun go test's ten
+# minutes.
 go-goldens: schema-file-types
-	@for p in $$(grep -rl 'flag.Bool("update' --include='*_test.go' . | grep -v '^./third_party/' | xargs -n1 dirname | sort -u); do \
+	@for p in $$(grep -rl 'flag.Bool("update"' --include='*_test.go' . | grep -v '^./third_party/' | xargs -n1 dirname | sort -u); do \
 		p=./$${p#./}; m=$$p; while [ ! -f $$m/go.mod ]; do m=$$(dirname $$m); done; \
-		(cd $$m && go test -count=1 .$${p#$$m} -update) || exit 1; done
+		(cd $$m && go test -count=1 -timeout 60m .$${p#$$m} -update) || exit 1; done
 
 # The TypeScript and Python scalar catalogs are written from the superscalar
 # Go package, the TypeScript one with each scalar's value class from the
-# graph descriptor's rule. CI fails when a committed catalog differs.
+# graph descriptor's rule, and the docs' scalar page with the table
+# `superschematic catalog scalars` prints. CI fails when a committed
+# catalog differs.
 catalog-check:
 	go run ./internal/tools/scalarcatalog -check
 
@@ -185,6 +202,7 @@ behaviors-check:
 ts:
 	cd packages && bun install --frozen-lockfile && bun run typecheck && bun test
 	cd runtime/schema/typescript && bun install --frozen-lockfile && bun run typecheck && bun run build && bun run test
+	cd runtime/rules/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
 	cd runtime/http/typescript && bun install --frozen-lockfile && bun run build && bun run test
 	cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
 	cd runtime/engine/typescript && bun install --frozen-lockfile
@@ -226,7 +244,10 @@ python:
 # logging, and the two at once, as a worker runs (D65); and gcs, a bucket on
 # GCS (D54), whose tests run against fakes, and against the fake-gcs-server
 # SUPERSCHEMATIC_TEST_GCS_EMULATOR names, when it is set, and beside a
-# worker's two, as a worker with a bucket builds; and otel, a deployable's
+# worker's two, as a worker with a bucket builds; memorystore-redis, a memory
+# store on Redis (D75), whose tests run on the Valkey
+# SUPERSCHEMATIC_TEST_MEMORY_STORE names, when it is set, and beside a
+# worker's two; and otel, a deployable's
 # trace export (D67), alone and with postgres, as a worker builds it.
 rust:
 	cd runtime/http/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
@@ -244,6 +265,9 @@ rust:
 		&& cargo test --features postgres,logging \
 		&& cargo clippy --all-targets --features gcs -- -D warnings && cargo test --features gcs \
 		&& cargo clippy --all-targets --features gcs,postgres,logging -- -D warnings \
+		&& cargo clippy --all-targets --features memorystore-redis -- -D warnings \
+		&& cargo test --features memorystore-redis \
+		&& cargo clippy --all-targets --features memorystore-redis,postgres,logging -- -D warnings \
 		&& cargo clippy --all-targets --features otel -- -D warnings && cargo test --features otel \
 		&& cargo clippy --all-targets --features postgres,otel -- -D warnings \
 		&& cargo test --features postgres,otel \
@@ -280,6 +304,9 @@ rust:
 # SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL names one (say a container of your
 # own on a spare port, postgres://postgres:<password>@localhost:<port>/postgres?sslmode=disable),
 # each in a schema it creates and drops; without it they skip that pass.
+# The behaviors' Rust adapter (rules-adapter, D103) runs its store tests and
+# replays the core's transcripts on SQLite, and on Postgres as well when
+# SUPERSCHEMATIC_RULES_TEST_DATABASE_URL names one, in schemas of its own.
 # The test kit replays the scenario corpus
 # (runtime/engine/testdata/scenarios, or the directory ENGINE_CORPUS_DIR
 # names) on the same databases, and the HTTP corpus through the engine's
@@ -300,6 +327,12 @@ engine-rust:
 # (runtime/engine/go/lib/<goos>_<goarch>).
 engine-archive:
 	scripts/engine-archive.sh >/dev/null
+
+# The behaviors' core's static archive (D103), superschematic-rules-wasm's
+# native build, staged where its Go binding links it
+# (runtime/rules/go/lib/<goos>_<goarch>).
+rules-archive:
+	scripts/rules-archive.sh >/dev/null
 
 # The engine's Go binding (runtime/engine/go), whose own tests go-test runs
 # over the core's archive, replays the HTTP corpus
@@ -336,9 +369,10 @@ engine-servers: versiongraph engine-archive
 	scripts/engine-napi.sh
 	go test -count=1 -timeout 80m -run '$(ENGINE_SERVER_TESTS)' ./internal/generator/servergen/
 
-# One Go binary that links superscalar's, the version graph's and the
-# engine's archives together and calls each (scripts/engine-link-check.sh),
-# after checking that each archive defines its own C functions alone.
+# One Go binary that links superscalar's, the version graph's, the engine's
+# and the behaviors' core's archives together and calls each
+# (scripts/engine-link-check.sh), after checking that each of the four
+# defines its own C functions alone.
 engine-link-check:
 	scripts/engine-link-check.sh
 
@@ -459,9 +493,9 @@ docs:
 # fixture-cross-instance-json, fixture-rollups-json, fixture-search-json,
 # fixture-reactions-json, fixture-variants-json, fixture-branches-json,
 # fixture-staterules-json, fixture-numbering-json, fixture-approvals-json,
-# fixture-timers-json, fixture-workqueue-json and fixture-commerce-json,
-# whose types compose the core's behaviors (D10): --emit-ir carries all
-# twenty-six and json-schema admits them; fixture-commerce-currency-json
+# fixture-timers-json, fixture-workqueue-json, fixture-commerce-json and
+# fixture-derived-json, whose types compose the core's behaviors (D10):
+# --emit-ir carries all twenty-eight and json-schema admits them; fixture-commerce-currency-json
 # holds a commerce currency in a Finance.Currency own field (D70). The
 # engine runs the first eleven documents with its own behaviors in
 # runtime/engine/typescript/test/core-behaviors.test.ts, the work-queue
@@ -508,12 +542,14 @@ cli-smoke: $(CORE_BIN)
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-commerce-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
+	@$(CORE_BIN) build internal/loader/testdata/services/fixture-derived-json --emit-ir --out /tmp/superschematic-cli-smoke \
+		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-commerce-currency-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>/tmp/superschematic-cli-smoke/commerce-currency-ir.json
 	@grep -q '"name": "Finance.Currency"' /tmp/superschematic-cli-smoke/commerce-currency-ir.json \
 		|| { echo "cli-smoke: the commerce currency fixture's IR names no Finance.Currency"; exit 1; }
 	@$(CORE_BIN) json-schema >/tmp/superschematic-cli-smoke/schema-file.json
-	@for b in Workflow Comments Revisions Dependencies Links Rollups Search Reactions Constants Variants Branches StateRules Approvals Numbering Timers \
+	@for b in Workflow Comments Revisions Dependencies Links Rollups Search Reactions Constants Variants Branches StateRules Approvals Numbering Timers Derived Provenance \
 		Lease Assignment Queue Presence Blueprint Budget Retries Stock Calendar Holds Payments; do \
 		grep -q "\"name\": \"$$b\"" /tmp/superschematic-cli-smoke/behaviors-ir.json && grep -q "\"const\": \"$$b\"" /tmp/superschematic-cli-smoke/schema-file.json \
 			|| { echo "cli-smoke: the core binary does not carry behavior $$b"; exit 1; }; done

@@ -216,6 +216,11 @@ type FieldInfo struct {
 	// Validations contains validation rules derived from scalar and field constraints.
 	Validations []ValidationRule
 
+	// Digits are the field's rules on a decimal's digits and a vector's
+	// length (D84), nil without any. They are not in Validations: every
+	// validator checks them on each value apart from the other rules.
+	Digits *DigitRules
+
 	// Default is the raw @default value as written in the schema. Nil means
 	// the field has no default. Per-language generators parse this string
 	// into a typed literal using the field's primitive / scalar / enum
@@ -273,6 +278,11 @@ type TypeInfo struct {
 	// StrictJSON indicates the type carries @strictJSON: every generated
 	// decoder rejects an undeclared key and an absent or null required field.
 	StrictJSON bool
+
+	// AllowUnknownFields indicates the type carries @allowUnknownFields:
+	// every generated decoder accepts a key the type does not declare and
+	// drops it (D87).
+	AllowUnknownFields bool
 
 	// EnvVars indicates the type declares the service's environment-variable
 	// configuration surface.

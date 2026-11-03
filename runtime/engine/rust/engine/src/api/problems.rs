@@ -78,9 +78,13 @@ impl Problem {
         };
         let mut problem =
             Problem::new(refusal.status(), refusal.message(), refusal.code().as_str());
-        // A busy storage clears once the writer ahead lets go of its lock:
-        // a client tries again after a moment.
-        if refusal.code() == crate::errors::EngineErrorCode::Busy {
+        // A busy storage clears once the writer ahead lets go of its lock,
+        // and a signal's rate limit within a second (D77): a client tries
+        // again after a moment.
+        if matches!(
+            refusal.code(),
+            crate::errors::EngineErrorCode::Busy | crate::errors::EngineErrorCode::RateLimited
+        ) {
             problem = problem.with_header("retry-after", "1");
         }
         let details = match refusal.kind() {

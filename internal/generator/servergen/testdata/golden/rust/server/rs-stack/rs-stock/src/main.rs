@@ -19,6 +19,12 @@
 //! account or on the emulator the bucket's connection names, through the
 //! HTTP runtime's `gcs` (D54; section 8.9).
 //!
+//! It opens each memory store its APIs list once, on Redis through the
+//! HTTP runtime's `memorystore-redis` (D75), and closes it once it stops
+//! serving. Opening never waits for a server that is down, and readiness
+//! never waits for the store: an unset field, or a connection the store
+//! refuses, runs it disabled.
+//!
 //! Each API's implementation is the crate at the naming file's
 //! `[implementation_paths] rust` template, which the build scaffolded once
 //! when it was missing, and which each build copies into the output root's
@@ -46,10 +52,13 @@ use superschematic_http_runtime::bucket::Bucket;
 use superschematic_http_runtime::gcs;
 use superschematic_http_runtime::identity::{PostgresPool, Store};
 use superschematic_http_runtime::logging::{self, tracing};
+use superschematic_http_runtime::memorystore;
 use superschematic_http_runtime::postgres::{self, Pool};
 use superschematic_http_runtime::stackconfig::{self, Database, Service};
 use superschematic_http_runtime::telemetry::{self, Defaults};
-use superschematic_http_runtime::{cors, IdentityAuthenticator, JwtServiceAuthenticator};
+use superschematic_http_runtime::{
+    cors, IdentityAuthenticator, JwtServiceAuthenticator, RateLimits,
+};
 use tokio::signal::unix::{signal, Signal, SignalKind};
 
 use schemas_rs_pricing_sdk as rs_pricing_sdk;
@@ -137,12 +146,23 @@ async fn run() -> Result<(), Failure> {
         &rs_stock_config.rs_media_bucket,
     )?;
 
+    // One memory store per MemoryStore service, shared by every API that
+    // lists it (D75): disabled while its field is unset or its connection
+    // refused, so each call takes its fallback path.
+    let rs_cache_store = memorystore::redis::open_or_disabled(
+        "rs-cache",
+        "RS_CACHE_MEMORY_STORE",
+        rs_stock_config.rs_cache_memory_store.as_ref(),
+    )
+    .await;
+
     // rs-stock: its implementation, built from its Deps, and its routes.
     let rs_stock_deps = rs_stock_api::Deps {
         config: rs_stock_config.clone(),
         db: rs_db_pool.clone(),
         rs_pricing: rs_pricing_client.clone(),
         rs_media: Arc::clone(&rs_media_bucket),
+        rs_cache: Arc::clone(&rs_cache_store),
         span: logging::api_span("rs-stock"),
     };
     // The handlers of its @manualRouteRegistration operations, which its
@@ -170,9 +190,15 @@ async fn run() -> Result<(), Failure> {
         Arc::new(IdentityAuthenticator::new(Arc::new(rs_stock_identity))),
         Arc::new(rs_stock_service_authenticator),
     );
+    // Its @rateLimit routes count in rs-cache, its rateLimitStore, so its
+    // replicas share each operation's budget (D75).
+    let rs_stock_router_options = rs_stock_api::RouterOptions {
+        rate_limits: RateLimits::with_store("rs-stock", Arc::clone(&rs_cache_store)),
+        ..rs_stock_api::RouterOptions::default()
+    };
     let rs_stock_router = rs_stock_api::build_router_with_manual_routes(
         rs_stock_implementations,
-        rs_stock_api::RouterOptions::default(),
+        rs_stock_router_options,
         rs_stock_manual_routes,
     );
 
@@ -202,7 +228,10 @@ async fn run() -> Result<(), Failure> {
     let app = app.layer(telemetry::ServerLayer::new(&[
         rs_stock_api::operations::ALL,
     ]));
-    serve(port, app, readiness).await
+    let served = serve(port, app, readiness).await;
+    // Each memory store closes after the requests in flight finish.
+    rs_cache_store.close().await;
+    served
 }
 
 /// The port $PORT names, or DEFAULT_PORT when it is unset.

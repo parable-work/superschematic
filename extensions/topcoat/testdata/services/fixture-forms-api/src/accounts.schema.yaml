@@ -8,8 +8,10 @@
 # labels, a list of objects with bounds, each holding a list of strings,
 # rows within rows, a list of enums, a date, a time, a date-time, a
 # secret, a list of secrets without a listMax, a default, long text, any
-# JSON value and a map. An account's key has a secret field and a
-# @uiHidden one, so its record has none.
+# JSON value and a map, and amounts (D48, amended): a deposit in GBP with
+# a default and a tip in JPY, each a decimal, and an extra charge in the
+# booking's currency field, in minor units. An account's key has a secret
+# field and a @uiHidden one, so its record has none.
 name: fixture-forms-api
 kind: API
 scalars:
@@ -37,6 +39,12 @@ scalars:
   Generic.JSON:
     name: Generic.JSON
     languagePrimitive: object
+  Generic.Int64:
+    name: Generic.Int64
+    languagePrimitive: number
+  Finance.Money:
+    name: Finance.Money
+    languagePrimitive: number
 enums:
   # What an account pays for.
   Plan:
@@ -193,6 +201,16 @@ types:
         typeRef: { name: Generic.JSON }
       - name: labels
         typeRef: { name: string, isMap: true }
+      - name: deposit
+        typeRef: { name: Finance.Money }
+        default: "2500"
+        display: { currency: GBP }
+      - name: tip
+        typeRef: { name: Generic.Int64 }
+        display: { currency: JPY }
+      - name: extraCharge
+        typeRef: { name: Finance.Money }
+        display: { currency: { field: currency } }
   BookingView:
     name: BookingView
     role: APIView

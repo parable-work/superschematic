@@ -25,6 +25,7 @@ import type { Pool } from 'pg';
 import { openEngineInBackground, type AsyncEngine, type EngineBackground, type EngineOptions, type Principal } from '@superschematic/engine/server';
 import * as deskTsApiApi from '@schemas/desk-ts-api-api';
 import * as deskTsApiImpl from '@schemas/desk-ts-api-implementation';
+import { createOrm as createDeskDbOrm } from '@schemas/desk-db-types/orm';
 import { engineDocument as deskDbEngineDocument } from '@schemas/desk-db-types/engine';
 
 const logger = createLogger({ stack: 'desk-ts-stack', job: 'desk-ts-api-close-stale-tickets' });
@@ -56,6 +57,7 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[], engin
   const deskTsApiDeps: deskTsApiApi.Deps = {
     config: deskTsApiConfig,
     db: deskDbPool,
+    orm: createDeskDbOrm(deskDbPool),
     engine: deskDbEngine.background,
     logger: logger.child({ api: 'desk-ts-api' }),
   };

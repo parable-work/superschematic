@@ -73,6 +73,72 @@ func ReadInput(r io.Reader, fields []string) (json.RawMessage, *InputRefusal) {
 	return raw, nil
 }
 
+// ReadInputDroppingUnknown reads the body of an input that accepts the
+// keys its type does not declare (D87): a type that is
+// @allowUnknownFields, or a @webhook's input. It makes ReadInput's checks
+// but the last, and returns the object with only the top-level keys fields
+// lists, each where the body holds it. A key is declared only as fields
+// spells it, so a key that differs in case is dropped too, where
+// encoding/json would read it into the field: every server reads the same
+// keys.
+func ReadInputDroppingUnknown(r io.Reader, fields []string) (json.RawMessage, *InputRefusal) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, &InputRefusal{Detail: BodyNotJSON}
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil, &InputRefusal{Detail: BodyRequired}
+	}
+	var raw json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, &InputRefusal{Detail: BodyNotJSON}
+	}
+	declared, isObject := declaredMembers(raw, fields)
+	if !isObject {
+		return nil, Mismatch("expected an object", nil)
+	}
+	return declared, nil
+}
+
+// declaredMembers is the JSON object raw with only the members whose keys
+// fields lists, in the order raw holds them. isObject is false for any
+// other JSON value.
+func declaredMembers(raw json.RawMessage, fields []string) (declared json.RawMessage, isObject bool) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		return nil, false
+	}
+	known := make(map[string]bool, len(fields))
+	for _, field := range fields {
+		known[field] = true
+	}
+	var out bytes.Buffer
+	out.WriteByte('{')
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		key, _ := token.(string)
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			break
+		}
+		if !known[key] {
+			continue
+		}
+		if out.Len() > 1 {
+			out.WriteByte(',')
+		}
+		name, _ := json.Marshal(key)
+		out.Write(name)
+		out.WriteByte(':')
+		out.Write(value)
+	}
+	out.WriteByte('}')
+	return out.Bytes(), true
+}
+
 // unknownKeys lists the top-level keys of the JSON object raw that fields
 // does not, once each, in the order raw first holds them. isObject is
 // false for any other JSON value.

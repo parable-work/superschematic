@@ -749,7 +749,7 @@
               }
             }
           ],
-          "image": "orders",
+          "image": "images.fake.test/orders",
           "language": "go",
           "name": "orders",
           "public": false
@@ -978,7 +978,7 @@
               }
             }
           ],
-          "image": "shop-api",
+          "image": "images.fake.test/shop-api",
           "language": "go",
           "name": "shop-api",
           "public": true
@@ -1208,7 +1208,7 @@
               }
             }
           ],
-          "image": "shop-orders-fulfil-orders",
+          "image": "images.fake.test/shop-orders-fulfil-orders",
           "instances": 1,
           "language": "go",
           "name": "shop-orders-fulfil-orders"
@@ -1390,7 +1390,7 @@
               }
             }
           ],
-          "image": "shop-orders-ship-orders",
+          "image": "images.fake.test/shop-orders-ship-orders",
           "language": "go",
           "name": "shop-orders-ship-orders",
           "retries": 1,

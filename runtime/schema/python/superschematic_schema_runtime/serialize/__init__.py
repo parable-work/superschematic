@@ -186,7 +186,9 @@ def _walk_type_def(
         if key not in data:
             continue
         out[key] = _walk_field(ctx, field, data[key], errors, key)
-    if ctx.strict:
+    # A type that is @allowUnknownFields accepts the keys it does not
+    # declare, in strict mode too, and the output holds only its own (D87).
+    if ctx.strict and not td.allow_unknown_fields:
         for k in data.keys():
             if k in known:
                 continue

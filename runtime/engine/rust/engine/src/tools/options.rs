@@ -309,11 +309,13 @@ fn is_operation_name(name: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-// The keys the mcp record and @mcp already use (ir.ValidateMCPInvocationKey).
-const RESERVED_POLICY_KEYS: [&str; 8] = [
+// The keys the mcp record, @mcp and the engine's hidden record already use
+// (ir.ValidateMCPInvocationKey).
+const RESERVED_POLICY_KEYS: [&str; 9] = [
     "handle",
     "hidden",
     "hiddenReason",
+    "hiddenBy",
     "_meta",
     "name",
     "description",

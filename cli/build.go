@@ -36,6 +36,10 @@ type buildFlags struct {
 	// apiLanguage, when set, replaces the target's outputs.api.language
 	// for this build (--api-language).
 	apiLanguage string
+	// rewriteMigrations are the projection migration stamps the build
+	// writes again although projections.lock records other files under
+	// them (--rewrite-migration, D102).
+	rewriteMigrations []string
 }
 
 // newBuildCmd is the build orchestrator entrypoint: it loads a service
@@ -77,6 +81,12 @@ the closure are not built. A container image or CI job that needs one
 service's generated packages builds them with one command instead of
 listing the dependencies by hand.
 
+Use --rewrite-migration <stamp> on a DB service to write a projection's
+migration pair again, and record it again in projections.lock, when the
+lock records other files under the stamp: for a stamp no database has
+applied. Without it a projection whose files would change under a stamp
+the lock records fails the build, which names the next stamp to give it.
+
 Use --scaffold to write the implementation of each Go, TypeScript or Rust
 API built whose package is missing: a package at the naming file's
 [implementation_paths] template of its language (go/{service},
@@ -88,7 +98,8 @@ until implemented. It never writes into a package that exists.
 Examples:
   superschematic build ./schemas/services/shop-db
   superschematic build --with-deps ./schemas/services/shop-api
-  superschematic build --with-deps --api-language RUST --out ./schemas/dist-rust ./schemas/services/shop-api`,
+  superschematic build --with-deps --api-language RUST --out ./schemas/dist-rust ./schemas/services/shop-api
+  superschematic build ./schemas/services/finances-db --rewrite-migration 20261028120000`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runBuild(cmd, a, flags, args[0])
@@ -102,6 +113,7 @@ Examples:
 	cmd.Flags().BoolVar(&flags.skipFormat, "skip-format", false, "skip developer-friendly formatting for generated files")
 	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <service-dir>/../../superschematic.toml)")
 	cmd.Flags().StringVar(&flags.apiLanguage, "api-language", "", "build the target's API server in this language (GO, RUST or TYPESCRIPT) instead of its config's outputs.api.language")
+	cmd.Flags().StringArrayVar(&flags.rewriteMigrations, "rewrite-migration", nil, "write this projection migration stamp's files again and record them in projections.lock, for a stamp no database has applied; repeatable")
 	return cmd
 }
 
@@ -168,6 +180,9 @@ func runBuild(cmd *cobra.Command, a *app, flags *buildFlags, servicePath string)
 	}
 	if flags.withDeps && flags.emitIR {
 		return fmt.Errorf("--emit-ir prints one schema's IR and cannot be combined with --with-deps")
+	}
+	if flags.withDeps && len(flags.rewriteMigrations) > 0 {
+		return fmt.Errorf("--rewrite-migration rewrites a DB service's projection migrations and cannot be combined with --with-deps; build the DB service alone")
 	}
 	if flags.apiLanguage != "" {
 		language, err := apiLanguageFlag(flags.apiLanguage)
@@ -262,6 +277,7 @@ func runBuild(cmd *cobra.Command, a *app, flags *buildFlags, servicePath string)
 		APILanguage: flags.apiLanguage,
 
 		ImplementationRoot: implementationRoot,
+		RewriteMigrations:  flags.rewriteMigrations,
 	})
 	return err
 }

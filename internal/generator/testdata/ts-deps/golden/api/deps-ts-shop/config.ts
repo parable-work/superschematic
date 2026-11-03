@@ -12,9 +12,11 @@ import {
   loadBucket,
   loadCallers,
   loadDatabase,
+  loadMemoryStore,
   loadService,
   type BucketConnection,
   type Database,
+  type MemoryStoreConnection,
   type Service,
   type ServiceAuthConfig,
   type StackEnv,
@@ -32,6 +34,8 @@ export interface EnvConfig extends LoadedShopConfig {
   readonly DEPS_TS_PRICING_SERVICE: Service;
   /** How the server reaches deps-media, a bucket the API lists. It is read from DEPS_MEDIA_BUCKET_*. */
   readonly DEPS_MEDIA_BUCKET: BucketConnection;
+  /** How the server reaches deps-cache, a memory store the API counts its rate limits in (D75). It is read from DEPS_CACHE_MEMORY_STORE_*; null when none of them is set, a disabled store. */
+  readonly DEPS_CACHE_MEMORY_STORE: MemoryStoreConnection | null;
   /**
    * What the server verifies a calling service's credential against: the
    * API's callers field, for its service clauses. It is read from DEPS_TS_SHOP_CALLERS_*.
@@ -70,6 +74,7 @@ export function loadEnvConfig(env: StackEnv = processEnv()): EnvConfig {
     DEPS_DB_DATABASE: read(() => loadDatabase("DEPS_DB_DATABASE", env)),
     DEPS_TS_PRICING_SERVICE: read(() => loadService("DEPS_TS_PRICING_SERVICE", env)),
     DEPS_MEDIA_BUCKET: read(() => loadBucket("DEPS_MEDIA_BUCKET", env)),
+    DEPS_CACHE_MEMORY_STORE: read(() => loadMemoryStore("DEPS_CACHE_MEMORY_STORE", env)),
     DEPS_TS_SHOP_CALLERS: read(() => loadCallers("DEPS_TS_SHOP_CALLERS", env)),
   };
   if (problems.length > 0) throw new StackConfigError(problems);

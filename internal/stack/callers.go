@@ -38,7 +38,7 @@ func (r *resolver) callersFields(d *deployable) map[string]string {
 	return fields
 }
 
-// checkCallersFields refuses a callers field of server d that a config
+// checkCallersFields refuses a callers field of server or app d (D78) that a config
 // field, an edge's derived field or an env key of the environment takes:
 // its name, or a name it begins with and an underscore, either way round.
 // It reports the env keys it refused, which bindConfig then skips.
@@ -48,23 +48,23 @@ func (r *resolver) checkCallersFields(d *deployable, callers map[string]string, 
 		api := callers[name]
 		for _, fieldName := range sortedKeys(d.fields) {
 			if f := d.fields[fieldName]; ir.DerivedFieldClaims(name, f.name) {
-				r.fail(CodeFieldCollision, "server %s: config field %s of %s collides with %s, the callers field of %s", d.res.Name, f.name, f.declaring, name, api)
+				r.fail(CodeFieldCollision, "%s %s: config field %s of %s collides with %s, the callers field of %s", d.res.Kind, d.res.Name, f.name, f.declaring, name, api)
 			}
 		}
 		for _, other := range sortedKeys(derived) {
 			if ir.DerivedFieldClaims(name, other) || ir.DerivedFieldClaims(other, name) {
-				r.fail(CodeFieldCollision, "server %s: %s, the field edge %s derives, collides with %s, the callers field of %s", d.res.Name, other, derived[other].res.ID, name, api)
+				r.fail(CodeFieldCollision, "%s %s: %s, the field edge %s derives, collides with %s, the callers field of %s", d.res.Kind, d.res.Name, other, derived[other].res.ID, name, api)
 			}
 		}
 		if _, set := d.settings.env[name]; set {
-			r.fail(CodeUnknownEnvKey, "environment %s sets env %s on server %s, the callers field of %s, which the http edges to %s derive", d.settings.envFrom[name], name, d.res.Name, api, api)
+			r.fail(CodeUnknownEnvKey, "environment %s sets env %s on %s %s, the callers field of %s, which the http edges to %s derive", d.settings.envFrom[name], name, d.res.Kind, d.res.Name, api, api)
 			refused[name] = true
 		}
 	}
 	return refused
 }
 
-// callersBindings binds each callers field of server d to the http edges
+// callersBindings binds each callers field of server or app d to the http edges
 // to its API from other servers, whose values connectEdges merges.
 func (r *resolver) callersBindings(d *deployable, callers map[string]string) []*ir.Binding {
 	var out []*ir.Binding
@@ -142,7 +142,7 @@ func (r *resolver) fillCallers(callees map[string]any, connected map[string]bool
 				err = ir.CheckServiceAuth(value)
 			}
 			if err != nil {
-				r.fail(CodeLowering, "server %s: the callers field %s of %s: %v", name, b.Field, b.CallersOf, err)
+				r.fail(CodeLowering, "%s %s: the callers field %s of %s: %v", r.deployables[name].res.Kind, name, b.Field, b.CallersOf, err)
 				continue
 			}
 			b.Value = value

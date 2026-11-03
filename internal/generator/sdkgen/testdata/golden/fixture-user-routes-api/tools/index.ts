@@ -60,6 +60,7 @@ export interface AccountAdminUpdateRoleParams {
 }
 
 export interface AccountAdminListUsersParams {
+  pending?: boolean;
 }
 
 export interface AccountAdminCreateUserParams {
@@ -69,6 +70,10 @@ export interface AccountAdminCreateUserParams {
 }
 
 export interface AccountAdminGetUserParams {
+  id: string;
+}
+
+export interface AccountAdminApproveUserParams {
   id: string;
 }
 
@@ -222,6 +227,7 @@ export const ACCOUNT_ADMIN_UPDATE_ROLE = 'account-admin.updateRole' as const;
 export const ACCOUNT_ADMIN_LIST_USERS = 'account-admin.listUsers' as const;
 export const ACCOUNT_ADMIN_CREATE_USER = 'account-admin.createUser' as const;
 export const ACCOUNT_ADMIN_GET_USER = 'account-admin.getUser' as const;
+export const ACCOUNT_ADMIN_APPROVE_USER = 'account-admin.approveUser' as const;
 export const ACCOUNT_ADMIN_DISABLE_USER = 'account-admin.disableUser' as const;
 export const ACCOUNT_ADMIN_ENABLE_USER = 'account-admin.enableUser' as const;
 export const ACCOUNT_ADMIN_SET_USER_PASSWORD = 'account-admin.setUserPassword' as const;
@@ -246,6 +252,7 @@ export type ToolName =
   | typeof ACCOUNT_ADMIN_LIST_USERS
   | typeof ACCOUNT_ADMIN_CREATE_USER
   | typeof ACCOUNT_ADMIN_GET_USER
+  | typeof ACCOUNT_ADMIN_APPROVE_USER
   | typeof ACCOUNT_ADMIN_DISABLE_USER
   | typeof ACCOUNT_ADMIN_ENABLE_USER
   | typeof ACCOUNT_ADMIN_SET_USER_PASSWORD
@@ -270,6 +277,7 @@ export const TOOL_NAMES: ToolName[] = [
   ACCOUNT_ADMIN_LIST_USERS,
   ACCOUNT_ADMIN_CREATE_USER,
   ACCOUNT_ADMIN_GET_USER,
+  ACCOUNT_ADMIN_APPROVE_USER,
   ACCOUNT_ADMIN_DISABLE_USER,
   ACCOUNT_ADMIN_ENABLE_USER,
   ACCOUNT_ADMIN_SET_USER_PASSWORD,
@@ -460,7 +468,7 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     guidance: {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
     requiredPermissions: [],
     replay: null,
-    description: `Creates a user with the login, name and password given and signs them in, as login does.`,
+    description: `Creates a user with the login, name and password given, who waits for an administrator's approval: it answers 202 with pending true and starts no session. The first administrator, when the set names one, is signed in as login does.`,
     namespace: 'account',
     methodName: 'register',
     requiresAuth: false,
@@ -480,7 +488,7 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     },
     returns: {
       type: 'object',
-      description: `LoginResult object`
+      description: `RegisterResult object`
     }
   },
   [ACCOUNT_ADMIN_LIST_ROLES]: {
@@ -634,11 +642,12 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
-    inputSchemaDigest: 'sha256:c891cf2445087af59e0336855a83add164516ad33268063fa9d09110dd47ace7',
+    inputSchemaDigest: 'sha256:cadd059fba88b02165defad0a5e28a300fe1cdf9b401d77ae842de4363a9cb6c',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
+        pending: {"description":"A boolean value (true or false)","type":["boolean","null"]},
       }
     },
     returns: {
@@ -702,6 +711,38 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     description: `One user and the roles they hold. (Requires authentication)`,
     namespace: 'account-admin',
     methodName: 'getUser',
+    requiresAuth: true,
+    isScoped: false,
+    bindingStatus: 'ready',
+    inputSchemaDigest: 'sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+      },
+      required: ['id']
+    },
+    returns: {
+      type: 'object',
+      description: `IdentityUser object`
+    }
+  },
+  [ACCOUNT_ADMIN_APPROVE_USER]: {
+    name: 'account-admin.approveUser',
+    operationId: 'AccountAdminApproveUserHandler',
+    title: ``,
+    mcp: null,
+    capability: '',
+    lifecycle: '',
+    visibility: '',
+    audience: '',
+    guidance: {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+    requiredPermissions: ['identity.users.write'],
+    replay: null,
+    description: `Approves a user who registered to wait for approval, who can then sign in with the roles register granted them. The caller's own permissions must cover those roles'. (Requires authentication)`,
+    namespace: 'account-admin',
+    methodName: 'approveUser',
     requiresAuth: true,
     isScoped: false,
     bindingStatus: 'ready',
@@ -981,7 +1022,7 @@ export const openAIFunctions: OpenAIFunction[] = [
   },
   {
     name: 'account.register',
-    description: `Creates a user with the login, name and password given and signs them in, as login does.`,
+    description: `Creates a user with the login, name and password given, who waits for an administrator's approval: it answers 202 with pending true and starts no session. The first administrator, when the set names one, is signed in as login does.`,
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -1050,6 +1091,7 @@ export const openAIFunctions: OpenAIFunction[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
+        pending: {"description":"A boolean value (true or false)","type":["boolean","null"]},
       }
     }
   },
@@ -1070,6 +1112,18 @@ export const openAIFunctions: OpenAIFunction[] = [
   {
     name: 'account-admin.getUser',
     description: `One user and the roles they hold. (Requires authentication)`,
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'account-admin.approveUser',
+    description: `Approves a user who registered to wait for approval, who can then sign in with the roles register granted them. The caller's own permissions must cover those roles'. (Requires authentication)`,
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -1218,7 +1272,7 @@ export const anthropicTools: AnthropicTool[] = [
   },
   {
     name: 'account.register',
-    description: `Creates a user with the login, name and password given and signs them in, as login does.`,
+    description: `Creates a user with the login, name and password given, who waits for an administrator's approval: it answers 202 with pending true and starts no session. The first administrator, when the set names one, is signed in as login does.`,
     input_schema: {
       type: 'object',
       additionalProperties: false,
@@ -1287,6 +1341,7 @@ export const anthropicTools: AnthropicTool[] = [
       type: 'object',
       additionalProperties: false,
       properties: {
+        pending: {"description":"A boolean value (true or false)","type":["boolean","null"]},
       }
     }
   },
@@ -1307,6 +1362,18 @@ export const anthropicTools: AnthropicTool[] = [
   {
     name: 'account-admin.getUser',
     description: `One user and the roles they hold. (Requires authentication)`,
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        id: {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+      },
+      required: ['id']
+    }
+  },
+  {
+    name: 'account-admin.approveUser',
+    description: `Approves a user who registered to wait for approval, who can then sign in with the roles register granted them. The caller's own permissions must cover those roles'. (Requires authentication)`,
     input_schema: {
       type: 'object',
       additionalProperties: false,
@@ -1408,6 +1475,7 @@ export type ToolParams = {
   [ACCOUNT_ADMIN_LIST_USERS]: AccountAdminListUsersParams;
   [ACCOUNT_ADMIN_CREATE_USER]: AccountAdminCreateUserParams;
   [ACCOUNT_ADMIN_GET_USER]: AccountAdminGetUserParams;
+  [ACCOUNT_ADMIN_APPROVE_USER]: AccountAdminApproveUserParams;
   [ACCOUNT_ADMIN_DISABLE_USER]: AccountAdminDisableUserParams;
   [ACCOUNT_ADMIN_ENABLE_USER]: AccountAdminEnableUserParams;
   [ACCOUNT_ADMIN_SET_USER_PASSWORD]: AccountAdminSetUserPasswordParams;
@@ -1460,11 +1528,13 @@ export async function invokeTool<T extends ToolName>(
     case ACCOUNT_ADMIN_UPDATE_ROLE:
       return sdk.accountAdmin.updateRole((params as AccountAdminUpdateRoleParams).id, { name: (params as AccountAdminUpdateRoleParams).name, permissions: (params as AccountAdminUpdateRoleParams).permissions });
     case ACCOUNT_ADMIN_LIST_USERS:
-      return sdk.accountAdmin.listUsers();
+      return sdk.accountAdmin.listUsers({ pending: (params as AccountAdminListUsersParams).pending });
     case ACCOUNT_ADMIN_CREATE_USER:
       return sdk.accountAdmin.createUser({ login: (params as AccountAdminCreateUserParams).login, name: (params as AccountAdminCreateUserParams).name, password: (params as AccountAdminCreateUserParams).password });
     case ACCOUNT_ADMIN_GET_USER:
       return sdk.accountAdmin.getUser((params as AccountAdminGetUserParams).id);
+    case ACCOUNT_ADMIN_APPROVE_USER:
+      return sdk.accountAdmin.approveUser((params as AccountAdminApproveUserParams).id);
     case ACCOUNT_ADMIN_DISABLE_USER:
       return sdk.accountAdmin.disableUser((params as AccountAdminDisableUserParams).id);
     case ACCOUNT_ADMIN_ENABLE_USER:

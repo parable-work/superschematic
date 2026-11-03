@@ -10,9 +10,28 @@ import (
 	"time"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
+
+// workflowFixture is the DB service whose tables' fields are behaviors
+// (D103), written as field types: an Order whose status is a Workflow with
+// a permission on a transition, and a Shipment with two, its status and
+// its paymentStatus.
+const workflowFixture = "fixture-workflow-db"
+
+// timersFixture is the DB service whose tables implement Timers (D103): a
+// Ticket held to its SLA, and an Invoice with two Workflows whose Timers
+// names the one it reads. Each table keeps its deadlines in a sub-table and
+// arms them on its deadline queue.
+const timersFixture = "fixture-timers-db"
+
+// reactionsFixture is the DB fixture whose Project and Task implement
+// Reactions (D103): Project hears Task's writes through task.project, and
+// each table keeps a change queue its trigger writes.
+const reactionsFixture = "fixture-reactions-db"
 
 var update = flag.Bool("update", false, "rewrite golden files")
 
@@ -26,7 +45,16 @@ func generateFixtureDB(t *testing.T) *ORMOutput {
 func generateFixture(t *testing.T, svc string) *ORMOutput {
 	t.Helper()
 
-	schema, err := loader.LoadService(filepath.Join(fixturesDir, svc))
+	// fixture-workflow-db's tables' fields are behaviors (D103), which the
+	// loader adds the owned fields of and the generator renders from the
+	// core's registry; so are the Timers and Reactions fixtures' tables.
+	var loadOpts []loader.Option
+	var reg *registry.Registry
+	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture {
+		reg = registry.New(naming.Default())
+		loadOpts = append(loadOpts, loader.WithRegistry(reg))
+	}
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, svc), loadOpts...)
 	if err != nil {
 		t.Fatalf("load %s: %v", svc, err)
 	}
@@ -37,8 +65,9 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 		TypesModule: "example.com/schemas/types/go/" + svc,
 		// fixture-queue-db lists the sqlite dialect, whose queues the ORM
 		// claims on SQLite too.
-		SQLite: svc == queueFixture,
-		Clock:  codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
+		SQLite:   svc == queueFixture,
+		Registry: reg,
+		Clock:    codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 	})
 	if err != nil {
 		t.Fatalf("generate: %v", err)
@@ -50,14 +79,16 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 }
 
 // TestWriteORMGolden generates the ORM module for the fixture-db,
-// fixture-nested-arrays-db, fixture-version-graph-db, fixture-optimistic-db
-// and fixture-user-model-db services and compares every emitted file
-// against its golden copy. Regenerate with:
+// fixture-nested-arrays-db, fixture-version-graph-db, fixture-optimistic-db,
+// fixture-user-model-db and the behaviors' services and compares every
+// emitted file against its golden copy. Regenerate with:
 // go test ./internal/generator/ormgen -run TestWriteORMGolden -update
 func TestWriteORMGolden(t *testing.T) {
 	common := []string{
 		"database.go", "interfaces.go", "query.go", "utils.go",
 		"go.mod", "README.md", "Makefile",
+		// An upsert's result and a transaction's options (D89).
+		"upsert.go", "transaction.go",
 	}
 	for _, tc := range []struct {
 		svc          string
@@ -76,7 +107,31 @@ func TestWriteORMGolden(t *testing.T) {
 			"repository_role.go", "repository_session.go", "repository_user.go",
 			"repository_user_credential.go", "repository_user_role_grant.go",
 		}},
-		{"fixture-queue-db", []string{"repository_order.go", "queues.go", "queues_sqlite.go"}},
+		{"fixture-queue-db", []string{"repository_order.go", "repository_order_line.go", "repository_product.go", "queues.go", "queues_sqlite.go"}},
+		// The tables both ORMs are held to (D79).
+		{"fixture-ledger-db", []string{"repository_account.go", "repository_entry.go", "queues.go", "search.go"}},
+		// Encrypted<T> fields (D85): encrypted.go seals and opens them.
+		{"fixture-vault-db", []string{"repository_api_credential.go", "repository_plaid_item.go", "encrypted.go", "search.go"}},
+		// Tables and columns @table and @column name (D85).
+		{"fixture-naming-db", []string{"queues.go", "repository_category.go", "repository_line_item.go", "repository_note.go", "search.go"}},
+		// Vectors and decimals, and Nearest (D84).
+		{"fixture-vectors-db", []string{"repository_chunk.go", "repository_ledger_line.go", "repository_passage.go", "repository_text_embedding.go", "nearest.go", "encrypted.go"}},
+		// A bank sync's upserts of many rows, only if changed (D89).
+		{"fixture-sync-db", []string{"repository_bank_account.go", "repository_line_item.go", "queues.go"}},
+		// Declared queries (D86): queries.go runs them, a query over the
+		// line_list projection's view among them (D95).
+		{"fixture-queries-db", []string{"repository_account.go", "repository_category.go", "repository_line_item.go", "repository_transfer_group.go", "projections.go", "queries.go"}},
+		// Tables whose fields are behaviors (D103): rules.go embeds their
+		// layout, and each repository runs its writes and its fields'
+		// operations through the core.
+		{workflowFixture, []string{"repository_order.go", "repository_shipment.go", "rules.go"}},
+		// Tables that implement Timers (D103): their operations under
+		// Timers(), RunDeadline, no upsert, no repository of a sub-table,
+		// and the deadline queues.
+		{timersFixture, []string{"repository_ticket.go", "repository_invoice.go", "rules.go", "queues.go"}},
+		// Tables whose writes Reactions hear (D103): RunChange, the change
+		// queues, and a relation's column in the core's spec.
+		{reactionsFixture, []string{"repository_project.go", "repository_task.go", "rules.go", "queues.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)
@@ -428,7 +483,7 @@ func TestGenerateReferencedByAndAuditTimestampFilters(t *testing.T) {
 		"ReferencedByTenantUserTenant *ReferencedByFilter",
 		"probe := `SELECT 1 FROM tenant_user WHERE tenant_user.tenant_id = tenant.id`",
 		"probe += ` AND tenant_user.deleted_at IS NULL`",
-		"conditions = append(conditions, `NOT EXISTS (`+probe+`)`)",
+		"conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))",
 		// createdAt/updatedAt are filterable; the rest of the audit set is not.
 		"CreatedAt *DateTimeFilter",
 		"UpdatedAt *DateTimeFilter",
@@ -1599,16 +1654,18 @@ func TestRequiredEnumDefaultAppliesToLocalAndImportedEnums(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read repository: %v", err)
 	}
-	// CreateOne binds the default as a value and CreateMany as a row's cell.
-	// TestCreateBindsTheEnumDefaultWhenUnset in compile_test.go runs both.
-	for _, want := range []string{
-		`values = append(values, types.OrderStatus("pending"))`,
-		`values = append(values, types.OrderPriority("normal"))`,
-		`cell.value = types.OrderStatus("pending")`,
-		`cell.value = types.OrderPriority("normal")`,
+	// CreateOne and UpsertOne bind the default as a value, and CreateMany
+	// and UpsertMany (D89) as a row's cell.
+	// TestCreateBindsTheEnumDefaultWhenUnset in compile_test.go runs
+	// CreateOne and CreateMany.
+	for want, count := range map[string]int{
+		`values = append(values, types.OrderStatus("pending"))`:  2,
+		`values = append(values, types.OrderPriority("normal"))`: 2,
+		`cell.value = types.OrderStatus("pending")`:              2,
+		`cell.value = types.OrderPriority("normal")`:             2,
 	} {
-		if n := strings.Count(string(source), want); n != 1 {
-			t.Errorf("CreateOne and CreateMany must each insert the default; found %d of %q, want 1", n, want)
+		if n := strings.Count(string(source), want); n != count {
+			t.Errorf("CreateOne, UpsertOne and CreateMany must each insert the default; found %d of %q, want %d", n, want, count)
 		}
 	}
 }

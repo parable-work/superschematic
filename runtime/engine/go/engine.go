@@ -348,8 +348,9 @@ func (e *Engine) Close() error {
 	return nil
 }
 
-// Changed returns a channel closed at the next commit (in any process, on
-// Postgres) or when the engine closes: one goroutine waits in the archive
+// Changed returns a channel closed at the next commit or signal (D77) (in
+// any process, on Postgres) or when the engine closes: one goroutine waits
+// in the archive
 // and wakes every stream. Take it before reading, so a commit between the
 // read and the wait is not missed.
 func (e *Engine) Changed() <-chan struct{} {

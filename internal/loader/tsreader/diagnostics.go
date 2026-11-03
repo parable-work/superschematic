@@ -131,16 +131,12 @@ func skipTrivia(text string, pos int) int {
 }
 
 // leadingComment extracts the comment block immediately preceding a node,
-// with comment markers stripped. It returns "" when the node has no attached
-// comment. Comments are IR metadata and round-trip through all formats.
+// with comment markers stripped: the comments no blank line parts from the
+// node, without the rules and banners that mark a file's sections (D100;
+// triviaComment). It returns "" when the node has no attached comment.
+// Comments are IR metadata and round-trip through all formats.
 func leadingComment(node *astNode) string {
-	var lines []string
-	for _, raw := range strings.Split(leadingTrivia(node), "\n") {
-		if s, ok := commentLine(strings.TrimSpace(raw)); ok {
-			lines = append(lines, s)
-		}
-	}
-	return strings.Join(lines, "\n")
+	return triviaComment(leadingTrivia(node))
 }
 
 // leadingTrivia is the text between a node's start and its first token:

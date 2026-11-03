@@ -711,6 +711,10 @@ impl<'d> Run<'d> {
                     .map_err(|error| error_json(&error))?,
             );
         }
+        if let Some(signals) = given.get("signals") {
+            options.signals = superschematic_engine::SignalOptions::from_json(signals)
+                .map_err(|error| error_json(&error))?;
+        }
         let engine = Engine::open_shared(options).map_err(|error| error_json(&error))?;
         self.engines.push((
             name,

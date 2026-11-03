@@ -18,13 +18,16 @@ each call, and the list holds the tools the policy lets that caller see.
 The mount's `tools` filter narrows it further, per caller. A call the
 engine refuses returns a tool error (isError) whose structured content
 is the problem document the HTTP API would answer with; a tool the
-namespace does not have is a JSON-RPC invalid-params error.
+namespace does not have is a JSON-RPC invalid-params error. With
+`actingFor`, the endpoint honors the Acting-For header as engineApp's
+routes do (D77); by default it ignores it.
 */
 
 import type { RouterRuntimeOptions } from '@superschematic/http-runtime/hono';
 import type { IdentityService } from '@superschematic/http-runtime/identity';
 import type { Hono } from 'hono';
 
+import type { ActingForOption } from '../http/app.js';
 import { nativeEngineMcp, type ServedEngine } from '../native/http.js';
 import type { ToolFilter } from '../types/tools.js';
 
@@ -60,6 +63,12 @@ export interface EngineMcpOptions extends RouterRuntimeOptions {
    * endpoint streams, so a server's shutdown waits for none.
    */
   done?: AbortSignal;
+  /**
+   * Whether the endpoint honors the Acting-For header (D77), as engineApp's
+   * actingFor: false (the default) ignores it, true honors it, a function
+   * decides per request.
+   */
+  actingFor?: ActingForOption;
 }
 
 /** The MCP endpoint's path, relative to where the app is mounted. */

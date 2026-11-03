@@ -76,7 +76,9 @@ use ::axum::Router;
 use futures_util::{Stream, StreamExt};
 use tokio::sync::watch;
 
-use crate::api::{self, ApiOptions, Body, Caller, EventStream, Problem, Pull, Route};
+use crate::api::{
+    self, ActingForHeader, ApiOptions, Body, Caller, EventStream, Problem, Pull, Route,
+};
 pub use crate::background::Background;
 use crate::storage::Notifier;
 use crate::Engine;
@@ -189,7 +191,7 @@ pub struct Options {
     pub prefix: String,
     /// The engine's own options for its routes: the event stream's page
     /// size and heartbeat, the MCP endpoint's server info, the tool
-    /// filter.
+    /// filter, and whether the `Acting-For` header is honored (D77).
     pub api: ApiOptions,
     /// Who each request's caller is ([`FromExtensions`] unless set).
     pub callers: Arc<dyn Callers>,
@@ -255,6 +257,13 @@ impl Options {
     /// The engine's own options for its routes.
     pub fn api(mut self, api: ApiOptions) -> Self {
         self.api = api;
+        self
+    }
+
+    /// Whether the routes honor the `Acting-For` header (D77): ignored
+    /// unless set.
+    pub fn acting_for(mut self, acting_for: ActingForHeader) -> Self {
+        self.api.acting_for = acting_for;
         self
     }
 
@@ -801,7 +810,7 @@ impl Pulling {
             let pulled = tokio::task::spawn_blocking(move || {
                 let notifier = stream
                     .notifier()
-                    .map(|notifier| (notifier.epoch(), notifier));
+                    .map(|notifier| (notifier.wakes(), notifier));
                 let pull = stream.next(Duration::ZERO);
                 (stream, pull, notifier)
             })
@@ -820,10 +829,10 @@ impl Pulling {
                 Pull::Pending => {
                     self.stream = Some(stream);
                     let idle = *self.idle_since.get_or_insert_with(Instant::now);
-                    // A commit since the pull read, or an engine closed
-                    // since: pull again now.
+                    // A commit or a signal since the pull read, or an
+                    // engine closed since: pull again now.
                     let moved = match &notifier {
-                        Some((epoch, notifier)) => notifier.epoch() > *epoch,
+                        Some((wakes, notifier)) => notifier.wakes() > *wakes,
                         None => true,
                     };
                     if !moved {
@@ -885,11 +894,11 @@ impl Wakes {
         let receiver = self.sender.subscribe();
         if !self.watching.swap(true, Ordering::SeqCst) {
             let notifier = Arc::clone(&self.notifier);
-            let epoch = notifier.epoch();
+            let seen = notifier.wakes();
             let wakes = Arc::downgrade(self);
             let started = std::thread::Builder::new()
                 .name("engine-stream-wakes".to_owned())
-                .spawn(move || watch_notifier(&wakes, &notifier, epoch));
+                .spawn(move || watch_notifier(&wakes, &notifier, seen));
             if started.is_err() {
                 // No thread: the streams wake on their heartbeats alone.
                 self.watching.store(false, Ordering::SeqCst);
@@ -899,11 +908,12 @@ impl Wakes {
     }
 }
 
-// watch_notifier moves the wakes on each time the notifier does, until the
-// engine closes, the router and its streams are gone, or no stream is left.
+// watch_notifier moves the wakes on each time the notifier's do (a commit
+// or a signal, D77), until the engine closes, the router and its streams
+// are gone, or no stream is left.
 fn watch_notifier(wakes: &Weak<Wakes>, notifier: &Notifier, mut last: u64) {
     loop {
-        let now = notifier.wait(last, WATCH_TICK);
+        let now = notifier.wait_wakes(last, WATCH_TICK);
         // Not held across the wait, so the router and its streams can go.
         let Some(wakes) = wakes.upgrade() else {
             return;

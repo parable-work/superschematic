@@ -72,7 +72,7 @@ func TestDeployOrder(t *testing.T) {
 		t.Errorf("the provisioner was handed DNS token %q", got)
 	}
 	service := f.ext.Provisioner.Rendered().Resources.Resource("shop-api.service")
-	if got := service.Properties["image"]; got != "shop-api@"+digest(1) {
+	if got := service.Properties["image"]; got != image("shop-api", 1) {
 		t.Errorf("shop-api.service renders image %v", got)
 	}
 	if strings.Contains(f.log.String(), "sk_test_value") || strings.Contains(f.log.String(), "dns-token-value") {
@@ -83,7 +83,7 @@ func TestDeployOrder(t *testing.T) {
 	// plan expands before the rollout and contracts after it.
 	p.to = 2
 	n := len(f.ext.Provisioner.Calls())
-	m, err = stackdeploy.Deploy(ctx, deployOptions(f, t, env, nil, p, map[string]string{"shop-api": "shop-api@" + digest(2)}))
+	m, err = stackdeploy.Deploy(ctx, deployOptions(f, t, env, nil, p, map[string]string{"shop-api": image("shop-api", 2)}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestDeployOrder(t *testing.T) {
 	if got := m.Databases["shop-db"]["shop-db"].Hash; got != modelHash(t, 2) {
 		t.Errorf("shop-db holds %s, want v2", got)
 	}
-	if m.Images["shop-api"] != "shop-api@"+digest(2) || m.Images["Orders"] != "orders@"+digest(1) {
+	if m.Images["shop-api"] != image("shop-api", 2) || m.Images["Orders"] != image("Orders", 1) {
 		t.Errorf("images %v: want shop-api's new one and Orders' carried forward", m.Images)
 	}
 }
@@ -159,7 +159,7 @@ func TestDeployFailedRollout(t *testing.T) {
 	if m.Status != stackdeploy.StatusFailed || m.Step != "rollout 2" || applied.Hash != expanded || applied.Pending != nil {
 		t.Fatalf("manifest: status %s, step %s, shop-db at %s (want the expanded %s), pending %+v", m.Status, m.Step, applied.Hash, expanded, applied.Pending)
 	}
-	if m.Images["shop-api"] != "shop-api@"+digest(2) || m.Images["Orders"] != "orders@"+digest(1) {
+	if m.Images["shop-api"] != image("shop-api", 2) || m.Images["Orders"] != image("Orders", 1) {
 		t.Errorf("images %v: want wave 1's new image and Orders' previous one", m.Images)
 	}
 
@@ -295,7 +295,7 @@ func TestDeployPreparesTheMigrationRunner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.Status != stackdeploy.StatusDeployed || m.Images["shop-api"] != "shop-api@"+digest(2) {
+	if m.Status != stackdeploy.StatusDeployed || m.Images["shop-api"] != image("shop-api", 2) {
 		t.Errorf("the manifest after the refusal: %s, shop-api at %s", m.Status, m.Images["shop-api"])
 	}
 
@@ -304,7 +304,7 @@ func TestDeployPreparesTheMigrationRunner(t *testing.T) {
 	f.ext.Migrations.PrepareFail = nil
 	with := f.workerEnv(t, "Staging")
 	imgs := images(2)
-	imgs[stacktest.FulfilOrdersWorker] = stacktest.FulfilOrdersWorker + "@" + digest(2)
+	imgs[stacktest.FulfilOrdersWorker] = image(stacktest.FulfilOrdersWorker, 2)
 	if _, err := stackdeploy.Deploy(ctx, deployOptions(f, t, with, nil, &planner{to: 1}, imgs)); err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +333,7 @@ func TestDeployPreparesAPrivilegelessRunnerForSteps(t *testing.T) {
 	n := len(f.ext.Provisioner.Calls())
 	with := f.workerEnv(t, "Staging")
 	imgs := images(2)
-	imgs[stacktest.FulfilOrdersWorker] = stacktest.FulfilOrdersWorker + "@" + digest(2)
+	imgs[stacktest.FulfilOrdersWorker] = image(stacktest.FulfilOrdersWorker, 2)
 	if _, err := stackdeploy.Deploy(ctx, deployOptions(f, t, with, nil, &planner{to: 1}, imgs)); err != nil {
 		t.Fatal(err)
 	}

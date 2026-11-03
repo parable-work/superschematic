@@ -57,6 +57,17 @@
       }
     },
     {
+      "checks": [
+        {
+          "column": "scope",
+          "in": [
+            "app",
+            "team",
+            "user"
+          ],
+          "name": "ck_preference_scope"
+        }
+      ],
       "columns": [
         {
           "default": "gen_random_uuid()",
@@ -125,6 +136,7 @@
           "type": "JSONB"
         },
         {
+          "default": "1",
           "name": "revision",
           "origin": "Preference.revision",
           "type": "BIGINT"
@@ -142,6 +154,7 @@
           "type": "TIMESTAMPTZ"
         },
         {
+          "default": "false",
           "name": "hidden",
           "origin": "Preference.hidden",
           "type": "BOOLEAN"

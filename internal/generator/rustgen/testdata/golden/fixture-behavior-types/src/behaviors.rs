@@ -194,6 +194,230 @@ pub struct JobRetriesClassAttempts {
 pub struct NoteBehaviors {
 }
 
+/// RequestState is a state of a Request's Workflow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum RequestState {
+    #[serde(rename = "new")]
+    New,
+    #[serde(rename = "triage")]
+    Triage,
+    #[serde(rename = "assigned")]
+    Assigned,
+}
+
+/// RequestBehaviors holds the fields of a Request's behaviors as a read returns them, under behaviors: one member per behavior that declares a field, under the behavior's name.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RequestBehaviors {
+    /// The fields of Workflow.
+    #[serde(rename = "Workflow")]
+    pub workflow: RequestWorkflow,
+    /// The fields of Derived.
+    #[serde(rename = "Derived")]
+    pub derived: RequestDerived,
+    /// The fields of Provenance.
+    #[serde(rename = "Provenance")]
+    pub provenance: RequestProvenance,
+}
+
+/// RequestWorkflow holds the fields a Request's Workflow adds, as a read returns them: a field with no value is absent.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RequestWorkflow {
+    /// The state the instance is in.
+    pub status: RequestState,
+    /// When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition.
+    #[serde(default, rename = "enteredAt", skip_serializing_if = "Option::is_none")]
+    pub entered_at: Option<i64>,
+}
+
+/// RequestDerived holds the fields a Request's Derived adds, as a read returns them: a field with no value is absent.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RequestDerived {
+    /// The last value settled for each derived field, by field: { sourceHash, model, settledAt, settledBy, confidence? }, and overridden: { by, at } once a caller or another behavior's operation wrote it. A field with neither is absent.
+    pub fields: RequestDerivedFields,
+    /// The derived fields whose inputs, instruction, model or type moved since their last value, or that rederive asked for, and that no write overrode, in the config's order. One of "category", "summary".
+    pub stale: Vec<String>,
+}
+
+/// RequestDerivedFields types RequestDerived.fields.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RequestDerivedFields {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<RequestDerivedFieldsCategory>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<RequestDerivedFieldsSummary>,
+}
+
+/// RequestDerivedFieldsCategory types RequestDerivedFields.category.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RequestDerivedFieldsCategory {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overridden: Option<RequestDerivedFieldsCategoryOverridden>,
+    #[serde(default, rename = "settledAt", skip_serializing_if = "Option::is_none")]
+    pub settled_at: Option<i64>,
+    #[serde(default, rename = "settledBy", skip_serializing_if = "Option::is_none")]
+    pub settled_by: Option<String>,
+    #[serde(default, rename = "sourceHash", skip_serializing_if = "Option::is_none")]
+    pub source_hash: Option<String>,
+}
+
+/// RequestDerivedFieldsCategoryOverridden types RequestDerivedFieldsCategory.overridden.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RequestDerivedFieldsCategoryOverridden {
+    pub at: i64,
+    pub by: String,
+}
+
+/// RequestDerivedFieldsSummary types RequestDerivedFields.summary.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RequestDerivedFieldsSummary {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overridden: Option<RequestDerivedFieldsSummaryOverridden>,
+    #[serde(default, rename = "settledAt", skip_serializing_if = "Option::is_none")]
+    pub settled_at: Option<i64>,
+    #[serde(default, rename = "settledBy", skip_serializing_if = "Option::is_none")]
+    pub settled_by: Option<String>,
+    #[serde(default, rename = "sourceHash", skip_serializing_if = "Option::is_none")]
+    pub source_hash: Option<String>,
+}
+
+/// RequestDerivedFieldsSummaryOverridden types RequestDerivedFieldsSummary.overridden.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RequestDerivedFieldsSummaryOverridden {
+    pub at: i64,
+    pub by: String,
+}
+
+/// RequestProvenance holds the fields a Request's Provenance adds, as a read returns them: a field with no value is absent.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RequestProvenance {
+    /// By recorded field written since Provenance was added: { source, by, for?, at, confidence?, review? }. source is caller for a caller's create or update, else the name of the behavior whose operation wrote it; by is the principal's subject; for is the subject it acted for, when it acted for one (D77); review is { state, by?, at? }, state proposed, accepted, rejected or edited.
+    pub fields: RequestProvenanceFields,
+    /// Whether any recorded field is proposed. A list filters on it.
+    #[serde(rename = "inReview")]
+    pub in_review: bool,
+}
+
+/// RequestProvenanceFields types RequestProvenance.fields.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RequestProvenanceFields {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<RequestProvenanceFieldsBody>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<RequestProvenanceFieldsCategory>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<RequestProvenanceFieldsSubject>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<RequestProvenanceFieldsSummary>,
+}
+
+/// RequestProvenanceFieldsBody types RequestProvenanceFields.body.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RequestProvenanceFieldsBody {
+    pub at: i64,
+    pub by: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#for: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review: Option<RequestProvenanceFieldsBodyReview>,
+    pub source: String,
+}
+
+/// RequestProvenanceFieldsBodyReview types RequestProvenanceFieldsBody.review.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RequestProvenanceFieldsBodyReview {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by: Option<String>,
+    /// One of "proposed", "accepted", "rejected", "edited".
+    pub state: String,
+}
+
+/// RequestProvenanceFieldsCategory types RequestProvenanceFields.category.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RequestProvenanceFieldsCategory {
+    pub at: i64,
+    pub by: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#for: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review: Option<RequestProvenanceFieldsCategoryReview>,
+    pub source: String,
+}
+
+/// RequestProvenanceFieldsCategoryReview types RequestProvenanceFieldsCategory.review.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RequestProvenanceFieldsCategoryReview {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by: Option<String>,
+    /// One of "proposed", "accepted", "rejected", "edited".
+    pub state: String,
+}
+
+/// RequestProvenanceFieldsSubject types RequestProvenanceFields.subject.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RequestProvenanceFieldsSubject {
+    pub at: i64,
+    pub by: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#for: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review: Option<RequestProvenanceFieldsSubjectReview>,
+    pub source: String,
+}
+
+/// RequestProvenanceFieldsSubjectReview types RequestProvenanceFieldsSubject.review.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RequestProvenanceFieldsSubjectReview {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by: Option<String>,
+    /// One of "proposed", "accepted", "rejected", "edited".
+    pub state: String,
+}
+
+/// RequestProvenanceFieldsSummary types RequestProvenanceFields.summary.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RequestProvenanceFieldsSummary {
+    pub at: i64,
+    pub by: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#for: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review: Option<RequestProvenanceFieldsSummaryReview>,
+    pub source: String,
+}
+
+/// RequestProvenanceFieldsSummaryReview types RequestProvenanceFieldsSummary.review.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RequestProvenanceFieldsSummaryReview {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by: Option<String>,
+    /// One of "proposed", "accepted", "rejected", "edited".
+    pub state: String,
+}
+
 /// TicketState is a state of a Ticket's Workflow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TicketState {
@@ -252,9 +476,24 @@ pub struct TicketWorkflow {
 /// TicketComments holds the fields a Ticket's Comments adds, as a read returns them: a field with no value is absent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TicketComments {
-    /// How many comments the instance has.
-    #[serde(rename = "commentCount")]
-    pub comment_count: i64,
+    /// How many posted and interrupted messages the conversation has, top-level and replies; composing, deleted and purged ones are not counted.
+    pub messages: i64,
+    /// The greatest postedAt of a posted or interrupted message, in epoch milliseconds; absent while there is none.
+    #[serde(default, rename = "lastMessageAt", skip_serializing_if = "Option::is_none")]
+    pub last_message_at: Option<i64>,
+    /// The posted and interrupted top-level messages, each a thread, whether resolved or not: { open, resolved }.
+    pub threads: TicketCommentsThreads,
+    /// The subjects writing a message now: each subject with a composing message on the instance, once, in the order of its earliest composing message's id; empty while nobody is.
+    pub composing: Vec<String>,
+    /// The caller's: how many posted and interrupted top-level messages of others came to stand after the caller's read marker on the conversation. 0 until the caller first reads the conversation with markRead or posts in it top-level, so a conversation nobody opened is unread for nobody. Replies are read thread by thread, in the inbox, and not counted here.
+    pub unread: i64,
+}
+
+/// TicketCommentsThreads types TicketComments.threads.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TicketCommentsThreads {
+    pub open: i64,
+    pub resolved: i64,
 }
 
 /// TicketRevisions holds the fields a Ticket's Revisions adds, as a read returns them: a field with no value is absent.

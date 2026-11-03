@@ -277,7 +277,7 @@ fn registration_refuses_a_declaration_the_engine_cannot_take() {
                 "operation increment has no resultSchema",
             ),
             (Box::new(|d| d["operations"][0]["writes"] = json!("yes")), "operation increment writes is a boolean"),
-            (Box::new(|d| d["operations"][0]["scope"] = json!("type")), "operation increment scope \"type\" is not \"instance\" or \"schema\""),
+            (Box::new(|d| d["operations"][0]["scope"] = json!("type")), "operation increment scope \"type\" is not \"instance\", \"schema\" or \"namespace\""),
             (Box::new(|d| d["fields"][0]["name"] = json!("the count")), "fields[0].name \"the count\" is not an identifier"),
             (Box::new(|d| d["fields"] = json!([{"name": "count"}, {"name": "count"}])), "field count is declared twice"),
             (Box::new(|d| d["fields"][0]["volatile"] = json!("yes")), "fields[0].volatile is a boolean"),

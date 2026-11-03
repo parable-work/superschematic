@@ -101,8 +101,8 @@ export interface ServiceAuthenticatorOptions {
   readonly now?: () => number;
   /**
    * Fetches a JWKS and resolves its parsed JSON, sending `bearer` as
-   * `Authorization: Bearer` when given; rejects when it cannot. The global
-   * fetch by default, with a 10-second timeout.
+   * `Authorization: Bearer` when given; rejects when it cannot. By default
+   * fetchKeySet: the global fetch, within 10 seconds and at most 1 MiB.
    */
   readonly fetchKeys?: (url: string, bearer?: string) => Promise<unknown>;
   /**
@@ -120,6 +120,8 @@ const JWKS_MIN_INTERVAL_MS = 60_000;
 /** Keys fetched longer ago than this are fetched again. */
 const JWKS_MAX_AGE_MS = 60 * 60_000;
 const JWKS_FETCH_TIMEOUT_MS = 10_000;
+/** The most bytes a fetched key set may hold, as Go's serviceauth.HTTPFetcher and Rust's http_client read (1 MiB). */
+export const MAX_KEY_SET_BYTES = 1 << 20;
 /** The smallest RSA modulus accepted, as RFC 7518 requires for RS256. */
 const MIN_RSA_BITS = 2048;
 
@@ -470,9 +472,49 @@ function isObject(value: unknown): value is Record<string, unknown> {
 async function fetchJwks(url: string, bearer?: string): Promise<unknown> {
   const headers: Record<string, string> = { accept: 'application/json' };
   if (bearer) headers.authorization = `Bearer ${bearer}`;
+  return fetchKeySet(url, headers);
+}
+
+/**
+ * GETs the key set at url and resolves its parsed JSON, within 10 seconds
+ * and of at most MAX_KEY_SET_BYTES, as Go's serviceauth.HTTPFetcher and
+ * Rust's http_client fetch one; it rejects past either, and on a status
+ * other than 2xx.
+ */
+export async function fetchKeySet(url: string, headers: Record<string, string> = { accept: 'application/json' }): Promise<unknown> {
   const response = await fetch(url, { headers, signal: AbortSignal.timeout(JWKS_FETCH_TIMEOUT_MS) });
-  if (!response.ok) throw new Error(`GET ${url}: status ${response.status}`);
-  return response.json();
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Error(`GET ${url}: status ${response.status}`);
+  }
+  const tooLarge = () => new Error(`GET ${url}: key set larger than ${MAX_KEY_SET_BYTES} bytes`);
+  const declared = response.headers.get('content-length');
+  if (declared !== null && /^\d+$/u.test(declared) && Number(declared) > MAX_KEY_SET_BYTES) {
+    await response.body?.cancel();
+    throw tooLarge();
+  }
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  if (response.body) {
+    const reader = response.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_KEY_SET_BYTES) {
+        await reader.cancel();
+        throw tooLarge();
+      }
+      chunks.push(value);
+    }
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return JSON.parse(new TextDecoder().decode(bytes));
 }
 
 interface FsPromisesLike {

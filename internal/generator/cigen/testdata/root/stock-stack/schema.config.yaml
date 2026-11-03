@@ -1,0 +1,6 @@
+# A second stack of the root the shop stack's tests build in: it deploys
+# stock-app-api, whose app Backoffice needs the topcoat extension (D78).
+# It has no CI of its own.
+name: stock-stack
+kind: Stack
+outputs: {}

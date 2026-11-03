@@ -1,0 +1,53 @@
+# Signs users in and out, without registration, and lists and reads the
+# signed-in user's notes, a resource whose pages the console serves beside
+# its sign-in, account, users and roles pages.
+name: fixture-identity-pages-api
+kind: API
+scalars:
+  Identity.UUID:
+    name: Identity.UUID
+    languagePrimitive: string
+types:
+  Note:
+    name: Note
+    role: APIView
+    display:
+      noun: Note
+      plural: Notes
+      titleField: title
+    fields:
+      - name: id
+        typeRef: { name: Identity.UUID }
+        required: true
+      - name: title
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: Account
+    userSessions: {}
+    operations: []
+  - name: NoteQueries
+    operations:
+      # The signed-in user's notes.
+      - name: listNotes
+        typeRef: { name: Note, isArray: true }
+        required: true
+        auth: true
+        httpMethod: GET
+        restPath: notes
+        arguments:
+          # The notes whose title holds it, the list's filter.
+          - name: title
+            typeRef: { name: string }
+            isQuery: true
+      # One note.
+      - name: getNote
+        typeRef: { name: Note }
+        required: true
+        auth: true
+        httpMethod: GET
+        restPath: "notes/{id}"
+        arguments:
+          - name: id
+            typeRef: { name: Identity.UUID }
+            required: true

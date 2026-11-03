@@ -6,7 +6,11 @@
  * site: its config names the APIs it calls and how it builds, and its code
  * sits at its implementation path (D55). A Bucket service is private object
  * storage that APIs list in their `buckets` (D54): its config is all it
- * has, `{ name, kind: SchemaKind.Bucket, outputs: {} }`.
+ * has, `{ name, kind: SchemaKind.Bucket, outputs: {} }`. A MemoryStore
+ * service is a Redis or Valkey server the replicas of a stack share, which
+ * holds no fact (D75): its schema declares each channel and key it carries
+ * (`@superschematic/memory-store`), and APIs list it in their
+ * `memoryStores`.
  */
 export enum SchemaKind {
   DB = "DB",
@@ -14,7 +18,8 @@ export enum SchemaKind {
   General = "General",
   Stack = "Stack",
   Site = "Site",
-  Bucket = "Bucket"
+  Bucket = "Bucket",
+  MemoryStore = "MemoryStore"
 }
 
 /**
@@ -40,20 +45,26 @@ export enum TargetLanguage {
 /**
  * A handle to a service: what service() returns and a generated sentinel
  * exports. K is the service's kind, as a string ("API"), C the type of its
- * @envVars class, J the names of its @job classes and W the names of its
- * @worker classes. All four are phantom: the sentinel generator writes
+ * @envVars class, J the names of its @job classes, W the names of its
+ * @worker classes, D the names of its @deriver classes and A the names of
+ * its @app classes. All six are phantom: the sentinel generator writes
  * them (`service<"API", ShopApiConfig, "ExpireCarts", "FulfilOrders">({...})`),
  * and superschematic reads only name and kind. A DB or General handle has
- * no config type, no jobs and no workers, nor has an API without an
- * @envVars class, a @job class or a @worker class, or a handle written by
- * hand, so C, J and W keep their defaults: any config, and any job or
- * worker name. An API with workers and no jobs has the jobs `never`.
+ * no config type, no jobs, no workers, no derivers and no apps, nor has an
+ * API without an @envVars class, a @job class, a @worker class, a @deriver
+ * class or an @app class, or a handle written by hand, so C, J, W, D and A
+ * keep their defaults: any config, and any job, worker, deriver or app
+ * name. An API with workers and no jobs has the jobs `never`, one with
+ * derivers has `never` for the jobs and the workers it lacks, and one with
+ * apps `never` for the jobs, the workers and the derivers it lacks.
  */
 export type ServiceHandle<
   K extends SchemaKindName = SchemaKindName,
   C = unknown,
   J extends string = string,
-  W extends string = string
+  W extends string = string,
+  D extends string = string,
+  A extends string = string
 > = {
   readonly __brand: "ServiceHandle";
   readonly name: string;
@@ -64,6 +75,10 @@ export type ServiceHandle<
   readonly __jobs?: J;
   /** Phantom: carries W for the type checker and is never set. */
   readonly __workers?: W;
+  /** Phantom: carries D for the type checker and is never set. */
+  readonly __derivers?: D;
+  /** Phantom: carries A for the type checker and is never set. */
+  readonly __apps?: A;
 };
 
 export type TargetOutputConfig = {
@@ -87,12 +102,29 @@ export type ApiOutputConfig = {
   readonly enabled: boolean;
   readonly language?: ApiLanguage;
   readonly scaffoldsOutputDir?: string;
+  /**
+   * Serve the operations the mcp decorator makes visible tools over MCP at POST /api/mcp (D81): the caller authenticates as on the API's other routes, and each tools/call runs through the route of its operation. A TypeScript API serves it; the build refuses it on a Go or Rust API, where support follows. Unset is off.
+   */
+  readonly mcp?: boolean;
+  /**
+   * The Secret<string> config field the MCP endpoint signs the confirmations of its ask tools with (D93), by the envVars class that declares it and the field's name, as a stack names the secret: "McpKeys.MCP_CONFIRMATION_KEY". The API's envVars class holds the field, its own or one it extends; its value is a random string of at least 32 bytes, one per environment. Required with mcp when a visible tool's invocation policy is ask.
+   */
+  readonly mcpConfirmationKey?: string;
 };
 
 /**
  * The client SDK in each language. An SDK imports the service's types in its language, so each enabled SDK language needs the same language enabled in types.
  */
-export type SdkOutputConfig = Partial<Record<TargetLanguage, TargetOutputConfig>>;
+export type SdkOutputConfig = Partial<Record<Exclude<TargetLanguage, TargetLanguage.TypeScript>, TargetOutputConfig>> & {
+  readonly [TargetLanguage.TypeScript]?: TypeScriptSdkOutputConfig;
+};
+
+/**
+ * The TypeScript SDK. With lazyValidation, the SDK loads its types package's validators and parsers, and with them superscalar's WebAssembly core, on its first call rather than when it is imported (D82): a browser bundle that splits code (Vite, bun build --splitting) carries them in a chunk of its own, out of the page's first load.
+ */
+export type TypeScriptSdkOutputConfig = TargetOutputConfig & {
+  readonly lazyValidation?: boolean;
+};
 
 /**
  * A database the DB kind's sql output is built for.
@@ -119,6 +151,46 @@ export type SqlOutputConfig = {
    * The databases the service is built for. With sqlite listed, the build also writes sqlite/create.sql and refuses a schema that uses what SQLite does not support, and migrate plan --dialect sqlite plans for it. The list must hold postgres: the Go ORM the kind always generates runs on Postgres. Unset is ["postgres"].
    */
   readonly dialects?: readonly SqlDialect[];
+  /**
+   * Where the keys of the schema's Encrypted<T> fields come from (D85). A schema with one needs it.
+   */
+  readonly encryption?: SqlEncryptionConfig;
+  /**
+   * Who the ORMs act as for a write no request's caller makes, a job's or a worker's: orm.asSystem() in TypeScript and orm.AsSystem(ctx) in Go stamp createdBy, updatedBy and deletedBy with its id (D87). The audit fields hold a user's id with no foreign key, so it needs no user row. Unset is { id: "00000000-0000-4000-8000-000000000000", name: "system" }.
+   */
+  readonly systemActor?: SqlSystemActorConfig;
+  /**
+   * An update of a table with an updatedBy field needs an acting user, as a create of a table with createdBy does: without one the ORMs refuse it (NoUserError in TypeScript, ErrNoUserInContext in Go) where they would leave a nullable updatedBy as it was (D87). Unset is false.
+   */
+  readonly requireUpdatedBy?: boolean;
+};
+
+/**
+ * The system actor of a DB service's ORMs (D87).
+ */
+export type SqlSystemActorConfig = {
+  /**
+   * The actor's user id: a UUID, hyphenated.
+   *
+   * @pattern ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
+   */
+  readonly id: string;
+  /**
+   * The name an app shows for the actor. Unset is "system".
+   *
+   * @minLength 1
+   */
+  readonly name?: string;
+};
+
+/**
+ * The keys of a DB service's Encrypted<T> fields (D85).
+ */
+export type SqlEncryptionConfig = {
+  /**
+   * The Secret<string> field of an env vars class that holds the keys, by the type that declares the field and the field's name, as a stack names the secret: "FieldKeys.FINANCES_DB_KEY". Its value is one or more 32-byte keys in base64, separated by commas; the first encrypts, and each decrypts what it encrypted. Every API whose servers, jobs and workers open the service's ORM must hold the field in its env vars class.
+   */
+  readonly key: string;
 };
 
 /**
@@ -280,6 +352,24 @@ export type SiteConfig = {
    * The file, relative to output, served for a path that names no file: "index.html" for a single-page application, whose router reads the path. Unset answers such a path 404.
    */
   readonly fallback?: string;
+  /**
+   * The site's dev server, which stack dev runs in place of building the site once, behind a proxy that serves the site and each API it calls on one origin (D82). A deploy builds the site whether it is set or not. Unset, stack dev builds the site once.
+   */
+  readonly dev?: SiteDevConfig;
+};
+
+/**
+ * How a site's dev server runs under stack dev (D82): Vite, Bun's own (bun ./index.html), or any server that serves the site's code and reloads it on an edit.
+ */
+export type SiteDevConfig = {
+  /**
+   * The script of the site's package.json, or a binary of its dependencies, that runs the dev server, which stack dev runs with bun run after the workspace's install. Arguments go in the script. Unset is "dev".
+   */
+  readonly command?: string;
+  /**
+   * The port the dev server listens on, on loopback, for a command that picks its own. Unset, stack dev picks a port per checkout and hands it to the command in PORT, which the script passes on: "vite --port $PORT --strictPort".
+   */
+  readonly port?: number;
 };
 
 export type SchemaConfig = {
@@ -297,6 +387,14 @@ export type SchemaConfig = {
    */
   readonly buckets?: readonly ServiceHandle<"Bucket">[];
   /**
+   * The MemoryStore services this API's implementation uses: each is a MemoryStore in its Deps, and a memoryStore edge from its server, jobs and workers. Only an API service sets it, and each entry is a MemoryStore service's handle.
+   */
+  readonly memoryStores?: readonly ServiceHandle<"MemoryStore">[];
+  /**
+   * The MemoryStore service this API's rate-limited routes count in, so its replicas share one budget per client; while the store is unavailable each replica counts in process. It is listed in memoryStores whether or not that list names it. Only an API service sets it.
+   */
+  readonly rateLimitStore?: ServiceHandle<"MemoryStore">;
+  /**
    * How a Site service builds and what it serves. Only a Site service sets it.
    */
   readonly site?: SiteConfig;
@@ -308,7 +406,7 @@ export type SchemaConfig = {
 
 /**
  * A service reference in the JSON/YAML config forms, in dependencies,
- * calls and buckets. The TypeScript form builds ServiceHandle sentinels with the
+ * calls, buckets, memoryStores and rateLimitStore. The TypeScript form builds ServiceHandle sentinels with the
  * service() helper; the data forms carry the same name + kind pair as a
  * plain object.
  */
@@ -342,6 +440,14 @@ export type SchemaConfigDocument = {
    */
   readonly buckets?: readonly ServiceDependencyRef[];
   /**
+   * The MemoryStore services this API's implementation uses: each is a MemoryStore in its Deps, and a memoryStore edge from its server, jobs and workers. Only an API service sets it, and each entry names a MemoryStore service.
+   */
+  readonly memoryStores?: readonly ServiceDependencyRef[];
+  /**
+   * The MemoryStore service this API's rate-limited routes count in, so its replicas share one budget per client; while the store is unavailable each replica counts in process. It is listed in memoryStores whether or not that list names it. Only an API service sets it.
+   */
+  readonly rateLimitStore?: ServiceDependencyRef;
+  /**
    * How a Site service builds and what it serves. Only a Site service sets it.
    */
   readonly site?: SiteConfig;
@@ -360,10 +466,14 @@ export function defineConfig<TConfig extends SchemaConfig>(cfg: TConfig): TConfi
  * so `service({ name: "shop-api", kind: SchemaKind.API })` is a
  * `ServiceHandle<"API">`, the type the sentinel's `service<"API">` gives.
  */
-export function service<K extends SchemaKindName, C = unknown, J extends string = string, W extends string = string>(cfg: {
-  readonly name: string;
-  readonly kind: K;
-}): ServiceHandle<`${K}`, C, J, W> {
+export function service<
+  K extends SchemaKindName,
+  C = unknown,
+  J extends string = string,
+  W extends string = string,
+  D extends string = string,
+  A extends string = string
+>(cfg: { readonly name: string; readonly kind: K }): ServiceHandle<`${K}`, C, J, W, D, A> {
   return {
     __brand: "ServiceHandle",
     name: cfg.name,
@@ -371,4 +481,10 @@ export function service<K extends SchemaKindName, C = unknown, J extends string 
   };
 }
 
+/**
+ * On a class of a General or API schema: its fields are the service's
+ * environment variables, with a generated loader and values-schema.json. On
+ * an API it is the config of the API's server, whose fields a stack's `env`
+ * binds.
+ */
 export const envVars: ClassDecorator = () => {};

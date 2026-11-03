@@ -41,6 +41,11 @@ export type EngineErrorCode =
    */
   | 'unavailable'
   /**
+   * A caller sent more signals on one instance than the engine's
+   * signals.perSecond lets a principal send (D77); try again in a moment.
+   */
+  | 'rate_limited'
+  /**
    * Another writer held the database's lock past the busy timeout:
    * SQLite's SQLITE_BUSY, or a Postgres lock or connection wait (D58). The
    * call wrote nothing and may be tried again.

@@ -27,15 +27,32 @@
 //!
 //! shop-db is an engine database (D58, D70), so the crate mounts its
 //! engine at `/engine` beside the JSON API, which the app opens on a SQLite
-//! file of its own (`open_engine`) and deploys shop-db's engine types in.
-//! The app keeps its own orders and sells nothing through the engine yet:
-//! the shop's checkouts, which hold stock and take payment, are the stack's,
-//! on shop-orders' Go server.
+//! file of its own (`open_engine`) and deploys shop-db's engine types in,
+//! and the console pages it at `/console/engine`: the types the caller may
+//! read, each type's instances, and an instance's fields, a panel per
+//! behavior and its operations as forms, every call made as the signed-in
+//! caller, whom shop-db's engine policy admits by their permissions. Staff
+//! receive, adjust and count an Inventory's stock there, see a
+//! CollectionPoint's hours and bookings, and a Checkout's holds and its
+//! payment, every amount as money; a Refund moves to approved only once two
+//! of them who hold `refunds.approve` have signed it off, and approving it
+//! asks the checkout's Payments for the money back. Ada, the demo's staff,
+//! holds the roles the policy names (`BACK_OFFICE_ROLES`), and administers
+//! the shop's users and roles at `/console/users` and `/console/roles`.
+//! The app itself sells nothing through the engine: the shop's checkouts,
+//! which hold stock and take payment, are the stack's, on shop-orders' Go
+//! server, and this engine has no payment adapter, so its checkouts are
+//! those a test writes, and a refund approved here waits for an adapter to
+//! report it paid.
+//!
+//! The crate's identity pages serve `/console/sign-in` too, but the
+//! console links to the app's own `/sign-in`, which its settings name
+//! (`console_settings`), and signs out at `/console/sign-out`.
 
 use std::sync::Arc;
 
 use acme_shop_orders_server::sqlite::SqliteShop;
-use acme_shop_orders_server::{Shop, ShopImplementation, add_shopper, add_staff, implementations, update_roles};
+use acme_shop_orders_server::{Shop, ShopImplementation, add_shopper, add_staff, implementations, role, update_roles};
 use acme_shop_orders_topcoat::api::runtime::identity::{LoginInput, Service, StoreError};
 use acme_shop_orders_topcoat::api::runtime::{ApiError, Principal};
 use acme_shop_orders_topcoat::api::{
@@ -118,11 +135,12 @@ pub fn stock_sqlite(shop: &SqliteShop) -> Result<(), Box<dyn std::error::Error>>
 pub type Person = (&'static str, &'static str, &'static str);
 
 /// Adds `shopper`, holding the `shopper` role, and `staff`, holding the
-/// `staff` role, to `users`, each unless an earlier run over the same file
-/// added them, as a real shop's own flows would. It first brings both
-/// roles to the permissions they grant now (`update_roles`), users or no
-/// users: a file made before staff held `orders.any` has a `shopper` role
-/// that grants all of `orders`, and so every customer's orders.
+/// `staff` role and the back office's (`BACK_OFFICE_ROLES`), to `users`,
+/// each unless an earlier run over the same file added them, as a real
+/// shop's own flows would. It first brings both roles to the permissions
+/// they grant now (`update_roles`), users or no users: a file made before
+/// staff held `orders.any` has a `shopper` role that grants all of
+/// `orders`, and so every customer's orders.
 pub async fn add_people(users: &Service, shopper: Person, staff: Person) -> Result<(), Box<dyn std::error::Error>> {
     update_roles(users).await?;
     for ((login, name, password), is_staff) in [(shopper, false), (staff, true)] {
@@ -132,6 +150,30 @@ pub async fn add_people(users: &Service, shopper: Person, staff: Person) -> Resu
             Err(StoreError::NotFound) => add_shopper(users, login, name, password).await?,
             Err(err) => return Err(err.into()),
         }
+    }
+    add_back_office(users, staff.0).await
+}
+
+/// The back office's roles, which staff hold beside rust-server's `staff`
+/// (`orders.any`, which reads every checkout): each of the first three
+/// grants a permission shop-db's engine policy asks of staff, to sign a
+/// refund off, keep the stock and keep the collection points; `admin`
+/// grants the identity pages' administration of users and roles.
+pub const BACK_OFFICE_ROLES: [(&str, &[&str]); 4] = [
+    ("refunds", &["refunds.approve"]),
+    ("stock", &["stock.write"]),
+    ("collection-points", &["calendar.manage"]),
+    ("admin", &["identity.users.read", "identity.users.write", "identity.roles.read", "identity.roles.write"]),
+];
+
+/// Grants the user whose login is `login` every role of
+/// `BACK_OFFICE_ROLES`, each brought to the permissions it grants now or
+/// created; a role already held stays held.
+pub async fn add_back_office(users: &Service, login: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let user = users.store().find_login(login).await?;
+    for (name, permissions) in BACK_OFFICE_ROLES {
+        let role = role(users, name, permissions).await?;
+        users.store().grant_role(&user.user.id, &role.id, std::time::SystemTime::now()).await?;
     }
     Ok(())
 }

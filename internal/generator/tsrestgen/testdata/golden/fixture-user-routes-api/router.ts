@@ -18,6 +18,7 @@ import {
   mountOperation,
   type RouterRuntimeOptions,
 } from '@superschematic/http-runtime/hono';
+import { mountOpenAPI, type OpenAPIOptions } from '@superschematic/http-runtime/openapi';
 import {
   IdentityService,
   identityCorsRoutes,
@@ -25,8 +26,10 @@ import {
   identityRouterOptions,
   routesOf,
   type IdentityServiceOptions,
+  type RegistrationOptions,
 } from '@superschematic/http-runtime/identity';
 import type { Implementations } from './interfaces';
+import { openAPIJSON } from './openapi';
 
 export type OperationName =
   | 'listRoles'
@@ -36,6 +39,7 @@ export type OperationName =
   | 'listUsers'
   | 'createUser'
   | 'getUser'
+  | 'approveUser'
   | 'disableUser'
   | 'enableUser'
   | 'setUserPassword'
@@ -126,6 +130,17 @@ export const operationSpecs = {
     queryParams: [],
     bodyParams: [],
     auth: { public: false, required: true, permissions: ['identity.users.read'] },
+    manual: true,
+  },
+  approveUser: {
+    name: 'approveUser',
+    namespace: 'account-admin',
+    method: 'POST',
+    path: '/api/auth/admin/users/{id}/approve',
+    pathParams: [{ name: 'id', kind: 'uuid', required: true }],
+    queryParams: [],
+    bodyParams: [],
+    auth: { public: false, required: true, permissions: ['identity.users.write'] },
     manual: true,
   },
   disableUser: {
@@ -265,7 +280,7 @@ export const operationSpecs = {
   },
 } as const satisfies Record<OperationName, OperationSpec>;
 
-export interface RouterOptions<E extends Env = Env> extends Omit<RouterRuntimeOptions, 'authenticate'> {
+export interface RouterOptions<E extends Env = Env> extends Omit<RouterRuntimeOptions, 'authenticate'>, OpenAPIOptions {
   /**
    * The identity service (D50), which authenticates every route: the
    * principal is the user, with their roles' permissions. Build it with
@@ -293,10 +308,15 @@ export interface RouterOptions<E extends Env = Env> extends Omit<RouterRuntimeOp
  *   node:sqlite database (bunSqlite for bun:sqlite).
  * - config: the identity config's JSON value, or what parseIdentityConfig
  *   returns for it; absent is every default.
+ *
+ * register admits users as identityRegistration says.
  */
-export function identityService(options: Omit<IdentityServiceOptions, 'routes'>): IdentityService {
-  return new IdentityService({ ...options, routes: routesOf(operationSpecs) });
+export function identityService(options: Omit<IdentityServiceOptions, 'routes' | 'registration'>): IdentityService {
+  return new IdentityService({ ...options, routes: routesOf(operationSpecs), registration: identityRegistration });
 }
+
+/** How register admits users, as the API's @userSessions declares it (D81). */
+export const identityRegistration: RegistrationOptions = { approval: true, defaultRoles: ['member'], firstUser: { role: 'admin', permissions: ['identity'] } };
 
 /**
  * Mounts every operation of the schema on a new Hono router. Mount it at '/' of the application.
@@ -308,6 +328,9 @@ export function identityService(options: Omit<IdentityServiceOptions, 'routes'>)
 export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E>): Hono<E> {
   const runtime = identityRouterOptions(options);
   const router = new Hono<E>();
+  // The OpenAPI document at GET /api/openapi.json and its page at GET
+  // /api/docs, as the Go and Rust servers serve them (D81).
+  mountOpenAPI(router, openAPIJSON, 'fixture-user-routes-api', options);
   // The trusted origins' CORS, on this API's routes alone, registered
   // before each route's handler.
   const cors = identityCorsRoutes(router, runtime.identity);
@@ -346,6 +369,11 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     bodyLimitBytes: options.bodyLimits?.getUser,
     rateLimitPerMinute: options.rateLimits?.getUser,
     timeoutSeconds: options.timeouts?.getUser,
+  });
+  mountManualOperation(router, operationSpecs.approveUser, identityHandler(runtime.identity, 'approveUser'), runtime, {
+    bodyLimitBytes: options.bodyLimits?.approveUser,
+    rateLimitPerMinute: options.rateLimits?.approveUser,
+    timeoutSeconds: options.timeouts?.approveUser,
   });
   mountManualOperation(router, operationSpecs.disableUser, identityHandler(runtime.identity, 'disableUser'), runtime, {
     bodyLimitBytes: options.bodyLimits?.disableUser,

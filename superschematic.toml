@@ -35,12 +35,14 @@ schema_ir_go_module = "github.com/parable-work/superschematic/ir"
 schema_runtime_go_module = "github.com/parable-work/superschematic/runtime/schema/go"
 schema_runtime_rust_crate = "superschematic-schema-runtime"
 versiongraph_go_module = "github.com/parable-work/superschematic/runtime/versiongraph/go"
+rules_go_module = "github.com/parable-work/superschematic/runtime/rules/go"
 versiongraph_rust_crate = "superschematic-versiongraph-engine"
 engine_go_module = "github.com/parable-work/superschematic/runtime/engine/go"
 http_runtime_go_module = "github.com/parable-work/superschematic/runtime/http/go"
 http_runtime_rust_crate = "superschematic-http-runtime"
 http_runtime_npm_package = "@superschematic/http-runtime"
 versiongraph_npm_package = "@superschematic/versiongraph"
+rules_npm_package = "@superschematic/rules"
 versiongraph_pypi_dist = "superschematic-versiongraph"
 versiongraph_python_module = "superschematic_versiongraph"
 engine_npm_package = "@superschematic/engine"
@@ -115,21 +117,27 @@ engine_workqueue_rust = "runtime/engine-workqueue/rust"
 engine_commerce_rust = "runtime/engine-commerce/rust"
 engine_abi_rust = "runtime/engine/rust/abi"
 engine_napi_rust = "runtime/engine/rust/napi"
+rules_adapter_rust = "runtime/engine/rust/rules-adapter"
+rules_behaviors_rust = "runtime/engine/rust/rules-behaviors"
 engine_go = "runtime/engine/go"
 engine_typescript = "runtime/engine/typescript"
 versiongraph_python = "runtime/versiongraph/python"
 http_runtime_go = "runtime/http/go"
 http_runtime_rust = "runtime/http/rust"
 http_runtime_typescript = "runtime/http/typescript"
+rules_typescript = "runtime/rules/typescript"
+rules_go = "runtime/rules/go"
 
 # How the config fields an API's edges derive in a stack are named: its
 # database connection, the endpoint of each API it `calls`, and the
-# connection of each bucket it lists in `buckets`. {SERVICE} is the DB,
-# called API or Bucket service's name in upper snake case.
+# connection of each bucket it lists in `buckets`, and of each memory store
+# it lists in `memoryStores`. {SERVICE} is the DB, called API, Bucket or
+# MemoryStore service's name in upper snake case.
 [derived_fields]
 database = "{SERVICE}_DATABASE"
 service = "{SERVICE}_SERVICE"
 bucket = "{SERVICE}_BUCKET"
+memory_store = "{SERVICE}_MEMORY_STORE"
 
 # Where a stack's build and `build --scaffold` write a missing API
 # implementation, per language, relative to the repository root, and where a

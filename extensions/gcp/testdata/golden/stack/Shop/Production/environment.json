@@ -80,6 +80,12 @@
           "kind": "API"
         }
       ],
+      "memoryStores": [
+        {
+          "name": "shop-cache",
+          "kind": "MemoryStore"
+        }
+      ],
       "language": "GO",
       "artifact": "image",
       "settings": {
@@ -120,6 +126,39 @@
             }
           },
           "edge": "http:Orders->shop-api"
+        },
+        {
+          "field": "SHOP_CACHE_MEMORY_STORE",
+          "source": "derived",
+          "value": {
+            "auth": "iam",
+            "ca": {
+              "$output": {
+                "resource": "shop-cache.instance",
+                "name": "managedServerCas[0].caCerts[0].certificates[0]"
+              }
+            },
+            "store": "shop-cache",
+            "url": {
+              "$concat": [
+                "rediss://",
+                {
+                  "$output": {
+                    "resource": "shop-cache.instance",
+                    "name": "endpoints[0].connections[0].pscAutoConnection.ipAddress"
+                  }
+                },
+                ":",
+                {
+                  "$output": {
+                    "resource": "shop-cache.instance",
+                    "name": "endpoints[0].connections[0].pscAutoConnection.port"
+                  }
+                }
+              ]
+            }
+          },
+          "edge": "memoryStore:Orders->shop-cache"
         },
         {
           "field": "SHOP_DB_DATABASE",
@@ -166,6 +205,12 @@
           "kind": "Bucket"
         }
       ],
+      "memoryStores": [
+        {
+          "name": "shop-cache",
+          "kind": "MemoryStore"
+        }
+      ],
       "language": "GO",
       "artifact": "image",
       "exposed": true,
@@ -198,6 +243,39 @@
           "edges": [
             "site:shop-web->shop-api"
           ]
+        },
+        {
+          "field": "SHOP_CACHE_MEMORY_STORE",
+          "source": "derived",
+          "value": {
+            "auth": "iam",
+            "ca": {
+              "$output": {
+                "resource": "shop-cache.instance",
+                "name": "managedServerCas[0].caCerts[0].certificates[0]"
+              }
+            },
+            "store": "shop-cache",
+            "url": {
+              "$concat": [
+                "rediss://",
+                {
+                  "$output": {
+                    "resource": "shop-cache.instance",
+                    "name": "endpoints[0].connections[0].pscAutoConnection.ipAddress"
+                  }
+                },
+                ":",
+                {
+                  "$output": {
+                    "resource": "shop-cache.instance",
+                    "name": "endpoints[0].connections[0].pscAutoConnection.port"
+                  }
+                }
+              ]
+            }
+          },
+          "edge": "memoryStore:shop-api->shop-cache"
         },
         {
           "field": "SHOP_DB_DATABASE",
@@ -240,6 +318,40 @@
           "secret": "PaymentsSecrets.STRIPE_KEY"
         }
       ]
+    },
+    {
+      "name": "shop-cache",
+      "kind": "memoryStore",
+      "platform": "gcp.memorystore",
+      "services": [
+        {
+          "name": "shop-cache",
+          "kind": "MemoryStore"
+        }
+      ],
+      "settings": {
+        "nodeType": "STANDARD_SMALL",
+        "replicas": 2
+      },
+      "resourceName": "acme-prod-shop-shop-cache",
+      "address": {
+        "$concat": [
+          "rediss://",
+          {
+            "$output": {
+              "resource": "shop-cache.instance",
+              "name": "endpoints[0].connections[0].pscAutoConnection.ipAddress"
+            }
+          },
+          ":",
+          {
+            "$output": {
+              "resource": "shop-cache.instance",
+              "name": "endpoints[0].connections[0].pscAutoConnection.port"
+            }
+          }
+        ]
+      }
     },
     {
       "name": "shop-db",
@@ -301,6 +413,12 @@
           "kind": "API"
         }
       ],
+      "memoryStores": [
+        {
+          "name": "shop-cache",
+          "kind": "MemoryStore"
+        }
+      ],
       "language": "GO",
       "artifact": "image",
       "worker": {
@@ -341,6 +459,39 @@
             }
           },
           "edge": "http:shop-orders-fulfil-orders->shop-api"
+        },
+        {
+          "field": "SHOP_CACHE_MEMORY_STORE",
+          "source": "derived",
+          "value": {
+            "auth": "iam",
+            "ca": {
+              "$output": {
+                "resource": "shop-cache.instance",
+                "name": "managedServerCas[0].caCerts[0].certificates[0]"
+              }
+            },
+            "store": "shop-cache",
+            "url": {
+              "$concat": [
+                "rediss://",
+                {
+                  "$output": {
+                    "resource": "shop-cache.instance",
+                    "name": "endpoints[0].connections[0].pscAutoConnection.ipAddress"
+                  }
+                },
+                ":",
+                {
+                  "$output": {
+                    "resource": "shop-cache.instance",
+                    "name": "endpoints[0].connections[0].pscAutoConnection.port"
+                  }
+                }
+              ]
+            }
+          },
+          "edge": "memoryStore:shop-orders-fulfil-orders->shop-cache"
         },
         {
           "field": "SHOP_DB_DATABASE",
@@ -387,6 +538,12 @@
           "kind": "API"
         }
       ],
+      "memoryStores": [
+        {
+          "name": "shop-cache",
+          "kind": "MemoryStore"
+        }
+      ],
       "language": "GO",
       "artifact": "image",
       "job": {
@@ -431,6 +588,39 @@
             }
           },
           "edge": "http:shop-orders-ship-orders->shop-api"
+        },
+        {
+          "field": "SHOP_CACHE_MEMORY_STORE",
+          "source": "derived",
+          "value": {
+            "auth": "iam",
+            "ca": {
+              "$output": {
+                "resource": "shop-cache.instance",
+                "name": "managedServerCas[0].caCerts[0].certificates[0]"
+              }
+            },
+            "store": "shop-cache",
+            "url": {
+              "$concat": [
+                "rediss://",
+                {
+                  "$output": {
+                    "resource": "shop-cache.instance",
+                    "name": "endpoints[0].connections[0].pscAutoConnection.ipAddress"
+                  }
+                },
+                ":",
+                {
+                  "$output": {
+                    "resource": "shop-cache.instance",
+                    "name": "endpoints[0].connections[0].pscAutoConnection.port"
+                  }
+                }
+              ]
+            }
+          },
+          "edge": "memoryStore:shop-orders-ship-orders->shop-cache"
         },
         {
           "field": "SHOP_DB_DATABASE",
@@ -547,6 +737,54 @@
       },
       "connector": "gcp.cloudrunjob-cloudrun",
       "field": "SHOP_API_SERVICE"
+    },
+    {
+      "id": "memoryStore:Orders->shop-cache",
+      "kind": "memoryStore",
+      "from": "Orders",
+      "to": "shop-cache",
+      "service": {
+        "name": "shop-cache",
+        "kind": "MemoryStore"
+      },
+      "connector": "gcp.cloudrun-memorystore",
+      "field": "SHOP_CACHE_MEMORY_STORE"
+    },
+    {
+      "id": "memoryStore:shop-api->shop-cache",
+      "kind": "memoryStore",
+      "from": "shop-api",
+      "to": "shop-cache",
+      "service": {
+        "name": "shop-cache",
+        "kind": "MemoryStore"
+      },
+      "connector": "gcp.cloudrun-memorystore",
+      "field": "SHOP_CACHE_MEMORY_STORE"
+    },
+    {
+      "id": "memoryStore:shop-orders-fulfil-orders->shop-cache",
+      "kind": "memoryStore",
+      "from": "shop-orders-fulfil-orders",
+      "to": "shop-cache",
+      "service": {
+        "name": "shop-cache",
+        "kind": "MemoryStore"
+      },
+      "connector": "gcp.cloudrunworker-memorystore",
+      "field": "SHOP_CACHE_MEMORY_STORE"
+    },
+    {
+      "id": "memoryStore:shop-orders-ship-orders->shop-cache",
+      "kind": "memoryStore",
+      "from": "shop-orders-ship-orders",
+      "to": "shop-cache",
+      "service": {
+        "name": "shop-cache",
+        "kind": "MemoryStore"
+      },
+      "connector": "gcp.cloudrunjob-memorystore",
+      "field": "SHOP_CACHE_MEMORY_STORE"
     },
     {
       "id": "site:shop-web->shop-api",
@@ -712,6 +950,31 @@
         ]
       },
       {
+        "id": "Orders.memorystore.shop-cache",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "condition": {
+            "expression": "resource.type == \"memorystore.googleapis.com/Instance\" && resource.name == \"projects/acme-prod/locations/us-east1/instances/acme-prod-shop-shop-cache\"",
+            "title": "Memorystore instance acme-prod-shop-shop-cache"
+          },
+          "member": {
+            "$output": {
+              "resource": "Orders.account",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/memorystore.dbConnectionUser"
+        },
+        "dependsOn": [
+          "Orders.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "memoryStore:Orders->shop-cache"
+        ]
+      },
+      {
         "id": "Orders.reads.PaymentsSecrets.STRIPE_KEY",
         "type": "gcp:secretmanager/secretIamMember:SecretIamMember",
         "properties": {
@@ -808,6 +1071,44 @@
                         "resource": "shop-api.service",
                         "name": "uri"
                       }
+                    }
+                  },
+                  {
+                    "name": "SHOP_CACHE_MEMORY_STORE_AUTH",
+                    "value": "iam"
+                  },
+                  {
+                    "name": "SHOP_CACHE_MEMORY_STORE_CA",
+                    "value": {
+                      "$output": {
+                        "resource": "shop-cache.instance",
+                        "name": "managedServerCas[0].caCerts[0].certificates[0]"
+                      }
+                    }
+                  },
+                  {
+                    "name": "SHOP_CACHE_MEMORY_STORE_STORE",
+                    "value": "shop-cache"
+                  },
+                  {
+                    "name": "SHOP_CACHE_MEMORY_STORE_URL",
+                    "value": {
+                      "$concat": [
+                        "rediss://",
+                        {
+                          "$output": {
+                            "resource": "shop-cache.instance",
+                            "name": "endpoints[0].connections[0].pscAutoConnection.ipAddress"
+                          }
+                        },
+                        ":",
+                        {
+                          "$output": {
+                            "resource": "shop-cache.instance",
+                            "name": "endpoints[0].connections[0].pscAutoConnection.port"
+                          }
+                        }
+                      ]
                     }
                   },
                   {
@@ -957,6 +1258,7 @@
           "network.subnet",
           "secret.PaymentsSecrets.STRIPE_KEY",
           "shop-api.service",
+          "shop-cache.instance",
           "shop-db.database.shop-db",
           "shop-db.instance"
         ],
@@ -1101,8 +1403,68 @@
         "phase": "infrastructure",
         "owners": [
           "Orders",
+          "shop-api",
+          "shop-cache",
           "shop-orders-fulfil-orders",
           "shop-orders-ship-orders"
+        ]
+      },
+      {
+        "id": "network.memorystore",
+        "type": "gcp:networkconnectivity/serviceConnectionPolicy:ServiceConnectionPolicy",
+        "properties": {
+          "description": "Private Service Connect endpoints of the Memorystore instances of stack Shop",
+          "location": "us-east1",
+          "name": "shop-memorystore",
+          "network": {
+            "$output": {
+              "resource": "network",
+              "name": "id"
+            }
+          },
+          "project": "acme-prod",
+          "pscConfig": {
+            "subnetworks": [
+              {
+                "$output": {
+                  "resource": "network.memorystore-subnet",
+                  "name": "id"
+                }
+              }
+            ]
+          },
+          "serviceClass": "gcp-memorystore"
+        },
+        "dependsOn": [
+          "network",
+          "network.memorystore-subnet"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "shop-cache"
+        ]
+      },
+      {
+        "id": "network.memorystore-subnet",
+        "type": "gcp:compute/subnetwork:Subnetwork",
+        "properties": {
+          "ipCidrRange": "10.8.16.0/24",
+          "name": "shop-memorystore",
+          "network": {
+            "$output": {
+              "resource": "network",
+              "name": "id"
+            }
+          },
+          "project": "acme-prod",
+          "region": "us-east1"
+        },
+        "dependsOn": [
+          "network"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "shop-cache"
         ]
       },
       {
@@ -1127,6 +1489,8 @@
         "phase": "infrastructure",
         "owners": [
           "Orders",
+          "shop-api",
+          "shop-cache",
           "shop-orders-fulfil-orders",
           "shop-orders-ship-orders"
         ]
@@ -1151,6 +1515,8 @@
         "phase": "infrastructure",
         "owners": [
           "Orders",
+          "shop-api",
+          "shop-cache",
           "shop-orders-fulfil-orders",
           "shop-orders-ship-orders"
         ]
@@ -1177,6 +1543,8 @@
         "phase": "infrastructure",
         "owners": [
           "Orders",
+          "shop-api",
+          "shop-cache",
           "shop-orders-fulfil-orders",
           "shop-orders-ship-orders"
         ]
@@ -1500,6 +1868,31 @@
         ]
       },
       {
+        "id": "shop-api.memorystore.shop-cache",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "condition": {
+            "expression": "resource.type == \"memorystore.googleapis.com/Instance\" && resource.name == \"projects/acme-prod/locations/us-east1/instances/acme-prod-shop-shop-cache\"",
+            "title": "Memorystore instance acme-prod-shop-shop-cache"
+          },
+          "member": {
+            "$output": {
+              "resource": "shop-api.account",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/memorystore.dbConnectionUser"
+        },
+        "dependsOn": [
+          "shop-api.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "memoryStore:shop-api->shop-cache"
+        ]
+      },
+      {
         "id": "shop-api.reads.PaymentsSecrets.STRIPE_KEY",
         "type": "gcp:secretmanager/secretIamMember:SecretIamMember",
         "properties": {
@@ -1551,6 +1944,44 @@
                   {
                     "name": "SHOP_API_CORS_ORIGINS",
                     "value": "https://shop-web.acme.dev"
+                  },
+                  {
+                    "name": "SHOP_CACHE_MEMORY_STORE_AUTH",
+                    "value": "iam"
+                  },
+                  {
+                    "name": "SHOP_CACHE_MEMORY_STORE_CA",
+                    "value": {
+                      "$output": {
+                        "resource": "shop-cache.instance",
+                        "name": "managedServerCas[0].caCerts[0].certificates[0]"
+                      }
+                    }
+                  },
+                  {
+                    "name": "SHOP_CACHE_MEMORY_STORE_STORE",
+                    "value": "shop-cache"
+                  },
+                  {
+                    "name": "SHOP_CACHE_MEMORY_STORE_URL",
+                    "value": {
+                      "$concat": [
+                        "rediss://",
+                        {
+                          "$output": {
+                            "resource": "shop-cache.instance",
+                            "name": "endpoints[0].connections[0].pscAutoConnection.ipAddress"
+                          }
+                        },
+                        ":",
+                        {
+                          "$output": {
+                            "resource": "shop-cache.instance",
+                            "name": "endpoints[0].connections[0].pscAutoConnection.port"
+                          }
+                        }
+                      ]
+                    }
                   },
                   {
                     "name": "SHOP_DB_DATABASE_CLOUD_SQL_DATABASE",
@@ -1683,12 +2114,34 @@
                 },
                 "name": "cloudsql"
               }
-            ]
+            ],
+            "vpcAccess": {
+              "egress": "ALL_TRAFFIC",
+              "networkInterfaces": [
+                {
+                  "network": {
+                    "$output": {
+                      "resource": "network",
+                      "name": "name"
+                    }
+                  },
+                  "subnetwork": {
+                    "$output": {
+                      "resource": "network.subnet",
+                      "name": "name"
+                    }
+                  }
+                }
+              ]
+            }
           }
         },
         "dependsOn": [
+          "network",
+          "network.subnet",
           "secret.PaymentsSecrets.STRIPE_KEY",
           "shop-api.account",
+          "shop-cache.instance",
           "shop-db.database.shop-db",
           "shop-db.instance",
           "shop-media.bucket"
@@ -1791,6 +2244,45 @@
         "phase": "exposure",
         "owners": [
           "shop-api"
+        ]
+      },
+      {
+        "id": "shop-cache.instance",
+        "type": "gcp:memorystore/instance:Instance",
+        "properties": {
+          "authorizationMode": "IAM_AUTH",
+          "deletionProtectionEnabled": false,
+          "desiredAutoCreatedEndpoints": [
+            {
+              "network": {
+                "$output": {
+                  "resource": "network",
+                  "name": "id"
+                }
+              },
+              "projectId": "acme-prod"
+            }
+          ],
+          "engineVersion": "VALKEY_8_0",
+          "instanceId": "acme-prod-shop-shop-cache",
+          "location": "us-east1",
+          "mode": "CLUSTER_DISABLED",
+          "nodeType": "STANDARD_SMALL",
+          "persistenceConfig": {
+            "mode": "DISABLED"
+          },
+          "project": "acme-prod",
+          "replicaCount": 2,
+          "shardCount": 1,
+          "transitEncryptionMode": "SERVER_AUTHENTICATION"
+        },
+        "dependsOn": [
+          "network",
+          "network.memorystore"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "shop-cache"
         ]
       },
       {
@@ -1982,6 +2474,31 @@
         ]
       },
       {
+        "id": "shop-orders-fulfil-orders.memorystore.shop-cache",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "condition": {
+            "expression": "resource.type == \"memorystore.googleapis.com/Instance\" && resource.name == \"projects/acme-prod/locations/us-east1/instances/acme-prod-shop-shop-cache\"",
+            "title": "Memorystore instance acme-prod-shop-shop-cache"
+          },
+          "member": {
+            "$output": {
+              "resource": "shop-orders-fulfil-orders.account",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/memorystore.dbConnectionUser"
+        },
+        "dependsOn": [
+          "shop-orders-fulfil-orders.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "memoryStore:shop-orders-fulfil-orders->shop-cache"
+        ]
+      },
+      {
         "id": "shop-orders-fulfil-orders.reads.PaymentsSecrets.STRIPE_KEY",
         "type": "gcp:secretmanager/secretIamMember:SecretIamMember",
         "properties": {
@@ -2098,6 +2615,44 @@
                         "resource": "shop-api.service",
                         "name": "uri"
                       }
+                    }
+                  },
+                  {
+                    "name": "SHOP_CACHE_MEMORY_STORE_AUTH",
+                    "value": "iam"
+                  },
+                  {
+                    "name": "SHOP_CACHE_MEMORY_STORE_CA",
+                    "value": {
+                      "$output": {
+                        "resource": "shop-cache.instance",
+                        "name": "managedServerCas[0].caCerts[0].certificates[0]"
+                      }
+                    }
+                  },
+                  {
+                    "name": "SHOP_CACHE_MEMORY_STORE_STORE",
+                    "value": "shop-cache"
+                  },
+                  {
+                    "name": "SHOP_CACHE_MEMORY_STORE_URL",
+                    "value": {
+                      "$concat": [
+                        "rediss://",
+                        {
+                          "$output": {
+                            "resource": "shop-cache.instance",
+                            "name": "endpoints[0].connections[0].pscAutoConnection.ipAddress"
+                          }
+                        },
+                        ":",
+                        {
+                          "$output": {
+                            "resource": "shop-cache.instance",
+                            "name": "endpoints[0].connections[0].pscAutoConnection.port"
+                          }
+                        }
+                      ]
                     }
                   },
                   {
@@ -2228,6 +2783,7 @@
           "network.subnet",
           "secret.PaymentsSecrets.STRIPE_KEY",
           "shop-api.service",
+          "shop-cache.instance",
           "shop-db.database.shop-db",
           "shop-db.instance",
           "shop-orders-fulfil-orders.account"
@@ -2364,6 +2920,44 @@
                       }
                     },
                     {
+                      "name": "SHOP_CACHE_MEMORY_STORE_AUTH",
+                      "value": "iam"
+                    },
+                    {
+                      "name": "SHOP_CACHE_MEMORY_STORE_CA",
+                      "value": {
+                        "$output": {
+                          "resource": "shop-cache.instance",
+                          "name": "managedServerCas[0].caCerts[0].certificates[0]"
+                        }
+                      }
+                    },
+                    {
+                      "name": "SHOP_CACHE_MEMORY_STORE_STORE",
+                      "value": "shop-cache"
+                    },
+                    {
+                      "name": "SHOP_CACHE_MEMORY_STORE_URL",
+                      "value": {
+                        "$concat": [
+                          "rediss://",
+                          {
+                            "$output": {
+                              "resource": "shop-cache.instance",
+                              "name": "endpoints[0].connections[0].pscAutoConnection.ipAddress"
+                            }
+                          },
+                          ":",
+                          {
+                            "$output": {
+                              "resource": "shop-cache.instance",
+                              "name": "endpoints[0].connections[0].pscAutoConnection.port"
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    {
                       "name": "SHOP_DB_DATABASE_CLOUD_SQL_DATABASE",
                       "value": {
                         "$output": {
@@ -2465,6 +3059,7 @@
           "network.subnet",
           "secret.PaymentsSecrets.STRIPE_KEY",
           "shop-api.service",
+          "shop-cache.instance",
           "shop-db.database.shop-db",
           "shop-db.instance",
           "shop-orders-ship-orders.account"
@@ -2472,6 +3067,31 @@
         "phase": "rollout",
         "owners": [
           "shop-orders-ship-orders"
+        ]
+      },
+      {
+        "id": "shop-orders-ship-orders.memorystore.shop-cache",
+        "type": "gcp:projects/iAMMember:IAMMember",
+        "properties": {
+          "condition": {
+            "expression": "resource.type == \"memorystore.googleapis.com/Instance\" && resource.name == \"projects/acme-prod/locations/us-east1/instances/acme-prod-shop-shop-cache\"",
+            "title": "Memorystore instance acme-prod-shop-shop-cache"
+          },
+          "member": {
+            "$output": {
+              "resource": "shop-orders-ship-orders.account",
+              "name": "member"
+            }
+          },
+          "project": "acme-prod",
+          "role": "roles/memorystore.dbConnectionUser"
+        },
+        "dependsOn": [
+          "shop-orders-ship-orders.account"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "memoryStore:shop-orders-ship-orders->shop-cache"
         ]
       },
       {
@@ -2966,9 +3586,12 @@
         "Orders.cloudsql-client.shop-db",
         "Orders.cloudsql-login.shop-db",
         "Orders.database-user.shop-db",
+        "Orders.memorystore.shop-cache",
         "Orders.reads.PaymentsSecrets.STRIPE_KEY",
         "Orders.trace-agent",
         "network",
+        "network.memorystore",
+        "network.memorystore-subnet",
         "network.nat",
         "network.router",
         "network.subnet",
@@ -2977,10 +3600,12 @@
         "shop-api.cloudsql-client.shop-db",
         "shop-api.cloudsql-login.shop-db",
         "shop-api.database-user.shop-db",
+        "shop-api.memorystore.shop-cache",
         "shop-api.reads.PaymentsSecrets.STRIPE_KEY",
         "shop-api.sign-as-self",
         "shop-api.storage.shop-media",
         "shop-api.trace-agent",
+        "shop-cache.instance",
         "shop-db.database.shop-db",
         "shop-db.instance",
         "shop-db.migrator",
@@ -2989,12 +3614,14 @@
         "shop-orders-fulfil-orders.cloudsql-client.shop-db",
         "shop-orders-fulfil-orders.cloudsql-login.shop-db",
         "shop-orders-fulfil-orders.database-user.shop-db",
+        "shop-orders-fulfil-orders.memorystore.shop-cache",
         "shop-orders-fulfil-orders.reads.PaymentsSecrets.STRIPE_KEY",
         "shop-orders-fulfil-orders.trace-agent",
         "shop-orders-ship-orders.account",
         "shop-orders-ship-orders.cloudsql-client.shop-db",
         "shop-orders-ship-orders.cloudsql-login.shop-db",
         "shop-orders-ship-orders.database-user.shop-db",
+        "shop-orders-ship-orders.memorystore.shop-cache",
         "shop-orders-ship-orders.reads.PaymentsSecrets.STRIPE_KEY",
         "shop-web.address",
         "shop-web.anchor",

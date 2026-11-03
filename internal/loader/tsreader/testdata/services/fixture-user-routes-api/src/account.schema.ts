@@ -1,7 +1,14 @@
 import { HttpMethod, auth, rest, userAdministration, userSessions } from "@superschematic/api";
 
-// Signs users in and out, and lets anyone register.
-@userSessions({ register: true })
+// Signs users in and out, and lets anyone register: a new user waits for
+// an administrator's approval as a member, and the first is the
+// administrator (D81).
+@userSessions({
+  register: true,
+  registration: "approval",
+  defaultRoles: ["member"],
+  firstUser: { role: "admin", permissions: ["identity"] },
+})
 export class Account {}
 
 // Manages users, roles and the grants between them.

@@ -42,7 +42,7 @@ func displaySchema(change func(*ir.TypeDef)) *ir.Schema {
 		Display: &ir.TypeDisplay{
 			Noun:          "Ticket",
 			TitleField:    "title",
-			SummaryFields: []string{"Workflow.status", "Comments.commentCount", "owner"},
+			SummaryFields: []string{"Workflow.status", "Comments.messages", "owner"},
 			States:        map[string]ir.DisplayState{"todo": {Label: "To do"}, "doing": {Label: "Do", ActiveForm: "Doing", Tone: ir.DisplayToneActive}},
 			Transitions:   map[string]map[string]string{"todo": {"doing": "Start"}, "doing": {"done": "Finish"}},
 		},
@@ -103,7 +103,7 @@ func TestDisplaysVerify(t *testing.T) {
 		}},
 		{"states without Workflow", func(td *ir.TypeDef) {
 			td.Behaviors = td.Behaviors[1:]
-			td.Display.SummaryFields = []string{"Comments.commentCount"}
+			td.Display.SummaryFields = []string{"Comments.messages"}
 		}, []string{prefix + "states and transitions label a Workflow's; the type does not compose Workflow"}},
 		{"transitions alone without Workflow", func(td *ir.TypeDef) {
 			td.Behaviors = nil
@@ -195,5 +195,73 @@ func TestFieldDisplaysVerify(t *testing.T) {
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("errors:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// D48, amended: a field's @display currency is for a field that holds an
+// amount in minor units, an integer scalar or a list of them, and names
+// an active ISO 4217 code in capitals or a field of the same type that
+// holds a single text value, in every form.
+func TestFieldDisplayCurrenciesVerify(t *testing.T) {
+	reg := registry.New(naming.Naming{})
+	const prefix = "src/price.schema.json: type Price: field "
+	integer := map[string]string{"json_schema": "integer"}
+	schema := func(currency ir.DisplayCurrency, field string) *ir.Schema {
+		schema := ir.NewSchema("prices", ir.SchemaKindGeneral)
+		schema.Scalars["Finance.Money"] = &ir.ScalarDef{Name: "Finance.Money", LanguagePrimitive: ir.LanguageNumber, TypeMappings: integer}
+		schema.Scalars["Generic.Int64"] = &ir.ScalarDef{Name: "Generic.Int64", LanguagePrimitive: ir.LanguageNumber, TypeMappings: integer}
+		schema.Scalars["Generic.Float64"] = &ir.ScalarDef{Name: "Generic.Float64", LanguagePrimitive: ir.LanguageNumber, TypeMappings: map[string]string{"json_schema": "number"}}
+		schema.Scalars["Finance.Currency"] = &ir.ScalarDef{Name: "Finance.Currency", LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"json_schema": "string"}}
+		td := &ir.TypeDef{Name: "Price", Owner: "src/price.schema.json", Role: ir.RoleEmbeddedStruct, Fields: []*ir.FieldDef{
+			{Name: "amount", TypeRef: ir.TypeRef{Name: "Finance.Money"}, Required: true},
+			{Name: "cents", TypeRef: ir.TypeRef{Name: "Generic.Int64"}},
+			{Name: "fee", JSONTag: "currency", TypeRef: ir.TypeRef{Name: "Generic.Int64"}},
+			{Name: "tiers", TypeRef: ir.TypeRef{Name: "Finance.Money", IsArray: true}},
+			{Name: "byRegion", TypeRef: ir.TypeRef{Name: "Finance.Money", IsMap: true}},
+			{Name: "rate", TypeRef: ir.TypeRef{Name: "Generic.Float64"}},
+			{Name: "note", TypeRef: ir.TypeRef{Name: "string"}},
+			{Name: "currency", TypeRef: ir.TypeRef{Name: "Finance.Currency"}},
+			{Name: "code", JSONTag: "currencyCode", TypeRef: ir.TypeRef{Name: "string"}},
+			{Name: "codes", TypeRef: ir.TypeRef{Name: "Finance.Currency", IsArray: true}},
+		}}
+		for _, f := range td.Fields {
+			if f.Name == field {
+				f.Display = &ir.FieldDisplay{Currency: &currency}
+			}
+		}
+		schema.Types["Price"] = td
+		return schema
+	}
+	for _, test := range []struct {
+		name     string
+		field    string
+		currency ir.DisplayCurrency
+		want     []string
+	}{
+		{"money in a code", "amount", ir.DisplayCurrency{Code: "GBP"}, nil},
+		{"an integer in a code without minor units", "cents", ir.DisplayCurrency{Code: "XAU"}, nil},
+		{"a list of money in a field", "tiers", ir.DisplayCurrency{Field: "currency"}, nil},
+		{"money in a text field by its JSON key", "amount", ir.DisplayCurrency{Field: "currencyCode"}, nil},
+		{"money in a text field by its name", "amount", ir.DisplayCurrency{Field: "code"}, nil},
+		{"a name before another field's JSON key", "amount", ir.DisplayCurrency{Field: "currency"}, nil},
+		{"a map of money", "byRegion", ir.DisplayCurrency{Code: "GBP"}, []string{prefix + "byRegion takes @display currency, which is for an amount in minor units, but it is a map of Finance.Money"}},
+		{"a number", "rate", ir.DisplayCurrency{Code: "GBP"}, []string{prefix + "rate takes @display currency, which is for an amount in minor units, but it is Generic.Float64"}},
+		{"text", "note", ir.DisplayCurrency{Code: "GBP"}, []string{prefix + "note takes @display currency, which is for an amount in minor units, but it is string"}},
+		{"a code no list carries", "amount", ir.DisplayCurrency{Code: "XYZ"}, []string{prefix + `amount takes @display currency "XYZ", which is not an active ISO 4217 currency code`}},
+		{"a withdrawn code", "amount", ir.DisplayCurrency{Code: "HRK"}, []string{prefix + `amount takes @display currency "HRK", which is not an active ISO 4217 currency code`}},
+		{"a field the type lacks", "amount", ir.DisplayCurrency{Field: "money"}, []string{prefix + `amount takes @display currency { field: "money" }, which is not a field of the type (fields: cents, fee, tiers, byRegion, rate, note, currency, code, codes)`}},
+		{"the amount itself", "cents", ir.DisplayCurrency{Field: "cents"}, []string{prefix + `cents takes @display currency { field: "cents" }, which is the amount itself; the currency is another field of the type`}},
+		{"a field that holds no text", "amount", ir.DisplayCurrency{Field: "cents"}, []string{prefix + `amount takes @display currency { field: "cents" }, which is Generic.Int64; a currency field holds a single Finance.Currency or text value`}},
+		{"a list of currencies", "amount", ir.DisplayCurrency{Field: "codes"}, []string{prefix + `amount takes @display currency { field: "codes" }, which is Finance.Currency[]; a currency field holds a single Finance.Currency or text value`}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var got []string
+			for _, d := range Run(schema(test.currency, test.field), Input{Registry: reg}).Errors {
+				got = append(got, d.Error())
+			}
+			if strings.Join(got, "\n") != strings.Join(test.want, "\n") {
+				t.Fatalf("errors:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(test.want, "\n"))
+			}
+		})
 	}
 }

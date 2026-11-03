@@ -505,3 +505,64 @@ func TestAStacksCacheKeyFollowsTheServicesItReaches(t *testing.T) {
 		before = after
 	}
 }
+
+// TestServiceCarriesMemoryStores: an API's memory stores, its
+// rateLimitStore among them, reach the resolver's facts, and the stack
+// loads each store it reaches (D75).
+func TestServiceCarriesMemoryStores(t *testing.T) {
+	cache := ir.ServiceRef{Name: "shop-cache", Kind: ir.SchemaKindMemoryStore}
+	api := ir.NewSchema("shop-api", ir.SchemaKindAPI)
+	api.MemoryStores = []ir.ServiceRef{cache}
+	api.RateLimitStore = &cache
+	svc, err := stackgen.Service(api, &registry.Outputs{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(svc.MemoryStores, []ir.ServiceRef{cache}) {
+		t.Errorf("memory stores = %+v", svc.MemoryStores)
+	}
+
+	schemas := map[string]*ir.Schema{"shop-api": api, "shop-cache": ir.NewSchema("shop-cache", ir.SchemaKindMemoryStore)}
+	c := registry.GenerateContext{
+		LoadDependency: func(name string) (*ir.Schema, error) {
+			if schema, ok := schemas[name]; ok {
+				return schema, nil
+			}
+			return nil, os.ErrNotExist
+		},
+		Options: registry.Options{LoadDependencyConfig: func(name string) (*schemaconfig.SchemaConfig, error) {
+			return &schemaconfig.SchemaConfig{Name: name, Kind: schemas[name].Kind}, nil
+		}},
+	}
+	services, err := stackgen.Services(c, &ir.Stack{Name: "s", Deploy: []ir.ServiceRef{{Name: "shop-api", Kind: ir.SchemaKindAPI}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, svc := range services {
+		names = append(names, svc.Name)
+	}
+	if strings.Join(names, ",") != "shop-api,shop-cache" {
+		t.Errorf("services = %v, want shop-api and shop-cache", names)
+	}
+}
+
+// TestServiceCarriesVectorsAndFieldKeys: a database with a vector column
+// and an Encrypted<T> field gives the resolver both facts, the vector,
+// which picks pgvector's image for stack dev (D84), and the key secret,
+// which every deployable on the database reads (D85).
+func TestServiceCarriesVectorsAndFieldKeys(t *testing.T) {
+	reg := assemble(t)
+	schema, cfg := load(t, reg, filepath.Join("..", "..", "loader", "tsreader", "testdata", "services", "fixture-vectors-db"))
+	outputs, err := registry.ParseOutputs(cfg.Outputs, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := stackgen.Service(schema, outputs, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !svc.Vectors || svc.FieldKeys != "VectorKeys.VECTOR_DB_FIELD_KEYS" {
+		t.Errorf("vectors = %v, field keys = %q; want both", svc.Vectors, svc.FieldKeys)
+	}
+}

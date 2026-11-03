@@ -58,9 +58,12 @@ rust = "rust-impl/{service}"
 # with a page per resource its operations describe under /console, whose
 # lists are live: with Topcoat's runtime in the browser, which the app loads
 # when its asset bundle is beside it, a filter or a page renders the list
-# again in place. The core binary never reads this table, so the configs
-# stay its own.
+# again in place. shop-stock, whose server is Rust in shop-stack, gets the
+# crate its app Backoffice (apps/backoffice, D78) serves, with its pages
+# under /stock: each service's pages have a path of their own, since an app
+# that links both crates would serve one's pages inside the other's. The
+# core binary never reads this table, so the configs stay its own.
 [extension.topcoat]
-services = ["shop-orders"]
-pages_prefix = "/console"
+services = ["shop-orders", "shop-stock"]
+pages_prefix = { "shop-orders" = "/console", "shop-stock" = "/stock" }
 pages_live = true

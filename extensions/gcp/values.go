@@ -36,6 +36,14 @@ const (
 	TypeRecordSet           = "gcp:dns/recordSet:RecordSet"
 	TypeBucket              = "gcp:storage/bucket:Bucket"
 
+	// The types of a memory store (D75): its Memorystore for Valkey
+	// instance, and the service connection policy that lets it create its
+	// Private Service Connect endpoints on the environment's network. A
+	// memoryStore edge's grant is a TypeProjectIAMMember held to the
+	// instance by a condition, since an instance has no IAM policy.
+	TypeMemoryStoreInstance     = "gcp:memorystore/instance:Instance"
+	TypeServiceConnectionPolicy = "gcp:networkconnectivity/serviceConnectionPolicy:ServiceConnectionPolicy"
+
 	// The types of a site (D55): the bucket that holds its files
 	// (TypeBucket), the load balancer's backend for it, and the HTTP proxy
 	// of a site with no domain.
@@ -231,6 +239,11 @@ const (
 	// egressRange is the subnet Direct VPC egress takes its addresses from:
 	// two per instance, so a /20 serves about two thousand.
 	egressRange = "10.8.0.0/20"
+
+	// memoryStoreRange is the subnet the Private Service Connect endpoints
+	// of the environment's memory stores take their addresses from (D75):
+	// two per instance, a primary's and a reader's, beside egressRange.
+	memoryStoreRange = "10.8.16.0/24"
 
 	// recordTTL is the TTL of every record Cloud DNS writes.
 	recordTTL = 300

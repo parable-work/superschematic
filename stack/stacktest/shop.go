@@ -349,6 +349,16 @@ func WorkerOf(ref ir.ServiceRef, worker string) ir.DeployableRef {
 	return ir.DeployableRef{Service: &ref, Worker: worker}
 }
 
+// DeriverOf names a deriver of an API service (D74).
+func DeriverOf(ref ir.ServiceRef, deriver string) ir.DeployableRef {
+	return ir.DeployableRef{Service: &ref, Deriver: deriver}
+}
+
+// AppOf names an app of an API service (D78).
+func AppOf(ref ir.ServiceRef, app string) ir.DeployableRef {
+	return ir.DeployableRef{Service: &ref, App: app}
+}
+
 // RunnerOf names the engine's runner of a DB service (D58).
 func RunnerOf(ref ir.ServiceRef) ir.DeployableRef {
 	return ir.DeployableRef{Service: &ref, Runner: true}

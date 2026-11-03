@@ -1,0 +1,41 @@
+{
+  "dialect": "postgres",
+  "expanded": "87f55fba10944d440e79bde4feb9be0ec3e722d3d51a97bec9ad3bcae9c179d4",
+  "from": "87f55fba10944d440e79bde4feb9be0ec3e722d3d51a97bec9ad3bcae9c179d4",
+  "hash": "d12bd10f912e50d36fd64a1ac8787195f9acea42e49e3a80f3bf28d54e0c7c22",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "replaceCheck",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"order\" DROP CONSTRAINT ck_order_status",
+        "ALTER TABLE \"order\" ADD CONSTRAINT ck_order_status CHECK (status IN ('placed', 'shipped')) NOT VALID"
+      ],
+      "subject": "table/order/constraint/ck_order_status",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/order/constraint/ck_order_status",
+          "reason": "Order.status takes fewer values: validating ck_order_status fails when a row of order holds 'cancelled'.",
+          "subject": "table/order/constraint/ck_order_status"
+        }
+      ],
+      "index": 2,
+      "op": "validateCheck",
+      "phase": "contract",
+      "statements": [
+        "ALTER TABLE \"order\" VALIDATE CONSTRAINT ck_order_status"
+      ],
+      "subject": "table/order/constraint/ck_order_status",
+      "transactional": true
+    }
+  ],
+  "to": "ae5c744ddcfe8cceb624d759c560efadcc3ee006d350e2eddd692c0a67e14675",
+  "toModel": null,
+  "version": 1
+}

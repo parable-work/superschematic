@@ -39,7 +39,8 @@ export const identityDescriptor = {
       "user": "user_id",
       "passwordHash": "password_hash",
       "passwordChangedAt": "password_changed_at",
-      "disabledAt": "disabled_at"
+      "disabledAt": "disabled_at",
+      "pendingAt": "pending_at"
     }
   },
   "role": {

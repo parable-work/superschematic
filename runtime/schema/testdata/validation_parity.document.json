@@ -126,6 +126,51 @@
         "sql": "VARCHAR(9)"
       }
     },
+    "DigitMatrix": {
+      "properties": {
+        "amount": {
+          "$ref": "#/definitions/scalars/Finance_SignedMoney"
+        },
+        "decList": {
+          "items": {
+            "$ref": "#/definitions/scalars/Generic_Decimal"
+          },
+          "type": "array",
+          "x-validatePrecision": 4,
+          "x-validateScale": 1
+        },
+        "dimList": {
+          "items": {
+            "$ref": "#/definitions/scalars/Embedding_Vector"
+          },
+          "type": "array",
+          "x-validateDimensions": 2
+        },
+        "optDec": {
+          "$ref": "#/definitions/scalars/Generic_Decimal",
+          "x-validatePrecision": 3
+        },
+        "optDim": {
+          "$ref": "#/definitions/scalars/Embedding_Vector",
+          "x-validateDimensions": 2
+        },
+        "reqDec": {
+          "$ref": "#/definitions/scalars/Generic_Decimal",
+          "x-validatePrecision": 5,
+          "x-validateScale": 2
+        },
+        "reqDim": {
+          "$ref": "#/definitions/scalars/Embedding_Vector",
+          "x-validateDimensions": 3
+        }
+      },
+      "required": [
+        "reqDec",
+        "reqDim"
+      ],
+      "type": "object",
+      "x-kind": "type"
+    },
     "Embedding_Vector": {
       "description": "Fixed-dimensional float32 vector",
       "type": "array",
@@ -180,6 +225,22 @@
         "sql": "BIGINT"
       }
     },
+    "Finance_SignedMoney": {
+      "description": "Signed monetary amount in smallest currency unit (e.g., cents for USD)",
+      "maximum": 9007199254740991,
+      "minimum": -9007199254740991,
+      "type": "integer",
+      "x-hasCustomParse": true,
+      "x-scalar": "Finance_SignedMoney",
+      "x-typeMapping": {
+        "go": "FinanceSignedMoney",
+        "json_schema": "integer",
+        "python": "int",
+        "rust": "i64",
+        "sql": "BIGINT",
+        "typescript": "number"
+      }
+    },
     "Generic_Boolean": {
       "description": "True or false",
       "type": "string",
@@ -189,6 +250,21 @@
         "go": "GenericBoolean",
         "json_schema": "boolean",
         "sql": "BOOLEAN"
+      }
+    },
+    "Generic_Decimal": {
+      "description": "Exact decimal number in plain notation, carried as a string",
+      "pattern": "^[+-]?[0-9]+(\\.[0-9]+)?$",
+      "type": "string",
+      "x-hasCustomParse": true,
+      "x-scalar": "Generic_Decimal",
+      "x-typeMapping": {
+        "go": "GenericDecimal",
+        "json_schema": "string",
+        "python": "decimal.Decimal",
+        "rust": "superscalar::Decimal",
+        "sql": "NUMERIC",
+        "typescript": "string"
       }
     },
     "Generic_Float64": {

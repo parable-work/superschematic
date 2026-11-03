@@ -171,7 +171,7 @@ func PrimitiveToRustType(value string) (string, bool) {
 // UseLine renders a use declaration of items under path, as rustfmt lays
 // one out: `use path::item;` for one, `use path::{a, b};` for more, the
 // items sorted with self first, then lower case, then upper case, and,
-// when the line passes 100 columns, the items on lines of their own
+// when the line passes 98 columns, the items on lines of their own
 // indented four spaces, as many to a line as fit.
 func UseLine(path string, items []string) string {
 	items = append([]string(nil), items...)
@@ -194,7 +194,9 @@ func UseLine(path string, items []string) string {
 		return "use " + path + "::" + items[0] + ";"
 	}
 	line := "use " + path + "::{" + strings.Join(items, ", ") + "};"
-	if len(line) <= 100 {
+	// rustfmt keeps a braced list on the use's line up to 98 columns: a
+	// line of 99 or 100 it breaks too.
+	if len(line) <= 98 {
 		return line
 	}
 	var b strings.Builder

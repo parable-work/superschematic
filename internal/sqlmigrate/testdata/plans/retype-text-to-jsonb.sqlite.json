@@ -1,0 +1,60 @@
+{
+  "dialect": "sqlite",
+  "from": "2dd1d74151c17cdd210b4e455cc9ef564941927f6e050cde2d6ed0c3771e6efc",
+  "hash": "bdd7704deca5bbfb5b9947aa4abc468a2f9483d7cc8b657880c91181dc63d36f",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:table/order",
+          "reason": "Copying order, order_label and order_line holds the database's write lock for time that grows with the tables.",
+          "subject": "table/order"
+        },
+        {
+          "class": "compat",
+          "id": "compat:table/order/column/ship_to",
+          "reason": "Order.shipTo changes from a scalar (TEXT) to a JSON value (TEXT): servers built from the previous version still read and write a scalar (TEXT).",
+          "subject": "table/order/column/ship_to"
+        },
+        {
+          "class": "data-dependent",
+          "id": "data-dependent:table/order/column/ship_to",
+          "reason": "Order.shipTo changes from a scalar (TEXT) to a JSON value (TEXT): the cast fails on a value a JSON value (TEXT) cannot hold.",
+          "subject": "table/order/column/ship_to"
+        },
+        {
+          "class": "copy-table",
+          "id": "copy-table:table/order",
+          "reason": "SQLite's ALTER TABLE cannot change the type of ship_to, so the step rebuilds order with the tables that reference it, directly or through another table: order_label and order_line. It copies the rows of each table it keeps into a new table, drops the old tables and renames the new ones.",
+          "subject": "table/order"
+        }
+      ],
+      "index": 1,
+      "op": "copyTable",
+      "phase": "expand",
+      "statements": [
+        "PRAGMA defer_foreign_keys = ON",
+        "CREATE TABLE \"_new_order\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"code\" TEXT NOT NULL,\n  \"customer_id\" TEXT NOT NULL,\n  \"total\" INTEGER NOT NULL,\n  \"reference\" TEXT,\n  \"note\" TEXT,\n  \"placed_at\" TEXT NOT NULL,\n  \"ship_to\" TEXT,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"customer_id\") REFERENCES \"customer\" (\"id\") ON DELETE RESTRICT\n)",
+        "CREATE TABLE \"_new_order_label\" (\n  \"order_id\" TEXT NOT NULL,\n  \"label_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"order_id\", \"label_id\"),\n  FOREIGN KEY (\"label_id\") REFERENCES \"label\" (\"id\") ON DELETE CASCADE,\n  FOREIGN KEY (\"order_id\") REFERENCES \"_new_order\" (\"id\") ON DELETE CASCADE\n)",
+        "CREATE TABLE \"_new_order_line\" (\n  \"id\" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,\n  \"sku\" TEXT NOT NULL,\n  \"quantity\" INTEGER NOT NULL,\n  \"order_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"order_id\") REFERENCES \"_new_order\" (\"id\") ON DELETE CASCADE\n)",
+        "INSERT INTO \"_new_order\" (\"id\", \"code\", \"customer_id\", \"total\", \"reference\", \"note\", \"placed_at\", \"ship_to\")\nSELECT \"id\", \"code\", \"customer_id\", \"total\", \"reference\", \"note\", \"placed_at\", json(\"ship_to\")\nFROM \"order\"",
+        "INSERT INTO \"_new_order_label\" (\"order_id\", \"label_id\")\nSELECT \"order_id\", \"label_id\"\nFROM \"order_label\"",
+        "INSERT INTO \"_new_order_line\" (\"id\", \"sku\", \"quantity\", \"order_id\")\nSELECT \"id\", \"sku\", \"quantity\", \"order_id\"\nFROM \"order_line\"",
+        "DROP TABLE \"order_label\"",
+        "DROP TABLE \"order_line\"",
+        "DROP TABLE \"order\"",
+        "ALTER TABLE \"_new_order\" RENAME TO \"order\"",
+        "ALTER TABLE \"_new_order_label\" RENAME TO \"order_label\"",
+        "ALTER TABLE \"_new_order_line\" RENAME TO \"order_line\"",
+        "CREATE INDEX \"idx_order_customer_placed_at\" ON \"order\" (\"customer_id\", \"placed_at\")"
+      ],
+      "subject": "table/order",
+      "transactional": true
+    }
+  ],
+  "to": "fca83c4cac2ab5c6360ec5515cf367403c47ac014b39d2f34749bd7cba17c84e",
+  "toModel": null,
+  "version": 1
+}

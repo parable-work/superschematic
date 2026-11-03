@@ -61,6 +61,16 @@ export function uncovered(held: readonly string[], given: readonly string[]): st
   return out;
 }
 
+/**
+ * The permissions a user holds through roles that no permission of held
+ * covers: uncovered of their effectivePermissions. A caller may set the
+ * user's password, disable them or enable them only when it is empty: no
+ * one takes over, or locks out, a user who holds what they do not.
+ */
+export function uncoveredUser(held: readonly string[], roles: readonly PermissionsOf[]): string[] {
+  return uncovered(held, effectivePermissions(roles));
+}
+
 /** What capabilities needs to know of one operation of the API. */
 export interface IdentityRoute {
   /** The operation's OpenAPI operation id, its key in Capabilities. */

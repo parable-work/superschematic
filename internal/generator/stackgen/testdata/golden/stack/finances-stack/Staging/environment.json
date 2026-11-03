@@ -1,0 +1,397 @@
+{
+  "version": 1,
+  "stack": "finances-stack",
+  "environment": "Staging",
+  "target": "fake",
+  "provisioner": "fake",
+  "values": {
+    "project": "finances-staging",
+    "region": "us-east1"
+  },
+  "deployables": [
+    {
+      "name": "finances-api",
+      "kind": "server",
+      "platform": "fake.run",
+      "services": [
+        {
+          "name": "finances-api",
+          "kind": "API"
+        }
+      ],
+      "language": "TYPESCRIPT",
+      "artifact": "image",
+      "resourceName": "finances-api",
+      "address": {
+        "$output": {
+          "resource": "finances-api.service",
+          "name": "url"
+        }
+      },
+      "bindings": [
+        {
+          "field": "EMBEDDING_MODEL",
+          "source": "literal",
+          "value": "voyage-4-large"
+        },
+        {
+          "field": "FINANCES_DB_DATABASE",
+          "source": "derived",
+          "value": {
+            "cloudSql": {
+              "database": {
+                "$output": {
+                  "resource": "finances-db.database.finances-db",
+                  "name": "name"
+                }
+              },
+              "instance": {
+                "$output": {
+                  "resource": "finances-db.instance",
+                  "name": "connectionName"
+                }
+              },
+              "user": {
+                "$output": {
+                  "resource": "finances-api.account",
+                  "name": "email"
+                }
+              }
+            }
+          },
+          "edge": "sql:finances-api->finances-db"
+        },
+        {
+          "field": "FINANCES_DB_FIELD_KEYS",
+          "source": "secret",
+          "secret": "FieldKeys.FINANCES_DB_FIELD_KEYS"
+        },
+        {
+          "field": "PLAID_CLIENT_ID",
+          "source": "secret",
+          "secret": "FinancesConfig.PLAID_CLIENT_ID"
+        }
+      ]
+    },
+    {
+      "name": "finances-db",
+      "kind": "database",
+      "platform": "fake.sql",
+      "services": [
+        {
+          "name": "finances-db",
+          "kind": "DB"
+        }
+      ],
+      "dialect": "postgres",
+      "resourceName": "finances-db",
+      "address": {
+        "$output": {
+          "resource": "finances-db.instance",
+          "name": "connectionName"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "sql:finances-api->finances-db",
+      "kind": "sql",
+      "from": "finances-api",
+      "to": "finances-db",
+      "service": {
+        "name": "finances-db",
+        "kind": "DB"
+      },
+      "connector": "fake.run-sql",
+      "field": "FINANCES_DB_DATABASE"
+    }
+  ],
+  "secrets": [
+    {
+      "id": "FieldKeys.FINANCES_DB_FIELD_KEYS",
+      "type": "FieldKeys",
+      "field": "FINANCES_DB_FIELD_KEYS",
+      "readers": [
+        "finances-api"
+      ]
+    },
+    {
+      "id": "FinancesConfig.PLAID_CLIENT_ID",
+      "type": "FinancesConfig",
+      "field": "PLAID_CLIENT_ID",
+      "readers": [
+        "finances-api"
+      ]
+    }
+  ],
+  "resources": {
+    "resources": [
+      {
+        "id": "finances-api.account",
+        "type": "fake:iam/account:Account",
+        "properties": {
+          "name": "finances-api"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "finances-api"
+        ]
+      },
+      {
+        "id": "finances-api.reads.FieldKeys.FINANCES_DB_FIELD_KEYS",
+        "type": "fake:iam/grant:Grant",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "finances-api.account",
+              "name": "email"
+            }
+          },
+          "resource": {
+            "$output": {
+              "resource": "secret.FieldKeys.FINANCES_DB_FIELD_KEYS",
+              "name": "id"
+            }
+          },
+          "role": "secret.accessor"
+        },
+        "dependsOn": [
+          "finances-api.account",
+          "secret.FieldKeys.FINANCES_DB_FIELD_KEYS"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "finances-api"
+        ]
+      },
+      {
+        "id": "finances-api.reads.FinancesConfig.PLAID_CLIENT_ID",
+        "type": "fake:iam/grant:Grant",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "finances-api.account",
+              "name": "email"
+            }
+          },
+          "resource": {
+            "$output": {
+              "resource": "secret.FinancesConfig.PLAID_CLIENT_ID",
+              "name": "id"
+            }
+          },
+          "role": "secret.accessor"
+        },
+        "dependsOn": [
+          "finances-api.account",
+          "secret.FinancesConfig.PLAID_CLIENT_ID"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "finances-api"
+        ]
+      },
+      {
+        "id": "finances-api.service",
+        "type": "fake:run/service:Service",
+        "properties": {
+          "account": {
+            "$output": {
+              "resource": "finances-api.account",
+              "name": "email"
+            }
+          },
+          "env": [
+            {
+              "name": "EMBEDDING_MODEL",
+              "value": "voyage-4-large"
+            },
+            {
+              "name": "FINANCES_DB_DATABASE_CLOUD_SQL_DATABASE",
+              "value": {
+                "$output": {
+                  "resource": "finances-db.database.finances-db",
+                  "name": "name"
+                }
+              }
+            },
+            {
+              "name": "FINANCES_DB_DATABASE_CLOUD_SQL_INSTANCE",
+              "value": {
+                "$output": {
+                  "resource": "finances-db.instance",
+                  "name": "connectionName"
+                }
+              }
+            },
+            {
+              "name": "FINANCES_DB_DATABASE_CLOUD_SQL_USER",
+              "value": {
+                "$output": {
+                  "resource": "finances-api.account",
+                  "name": "email"
+                }
+              }
+            },
+            {
+              "name": "FINANCES_DB_FIELD_KEYS",
+              "secret": {
+                "$output": {
+                  "resource": "secret.FieldKeys.FINANCES_DB_FIELD_KEYS",
+                  "name": "id"
+                }
+              }
+            },
+            {
+              "name": "PLAID_CLIENT_ID",
+              "secret": {
+                "$output": {
+                  "resource": "secret.FinancesConfig.PLAID_CLIENT_ID",
+                  "name": "id"
+                }
+              }
+            }
+          ],
+          "image": "images.fake.test/finances-api",
+          "language": "typescript",
+          "name": "finances-api",
+          "public": false
+        },
+        "dependsOn": [
+          "finances-api.account",
+          "finances-db.database.finances-db",
+          "finances-db.instance",
+          "secret.FieldKeys.FINANCES_DB_FIELD_KEYS",
+          "secret.FinancesConfig.PLAID_CLIENT_ID"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "finances-api"
+        ]
+      },
+      {
+        "id": "finances-api.sql.finances-db",
+        "type": "fake:iam/grant:Grant",
+        "properties": {
+          "member": {
+            "$output": {
+              "resource": "finances-api.account",
+              "name": "email"
+            }
+          },
+          "resource": {
+            "$output": {
+              "resource": "finances-db.instance",
+              "name": "id"
+            }
+          },
+          "role": "sql.client"
+        },
+        "dependsOn": [
+          "finances-api.account",
+          "finances-db.instance"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "sql:finances-api->finances-db"
+        ]
+      },
+      {
+        "id": "finances-db.database.finances-db",
+        "type": "fake:sql/database:Database",
+        "properties": {
+          "instance": {
+            "$output": {
+              "resource": "finances-db.instance",
+              "name": "name"
+            }
+          },
+          "name": "finances_db"
+        },
+        "dependsOn": [
+          "finances-db.instance"
+        ],
+        "phase": "infrastructure",
+        "owners": [
+          "finances-db"
+        ]
+      },
+      {
+        "id": "finances-db.instance",
+        "type": "fake:sql/instance:Instance",
+        "properties": {
+          "dialect": "postgres",
+          "highAvailability": false,
+          "name": "finances-db",
+          "tier": "small"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "finances-db"
+        ]
+      },
+      {
+        "id": "secret.FieldKeys.FINANCES_DB_FIELD_KEYS",
+        "type": "fake:secrets/secret:Secret",
+        "properties": {
+          "name": "FieldKeys.FINANCES_DB_FIELD_KEYS"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "finances-api"
+        ]
+      },
+      {
+        "id": "secret.FinancesConfig.PLAID_CLIENT_ID",
+        "type": "fake:secrets/secret:Secret",
+        "properties": {
+          "name": "FinancesConfig.PLAID_CLIENT_ID"
+        },
+        "phase": "infrastructure",
+        "owners": [
+          "finances-api"
+        ]
+      }
+    ]
+  },
+  "deployOrder": [
+    {
+      "step": "infrastructure",
+      "resources": [
+        "finances-api.account",
+        "finances-api.reads.FieldKeys.FINANCES_DB_FIELD_KEYS",
+        "finances-api.reads.FinancesConfig.PLAID_CLIENT_ID",
+        "finances-api.sql.finances-db",
+        "finances-db.database.finances-db",
+        "finances-db.instance",
+        "secret.FieldKeys.FINANCES_DB_FIELD_KEYS",
+        "secret.FinancesConfig.PLAID_CLIENT_ID"
+      ]
+    },
+    {
+      "step": "migrate",
+      "migration": "expand",
+      "deployables": [
+        "finances-db"
+      ]
+    },
+    {
+      "step": "rollout",
+      "wave": 1,
+      "deployables": [
+        "finances-api"
+      ],
+      "resources": [
+        "finances-api.service"
+      ]
+    },
+    {
+      "step": "migrate",
+      "migration": "contract",
+      "deployables": [
+        "finances-db"
+      ]
+    }
+  ]
+}

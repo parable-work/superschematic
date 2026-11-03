@@ -139,9 +139,12 @@ export default defineConfig({
 // and an @environment class per environment, in their order.
 func Schema(p *Plan, reg *registry.Registry) ([]byte, error) {
 	class := ClassName(p.Name, append(p.Handles(), environmentNames(p)...))
-	expose := make([]ir.DeployableRef, len(p.Expose))
+	expose := make([]ir.DeployableRef, len(p.Expose), len(p.Expose)+len(p.ExposeApps))
 	for i := range p.Expose {
 		expose[i] = ir.DeployableRef{Service: &p.Expose[i]}
+	}
+	for _, app := range p.ExposeApps {
+		expose = append(expose, ir.DeployableRef{Service: &ir.ServiceRef{Name: app.API, Kind: ir.SchemaKindAPI}, App: app.App})
 	}
 	doc := &schemafile.Document{
 		Kind: ir.SchemaKindStack,
@@ -181,13 +184,21 @@ func stackComment(p *Plan) string {
 		"tree, and the databases and buckets they reach come with them.",
 	}
 	if p.ExposeNamed {
-		return strings.Join(append(lines, "It exposes the APIs it was told to; only other servers reach the rest."), "\n")
+		lines = append(lines, "It exposes the APIs it was told to; only other servers reach the rest.")
+	} else {
+		lines = append(lines,
+			"It exposes each API an end user or a third party calls, one with an",
+			"operation that is not @requireService, and each API a site calls; only",
+			"other servers reach the rest.",
+		)
 	}
-	return strings.Join(append(lines,
-		"It exposes each API an end user or a third party calls, one with an",
-		"operation that is not @requireService, and each API a site calls; only",
-		"other servers reach the rest.",
-	), "\n")
+	if len(p.ExposeApps) > 0 {
+		lines = append(lines,
+			"It exposes every app of those APIs too: an app is a program people use,",
+			"which inside its environment alone no one reaches.",
+		)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func environmentNames(p *Plan) []string {

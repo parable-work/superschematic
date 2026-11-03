@@ -15,10 +15,13 @@ name: ci
 # (the Rust engine's Node-API addon, D58) and its suite on the test addon,
 # the engine's work-queue
 # package and the engine examples, the
-# Python schema runtime, the Rust http runtime, the Rust engine's workspace,
-# the engine's C ABI and Go binding (its corpus replay, and a link check of
-# the three archives a Go server links), the version graph (the core
-# crate, its Go binding, the TypeScript package over its wasm build and the
+# Python schema runtime, the Rust http runtime, the Rust engine's workspace
+# (with the behaviors' core's crates and the Rust adapter, D103), the
+# engine's C ABI and Go binding (its corpus replay, and a link check of the
+# four archives a Go server links), the behaviors' core's Go binding and
+# adapter (its transcript replay on SQLite and Postgres), the version graph
+# (the core crate, its Go binding, the TypeScript package over its wasm
+# build and the
 # Python package over its PyO3 build, and the Go, TypeScript, Rust and
 # Python engines against Postgres), the Starlight docs build, and the
 # extraction scrub.
@@ -161,8 +164,8 @@ jobs:
         # Builds the superscalar ffi archive from source, with this toolchain
         # rather than the one the checkout's rust-toolchain.toml pins, as the
         # version-graph archive is (tools.env says why). The wasm32 target
-        # builds the version-graph TypeScript package and superscalar's
-        # browser and workerd builds, and
+        # builds the version-graph and rules TypeScript packages and
+        # superscalar's browser and workerd builds, and
         # rustsdkgen compile tests run cargo clippy on the generated SDK
         # crates, so this toolchain carries clippy; the projectengine tests
         # hold the engine crates they write to rustfmt's layout, so it
@@ -194,11 +197,29 @@ jobs:
         # against the archive this stages under runtime/versiongraph/go/lib.
         run: scripts/versiongraph-archive.sh
 
+      - name: Build the rules archive
+        # A generated ORM whose tables' fields are behaviors runs them
+        # through the behaviors' core's Go module (runtime/rules/go, D103),
+        # and ormgen's TestWorkflowTablesOnPostgres builds and runs such a
+        # module, on the Postgres below, against the archive this stages
+        # under runtime/rules/go/lib.
+        run: scripts/rules-archive.sh
+
       - name: Build the version-graph TypeScript package
         # A generated TypeScript types package whose schema declares a
         # version graph depends on it, and tsgen's tests type-check that
         # facade and run it against Postgres over its dist/.
         working-directory: runtime/versiongraph/typescript
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
+      - name: Build the rules TypeScript package
+        # A generated TypeScript types package whose tables' fields are
+        # behaviors depends on it (D103): tsgen's tests type-check its
+        # orm.ts and run the generated repositories over its dist/, the
+        # behaviors' core built for wasm32, on bun:sqlite and Postgres.
+        working-directory: runtime/rules/typescript
         run: |
           bun install --frozen-lockfile
           bun run build
@@ -288,6 +309,31 @@ jobs:
             --command "CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public" \
             --command "CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public"
 
+      - name: Start Postgres with pgvector
+        # The tests of vector columns (D84) run on a second Postgres, the
+        # pgvector image of the same major version, which they read from
+        # SUPERSCHEMATIC_VECTOR_TEST_DATABASE_URL. The other database tests
+        # keep the alpine image above: the version-graph vectors hold
+        # date-times to its tzdata, which the pgvector image's Debian
+        # tzdata reads differently for 1890 Amsterdam.
+        run: |
+          docker run --detach --name superschematic-pgvector \
+            --env POSTGRES_PASSWORD=superschematic \
+            --publish 5433:5432 \
+            "pgvector/pgvector:${PGVECTOR_VERSION}-pg${POSTGRES_VERSION}"
+          ready=""
+          for _ in $(seq 1 60); do
+            if docker exec superschematic-pgvector pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then ready=1; break; fi
+            sleep 1
+          done
+          if [ -z "$ready" ]; then
+            docker logs superschematic-pgvector
+            exit 1
+          fi
+          docker exec superschematic-pgvector psql --host 127.0.0.1 --username postgres --set ON_ERROR_STOP=1 \
+            --command "CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public" \
+            --command "CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public"
+
       - name: Install the runtime's pinned workerd
         # The cloudflare extension runs the script of a site's Worker, and
         # servergen a job's bundled scheduled.ts, under the workerd the
@@ -330,6 +376,19 @@ jobs:
           # The identity runtime's store and handler tests run on it in a
           # schema of their own, as well as on SQLite.
           SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
+          # The generated Go, TypeScript and Rust servers' behavior
+          # operations (D103) run on it, each in a schema of its own, through
+          # their SDKs, and their behavior workers' deadline and change
+          # queues in process (the Timers and Reactions end-to-end tests,
+          # raw SQL writes heard among them): the Go one over the rules
+          # archive staged above, the TypeScript one over the rules package
+          # built above, and the Rust one over the engine workspace's
+          # rules-adapter crate.
+          SUPERSCHEMATIC_RULES_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
+          # The tests of vector columns run on the pgvector container
+          # (D84); the database is there, so a skip is a broken gate.
+          SUPERSCHEMATIC_VECTOR_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5433/postgres?sslmode=disable
+          SUPERSCHEMATIC_REQUIRE_VECTOR_TESTS: "1"
           # The rustgen, rustsdkgen, rustrestgen and parity tests run cargo on
           # the crates they generate. Each uses CARGO_TARGET_DIR when set, so
           # one target directory compiles axum, tokio, reqwest and superscalar
@@ -340,7 +399,7 @@ jobs:
           # generated Go, TypeScript, Rust and Python modules.
           GO_TEST_SHORT: ${{ github.event_name == 'pull_request' }}
         run: |
-          export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print)"
+          export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print) $(scripts/rules-archive.sh --print)"
           for m in . ir runtime/schema/go runtime/http/go runtime/migrate/go extensions/gcp extensions/cloudflare extensions/pulumi extensions/topcoat cmd/superschematic; do
             echo "==> $m"
             # Packages that run cargo queue on its lock of the shared target
@@ -353,7 +412,7 @@ jobs:
           out="$(gofmt -l $(git ls-files '*.go'))"
           if [ -n "$out" ]; then echo "gofmt: files need formatting:"; echo "$out"; exit 1; fi
 
-      - name: Scalar catalog drift (TypeScript + Python catalogs match the pinned superscalar)
+      - name: Scalar catalog drift (TypeScript + Python catalogs and the docs' scalar page match the pinned superscalar)
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
         run: |
@@ -699,7 +758,7 @@ jobs:
       - name: Install Rust toolchain
         # Builds the engine's Node-API addon, the Rust engine (D58). The
         # wasm32 target builds superscalar's browser and workerd builds
-        # (D64).
+        # (D64), and the behaviors' core the rules package ships (D103).
         run: |
           rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown
           rustup default "$RUST_VERSION"
@@ -742,6 +801,20 @@ jobs:
           docker logs superschematic-pg
           exit 1
 
+      - name: Start Valkey
+        # The memory store tests that read SUPERSCHEMATIC_TEST_MEMORY_STORE
+        # (D75) run against it, in database 1, and skip without it.
+        run: |
+          docker run --detach --name superschematic-valkey \
+            --publish 6379:6379 \
+            "valkey/valkey:${VALKEY_VERSION}-alpine"
+          for _ in $(seq 1 30); do
+            if docker exec superschematic-valkey valkey-cli ping >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          docker logs superschematic-valkey
+          exit 1
+
       - name: packages/ typecheck + test
         working-directory: packages
         run: |
@@ -757,8 +830,26 @@ jobs:
           bun run build
           bun run test
 
+      - name: runtime/rules/typescript typecheck + build + test (wasm32 build, Bun and Node.js)
+        # The behaviors' core built for wasm32 (D103), which the http
+        # runtime's adapter tests below load from its dist/.
+        working-directory: runtime/rules/typescript
+        run: |
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun run test
+
       - name: runtime/http/typescript typecheck + build + test
         working-directory: runtime/http/typescript
+        env:
+          # src/redis.test.ts's tests against a real server, on the Valkey
+          # above.
+          SUPERSCHEMATIC_TEST_MEMORY_STORE: redis://127.0.0.1:6379/1
+          # The behaviors' adapter tests (src/rules*.test.ts, D103) on the
+          # Postgres above too, each in a schema of its own, deadlines and
+          # change queues among them, and the core's four transcripts
+          # replayed there as on bun:sqlite.
+          SUPERSCHEMATIC_RULES_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: |
           bun install --frozen-lockfile
           bun run build
@@ -948,6 +1039,20 @@ jobs:
         # superscalar is built here but that crate.
         run: scripts/superscalar-dep.sh --checkout
 
+      - name: Start Valkey
+        # The memory store tests that read SUPERSCHEMATIC_TEST_MEMORY_STORE
+        # (D75) run against it, in database 1, and skip without it.
+        run: |
+          docker run --detach --name superschematic-valkey \
+            --publish 6379:6379 \
+            "valkey/valkey:${VALKEY_VERSION}-alpine"
+          for _ in $(seq 1 30); do
+            if docker exec superschematic-valkey valkey-cli ping >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          docker logs superschematic-valkey
+          exit 1
+
       # superscalar's default lossless-json feature turns on serde_json's
       # arbitrary_precision and preserve_order, and Cargo unifies them into
       # every crate of a build that uses it, so both runtimes' lints and
@@ -958,11 +1063,15 @@ jobs:
       # here, logging, and the two at once, as a worker runs, whose loop's
       # log lines a test reads (D65); gcs, a bucket on GCS (D54), whose
       # tests run against fakes, the fake-gcs-server run skipping here, and
-      # beside a worker's two, as a worker with a bucket builds; and otel, a
+      # beside a worker's two, as a worker with a bucket builds;
+      # memorystore-redis, a memory store on Redis (D75), whose tests run
+      # on the Valkey above, alone and beside a worker's two; and otel, a
       # deployable's trace export, alone and with postgres, as a worker
       # builds it, whose message spans a test reads (D67).
       - name: fmt / clippy / test
         working-directory: runtime/http/rust
+        env:
+          SUPERSCHEMATIC_TEST_MEMORY_STORE: redis://127.0.0.1:6379/1
         run: |
           cargo fmt --check
           cargo clippy --all-targets -- -D warnings
@@ -984,6 +1093,9 @@ jobs:
           cargo clippy --all-targets --features gcs -- -D warnings
           cargo test --features gcs
           cargo clippy --all-targets --features gcs,postgres,logging -- -D warnings
+          cargo clippy --all-targets --features memorystore-redis -- -D warnings
+          cargo test --features memorystore-redis
+          cargo clippy --all-targets --features memorystore-redis,postgres,logging -- -D warnings
           cargo clippy --all-targets --features otel -- -D warnings
           cargo test --features otel
           cargo clippy --all-targets --features postgres,otel -- -D warnings
@@ -1014,7 +1126,9 @@ jobs:
   engine-rust:
     # The workspace has the work queue's crate (runtime/engine-workqueue/rust)
     # and the commerce crate (runtime/engine-commerce/rust) as members, so
-    # --workspace builds, lints and tests them too.
+    # --workspace builds, lints and tests them too, and the behaviors'
+    # core's crates (D103): the core, its behaviors, its reference host, its
+    # wasm binding and the Rust adapter (rules-adapter).
     name: engine-rust (the Rust engine's workspace)
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
@@ -1091,11 +1205,15 @@ jobs:
       # its axum router; it fails when the corpus is missing. Each replays
       # its files on threads of their own, one per core. The tests of two
       # engines on one database (testkit/tests/replicas_*.rs) run here too;
-      # their soaks, `make engine-rust-soak`, do not.
+      # their soaks, `make engine-rust-soak`, do not. The behaviors' Rust
+      # adapter runs its store tests and replays the core's transcripts
+      # (runtime/engine/testdata/rules) on rusqlite and on this Postgres
+      # through SUPERSCHEMATIC_RULES_TEST_DATABASE_URL, in schemas of its own.
       - name: test (SQLite and Postgres)
         working-directory: runtime/engine/rust
         env:
           SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
+          SUPERSCHEMATIC_RULES_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: cargo test --workspace --all-features
 
   engine-go:
@@ -1110,7 +1228,7 @@ jobs:
         run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
 
       - name: Install Rust toolchain
-        # The three archives a Go server links are built with this one
+        # The four archives a Go server links are built with this one
         # toolchain (tools.env says why).
         run: |
           rustup toolchain install "$RUST_VERSION" --profile minimal
@@ -1122,6 +1240,7 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: |
             runtime/engine/go/go.sum
+            runtime/rules/go/go.sum
             runtime/engine/testdata/linkcheck/go.sum
 
       - name: Cache Rust dependencies
@@ -1155,11 +1274,11 @@ jobs:
           docker logs superschematic-pg
           exit 1
 
-      - name: Link check (one binary over superscalar's, the version graph's and the engine's archives)
-        # Builds the three archives, checks each defines its own C
+      - name: Link check (one binary over superscalar's, the version graph's, the engine's and the rules' archives)
+        # Builds the four archives, checks each defines its own C
         # functions alone (the version graph's vg_* is off in the engine's
         # build), then builds runtime/engine/testdata/linkcheck, which
-        # imports all three bindings, and runs it.
+        # imports all four bindings, and runs it.
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
           CGO_ENABLED: "1"
@@ -1199,6 +1318,91 @@ jobs:
         with:
           version: v${{ env.GOLANGCI_LINT_VERSION }}
           working-directory: runtime/engine/go
+
+  rules-go:
+    name: rules-go (the behaviors' core's archive, Go binding, adapter and transcript replay)
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Load pinned tool versions
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
+
+      - name: Install Rust toolchain
+        # The archive is built with the toolchain every archive a Go binary
+        # links is built with (tools.env says why).
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: runtime/rules/go/go.sum
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: runtime/engine/rust
+
+      - name: Cache the superscalar checkout
+        # The archive's crate is a member of the engine's workspace, which
+        # cargo loads whole, and the engine reaches superscalar's core by
+        # path; scripts/rules-archive.sh checks it out when it is missing.
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            third_party/superscalar
+            !third_party/superscalar/target
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
+
+      - name: Start Postgres
+        # The adapter's tests, the stores' and the transcript replay run on
+        # SQLite, and on this Postgres too through
+        # SUPERSCHEMATIC_RULES_TEST_DATABASE_URL, each in a schema of its
+        # own; without the variable they skip the Postgres pass.
+        run: |
+          docker run --detach --name superschematic-pg \
+            --env POSTGRES_PASSWORD=superschematic \
+            --publish 5432:5432 \
+            "postgres:${POSTGRES_VERSION}-alpine"
+          for _ in $(seq 1 60); do
+            if docker exec superschematic-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
+            sleep 1
+          done
+          docker logs superschematic-pg
+          exit 1
+
+      - name: Build the rules archive
+        # superschematic-rules-wasm's staticlib (D103), staged under
+        # runtime/rules/go/lib, where the binding links it through cgo.
+        run: scripts/rules-archive.sh
+
+      - name: Binding, adapter and stores (build / vet / test -race on SQLite and Postgres, the transcripts replayed on both)
+        # The binding's tests call the core from many goroutines at once,
+        # under the race detector; the replays fail on any mismatch and
+        # below their floors, 96 steps for core-workflow, 125 for
+        # core-timers, 586 for core-reactions and 60 for
+        # core-reactions-changes.
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+          CGO_ENABLED: "1"
+          SUPERSCHEMATIC_RULES_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
+        run: |
+          export CGO_LDFLAGS="$(scripts/rules-archive.sh --print)"
+          cd runtime/rules/go
+          go build ./... && go vet ./... && go test -race -count=1 ./...
+
+      - name: golangci-lint (runtime/rules/go)
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        with:
+          version: v${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: runtime/rules/go
 
   engine-servers:
     # Generated servers mount the engine (D58), end to end, in the full tier
@@ -1525,6 +1729,7 @@ jobs:
       - rust
       - engine-rust
       - engine-go
+      - rules-go
       - engine-servers
       - versiongraph
       - docs

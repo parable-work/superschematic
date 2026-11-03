@@ -194,6 +194,57 @@ func TestStackKeyIsItsCheckouts(t *testing.T) {
 	assert.Equal(t, first["shop-stack"], linked["shop-stack"], "a link to a checkout is that checkout")
 }
 
+// TestACIStacksKeyIsTheRootsStacks: the workflow of a stack with CI runs
+// the binary the apps of every stack of the services root choose (D78),
+// so a change to another stack, or to an API it deploys, which the
+// references depfile its last build wrote names, changes the CI stack's
+// key, and not the key of a stack without CI.
+func TestACIStacksKeyIsTheRootsStacks(t *testing.T) {
+	repo := t.TempDir()
+	writeFile(t, filepath.Join(repo, "schemas", "package.json"), "{}")
+	services := func() []buildplan.Service {
+		var out []buildplan.Service
+		for _, s := range []struct {
+			name    string
+			kind    ir.SchemaKind
+			outputs map[string]any
+		}{
+			{"shop-stock", ir.SchemaKindAPI, nil},
+			{"shop-stack", ir.SchemaKindStack, nil},
+			{"storefront-stack", ir.SchemaKindStack, map[string]any{"ci": map[string]any{"github": map[string]any{}}}},
+			{"wishlist-stack", ir.SchemaKindStack, nil},
+		} {
+			dir := filepath.Join(repo, "schemas", "services", s.name)
+			out = append(out, buildplan.Service{Name: s.name, Dir: dir, Config: &schemaconfig.SchemaConfig{Name: s.name, Kind: s.kind, Outputs: s.outputs}})
+		}
+		return out
+	}
+	source := func(name, file string) string {
+		return filepath.Join(repo, "schemas", "services", name, "src", file)
+	}
+	writeFile(t, source("shop-stock", "apps.schema.ts"), "export class Stock {}")
+	writeFile(t, source("shop-stack", "stack.schema.ts"), "export class Shop {}")
+	writeFile(t, source("storefront-stack", "stack.schema.ts"), "export class Storefront {}")
+	writeFile(t, source("wishlist-stack", "stack.schema.ts"), "export class Wishlist {}")
+	require.NoError(t, WriteSchemaReferences(filepath.Join(repo, "schemas"), "shop-stack", []ir.ServiceRef{{Name: "shop-stock", Kind: ir.SchemaKindAPI}}, nil))
+
+	hashes := func() map[string]string {
+		got, err := ComputeInputHashes(services(), repo, naming.Naming{})
+		require.NoError(t, err)
+		return got
+	}
+	before := hashes()
+	writeFile(t, source("shop-stock", "apps.schema.ts"), "@app({ extensions: [\"topcoat\"] }) export class Backoffice {}")
+	after := hashes()
+	assert.NotEqual(t, before["storefront-stack"], after["storefront-stack"], "an app of another stack's API leaves the CI stack's key")
+	assert.Equal(t, before["wishlist-stack"], after["wishlist-stack"], "a stack without CI keys on the root's other stacks")
+
+	writeFile(t, source("wishlist-stack", "stack.schema.ts"), "export class Wishlist { other = 1 }")
+	again := hashes()
+	assert.NotEqual(t, after["storefront-stack"], again["storefront-stack"], "a change to another stack leaves the CI stack's key")
+	assert.Equal(t, after["shop-stack"], again["shop-stack"], "a stack without CI keys on the root's other stacks")
+}
+
 // TestCallsJoinTheKey: a caller's generated Deps imports each callee's
 // SDK, so a change to a callee changes the caller's key; two APIs that
 // call each other hash without a cycle, and a callee's key does not follow

@@ -32,6 +32,9 @@ func TestWriteTypesGolden(t *testing.T) {
 		deps    []string
 		// sqlite is whether the service lists the sqlite dialect.
 		sqlite bool
+		// behaviors is whether the service's tables compose behaviors,
+		// which the core's registry declares.
+		behaviors bool
 	}{
 		{service: "fixture-db"},
 		{service: "fixture-api", deps: []string{"fixture-db"}},
@@ -47,6 +50,26 @@ func TestWriteTypesGolden(t *testing.T) {
 		// A DB with queues (D53): queues.ts holds each as the HTTP runtime's
 		// queue client reads it.
 		{service: "fixture-queue-db", sqlite: true},
+		// The repositories (D79): orm.ts over a ledger's tables.
+		{service: "fixture-ledger-db"},
+		// Encrypted<T> fields (D85): rows hold them as SecretValues.
+		{service: "fixture-vault-db"},
+		// Tables and columns @table and @column name (D85).
+		{service: "fixture-naming-db"},
+		// Declared queries (D86): orm.ts's queries, and their params' and
+		// rows' types.
+		{service: "fixture-queries-db"},
+		// Tables whose fields are behaviors (D103): orm.ts's owned
+		// columns, the layout document and each field's operations.
+		{service: "fixture-workflow-db", behaviors: true},
+		// Tables that implement Timers (D103): its operations under
+		// timers, runDeadline and runChange, no upserts, no repository of
+		// its sub-table, and the deadline and change queues in queues.ts.
+		{service: "fixture-timers-db", behaviors: true},
+		// Tables that implement Reactions (D103): runChange, the change
+		// queues, and a relation the layout's spec names, which Project's
+		// rules hear Task through.
+		{service: "fixture-reactions-db", behaviors: true},
 	}
 
 	for _, tc := range cases {
@@ -57,6 +80,9 @@ func TestWriteTypesGolden(t *testing.T) {
 				reg = behaviortypestest.Registry(t)
 				schema = behaviortypestest.Schema(t, reg)
 			} else {
+				if tc.behaviors {
+					reg = registry.New(naming.Default())
+				}
 				var err error
 				if schema, err = loader.LoadService(filepath.Join(fixturesDir, tc.service)); err != nil {
 					t.Fatalf("load %s: %v", tc.service, err)

@@ -39,7 +39,7 @@ func TestBuildCommand_FillsTheUserRouteSets(t *testing.T) {
 			}
 		}
 	}
-	assert.Equal(t, map[string]int{"Account": 6, "AccountAdmin": 12}, counts)
+	assert.Equal(t, map[string]int{"Account": 6, "AccountAdmin": 13}, counts)
 }
 
 // TestBuildCommand_WithDepsBuildsTheUserRoutes: build --with-deps reads the

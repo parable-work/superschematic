@@ -1,0 +1,60 @@
+{
+  "name": "fixture-reactions-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-reactions-db",
+      "types": [
+        "Project",
+        "Task"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-reactions-db",
+      "kind": "DB"
+    }
+  ],
+  "operationSets": [
+    {
+      "name": "ProjectActions",
+      "comment": "A project's status operations (D103), for callers who hold projects.write.",
+      "operations": [],
+      "behaviorOperations": {
+        "type": "Project"
+      },
+      "permissions": [
+        "projects.write"
+      ]
+    },
+    {
+      "name": "TaskActions",
+      "comment": "A task's status operations, for callers who hold tasks.write.",
+      "operations": [],
+      "behaviorOperations": {
+        "type": "Task"
+      },
+      "permissions": [
+        "tasks.write"
+      ]
+    }
+  ],
+  "workers": [
+    {
+      "name": "ProjectReactions",
+      "comment": "Runs Project's change queue (D103): the writes of its rows, which its\nReactions hear.",
+      "behaviorWorker": {
+        "type": "Project"
+      }
+    },
+    {
+      "name": "TaskReactions",
+      "comment": "Runs Task's change queue: its own rules, and Project's allTerminal and\nanyTerminal over task.project, which move the project as this worker.",
+      "concurrency": 2,
+      "behaviorWorker": {
+        "type": "Task"
+      }
+    }
+  ]
+}

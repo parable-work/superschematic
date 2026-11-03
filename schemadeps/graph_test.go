@@ -58,7 +58,7 @@ func TestCollectFromDist_GoRecordsDirectRequires(t *testing.T) {
 	const pseudo = " v0.0.0-00010101000000-000000000000"
 	write := func(rel, module string, requires ...string) {
 		t.Helper()
-		content := "module " + module + "\n\ngo 1.26.4\n\nrequire (\n"
+		content := "module " + module + "\n\ngo 1.27.3\n\nrequire (\n"
 		for _, req := range requires {
 			content += "\t" + req + "\n"
 		}
@@ -116,7 +116,7 @@ func TestCollectFromDist_GoSDKRecordsSingleLineRequires(t *testing.T) {
 	const root = "example.com/schemas/"
 	write := func(rel string, lines ...string) {
 		t.Helper()
-		content := "module " + root + rel + "\n\ngo 1.26.4\n\n" + strings.Join(lines, "\n") + "\n"
+		content := "module " + root + rel + "\n\ngo 1.27.3\n\n" + strings.Join(lines, "\n") + "\n"
 		if err := os.MkdirAll(filepath.Join(dist, filepath.FromSlash(rel)), 0o755); err != nil {
 			t.Fatal(err)
 		}

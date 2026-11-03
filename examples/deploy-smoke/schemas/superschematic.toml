@@ -1,0 +1,29 @@
+# The naming file: every command reads it from the schemas root (this
+# directory). A key left out keeps the core default; the docs site's naming
+# reference lists every key.
+
+# Coordinates of the generated packages: <go_module_root>/types/go/<service>,
+# <npm_scope>/<service>-types, and the services' own packages,
+# <npm_scope>/<service>.
+go_module_root = "example.com/deploy-smoke"
+npm_scope = "@smoke"
+
+# Where the runtime modules live, relative to the parent of the schemas
+# root. Generated manifests point their path dependencies (go.mod replace,
+# npm file:, Cargo path) here, so the project compiles against a
+# superschematic checkout before anything is published. Once the modules
+# are published, remove this table.
+[paths]
+scalar_go = "../../third_party/superscalar/go"
+scalar_typescript = "../../third_party/superscalar/bindings/typescript"
+scalar_rust = "../../third_party/superscalar/crates/core"
+schema_ir = "../../ir"
+schema_runtime_go = "../../runtime/schema/go"
+schema_runtime_rust = "../../runtime/schema/rust"
+http_runtime_go = "../../runtime/http/go"
+http_runtime_rust = "../../runtime/http/rust"
+http_runtime_typescript = "../../runtime/http/typescript"
+versiongraph_go = "../../runtime/versiongraph/go"
+# A stack's server images build from the checkout, which holds the runtime
+# modules above as well as this project.
+build_context = "../.."

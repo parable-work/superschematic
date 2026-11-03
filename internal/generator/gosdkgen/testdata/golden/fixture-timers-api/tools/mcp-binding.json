@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schemaVersion": "1.0",
+  "generatedAt": "2026-01-02T03:04:05Z",
+  "apiId": "fixture-timers-api",
+  "sdkClassName": "FixtureTimersApiSDK",
+  "tools": [
+    {
+      "toolName": "ticket.status.transition",
+      "apiId": "fixture-timers-api",
+      "namespace": "ticket",
+      "methodName": "transition",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "to",
+          "required": true,
+          "kind": "input",
+          "target": "input.to"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["to"]
+        }
+      ]
+    },
+    {
+      "toolName": "ticket.timers.fireTimer",
+      "apiId": "fixture-timers-api",
+      "namespace": "ticket",
+      "methodName": "fireTimer",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "deadline",
+          "required": true,
+          "kind": "input",
+          "target": "input.deadline"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["deadline"]
+        }
+      ]
+    },
+    {
+      "toolName": "ticket.timers.resetTimer",
+      "apiId": "fixture-timers-api",
+      "namespace": "ticket",
+      "methodName": "resetTimer",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "deadline",
+          "required": true,
+          "kind": "input",
+          "target": "input.deadline"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["deadline"]
+        }
+      ]
+    },
+    {
+      "toolName": "ticket.timers.snoozeTimer",
+      "apiId": "fixture-timers-api",
+      "namespace": "ticket",
+      "methodName": "snoozeTimer",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "deadline",
+          "required": true,
+          "kind": "input",
+          "target": "input.deadline"
+        },
+        {
+          "toolParameter": "dueAt",
+          "required": true,
+          "kind": "input",
+          "target": "input.dueAt"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["deadline", "dueAt"]
+        }
+      ]
+    }
+  ]
+}

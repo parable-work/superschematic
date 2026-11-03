@@ -20,7 +20,9 @@ func checkIndexTables(schema *ir.Schema, r *Result) {
 	bases := codegen.BaseTypeNames(schema)
 	for _, name := range sortedTypeNames(schema.Types) {
 		td := schema.Types[name]
-		if len(td.Indexes) == 0 || hasTable(td, bases) || td.Role == ir.RoleProjection {
+		// The deadline queue a table's behaviors keep (D103) is a queue,
+		// whose table sqlgen writes with the indexes the loader gave it.
+		if len(td.Indexes) == 0 || hasTable(td, bases) || td.Role == ir.RoleProjection || td.BehaviorQueue != nil {
 			continue
 		}
 		var on string
@@ -100,11 +102,11 @@ func checkIndexKeys(schema *ir.Schema, r *Result) {
 			for _, key := range idx.Keys {
 				list := lists[key]
 				switch {
-				case slices.ContainsFunc(columns, func(column string) bool { return sqlutil.IndexKeyMatches(key, column) }):
+				case slices.Contains(columns, sqlutil.KeyColumnIn(schema, td, key)) || slices.ContainsFunc(columns, func(column string) bool { return sqlutil.IndexKeyMatches(key, column) }):
 				case list != nil && list.TypeRef.IsArrayOfArrays:
 					// checkArraysOfArrays refuses the key.
 				case list != nil:
-					r.errorf(td.Owner, "%s: %s key %q is a list relation, which has no column in table %s", td.Name, indexLabel(idx), key, codegen.ToSnakeCase(td.Name))
+					r.errorf(td.Owner, "%s: %s key %q is a list relation, which has no column in table %s", td.Name, indexLabel(idx), key, sqlutil.TableName(td))
 				default:
 					r.errorf(td.Owner, "%s: %s key %q names no field of %s", td.Name, indexLabel(idx), key, td.Name)
 				}
@@ -127,9 +129,9 @@ func indexColumns(schema *ir.Schema, td *ir.TypeDef) ([]string, map[string]*ir.F
 		case relation && fd.TypeRef.IsArray:
 			lists[fd.Name] = fd
 		case relation:
-			columns = append(columns, codegen.ToSnakeCase(fd.Name)+"_id")
+			columns = append(columns, sqlutil.ForeignKeyColumn(fd))
 		default:
-			columns = append(columns, codegen.ToSnakeCase(fd.Name))
+			columns = append(columns, sqlutil.ColumnName(fd))
 		}
 	}
 	return columns, lists

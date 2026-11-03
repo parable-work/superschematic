@@ -128,14 +128,18 @@ type (
 
 // FileUploadField represents a file upload field in an endpoint's input type.
 type FileUploadField struct {
-	Name             string
-	GoName           string
-	ScalarType       string
-	MaxSize          int64
-	AllowedTypes     []string
-	Category         string
-	Required         bool
-	ImageConstraints *ir.ImageConstraints
+	Name         string
+	GoName       string
+	ScalarType   string
+	MaxSize      int64
+	AllowedTypes []string
+	// AllowedExtensions are the filename extensions the part's filename
+	// may end in, with the dot, matched without regard to case (D81);
+	// empty admits any.
+	AllowedExtensions []string
+	Category          string
+	Required          bool
+	ImageConstraints  *ir.ImageConstraints
 }
 
 // EndpointInfo represents one REST API endpoint extracted from an operation.
@@ -159,6 +163,12 @@ type EndpointInfo struct {
 	HasInput      bool
 	// InputRequired reports whether the input argument is non-null.
 	InputRequired bool
+	// InputAllowsUnknownFields reports whether every server decodes the
+	// input accepting a top-level key its type does not declare and
+	// dropping it (D87): its type is @allowUnknownFields, or the operation
+	// is a @webhook and its type is neither @strictJSON nor
+	// @denyUnknownFields. Every other input refuses such a key (D42).
+	InputAllowsUnknownFields bool
 
 	OutputType    string // schema output type name
 	OutputGoType  string // qualified Go type expression for the output
@@ -229,6 +239,12 @@ type EndpointInfo struct {
 
 	HasFileUpload    bool
 	FileUploadFields []FileUploadField
+
+	// FileDownload is the operation's FileDownload<C> result (D81), nil for
+	// every other endpoint: the route answers the file's bytes with its
+	// Content-Type and a Content-Disposition filename, not the envelope,
+	// and OutputType is empty.
+	FileDownload *ir.FileDownloadDef
 
 	// Middleware values resolved from the operation set defaults plus
 	// field-level overrides. Nil means no directive.
@@ -339,6 +355,18 @@ type APIOutput struct {
 	// whose Endpoints hold every operation.
 	IdentityEndpoints []EndpointInfo
 
+	// BehaviorEndpoints are a table's behavior operations (D103), which the
+	// generated handlers run through the ORM of the API's database:
+	// ImplementedOutput moves them here from Endpoints, so the Go server
+	// mounts them on those handlers and implements none of them. Nil in the
+	// output Generate returns, whose Endpoints hold every operation.
+	BehaviorEndpoints []EndpointInfo
+
+	// Registration is the API's @userSessions when its register admits
+	// users otherwise than open registration with no roles does (D81), and
+	// nil otherwise: the identity wiring passes it to the runtime.
+	Registration *ir.UserSessionsConfig
+
 	HasAuth                  bool
 	HasEncryptedEndpoints    bool
 	HasPermissionEndpoints   bool
@@ -431,6 +459,10 @@ type APIOutput struct {
 	// EngineReplacePath replaces the engine's Go binding, which Deps holds
 	// an engine of when the API has an engine database (D58).
 	EngineReplacePath string
+	// RulesReplacePath replaces the rules module, which the ORM of a
+	// database whose tables' fields are behaviors requires, and which
+	// behaviors.go imports (D103; Deps.Rules).
+	RulesReplacePath string
 
 	// Pins are the runtime modules go.mod takes from the module proxy, at
 	// the release that generates it (SetReleasePins).
@@ -452,20 +484,14 @@ func (o *APIOutput) TypesModuleReplaces() []string {
 }
 
 // RoutedEndpoints are the endpoints RegisterRoutes mounts and the identity
-// route table lists: Endpoints and IdentityEndpoints, in Generate's order
-// (by path, then method). Without IdentityEndpoints they are Endpoints.
+// route table lists: Endpoints, IdentityEndpoints and BehaviorEndpoints, in
+// Generate's order (by path, then method). Without IdentityEndpoints and
+// BehaviorEndpoints they are Endpoints.
 func (o *APIOutput) RoutedEndpoints() []EndpointInfo {
-	if len(o.IdentityEndpoints) == 0 {
+	if len(o.IdentityEndpoints) == 0 && len(o.BehaviorEndpoints) == 0 {
 		return o.Endpoints
 	}
-	routed := append(append([]EndpointInfo{}, o.Endpoints...), o.IdentityEndpoints...)
-	sort.SliceStable(routed, func(i, j int) bool {
-		if routed[i].Path != routed[j].Path {
-			return routed[i].Path < routed[j].Path
-		}
-		return routed[i].Method < routed[j].Method
-	})
-	return routed
+	return sortedEndpoints(o.Endpoints, o.IdentityEndpoints, o.BehaviorEndpoints)
 }
 
 // ManualEndpoints are the @manualRouteRegistration endpoints among
@@ -540,7 +566,7 @@ func (o *APIOutput) HasConstants() bool {
 // argument of a GET operation or an input type, so routes.go imports the
 // HTTP runtime's bodyargs package.
 func (o *APIOutput) HasBodyArgs() bool {
-	for _, endpoint := range o.Endpoints {
+	for _, endpoint := range o.HandlerEndpoints() {
 		if len(endpoint.BodyArgs) > 0 || len(endpoint.QueryListArgs) > 0 || endpoint.HasInput {
 			return true
 		}
@@ -552,7 +578,7 @@ func (o *APIOutput) HasBodyArgs() bool {
 // scalars: a body argument or a query-string list of a JSON-object scalar
 // is built with superscalar's check of the scalar (BodyArg.ChecksJSON).
 func (o *APIOutput) RoutesNeedScalars() bool {
-	for _, endpoint := range o.Endpoints {
+	for _, endpoint := range o.HandlerEndpoints() {
 		for _, args := range [][]BodyArg{endpoint.BodyArgs, endpoint.QueryListArgs} {
 			for _, arg := range args {
 				if arg.ChecksJSON() {
@@ -565,10 +591,11 @@ func (o *APIOutput) RoutesNeedScalars() bool {
 }
 
 // RoutesNeedTypes gates the types import in routes.go: only a handler
-// factory (written for every endpoint, mounted or not) references the
-// generated types module, as handlerUsesTypes lists.
+// factory (written for every endpoint, mounted or not, a behavior
+// operation's included) references the generated types module, as
+// handlerUsesTypes lists.
 func (o *APIOutput) RoutesNeedTypes() bool {
-	for _, endpoint := range o.Endpoints {
+	for _, endpoint := range o.HandlerEndpoints() {
 		if endpoint.handlerUsesTypes() {
 			return true
 		}
@@ -595,6 +622,10 @@ func (e EndpointInfo) handlerUsesTypes() bool {
 	}
 	// A nil inner list of a list-of-lists response is sent as []<Output>{}.
 	if e.OutputType != "" && e.OutputIsArrayOfArrays && strings.HasPrefix(e.OutputGoType, "types.") {
+		return true
+	}
+	// A behavior operation's result is decoded into its output type.
+	if e.BehaviorOperation() != nil && strings.Contains(e.BehaviorResultGoType(), "types.") {
 		return true
 	}
 	// A path parameter of a generated type is parsed (a UUID or a
@@ -807,13 +838,14 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		return nil, fmt.Errorf("apigen: upstream schema %s declared but no upstream IR provided", opts.UpstreamSchema)
 	}
 	output.Jobs = jobsOf(schema)
-	output.Workers = workersOf(schema)
+	output.Workers = workersOf(schema, opts.Dependencies)
+	output.Registration = IdentityRegistration(schema)
 	output.IndirectModules = goutil.UniqueModules([]string{output.TypesModule}, []string{upstreamTypesModule})
 	output.UpstreamVersionGraph = declaresVersionGraph(opts.UpstreamIR)
 	if opts.IsPublic && opts.UpstreamSchema != "" {
 		// The upstream auth schema is the API's database (resolveUpstreamAuth
 		// reads authDb, or the one DB-kind dependency, as Deps does).
-		output.Deps = DepsInfo{Database: opts.UpstreamSchema, ORMModule: ormModule, VersionGraph: output.UpstreamVersionGraph}
+		output.Deps = DepsInfo{Database: opts.UpstreamSchema, ORMModule: ormModule, VersionGraph: output.UpstreamVersionGraph, Rules: DeclaresTableBehaviors(opts.UpstreamIR)}
 	}
 	auth, err := opts.Provider.Analyze(schema, opts.UpstreamIR)
 	if err != nil {
@@ -842,6 +874,12 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 
 	if len(output.Endpoints) == 0 {
 		return nil, nil
+	}
+	// The behavior operations run through the ORM of the API's database
+	// (D103), which Deps holds; the dispatch layer sets Deps again with
+	// SetDeps, from the database it loads.
+	if db := behaviorDatabase(output.Endpoints); db != "" && output.Deps.Database == "" {
+		output.Deps = DepsInfo{Database: db, ORMModule: opts.Naming.GoORMModule(db), Rules: true}
 	}
 
 	if err := output.summarizeEndpoints(); err != nil {
@@ -891,15 +929,16 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 }
 
 // permissionCatalog is the API's permissions.json, from every endpoint, the
-// user model's included, and from the engine its server mounts, whose
-// permission policy asks <Type>.<action> of each engine type (D58), or ""
-// when neither names a permission.
+// user model's included, a behavior operation's with the permissions its
+// behavior's config names, which the core checks (D103), and from the
+// engine its server mounts, whose permission policy asks <Type>.<action> of
+// each engine type (D58), or "" when none names a permission.
 func permissionCatalog(output *APIOutput, schema *ir.Schema) (string, error) {
 	operations := make([]permcatalog.Operation, len(output.Endpoints))
 	for i, endpoint := range output.Endpoints {
 		operations[i] = permcatalog.Operation{
 			ID:          endpoint.HandlerName,
-			Permissions: endpoint.RequiredPerms,
+			Permissions: endpoint.catalogPermissions(),
 			Identity:    endpoint.IdentityOperation != "",
 		}
 	}
@@ -983,7 +1022,8 @@ func (o *APIOutput) summarizeEndpoints() error {
 // mounts: whether it needs a caller or a permission, whether its
 // middlewares call time, and whether it has a service clause.
 // summarizeEndpoints calls it on every endpoint, and ImplementedOutput on
-// the identity runtime's too, since the router mounts them.
+// the identity runtime's and the behavior operations' too, since the router
+// mounts them.
 func (o *APIOutput) summarizeRoute(endpoint EndpointInfo) {
 	if endpoint.RequiresAuth {
 		o.HasAuth = true
@@ -1015,6 +1055,13 @@ func extractNamespace(setName string) string {
 	return codegen.ToKebabCase(name)
 }
 
+// RateLimitOperation names the operation in the shared rate limit's keys
+// (D75): its namespace and its name, `product.getProduct`, as every
+// language's server names it.
+func (e EndpointInfo) RateLimitOperation() string {
+	return e.Namespace + "." + e.Name
+}
+
 // defaultMethodForSet returns the HTTP method for operations that omit an
 // explicit method. Mutation- and action-style sets default to POST.
 func defaultMethodForSet(setName string) string {
@@ -1040,6 +1087,11 @@ func handlerName(namespace, operation string) string {
 func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *ir.OperationSet, types *typeMapper, schema *ir.Schema, provider AuthProvider, invocation ToolInvocationPolicy) (*EndpointInfo, error) {
 	if err := ir.ValidateOperationDocs(op.Docs); err != nil {
 		return nil, fmt.Errorf("apigen: operation %s.%s has invalid docs: %w", namespace, op.Name, err)
+	}
+	// The decorator refuses a :name segment where it is read (D100); the
+	// data forms carry the path as it is.
+	if err := ir.ValidateRestPath(op.RestPath); err != nil {
+		return nil, fmt.Errorf("apigen: operation %s.%s: %w", namespace, op.Name, err)
 	}
 	mcp, err := resolveOperationMCP(op, namespace, invocation)
 	if err != nil {
@@ -1141,6 +1193,13 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		}
 	}
 
+	inputAllowsUnknownFields := false
+	if inputType != "" {
+		if typeDef, ok := types.findTypeDef(inputType); ok {
+			inputAllowsUnknownFields = InputAllowsUnknownFields(op, typeDef)
+		}
+	}
+
 	requiresAuth := op.Auth || op.RequireOwnership || len(op.Permissions) > 0
 
 	rateLimit, bodyLimit, timeout := resolveMiddleware(set.Middleware, op.Middleware)
@@ -1172,6 +1231,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		InputTypeFields:              inputTypeFields,
 		HasInput:                     hasInput,
 		InputRequired:                inputRequired,
+		InputAllowsUnknownFields:     inputAllowsUnknownFields,
 		OutputType:                   op.TypeRef.Name,
 		OutputGoType:                 outputGoType,
 		OutputIsArray:                op.TypeRef.IsArray,
@@ -1194,6 +1254,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		ServiceCallers:               ir.EffectiveServiceCallers(set, op),
 		HasFileUpload:                len(fileUploadFields) > 0,
 		FileUploadFields:             fileUploadFields,
+		FileDownload:                 op.FileDownload,
 		RateLimit:                    rateLimit,
 		BodyLimit:                    bodyLimit,
 		Timeout:                      timeout,
@@ -1230,6 +1291,21 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 	}
 
 	return endpoint, nil
+}
+
+// InputAllowsUnknownFields reports whether the servers decode op's input,
+// of type input, accepting and dropping a top-level key the type does not
+// declare (D87): a type that is @allowUnknownFields does so wherever it is
+// decoded, and a @webhook's input does so unless its type is @strictJSON or
+// @denyUnknownFields, since a provider adds keys to its payloads over time.
+func InputAllowsUnknownFields(op *ir.FieldDef, input *ir.TypeDef) bool {
+	if input == nil {
+		return false
+	}
+	if input.AllowUnknownFields {
+		return true
+	}
+	return op != nil && op.Webhook && !input.StrictJSON && !input.DenyUnknownFields
 }
 
 // buildPath assembles the full route path. An explicit @rest path wins;
@@ -1344,9 +1420,10 @@ func declaresVersionGraph(schema *ir.Schema) bool {
 }
 
 // resolveUUIDTypeExpr finds the schema's UUID-like scalar and returns its
-// qualified Go type expression.
+// qualified Go type expression: the least of those whose leaf is UUID, else
+// the least of the others, whatever order the scalars are walked in (D94).
 func resolveUUIDTypeExpr(schema *ir.Schema) string {
-	var fallback string
+	var exact, fallback string
 	for name, scalarDef := range schema.Scalars {
 		tokens := codegen.BuildScalarTokens(name)
 		traits := codegen.BuildScalarTraits(scalarDef, tokens, "")
@@ -1355,11 +1432,17 @@ func resolveUUIDTypeExpr(schema *ir.Schema) string {
 		}
 		expr := "types." + tokens.Symbol
 		if strings.EqualFold(tokens.Leaf(), "uuid") {
-			return expr
+			if exact == "" || expr < exact {
+				exact = expr
+			}
+			continue
 		}
 		if fallback == "" || expr < fallback {
 			fallback = expr
 		}
+	}
+	if exact != "" {
+		return exact
 	}
 	return fallback
 }
@@ -1613,50 +1696,53 @@ func (m *typeMapper) extractFileUploadFields(inputTypeName string) ([]FileUpload
 
 	var fields []FileUploadField
 	for _, field := range typeDef.Fields {
-		scalarDef, ok := m.findScalarDef(field.TypeRef.Name)
-		if !ok || scalarDef.FileUpload == nil {
+		fu := ir.FileUploadOf(field, m.findScalarDef)
+		if fu == nil {
 			continue
 		}
 
 		if field.TypeRef.IsArrayOfArrays {
 			return nil, fmt.Errorf("input field %s.%s: a file upload cannot be an array of arrays", inputTypeName, field.Name)
 		}
-		fu := scalarDef.FileUpload
 		maxSize := int64(fu.MaxSize)
 		allowedTypes := fu.AllowedTypes
 		if field.ValidateUploadMaxBytes != nil {
 			maxSize = *field.ValidateUploadMaxBytes
 		}
 		if maxSize <= 0 {
-			maxSize = 100 * 1024 * 1024
+			maxSize = ir.DefaultUploadMaxBytes
 		}
 		if allowedTypes == nil {
 			allowedTypes = []string{}
 		}
+		var imageConstraints *ir.ImageConstraints
+		if field.FileUpload == nil {
+			if scalarDef, ok := m.findScalarDef(field.TypeRef.Name); ok {
+				imageConstraints = scalarDef.ImageConstraints
+			}
+		}
 
 		fields = append(fields, FileUploadField{
-			Name:             field.Name,
-			GoName:           codegen.ToPascalCase(field.Name),
-			ScalarType:       field.TypeRef.Name,
-			MaxSize:          maxSize,
-			AllowedTypes:     allowedTypes,
-			Category:         fu.Category,
-			Required:         field.Required,
-			ImageConstraints: scalarDef.ImageConstraints,
+			Name:              field.Name,
+			GoName:            codegen.ToPascalCase(field.Name),
+			ScalarType:        field.TypeRef.Name,
+			MaxSize:           maxSize,
+			AllowedTypes:      allowedTypes,
+			AllowedExtensions: append([]string{}, fu.AllowedExtensions...),
+			Category:          fu.Category,
+			Required:          field.Required,
+			ImageConstraints:  imageConstraints,
 		})
 	}
 	return fields, nil
 }
 
+// findScalarDef finds the scalar name in the first of ir.LookupScopes that
+// declares it: the schema, the dependency it imports name from, then the
+// others by service name, never in the order of a map walk (D94).
 func (m *typeMapper) findScalarDef(name string) (*ir.ScalarDef, bool) {
-	if scalarDef, ok := m.schema.Scalars[name]; ok {
-		return scalarDef, true
-	}
-	for _, dep := range m.dependencies {
-		if dep == nil {
-			continue
-		}
-		if scalarDef, ok := dep.Scalars[name]; ok {
+	for _, scope := range ir.LookupScopes(m.schema, m.dependencies, name) {
+		if scalarDef, ok := scope.Schema.Scalars[name]; ok {
 			return scalarDef, true
 		}
 	}

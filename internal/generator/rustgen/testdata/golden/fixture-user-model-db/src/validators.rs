@@ -406,7 +406,7 @@ pub fn parse_user(value: Value, unknown_fields: rt::UnknownFields) -> Result<cra
 }
 
 /// The fields `UserCredential` declares, by their wire names.
-pub const USER_CREDENTIAL_FIELDS: &[&str] = &["id", "user", "passwordHash", "passwordChangedAt", "disabledAt"];
+pub const USER_CREDENTIAL_FIELDS: &[&str] = &["id", "user", "passwordHash", "passwordChangedAt", "disabledAt", "pendingAt"];
 
 /// Validates a JSON value as `UserCredential`. A null value passes; the errors
 /// are empty when the value is valid.
@@ -445,6 +445,12 @@ pub fn validate_user_credential(value: &Value) -> ValidationErrors {
         let field = value.get("disabledAt");
         if !rt::is_absent(field) {
             errors.set_result("disabledAt", scalars::validate_temporal_date_time(field));
+        }
+    }
+    {
+        let field = value.get("pendingAt");
+        if !rt::is_absent(field) {
+            errors.set_result("pendingAt", scalars::validate_temporal_date_time(field));
         }
     }
     errors

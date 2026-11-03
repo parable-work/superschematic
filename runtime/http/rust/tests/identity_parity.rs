@@ -16,8 +16,8 @@ use serde_json::{json, Value};
 use superschematic_http_runtime::has_any_permission;
 use superschematic_http_runtime::identity::{
     capabilities_of, check_cross_origin, check_password, effective_permissions, extract_credential,
-    hash_password_with_salt, hash_token, token_from_bytes, uncovered, valid_permission,
-    verify_password, Argon2Params, Config, CredentialOutcome, Route, TOKEN_BYTES,
+    hash_password_with_salt, hash_token, token_from_bytes, uncovered, uncovered_user,
+    valid_permission, verify_password, Argon2Params, Config, CredentialOutcome, Route, TOKEN_BYTES,
 };
 
 const VECTORS: &str = "../testdata/identity_parity.json";
@@ -38,6 +38,7 @@ struct ParityFile {
     permission_names: Vec<PermissionCase>,
     effective_permissions: Vec<EffectiveCase>,
     grants: Vec<GrantCase>,
+    user_writes: Vec<UserWriteCase>,
     capabilities: CapabilitiesTable,
 }
 
@@ -137,6 +138,15 @@ struct ParityRole {
     #[allow(dead_code)]
     name: String,
     permissions: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UserWriteCase {
+    name: String,
+    held: Vec<String>,
+    roles: Vec<ParityRole>,
+    want: Value,
 }
 
 #[derive(Deserialize)]
@@ -422,6 +432,25 @@ fn grants() {
         let missing = uncovered(&case.held, &case.given);
         let got = json!({"allowed": missing.is_empty(), "uncovered": missing});
         check.eq("grants", &case.name, got, &case.want);
+    }
+    check.done();
+}
+
+#[test]
+fn user_writes() {
+    let file = vectors();
+    unique(
+        "userWrites",
+        file.user_writes.iter().map(|c| c.name.as_str()),
+    );
+    let mut check = Check::default();
+    for case in &file.user_writes {
+        let missing = uncovered_user(
+            &case.held,
+            case.roles.iter().map(|r| r.permissions.as_slice()),
+        );
+        let got = json!({"allowed": missing.is_empty(), "uncovered": missing});
+        check.eq("userWrites", &case.name, got, &case.want);
     }
     check.done();
 }

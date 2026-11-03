@@ -364,7 +364,7 @@ func composedBehaviors(schema *ir.Schema) []string {
 	seen := map[string]bool{}
 	var names []string
 	for _, td := range codegen.EngineTypes(schema) {
-		for _, ref := range td.Behaviors {
+		for _, ref := range td.TypeBehaviors() {
 			if !seen[ref.Name] {
 				seen[ref.Name] = true
 				names = append(names, ref.Name)

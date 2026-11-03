@@ -365,6 +365,10 @@ type {{ envConfigType }} struct {
 {{- else if eq .Kind "bucket" }}
 	// {{ .GoName }} is how the server reaches {{ .Service }}, a bucket the API
 	// lists. It is read from {{ .Key }}_*.
+{{- else if eq .Kind "memoryStore" }}
+	// {{ .GoName }} is how the server reaches {{ .Service }}, a memory store
+	// the API {{ if eq .From "rateLimitStore" }}counts its rate limits in{{ else }}lists{{ end }}. It is read from {{ .Key }}_*; none of them set
+	// is a disabled store, which its Enabled reports.
 {{- else }}
 	// {{ .GoName }} is the endpoint of {{ .Service }}, which the API calls.
 	// It is read from {{ .Key }}_*.

@@ -1,0 +1,33 @@
+# ts-ledger on Cloudflare Workers with its database on Postgres through
+# Hyperdrive (D92). Edge, on stacktest's fake target, places the server on
+# the fake bundle platform, as Workers, each worker on the fake drain
+# platform, as a Worker under a Cron Trigger that drains its queue, and the
+# database on the fake Postgres one, whose connectors from both derive a
+# Hyperdrive binding. The server's package gets fetch.ts and bundle.ts
+# beside main.ts, and each worker's drain.ts and bundle.ts, each bundled
+# with Node's modules, which node-postgres needs.
+kind: Stack
+types:
+  Ledger:
+    name: Ledger
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: ts-ledger, kind: API }
+      expose:
+        - service: { name: ts-ledger, kind: API }
+  Edge:
+    name: Edge
+    role: EmbeddedStruct
+    environment:
+      target: fake
+      values: { project: acme-edge, region: us-east1 }
+      settings:
+        - of: { service: { name: ts-ledger, kind: API } }
+          platform: fake.bundle
+        - of: { service: { name: ts-ledger, kind: API }, worker: EmbedLineItems }
+          platform: fake.drain
+        - of: { service: { name: ts-ledger, kind: API }, worker: SyncItems }
+          platform: fake.drain
+        - of: { service: { name: ts-ledger-db, kind: DB } }
+          platform: fake.sql

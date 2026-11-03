@@ -1,0 +1,187 @@
+{
+  "comment": "Encrypted<T> envelopes (D85): runtime/schema/go/fieldcrypt writes them (go test -run TestParityVectors -update) and runtime/http/typescript/src/fieldcrypt.test.ts reads them.",
+  "keyrings": [
+    {
+      "keyring": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
+      "ids": [
+        "25de0798"
+      ]
+    },
+    {
+      "keyring": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=, ZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5/gIGCg4Q=",
+      "ids": [
+        "25de0798",
+        "8c3f1c5a"
+      ]
+    },
+    {
+      "keyring": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+      "ids": [
+        "25de0798"
+      ]
+    },
+    {
+      "keyring": "",
+      "error": "bad-keys"
+    },
+    {
+      "keyring": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=,",
+      "error": "bad-keys"
+    },
+    {
+      "keyring": "not base64!",
+      "error": "bad-keys"
+    },
+    {
+      "keyring": "AAAAAAAAAAAAAAAAAAAAAA==",
+      "error": "bad-keys"
+    },
+    {
+      "keyring": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=,AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
+      "error": "bad-keys"
+    }
+  ],
+  "seals": [
+    {
+      "name": "a Plaid access token",
+      "keyring": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=, ZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5/gIGCg4Q=",
+      "table": "PlaidItem",
+      "field": "accessToken",
+      "row": "0b9c4d8e-5f1a-4c2b-9d3e-7a6b5c4d3e2f",
+      "plaintext": "access-sandbox-8ab976e3-8c64-4ff1-9f71-a3e5f9d1b2c0",
+      "nonce": "BwgJCgsMDQ4PEBES",
+      "envelope": "v1:25de0798:BwgJCgsMDQ4PEBES:MlRe2vcqmmnGxwINp3tvoiyGUcW7hRRqkZjalxPnUsdLPcR4u7lHj82B4YC218MOGIbCE6upUwJmD3XD0MnJUnixsQ"
+    },
+    {
+      "name": "the empty text",
+      "keyring": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
+      "table": "PlaidItem",
+      "field": "accessToken",
+      "row": "0b9c4d8e-5f1a-4c2b-9d3e-7a6b5c4d3e2f",
+      "plaintext": "",
+      "nonce": "Hh8gISIjJCUmJygp",
+      "envelope": "v1:25de0798:Hh8gISIjJCUmJygp:QwfEuXswJNgXhc1-PJCXTQ"
+    },
+    {
+      "name": "text past ASCII",
+      "keyring": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
+      "table": "Note",
+      "field": "body",
+      "row": "42",
+      "plaintext": "caf\u00e9 \u2603 \ud83d\udd11",
+      "nonce": "PD0-P0BBQkNERUZH",
+      "envelope": "v1:25de0798:PD0-P0BBQkNERUZH:IewcgEB8RLls65u1olahAuV-Kogw2OH06fiBmj4q"
+    },
+    {
+      "name": "under the previous key",
+      "keyring": "ZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5/gIGCg4Q=",
+      "table": "PlaidItem",
+      "field": "accessToken",
+      "row": "0b9c4d8e-5f1a-4c2b-9d3e-7a6b5c4d3e2f",
+      "plaintext": "access-sandbox-old",
+      "nonce": "WltcXV5fYGFiY2Rl",
+      "envelope": "v1:8c3f1c5a:WltcXV5fYGFiY2Rl:vNLBoOiZxAaDgRotxZyOxow9WSFocXTbbjLuOCT_pu6nPg"
+    }
+  ],
+  "opens": [
+    {
+      "name": "the current key",
+      "keyring": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=, ZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5/gIGCg4Q=",
+      "table": "PlaidItem",
+      "field": "accessToken",
+      "row": "0b9c4d8e-5f1a-4c2b-9d3e-7a6b5c4d3e2f",
+      "envelope": "v1:25de0798:BwgJCgsMDQ4PEBES:MlRe2vcqmmnGxwINp3tvoiyGUcW7hRRqkZjalxPnUsdLPcR4u7lHj82B4YC218MOGIbCE6upUwJmD3XD0MnJUnixsQ",
+      "plaintext": "access-sandbox-8ab976e3-8c64-4ff1-9f71-a3e5f9d1b2c0"
+    },
+    {
+      "name": "a previous key, listed after the current one",
+      "keyring": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=, ZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5/gIGCg4Q=",
+      "table": "PlaidItem",
+      "field": "accessToken",
+      "row": "0b9c4d8e-5f1a-4c2b-9d3e-7a6b5c4d3e2f",
+      "envelope": "v1:8c3f1c5a:WltcXV5fYGFiY2Rl:vNLBoOiZxAaDgRotxZyOxow9WSFocXTbbjLuOCT_pu6nPg",
+      "plaintext": "access-sandbox-old"
+    },
+    {
+      "name": "a key the keyring does not hold",
+      "keyring": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
+      "table": "PlaidItem",
+      "field": "accessToken",
+      "row": "0b9c4d8e-5f1a-4c2b-9d3e-7a6b5c4d3e2f",
+      "envelope": "v1:8c3f1c5a:WltcXV5fYGFiY2Rl:vNLBoOiZxAaDgRotxZyOxow9WSFocXTbbjLuOCT_pu6nPg",
+      "error": "unknown-key"
+    },
+    {
+      "name": "another row",
+      "keyring": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=, ZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5/gIGCg4Q=",
+      "table": "PlaidItem",
+      "field": "accessToken",
+      "row": "1b9c4d8e-5f1a-4c2b-9d3e-7a6b5c4d3e2f",
+      "envelope": "v1:25de0798:BwgJCgsMDQ4PEBES:MlRe2vcqmmnGxwINp3tvoiyGUcW7hRRqkZjalxPnUsdLPcR4u7lHj82B4YC218MOGIbCE6upUwJmD3XD0MnJUnixsQ",
+      "error": "decrypt"
+    },
+    {
+      "name": "another field",
+      "keyring": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=, ZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5/gIGCg4Q=",
+      "table": "PlaidItem",
+      "field": "itemId",
+      "row": "0b9c4d8e-5f1a-4c2b-9d3e-7a6b5c4d3e2f",
+      "envelope": "v1:25de0798:BwgJCgsMDQ4PEBES:MlRe2vcqmmnGxwINp3tvoiyGUcW7hRRqkZjalxPnUsdLPcR4u7lHj82B4YC218MOGIbCE6upUwJmD3XD0MnJUnixsQ",
+      "error": "decrypt"
+    },
+    {
+      "name": "another table",
+      "keyring": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=, ZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5/gIGCg4Q=",
+      "table": "Account",
+      "field": "accessToken",
+      "row": "0b9c4d8e-5f1a-4c2b-9d3e-7a6b5c4d3e2f",
+      "envelope": "v1:25de0798:BwgJCgsMDQ4PEBES:MlRe2vcqmmnGxwINp3tvoiyGUcW7hRRqkZjalxPnUsdLPcR4u7lHj82B4YC218MOGIbCE6upUwJmD3XD0MnJUnixsQ",
+      "error": "decrypt"
+    },
+    {
+      "name": "a changed ciphertext",
+      "keyring": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=, ZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5/gIGCg4Q=",
+      "table": "PlaidItem",
+      "field": "accessToken",
+      "row": "0b9c4d8e-5f1a-4c2b-9d3e-7a6b5c4d3e2f",
+      "envelope": "v1:25de0798:BwgJCgsMDQ4PEBES:MlRe2vcqmmnGxwINp3tvoiyGUcW7hRRqkZjalxPnUsdLPcR4u7lHj82B4YC218MOGIbCE6upUwJmD3XD0MnJUnixsA",
+      "error": "decrypt"
+    },
+    {
+      "name": "plaintext",
+      "keyring": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=, ZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5/gIGCg4Q=",
+      "table": "PlaidItem",
+      "field": "accessToken",
+      "row": "0b9c4d8e-5f1a-4c2b-9d3e-7a6b5c4d3e2f",
+      "envelope": "access-sandbox-plain",
+      "error": "malformed"
+    },
+    {
+      "name": "another version",
+      "keyring": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=, ZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5/gIGCg4Q=",
+      "table": "PlaidItem",
+      "field": "accessToken",
+      "row": "0b9c4d8e-5f1a-4c2b-9d3e-7a6b5c4d3e2f",
+      "envelope": "v2:25de0798:BwgJCgsMDQ4PEBES:MlRe2vcqmmnGxwINp3tvoiyGUcW7hRRqkZjalxPnUsdLPcR4u7lHj82B4YC218MOGIbCE6upUwJmD3XD0MnJUnixsQ",
+      "error": "malformed"
+    },
+    {
+      "name": "a short nonce",
+      "keyring": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=, ZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5/gIGCg4Q=",
+      "table": "PlaidItem",
+      "field": "accessToken",
+      "row": "0b9c4d8e-5f1a-4c2b-9d3e-7a6b5c4d3e2f",
+      "envelope": "v1:25de0798:AAAA:MlRe2vcqmmnGxwINp3tvoiyGUcW7hRRqkZjalxPnUsdLPcR4u7lHj82B4YC218MOGIbCE6upUwJmD3XD0MnJUnixsQ",
+      "error": "malformed"
+    },
+    {
+      "name": "no keyring",
+      "keyring": null,
+      "table": "PlaidItem",
+      "field": "accessToken",
+      "row": "0b9c4d8e-5f1a-4c2b-9d3e-7a6b5c4d3e2f",
+      "envelope": "v1:25de0798:BwgJCgsMDQ4PEBES:MlRe2vcqmmnGxwINp3tvoiyGUcW7hRRqkZjalxPnUsdLPcR4u7lHj82B4YC218MOGIbCE6upUwJmD3XD0MnJUnixsQ",
+      "error": "no-keys"
+    }
+  ]
+}

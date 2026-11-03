@@ -345,8 +345,33 @@ func (ih *InputHasher) surface(service buildplan.Service) string {
 	// amended), so a stack's entry is its checkout's alone.
 	if service.Config.Kind == ir.SchemaKindStack {
 		_, _ = fmt.Fprintf(h, "|checkout:%s", ih.checkout())
+		// The workflow of a stack with CI runs the binary that builds the
+		// whole services root, which the apps of every stack choose
+		// (D78), so its entry is the other stacks' too.
+		if _, ok := service.Config.Outputs["ci"]; ok {
+			ih.writeOtherStacks(h, service.Name)
+		}
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// writeOtherStacks adds to a hash the sources of every stack but name and
+// of the services each one's schema references, the services it deploys
+// among them, with all they reach through their configs.
+func (ih *InputHasher) writeOtherStacks(h io.Writer, name string) {
+	var stacks []string
+	for other, service := range ih.services {
+		if other != name && service.Config != nil && service.Config.Kind == ir.SchemaKindStack {
+			stacks = append(stacks, other)
+		}
+	}
+	sort.Strings(stacks)
+	for _, other := range stacks {
+		_, _ = fmt.Fprintf(h, "|stack:%s:%s", other, ih.serviceDigests[other])
+		for _, ref := range ReadSchemaReferences(ih.repoRoot, other).References {
+			_, _ = fmt.Fprintf(h, "|stack-ref:%s:%s:%s", other, ref, ih.sourcesDigest(ref))
+		}
+	}
 }
 
 // checkout is the schemas root the hasher's services build in, absolute

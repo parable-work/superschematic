@@ -1,0 +1,22 @@
+{
+  "name": "@smoke/smoke-api-implementation",
+  "version": "0.0.0",
+  "description": "The implementation of the smoke-api API.",
+  "private": true,
+  "type": "module",
+  "main": "index.ts",
+  "types": "index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@smoke/smoke-api-api": "workspace:*",
+    "@smoke/smoke-api-types": "workspace:*",
+    "@smoke/smoke-db-types": "workspace:*",
+    "@superschematic/http-runtime": "*"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.9",
+    "typescript": "5.9.3"
+  }
+}

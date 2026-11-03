@@ -1,0 +1,19 @@
+[package]
+name = "schemas-triage-rs-api-api"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.99.0"
+
+[dependencies]
+async-trait = "0.1.89"
+axum = { version = "0.8.9", features = ["json", "matched-path"] }
+http = "1"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread"] }
+dotenvy = "0.15"
+tracing = { version = "0.1.41", default-features = false, features = ["std"] }
+superschematic-http-runtime = { path = "../../../../runtime/http/rust", features = ["postgres"] }
+schemas-triage-rs-api-types = { path = "../../types/rust/triage-rs-api" }
+schemas-triage-db-types = { path = "../../types/rust/triage-db" }
+superschematic-engine = { path = "../../../../runtime/engine/rust/engine", default-features = false, features = ["background"] }

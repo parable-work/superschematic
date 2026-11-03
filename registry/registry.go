@@ -103,7 +103,11 @@ type (
 	// as a RustEndpoint with its Args struct, its arguments (RustParam),
 	// its input (RustInput), its page when it is @paginated (RustPage,
 	// D60), its result type and its auth rules. Identity is set when the
-	// crate authenticates with the identity runtime. RustAPIOf returns it.
+	// crate authenticates with the identity runtime. A mounted endpoint
+	// whose Behavior is set is a table's behavior operation (D103), which
+	// the crate's handler runs through the behaviors' core: no namespace
+	// trait has a method for it, so nothing calls it in-process.
+	// RustAPIOf returns it.
 	RustAPI      = rustrestgen.APIOutput
 	RustEndpoint = rustrestgen.EndpointInfo
 	RustParam    = rustrestgen.ParamInfo
@@ -237,10 +241,13 @@ type (
 	// target's CI seam (CIIdentities) gives each environment a CIIdentity
 	// per CIRole, a provisioner's spec lists the CLITools a CI job
 	// installs, and the request names the release's CIArchive for each
-	// platform, which a job that compiles a Go server links.
+	// platform, which a job that compiles a Go server links, and the
+	// CIApps of the services root's other stacks, whose extensions the
+	// workflow's binary links (D78).
 	CIRendererSpec = registry.CIRendererSpec
 	CIRequest      = registry.CIRequest
 	CIArchive      = registry.CIArchive
+	CIApp          = registry.CIApp
 	CIStack        = registry.CIStack
 	CISite         = registry.CISite
 	CIEnvironment  = registry.CIEnvironment

@@ -505,7 +505,7 @@ func (r *TastingRepository) batchRecipeByIDs(ctx context.Context, ids []types.Id
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&RecipeFilter{
 			Id: &UUIDFilter{
@@ -583,7 +583,7 @@ func (r *TastingRepository) batchRefByIDs(ctx context.Context, ids []types.Ident
 		findOpts.Limit = len(ids)
 	}
 
-	relatedRecords, _, err := repo.FindMany(
+	relatedRecords, err := repo.findRelated(
 		ctx,
 		&RecipeRefFilter{
 			Id: &UUIDFilter{
@@ -1427,7 +1427,8 @@ func (r *TastingRepository) FindOne(ctx context.Context, filter *TastingFilter, 
 	return result, nil
 }
 
-// FindMany retrieves multiple Tasting records matching the filter
+// FindMany retrieves multiple Tasting records matching the filter, and how
+// many it matches in all, -1 when the options skip the count
 func (r *TastingRepository) FindMany(ctx context.Context, filter *TastingFilter, opts *TastingFindOptions) ([]*types.Tasting, int, error) {
 	if opts == nil || opts.Fields.IsZero() {
 		return nil, 0, fmt.Errorf("fields must be specified in FindOptions for performance")
@@ -1460,18 +1461,20 @@ func (r *TastingRepository) FindMany(ctx context.Context, filter *TastingFilter,
 	// Build query
 	query := fmt.Sprintf(`SELECT %s FROM tasting%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
 
-	// Get total count
-	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM tasting%s`, whereClause)
+	// Get total count, unless the options skip it (D89)
+	totalCount := -1
+	if !opts.SkipCount {
+		countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM tasting%s`, whereClause)
 
-	var totalCount int
-	var countRow pgx.Row
-	if r.tx != nil {
-		countRow = r.tx.QueryRow(ctx, countQuery, args...)
-	} else {
-		countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
-	}
-	if err := countRow.Scan(&totalCount); err != nil {
-		return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		var countRow pgx.Row
+		if r.tx != nil {
+			countRow = r.tx.QueryRow(ctx, countQuery, args...)
+		} else {
+			countRow = r.db.pool.QueryRow(ctx, countQuery, args...)
+		}
+		if err := countRow.Scan(&totalCount); err != nil {
+			return nil, 0, fmt.Errorf("failed to get count: %w", err)
+		}
 	}
 
 	results, err := r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
@@ -1479,6 +1482,30 @@ func (r *TastingRepository) FindMany(ctx context.Context, filter *TastingFilter,
 		return nil, 0, err
 	}
 	return results, totalCount, nil
+}
+
+// findRelated reads the rows filter finds as FindMany reads them, with no
+// count: the read that loads a relation's rows for the rows of another
+// table's read (D90), which counts nothing, as the TypeScript
+// repositories' include does.
+func (r *TastingRepository) findRelated(ctx context.Context, filter *TastingFilter, opts *TastingFindOptions) ([]*types.Tasting, error) {
+	if opts == nil || opts.Fields.IsZero() {
+		return nil, fmt.Errorf("fields must be specified in FindOptions for performance")
+	}
+	fieldStrings := tastingFieldStrings(opts.Fields)
+	if err := validateFields(fieldStrings, TastingAllowedFields); err != nil {
+		return nil, err
+	}
+	selectFields := buildSelectFieldsTyped(fieldStrings, "tasting")
+	if selectFields == "" {
+		return nil, fmt.Errorf("no valid fields specified")
+	}
+	var args []interface{}
+	whereClause := filter.buildWhereClause(&args, 0)
+	orderByClause := buildTastingOrderByClause(opts.OrderBy, `tasting`)
+	limitOffsetClause := buildLimitOffsetClauseTyped(opts.Limit, opts.Offset)
+	query := fmt.Sprintf(`SELECT %s FROM tasting%s%s%s`, selectFields, whereClause, orderByClause, limitOffsetClause)
+	return r.findRows(ctx, "FindMany", query, args, fieldStrings, opts.Fields)
 }
 
 // tastingFieldStrings are the columns fields selects, in OrderedMembers
@@ -1997,7 +2024,7 @@ func (r *TastingRepository) CreateOne(ctx context.Context, input *types.Tasting)
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := tastingUUIDValue(input.Recipe.Id); ok && relID != zeroId {
-			fields = append(fields, "recipe_id")
+			fields = append(fields, `recipe_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -2007,7 +2034,7 @@ func (r *TastingRepository) CreateOne(ctx context.Context, input *types.Tasting)
 	{
 		var zeroId types.IdentityUUID
 		if relID, ok := tastingUUIDValue(input.Ref.Id); ok && relID != zeroId {
-			fields = append(fields, "ref_id")
+			fields = append(fields, `ref_id`)
 			paramNum++
 			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
 			values = append(values, relID.ToUUID())
@@ -2120,6 +2147,956 @@ func (r *TastingRepository) CreateOne(ctx context.Context, input *types.Tasting)
 	}
 
 	return result, nil
+}
+
+// tastingUniqueKeys are the conflict targets of Tasting's unique keys, and
+// the assignment an upsert that sets nothing writes, so the row it
+// conflicts with is returned (sqlutil.UniqueKey, D79); the read of the rows
+// that hold keys, which an upsert only if changed reads back, empty for a
+// key over an expression, and the key's columns as a batch insert's cells
+// name them (D89).
+var tastingUniqueKeys = map[TastingUniqueKey]struct {
+	conflict, keep, rows string
+	columns              []string
+}{
+	TastingUniqueById:           {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "recipe_id", "taster", "salty", "score", "servings", "tasted_on", "tasted_at", "served_at", "rested", "verdict", "remarks", "tags", "helpers", "bites", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM tasting WHERE (id) IN (%s)`, []string{`id`}},
+	TastingUniqueByEntityKeyRef: {`(entity_key, ref_id)`, `entity_key = EXCLUDED.entity_key`, `SELECT "id", "recipe_id", "taster", "salty", "score", "servings", "tasted_on", "tasted_at", "served_at", "rested", "verdict", "remarks", "tags", "helpers", "bites", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM tasting WHERE (entity_key, ref_id) IN (%s)`, []string{`entity_key`, `ref_id`}},
+}
+
+// tastingKeyOf is the text of row's values of the unique key on, as
+// UpsertMany matches the rows a statement returns to its inputs, or false
+// when the insert leaves one of them to the database (D89).
+func tastingKeyOf(on TastingUniqueKey, row *types.Tasting) (string, bool) {
+	switch on {
+	case TastingUniqueById:
+		return upsertKeyText(upsertKeyValue(row.Id, false))
+	case TastingUniqueByEntityKeyRef:
+		return upsertKeyText(upsertKeyValue(row.EntityKey, false), upsertKeyValue(row.Ref.Id, false))
+	}
+	return "", false
+}
+
+// database is the Database the repository runs on.
+func (r *TastingRepository) database() *Database {
+	if r.txDB != nil {
+		return r.txDB
+	}
+	return r.db
+}
+
+// scanReturned scans a row of every column of Tasting, as a write returns
+// it, and, with inserted, the flag an upsert returns after them (D89).
+func (r *TastingRepository) scanReturned(row pgx.Row, inserted *bool) (*types.Tasting, error) {
+	result := &types.Tasting{}
+	// Create temporary variables for nullable fields that need pointer scanning
+
+	var tempTastedOn pgtype.Date
+	var tempRemarks []byte
+	var tempTags []*string
+	var tempHelpers []*types.IdentityUUID
+	var tempBites []byte
+
+	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
+	var tempRelRecipe *types.IdentityUUID
+	var tempRelRef *types.IdentityUUID
+
+	// Scan all fields in schema order (matches DDL column order)
+	dest := []any{
+
+		&result.Id,
+
+		&tempRelRecipe,
+
+		&result.Taster,
+
+		&result.Salty,
+
+		&result.Score,
+
+		&result.Servings,
+
+		&tempTastedOn,
+
+		&result.TastedAt,
+
+		&result.ServedAt,
+
+		(*time.Duration)(&result.Rested),
+
+		&result.Verdict,
+
+		&tempRemarks,
+
+		&tempTags,
+
+		&tempHelpers,
+
+		&tempBites,
+
+		&result.EntityKey,
+
+		&tempRelRef,
+
+		&result.DeletedOnRef,
+
+		&result.Version,
+	}
+	if inserted != nil {
+		dest = append(dest, inserted)
+	}
+	if err := row.Scan(dest...); err != nil {
+		return nil, err
+	}
+
+	// Copy nullable fields when present
+
+	if tempTastedOn.Valid {
+		result.TastedOn = types.TemporalDate(tempTastedOn.Time.Format("2006-01-02"))
+	}
+	if len(tempRemarks) > 0 {
+		if err := unmarshalGenericJSONFieldValue(tempRemarks, &result.Remarks); err != nil {
+			return nil, fmt.Errorf("failed to decode JSON field remarks: %w", err)
+		}
+	}
+	if err := copyListElements("tags", tempTags, &result.Tags); err != nil {
+		return nil, fmt.Errorf("failed to decode field tags: %w", err)
+	}
+	if err := copyListElements("helpers", tempHelpers, &result.Helpers); err != nil {
+		return nil, fmt.Errorf("failed to decode field helpers: %w", err)
+	}
+	if len(tempBites) > 0 {
+		if err := unmarshalJSONListFieldValue(tempBites, &result.Bites, "bites", 2); err != nil {
+			return nil, fmt.Errorf("failed to decode JSON field bites: %w", err)
+		}
+	}
+
+	// Set relationship IDs from scanned FK values
+	if tempRelRecipe != nil {
+		result.Recipe.Id = tastingUUIDPtr(*tempRelRecipe)
+	}
+	if tempRelRef != nil {
+		result.Ref.Id = tastingUUIDPtr(*tempRelRef)
+	}
+
+	return result, nil
+}
+
+// UpsertOne inserts input, or, when a row already holds its value of the
+// unique key on, applies update to that row instead, and returns the row
+// (D79). The insert writes what CreateOne writes and the update what
+// UpdateOne writes, updated_at and updated_by among it, but an update that
+// sets no field leaves the row as it is.
+func (r *TastingRepository) UpsertOne(ctx context.Context, input *types.Tasting, on TastingUniqueKey, update *TastingUpdate) (*types.Tasting, error) {
+	result, err := r.UpsertOneResult(ctx, input, on, update, nil)
+	if err != nil {
+		return nil, err
+	}
+	return result.Row, nil
+}
+
+// UpsertOneResult is UpsertOne, and what it did with the row: inserted it,
+// updated the row that held the key, or left that row as it was (D89).
+// With opts.OnlyIfChanged it updates the row only when a field the update
+// sets differs from what the row holds, which it reads back otherwise. A write that
+// may take more than one statement runs in a transaction of its own when
+// none is open.
+func (r *TastingRepository) UpsertOneResult(ctx context.Context, input *types.Tasting, on TastingUniqueKey, update *TastingUpdate, opts *UpsertOptions) (UpsertResult[*types.Tasting], error) {
+	var none UpsertResult[*types.Tasting]
+	key, ok := tastingUniqueKeys[on]
+	if !ok {
+		return none, fmt.Errorf("orm: Tasting has no unique key %q", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if opts.OnlyIfChanged && key.rows == "" {
+		return none, upsertExpressionKey("UpsertOneResult", "Tasting", string(on))
+	}
+	if update == nil {
+		update = &TastingUpdate{}
+	}
+	write := func(repo *TastingRepository) (UpsertResult[*types.Tasting], error) {
+		result, err := repo.upsertRow(ctx, input, on, update, opts.OnlyIfChanged)
+		if err != nil {
+			return none, err
+		}
+		return *result, nil
+	}
+	if !opts.OnlyIfChanged {
+		return write(r)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (UpsertResult[*types.Tasting], error) {
+		return write(&TastingRepository{tx: tx, txDB: r.database()})
+	})
+}
+
+// upsertRow is UpsertOneResult on the repository's connection: the upsert,
+// a read of the row it left as it was, only if changed, and the second
+// statement of an encrypted field.
+func (r *TastingRepository) upsertRow(ctx context.Context, input *types.Tasting, on TastingUniqueKey, update *TastingUpdate, onlyIfChanged bool) (*UpsertResult[*types.Tasting], error) {
+	key := tastingUniqueKeys[on]
+	// Set audit fields
+
+	// Build INSERT query
+	var fields []string
+	var placeholders []string
+	var values []interface{}
+	paramNum := 0
+	// Schema-owned identities may supply a stable UUID. A zero value keeps the
+	// database-generated default used by ordinary creates.
+	{
+		var zeroPrimaryKey types.IdentityUUID
+		if primaryKey, ok := tastingUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+			fields = append(fields, `id`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, primaryKey.ToUUID())
+		}
+	}
+	// Required field: taster
+	fields = append(fields, `taster`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Taster.ToUUID())
+	// Required field: salty
+	fields = append(fields, `salty`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Salty)
+	// Required field: score
+	fields = append(fields, `score`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Score)
+	// Required field: servings
+	fields = append(fields, `servings`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Servings)
+	// Required field: tastedOn
+	fields = append(fields, `tasted_on`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.TastedOn)
+	// Required field: tastedAt
+	fields = append(fields, `tasted_at`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, time.Time(input.TastedAt))
+	// Required field: servedAt
+	fields = append(fields, `served_at`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.ServedAt)
+	// Required field: rested
+	fields = append(fields, `rested`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	// An INTERVAL goes as its microseconds, which pgx encodes from a
+	// time.Duration, sign and all.
+	values = append(values, time.Duration(input.Rested))
+	// Required field: verdict
+	fields = append(fields, `verdict`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Verdict)
+	// Required field: remarks
+	fields = append(fields, `remarks`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	jsonValueRemarks, err := marshalJSONFieldValue(input.Remarks)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal JSON field remarks: %w", err)
+	}
+	values = append(values, jsonValueRemarks)
+	// Required field: tags
+	fields = append(fields, `tags`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Tags)
+	// Required field: helpers
+	fields = append(fields, `helpers`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.Helpers)
+	// Required field: bites
+	fields = append(fields, `bites`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	jsonValueBites, err := marshalArrayOfArraysFieldValue(input.Bites)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal JSON field bites: %w", err)
+	}
+	values = append(values, jsonValueBites)
+	// Auto-generated field: entityKey - only add if set
+	{
+		if !reflect.ValueOf(input.EntityKey).IsZero() {
+			fields = append(fields, `entity_key`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, input.EntityKey.ToUUID())
+		}
+	}
+	// Required field: deletedOnRef
+	fields = append(fields, `deleted_on_ref`)
+	paramNum++
+	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+	values = append(values, input.DeletedOnRef)
+
+	// Handle relationship foreign key columns
+	// Relationship: recipe (FK: recipe_id)
+	{
+		var zeroId types.IdentityUUID
+		if relID, ok := tastingUUIDValue(input.Recipe.Id); ok && relID != zeroId {
+			fields = append(fields, `recipe_id`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, relID.ToUUID())
+		}
+	}
+	// Relationship: ref (FK: ref_id)
+	{
+		var zeroId types.IdentityUUID
+		if relID, ok := tastingUUIDValue(input.Ref.Id); ok && relID != zeroId {
+			fields = append(fields, `ref_id`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			values = append(values, relID.ToUUID())
+		}
+	}
+
+	// Build the update of the row the key conflicts with, its placeholders
+	// numbered after the insert's
+	var setClauses, compareCurrent, compareNext []string
+	if update.Taster != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`taster = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `tasting.taster`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		values = append(values, (*update.Taster).ToUUID())
+	}
+	if update.Salty != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`salty = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `tasting.salty`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		values = append(values, *update.Salty)
+	}
+	if update.Score != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`score = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `tasting.score`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		values = append(values, *update.Score)
+	}
+	if update.Servings != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`servings = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `tasting.servings`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		values = append(values, *update.Servings)
+	}
+	if update.TastedOn != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`tasted_on = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `tasting.tasted_on`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		values = append(values, *update.TastedOn)
+	}
+	if update.TastedAt != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`tasted_at = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `tasting.tasted_at`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		values = append(values, time.Time(*update.TastedAt))
+	}
+	if update.ServedAt != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`served_at = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `tasting.served_at`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		values = append(values, *update.ServedAt)
+	}
+	if update.Rested != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`rested = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `tasting.rested`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		// An INTERVAL goes as its microseconds, which pgx encodes from a
+		// time.Duration, sign and all.
+		values = append(values, time.Duration(*update.Rested))
+	}
+	if update.Verdict != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`verdict = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `tasting.verdict`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		values = append(values, *update.Verdict)
+	}
+	if update.Remarks != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`remarks = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `tasting.remarks`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		jsonValueRemarks, err := marshalJSONFieldValue(*update.Remarks)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal JSON field remarks: %w", err)
+		}
+		values = append(values, jsonValueRemarks)
+	}
+	if update.Tags != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`tags = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `tasting.tags`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		values = append(values, *update.Tags)
+	}
+	if update.Helpers != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`helpers = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `tasting.helpers`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		values = append(values, *update.Helpers)
+	}
+	if update.Bites != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`bites = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `tasting.bites`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		jsonValueBites, err := marshalArrayOfArraysFieldValue(*update.Bites)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal JSON field bites: %w", err)
+		}
+		values = append(values, jsonValueBites)
+	}
+	if update.EntityKey != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`entity_key = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `tasting.entity_key`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		values = append(values, (*update.EntityKey).ToUUID())
+	}
+	if update.DeletedOnRef != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`deleted_on_ref = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `tasting.deleted_on_ref`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		values = append(values, *update.DeletedOnRef)
+	}
+	// Handle relationship foreign key: recipe
+	if update.RecipeID != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("recipe_id = $%d", paramNum))
+		compareCurrent = append(compareCurrent, `tasting.recipe_id`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		values = append(values, update.RecipeID.ToUUID())
+	}
+	// Handle relationship foreign key: ref
+	if update.RefID != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf("ref_id = $%d", paramNum))
+		compareCurrent = append(compareCurrent, `tasting.ref_id`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		values = append(values, update.RefID.ToUUID())
+	}
+
+	assigned := len(setClauses)
+	if assigned == 0 {
+		// An update that sets no field leaves the row as it is, stamps and
+		// all, and returns it.
+		setClauses = append(setClauses, key.keep)
+	} else {
+		// Set updated_at
+
+		// Set updated_by
+
+	}
+
+	query := fmt.Sprintf(
+		`INSERT INTO tasting (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "recipe_id", "taster", "salty", "score", "servings", "tasted_on", "tasted_at", "served_at", "rested", "verdict", "remarks", "tags", "helpers", "bites", "entity_key", "ref_id", "deleted_on_ref", "_version", (xmax = 0) AS _inserted`,
+		strings.Join(fields, ", "),
+		"("+strings.Join(placeholders, ", ")+")",
+		key.conflict,
+		strings.Join(setClauses, ", "),
+		upsertWhere(``, compareCurrent, compareNext, onlyIfChanged),
+	)
+
+	// Execute query
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, values...)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, values...)
+	}
+	var inserted bool
+	scanned, err := r.scanReturned(row, &inserted)
+	var upserted *UpsertResult[*types.Tasting]
+	switch {
+	case err == nil:
+		status := UpsertUnchanged
+		if inserted {
+			status = UpsertInserted
+		} else if assigned > 0 {
+			status = UpsertUpdated
+		}
+		upserted = &UpsertResult[*types.Tasting]{Row: scanned, Status: status}
+	case err != pgx.ErrNoRows:
+		return nil, fmt.Errorf("failed to scan result: %w", err)
+	case !onlyIfChanged:
+		// The row the key conflicts with is soft-deleted.
+		return nil, ErrNotFound
+	default:
+		// The row the key conflicts with already held the update's values.
+		keyValues, ok := upsertCellValues(upsertCells(fields, values), key.columns)
+		if !ok {
+			return nil, fmt.Errorf("no Tasting row holds an unset %s: %w", string(on), ErrNotFound)
+		}
+		found, err := r.rowsOfKeys(ctx, on, [][]any{keyValues}, []*types.Tasting{input})
+		if err != nil {
+			return nil, err
+		}
+		upserted = &UpsertResult[*types.Tasting]{Row: found[0], Status: UpsertUnchanged}
+	}
+	return upserted, nil
+}
+
+// UpsertMany inserts each input, or, when a row already holds its value of
+// the unique key on, sets each field update names of that row to the value
+// the input would have inserted, and returns each input's row and what it
+// did with it, in the inputs' order (D89). One statement writes a batch of
+// rows, opts.Batch or as many as Postgres binds the parameters of, and more
+// rows take a statement per batch, in one transaction; a write that may
+// take more than one statement runs in a transaction of its own when none
+// is open. An update that names no field leaves each row that holds a key
+// as it is. Two inputs of one batch that hold one key fail
+// the statement, and a key over an expression, whose rows the statement's
+// cannot be matched to the inputs by, is refused.
+func (r *TastingRepository) UpsertMany(ctx context.Context, inputs []*types.Tasting, on TastingUniqueKey, update TastingFields, opts *UpsertOptions) ([]UpsertResult[*types.Tasting], error) {
+	key, ok := tastingUniqueKeys[on]
+	if !ok {
+		return nil, fmt.Errorf("orm: Tasting has no unique key %q", string(on))
+	}
+	if key.rows == "" {
+		return nil, upsertExpressionKey("UpsertMany", "Tasting", string(on))
+	}
+	if opts == nil {
+		opts = &UpsertOptions{}
+	}
+	if update.Id {
+		return nil, fmt.Errorf("orm: UpsertMany of Tasting sets the fields an update sets, not id")
+	}
+	if update.Version {
+		return nil, fmt.Errorf("orm: UpsertMany of Tasting sets the fields an update sets, not _version")
+	}
+	batch, err := upsertBatch("Tasting", opts.Batch, 3640)
+	if err != nil {
+		return nil, err
+	}
+	if len(inputs) == 0 {
+		return []UpsertResult[*types.Tasting]{}, nil
+	}
+	if len(inputs) <= batch && !opts.OnlyIfChanged {
+		return r.upsertBatches(ctx, inputs, on, update, batch, false)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]UpsertResult[*types.Tasting], error) {
+		return (&TastingRepository{tx: tx, txDB: r.database()}).upsertBatches(ctx, inputs, on, update, batch, opts.OnlyIfChanged)
+	})
+}
+
+// upsertBatches is UpsertMany on the repository's connection, a batch at a
+// time: each batch's statement, a read of the rows it left as they were,
+// only if changed, and the second statement of each encrypted field.
+func (r *TastingRepository) upsertBatches(ctx context.Context, inputs []*types.Tasting, on TastingUniqueKey, update TastingFields, batch int, onlyIfChanged bool) ([]UpsertResult[*types.Tasting], error) {
+	key := tastingUniqueKeys[on]
+
+	// Set audit fields
+
+	// Each field update names takes the value the input would have
+	// inserted, which an upsert only if changed compares with the row's.
+	var setClauses, compareCurrent, compareNext []string
+	if update.Taster {
+		setClauses = append(setClauses, `taster = EXCLUDED.taster`)
+		compareCurrent = append(compareCurrent, `tasting.taster`)
+		compareNext = append(compareNext, `EXCLUDED.taster`)
+	}
+	if update.Salty {
+		setClauses = append(setClauses, `salty = EXCLUDED.salty`)
+		compareCurrent = append(compareCurrent, `tasting.salty`)
+		compareNext = append(compareNext, `EXCLUDED.salty`)
+	}
+	if update.Score {
+		setClauses = append(setClauses, `score = EXCLUDED.score`)
+		compareCurrent = append(compareCurrent, `tasting.score`)
+		compareNext = append(compareNext, `EXCLUDED.score`)
+	}
+	if update.Servings {
+		setClauses = append(setClauses, `servings = EXCLUDED.servings`)
+		compareCurrent = append(compareCurrent, `tasting.servings`)
+		compareNext = append(compareNext, `EXCLUDED.servings`)
+	}
+	if update.TastedOn {
+		setClauses = append(setClauses, `tasted_on = EXCLUDED.tasted_on`)
+		compareCurrent = append(compareCurrent, `tasting.tasted_on`)
+		compareNext = append(compareNext, `EXCLUDED.tasted_on`)
+	}
+	if update.TastedAt {
+		setClauses = append(setClauses, `tasted_at = EXCLUDED.tasted_at`)
+		compareCurrent = append(compareCurrent, `tasting.tasted_at`)
+		compareNext = append(compareNext, `EXCLUDED.tasted_at`)
+	}
+	if update.ServedAt {
+		setClauses = append(setClauses, `served_at = EXCLUDED.served_at`)
+		compareCurrent = append(compareCurrent, `tasting.served_at`)
+		compareNext = append(compareNext, `EXCLUDED.served_at`)
+	}
+	if update.Rested {
+		setClauses = append(setClauses, `rested = EXCLUDED.rested`)
+		compareCurrent = append(compareCurrent, `tasting.rested`)
+		compareNext = append(compareNext, `EXCLUDED.rested`)
+	}
+	if update.Verdict {
+		setClauses = append(setClauses, `verdict = EXCLUDED.verdict`)
+		compareCurrent = append(compareCurrent, `tasting.verdict`)
+		compareNext = append(compareNext, `EXCLUDED.verdict`)
+	}
+	if update.Remarks {
+		setClauses = append(setClauses, `remarks = EXCLUDED.remarks`)
+		compareCurrent = append(compareCurrent, `tasting.remarks`)
+		compareNext = append(compareNext, `EXCLUDED.remarks`)
+	}
+	if update.Tags {
+		setClauses = append(setClauses, `tags = EXCLUDED.tags`)
+		compareCurrent = append(compareCurrent, `tasting.tags`)
+		compareNext = append(compareNext, `EXCLUDED.tags`)
+	}
+	if update.Helpers {
+		setClauses = append(setClauses, `helpers = EXCLUDED.helpers`)
+		compareCurrent = append(compareCurrent, `tasting.helpers`)
+		compareNext = append(compareNext, `EXCLUDED.helpers`)
+	}
+	if update.Bites {
+		setClauses = append(setClauses, `bites = EXCLUDED.bites`)
+		compareCurrent = append(compareCurrent, `tasting.bites`)
+		compareNext = append(compareNext, `EXCLUDED.bites`)
+	}
+	if update.EntityKey {
+		setClauses = append(setClauses, `entity_key = EXCLUDED.entity_key`)
+		compareCurrent = append(compareCurrent, `tasting.entity_key`)
+		compareNext = append(compareNext, `EXCLUDED.entity_key`)
+	}
+	if update.DeletedOnRef {
+		setClauses = append(setClauses, `deleted_on_ref = EXCLUDED.deleted_on_ref`)
+		compareCurrent = append(compareCurrent, `tasting.deleted_on_ref`)
+		compareNext = append(compareNext, `EXCLUDED.deleted_on_ref`)
+	}
+	if update.Recipe {
+		setClauses = append(setClauses, `recipe_id = EXCLUDED.recipe_id`)
+		compareCurrent = append(compareCurrent, `tasting.recipe_id`)
+		compareNext = append(compareNext, `EXCLUDED.recipe_id`)
+	}
+	if update.Ref {
+		setClauses = append(setClauses, `ref_id = EXCLUDED.ref_id`)
+		compareCurrent = append(compareCurrent, `tasting.ref_id`)
+		compareNext = append(compareNext, `EXCLUDED.ref_id`)
+	}
+
+	results := make([]UpsertResult[*types.Tasting], 0, len(inputs))
+	for start := 0; start < len(inputs); start += batch {
+		chunk := inputs[start:min(start+batch, len(inputs))]
+		prepared := chunk
+
+		// The batch's rows, as CreateMany writes them.
+		rows := make([][]batchInsertCell, 0, len(prepared))
+		for _, input := range prepared {
+			var row []batchInsertCell
+			// Primary key: id. Schema-owned identities may supply a stable
+			// UUID, matching CreateOne; a row without one takes the generated default.
+			{
+				cell := batchInsertCell{column: `id`}
+				var zeroPrimaryKey types.IdentityUUID
+				if primaryKey, ok := tastingUUIDValue(input.Id); ok && primaryKey != zeroPrimaryKey {
+					cell.value, cell.set = primaryKey.ToUUID(), true
+				}
+				row = append(row, cell)
+			}
+			// Required field: taster
+			{
+				cell := batchInsertCell{column: `taster`, set: true}
+				cell.value = input.Taster.ToUUID()
+				row = append(row, cell)
+			}
+			// Required field: salty
+			{
+				cell := batchInsertCell{column: `salty`, set: true}
+				cell.value = input.Salty
+				row = append(row, cell)
+			}
+			// Required field: score
+			{
+				cell := batchInsertCell{column: `score`, set: true}
+				cell.value = input.Score
+				row = append(row, cell)
+			}
+			// Required field: servings
+			{
+				cell := batchInsertCell{column: `servings`, set: true}
+				cell.value = input.Servings
+				row = append(row, cell)
+			}
+			// Required field: tastedOn
+			{
+				cell := batchInsertCell{column: `tasted_on`, set: true}
+				cell.value = input.TastedOn
+				row = append(row, cell)
+			}
+			// Required field: tastedAt
+			{
+				cell := batchInsertCell{column: `tasted_at`, set: true}
+				cell.value = time.Time(input.TastedAt)
+				row = append(row, cell)
+			}
+			// Required field: servedAt
+			{
+				cell := batchInsertCell{column: `served_at`, set: true}
+				cell.value = input.ServedAt
+				row = append(row, cell)
+			}
+			// Required field: rested
+			{
+				cell := batchInsertCell{column: `rested`, set: true}
+				// An INTERVAL goes as its microseconds, which pgx encodes from a
+				// time.Duration, sign and all.
+				cell.value = time.Duration(input.Rested)
+				row = append(row, cell)
+			}
+			// Required field: verdict
+			{
+				cell := batchInsertCell{column: `verdict`, set: true}
+				cell.value = input.Verdict
+				row = append(row, cell)
+			}
+			// Required field: remarks
+			{
+				cell := batchInsertCell{column: `remarks`, set: true}
+				jsonValue, err := marshalJSONFieldValue(input.Remarks)
+				if err != nil {
+					return nil, fmt.Errorf("failed to marshal JSON field remarks: %w", err)
+				}
+				cell.value = jsonValue
+				row = append(row, cell)
+			}
+			// Required field: tags
+			{
+				cell := batchInsertCell{column: `tags`, set: true}
+				cell.value = input.Tags
+				row = append(row, cell)
+			}
+			// Required field: helpers
+			{
+				cell := batchInsertCell{column: `helpers`, set: true}
+				cell.value = input.Helpers
+				row = append(row, cell)
+			}
+			// Required field: bites
+			{
+				cell := batchInsertCell{column: `bites`, set: true}
+				jsonValue, err := marshalArrayOfArraysFieldValue(input.Bites)
+				if err != nil {
+					return nil, fmt.Errorf("failed to marshal JSON field bites: %w", err)
+				}
+				cell.value = jsonValue
+				row = append(row, cell)
+			}
+			// Auto-generated field: entityKey
+			{
+				cell := batchInsertCell{column: `entity_key`}
+				if !reflect.ValueOf(input.EntityKey).IsZero() {
+					cell.value = input.EntityKey.ToUUID()
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
+			// Required field: deletedOnRef
+			{
+				cell := batchInsertCell{column: `deleted_on_ref`, set: true}
+				cell.value = input.DeletedOnRef
+				row = append(row, cell)
+			}
+
+			// Relationship foreign key columns, matching CreateOne
+			// Relationship: recipe (FK: recipe_id)
+			{
+				cell := batchInsertCell{column: `recipe_id`}
+				var zeroId types.IdentityUUID
+				if relID, ok := tastingUUIDValue(input.Recipe.Id); ok && relID != zeroId {
+					cell.value, cell.set = relID.ToUUID(), true
+				}
+				row = append(row, cell)
+			}
+			// Relationship: ref (FK: ref_id)
+			{
+				cell := batchInsertCell{column: `ref_id`}
+				var zeroId types.IdentityUUID
+				if relID, ok := tastingUUIDValue(input.Ref.Id); ok && relID != zeroId {
+					cell.value, cell.set = relID.ToUUID(), true
+				}
+				row = append(row, cell)
+			}
+			rows = append(rows, row)
+		}
+		fieldNames, valuePlaceholders, values := buildBatchInsert(rows)
+		assignments := append([]string(nil), setClauses...)
+		if len(setClauses) == 0 {
+			// An update that names no field leaves each row as it is.
+			assignments = append(assignments, key.keep)
+		} else {
+		}
+		query := fmt.Sprintf(
+			`INSERT INTO tasting (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "recipe_id", "taster", "salty", "score", "servings", "tasted_on", "tasted_at", "served_at", "rested", "verdict", "remarks", "tags", "helpers", "bites", "entity_key", "ref_id", "deleted_on_ref", "_version", (xmax = 0) AS _inserted`,
+			strings.Join(fieldNames, ", "),
+			strings.Join(valuePlaceholders, ", "),
+			key.conflict,
+			strings.Join(assignments, ", "),
+			upsertWhere(``, compareCurrent, compareNext, onlyIfChanged),
+		)
+		returned, inserted, err := r.upsertReturned(ctx, query, values)
+		if err != nil {
+			return nil, err
+		}
+
+		// A row is its input's by the key's values; an input that sets none
+		// of them, whose key the database generates, takes the next row whose
+		// key no input holds, as the rows come back in the inputs' order.
+		keys := make([]string, len(prepared))
+		set := make([]bool, len(prepared))
+		for i, input := range prepared {
+			keys[i], set[i] = tastingKeyOf(on, input)
+		}
+		matcher := newUpsertMatcher(keys, set)
+		matched := make([]*UpsertResult[*types.Tasting], len(prepared))
+		for n, row := range returned {
+			text, ok := tastingKeyOf(on, row)
+			i := matcher.take(text, ok)
+			if i < 0 {
+				return nil, fmt.Errorf("orm: UpsertMany of Tasting wrote a row whose %s no input holds", string(on))
+			}
+			status := UpsertUnchanged
+			if inserted[n] {
+				status = UpsertInserted
+			} else if len(setClauses) > 0 {
+				status = UpsertUpdated
+			}
+			matched[i] = &UpsertResult[*types.Tasting]{Row: row, Status: status}
+		}
+
+		// A row it did not return is one it left as it was, only if changed,
+		// which it reads back by its key, or a deleted one.
+		var left []int
+		for i := range matched {
+			if matched[i] == nil {
+				left = append(left, i)
+			}
+		}
+		if len(left) > 0 {
+			if !onlyIfChanged {
+				return nil, fmt.Errorf("the Tasting row that holds the %s of input %d is deleted: %w", string(on), start+left[0], ErrNotFound)
+			}
+			keyValues := make([][]any, len(left))
+			wanted := make([]*types.Tasting, len(left))
+			for n, i := range left {
+				cells, ok := upsertCellValues(rows[i], key.columns)
+				if !ok {
+					return nil, fmt.Errorf("no Tasting row holds an unset %s: %w", string(on), ErrNotFound)
+				}
+				keyValues[n], wanted[n] = cells, prepared[i]
+			}
+			found, err := r.rowsOfKeys(ctx, on, keyValues, wanted)
+			if err != nil {
+				return nil, err
+			}
+			for n, i := range left {
+				matched[i] = &UpsertResult[*types.Tasting]{Row: found[n], Status: UpsertUnchanged}
+			}
+		}
+		for _, result := range matched {
+			results = append(results, *result)
+		}
+	}
+	return results, nil
+}
+
+// upsertReturned runs an upsert's statement, query with values, and scans
+// each row it returns and whether it inserted it.
+func (r *TastingRepository) upsertReturned(ctx context.Context, query string, values []any) ([]*types.Tasting, []bool, error) {
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to execute upsert: %w", err)
+	}
+	defer rows.Close()
+	var returned []*types.Tasting
+	var inserted []bool
+	for rows.Next() {
+		var flag bool
+		row, err := r.scanReturned(rows, &flag)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		returned = append(returned, row)
+		inserted = append(inserted, flag)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	return returned, inserted, nil
+}
+
+// rowsOfKeys reads the rows that hold keys, each the values of the unique
+// key on an input's insert binds, among the rows the key's index holds, in
+// the inputs' order: the rows an upsert only if changed left as they were
+// (D89). A key no live row holds is ErrNotFound.
+func (r *TastingRepository) rowsOfKeys(ctx context.Context, on TastingUniqueKey, keys [][]any, inputs []*types.Tasting) ([]*types.Tasting, error) {
+	tuples, values := upsertKeyTuples(keys)
+	query := fmt.Sprintf(tastingUniqueKeys[on].rows, strings.Join(tuples, ", "))
+	var rows pgx.Rows
+	var err error
+	if r.tx != nil {
+		rows, err = r.tx.Query(ctx, query, values...)
+	} else {
+		rows, err = r.db.pool.Query(ctx, query, values...)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the rows the upsert left: %w", err)
+	}
+	defer rows.Close()
+	found := map[string]*types.Tasting{}
+	for rows.Next() {
+		row, err := r.scanReturned(rows, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan result: %w", err)
+		}
+		if text, ok := tastingKeyOf(on, row); ok {
+			found[text] = row
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating results: %w", err)
+	}
+	out := make([]*types.Tasting, len(inputs))
+	for i, input := range inputs {
+		text, _ := tastingKeyOf(on, input)
+		row := found[text]
+		if row == nil {
+			return nil, fmt.Errorf("the Tasting row that holds the key %s is deleted: %w", string(on), ErrNotFound)
+		}
+		out[i] = row
+	}
+	return out, nil
 }
 
 // CreateMany inserts multiple Tasting records in a single statement
@@ -2254,7 +3231,7 @@ func (r *TastingRepository) CreateMany(ctx context.Context, inputs []*types.Tast
 		// Relationship foreign key columns, matching CreateOne
 		// Relationship: recipe (FK: recipe_id)
 		{
-			cell := batchInsertCell{column: "recipe_id"}
+			cell := batchInsertCell{column: `recipe_id`}
 			var zeroId types.IdentityUUID
 			if relID, ok := tastingUUIDValue(input.Recipe.Id); ok && relID != zeroId {
 				cell.value, cell.set = relID.ToUUID(), true
@@ -2263,7 +3240,7 @@ func (r *TastingRepository) CreateMany(ctx context.Context, inputs []*types.Tast
 		}
 		// Relationship: ref (FK: ref_id)
 		{
-			cell := batchInsertCell{column: "ref_id"}
+			cell := batchInsertCell{column: `ref_id`}
 			var zeroId types.IdentityUUID
 			if relID, ok := tastingUUIDValue(input.Ref.Id); ok && relID != zeroId {
 				cell.value, cell.set = relID.ToUUID(), true

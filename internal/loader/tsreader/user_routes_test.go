@@ -25,7 +25,11 @@ func TestUserRoutesAreRecorded(t *testing.T) {
 	if account == nil || admin == nil || greeting == nil {
 		t.Fatalf("operation sets = %v", sets)
 	}
-	if want := (&ir.UserSessionsConfig{Register: true}); !reflect.DeepEqual(account.UserSessions, want) || account.UserAdministration != nil {
+	want := &ir.UserSessionsConfig{
+		Register: true, Registration: ir.IdentityRegistrationApproval, DefaultRoles: []string{"member"},
+		FirstUser: &ir.IdentityFirstUser{Role: "admin", Permissions: []string{"identity"}},
+	}
+	if !reflect.DeepEqual(account.UserSessions, want) || account.UserAdministration != nil {
 		t.Errorf("Account = %+v, want UserSessions %+v", account, want)
 	}
 	if want := (&ir.UserAdministrationConfig{}); !reflect.DeepEqual(admin.UserAdministration, want) || admin.UserSessions != nil {
@@ -34,7 +38,7 @@ func TestUserRoutesAreRecorded(t *testing.T) {
 	if len(account.Operations) != 0 || len(admin.Operations) != 0 {
 		t.Errorf("the reader added operations: %v, %v", account.Operations, admin.Operations)
 	}
-	if account.Comment != "Signs users in and out, and lets anyone register." {
+	if account.Comment != "Signs users in and out, and lets anyone register: a new user waits for\nan administrator's approval as a member, and the first is the\nadministrator (D81)." {
 		t.Errorf("Account.Comment = %q", account.Comment)
 	}
 	if greeting.IsIdentityRoutes() || len(greeting.Operations) != 1 {
@@ -136,7 +140,7 @@ export class Account {}
 @userSessions({ roles: true })
 export class Account {}
 `,
-			want: []string{`a.schema.ts:3:15: @userSessions config has unknown key "roles"; it takes login, path and register`},
+			want: []string{`a.schema.ts:3:15: @userSessions config has unknown key "roles"; it takes defaultRoles, firstUser, login, path, register and registration`},
 		},
 		{
 			name: "an Authenticated base",

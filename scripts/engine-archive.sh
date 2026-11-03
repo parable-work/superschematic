@@ -106,8 +106,9 @@ trap 'rm -f "$BUILD_LOG" "$NEW_STAMP"' EXIT
 
 # cargo names the archive it built in its artifact records, wherever
 # CARGO_TARGET_DIR or a config puts the target directory: the staticlib of
-# the package whose manifest is the crate's.
-cargo build --release "${locked[@]}" --manifest-path "$crate/Cargo.toml" \
+# the package whose manifest is the crate's. ${locked[@]+...} expands an
+# empty list to nothing under set -u on macOS's bash 3.2 too.
+cargo build --release ${locked[@]+"${locked[@]}"} --manifest-path "$crate/Cargo.toml" \
   --message-format=json-render-diagnostics >"$BUILD_LOG"
 read -r ARCHIVE PACKAGE < <(python3 - "$BUILD_LOG" "$crate/Cargo.toml" <<'PY'
 import json, os, sys

@@ -28,7 +28,11 @@
 //! over the instances a call's SQL reads (`sql.instances()`) is
 //! `bhv_<key>___instances`. A name the behavior gives starts with a letter
 //! after the prefix, so none of these collides with one of its tables, and
-//! a migration may not name one ([`crate::sql_refusal`]).
+//! a migration may not name one ([`crate::sql_refusal`]). A namespace
+//! operation's statements (D77) read `bhv_<key>___readable` instead: the
+//! schemas of the call's namespace that compose the behavior and that the
+//! call's principal may read ([`ReadableRelation`]), one row each, its
+//! column `schema`, inlined as literals the same way.
 //!
 //! The relation is a common table expression the engine puts ahead of each
 //! statement that names it ([`crate::with_relation`]), over
@@ -87,6 +91,12 @@ pub fn prefix_of(key: &str) -> String {
 /// (`sql.instances()`), before a database keeps it.
 pub fn relation_name(prefix: &str) -> String {
     format!("{prefix}_instances")
+}
+
+/// The SQL name of the relation over the schemas a namespace operation's
+/// statements may read (`sql.readable()`, D77), before a database keeps it.
+pub fn readable_name(prefix: &str) -> String {
+    format!("{prefix}_readable")
 }
 
 /// The SQL name of an index a behavior's migration lists on the instances
@@ -366,15 +376,26 @@ pub struct InstanceRelation<'a> {
     pub allow: Box<dyn Fn() -> Result<()> + 'a>,
 }
 
+/// The schemas a namespace operation's statements may read (D77,
+/// `sql.readable()`): those of the call's namespace that compose the
+/// behavior and that the call's principal may read. `schemas` asks the
+/// access policy, once a call, the first time a statement names the
+/// relation; an error refuses the statement.
+pub struct ReadableRelation<'a> {
+    pub schemas: Box<dyn Fn() -> Result<Vec<String>> + 'a>,
+}
+
 /// The SQL handle a behavior gets: its own tables, in one mode, and with a
-/// relation, its own columns across the instances of the call's schema.
-/// Every statement passes [`sql_refusal`] first.
+/// relation, its own columns across the instances of the call's schema, or
+/// in a namespace operation the schemas it may read. Every statement
+/// passes [`sql_refusal`] first.
 pub struct BehaviorSql<'t, 'db> {
     tx: &'t Tx<'db>,
     behavior: &'t str,
     prefix: &'t str,
     mode: SqlMode,
     relation: Option<&'t InstanceRelation<'t>>,
+    readable: Option<&'t ReadableRelation<'t>>,
 }
 
 impl<'t, 'db> BehaviorSql<'t, 'db> {
@@ -394,6 +415,22 @@ impl<'t, 'db> BehaviorSql<'t, 'db> {
             prefix,
             mode,
             relation,
+            readable: None,
+        }
+    }
+
+    /// The SQL of a namespace operation (D77): no relation over one
+    /// schema's instances, and `readable()` over the schemas it may read.
+    pub fn namespace(
+        tx: &'t Tx<'db>,
+        behavior: &'t str,
+        prefix: &'t str,
+        mode: SqlMode,
+        readable: &'t ReadableRelation<'t>,
+    ) -> Self {
+        BehaviorSql {
+            readable: Some(readable),
+            ..BehaviorSql::new(tx, behavior, prefix, mode, None)
         }
     }
 
@@ -427,6 +464,19 @@ impl<'t, 'db> BehaviorSql<'t, 'db> {
     pub fn instances(&self) -> Result<String> {
         self.definition()?;
         Ok(self.relation_name())
+    }
+
+    /// The SQL name of the relation over the schemas a namespace
+    /// operation may read, one row each, its column `schema` (D77). It
+    /// refuses anywhere else.
+    pub fn readable(&self) -> Result<String> {
+        if self.readable.is_none() {
+            return Err(Error::behavior(
+                self.behavior,
+                "sql.readable() is a namespace operation's: it names the schemas of the call's namespace that compose the behavior and that the principal may read",
+            ));
+        }
+        Ok(self.readable_name())
     }
 
     /// Runs one statement and returns its first row.
@@ -526,8 +576,22 @@ impl<'t, 'db> BehaviorSql<'t, 'db> {
     /// table the TypeScript engine creates, through the checker; on
     /// Postgres the engine writes its table, its generated vectors, their
     /// GIN index and its text search configuration itself, creating the
-    /// `unaccent` extension when the database lacks it.
+    /// `unaccent` extension when the database lacks it
+    /// ([`fulltext::Unaccent::Required`]).
     pub fn create_fulltext(&self, name: &str, columns: &[&str]) -> Result<()> {
+        self.create_fulltext_with(name, columns, fulltext::Unaccent::Required)
+    }
+
+    /// [`BehaviorSql::create_fulltext`], saying whether a Postgres index
+    /// needs `unaccent`: with [`fulltext::Unaccent::IfAvailable`] a
+    /// database that lacks it and refuses the engine its create gets an
+    /// index that folds case alone, and the migration goes on.
+    pub fn create_fulltext_with(
+        &self,
+        name: &str,
+        columns: &[&str],
+        unaccent: fulltext::Unaccent,
+    ) -> Result<()> {
         if self.mode != SqlMode::Migrate {
             return Err(Error::behavior(
                 self.behavior,
@@ -544,10 +608,51 @@ impl<'t, 'db> BehaviorSql<'t, 'db> {
                 self.run(fulltext::sqlite_create(&table, columns), &[])?;
             }
             Dialect::Postgres => {
-                let extension = self.unaccent_schema()?;
                 let config = fulltext::config_name(self.prefix, name);
-                for statement in fulltext::postgres_create(&table, &config, &extension, columns) {
-                    self.tx.exec(statement)?;
+                match unaccent {
+                    fulltext::Unaccent::Required => {
+                        let extension = self.unaccent_schema()?.map_err(|failure| {
+                            Error::behavior(
+                                self.behavior,
+                                format!(
+                                    "full-text search on Postgres needs the unaccent extension, which the database does not have and the engine could not create in schema {} ({failure}); have an administrator run CREATE EXTENSION unaccent",
+                                    fulltext::EXTENSION_SCHEMA,
+                                ),
+                            )
+                        })?;
+                        for statement in
+                            fulltext::postgres_create(&table, &config, &extension, columns)
+                        {
+                            self.tx.exec(statement)?;
+                        }
+                    }
+                    fulltext::Unaccent::IfAvailable => {
+                        self.tx.exec(fulltext::postgres_configuration(&config))?;
+                        // unaccent where the database has it or the engine
+                        // may create it, and the role may use it; else
+                        // simple alone. Each try in a savepoint, so a
+                        // refusal leaves the migration running. Only a
+                        // refusal falls back: any other error (a lock or
+                        // statement timeout, a lost connection) is the
+                        // migration's, and fails it, rather than leave an
+                        // index made without unaccent for good.
+                        let mapped = match self.unaccent_schema()? {
+                            Ok(extension) => match self.tx.savepoint(|tx| {
+                                tx.exec(fulltext::postgres_mapping(&config, Some(&extension)))
+                            }) {
+                                Ok(_) => true,
+                                Err(error) if fulltext::unaccent_unavailable(&error) => false,
+                                Err(error) => return Err(error),
+                            },
+                            Err(_) => false,
+                        };
+                        if !mapped {
+                            self.tx.exec(fulltext::postgres_mapping(&config, None))?;
+                        }
+                        for statement in fulltext::postgres_tables(&table, &config, columns) {
+                            self.tx.exec(statement)?;
+                        }
+                    }
                 }
             }
         }
@@ -569,10 +674,17 @@ impl<'t, 'db> BehaviorSql<'t, 'db> {
         let index = self.table(query.index)?;
         let keys = self.table(query.keys)?;
         let config = fulltext::config_name(self.prefix, query.index);
+        // A match kept to the readable schemas is a namespace operation's:
+        // readable() refuses anywhere else.
+        let readable = match query.readable {
+            Some(_) => Some(self.readable()?),
+            None => None,
+        };
         let names = fulltext::Names {
             index: &index,
             keys: &keys,
             config: &config,
+            readable: readable.as_deref(),
         };
         let expression = match dialect {
             Dialect::Sqlite => query.expression.to_owned(),
@@ -605,36 +717,38 @@ impl<'t, 'db> BehaviorSql<'t, 'db> {
     // in, created in fulltext::EXTENSION_SCHEMA when it has none. Each
     // create runs in a savepoint: another engine creating it at the same
     // moment fails it as a duplicate, and leaves it there.
-    fn unaccent_schema(&self) -> Result<String> {
+    // unaccent_schema is the schema `unaccent` lives in, created in
+    // EXTENSION_SCHEMA when the database lacks it; `Ok(Err(failure))` when
+    // the database refuses the engine its create
+    // (fulltext::unaccent_unavailable), and any other error the
+    // migration's.
+    fn unaccent_schema(&self) -> Result<std::result::Result<String, String>> {
         let found = |tx: &Tx<'_>| -> Result<Option<String>> {
             tx.get(fulltext::UNACCENT_SCHEMA, &[])?
                 .map(|row| row.text("schema").map(str::to_owned))
                 .transpose()
         };
         if let Some(schema) = found(self.tx)? {
-            return Ok(schema);
+            return Ok(Ok(schema));
         }
         let mut failure = None;
         for statement in fulltext::unaccent_create() {
             if let Err(error) = self.tx.savepoint(|tx| tx.exec(statement.as_str())) {
                 let duplicate = matches!(error.sqlstate(), Some("23505" | "42P06" | "42710"));
-                if !duplicate {
-                    failure = Some(error.to_string());
-                    break;
+                if duplicate {
+                    continue;
                 }
+                if !fulltext::unaccent_unavailable(&error) {
+                    return Err(error);
+                }
+                failure = Some(error.to_string());
+                break;
             }
         }
-        match (found(self.tx)?, failure) {
+        Ok(match (found(self.tx)?, failure) {
             (Some(schema), _) => Ok(schema),
-            (None, failure) => Err(Error::behavior(
-                self.behavior,
-                format!(
-                    "full-text search on Postgres needs the unaccent extension, which the database does not have and the engine could not create in schema {} ({}); have an administrator run CREATE EXTENSION unaccent",
-                    fulltext::EXTENSION_SCHEMA,
-                    failure.unwrap_or_else(|| "it is still missing".to_owned())
-                ),
-            )),
-        }
+            (None, failure) => Err(failure.unwrap_or_else(|| "it is still missing".to_owned())),
+        })
     }
 
     fn writable(&self) -> Result<()> {
@@ -651,6 +765,28 @@ impl<'t, 'db> BehaviorSql<'t, 'db> {
         identifier(self.dialect(), &relation_name(self.prefix)).into_owned()
     }
 
+    fn readable_name(&self) -> String {
+        identifier(self.dialect(), &readable_name(self.prefix)).into_owned()
+    }
+
+    // readable_definition is what follows `<readable> AS`: one row per
+    // schema, each a string literal, as the relation over the instances
+    // inlines its own; no row when the principal may read none.
+    fn readable_definition(&self, readable: &ReadableRelation<'_>) -> Result<String> {
+        let schemas = (readable.schemas)()?;
+        if schemas.is_empty() {
+            return Ok("(SELECT CAST(NULL AS TEXT) AS schema WHERE 1 = 0)".to_owned());
+        }
+        Ok(format!(
+            "({})",
+            schemas
+                .iter()
+                .map(|schema| format!("SELECT CAST({} AS TEXT) AS schema", sql_string(schema)))
+                .collect::<Vec<_>>()
+                .join(" UNION ALL ")
+        ))
+    }
+
     // prepare checks the behavior's statement and returns what runs: the
     // statement, with the relation's definition ahead of it when it names
     // the relation, once the access policy has allowed the read.
@@ -665,6 +801,13 @@ impl<'t, 'db> BehaviorSql<'t, 'db> {
                 format!("SQL refused: {refusal}: {shown}"),
             ));
         }
+        let readable = match self.readable {
+            None => None,
+            Some(readable) => with_relation(text, dialect, &self.readable_name(), || {
+                self.readable_definition(readable)
+            })?,
+        };
+        let text = readable.as_deref().unwrap_or(text);
         let Some(relation) = self.relation else {
             return Ok(text.to_owned());
         };

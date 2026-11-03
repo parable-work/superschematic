@@ -4,7 +4,9 @@
 //! grace@example.com, with the password below, then place an order, filter
 //! and cancel it at `/orders`, and write a review. A shopper sees their own
 //! orders alone; sign in as ada@example.com, staff, to see and cancel every
-//! customer's.
+//! customer's, and to keep the back office: the engine's types at
+//! `/console/engine`, its stock and collection points among them, and the
+//! users and roles at `/console/users` and `/console/roles`.
 //!
 //! With `DATABASE_URL` set, as superschematic-migrate reads it
 //! (`sqlite:shop.db`, a `file:` URI, or a path), the shop and its users are
@@ -32,7 +34,8 @@ use topcoat::asset::{AssetBundle, AssetConfig};
 /// The demo shopper's email, name and password.
 const SHOPPER: Person = ("grace@example.com", "Grace Hopper", "grace's password");
 
-/// The demo staff's, who read and cancel every customer's orders.
+/// The demo staff's, who read and cancel every customer's orders, and
+/// hold the back office's roles (`BACK_OFFICE_ROLES`).
 const STAFF: Person = ("ada@example.com", "Ada Lovelace", "ada's password");
 
 #[tokio::main]

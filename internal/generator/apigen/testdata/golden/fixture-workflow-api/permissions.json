@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "api": "fixture-workflow-api",
+  "permissions": [
+    {
+      "name": "orders.ship",
+      "identity": false,
+      "operations": [
+        "OrderStatusTransitionHandler"
+      ]
+    },
+    {
+      "name": "orders.write",
+      "identity": false,
+      "operations": [
+        "OrderStatusTransitionHandler"
+      ]
+    },
+    {
+      "name": "payments.refund",
+      "identity": false,
+      "operations": [
+        "ShipmentPaymentStatusTransitionHandler"
+      ]
+    }
+  ]
+}

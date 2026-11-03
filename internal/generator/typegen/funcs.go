@@ -350,6 +350,61 @@ func inputFieldValueType(goType string) string {
 	return strings.TrimSuffix(strings.TrimPrefix(goType, "InputField["), "]")
 }
 
+// digitRulesCheck is the Go that checks field's digit rules (D84) in
+// Validate, after the field's other checks, or "" for a field without any:
+// checkDecimalDigits on each decimal, checkVectorDimensions on each vector,
+// a single value or each element of a list, set or not as the field's Go
+// type says. A missing value is the required rule's, and a null element
+// the list's, so neither is counted.
+func digitRulesCheck(field FieldInfo) string {
+	d := field.Digits
+	if d == nil {
+		return ""
+	}
+	var check []string
+	if d.Decimal {
+		check = append(check, fmt.Sprintf("checkDecimalDigits(errors, key, string(value), %d, %d)", d.IntegerDigits, d.Scale))
+	}
+	if d.Dimensions > 0 {
+		check = append(check, fmt.Sprintf("if value != nil {\n\t\t\tcheckVectorDimensions(errors, key, len(value), %d)\n\t\t}", d.Dimensions))
+	}
+	goType := field.GoType
+	access := "t." + field.GoName
+	var b strings.Builder
+	fmt.Fprintf(&b, "\t// The digit rules of %s (D84).\n\t{\n", field.Name)
+	if field.UsesWrapper {
+		goType = inputFieldValueType(goType)
+		fmt.Fprintf(&b, "\tif %s.IsSet() && !%s.IsNull() {\n", access, access)
+		access += ".Value"
+	}
+	element := strings.TrimPrefix(goType, "[]")
+	list := element != goType
+	pointer := strings.HasPrefix(element, "*")
+	valueType := strings.TrimPrefix(element, "*")
+	fmt.Fprintf(&b, "\t\tcheck := func(key string, value %s) {\n\t\t\t%s\n\t\t}\n", valueType, strings.Join(check, "\n\t\t\t"))
+	deref := "item"
+	if pointer {
+		deref = "*item"
+	}
+	switch {
+	case list:
+		fmt.Fprintf(&b, "\t\tfor i, item := range %s {\n", access)
+		if pointer {
+			b.WriteString("\t\t\tif item == nil {\n\t\t\t\tcontinue\n\t\t\t}\n")
+		}
+		fmt.Fprintf(&b, "\t\t\tcheck(fmt.Sprintf(\"%s[%%d]\", i), %s)\n\t\t}\n", field.Name, deref)
+	case pointer:
+		fmt.Fprintf(&b, "\t\tif %s != nil {\n\t\t\tcheck(%q, *%s)\n\t\t}\n", access, field.Name, access)
+	default:
+		fmt.Fprintf(&b, "\t\tcheck(%q, %s)\n", field.Name, access)
+	}
+	if field.UsesWrapper {
+		b.WriteString("\t}\n")
+	}
+	b.WriteString("\t}")
+	return b.String()
+}
+
 // templateFuncs returns the typegen-specific template functions.
 func templateFuncs() template.FuncMap {
 	return template.FuncMap{
@@ -367,6 +422,7 @@ func templateFuncs() template.FuncMap {
 		"autoFilledField":             autoFilledField,
 		"scalarValidateCall":          scalarValidateCall,
 		"inputFieldValueType":         inputFieldValueType,
+		"digitRulesCheck":             digitRulesCheck,
 		"hasUnionFields": func(fields []FieldInfo) bool {
 			for _, f := range fields {
 				if f.IsUnion {

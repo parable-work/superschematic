@@ -36,6 +36,8 @@ const (
 //   - The IR, tools/schema.json, tools/mcp-audit.json and tools/index.ts
 //     write the policy under Key, and tools/index.ts types it as the union
 //     of Values in their order.
+//   - An API's MCP endpoint runs a tool whose value Confirms only once the
+//     person confirms the call (D93).
 type ToolInvocationPolicy struct {
 	// Extension is the registering extension's Name(); empty for the
 	// core's policy.
@@ -50,16 +52,32 @@ type ToolInvocationPolicy struct {
 	// Default is the value a visible tool gets when @mcp omits Key. It is
 	// one of Values.
 	Default string
+	// Confirm are the values whose tools an API's MCP endpoint runs only
+	// once the person confirms the call (D93), each one of Values: ask in
+	// the core's. Empty confirms every value but Default, which is the
+	// exception a tool's author opts into.
+	Confirm []string
 }
 
 // DefaultToolInvocationPolicy returns the core's policy: invocationPolicy,
-// auto or ask, auto by default.
+// auto or ask, auto by default, ask confirmed.
 func DefaultToolInvocationPolicy() ToolInvocationPolicy {
 	return ToolInvocationPolicy{
 		Key:     DefaultToolInvocationKey,
 		Values:  []string{ToolInvocationAuto, ToolInvocationAsk},
 		Default: ToolInvocationAuto,
+		Confirm: []string{ToolInvocationAsk},
 	}
+}
+
+// Confirms reports whether an API's MCP endpoint runs a tool whose policy
+// is value only once the person confirms the call (D93): value is one of
+// Confirm, or, with Confirm empty, one of Values other than Default.
+func (p ToolInvocationPolicy) Confirms(value string) bool {
+	if len(p.Confirm) > 0 {
+		return slices.Contains(p.Confirm, value)
+	}
+	return value != p.Default && slices.Contains(p.Values, value)
 }
 
 var toolInvocationValuePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
@@ -83,6 +101,14 @@ func (p ToolInvocationPolicy) Validate() error {
 	}
 	if !slices.Contains(p.Values, p.Default) {
 		return fmt.Errorf("invocation policy %s default %q is not one of %s", p.Key, p.Default, p.QuotedValues())
+	}
+	for i, value := range p.Confirm {
+		if !slices.Contains(p.Values, value) {
+			return fmt.Errorf("invocation policy %s confirms %q, which is not one of %s", p.Key, value, p.QuotedValues())
+		}
+		if slices.Contains(p.Confirm[:i], value) {
+			return fmt.Errorf("invocation policy %s confirms %q twice", p.Key, value)
+		}
 	}
 	return nil
 }

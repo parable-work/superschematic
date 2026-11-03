@@ -254,8 +254,20 @@
       "methodName": "listUsers",
       "isScoped": false,
       "arguments": [
+        {
+          "toolParameter": "pending",
+          "required": false,
+          "kind": "scalar",
+          "target": "input.pending"
+        }
       ],
       "methodArgs": [
+        {
+          "position": 0,
+          "kind": "scalar",
+          "target": "input",
+          "sources": ["pending"]
+        }
       ]
     },
     {
@@ -298,6 +310,29 @@
       "apiId": "fixture-user-routes-api",
       "namespace": "account-admin",
       "methodName": "getUser",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        }
+      ]
+    },
+    {
+      "toolName": "account-admin.approveUser",
+      "apiId": "fixture-user-routes-api",
+      "namespace": "account-admin",
+      "methodName": "approveUser",
       "isScoped": false,
       "arguments": [
         {

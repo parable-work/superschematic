@@ -25,12 +25,17 @@ type ProjectionView struct {
 
 	// Pool and Name address the view as pool.name; it is created as
 	// "pool"."name", so the name a reader writes and the stored name match.
+	// A view without a pool (D90) is created beside the tables: its
+	// QuotedPool is empty, and its Relation its name alone. Schema is the
+	// Postgres schema it is created in, which a migration plan names: the
+	// pool, else outputs.sql.sourceSchema, else none, the search_path's.
 	Pool          string
 	Name          string
 	QuotedPool    string
 	QuotedName    string
 	Relation      string
 	QualifiedView string
+	Schema        string
 
 	// Migration is the version stamp; the file names derive from it, so a
 	// changed projection is always a new migration.
@@ -112,18 +117,15 @@ type ProjectionJoinClause struct {
 	On          string
 }
 
-// lookupEnum finds an enum by name in the schema or any dependency schema:
+// lookupEnum finds an enum by name in the schema or a dependency schema:
 // an enum a DB schema references often lives in a shared General schema,
-// which the loader does not merge into schema.Enums.
+// which the loader does not merge into schema.Enums. It is the first of
+// ir.LookupScopes that declares it: the schema, the dependency it imports
+// name from, then the others by service name, never in the order of a map
+// walk (D94).
 func lookupEnum(schema *ir.Schema, deps map[string]*ir.Schema, name string) *ir.EnumDef {
-	if enum := schema.Enums[name]; enum != nil {
-		return enum
-	}
-	for _, dep := range deps {
-		if dep == nil {
-			continue
-		}
-		if enum := dep.Enums[name]; enum != nil {
+	for _, scope := range ir.LookupScopes(schema, deps, name) {
+		if enum := scope.Schema.Enums[name]; enum != nil {
 			return enum
 		}
 	}
@@ -177,7 +179,7 @@ func (a *projectionAliases) column(ref string) (alias string, col *Column, err e
 	if table == nil {
 		return "", nil, fmt.Errorf("%q names unknown alias %q", ref, alias)
 	}
-	col = findIndexColumn(table.Columns, field)
+	col = fieldColumn(table, field)
 	if col == nil {
 		return "", nil, fmt.Errorf("%q: table %s has no column for field %q", ref, table.Name, field)
 	}
@@ -242,6 +244,10 @@ func buildProjection(schema *ir.Schema, deps map[string]*ir.Schema, td *ir.TypeD
 		return ProjectionView{}, fmt.Errorf("no @projection declaration")
 	}
 	for _, part := range []struct{ key, value string }{{"pool", def.Pool}, {"name", def.Name}} {
+		if part.key == "pool" && part.value == "" {
+			// A view without a pool is created beside the tables (D90).
+			continue
+		}
 		if !projectionIdentifierPattern.MatchString(part.value) {
 			return ProjectionView{}, fmt.Errorf("%s %q is not a snake_case SQL identifier", part.key, part.value)
 		}
@@ -265,16 +271,22 @@ func buildProjection(schema *ir.Schema, deps map[string]*ir.Schema, td *ir.TypeD
 		Doc:             codegen.DocText(td.Description, td.Comment),
 		Pool:            def.Pool,
 		Name:            def.Name,
-		QuotedPool:      sqlutil.QuoteIdentifier(def.Pool),
 		QuotedName:      sqlutil.QuoteIdentifier(def.Name),
-		Relation:        def.Pool + "." + def.Name,
+		Relation:        def.Relation(),
 		Migration:       def.Migration,
-		UpFileName:      fmt.Sprintf("%s_%s_%s_projection.up.sql", def.Migration, def.Pool, def.Name),
-		DownFileName:    fmt.Sprintf("%s_%s_%s_projection.down.sql", def.Migration, def.Pool, def.Name),
+		UpFileName:      fmt.Sprintf("%s_%s_projection.up.sql", def.Migration, strings.ReplaceAll(def.Relation(), ".", "_")),
+		DownFileName:    fmt.Sprintf("%s_%s_projection.down.sql", def.Migration, strings.ReplaceAll(def.Relation(), ".", "_")),
 		QuotedBaseTable: base.QuotedName,
 		QuotedBaseAlias: sqlutil.QuoteIdentifier(ir.ProjectionBaseAlias),
 	}
-	view.QualifiedView = view.QuotedPool + "." + view.QuotedName
+	// A view without a pool is created beside the tables, in the
+	// search_path's schema, or in sourceSchema's when it is set (D90).
+	view.QualifiedView = view.QuotedName
+	if def.Pool != "" {
+		view.Schema = def.Pool
+		view.QuotedPool = sqlutil.QuoteIdentifier(def.Pool)
+		view.QualifiedView = view.QuotedPool + "." + view.QuotedName
+	}
 
 	for _, j := range def.Joins {
 		if !projectionIdentifierPattern.MatchString(j.Alias) || j.Alias == ir.ProjectionBaseAlias || aliases.tables[j.Alias] != nil {
@@ -350,7 +362,7 @@ func buildProjection(schema *ir.Schema, deps map[string]*ir.Schema, td *ir.TypeD
 			expr, selfNamed = resolved, col.Name == name
 			nullable = nullable || col.Nullable || viaLeftJoin
 		}
-		colType := sqlutil.ColumnType(fd, scalarMapping)
+		colType := sqlutil.ColumnType(schema, fd, scalarMapping)
 		arrow, err := arrowDataType(colType)
 		if err != nil {
 			return view, fmt.Errorf("column %s: %w", name, err)
@@ -821,7 +833,7 @@ func ArrowSchemaJSON(schema *ir.Schema, schemaName string, view ProjectionView, 
 			keys.ProjectionPool:      view.Pool,
 			keys.ProjectionName:      view.Name,
 			keys.ProjectionRelation:  view.Relation,
-			keys.ProjectionView:      view.Pool + "." + view.Name,
+			keys.ProjectionView:      view.Relation,
 			keys.ProjectionSchema:    schemaName,
 			keys.ProjectionType:      view.TypeName,
 			keys.ProjectionMigration: view.Migration,
@@ -892,7 +904,7 @@ func DocsJSON(schemaName string, view ProjectionView) ([]byte, error) {
 		Schema:           schemaName,
 		Owner:            view.Owner,
 		Description:      oneLine(view.Doc),
-		View:             view.Pool + "." + view.Name,
+		View:             view.Relation,
 		Migration:        view.Migration,
 		Settings:         append([]string{}, view.Settings...),
 		OptionalSettings: append([]string{}, view.OptionalSettings...),

@@ -2,7 +2,8 @@
 //! `docs/stack-model.md`), the twin of the Go runtime's `stackconfig`
 //! package and of the TypeScript runtime's readers (D57): a database
 //! connection for the API's database, a service endpoint for each API it
-//! calls, a bucket connection for each bucket it lists (D54), for an API
+//! calls, a bucket connection for each bucket it lists (D54), a memory
+//! store connection for each memory store it uses (D75), for an API
 //! with a service clause its callers field, what its server verifies a
 //! service credential against, and for an API a site calls its CORS field
 //! (D55). The generated `config.rs` and entrypoint read each from the
@@ -10,6 +11,7 @@
 //! edges' connectors derived: the field's name, an underscore and the
 //! member's path in upper snake case (`SHOP_DB_DATABASE_URL`,
 //! `SHOP_API_SERVICE_CREDENTIAL_SOURCE`, `SHOP_MEDIA_BUCKET_NAME`,
+//! `SHOP_CACHE_MEMORY_STORE_URL`,
 //! `SHOP_API_CALLERS_ISSUERS_0_AUDIENCE`, `SHOP_API_CORS_ORIGINS`).
 //!
 //! | Reader | Variables | Value |
@@ -17,6 +19,7 @@
 //! | [`load_database`] | `<field>_URL`, or `<field>_CLOUD_SQL_INSTANCE`, `_DATABASE` and `_USER` | [`Database`] |
 //! | [`load_service`] | `<field>_URL`, and `<field>_CREDENTIAL_SOURCE`, `_AUDIENCE`, `_TOKEN_FILE`, `_ISSUER`, `_KEY` and `_HEADERS` | [`Service`] |
 //! | [`load_bucket`] | `<field>_NAME` and `<field>_ENDPOINT` | [`Bucket`] |
+//! | [`load_memory_store`] | `<field>_STORE`, `_URL`, `_AUTH`, `_CA` and `_MEMBER` | [`MemoryStore`], `None` when none is set |
 //! | [`load_callers`] | `<field>_ISSUERS` and the members of each issuer under its index | [`crate::ServiceAuthConfig`] |
 //! | [`load_cors`] | `<field>_ORIGINS` | [`Cors`] |
 //!
@@ -33,7 +36,9 @@
 //!
 //! The members a Worker alone reads (D64) are refused, with a message that
 //! says so: a database's D1 binding (`<field>_D1_BINDING`,
-//! `<field>_D1_DATABASE`), a service's binding (`<field>_BINDING_NAME`,
+//! `<field>_D1_DATABASE`) and Hyperdrive binding
+//! (`<field>_HYPERDRIVE_BINDING`, `<field>_HYPERDRIVE_CONFIG`, D92), a
+//! service's binding (`<field>_BINDING_NAME`,
 //! `<field>_BINDING_WORKER`), and a bucket's R2 binding and credential
 //! (`<field>_BINDING`, `<field>_R2_ACCOUNT`, `<field>_R2_ACCESS_KEY_ID`,
 //! `<field>_R2_TOKEN`, `<field>_R2_JURISDICTION`). The TypeScript runtime reads them for its Workers
@@ -260,6 +265,68 @@ pub struct Bucket {
     pub endpoint: Option<String>,
 }
 
+/// A memory store connection: how the server, a job or a worker reaches a
+/// memory store an API it serves uses (D75). It holds no credential: with
+/// [`MemoryStoreAuth::Iam`] the client sends the workload's access token.
+/// [`load_memory_store`] gives `None` for a field none of whose variables
+/// is set, a disabled store.
+#[derive(Clone, PartialEq, Eq)]
+pub struct MemoryStore {
+    /// The MemoryStore service's name, the first segment of every name the
+    /// store holds for it.
+    pub store: String,
+    /// The server's `redis://` or `rediss://` URL.
+    pub url: String,
+    /// How the client authenticates.
+    pub auth: MemoryStoreAuth,
+    /// The PEM of the CA a `rediss://` server is verified against; `None`
+    /// verifies it against the system's roots.
+    pub ca: Option<String>,
+    /// The member's name in a member of a parameterized environment, which
+    /// prefixes the store's names `<store>@<member>`.
+    pub member: Option<String>,
+}
+
+impl MemoryStore {
+    /// Whether the URL is `rediss://`.
+    pub fn tls(&self) -> bool {
+        self.url.starts_with("rediss://")
+    }
+}
+
+/// The URL is left out: it names the server, which no log holds.
+impl fmt::Debug for MemoryStore {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MemoryStore")
+            .field("store", &self.store)
+            .field("url", &"<redacted>")
+            .field("auth", &self.auth)
+            .field("ca", &self.ca.as_ref().map(|_| "<pem>"))
+            .field("member", &self.member)
+            .finish()
+    }
+}
+
+/// How a memory store's client authenticates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MemoryStoreAuth {
+    /// The workload's OAuth access token as the password of user
+    /// `default`, on each new connection; it needs `rediss://`.
+    Iam,
+    /// No credential.
+    None,
+}
+
+impl MemoryStoreAuth {
+    /// The authentication as the field's `<field>_AUTH` spells it.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MemoryStoreAuth::Iam => "iam",
+            MemoryStoreAuth::None => "none",
+        }
+    }
+}
+
 /// The variables a reader reads: the process's environment, or a map.
 pub(crate) trait Vars {
     /// A variable's value, `None` when it is unset.
@@ -322,8 +389,8 @@ pub(crate) fn quote(value: &str) -> String {
 
 /// Reads the database field named `field` from the environment:
 /// `<field>_URL`, or the three `<field>_CLOUD_SQL_` variables. Refuses
-/// neither, both, and only some of the three, and a D1 binding, which only
-/// a Worker reads.
+/// neither, both, and only some of the three, and a D1 or a Hyperdrive
+/// binding, which only a Worker reads.
 pub fn load_database(field: &str) -> Result<Database, StackConfigError> {
     read_database(field, &process_vars(field)?)
 }
@@ -363,6 +430,14 @@ fn read_database(field: &str, vars: &impl Vars) -> Result<Database, StackConfigE
         &[
             format!("{field}_D1_BINDING"),
             format!("{field}_D1_DATABASE"),
+        ],
+    )?;
+    worker_only(
+        vars,
+        "a Hyperdrive binding",
+        &[
+            format!("{field}_HYPERDRIVE_BINDING"),
+            format!("{field}_HYPERDRIVE_CONFIG"),
         ],
     )?;
     let url = vars.get(&format!("{field}_URL"));
@@ -578,6 +653,138 @@ fn read_bucket(field: &str, vars: &impl Vars) -> Result<Bucket, StackConfigError
         name: name.to_string(),
         endpoint: (!endpoint.is_empty()).then(|| endpoint.trim_end_matches('/').to_string()),
     })
+}
+
+/// Reads the memory store field named `field` from the environment:
+/// `<field>_STORE`, `<field>_URL` and `<field>_AUTH`, and `<field>_CA` and
+/// `<field>_MEMBER` when set (D75). `Ok(None)` when none of them is set: a
+/// disabled store. Refuses a required variable that is not set, a store or
+/// a member that is no segment, a URL that is no `redis://` or
+/// `rediss://` URL with a host and no user or password, a CA with
+/// `redis://` or one that holds no PEM certificate, and an authentication
+/// other than `iam` and `none`, or `iam` with `redis://`. No message holds
+/// the URL or the CA.
+pub fn load_memory_store(field: &str) -> Result<Option<MemoryStore>, StackConfigError> {
+    read_memory_store(field, &process_vars(field)?)
+}
+
+/// [`load_memory_store`] over `vars` in place of the environment.
+pub fn load_memory_store_from(
+    field: &str,
+    vars: &HashMap<String, String>,
+) -> Result<Option<MemoryStore>, StackConfigError> {
+    read_memory_store(field, vars)
+}
+
+fn read_memory_store(
+    field: &str,
+    vars: &impl Vars,
+) -> Result<Option<MemoryStore>, StackConfigError> {
+    let store = vars.get(&format!("{field}_STORE"));
+    let url = vars.get(&format!("{field}_URL"));
+    let ca = vars.get(&format!("{field}_CA"));
+    let auth = vars.get(&format!("{field}_AUTH"));
+    let member = vars.get(&format!("{field}_MEMBER"));
+    if [store, url, ca, auth, member].iter().all(|v| v.is_empty()) {
+        return Ok(None);
+    }
+    let mut problems = Vec::new();
+    for (name, value) in [("STORE", store), ("URL", url), ("AUTH", auth)] {
+        if value.is_empty() {
+            problems.push(format!(
+                "required environment variable {field}_{name} is not set: a memory store connection sets STORE, URL and AUTH, or none of its variables for a disabled store"
+            ));
+        }
+    }
+    let segment = "want one segment: 1 to 128 bytes, with no : * ? [ ] @ \\ or control character";
+    if !store.is_empty() && !is_memory_store_segment(store) {
+        problems.push(format!(
+            "environment variable {field}_STORE is {}; {segment}",
+            quote(store)
+        ));
+    }
+    if !member.is_empty() && !is_memory_store_segment(member) {
+        problems.push(format!(
+            "environment variable {field}_MEMBER is {}; {segment}",
+            quote(member)
+        ));
+    }
+    if !url.is_empty() && !is_memory_store_url(url) {
+        problems.push(format!(
+            "environment variable {field}_URL is no redis:// or rediss:// URL with a host and no user or password"
+        ));
+    }
+    let tls = url.starts_with("rediss://");
+    if !ca.is_empty() {
+        if url.starts_with("redis://") {
+            problems.push(format!(
+                "environment variable {field}_CA is set with a redis:// URL; a CA verifies a rediss:// server"
+            ));
+        } else if !ca.contains("-----BEGIN CERTIFICATE-----") {
+            problems.push(format!(
+                "environment variable {field}_CA holds no PEM certificate"
+            ));
+        }
+    }
+    let parsed = match auth {
+        "iam" => {
+            if !url.is_empty() && !tls {
+                problems.push(format!(
+                    "environment variable {field}_AUTH is iam with a redis:// URL; an access token travels only over rediss://"
+                ));
+            }
+            MemoryStoreAuth::Iam
+        }
+        "none" | "" => MemoryStoreAuth::None,
+        other => {
+            problems.push(format!(
+                "environment variable {field}_AUTH is {}; want iam or none",
+                quote(other)
+            ));
+            MemoryStoreAuth::None
+        }
+    };
+    if !problems.is_empty() {
+        return Err(StackConfigError::new(problems));
+    }
+    Ok(Some(MemoryStore {
+        store: store.to_string(),
+        url: url.to_string(),
+        auth: parsed,
+        ca: (!ca.is_empty()).then(|| ca.to_string()),
+        member: (!member.is_empty()).then(|| member.to_string()),
+    }))
+}
+
+/// Whether `s` is one segment of a memory store's names (D75): 1 to 128
+/// bytes, none of them a control byte or one of `:` `*` `?` `[` `]` `@`
+/// `\`.
+fn is_memory_store_segment(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 128
+        && s.bytes()
+            .all(|b| b >= 0x20 && b != 0x7f && !b":*?[]@\\".contains(&b))
+}
+
+/// Whether `url` is as Go's `^rediss?://[^/?#@\t\n\f\r ]+(/[0-9]*)?$`
+/// reads one: redis or rediss, a host with no user or password, and a
+/// database number at most.
+fn is_memory_store_url(url: &str) -> bool {
+    let Some(rest) = url
+        .strip_prefix("redis://")
+        .or_else(|| url.strip_prefix("rediss://"))
+    else {
+        return false;
+    };
+    let (host, path) = match rest.find('/') {
+        Some(i) => (&rest[..i], Some(&rest[i + 1..])),
+        None => (rest, None),
+    };
+    !host.is_empty()
+        && !host
+            .chars()
+            .any(|c| matches!(c, '?' | '#' | '@' | '\t' | '\n' | '\x0c' | '\r' | ' '))
+        && path.is_none_or(|p| p.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// Whether `endpoint` begins as Go's `^https?://[^/?#]+` does: an http or

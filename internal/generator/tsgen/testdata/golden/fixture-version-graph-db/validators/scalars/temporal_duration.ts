@@ -4,6 +4,12 @@ import type { ScalarValidationResult, ValidationError } from 'superscalar/valida
 
 import { validateTemporalDuration as validateTemporalDurationFromLib, normalizeTemporalDuration as normalizeTemporalDurationFromLib, parseTemporalDuration as parseTemporalDurationFromLib } from 'superscalar/scalars';
 
+// The constructors of TemporalDuration, the scalar library's own, which the
+// package hands out beside the type: each returns the value as
+// TemporalDuration and throws on a value Temporal.Duration refuses (D25,
+// amended; D100).
+export { parseTemporalDurationStrict, normalizeTemporalDurationStrict } from 'superscalar/scalars';
+
 const TemporalDurationPattern = new RegExp("^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$", "u");
 
 /**

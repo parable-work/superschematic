@@ -134,6 +134,12 @@ pub struct QueueField {
     /// The column holds the value as JSON.
     #[serde(default)]
     pub json: bool,
+    /// The kind of JSON value a JSON column holds for the member's type,
+    /// `object` or `list`, or none for a JSON scalar. The message's Rust
+    /// type holds a claimed row to it, so this only says what the
+    /// descriptor says.
+    #[serde(default)]
+    pub shape: Option<String>,
     /// The column holds a list as a Postgres array.
     #[serde(default)]
     pub list: bool,
@@ -175,6 +181,11 @@ pub struct QueueField {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct QueueStatements {
     pub insert: String,
+    /// Ends an enqueue on a queue that keeps one ready message per key
+    /// (D80): what it does when a ready message holds the message's key,
+    /// which replaces that message or keeps it. Empty for other queues.
+    #[serde(default)]
+    pub conflict: String,
     pub expire: String,
     pub claim: String,
     pub complete: String,
@@ -317,6 +328,29 @@ pub struct Claim<M> {
     pub message: M,
 }
 
+/// What an enqueue ends with after its VALUES: a space and the queue's
+/// conflict clause, or nothing (D80).
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+fn conflict_of(statements: &QueueStatements) -> String {
+    if statements.conflict.is_empty() {
+        String::new()
+    } else {
+        format!(" {}", statements.conflict)
+    }
+}
+
+#[cfg(feature = "postgres")]
+/// Whether `err` is the unique violation of a queue's index of claimed or
+/// of ready messages by key (D80): a claim on a queue that holds one claim
+/// per key meets it when another worker's claim of the key commits first,
+/// and a fail or a release on a queue that keeps one ready message per key
+/// when a concurrent enqueue of the key does. The claim then takes nothing,
+/// and the fail or the release runs once more, when the ready message it
+/// sees takes its place, as the Go ORM's and TypeScript's do.
+fn key_held(err: &tokio_postgres::Error) -> bool {
+    err.code() == Some(&tokio_postgres::error::SqlState::UNIQUE_VIOLATION)
+}
+
 /// Whether a message leaves a member unset: absent or null, or an enum
 /// with a default set to the empty string, as Go reads its zero value.
 fn unset(value: Option<&Value>, field: &QueueField) -> bool {
@@ -376,10 +410,11 @@ where
             .collect();
         let placeholders: Vec<String> = (1..=fields.len()).map(|i| format!("${i}")).collect();
         format!(
-            "{} ({}) VALUES ({})",
+            "{} ({}) VALUES ({}){}",
             queue.statements.insert,
             columns.join(", "),
-            placeholders.join(", ")
+            placeholders.join(", "),
+            conflict_of(&queue.statements)
         )
     };
     let statement = client
@@ -490,10 +525,14 @@ impl<M: DeserializeOwned> PostgresQueue<M> {
             .prepare_cached(&statements.claim)
             .await
             .map_err(|err| QueueError::failed(&context, &err))?;
-        let rows = client
+        let rows = match client
             .query(&claim, &[&Text::of(n), &Text::of(lease.as_secs_f64())])
             .await
-            .map_err(|err| QueueError::failed(&context, &err))?;
+        {
+            Ok(rows) => rows,
+            Err(err) if key_held(&err) => return Ok(Vec::new()),
+            Err(err) => return Err(QueueError::failed(&context, &err)),
+        };
         drop(client);
         let mut claims = Vec::with_capacity(rows.len());
         for row in &rows {
@@ -583,10 +622,11 @@ impl<M: DeserializeOwned> PostgresQueue<M> {
         ];
         let refs: Vec<&(dyn ToSql + Sync)> =
             params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
-        let row = client
-            .query_opt(&statement, &refs)
-            .await
-            .map_err(|err| QueueError::failed(&context, &err))?;
+        let row = match client.query_opt(&statement, &refs).await {
+            Err(err) if key_held(&err) => client.query_opt(&statement, &refs).await,
+            result => result,
+        }
+        .map_err(|err| QueueError::failed(&context, &err))?;
         let Some(row) = row else {
             return Err(QueueError::ClaimLost(format!("{context}: {CLAIM_LOST}")));
         };
@@ -668,10 +708,11 @@ impl<M: DeserializeOwned> PostgresQueue<M> {
             .collect();
         let refs: Vec<&(dyn ToSql + Sync)> =
             params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
-        let changed = client
-            .execute(&statement, &refs)
-            .await
-            .map_err(|err| QueueError::failed(&context, &err))?;
+        let changed = match client.execute(&statement, &refs).await {
+            Err(err) if key_held(&err) => client.execute(&statement, &refs).await,
+            result => result,
+        }
+        .map_err(|err| QueueError::failed(&context, &err))?;
         if changed == 0 {
             return Err(QueueError::ClaimLost(format!("{context}: {CLAIM_LOST}")));
         }
@@ -694,7 +735,7 @@ mod tests {
         "fields": [
             { "name": "sentAt", "column": "sent_at" },
             { "name": "priority", "column": "priority", "default": "low" },
-            { "name": "shipTo", "column": "ship_to", "json": true },
+            { "name": "shipTo", "column": "ship_to", "json": true, "shape": "object" },
             { "name": "tags", "column": "tags", "list": true },
             { "name": "dropAt", "column": "drop_at", "point": true },
             { "name": "wait", "column": "wait", "interval": true }
@@ -731,6 +772,7 @@ mod tests {
                     name: "sentAt".into(),
                     column: "sent_at".into(),
                     json: false,
+                    shape: None,
                     list: false,
                     default: None,
                     point: false,
@@ -743,6 +785,7 @@ mod tests {
                     name: "priority".into(),
                     column: "priority".into(),
                     json: false,
+                    shape: None,
                     list: false,
                     default: Some("low".into()),
                     point: false,
@@ -755,6 +798,7 @@ mod tests {
                     name: "shipTo".into(),
                     column: "ship_to".into(),
                     json: true,
+                    shape: Some("object".into()),
                     list: false,
                     default: None,
                     point: false,
@@ -767,6 +811,7 @@ mod tests {
                     name: "tags".into(),
                     column: "tags".into(),
                     json: false,
+                    shape: None,
                     list: true,
                     default: None,
                     point: false,
@@ -779,6 +824,7 @@ mod tests {
                     name: "dropAt".into(),
                     column: "drop_at".into(),
                     json: false,
+                    shape: None,
                     list: false,
                     default: None,
                     point: true,
@@ -791,6 +837,7 @@ mod tests {
                     name: "wait".into(),
                     column: "wait".into(),
                     json: false,
+                    shape: None,
                     list: false,
                     default: None,
                     point: false,
@@ -854,5 +901,27 @@ mod tests {
         assert!(unset(Some(&Value::from("")), with_default));
         assert!(!unset(Some(&Value::from("high")), with_default));
         assert!(!unset(Some(&Value::from(false)), plain));
+    }
+
+    #[cfg(any(feature = "postgres", feature = "sqlite"))]
+    #[test]
+    fn an_enqueue_ends_with_the_conflict_a_keyed_queue_carries() {
+        let mut def = QueueDefinition::parse(DESCRIPTOR).unwrap();
+        assert_eq!(def.statements.conflict, "");
+        assert_eq!(conflict_of(&def.statements), "");
+        def.statements.conflict =
+            "ON CONFLICT (sent_at) WHERE state = 'ready' DO NOTHING".to_string();
+        assert_eq!(
+            conflict_of(&def.statements),
+            " ON CONFLICT (sent_at) WHERE state = 'ready' DO NOTHING"
+        );
+        let keyed = DESCRIPTOR.replace(
+            r#""insert": "INSERT INTO ping_queue","#,
+            r#""insert": "INSERT INTO ping_queue", "conflict": "ON CONFLICT (sent_at) WHERE state = 'ready' DO NOTHING","#,
+        );
+        assert_eq!(
+            QueueDefinition::parse(&keyed).unwrap().statements.conflict,
+            "ON CONFLICT (sent_at) WHERE state = 'ready' DO NOTHING"
+        );
     }
 }

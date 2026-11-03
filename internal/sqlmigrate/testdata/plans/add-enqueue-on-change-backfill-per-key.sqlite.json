@@ -1,0 +1,30 @@
+{
+  "dialect": "sqlite",
+  "from": "428780561e9ddc045c2e9121781f90e326165ff2a2fc13637f475835f335a4e4",
+  "hash": "7b929f0ba40d5c7cadc49f8fdf91411f0ff4d8d755d6f1e4211576b9636829bc",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "blocking",
+          "id": "blocking:trigger/order/trg_order_enqueue_customer_ordered_insert",
+          "reason": "Backfilling trg_order_enqueue_customer_ordered_insert enqueues a message for every row of order that meets its conditions while the new trigger's lock blocks writes to order; for a large table, add the trigger without backfill and run stack queue backfill.",
+          "subject": "trigger/order/trg_order_enqueue_customer_ordered_insert"
+        }
+      ],
+      "index": 1,
+      "op": "createTrigger",
+      "phase": "expand",
+      "statements": [
+        "CREATE TRIGGER \"trg_order_enqueue_customer_ordered_insert\" AFTER INSERT ON \"order\" FOR EACH ROW\nBEGIN\n  INSERT INTO \"customer_ordered_queue\" (\"customer_id\", \"note\") VALUES (NEW.\"customer_id\", NEW.\"note\")\n    ON CONFLICT (customer_id) WHERE state = 'ready' DO UPDATE SET note = excluded.note, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now');\nEND",
+        "INSERT INTO \"customer_ordered_queue\" (\"customer_id\", \"note\")\nSELECT src.\"customer_id\", src.\"note\"\nFROM \"order\" AS src\nWHERE 1\nON CONFLICT (customer_id) WHERE state = 'ready' DO UPDATE SET note = excluded.note, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
+      ],
+      "subject": "trigger/order/trg_order_enqueue_customer_ordered_insert",
+      "transactional": true
+    }
+  ],
+  "to": "9e697aa053b3c1aa881cf4515a2834c2f2487d25e599f0e456b147caf855bdc7",
+  "toModel": null,
+  "version": 1
+}

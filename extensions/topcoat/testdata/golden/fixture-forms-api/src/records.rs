@@ -157,6 +157,9 @@ pub struct BookingInputRecord {
     pub requests: Option<String>,
     pub preferences: Option<String>,
     pub labels: Option<Vec<(String, String)>>,
+    pub deposit: Option<i64>,
+    pub tip: Option<i64>,
+    pub extra_charge: Option<i64>,
 }
 
 impl BookingInputRecord {
@@ -174,6 +177,9 @@ impl BookingInputRecord {
             requests: wire::optional(&json["requests"], wire::string),
             preferences: wire::optional(&json["preferences"], wire::json_text),
             labels: wire::optional(&json["labels"], |v| wire::entries(v, wire::string)),
+            deposit: wire::optional(&json["deposit"], wire::integer),
+            tip: wire::optional(&json["tip"], wire::integer),
+            extra_charge: wire::optional(&json["extraCharge"], wire::integer),
         }
     }
 
@@ -206,6 +212,15 @@ impl BookingInputRecord {
         }
         if let Some(value) = &self.labels {
             json.insert("labels".to_owned(), wire::put_entries(value, wire::put_string));
+        }
+        if let Some(value) = &self.deposit {
+            json.insert("deposit".to_owned(), wire::put_integer(value));
+        }
+        if let Some(value) = &self.tip {
+            json.insert("tip".to_owned(), wire::put_integer(value));
+        }
+        if let Some(value) = &self.extra_charge {
+            json.insert("extraCharge".to_owned(), wire::put_integer(value));
         }
         serde_json::Value::Object(json)
     }

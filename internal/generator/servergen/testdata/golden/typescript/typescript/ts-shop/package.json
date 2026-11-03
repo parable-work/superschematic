@@ -13,6 +13,7 @@
     "@schemas/ts-shop-api": "workspace:*",
     "@schemas/ts-shop-types": "workspace:*",
     "@schemas/ts-db-types": "workspace:*",
+    "@schemas/ts-cache-types": "workspace:*",
     "@superschematic/http-runtime": "*"
   },
   "devDependencies": {

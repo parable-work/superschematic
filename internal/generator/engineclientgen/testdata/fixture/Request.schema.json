@@ -1,0 +1,47 @@
+{
+  "kind": "General",
+  "name": "Request",
+  "description": "A request whose category and summary a model fills (D73): a model outside the engine fills its category and summary from its subject and body, while it is new or in triage; a category under 0.8 confidence waits in review, and the request moves to assigned only once its category is reviewed.",
+  "types": {
+    "Request": {
+      "name": "Request",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        {
+          "name": "Workflow",
+          "config": {
+            "states": ["new", "triage", "assigned"],
+            "transitions": [
+              { "from": "new", "to": "triage" },
+              { "from": "new", "to": "assigned" },
+              { "from": "triage", "to": "assigned" }
+            ]
+          }
+        },
+        {
+          "name": "Derived",
+          "config": {
+            "fields": {
+              "category": { "from": ["subject", "body"], "instruction": "Classify the request.", "model": "standard", "states": ["new", "triage"] },
+              "summary": { "from": ["body"], "instruction": "Summarize it in one sentence.", "model": "simple" }
+            },
+            "permission": "requests.derive"
+          }
+        },
+        {
+          "name": "Provenance",
+          "config": {
+            "review": { "sources": ["Derived"], "below": 0.8, "permission": "requests.review" },
+            "gates": { "assigned": { "reviewed": ["category"] } }
+          }
+        }
+      ],
+      "fields": [
+        { "name": "subject", "typeRef": { "name": "string" }, "required": true },
+        { "name": "body", "typeRef": { "name": "string" } },
+        { "name": "category", "typeRef": { "name": "string" } },
+        { "name": "summary", "typeRef": { "name": "string" } }
+      ]
+    }
+  }
+}

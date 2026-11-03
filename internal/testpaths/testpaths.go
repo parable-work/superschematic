@@ -62,6 +62,7 @@ func Local(t *testing.T) naming.LocalPaths {
 		SchemaRuntimeGo:        filepath.Join(root, "runtime", "schema", "go"),
 		SchemaRuntimeRust:      filepath.Join(root, "runtime", "schema", "rust"),
 		VersionGraphGo:         filepath.Join(root, "runtime", "versiongraph", "go"),
+		RulesGo:                filepath.Join(root, "runtime", "rules", "go"),
 		VersionGraphTypeScript: filepath.Join(root, "runtime", "versiongraph", "typescript"),
 		VersionGraphRust:       filepath.Join(root, "runtime", "versiongraph", "rust-engine"),
 		EngineRust:             filepath.Join(root, "runtime", "engine", "rust", "engine"),
@@ -70,12 +71,15 @@ func Local(t *testing.T) naming.LocalPaths {
 		EngineCommerceRust:     filepath.Join(root, "runtime", "engine-commerce", "rust"),
 		EngineABIRust:          filepath.Join(root, "runtime", "engine", "rust", "abi"),
 		EngineNapiRust:         filepath.Join(root, "runtime", "engine", "rust", "napi"),
+		RulesAdapterRust:       filepath.Join(root, "runtime", "engine", "rust", "rules-adapter"),
+		RulesBehaviorsRust:     filepath.Join(root, "runtime", "engine", "rust", "rules-behaviors"),
 		EngineGo:               filepath.Join(root, "runtime", "engine", "go"),
 		EngineTypeScript:       filepath.Join(root, "runtime", "engine", "typescript"),
 		VersionGraphPython:     filepath.Join(root, "runtime", "versiongraph", "python"),
 		HTTPRuntimeGo:          filepath.Join(root, "runtime", "http", "go"),
 		HTTPRuntimeRust:        filepath.Join(root, "runtime", "http", "rust"),
 		HTTPRuntimeTypeScript:  filepath.Join(root, "runtime", "http", "typescript"),
+		RulesTypeScript:        filepath.Join(root, "runtime", "rules", "typescript"),
 	}
 }
 

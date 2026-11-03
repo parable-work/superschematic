@@ -10,6 +10,7 @@
 
 import type { Pool } from 'pg';
 import type { Logger } from '@superschematic/http-runtime';
+import type { DeskDbOrm } from '@schemas/desk-db-types/orm';
 import type { EngineBackground } from '@superschematic/engine/server';
 import type { EnvConfig } from './config';
 import type { Implementations } from './interfaces';
@@ -18,8 +19,18 @@ import type { Implementations } from './interfaces';
 export interface Deps {
   /** The API's configuration: its @envVars settings and the fields its edges derive (loadEnvConfig). */
   readonly config: EnvConfig;
-  /** A pool of desk-db, the API's database. */
+  /** A pool of desk-db, the API's database, for the SQL the repositories do not express. */
   readonly db: Pool;
+  /**
+   * The repositories of desk-db's tables over db (D79), a table's rows
+   * read and written as its types' ./orm entry declares them, with no SQL of
+   * the implementation's. In an operation it acts as the caller, whom
+   * createdBy, updatedBy and deletedBy record, and in a job or a worker as
+   * no one: orm.asSystem() acts as the database's system actor, and
+   * orm.withUser(id) as another user (D87). orm.transaction(fn) writes in
+   * one transaction, which enqueue takes.
+   */
+  readonly orm: DeskDbOrm;
   /**
    * The engine of desk-db, the API's engine database (D58), which the
    * entrypoint opens in the background, so it starts while the database is

@@ -2,6 +2,12 @@
 
 import type { ScalarValidationResult, ValidationError } from 'superscalar/validation';
 
+// The constructors of IdentityName, the scalar library's own, which the
+// package hands out beside the type: each returns the value as
+// IdentityName and throws on a value Identity.Name refuses (D25,
+// amended; D100).
+export { parseIdentityNameStrict, normalizeIdentityNameStrict } from 'superscalar/scalars';
+
 /**
  * Validates a Identity.Name value
  */

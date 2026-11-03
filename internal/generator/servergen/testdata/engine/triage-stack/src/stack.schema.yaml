@@ -1,0 +1,18 @@
+# triage-ts-api and triage-rs-api run on their default servers, and each
+# deriver is a deployable of its own, in its API's language, beside
+# triage-db's runner (D74, D58). Its one environment, Local, runs on the
+# local target.
+kind: Stack
+types:
+  Triage:
+    name: Triage
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: triage-ts-api, kind: API }
+        - { name: triage-rs-api, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

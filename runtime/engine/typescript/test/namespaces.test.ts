@@ -304,6 +304,10 @@ for (const driver of drivers) {
       const hidden = Object.fromEntries(tools.filter((entry) => entry.mcp.hidden).map((entry) => [entry.name, (entry.mcp as { hiddenReason: string }).hiddenReason]));
       assert.deepEqual(Object.keys(hidden), ['engine.defineSchema', 'order.create', 'order.update', 'order.delete', 'order.mark']);
       assert.equal(hidden['order.create'], 'namespace acme is archived: it refuses every write until it is unarchived');
+      assert.deepEqual(
+        tools.flatMap((entry) => (entry.mcp.hidden ? [entry.mcp.hiddenBy] : [])),
+        [['archived'], ['archived'], ['archived'], ['archived'], ['archived']]
+      );
       assert.ok(tools.some((entry) => entry.name === 'engine.unarchiveNamespace' && !entry.mcp.hidden));
 
       // Unarchived, it writes again.

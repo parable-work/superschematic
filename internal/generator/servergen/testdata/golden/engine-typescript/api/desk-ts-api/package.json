@@ -45,6 +45,7 @@
   "dependencies": {},
   "peerDependencies": {
     "@schemas/desk-ts-api-types": "*",
+    "@schemas/desk-db-types": "*",
     "@superschematic/engine": "*",
     "@superschematic/http-runtime": "*",
     "hono": "4.13.8",

@@ -11,7 +11,7 @@ import { cleanup, clone, drivers, openTestEngine } from './helpers.ts';
 afterEach(cleanup);
 
 // The core's behaviors, which every engine registers when it opens.
-const CORE = ['Approvals', 'Branches', 'Comments', 'Constants', 'Dependencies', 'Links', 'Numbering', 'Reactions', 'Revisions', 'Rollups', 'Search', 'StateRules', 'Timers', 'Variants', 'Workflow'];
+const CORE = ['Approvals', 'Branches', 'Comments', 'Constants', 'Dependencies', 'Derived', 'Links', 'Numbering', 'Provenance', 'Reactions', 'Revisions', 'Rollups', 'Search', 'StateRules', 'Timers', 'Variants', 'Workflow'];
 
 // refusal registers an implementation with a fresh engine and returns the message it is refused with.
 function refusal(implementation: AnyBehaviorImplementation): string {
@@ -115,9 +115,9 @@ describe('behavior registration refuses', () => {
       ['an operation with no resultSchema', (d) => delete (d.operations as Array<Record<string, unknown>>)[0].resultSchema, /operation increment has no resultSchema/],
       ['writes that is not a boolean', (d) => ((d.operations as Array<Record<string, unknown>>)[0].writes = 'yes'), /operation increment writes is a boolean/],
       [
-        'a scope that is not instance or schema',
+        'a scope that is not instance, schema or namespace',
         (d) => ((d.operations as Array<Record<string, unknown>>)[0].scope = 'type'),
-        /operation increment scope "type" is not "instance" or "schema"/,
+        /operation increment scope "type" is not "instance", "schema" or "namespace"/,
       ],
       ['a field name that is not an identifier', (d) => ((d.fields as Array<Record<string, unknown>>)[0].name = 'the count'), /fields\[0\]\.name "the count" is not an identifier/],
       ['a field declared twice', (d) => (d.fields = [{ name: 'count' }, { name: 'count' }]), /field count is declared twice/],

@@ -339,6 +339,9 @@ func (d *deploy) step(ctx context.Context, step *ir.DeployStep) error {
 				d.manifest.setSite(name, d.sites.digests[name])
 			case dep != nil && dep.HasBundle():
 				d.manifest.setBundle(name, d.bundles[name])
+			case dep != nil && appOff(dep):
+				// An app turned off runs no image (D78): the manifest
+				// keeps the one it last ran.
 			default:
 				d.manifest.setImage(name, d.images[name], d.contexts[name])
 			}

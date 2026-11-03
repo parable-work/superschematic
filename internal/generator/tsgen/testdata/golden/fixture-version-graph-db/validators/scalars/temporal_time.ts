@@ -2,6 +2,12 @@
 
 import type { ScalarValidationResult, ValidationError } from 'superscalar/validation';
 
+// The constructors of TemporalTime, the scalar library's own, which the
+// package hands out beside the type: each returns the value as
+// TemporalTime and throws on a value Temporal.Time refuses (D25,
+// amended; D100).
+export { parseTemporalTimeStrict, normalizeTemporalTimeStrict } from 'superscalar/scalars';
+
 const TemporalTimePattern = new RegExp("^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?\\s?[AaPp][Mm])$", "u");
 
 /**

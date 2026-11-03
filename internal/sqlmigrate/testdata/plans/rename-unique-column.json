@@ -1,7 +1,7 @@
 {
   "dialect": "postgres",
-  "from": "e366a83220aa080e4b56add7ffac5856b26fc8473353b72c897ef9714712fe0f",
-  "hash": "59fd084a6e9048055d27ba922c2e332c802f989cdc44463aea50fd130f666a9d",
+  "from": "c6787cdef058267033f38e38e6c4e788b8fc54fcc00776b78d8b4db345c93d96",
+  "hash": "8be246c4c1111e606e579e9858708e4c584a4b6cc8fec71a363fac2c57da6aaa",
   "renames": [
     "customer.email=customer.contact_email"
   ],
@@ -36,7 +36,7 @@
       "transactional": true
     }
   ],
-  "to": "d827a886b58679c8e9b7b1efbf74e593096a0128865e95ccd86c56c28dae7082",
+  "to": "a3b880428f79a51ec19002118291e96a55d99a5fa42fcab7c6d041fb4a85047f",
   "toModel": null,
   "version": 1
 }

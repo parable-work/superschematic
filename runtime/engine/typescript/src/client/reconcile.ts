@@ -110,6 +110,7 @@ export class Reconciler {
       kinds: options.kinds,
       behaviors: options.behaviors,
       exclude: options.exclude,
+      beside: options.beside,
       ...(options.namespace !== undefined ? { namespace: options.namespace } : {}),
       ...(options.forward !== undefined ? { forward: options.forward } : {}),
       after: stored ?? options.start ?? 'head',

@@ -369,6 +369,71 @@ describe('schema-level operations', () => {
   });
 });
 
+describe('namespace operations', () => {
+  test("are tools named after their behavior (D77): tools/list shows a writing one only to a caller the policy's listing question allows, and tools/call runs them across the schemas", async () => {
+    const { url } = await served({ behaviors: ['test.Inbox'] }, {}, (engine) => {
+      for (const name of ['Note', 'Task']) {
+        const document = schemaDocument(name, [{ name: 'title', typeRef: { name: 'string' }, required: true }]) as { types: Record<string, Record<string, unknown>> };
+        document.types[name]!.behaviors = [{ name: 'test.Inbox', config: { label: name.toLowerCase() } }];
+        engine.schemas.define(everything, document);
+        engine.schemas.publish(everything, name);
+        engine.instances.create(everything, name, { title: name }, { id: `${name.toLowerCase()}1` });
+        engine.instances.invoke(everything, name, `${name.toLowerCase()}1`, 'add', { body: `on ${name}` });
+      }
+    });
+    const { client } = await connect(endpoint(url));
+    const byName = new Map((await client.listTools()).tools.map((tool) => [tool.name, tool]));
+    const notes = byName.get('test_inbox_notes');
+    assert.ok(notes);
+    assert.deepEqual([notes.title, Object.keys(notes.inputSchema.properties ?? {}), notes.annotations], ['test.Inbox: notes', ['params'], { readOnlyHint: true }]);
+    assert.ok(byName.has('test_inbox_clear'));
+    const listed = (await client.callTool({ name: 'test_inbox_notes', arguments: {} })) as CallToolResult;
+    assert.deepEqual(listed.structuredContent, {
+      items: [
+        ['Note', 'note1', 'on Note', 0],
+        ['Task', 'task1', 'on Task', 0],
+      ],
+    });
+    const { client: reader } = await connect(endpoint(url), 'reader');
+    const names = (await reader.listTools()).tools.map((tool) => tool.name);
+    assert.ok(names.includes('test_inbox_notes') && !names.includes('test_inbox_clear'), JSON.stringify(names));
+    const refused = (await reader.callTool({ name: 'test_inbox_clear', arguments: {} })) as CallToolResult;
+    assert.equal(problemOf(refused).status, 403);
+    const cleared = (await client.callTool({ name: 'test_inbox_clear', arguments: { params: {} } })) as CallToolResult;
+    assert.deepEqual(cleared.structuredContent, { changed: 2 });
+  });
+});
+
+describe("Comments' namespace operations", () => {
+  test('comments_inbox lists a reader its mentions across the schemas, and comments_claim_deliveries is a writer\'s tool', async () => {
+    const { url } = await served({ clock: () => 7000 }, {}, (engine) => {
+      const document = schemaDocument('Review', [{ name: 'title', typeRef: { name: 'string' }, required: true }]) as { types: Record<string, Record<string, unknown>> };
+      document.types.Review!.behaviors = [{ name: 'Comments' }];
+      engine.schemas.define(everything, document);
+      engine.schemas.publish(everything, 'Review');
+      engine.instances.create(everything, 'Review', { title: 'Q3 plan' }, { id: 'r1' });
+      engine.instances.invoke(everything, 'Review', 'r1', 'post', { body: 'Reader, a look?', mentions: ['reader'] });
+    });
+    const { client: reader } = await connect(endpoint(url), 'reader');
+    const tools = new Map((await reader.listTools()).tools.map((tool) => [tool.name, tool]));
+    const inbox = tools.get('comments_inbox');
+    assert.ok(inbox);
+    assert.deepEqual([inbox.title, inbox.annotations], ['Comments: inbox', { readOnlyHint: true }]);
+    assert.ok(!tools.has('comments_claim_deliveries') && !tools.has('comments_settle_deliveries'), JSON.stringify([...tools.keys()]));
+    const listed = (await reader.callTool({ name: 'comments_inbox', arguments: { params: { unread: true } } })) as CallToolResult;
+    assert.deepEqual(listed.structuredContent, {
+      items: [{ kind: 'mention', schema: 'Review', instanceId: 'r1', message: 1, author: 'alice', postedAt: 7000, excerpt: 'Reader, a look?', unread: 1 }],
+      next: null,
+    });
+    const { client } = await connect(endpoint(url));
+    const names = (await client.listTools()).tools.map((tool) => tool.name);
+    assert.ok(names.includes('comments_claim_deliveries') && names.includes('comments_settle_deliveries'), JSON.stringify(names));
+    // Review names no deliverPermission: nobody claims its deliveries.
+    const refused = (await client.callTool({ name: 'comments_claim_deliveries', arguments: { params: {} } })) as CallToolResult;
+    assert.equal(problemOf(refused).status, 409);
+  });
+});
+
 describe('tools/call', () => {
   test('runs the operation and returns its result as text and, for an object, structured content', async () => {
     const { url, engine } = await served();
@@ -611,8 +676,28 @@ describe("the core's behaviors", () => {
         ['documents_update', false, 'auto'],
         ['documents_delete', false, 'auto'],
         ['documents_transition', false, 'auto'],
-        ['documents_comment', false, 'auto'],
-        ['documents_list_comments', true, 'auto'],
+        ['documents_post', false, 'auto'],
+        ['documents_begin', false, 'auto'],
+        ['documents_append_draft', false, 'auto'],
+        ['documents_finish', false, 'auto'],
+        ['documents_interrupt', false, 'auto'],
+        ['documents_edit', false, 'auto'],
+        ['documents_delete_message', false, 'auto'],
+        ['documents_purge', false, 'auto'],
+        ['documents_react', false, 'auto'],
+        ['documents_unreact', false, 'auto'],
+        ['documents_pin', false, 'auto'],
+        ['documents_unpin', false, 'auto'],
+        ['documents_resolve', false, 'auto'],
+        ['documents_reopen', false, 'auto'],
+        ['documents_move_anchor', false, 'auto'],
+        ['documents_mark_read', false, 'auto'],
+        ['documents_follow', false, 'auto'],
+        ['documents_list_messages', true, 'auto'],
+        ['documents_get_message', true, 'auto'],
+        ['documents_list_edits', true, 'auto'],
+        ['documents_list_reactions', true, 'auto'],
+        ['documents_list_pinned', true, 'auto'],
         ['documents_list_revisions', true, 'auto'],
         ['documents_get_revision', true, 'auto'],
         ['documents_propose', false, 'auto'],
@@ -621,35 +706,49 @@ describe("the core's behaviors", () => {
         ['documents_list_proposals', true, 'auto'],
       ]
     );
-    // A reader is listed only the tools that read.
+    // A reader is listed only the tools that read, and markRead and
+    // follow, which ask read.
     const { client: reader } = await connect(endpoint(url), 'reader');
     assert.deepEqual(
       (await reader.listTools()).tools.map((tool) => tool.name).filter((name) => name.startsWith('documents_')),
-      ['documents_get', 'documents_list', 'documents_list_comments', 'documents_list_revisions', 'documents_get_revision', 'documents_list_proposals']
+      [
+        'documents_get',
+        'documents_list',
+        'documents_mark_read',
+        'documents_follow',
+        'documents_list_messages',
+        'documents_get_message',
+        'documents_list_edits',
+        'documents_list_reactions',
+        'documents_list_pinned',
+        'documents_list_revisions',
+        'documents_get_revision',
+        'documents_list_proposals',
+      ]
     );
   });
 
-  test('tools/call runs them, listComments for a reader, and a transition whose permission the caller lacks is a tool error with the 403 problem', async () => {
+  test('tools/call runs them, listMessages for a reader, a post beside the instance, and a transition whose permission the caller lacks is a tool error with the 403 problem', async () => {
     const { url, engine } = await withDocument();
     const { client } = await connect(endpoint(url));
-    const commented = await call(client, 'documents_comment', { id: 'doc-1', params: { body: 'First pass is up.' }, expectedSeq: 1 });
-    assert.deepEqual([commented.isError, (commented.structuredContent as { id: number }).id], [undefined, 1]);
+    const posted = await call(client, 'documents_post', { id: 'doc-1', params: { body: 'First pass is up.' }, expectedSeq: 1 });
+    assert.deepEqual([posted.isError, (posted.structuredContent as { id: number }).id], [undefined, 1]);
     const { client: reader } = await connect(endpoint(url), 'reader');
-    const page = await call(reader, 'documents_list_comments', { id: 'doc-1', params: { limit: 10 } });
+    const page = await call(reader, 'documents_list_messages', { id: 'doc-1', params: { limit: 10 } });
     assert.deepEqual(
-      [page.isError, (page.structuredContent as { items: Array<{ body: string }>; next: unknown }).items.map((item) => item.body), (page.structuredContent as { next: unknown }).next],
+      [page.isError, (page.structuredContent as { items: Array<{ body: string }> }).items.map((item) => item.body), (page.structuredContent as { before: unknown }).before],
       [undefined, ['First pass is up.'], null]
     );
-    assert.equal(problemOf(await call(reader, 'documents_comment', { id: 'doc-1', params: { body: 'Me too.' } })).status, 403);
+    assert.equal(problemOf(await call(reader, 'documents_post', { id: 'doc-1', params: { body: 'Me too.' } })).status, 403);
 
-    const moved = await call(client, 'documents_transition', { id: 'doc-1', params: { to: 'review' }, expectedSeq: 2 });
+    const moved = await call(client, 'documents_transition', { id: 'doc-1', params: { to: 'review' }, expectedSeq: 1 });
     assert.deepEqual(moved.structuredContent, { from: 'draft', to: 'review' });
     const refused = problemOf(await call(client, 'documents_transition', { id: 'doc-1', params: { to: 'published' } }));
     assert.deepEqual([refused.status, refused.code, refused.title], [403, 'forbidden', 'Forbidden']);
     assert.match(refused.detail, /the transition needs permission documents\.publish/);
-    assert.equal(engine.instances.get(alice, 'documents', 'doc-1')?.seq, 3, 'nothing was written');
+    assert.equal(engine.instances.get(alice, 'documents', 'doc-1')?.seq, 2, 'nothing was written');
     const { client: pat } = await connect(endpoint(url), 'pat');
-    const published = await call(pat, 'documents_transition', { id: 'doc-1', params: { to: 'published' }, expectedSeq: 3 });
+    const published = await call(pat, 'documents_transition', { id: 'doc-1', params: { to: 'published' }, expectedSeq: 2 });
     assert.deepEqual(published.structuredContent, { from: 'review', to: 'published' });
     assert.equal(engine.instances.get(alice, 'documents', 'doc-1')?.behaviors.Workflow.status, 'published');
   });

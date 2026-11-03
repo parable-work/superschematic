@@ -55,6 +55,11 @@ This crate provides:
   calling, from a JWT in `Service-Authorization`. `JwtServiceAuthenticator`
   verifies RS256, ES256 and EdDSA tokens against a `ServiceAuthConfig`,
   with static keys or a JWKS it caches per URL
+- `JwtBodyHashVerifier` (D81): the checks of an `@hmacVerified` provider
+  that signs each webhook with an ES256 JWT carrying the body's SHA-256,
+  as Plaid does, over a `WebhookKeys` lookup by `kid` or a JWKS URL. Its
+  `verify(request, next)` is the body of a generated crate's
+  `WebhookVerifier`
 - `RouteControls`: a route's `@rateLimit`, `@bodyLimit`, service step
   (`@requireService`, `@allowService`), permission check and `@timeout`,
   applied with `route_layer` in that order. A generated router gives a
@@ -244,6 +249,15 @@ TypeScript runtimes' (D51):
   which `PostgresQueue` implements; a queue that does not implement its
   `prune` prunes nothing. With the `otel` feature and export on, each
   message's handling is a consumer span, `process <queue>`.
+  `SelfCompleting<Q>` wraps a queue whose handler completes each message
+  itself, in the transaction that does its work: a behavior worker's
+  deadline queue and change queue (D103), whose generated handlers run a
+  deadline or a change of a row through the behaviors' core and spend
+  their claim in the same commit. Its
+  messages are `Claimed<M> { id, token, message }`, the claim beside the
+  message, its `complete` does nothing, and every other call is the
+  queue's, so a handler's error still fails its message and a stopping
+  worker still releases the ones its handlers did not finish.
 - The `otel` feature's `telemetry` module (D67), OpenTelemetry trace
   export over OTLP/HTTP in protobuf. `telemetry::start(Defaults { stack,
   kind, name })` is what a generated server's, job's or worker's `main`

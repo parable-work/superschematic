@@ -4,13 +4,17 @@
 // of any one authoring syntax: schema-kind / import-path compatibility,
 // cross-kind type-reference rules, the classes decorator arguments name,
 // full @source structural verification,
-// trait shape checks, version graph declarations,
-// the User and UserRole traits and the user model's route sets, projection view
-// declarations, the contexts that refuse an array of arrays, the arguments
+// trait shape checks, version graph declarations, the one @envVars class
+// that is a service's config (D94),
+// the User and UserRole traits and the user model's route sets, a table's
+// behavior operations (D103), projection view
+// declarations, the fields Encrypted<T> stores and the names @table and
+// @column give tables and columns (D85), the contexts that
+// refuse an array of arrays, the arguments
 // that cannot be EncryptedField<T>, the GET and DELETE operations that
 // cannot be encrypted, the operations @paginated cannot page, the service
 // clauses an operation cannot take,
-// @index placement and keys, each type's
+// @index placement, keys and options, @rawSql's placement and SQL, each type's
 // behaviors against their declarations, each type's @display against the
 // type and its Workflow, each RefersTo against its target and the
 // operation that lists it, each SearchQuery against its operation, each
@@ -134,9 +138,16 @@ type Input struct {
 	// it nil otherwise.
 	AuthDB *ir.Schema
 
+	// Database is the loaded schema of the API's database
+	// (ir.Schema.Database), which @behaviorOperations sets read their
+	// tables from (D103). The loader reads it for an API with such a set
+	// and leaves it nil otherwise.
+	Database *ir.Schema
+
 	// DependencySchemas holds the loaded schemas of the dependencies whose
 	// types a RefersTo names (D61), or a SortBy operation lists (D60,
-	// amended), by service name, which ResolveReference reads a target and
+	// amended), or a MemoryStore schema's payloads and enum parts name
+	// (D75), by service name, which ResolveReference reads a target and
 	// its options from, and checkSorts an item, when the schema does not
 	// declare it. The loader reads a dependency only for a reference or a
 	// sorted list that names a type the schema imports from it, and leaves
@@ -205,6 +216,20 @@ func (r *Result) warnf(file string, format string, args ...any) {
 	})
 }
 
+// CheckBehaviors runs the behaviors' checks alone (checkBehaviors), which
+// Run runs among the rest: each behavior is registered and configured as
+// its declaration says, and each field-anchored use is what the loader's
+// pass that adds its fields relies on (checkFieldAnchors). The loader runs
+// it before that pass, which it runs before Run, so every check that
+// resolves a field by its name (an index, a projection's column,
+// @enqueueOnChange) reads the fields a behavior owns as the table's own
+// (D103).
+func CheckBehaviors(schema *ir.Schema, in Input) *Result {
+	r := &Result{}
+	checkBehaviors(schema, in.registry(), r)
+	return r
+}
+
 // Run executes the full verification pass on an assembled schema. The pass
 // canonicalizes derived @source metadata (Virtual, OmittedFromSource) as it
 // verifies, so the IR a generator sees is exactly what verification proved.
@@ -214,26 +239,45 @@ func Run(schema *ir.Schema, in Input) *Result {
 	r := &Result{}
 	checkImports(schema, in, r)
 	checkClassRefs(schema, r)
+	checkEncryptedFields(schema, r)
+	checkUnknownFields(schema, r)
+	checkSQLNames(schema, r)
 	checkSourceProjections(schema, in, r)
 	checkTraits(schema, r)
 	checkVersioned(schema, r)
 	checkVersionGraphs(schema, r)
 	checkIdentity(schema, r)
 	checkIdentityRoutes(schema, in, r)
+	checkBehaviorOperations(schema, in, r)
 	checkProjections(schema, r)
 	checkArraysOfArrays(schema, r)
 	checkEncryptedArguments(schema, r)
 	checkEncryptedOperations(schema, r)
 	checkMiddleware(schema, r)
 	checkPages(schema, r)
+	checkFileTransfers(schema, r)
+	checkMCPToolsLeftOut(schema, r)
 	checkPublicRoutes(schema, r)
 	checkServiceCallers(schema, r)
 	checkJobs(schema, r)
 	checkQueues(schema, r)
+	checkEnqueueOnChange(schema, r)
 	checkWorkers(schema, r)
+	checkBehaviorWorkers(schema, in, r)
+	checkDerivers(schema, r)
+	checkMemoryStore(schema, in, r)
+	checkApps(schema, r)
+	checkEnvVarsTypes(schema, r)
 	checkDerivedFields(schema, in, r)
 	checkIndexTables(schema, r)
 	checkIndexKeys(schema, r)
+	checkIndexOptions(schema, r)
+	checkVectorColumns(schema, r)
+	checkDefaultNow(schema, r)
+	checkSeedRoles(schema, r)
+	checkQueueMessageScalars(schema, r)
+	checkRawSQL(schema, r)
+	checkQueries(schema, r)
 	checkSearchColumns(schema, r)
 	reg := in.registry()
 	checkBehaviors(schema, reg, r)

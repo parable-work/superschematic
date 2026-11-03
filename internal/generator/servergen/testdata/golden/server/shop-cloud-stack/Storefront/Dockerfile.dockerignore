@@ -15,6 +15,7 @@
 !schemas/dist/sdk/go/shop-api
 !schemas/dist/server/shop-cloud-stack/Storefront
 !schemas/dist/types/go/shop-api
+!schemas/dist/types/go/shop-cache
 !schemas/dist/types/go/shop-db
 !schemas/dist/types/go/shop-orders
 !schemas/dist/types/go/shop-reviews

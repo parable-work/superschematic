@@ -249,6 +249,15 @@ function serializeField(field: FieldDef, scalarNames: Set<string>): JsonObject {
   if (field.validatePattern) {
     output['x-validatePattern'] = field.validatePattern;
   }
+  if (field.validatePrecision !== null && field.validatePrecision !== undefined) {
+    output['x-validatePrecision'] = field.validatePrecision;
+  }
+  if (field.validateScale !== null && field.validateScale !== undefined) {
+    output['x-validateScale'] = field.validateScale;
+  }
+  if (field.validateDimensions !== null && field.validateDimensions !== undefined) {
+    output['x-validateDimensions'] = field.validateDimensions;
+  }
   withMiddleware(output, field.middleware, field.encrypted);
 
   if (field.arguments.length > 0) {
@@ -371,6 +380,9 @@ function serializeSchemaDefinitions(schema: Schema): JsonObject {
     if (typeDef.envVars) {
       typeOut['x-envVars'] = true;
     }
+    if (typeDef.allowUnknownFields) {
+      typeOut['x-allowUnknownFields'] = true;
+    }
     output[typeName] = typeOut;
   }
 
@@ -403,6 +415,9 @@ function serializeSchemaDefinitions(schema: Schema): JsonObject {
     }
     if (inputDef.envVars) {
       inputOut['x-envVars'] = true;
+    }
+    if (inputDef.allowUnknownFields) {
+      inputOut['x-allowUnknownFields'] = true;
     }
     output[inputName] = inputOut;
   }

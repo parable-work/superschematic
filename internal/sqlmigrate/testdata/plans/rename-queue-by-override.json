@@ -1,0 +1,127 @@
+{
+  "dialect": "postgres",
+  "from": "848ede4b90597b89aa257083178e5e2eddc46d7808f16004ff2226f7391211c0",
+  "hash": "cc85c4bda8a03ad7c390b898df1e1295b9c13fbd900917647cfd98440f0f355d",
+  "service": "shop-db",
+  "steps": [
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/orderShipments",
+          "reason": "Table order_shipped_queue is renamed to orderShipments, following OrderShipped's @table: servers built from the previous version still use the old name.",
+          "subject": "table/orderShipments"
+        }
+      ],
+      "index": 1,
+      "op": "renameTable",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE order_shipped_queue RENAME TO \"orderShipments\""
+      ],
+      "subject": "table/orderShipments",
+      "transactional": true
+    },
+    {
+      "hazards": [
+        {
+          "class": "compat",
+          "id": "compat:table/orderShipments/column/orderId",
+          "reason": "order_shipped_queue.order_id is renamed to orderShipments.orderId, following OrderShipped.orderId's @column: servers built from the previous version still use the old name.",
+          "subject": "table/orderShipments/column/orderId"
+        }
+      ],
+      "index": 2,
+      "op": "renameColumn",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"orderShipments\" RENAME COLUMN order_id TO \"orderId\""
+      ],
+      "subject": "table/orderShipments/column/orderId",
+      "transactional": true
+    },
+    {
+      "index": 3,
+      "op": "renameConstraint",
+      "phase": "expand",
+      "statements": [
+        "ALTER TABLE \"orderShipments\" RENAME CONSTRAINT order_shipped_queue_pkey TO \"orderShipments_pkey\""
+      ],
+      "subject": "table/orderShipments/constraint/orderShipments_pkey",
+      "transactional": true
+    },
+    {
+      "index": 4,
+      "op": "renameIndex",
+      "phase": "expand",
+      "statements": [
+        "ALTER INDEX idx_order_shipped_queue_claim_expires_at RENAME TO \"idx_orderShipments_claim_expires_at\""
+      ],
+      "subject": "table/orderShipments/index/idx_orderShipments_claim_expires_at",
+      "transactional": true
+    },
+    {
+      "index": 5,
+      "op": "renameIndex",
+      "phase": "expand",
+      "statements": [
+        "ALTER INDEX idx_order_shipped_queue_due_at RENAME TO \"idx_orderShipments_due_at\""
+      ],
+      "subject": "table/orderShipments/index/idx_orderShipments_due_at",
+      "transactional": true
+    },
+    {
+      "index": 6,
+      "op": "renameIndex",
+      "phase": "expand",
+      "statements": [
+        "ALTER INDEX idx_order_shipped_queue_updated_at RENAME TO \"idx_orderShipments_updated_at\""
+      ],
+      "subject": "table/orderShipments/index/idx_orderShipments_updated_at",
+      "transactional": true
+    },
+    {
+      "index": 7,
+      "op": "renameIndex",
+      "phase": "expand",
+      "statements": [
+        "ALTER INDEX uq_order_shipped_queue_ready_key RENAME TO \"uq_orderShipments_ready_key\""
+      ],
+      "subject": "table/orderShipments/index/uq_orderShipments_ready_key",
+      "transactional": true
+    },
+    {
+      "index": 8,
+      "op": "renameFunction",
+      "phase": "expand",
+      "statements": [
+        "ALTER FUNCTION order_enqueue_order_shipped() RENAME TO \"order_enqueue_orderShipments\""
+      ],
+      "subject": "function/order_enqueue_orderShipments",
+      "transactional": true
+    },
+    {
+      "index": 9,
+      "op": "renameTrigger",
+      "phase": "expand",
+      "statements": [
+        "ALTER TRIGGER trg_order_enqueue_order_shipped ON \"order\" RENAME TO \"trg_order_enqueue_orderShipments\""
+      ],
+      "subject": "trigger/order/trg_order_enqueue_orderShipments",
+      "transactional": true
+    },
+    {
+      "index": 10,
+      "op": "replaceFunction",
+      "phase": "expand",
+      "statements": [
+        "CREATE OR REPLACE FUNCTION \"order_enqueue_orderShipments\"() RETURNS trigger AS $$\nBEGIN\n  -- Enqueues a message of OrderShipped after a write to order (D80).\n  IF TG_OP = 'UPDATE' AND NOT (OLD.note IS DISTINCT FROM NEW.note) THEN\n    RETURN NULL;\n  END IF;\n  INSERT INTO \"orderShipments\" (\"orderId\", note) VALUES (NEW.id, NEW.note)\n    ON CONFLICT (\"orderId\") WHERE state = 'ready' DO UPDATE SET note = excluded.note, due_at = excluded.due_at, attempts = 0, last_error = NULL, updated_at = now();\n  RETURN NULL;\nEND;\n$$ LANGUAGE plpgsql"
+      ],
+      "subject": "function/order_enqueue_orderShipments",
+      "transactional": true
+    }
+  ],
+  "to": "d6759d1b1e0c360d34d13738d48e92a5313b40714a5f4b89fcd0559747bb65ef",
+  "toModel": null,
+  "version": 1
+}

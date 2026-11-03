@@ -69,6 +69,9 @@ func TestRegisterPlatformRejects(t *testing.T) {
 			s.NoIdentity = "its isolates hash no passwords"
 			s.IdentityConfig = `{"cookie": {"secure": false}}`
 		}, "declares an identity config and says it runs no identity runtime"},
+		{"identity databases without no identity", func(s *PlatformSpec) {
+			s.IdentityDatabases = []string{"fake.sql"}
+		}, "names the databases it serves the user model over, and no NoIdentity for the rest"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -90,21 +93,21 @@ func TestRegisterPlatformRejects(t *testing.T) {
 	t.Run("database with an identity config", func(t *testing.T) {
 		spec := sqlPlatform("fake.sql")
 		spec.IdentityConfig = `{"cookie": {"secure": false}}`
-		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "only a server platform does") {
+		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "only a server or an app platform does") {
 			t.Fatalf("RegisterPlatform = %v", err)
 		}
 	})
 	t.Run("database that runs no identity runtime", func(t *testing.T) {
 		spec := sqlPlatform("fake.sql")
 		spec.NoIdentity = "it serves no API"
-		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "only a server platform serves an API over the user model") {
+		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "only a server or an app platform serves an API over the user model") {
 			t.Fatalf("RegisterPlatform = %v", err)
 		}
 	})
 	t.Run("database with an artifact", func(t *testing.T) {
 		spec := sqlPlatform("fake.sql")
 		spec.Artifact = ir.ArtifactBundle
-		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "only a server, job, worker or runner platform builds one") {
+		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "only a server, job, worker, runner, deriver or app platform builds one") {
 			t.Fatalf("RegisterPlatform = %v", err)
 		}
 	})
@@ -281,6 +284,40 @@ func TestRegisterConnectorRejects(t *testing.T) {
 			t.Fatalf("RegisterPlatform = %v", err)
 		}
 	})
+	// A memoryStore edge runs from a server, a job or a worker to a
+	// memoryStore platform, which declares no languages and no dialects
+	// (D75). This is the seam a target registers its store's platform and
+	// connectors through.
+	storePlatform := runPlatform("fake.memorystore")
+	storePlatform.Kind, storePlatform.Languages = ir.DeployableMemoryStore, nil
+	workerPlatform := runPlatform("fake.worker")
+	workerPlatform.Kind = ir.DeployableWorker
+	toStore := ConnectorSpec{Name: "run-memorystore", Edge: ir.EdgeMemoryStore, From: "fake.run", To: "fake.memorystore", Connect: connect}
+	t.Run("a memoryStore edge", func(t *testing.T) {
+		if err := finalize(t, []PlatformSpec{runPlatform("fake.run"), storePlatform}, toStore); err != nil {
+			t.Fatal(err)
+		}
+		fromWorker := toStore
+		fromWorker.Name, fromWorker.From = "worker-memorystore", "fake.worker"
+		if err := finalize(t, []PlatformSpec{workerPlatform, storePlatform}, fromWorker); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("a memoryStore edge to a bucket platform", func(t *testing.T) {
+		spec := toStore
+		spec.To = "fake.storage"
+		err := finalize(t, []PlatformSpec{runPlatform("fake.run"), bucketPlatform}, spec)
+		if err == nil || !strings.Contains(err.Error(), `names platform "fake.storage", a bucket platform; a memoryStore edge's to is a memoryStore`) {
+			t.Fatalf("Finalize = %v", err)
+		}
+	})
+	t.Run("a memoryStore platform with languages", func(t *testing.T) {
+		spec := storePlatform
+		spec.Languages = []string{APILanguageGo}
+		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), `memoryStore platform "fake.memorystore" declares server languages or SQL dialects`) {
+			t.Fatalf("RegisterPlatform = %v", err)
+		}
+	})
 }
 
 // TestGenericConnector: a generic connector names no platform, serves an
@@ -298,6 +335,7 @@ func TestGenericConnector(t *testing.T) {
 		{"a platform", func(s *ConnectorSpec) { s.From = "fake.run" }, `generic connector "generic.http" names a platform`},
 		{"a sql edge", func(s *ConnectorSpec) { s.Edge = ir.EdgeSQL }, "serves a sql edge; a generic connector serves an http or a site edge"},
 		{"a bucket edge", func(s *ConnectorSpec) { s.Edge = ir.EdgeBucket }, "serves a bucket edge"},
+		{"a memoryStore edge", func(s *ConnectorSpec) { s.Edge = ir.EdgeMemoryStore }, "serves a memoryStore edge"},
 		{"a bad resource type", func(s *ConnectorSpec) {
 			s.ResourceTypes = map[string]json.RawMessage{"tls:index/privateKey:PrivateKey": json.RawMessage(`{"type": []}`)}
 		}, `connector "generic.http" resource type tls:index/privateKey:PrivateKey`},
@@ -561,13 +599,35 @@ func TestStackSpecsFailAfterFinalize(t *testing.T) {
 	if err := reg.RegisterTarget(TargetSpec{Name: "fake", Platforms: map[ir.DeployableKind]string{ir.DeployableServer: "fake.run"}}); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "enginedoc", "stack", "site"} {
+	for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "enginedoc", "stack", "site", "memorystore"} {
 		if err := reg.RegisterGenerator(GeneratorSpec{Name: name, Generate: noopGenerate}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if err := reg.Finalize(); err == nil || !strings.Contains(err.Error(), `target "fake" names platform "fake.run"`) {
 		t.Fatalf("Finalize = %v, want the target's unknown platform", err)
+	}
+	// A platform that serves the user model over database platforms names
+	// registered ones (D92).
+	for want, databases := range map[string][]string{
+		`serves the user model over database platform "fake.pg", which is not registered`: {"fake.pg"},
+		`serves the user model over platform "fake.run", a server platform`:               {"fake.run"},
+	} {
+		reg = New(naming.Default())
+		spec := runPlatform("fake.run")
+		spec.NoIdentity = "its isolates hash no passwords"
+		spec.IdentityDatabases = databases
+		if err := reg.RegisterPlatform(spec); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "enginedoc", "stack", "site", "memorystore"} {
+			if err := reg.RegisterGenerator(GeneratorSpec{Name: name, Generate: noopGenerate}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := reg.Finalize(); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("Finalize = %v, want %q", err, want)
+		}
 	}
 	reg = New(naming.Default())
 	finalizeWithCoreGenerators(t, reg)

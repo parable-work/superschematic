@@ -4,7 +4,8 @@
 # its package gets fetch.ts: ts-checkout's calls of ts-pricing stay in
 # process there, handed to Till's own app, and carry Till's loopback
 # credential, which ts-pricing, admitting only calling services, accepts
-# (docs/stack-model.md, sections 9.9 and 18.2).
+# (docs/stack-model.md, sections 9.9 and 18.2). ts-pricing lists the memory
+# store ts-cache, which a bundle reaches none of, so Edge turns it off (D75).
 kind: Stack
 types:
   Checkout:
@@ -32,3 +33,5 @@ types:
       settings:
         - of: { deployable: Till }
           platform: fake.bundle
+        - of: { service: { name: ts-cache, kind: MemoryStore } }
+          enabled: false
