@@ -1540,8 +1540,8 @@ var coverUniqueKeys = map[CoverUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	CoverUniqueById:           {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "recipe_id", "photo_url", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM cover WHERE (id) IN (%s)`, []string{`id`}},
-	CoverUniqueByEntityKeyRef: {`(entity_key, ref_id)`, `entity_key = EXCLUDED.entity_key`, `SELECT "id", "recipe_id", "photo_url", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM cover WHERE (entity_key, ref_id) IN (%s)`, []string{`entity_key`, `ref_id`}},
+	CoverUniqueById:           {`(id)`, `id = cover.id`, `SELECT "id", "recipe_id", "photo_url", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM cover WHERE (id) IN (%s)`, []string{`id`}},
+	CoverUniqueByEntityKeyRef: {`(entity_key, ref_id)`, `entity_key = cover.entity_key`, `SELECT "id", "recipe_id", "photo_url", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM cover WHERE (entity_key, ref_id) IN (%s)`, []string{`entity_key`, `ref_id`}},
 }
 
 // coverKeyOf is the text of row's values of the unique key on, as

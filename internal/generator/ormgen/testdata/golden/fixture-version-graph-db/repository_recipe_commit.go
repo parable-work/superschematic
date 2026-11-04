@@ -1680,8 +1680,8 @@ var recipeCommitUniqueKeys = map[RecipeCommitUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	RecipeCommitUniqueById:           {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "root_id", "ref_id", "parent_commit_id", "message", "schema_epoch", "content_hash", "sequence", "created_at", "created_by" FROM recipe_commit WHERE (id) IN (%s)`, []string{`id`}},
-	RecipeCommitUniqueByRootSequence: {`(root_id, "sequence")`, `root_id = EXCLUDED.root_id`, `SELECT "id", "root_id", "ref_id", "parent_commit_id", "message", "schema_epoch", "content_hash", "sequence", "created_at", "created_by" FROM recipe_commit WHERE (root_id, "sequence") IN (%s)`, []string{`root_id`, `"sequence"`}},
+	RecipeCommitUniqueById:           {`(id)`, `id = recipe_commit.id`, `SELECT "id", "root_id", "ref_id", "parent_commit_id", "message", "schema_epoch", "content_hash", "sequence", "created_at", "created_by" FROM recipe_commit WHERE (id) IN (%s)`, []string{`id`}},
+	RecipeCommitUniqueByRootSequence: {`(root_id, "sequence")`, `root_id = recipe_commit.root_id`, `SELECT "id", "root_id", "ref_id", "parent_commit_id", "message", "schema_epoch", "content_hash", "sequence", "created_at", "created_by" FROM recipe_commit WHERE (root_id, "sequence") IN (%s)`, []string{`root_id`, `"sequence"`}},
 }
 
 // recipeCommitKeyOf is the text of row's values of the unique key on, as

@@ -949,7 +949,7 @@ var noteUniqueKeys = map[NoteUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	NoteUniqueById: {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "bodyText", "updatedAt", "updatedBy", "_version" FROM "ledgerNote" WHERE (id) IN (%s)`, []string{`id`}},
+	NoteUniqueById: {`(id)`, `id = "ledgerNote".id`, `SELECT "id", "bodyText", "updatedAt", "updatedBy", "_version" FROM "ledgerNote" WHERE (id) IN (%s)`, []string{`id`}},
 }
 
 // noteKeyOf is the text of row's values of the unique key on, as

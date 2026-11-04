@@ -1565,8 +1565,8 @@ var recipeReleaseUniqueKeys = map[RecipeReleaseUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	RecipeReleaseUniqueById:   {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "root_id", "commit_id", "created_at", "created_by", "updated_at", "updated_by", "_version" FROM recipe_release WHERE (id) IN (%s)`, []string{`id`}},
-	RecipeReleaseUniqueByRoot: {`(root_id)`, `root_id = EXCLUDED.root_id`, `SELECT "id", "root_id", "commit_id", "created_at", "created_by", "updated_at", "updated_by", "_version" FROM recipe_release WHERE (root_id) IN (%s)`, []string{`root_id`}},
+	RecipeReleaseUniqueById:   {`(id)`, `id = recipe_release.id`, `SELECT "id", "root_id", "commit_id", "created_at", "created_by", "updated_at", "updated_by", "_version" FROM recipe_release WHERE (id) IN (%s)`, []string{`id`}},
+	RecipeReleaseUniqueByRoot: {`(root_id)`, `root_id = recipe_release.root_id`, `SELECT "id", "root_id", "commit_id", "created_at", "created_by", "updated_at", "updated_by", "_version" FROM recipe_release WHERE (root_id) IN (%s)`, []string{`root_id`}},
 }
 
 // recipeReleaseKeyOf is the text of row's values of the unique key on, as

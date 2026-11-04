@@ -164,8 +164,8 @@ export const coverTable: TableDefinition = {
     deleteMany: "DELETE FROM cover%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"recipe_id\", \"photo_url\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM cover WHERE (id) IN (%s)" },
-    "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = EXCLUDED.entity_key", rows: "SELECT \"id\", \"recipe_id\", \"photo_url\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM cover WHERE (entity_key, ref_id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = cover.id", rows: "SELECT \"id\", \"recipe_id\", \"photo_url\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM cover WHERE (id) IN (%s)" },
+    "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = cover.entity_key", rows: "SELECT \"id\", \"recipe_id\", \"photo_url\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM cover WHERE (entity_key, ref_id) IN (%s)" },
   },
   relations: [
     { field: "recipe", column: "recipeId", target: "recipe", probe: "cover.recipe_id IN (SELECT recipe.id FROM recipe%s)" },
@@ -315,8 +315,8 @@ export const ingredientTable: TableDefinition = {
     deleteMany: "DELETE FROM ingredient%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"recipe_id\", \"step_key\", \"quantity\", \"substitutes\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM ingredient WHERE (id) IN (%s)" },
-    "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = EXCLUDED.entity_key", rows: "SELECT \"id\", \"recipe_id\", \"step_key\", \"quantity\", \"substitutes\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM ingredient WHERE (entity_key, ref_id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = ingredient.id", rows: "SELECT \"id\", \"recipe_id\", \"step_key\", \"quantity\", \"substitutes\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM ingredient WHERE (id) IN (%s)" },
+    "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = ingredient.entity_key", rows: "SELECT \"id\", \"recipe_id\", \"step_key\", \"quantity\", \"substitutes\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM ingredient WHERE (entity_key, ref_id) IN (%s)" },
   },
   relations: [
     { field: "recipe", column: "recipeId", target: "recipe", probe: "ingredient.recipe_id IN (SELECT recipe.id FROM recipe%s)" },
@@ -461,8 +461,8 @@ export const noteTable: TableDefinition = {
     deleteMany: "DELETE FROM note%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"recipe_id\", \"reply_to\", \"body\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM note WHERE (id) IN (%s)" },
-    "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = EXCLUDED.entity_key", rows: "SELECT \"id\", \"recipe_id\", \"reply_to\", \"body\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM note WHERE (entity_key, ref_id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = note.id", rows: "SELECT \"id\", \"recipe_id\", \"reply_to\", \"body\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM note WHERE (id) IN (%s)" },
+    "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = note.entity_key", rows: "SELECT \"id\", \"recipe_id\", \"reply_to\", \"body\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM note WHERE (entity_key, ref_id) IN (%s)" },
   },
   relations: [
     { field: "recipe", column: "recipeId", target: "recipe", probe: "note.recipe_id IN (SELECT recipe.id FROM recipe%s)" },
@@ -605,7 +605,7 @@ export const recipeTable: TableDefinition = {
     deleteMany: "DELETE FROM recipe%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"title\", \"created_at\", \"created_by\" FROM recipe WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = recipe.id", rows: "SELECT \"id\", \"title\", \"created_at\", \"created_by\" FROM recipe WHERE (id) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByCoverRecipe", probe: "SELECT 1 FROM cover WHERE cover.recipe_id = recipe.id" },
@@ -796,8 +796,8 @@ export const recipeCommitTable: TableDefinition = {
     deleteMany: "DELETE FROM recipe_commit%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"root_id\", \"ref_id\", \"parent_commit_id\", \"message\", \"schema_epoch\", \"content_hash\", \"sequence\", \"created_at\", \"created_by\" FROM recipe_commit WHERE (id) IN (%s)" },
-    "root,sequence": { conflict: "(root_id, \"sequence\")", keep: "root_id = EXCLUDED.root_id", rows: "SELECT \"id\", \"root_id\", \"ref_id\", \"parent_commit_id\", \"message\", \"schema_epoch\", \"content_hash\", \"sequence\", \"created_at\", \"created_by\" FROM recipe_commit WHERE (root_id, \"sequence\") IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = recipe_commit.id", rows: "SELECT \"id\", \"root_id\", \"ref_id\", \"parent_commit_id\", \"message\", \"schema_epoch\", \"content_hash\", \"sequence\", \"created_at\", \"created_by\" FROM recipe_commit WHERE (id) IN (%s)" },
+    "root,sequence": { conflict: "(root_id, \"sequence\")", keep: "root_id = recipe_commit.root_id", rows: "SELECT \"id\", \"root_id\", \"ref_id\", \"parent_commit_id\", \"message\", \"schema_epoch\", \"content_hash\", \"sequence\", \"created_at\", \"created_by\" FROM recipe_commit WHERE (root_id, \"sequence\") IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByRecipeCommitParentCommit", probe: "SELECT 1 FROM recipe_commit WHERE recipe_commit.parent_commit_id = recipe_commit.id" },
@@ -953,8 +953,8 @@ export const recipePatchTable: TableDefinition = {
     deleteMany: "DELETE FROM recipe_patch%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\", \"operation\" FROM recipe_patch WHERE (id) IN (%s)" },
-    "commit,entityKind,entityKey": { conflict: "(commit_id, entity_kind, entity_key)", keep: "commit_id = EXCLUDED.commit_id", rows: "SELECT \"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\", \"operation\" FROM recipe_patch WHERE (commit_id, entity_kind, entity_key) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = recipe_patch.id", rows: "SELECT \"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\", \"operation\" FROM recipe_patch WHERE (id) IN (%s)" },
+    "commit,entityKind,entityKey": { conflict: "(commit_id, entity_kind, entity_key)", keep: "commit_id = recipe_patch.commit_id", rows: "SELECT \"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\", \"operation\" FROM recipe_patch WHERE (commit_id, entity_kind, entity_key) IN (%s)" },
   },
   relations: [
     { field: "commit", column: "commitId", target: "recipeCommit", probe: "recipe_patch.commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)" },
@@ -1146,8 +1146,8 @@ export const recipeRefTable: TableDefinition = {
   softDelete: true,
   historyActor: true,
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"root_id\", \"parent_ref_id\", \"base_commit_id\", \"head_commit_id\", \"name\", \"sealed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\", \"_version\" FROM recipe_ref WHERE (id) IN (%s)" },
-    "root,name": { conflict: "(root_id, \"name\") WHERE deleted_at IS NULL", keep: "root_id = EXCLUDED.root_id", rows: "SELECT \"id\", \"root_id\", \"parent_ref_id\", \"base_commit_id\", \"head_commit_id\", \"name\", \"sealed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\", \"_version\" FROM recipe_ref WHERE (root_id, \"name\") IN (%s) AND (deleted_at IS NULL)" },
+    "id": { conflict: "(id)", keep: "id = recipe_ref.id", rows: "SELECT \"id\", \"root_id\", \"parent_ref_id\", \"base_commit_id\", \"head_commit_id\", \"name\", \"sealed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\", \"_version\" FROM recipe_ref WHERE (id) IN (%s)" },
+    "root,name": { conflict: "(root_id, \"name\") WHERE deleted_at IS NULL", keep: "root_id = recipe_ref.root_id", rows: "SELECT \"id\", \"root_id\", \"parent_ref_id\", \"base_commit_id\", \"head_commit_id\", \"name\", \"sealed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\", \"_version\" FROM recipe_ref WHERE (root_id, \"name\") IN (%s) AND (deleted_at IS NULL)" },
   },
   referencedBy: [
     { filter: "referencedByCoverRef", probe: "SELECT 1 FROM cover WHERE cover.ref_id = recipe_ref.id" },
@@ -1307,8 +1307,8 @@ export const recipeReleaseTable: TableDefinition = {
   },
   historyActor: true,
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"root_id\", \"commit_id\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"_version\" FROM recipe_release WHERE (id) IN (%s)" },
-    "root": { conflict: "(root_id)", keep: "root_id = EXCLUDED.root_id", rows: "SELECT \"id\", \"root_id\", \"commit_id\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"_version\" FROM recipe_release WHERE (root_id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = recipe_release.id", rows: "SELECT \"id\", \"root_id\", \"commit_id\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"_version\" FROM recipe_release WHERE (id) IN (%s)" },
+    "root": { conflict: "(root_id)", keep: "root_id = recipe_release.root_id", rows: "SELECT \"id\", \"root_id\", \"commit_id\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"_version\" FROM recipe_release WHERE (root_id) IN (%s)" },
   },
   relations: [
     { field: "root", column: "rootId", target: "recipe", probe: "recipe_release.root_id IN (SELECT recipe.id FROM recipe%s)" },
@@ -1442,8 +1442,8 @@ export const recipeSnapshotEntryTable: TableDefinition = {
     deleteMany: "DELETE FROM recipe_snapshot_entry%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\" FROM recipe_snapshot_entry WHERE (id) IN (%s)" },
-    "commit,entityKind,entityKey": { conflict: "(commit_id, entity_kind, entity_key)", keep: "commit_id = EXCLUDED.commit_id", rows: "SELECT \"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\" FROM recipe_snapshot_entry WHERE (commit_id, entity_kind, entity_key) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = recipe_snapshot_entry.id", rows: "SELECT \"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\" FROM recipe_snapshot_entry WHERE (id) IN (%s)" },
+    "commit,entityKind,entityKey": { conflict: "(commit_id, entity_kind, entity_key)", keep: "commit_id = recipe_snapshot_entry.commit_id", rows: "SELECT \"id\", \"commit_id\", \"entity_kind\", \"entity_key\", \"entity_id\", \"entity_version\" FROM recipe_snapshot_entry WHERE (commit_id, entity_kind, entity_key) IN (%s)" },
   },
   relations: [
     { field: "commit", column: "commitId", target: "recipeCommit", probe: "recipe_snapshot_entry.commit_id IN (SELECT recipe_commit.id FROM recipe_commit%s)" },
@@ -1610,8 +1610,8 @@ export const stepTable: TableDefinition = {
   },
   historyActor: true,
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"recipe_id\", \"position\", \"instruction\", \"timings\", \"scratch\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM step WHERE (id) IN (%s)" },
-    "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = EXCLUDED.entity_key", rows: "SELECT \"id\", \"recipe_id\", \"position\", \"instruction\", \"timings\", \"scratch\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM step WHERE (entity_key, ref_id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = step.id", rows: "SELECT \"id\", \"recipe_id\", \"position\", \"instruction\", \"timings\", \"scratch\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM step WHERE (id) IN (%s)" },
+    "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = step.entity_key", rows: "SELECT \"id\", \"recipe_id\", \"position\", \"instruction\", \"timings\", \"scratch\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM step WHERE (entity_key, ref_id) IN (%s)" },
   },
   relations: [
     { field: "recipe", column: "recipeId", target: "recipe", probe: "step.recipe_id IN (SELECT recipe.id FROM recipe%s)" },
@@ -1809,8 +1809,8 @@ export const tastingTable: TableDefinition = {
     deleteMany: "DELETE FROM tasting%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"recipe_id\", \"taster\", \"salty\", \"score\", \"servings\", \"tasted_on\", \"tasted_at\", \"served_at\", \"rested\", \"verdict\", \"remarks\", \"tags\", \"helpers\", \"bites\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM tasting WHERE (id) IN (%s)" },
-    "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = EXCLUDED.entity_key", rows: "SELECT \"id\", \"recipe_id\", \"taster\", \"salty\", \"score\", \"servings\", \"tasted_on\", \"tasted_at\", \"served_at\", \"rested\", \"verdict\", \"remarks\", \"tags\", \"helpers\", \"bites\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM tasting WHERE (entity_key, ref_id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = tasting.id", rows: "SELECT \"id\", \"recipe_id\", \"taster\", \"salty\", \"score\", \"servings\", \"tasted_on\", \"tasted_at\", \"served_at\", \"rested\", \"verdict\", \"remarks\", \"tags\", \"helpers\", \"bites\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM tasting WHERE (id) IN (%s)" },
+    "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = tasting.entity_key", rows: "SELECT \"id\", \"recipe_id\", \"taster\", \"salty\", \"score\", \"servings\", \"tasted_on\", \"tasted_at\", \"served_at\", \"rested\", \"verdict\", \"remarks\", \"tags\", \"helpers\", \"bites\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM tasting WHERE (entity_key, ref_id) IN (%s)" },
   },
   relations: [
     { field: "recipe", column: "recipeId", target: "recipe", probe: "tasting.recipe_id IN (SELECT recipe.id FROM recipe%s)" },
@@ -1951,8 +1951,8 @@ export const utensilTable: TableDefinition = {
     deleteMany: "DELETE FROM utensil%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"recipe_id\", \"name\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM utensil WHERE (id) IN (%s)" },
-    "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = EXCLUDED.entity_key", rows: "SELECT \"id\", \"recipe_id\", \"name\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM utensil WHERE (entity_key, ref_id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = utensil.id", rows: "SELECT \"id\", \"recipe_id\", \"name\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM utensil WHERE (id) IN (%s)" },
+    "entityKey,ref": { conflict: "(entity_key, ref_id)", keep: "entity_key = utensil.entity_key", rows: "SELECT \"id\", \"recipe_id\", \"name\", \"entity_key\", \"ref_id\", \"deleted_on_ref\", \"_version\" FROM utensil WHERE (entity_key, ref_id) IN (%s)" },
   },
   relations: [
     { field: "recipe", column: "recipeId", target: "recipe", probe: "utensil.recipe_id IN (SELECT recipe.id FROM recipe%s)" },

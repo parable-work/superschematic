@@ -179,8 +179,8 @@ export const orderTable: TableDefinition = {
     deleteMany: "DELETE FROM \"order\"%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"customer_id\", \"status\", \"placed_at\", \"shipping_address\", \"cancel_reason\", \"checkout_id\", \"total_cents\" FROM \"order\" WHERE (id) IN (%s)" },
-    "checkoutId": { conflict: "(checkout_id)", keep: "checkout_id = EXCLUDED.checkout_id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"customer_id\", \"status\", \"placed_at\", \"shipping_address\", \"cancel_reason\", \"checkout_id\", \"total_cents\" FROM \"order\" WHERE (checkout_id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = \"order\".id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"customer_id\", \"status\", \"placed_at\", \"shipping_address\", \"cancel_reason\", \"checkout_id\", \"total_cents\" FROM \"order\" WHERE (id) IN (%s)" },
+    "checkoutId": { conflict: "(checkout_id)", keep: "checkout_id = \"order\".checkout_id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"customer_id\", \"status\", \"placed_at\", \"shipping_address\", \"cancel_reason\", \"checkout_id\", \"total_cents\" FROM \"order\" WHERE (checkout_id) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByOrderLineOrder", probe: "SELECT 1 FROM order_line WHERE order_line.order_id = \"order\".id" },
@@ -317,7 +317,7 @@ export const orderLineTable: TableDefinition = {
     deleteMany: "DELETE FROM order_line%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"order_id\", \"product_id\", \"quantity\", \"unit_price_cents\" FROM order_line WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = order_line.id", rows: "SELECT \"id\", \"order_id\", \"product_id\", \"quantity\", \"unit_price_cents\" FROM order_line WHERE (id) IN (%s)" },
   },
   relations: [
     { field: "order", column: "orderId", target: "order", probe: "order_line.order_id IN (SELECT \"order\".id FROM \"order\"%s)" },
@@ -466,8 +466,8 @@ export const productTable: TableDefinition = {
   },
   search: "product.search_text",
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"sku\", \"name\", \"price_cents\", \"in_stock\", \"image_object\" FROM product WHERE (id) IN (%s)" },
-    "sku": { conflict: "(sku)", keep: "sku = EXCLUDED.sku", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"sku\", \"name\", \"price_cents\", \"in_stock\", \"image_object\" FROM product WHERE (sku) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = product.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"sku\", \"name\", \"price_cents\", \"in_stock\", \"image_object\" FROM product WHERE (id) IN (%s)" },
+    "sku": { conflict: "(sku)", keep: "sku = product.sku", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"sku\", \"name\", \"price_cents\", \"in_stock\", \"image_object\" FROM product WHERE (sku) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByOrderLineProduct", probe: "SELECT 1 FROM order_line WHERE order_line.product_id = product.id" },
@@ -618,8 +618,8 @@ export const restockRequestTable: TableDefinition = {
     deleteMany: "DELETE FROM restock_request%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"status\", \"quantity\", \"open_product_id\", \"ordered_at\" FROM restock_request WHERE (id) IN (%s)" },
-    "openProductId": { conflict: "(open_product_id)", keep: "open_product_id = EXCLUDED.open_product_id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"status\", \"quantity\", \"open_product_id\", \"ordered_at\" FROM restock_request WHERE (open_product_id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = restock_request.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"status\", \"quantity\", \"open_product_id\", \"ordered_at\" FROM restock_request WHERE (id) IN (%s)" },
+    "openProductId": { conflict: "(open_product_id)", keep: "open_product_id = restock_request.open_product_id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"status\", \"quantity\", \"open_product_id\", \"ordered_at\" FROM restock_request WHERE (open_product_id) IN (%s)" },
   },
   relations: [
     { field: "product", column: "productId", target: "product", probe: "restock_request.product_id IN (SELECT product.id FROM product%s)" },
@@ -771,8 +771,8 @@ export const reviewTable: TableDefinition = {
   softDelete: true,
   search: "review.search_text",
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"author_id\", \"rating\", \"title\", \"body\", \"deleted_at\", \"deleted_by\" FROM review WHERE (id) IN (%s)" },
-    "product,author": { conflict: "(product_id, author_id) WHERE deleted_at IS NULL", keep: "product_id = EXCLUDED.product_id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"author_id\", \"rating\", \"title\", \"body\", \"deleted_at\", \"deleted_by\" FROM review WHERE (product_id, author_id) IN (%s) AND (deleted_at IS NULL)" },
+    "id": { conflict: "(id)", keep: "id = review.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"author_id\", \"rating\", \"title\", \"body\", \"deleted_at\", \"deleted_by\" FROM review WHERE (id) IN (%s)" },
+    "product,author": { conflict: "(product_id, author_id) WHERE deleted_at IS NULL", keep: "product_id = review.product_id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"product_id\", \"author_id\", \"rating\", \"title\", \"body\", \"deleted_at\", \"deleted_by\" FROM review WHERE (product_id, author_id) IN (%s) AND (deleted_at IS NULL)" },
   },
   relations: [
     { field: "product", column: "productId", target: "product", probe: "review.product_id IN (SELECT product.id FROM product%s)" },
@@ -901,8 +901,8 @@ export const roleTable: TableDefinition = {
     deleteMany: "DELETE FROM role%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"name\", \"permissions\" FROM role WHERE (id) IN (%s)" },
-    "name": { conflict: "(\"name\")", keep: "\"name\" = EXCLUDED.\"name\"", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"name\", \"permissions\" FROM role WHERE (\"name\") IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = role.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"name\", \"permissions\" FROM role WHERE (id) IN (%s)" },
+    "name": { conflict: "(\"name\")", keep: "\"name\" = role.\"name\"", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"name\", \"permissions\" FROM role WHERE (\"name\") IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByUserRoleGrantRole", probe: "SELECT 1 FROM user_role_grant WHERE user_role_grant.role_id = role.id" },
@@ -1041,8 +1041,8 @@ export const sessionTable: TableDefinition = {
     deleteMany: "DELETE FROM \"session\"%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE (id) IN (%s)" },
-    "tokenHash": { conflict: "(token_hash)", keep: "token_hash = EXCLUDED.token_hash", rows: "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE (token_hash) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = \"session\".id", rows: "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE (id) IN (%s)" },
+    "tokenHash": { conflict: "(token_hash)", keep: "token_hash = \"session\".token_hash", rows: "SELECT \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\" FROM \"session\" WHERE (token_hash) IN (%s)" },
   },
   relations: [
     { field: "user", column: "userId", target: "user", probe: "\"session\".user_id IN (SELECT \"user\".id FROM \"user\"%s)" },
@@ -1182,8 +1182,8 @@ export const userTable: TableDefinition = {
     deleteMany: "DELETE FROM \"user\"%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"email\", \"name\" FROM \"user\" WHERE (id) IN (%s)" },
-    "email": { conflict: "(email)", keep: "email = EXCLUDED.email", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"email\", \"name\" FROM \"user\" WHERE (email) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = \"user\".id", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"email\", \"name\" FROM \"user\" WHERE (id) IN (%s)" },
+    "email": { conflict: "(email)", keep: "email = \"user\".email", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"email\", \"name\" FROM \"user\" WHERE (email) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByOrderCustomer", probe: "SELECT 1 FROM \"order\" WHERE \"order\".customer_id = \"user\".id" },
@@ -1327,8 +1327,8 @@ export const userCredentialTable: TableDefinition = {
     deleteMany: "DELETE FROM user_credential%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE (id) IN (%s)" },
-    "user": { conflict: "(user_id)", keep: "user_id = EXCLUDED.user_id", rows: "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE (user_id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = user_credential.id", rows: "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE (id) IN (%s)" },
+    "user": { conflict: "(user_id)", keep: "user_id = user_credential.user_id", rows: "SELECT \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\" FROM user_credential WHERE (user_id) IN (%s)" },
   },
   relations: [
     { field: "user", column: "userId", target: "user", probe: "user_credential.user_id IN (SELECT \"user\".id FROM \"user\"%s)" },
@@ -1454,8 +1454,8 @@ export const userRoleGrantTable: TableDefinition = {
     deleteMany: "DELETE FROM user_role_grant%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE (id) IN (%s)" },
-    "user,role": { conflict: "(user_id, role_id)", keep: "user_id = EXCLUDED.user_id", rows: "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE (user_id, role_id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = user_role_grant.id", rows: "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE (id) IN (%s)" },
+    "user,role": { conflict: "(user_id, role_id)", keep: "user_id = user_role_grant.user_id", rows: "SELECT \"id\", \"user_id\", \"role_id\", \"granted_at\" FROM user_role_grant WHERE (user_id, role_id) IN (%s)" },
   },
   relations: [
     { field: "user", column: "userId", target: "user", probe: "user_role_grant.user_id IN (SELECT \"user\".id FROM \"user\"%s)" },

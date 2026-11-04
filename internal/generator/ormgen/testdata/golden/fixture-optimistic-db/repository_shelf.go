@@ -964,7 +964,7 @@ var shelfUniqueKeys = map[ShelfUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	ShelfUniqueById: {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "label", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by", "_version" FROM shelf WHERE (id) IN (%s)`, []string{`id`}},
+	ShelfUniqueById: {`(id)`, `id = shelf.id`, `SELECT "id", "label", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by", "_version" FROM shelf WHERE (id) IN (%s)`, []string{`id`}},
 }
 
 // shelfKeyOf is the text of row's values of the unique key on, as

@@ -1238,7 +1238,7 @@ var ticketUniqueKeys = map[TicketUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	TicketUniqueById: {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "title", "visit_at", "status", "status_entered_at", "_version" FROM ticket WHERE (id) IN (%s)`, []string{`id`}},
+	TicketUniqueById: {`(id)`, `id = ticket.id`, `SELECT "id", "title", "visit_at", "status", "status_entered_at", "_version" FROM ticket WHERE (id) IN (%s)`, []string{`id`}},
 }
 
 // ticketKeyOf is the text of row's values of the unique key on, as

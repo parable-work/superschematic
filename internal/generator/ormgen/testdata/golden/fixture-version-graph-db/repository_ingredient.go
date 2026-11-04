@@ -1713,8 +1713,8 @@ var ingredientUniqueKeys = map[IngredientUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	IngredientUniqueById:           {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "recipe_id", "step_key", "quantity", "substitutes", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM ingredient WHERE (id) IN (%s)`, []string{`id`}},
-	IngredientUniqueByEntityKeyRef: {`(entity_key, ref_id)`, `entity_key = EXCLUDED.entity_key`, `SELECT "id", "recipe_id", "step_key", "quantity", "substitutes", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM ingredient WHERE (entity_key, ref_id) IN (%s)`, []string{`entity_key`, `ref_id`}},
+	IngredientUniqueById:           {`(id)`, `id = ingredient.id`, `SELECT "id", "recipe_id", "step_key", "quantity", "substitutes", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM ingredient WHERE (id) IN (%s)`, []string{`id`}},
+	IngredientUniqueByEntityKeyRef: {`(entity_key, ref_id)`, `entity_key = ingredient.entity_key`, `SELECT "id", "recipe_id", "step_key", "quantity", "substitutes", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM ingredient WHERE (entity_key, ref_id) IN (%s)`, []string{`entity_key`, `ref_id`}},
 }
 
 // ingredientKeyOf is the text of row's values of the unique key on, as

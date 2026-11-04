@@ -1501,7 +1501,7 @@ var taskUniqueKeys = map[TaskUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	TaskUniqueById: {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "title", "owner", "reviewer", "plan", "proof", "urgent", "attempts", "created_by", "status", "status_entered_at", "_version" FROM task WHERE (id) IN (%s)`, []string{`id`}},
+	TaskUniqueById: {`(id)`, `id = task.id`, `SELECT "id", "title", "owner", "reviewer", "plan", "proof", "urgent", "attempts", "created_by", "status", "status_entered_at", "_version" FROM task WHERE (id) IN (%s)`, []string{`id`}},
 }
 
 // taskKeyOf is the text of row's values of the unique key on, as

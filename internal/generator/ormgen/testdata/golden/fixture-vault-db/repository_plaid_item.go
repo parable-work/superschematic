@@ -1023,8 +1023,8 @@ var plaidItemUniqueKeys = map[PlaidItemUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	PlaidItemUniqueById:     {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "item_id", "institution", "access_token", "webhook_secret", "created_at", "updated_at", "deleted_at" FROM plaid_item WHERE (id) IN (%s)`, []string{`id`}},
-	PlaidItemUniqueByItemId: {`(item_id)`, `item_id = EXCLUDED.item_id`, `SELECT "id", "item_id", "institution", "access_token", "webhook_secret", "created_at", "updated_at", "deleted_at" FROM plaid_item WHERE (item_id) IN (%s)`, []string{`item_id`}},
+	PlaidItemUniqueById:     {`(id)`, `id = plaid_item.id`, `SELECT "id", "item_id", "institution", "access_token", "webhook_secret", "created_at", "updated_at", "deleted_at" FROM plaid_item WHERE (id) IN (%s)`, []string{`id`}},
+	PlaidItemUniqueByItemId: {`(item_id)`, `item_id = plaid_item.item_id`, `SELECT "id", "item_id", "institution", "access_token", "webhook_secret", "created_at", "updated_at", "deleted_at" FROM plaid_item WHERE (item_id) IN (%s)`, []string{`item_id`}},
 }
 
 // plaidItemKeyOf is the text of row's values of the unique key on, as

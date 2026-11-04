@@ -781,7 +781,7 @@ var categoryUniqueKeys = map[CategoryUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	CategoryUniqueById: {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "displayName", "kind", "createdAt" FROM "budgetCategory" WHERE (id) IN (%s)`, []string{`id`}},
+	CategoryUniqueById: {`(id)`, `id = "budgetCategory".id`, `SELECT "id", "displayName", "kind", "createdAt" FROM "budgetCategory" WHERE (id) IN (%s)`, []string{`id`}},
 }
 
 // categoryKeyOf is the text of row's values of the unique key on, as

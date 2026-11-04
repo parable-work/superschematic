@@ -788,8 +788,8 @@ var roleUniqueKeys = map[RoleUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	RoleUniqueById:   {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "name", "permissions" FROM role WHERE (id) IN (%s)`, []string{`id`}},
-	RoleUniqueByName: {`("name")`, `"name" = EXCLUDED."name"`, `SELECT "id", "name", "permissions" FROM role WHERE ("name") IN (%s)`, []string{`"name"`}},
+	RoleUniqueById:   {`(id)`, `id = role.id`, `SELECT "id", "name", "permissions" FROM role WHERE (id) IN (%s)`, []string{`id`}},
+	RoleUniqueByName: {`("name")`, `"name" = role."name"`, `SELECT "id", "name", "permissions" FROM role WHERE ("name") IN (%s)`, []string{`"name"`}},
 }
 
 // roleKeyOf is the text of row's values of the unique key on, as

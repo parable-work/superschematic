@@ -1540,8 +1540,8 @@ var utensilUniqueKeys = map[UtensilUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	UtensilUniqueById:           {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "recipe_id", "name", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM utensil WHERE (id) IN (%s)`, []string{`id`}},
-	UtensilUniqueByEntityKeyRef: {`(entity_key, ref_id)`, `entity_key = EXCLUDED.entity_key`, `SELECT "id", "recipe_id", "name", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM utensil WHERE (entity_key, ref_id) IN (%s)`, []string{`entity_key`, `ref_id`}},
+	UtensilUniqueById:           {`(id)`, `id = utensil.id`, `SELECT "id", "recipe_id", "name", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM utensil WHERE (id) IN (%s)`, []string{`id`}},
+	UtensilUniqueByEntityKeyRef: {`(entity_key, ref_id)`, `entity_key = utensil.entity_key`, `SELECT "id", "recipe_id", "name", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM utensil WHERE (entity_key, ref_id) IN (%s)`, []string{`entity_key`, `ref_id`}},
 }
 
 // utensilKeyOf is the text of row's values of the unique key on, as

@@ -1005,7 +1005,7 @@ var passageUniqueKeys = map[PassageUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	PassageUniqueById: {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "title", "topic", "embedding", "title_embedding", "rates", "deleted_at" FROM passage WHERE (id) IN (%s)`, []string{`id`}},
+	PassageUniqueById: {`(id)`, `id = passage.id`, `SELECT "id", "title", "topic", "embedding", "title_embedding", "rates", "deleted_at" FROM passage WHERE (id) IN (%s)`, []string{`id`}},
 }
 
 // passageKeyOf is the text of row's values of the unique key on, as

@@ -1051,8 +1051,8 @@ var recipeSnapshotEntryUniqueKeys = map[RecipeSnapshotEntryUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	RecipeSnapshotEntryUniqueById:                        {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "commit_id", "entity_kind", "entity_key", "entity_id", "entity_version" FROM recipe_snapshot_entry WHERE (id) IN (%s)`, []string{`id`}},
-	RecipeSnapshotEntryUniqueByCommitEntityKindEntityKey: {`(commit_id, entity_kind, entity_key)`, `commit_id = EXCLUDED.commit_id`, `SELECT "id", "commit_id", "entity_kind", "entity_key", "entity_id", "entity_version" FROM recipe_snapshot_entry WHERE (commit_id, entity_kind, entity_key) IN (%s)`, []string{`commit_id`, `entity_kind`, `entity_key`}},
+	RecipeSnapshotEntryUniqueById:                        {`(id)`, `id = recipe_snapshot_entry.id`, `SELECT "id", "commit_id", "entity_kind", "entity_key", "entity_id", "entity_version" FROM recipe_snapshot_entry WHERE (id) IN (%s)`, []string{`id`}},
+	RecipeSnapshotEntryUniqueByCommitEntityKindEntityKey: {`(commit_id, entity_kind, entity_key)`, `commit_id = recipe_snapshot_entry.commit_id`, `SELECT "id", "commit_id", "entity_kind", "entity_key", "entity_id", "entity_version" FROM recipe_snapshot_entry WHERE (commit_id, entity_kind, entity_key) IN (%s)`, []string{`commit_id`, `entity_kind`, `entity_key`}},
 }
 
 // recipeSnapshotEntryKeyOf is the text of row's values of the unique key on, as

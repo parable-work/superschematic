@@ -73,7 +73,7 @@ func TestTablesOfModelsALedger(t *testing.T) {
 	if want := "id amountCents bookedOn createdAt updatedAt"; strings.Join(sorts, " ") != want {
 		t.Errorf("Entry sorts by %s, want %s", strings.Join(sorts, " "), want)
 	}
-	if key := entry.UniqueKeyNamed("account,externalId"); key == nil || key.Conflict != "(account_id, external_id) WHERE deleted_at IS NULL" || key.Keep != "account_id = EXCLUDED.account_id" {
+	if key := entry.UniqueKeyNamed("account,externalId"); key == nil || key.Conflict != "(account_id, external_id) WHERE deleted_at IS NULL" || key.Keep != "account_id = entry.account_id" {
 		t.Errorf("Entry's key by account and externalId = %+v", key)
 	}
 	account := tables["Account"]

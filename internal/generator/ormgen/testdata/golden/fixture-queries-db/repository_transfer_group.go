@@ -772,7 +772,7 @@ var transferGroupUniqueKeys = map[TransferGroupUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	TransferGroupUniqueById: {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "note" FROM transfer_group WHERE (id) IN (%s)`, []string{`id`}},
+	TransferGroupUniqueById: {`(id)`, `id = transfer_group.id`, `SELECT "id", "note" FROM transfer_group WHERE (id) IN (%s)`, []string{`id`}},
 }
 
 // transferGroupKeyOf is the text of row's values of the unique key on, as

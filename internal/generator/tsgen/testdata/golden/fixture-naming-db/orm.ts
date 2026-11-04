@@ -147,7 +147,7 @@ export const categoryTable: TableDefinition = {
     deleteMany: "DELETE FROM \"budgetCategory\"%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"displayName\", \"kind\", \"createdAt\" FROM \"budgetCategory\" WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = \"budgetCategory\".id", rows: "SELECT \"id\", \"displayName\", \"kind\", \"createdAt\" FROM \"budgetCategory\" WHERE (id) IN (%s)" },
   },
   referencedBy: [
     { filter: "referencedByLineItemCategory", probe: "SELECT 1 FROM \"lineItem\" WHERE \"lineItem\".\"categoryId\" = \"budgetCategory\".id", live: " AND \"lineItem\".\"deletedAt\" IS NULL" },
@@ -301,8 +301,8 @@ export const lineItemTable: TableDefinition = {
   softDelete: true,
   search: "\"lineItem\".search_text",
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"amountCents\", \"postedOn\", \"memo\", \"externalId\", \"categoryId\", \"createdAt\", \"updatedAt\", \"deletedAt\" FROM \"lineItem\" WHERE (id) IN (%s)" },
-    "category,externalId": { conflict: "(\"categoryId\", \"externalId\") WHERE \"deletedAt\" IS NULL", keep: "\"categoryId\" = EXCLUDED.\"categoryId\"", rows: "SELECT \"id\", \"amountCents\", \"postedOn\", \"memo\", \"externalId\", \"categoryId\", \"createdAt\", \"updatedAt\", \"deletedAt\" FROM \"lineItem\" WHERE (\"categoryId\", \"externalId\") IN (%s) AND (\"deletedAt\" IS NULL)" },
+    "id": { conflict: "(id)", keep: "id = \"lineItem\".id", rows: "SELECT \"id\", \"amountCents\", \"postedOn\", \"memo\", \"externalId\", \"categoryId\", \"createdAt\", \"updatedAt\", \"deletedAt\" FROM \"lineItem\" WHERE (id) IN (%s)" },
+    "category,externalId": { conflict: "(\"categoryId\", \"externalId\") WHERE \"deletedAt\" IS NULL", keep: "\"categoryId\" = \"lineItem\".\"categoryId\"", rows: "SELECT \"id\", \"amountCents\", \"postedOn\", \"memo\", \"externalId\", \"categoryId\", \"createdAt\", \"updatedAt\", \"deletedAt\" FROM \"lineItem\" WHERE (\"categoryId\", \"externalId\") IN (%s) AND (\"deletedAt\" IS NULL)" },
   },
   relations: [
     { field: "category", column: "categoryId", target: "category", probe: "\"lineItem\".\"categoryId\" IN (SELECT \"budgetCategory\".id FROM \"budgetCategory\"%s)" },
@@ -424,7 +424,7 @@ export const noteTable: TableDefinition = {
   },
   historyActor: true,
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"bodyText\", \"updatedAt\", \"updatedBy\", \"_version\" FROM \"ledgerNote\" WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = \"ledgerNote\".id", rows: "SELECT \"id\", \"bodyText\", \"updatedAt\", \"updatedBy\", \"_version\" FROM \"ledgerNote\" WHERE (id) IN (%s)" },
   },
 };
 

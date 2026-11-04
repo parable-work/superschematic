@@ -94,7 +94,8 @@ func TestUpsertStatementsOfASync(t *testing.T) {
 
 // TestExpressionKeysCannotBeReadBack holds that a unique @index over an
 // expression has no read of its rows (D89): an upsert cannot match a row to
-// its input by the expression's columns.
+// its input by the expression's columns. Its keep leaves the held row's
+// column as it is.
 func TestExpressionKeysCannotBeReadBack(t *testing.T) {
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-ddl-db"))
 	if err != nil {
@@ -109,7 +110,7 @@ func TestExpressionKeysCannotBeReadBack(t *testing.T) {
 			continue
 		}
 		key := table.UniqueKeyNamed("label")
-		if key == nil || !key.Expression || key.Rows != "" || key.Conflict != "((lower(label)))" {
+		if key == nil || !key.Expression || key.Rows != "" || key.Conflict != "((lower(label)))" || key.Keep != "label = category.label" {
 			t.Errorf("Category's key by lower(label) = %+v", key)
 		}
 		return

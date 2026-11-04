@@ -725,7 +725,7 @@ var productUniqueKeys = map[ProductUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	ProductUniqueById: {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "name" FROM product WHERE (id) IN (%s)`, []string{`id`}},
+	ProductUniqueById: {`(id)`, `id = product.id`, `SELECT "id", "name" FROM product WHERE (id) IN (%s)`, []string{`id`}},
 }
 
 // productKeyOf is the text of row's values of the unique key on, as

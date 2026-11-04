@@ -216,8 +216,8 @@ export const noteTable: TableDefinition = {
   },
   softDelete: true,
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"slug\", \"title\", \"body\", \"author\", \"pinned\", \"views\", \"created_by\", \"deleted_at\", \"status\", \"status_entered_at\", \"_version\" FROM note WHERE (id) IN (%s)" },
-    "slug": { conflict: "(slug)", keep: "slug = EXCLUDED.slug", rows: "SELECT \"id\", \"slug\", \"title\", \"body\", \"author\", \"pinned\", \"views\", \"created_by\", \"deleted_at\", \"status\", \"status_entered_at\", \"_version\" FROM note WHERE (slug) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = note.id", rows: "SELECT \"id\", \"slug\", \"title\", \"body\", \"author\", \"pinned\", \"views\", \"created_by\", \"deleted_at\", \"status\", \"status_entered_at\", \"_version\" FROM note WHERE (id) IN (%s)" },
+    "slug": { conflict: "(slug)", keep: "slug = note.slug", rows: "SELECT \"id\", \"slug\", \"title\", \"body\", \"author\", \"pinned\", \"views\", \"created_by\", \"deleted_at\", \"status\", \"status_entered_at\", \"_version\" FROM note WHERE (slug) IN (%s)" },
   },
 };
 
@@ -429,7 +429,7 @@ export const taskTable: TableDefinition = {
     deleteMany: "DELETE FROM task%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = EXCLUDED.id", rows: "SELECT \"id\", \"title\", \"owner\", \"reviewer\", \"plan\", \"proof\", \"urgent\", \"attempts\", \"created_by\", \"status\", \"status_entered_at\", \"_version\" FROM task WHERE (id) IN (%s)" },
+    "id": { conflict: "(id)", keep: "id = task.id", rows: "SELECT \"id\", \"title\", \"owner\", \"reviewer\", \"plan\", \"proof\", \"urgent\", \"attempts\", \"created_by\", \"status\", \"status_entered_at\", \"_version\" FROM task WHERE (id) IN (%s)" },
   },
 };
 

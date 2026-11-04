@@ -1142,8 +1142,8 @@ var userCredentialUniqueKeys = map[UserCredentialUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	UserCredentialUniqueById:   {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "user_id", "password_hash", "password_changed_at", "disabled_at", "pending_at" FROM user_credential WHERE (id) IN (%s)`, []string{`id`}},
-	UserCredentialUniqueByUser: {`(user_id)`, `user_id = EXCLUDED.user_id`, `SELECT "id", "user_id", "password_hash", "password_changed_at", "disabled_at", "pending_at" FROM user_credential WHERE (user_id) IN (%s)`, []string{`user_id`}},
+	UserCredentialUniqueById:   {`(id)`, `id = user_credential.id`, `SELECT "id", "user_id", "password_hash", "password_changed_at", "disabled_at", "pending_at" FROM user_credential WHERE (id) IN (%s)`, []string{`id`}},
+	UserCredentialUniqueByUser: {`(user_id)`, `user_id = user_credential.user_id`, `SELECT "id", "user_id", "password_hash", "password_changed_at", "disabled_at", "pending_at" FROM user_credential WHERE (user_id) IN (%s)`, []string{`user_id`}},
 }
 
 // userCredentialKeyOf is the text of row's values of the unique key on, as

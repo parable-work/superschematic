@@ -1081,8 +1081,8 @@ var recipePatchUniqueKeys = map[RecipePatchUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	RecipePatchUniqueById:                        {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "commit_id", "entity_kind", "entity_key", "entity_id", "entity_version", "operation" FROM recipe_patch WHERE (id) IN (%s)`, []string{`id`}},
-	RecipePatchUniqueByCommitEntityKindEntityKey: {`(commit_id, entity_kind, entity_key)`, `commit_id = EXCLUDED.commit_id`, `SELECT "id", "commit_id", "entity_kind", "entity_key", "entity_id", "entity_version", "operation" FROM recipe_patch WHERE (commit_id, entity_kind, entity_key) IN (%s)`, []string{`commit_id`, `entity_kind`, `entity_key`}},
+	RecipePatchUniqueById:                        {`(id)`, `id = recipe_patch.id`, `SELECT "id", "commit_id", "entity_kind", "entity_key", "entity_id", "entity_version", "operation" FROM recipe_patch WHERE (id) IN (%s)`, []string{`id`}},
+	RecipePatchUniqueByCommitEntityKindEntityKey: {`(commit_id, entity_kind, entity_key)`, `commit_id = recipe_patch.commit_id`, `SELECT "id", "commit_id", "entity_kind", "entity_key", "entity_id", "entity_version", "operation" FROM recipe_patch WHERE (commit_id, entity_kind, entity_key) IN (%s)`, []string{`commit_id`, `entity_kind`, `entity_key`}},
 }
 
 // recipePatchKeyOf is the text of row's values of the unique key on, as

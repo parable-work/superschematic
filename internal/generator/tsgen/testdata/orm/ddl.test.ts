@@ -104,6 +104,11 @@ describe.skipIf(dsn === '')('the DDL under the repositories', () => {
     const groceries = await orm.category.upsertOne({ label: 'Groceries', kind: personal }, ['label'], { sortOrder: 5 });
     const again = await orm.category.upsertOne({ label: 'GROCERIES', kind: business }, ['label'], { sortOrder: 7 });
     expect([again.id, again.label, again.kind, again.sortOrder]).toEqual([groceries.id, 'Groceries', personal, 7]);
+    // An upsert that sets no field keeps the held row's label, not the
+    // input's case of it.
+    const kept = await orm.category.upsertOneResult({ label: 'groceries', kind: business }, ['label'], {});
+    expect([kept.status, kept.row.id, kept.row.label, kept.row.sortOrder]).toEqual(['unchanged', groceries.id, 'Groceries', 7]);
+    expect((await orm.category.getOne(groceries.id)).label).toBe('Groceries');
     // Its rows cannot be matched to inputs or read back by their columns
     // (D89): upsertMany and an upsert only if changed refuse the key.
     await expect(orm.category.upsertMany([{ label: 'groceries', kind: personal }], ['label'], ['sortOrder'])).rejects.toThrow(/over an expression/);

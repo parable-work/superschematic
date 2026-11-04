@@ -975,7 +975,7 @@ var ledgerLineUniqueKeys = map[LedgerLineUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	LedgerLineUniqueById: {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "amount", "currency", "rate", "confidence", "quantity", "booked_at" FROM ledger_line WHERE (id) IN (%s)`, []string{`id`}},
+	LedgerLineUniqueById: {`(id)`, `id = ledger_line.id`, `SELECT "id", "amount", "currency", "rate", "confidence", "quantity", "booked_at" FROM ledger_line WHERE (id) IN (%s)`, []string{`id`}},
 }
 
 // ledgerLineKeyOf is the text of row's values of the unique key on, as

@@ -1869,8 +1869,8 @@ var entryUniqueKeys = map[EntryUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	EntryUniqueById:                {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE (id) IN (%s)`, []string{`id`}},
-	EntryUniqueByAccountExternalId: {`(account_id, external_id) WHERE deleted_at IS NULL`, `account_id = EXCLUDED.account_id`, `SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE (account_id, external_id) IN (%s) AND (deleted_at IS NULL)`, []string{`account_id`, `external_id`}},
+	EntryUniqueById:                {`(id)`, `id = entry.id`, `SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE (id) IN (%s)`, []string{`id`}},
+	EntryUniqueByAccountExternalId: {`(account_id, external_id) WHERE deleted_at IS NULL`, `account_id = entry.account_id`, `SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE (account_id, external_id) IN (%s) AND (deleted_at IS NULL)`, []string{`account_id`, `external_id`}},
 }
 
 // entryKeyOf is the text of row's values of the unique key on, as

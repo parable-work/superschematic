@@ -952,7 +952,7 @@ var chunkUniqueKeys = map[ChunkUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	ChunkUniqueById: {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "chunkText", "chunkVector", "note", "removedAt" FROM "NoteChunk" WHERE (id) IN (%s)`, []string{`id`}},
+	ChunkUniqueById: {`(id)`, `id = "NoteChunk".id`, `SELECT "id", "chunkText", "chunkVector", "note", "removedAt" FROM "NoteChunk" WHERE (id) IN (%s)`, []string{`id`}},
 }
 
 // chunkKeyOf is the text of row's values of the unique key on, as

@@ -1923,8 +1923,8 @@ var stepUniqueKeys = map[StepUniqueKey]struct {
 	conflict, keep, rows string
 	columns              []string
 }{
-	StepUniqueById:           {`(id)`, `id = EXCLUDED.id`, `SELECT "id", "recipe_id", "position", "instruction", "timings", "scratch", "created_at", "created_by", "updated_at", "updated_by", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM step WHERE (id) IN (%s)`, []string{`id`}},
-	StepUniqueByEntityKeyRef: {`(entity_key, ref_id)`, `entity_key = EXCLUDED.entity_key`, `SELECT "id", "recipe_id", "position", "instruction", "timings", "scratch", "created_at", "created_by", "updated_at", "updated_by", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM step WHERE (entity_key, ref_id) IN (%s)`, []string{`entity_key`, `ref_id`}},
+	StepUniqueById:           {`(id)`, `id = step.id`, `SELECT "id", "recipe_id", "position", "instruction", "timings", "scratch", "created_at", "created_by", "updated_at", "updated_by", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM step WHERE (id) IN (%s)`, []string{`id`}},
+	StepUniqueByEntityKeyRef: {`(entity_key, ref_id)`, `entity_key = step.entity_key`, `SELECT "id", "recipe_id", "position", "instruction", "timings", "scratch", "created_at", "created_by", "updated_at", "updated_by", "entity_key", "ref_id", "deleted_on_ref", "_version" FROM step WHERE (entity_key, ref_id) IN (%s)`, []string{`entity_key`, `ref_id`}},
 }
 
 // stepKeyOf is the text of row's values of the unique key on, as
