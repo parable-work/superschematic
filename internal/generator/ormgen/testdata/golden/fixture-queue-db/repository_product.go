@@ -716,16 +716,17 @@ func (r *ProductRepository) CreateOne(ctx context.Context, input *types.Product)
 }
 
 // productUniqueKeys are the conflict targets of Product's unique keys, and
-// the assignment an upsert that sets nothing writes, so the row it
-// conflicts with is returned (sqlutil.UniqueKey, D79); the read of the rows
-// that hold keys, which an upsert only if changed reads back, empty for a
-// key over an expression, and the key's columns as a batch insert's cells
-// name them (D89).
+// the assignment of the update an upsert that sets nothing names, which its
+// WHERE FALSE never runs (sqlutil.UniqueKey, D79); the read of the rows
+// that hold keys, which an upsert reads back when it leaves them as they
+// were, empty for a key over an expression, and that key's read of the row
+// that holds one input's value of it, empty for a key over columns; and the
+// key's columns as a batch insert's cells name them (D89).
 var productUniqueKeys = map[ProductUniqueKey]struct {
-	conflict, keep, rows string
-	columns              []string
+	conflict, keep, rows, held string
+	columns                    []string
 }{
-	ProductUniqueById: {`(id)`, `id = product.id`, `SELECT "id", "name" FROM product WHERE (id) IN (%s)`, []string{`id`}},
+	ProductUniqueById: {`(id)`, `id = product.id`, `SELECT "id", "name" FROM product WHERE (id) IN (%s)`, ``, []string{`id`}},
 }
 
 // productKeyOf is the text of row's values of the unique key on, as
@@ -792,7 +793,9 @@ func (r *ProductRepository) UpsertOne(ctx context.Context, input *types.Product,
 // UpsertOneResult is UpsertOne, and what it did with the row: inserted it,
 // updated the row that held the key, or left that row as it was (D89).
 // With opts.OnlyIfChanged it updates the row only when a field the update
-// sets differs from what the row holds, which it reads back otherwise. A write that
+// sets differs from what the row holds, which it reads back otherwise. One
+// whose update sets no field updates nothing, so the row keeps its version
+// and no trigger fires, and reads the row back. A write that
 // may take more than one statement runs in a transaction of its own when
 // none is open.
 func (r *ProductRepository) UpsertOneResult(ctx context.Context, input *types.Product, on ProductUniqueKey, update *ProductUpdate, opts *UpsertOptions) (UpsertResult[*types.Product], error) {
@@ -817,7 +820,7 @@ func (r *ProductRepository) UpsertOneResult(ctx context.Context, input *types.Pr
 		}
 		return *result, nil
 	}
-	if !opts.OnlyIfChanged {
+	if !opts.OnlyIfChanged && productUpdateSetsField(update) {
 		return write(r)
 	}
 	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (UpsertResult[*types.Product], error) {
@@ -825,9 +828,16 @@ func (r *ProductRepository) UpsertOneResult(ctx context.Context, input *types.Pr
 	})
 }
 
+// productUpdateSetsField reports whether update sets a field, a value or a
+// null: UpdatedBy alone sets none, but stamps the row an update that sets
+// one changes.
+func productUpdateSetsField(update *ProductUpdate) bool {
+	return update != nil && *update != (ProductUpdate{UpdatedBy: update.UpdatedBy})
+}
+
 // upsertRow is UpsertOneResult on the repository's connection: the upsert,
-// a read of the row it left as it was, only if changed, and the second
-// statement of an encrypted field.
+// a read of the row it left as it was, when the update sets no field or
+// only if changed, and the second statement of an encrypted field.
 func (r *ProductRepository) upsertRow(ctx context.Context, input *types.Product, on ProductUniqueKey, update *ProductUpdate, onlyIfChanged bool) (*UpsertResult[*types.Product], error) {
 	key := productUniqueKeys[on]
 	// Set audit fields
@@ -869,8 +879,9 @@ func (r *ProductRepository) upsertRow(ctx context.Context, input *types.Product,
 
 	assigned := len(setClauses)
 	if assigned == 0 {
-		// An update that sets no field leaves the row as it is, stamps and
-		// all, and returns it.
+		// An update that sets no field compares none, so its WHERE is FALSE:
+		// it leaves the row as it is, its version, stamps and history all,
+		// and reads it back below.
 		setClauses = append(setClauses, key.keep)
 	} else {
 		// Set updated_at
@@ -885,7 +896,7 @@ func (r *ProductRepository) upsertRow(ctx context.Context, input *types.Product,
 		"("+strings.Join(placeholders, ", ")+")",
 		key.conflict,
 		strings.Join(setClauses, ", "),
-		upsertWhere(``, compareCurrent, compareNext, onlyIfChanged),
+		upsertWhere(``, compareCurrent, compareNext, onlyIfChanged || assigned == 0),
 	)
 
 	// Execute query
@@ -909,20 +920,22 @@ func (r *ProductRepository) upsertRow(ctx context.Context, input *types.Product,
 		upserted = &UpsertResult[*types.Product]{Row: scanned, Status: status}
 	case err != pgx.ErrNoRows:
 		return nil, fmt.Errorf("failed to scan result: %w", err)
-	case !onlyIfChanged:
+	case !onlyIfChanged && assigned > 0:
 		// The row the key conflicts with is soft-deleted.
 		return nil, ErrNotFound
 	default:
-		// The row the key conflicts with already held the update's values.
+		// The row the key conflicts with, which the update sets no field of
+		// or which already held the update's values, read back by its key:
+		// a soft-deleted one is ErrNotFound.
 		keyValues, ok := upsertCellValues(upsertCells(fields, values), key.columns)
 		if !ok {
 			return nil, fmt.Errorf("no Product row holds an unset %s: %w", string(on), ErrNotFound)
 		}
-		found, err := r.rowsOfKeys(ctx, on, [][]any{keyValues}, []*types.Product{input})
+		found, err := r.heldOfKey(ctx, on, keyValues, input)
 		if err != nil {
 			return nil, err
 		}
-		upserted = &UpsertResult[*types.Product]{Row: found[0], Status: UpsertUnchanged}
+		upserted = &UpsertResult[*types.Product]{Row: found, Status: UpsertUnchanged}
 	}
 	return upserted, nil
 }
@@ -934,8 +947,9 @@ func (r *ProductRepository) upsertRow(ctx context.Context, input *types.Product,
 // rows, opts.Batch or as many as Postgres binds the parameters of, and more
 // rows take a statement per batch, in one transaction; a write that may
 // take more than one statement runs in a transaction of its own when none
-// is open. An update that names no field leaves each row that holds a key
-// as it is. Two inputs of one batch that hold one key fail
+// is open. One whose update names no field updates nothing, so each row
+// that holds a key keeps its version and no trigger fires, and reads those
+// rows back. Two inputs of one batch that hold one key fail
 // the statement, and a key over an expression, whose rows the statement's
 // cannot be matched to the inputs by, is refused.
 func (r *ProductRepository) UpsertMany(ctx context.Context, inputs []*types.Product, on ProductUniqueKey, update ProductFields, opts *UpsertOptions) ([]UpsertResult[*types.Product], error) {
@@ -959,7 +973,7 @@ func (r *ProductRepository) UpsertMany(ctx context.Context, inputs []*types.Prod
 	if len(inputs) == 0 {
 		return []UpsertResult[*types.Product]{}, nil
 	}
-	if len(inputs) <= batch && !opts.OnlyIfChanged {
+	if len(inputs) <= batch && !opts.OnlyIfChanged && update != (ProductFields{}) {
 		return r.upsertBatches(ctx, inputs, on, update, batch, false)
 	}
 	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]UpsertResult[*types.Product], error) {
@@ -969,7 +983,8 @@ func (r *ProductRepository) UpsertMany(ctx context.Context, inputs []*types.Prod
 
 // upsertBatches is UpsertMany on the repository's connection, a batch at a
 // time: each batch's statement, a read of the rows it left as they were,
-// only if changed, and the second statement of each encrypted field.
+// when update names no field or only if changed, and the second statement
+// of each encrypted field.
 func (r *ProductRepository) upsertBatches(ctx context.Context, inputs []*types.Product, on ProductUniqueKey, update ProductFields, batch int, onlyIfChanged bool) ([]UpsertResult[*types.Product], error) {
 	key := productUniqueKeys[on]
 
@@ -1016,7 +1031,9 @@ func (r *ProductRepository) upsertBatches(ctx context.Context, inputs []*types.P
 		fieldNames, valuePlaceholders, values := buildBatchInsert(rows)
 		assignments := append([]string(nil), setClauses...)
 		if len(setClauses) == 0 {
-			// An update that names no field leaves each row as it is.
+			// An update that names no field compares none, so its WHERE is
+			// FALSE: it leaves each row as it is, its version, stamps and
+			// history all, and reads it back below.
 			assignments = append(assignments, key.keep)
 		} else {
 		}
@@ -1026,7 +1043,7 @@ func (r *ProductRepository) upsertBatches(ctx context.Context, inputs []*types.P
 			strings.Join(valuePlaceholders, ", "),
 			key.conflict,
 			strings.Join(assignments, ", "),
-			upsertWhere(``, compareCurrent, compareNext, onlyIfChanged),
+			upsertWhere(``, compareCurrent, compareNext, onlyIfChanged || len(setClauses) == 0),
 		)
 		returned, inserted, err := r.upsertReturned(ctx, query, values)
 		if err != nil {
@@ -1058,8 +1075,9 @@ func (r *ProductRepository) upsertBatches(ctx context.Context, inputs []*types.P
 			matched[i] = &UpsertResult[*types.Product]{Row: row, Status: status}
 		}
 
-		// A row it did not return is one it left as it was, only if changed,
-		// which it reads back by its key, or a deleted one.
+		// A row it did not return is one it left as it was, when update
+		// names no field or only if changed, which it reads back by its key,
+		// or a deleted one.
 		var left []int
 		for i := range matched {
 			if matched[i] == nil {
@@ -1067,7 +1085,7 @@ func (r *ProductRepository) upsertBatches(ctx context.Context, inputs []*types.P
 			}
 		}
 		if len(left) > 0 {
-			if !onlyIfChanged {
+			if !onlyIfChanged && len(setClauses) > 0 {
 				return nil, fmt.Errorf("the Product row that holds the %s of input %d is deleted: %w", string(on), start+left[0], ErrNotFound)
 			}
 			keyValues := make([][]any, len(left))
@@ -1127,8 +1145,9 @@ func (r *ProductRepository) upsertReturned(ctx context.Context, query string, va
 
 // rowsOfKeys reads the rows that hold keys, each the values of the unique
 // key on an input's insert binds, among the rows the key's index holds, in
-// the inputs' order: the rows an upsert only if changed left as they were
-// (D89). A key no live row holds is ErrNotFound.
+// the inputs' order: the rows an upsert left as they were, as one whose
+// update sets no field or one only if changed does (D89). A key no live
+// row holds is ErrNotFound.
 func (r *ProductRepository) rowsOfKeys(ctx context.Context, on ProductUniqueKey, keys [][]any, inputs []*types.Product) ([]*types.Product, error) {
 	tuples, values := upsertKeyTuples(keys)
 	query := fmt.Sprintf(productUniqueKeys[on].rows, strings.Join(tuples, ", "))
@@ -1166,6 +1185,36 @@ func (r *ProductRepository) rowsOfKeys(ctx context.Context, on ProductUniqueKey,
 		out[i] = row
 	}
 	return out, nil
+}
+
+// heldOfKey reads the row that holds input's value of the unique key on,
+// keyValues the values of the key's columns its insert binds, which an
+// upsert left as it was: by rowsOfKeys, or, for a key over an expression,
+// whose columns read no row, by the expression's value over keyValues
+// (sqlutil.UniqueKey.Held, D105). A key no live row holds is ErrNotFound.
+func (r *ProductRepository) heldOfKey(ctx context.Context, on ProductUniqueKey, keyValues []any, input *types.Product) (*types.Product, error) {
+	query := productUniqueKeys[on].held
+	if query == "" {
+		found, err := r.rowsOfKeys(ctx, on, [][]any{keyValues}, []*types.Product{input})
+		if err != nil {
+			return nil, err
+		}
+		return found[0], nil
+	}
+	var read pgx.Row
+	if r.tx != nil {
+		read = r.tx.QueryRow(ctx, query, keyValues...)
+	} else {
+		read = r.db.pool.QueryRow(ctx, query, keyValues...)
+	}
+	row, err := r.scanReturned(read, nil)
+	if err == pgx.ErrNoRows {
+		return nil, fmt.Errorf("the Product row that holds the key %s is deleted: %w", string(on), ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the row the upsert left: %w", err)
+	}
+	return row, nil
 }
 
 // CreateMany inserts multiple Product records in a single statement

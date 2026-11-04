@@ -659,7 +659,10 @@ key is the primary key, a `@unique` field or a unique `@index`, named by
 its fields: `orm.ReviewUniqueByProductAuthor` in Go, and
 `['product', 'author']` in TypeScript (`upsertOne(input, on, update)`).
 The update writes what `UpdateOne` writes, `updatedAt` among it, but an
-update that sets no field leaves the row as it is and returns it. An
+update that sets no field writes nothing: the row keeps its version, its
+stamps and its history, no trigger fires, and the upsert reads the row
+back, by the key's columns or, for an `expression`, by the expression's
+value of the input, in a transaction of its own when none is open. An
 upsert by a unique `@index` names the index's own target: its
 `expression`, `ON CONFLICT ((lower(label)))`, and its `where`, so Postgres
 infers a partial index. On a soft-deletable table a unique `@index` covers

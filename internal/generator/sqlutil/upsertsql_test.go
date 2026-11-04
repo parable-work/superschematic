@@ -95,7 +95,9 @@ func TestUpsertStatementsOfASync(t *testing.T) {
 // TestExpressionKeysCannotBeReadBack holds that a unique @index over an
 // expression has no read of its rows (D89): an upsert cannot match a row to
 // its input by the expression's columns. Its keep leaves the held row's
-// column as it is.
+// column as it is, and its held read finds the one row that holds an
+// input's value of the expression, the expression evaluated over the
+// input's values cast to their columns' types.
 func TestExpressionKeysCannotBeReadBack(t *testing.T) {
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-ddl-db"))
 	if err != nil {
@@ -112,6 +114,10 @@ func TestExpressionKeysCannotBeReadBack(t *testing.T) {
 		key := table.UniqueKeyNamed("label")
 		if key == nil || !key.Expression || key.Rows != "" || key.Conflict != "((lower(label)))" || key.Keep != "label = category.label" {
 			t.Errorf("Category's key by lower(label) = %+v", key)
+		}
+		held := `SELECT "id", "label", "kind", "active", "sort_order", "parent_id" FROM category WHERE (lower(label)) = (SELECT (lower(label)) FROM (VALUES (CAST($1 AS TEXT))) AS category (label))`
+		if key != nil && key.Held != held {
+			t.Errorf("Category's key by lower(label) reads its held row by\n%s\nnot\n%s", key.Held, held)
 		}
 		return
 	}

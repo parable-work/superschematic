@@ -32,7 +32,8 @@ type repositoryCase struct {
 // the counterparts of the Go ORM's: fixture-ledger-db's CRUD, filters,
 // search, pages, upsert, acting user, soft delete, transaction with a
 // queued message and raw rows through the codec; fixture-db's pages, the
-// counterpart of page_postgres_test.go; fixture-queue-db's order by on a
+// counterpart of page_postgres_test.go, and its upserts of a versioned
+// table, whose update that sets no field writes nothing; fixture-queue-db's order by on a
 // keyword table, order_by_postgres_test.go's, and its keyed queues and
 // trigger under a transaction of the repositories (D80); fixture-db's JSON
 // column through the codec; fixture-user-model-db's user model tables,
@@ -68,13 +69,14 @@ var repositoryCases = []repositoryCase{
 		"a field of a @jsonField type is a JSON object in its JSONB column, and reads back as its value",
 		"a raw query on connectPostgres's pool decodes through decodeRow to wire-form ids and numeric amounts",
 	}},
-	{fixture: "fixture-db", files: []string{"page.test.ts", "json.test.ts"}, tests: []string{
+	{fixture: "fixture-db", files: []string{"page.test.ts", "json.test.ts", "upsert.test.ts"}, tests: []string{
 		"pages by text, a number and a time, each way, ties broken by the key in the sort's direction",
 		"a filter and a search sit beside the keyset, and a deleted member is out of every page unless included",
 		"a key is the row's id alone, which places a page however the row changed since",
 		"a page reads in a transaction",
 		"a JSON column holds a string, a number, a list, an object and the JSON null as they are, with the pool's parsers on and off",
 		"eq and in on a JSON column compare JSON values as JSONB does",
+		"an upsert that sets no field leaves the row it holds as it is, its version and history all; one that sets a field moves them once",
 	}},
 	{fixture: "fixture-queue-db", files: []string{"order_by.test.ts", "queue_key.test.ts"}, tests: []string{
 		"findMany and findOne order a keyword-named table by a column, each way",
