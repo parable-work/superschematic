@@ -390,3 +390,102 @@ func TestNarrowConstantsDropsOneWayForAnEngineType(t *testing.T) {
 		}
 	}
 }
+
+// A table's Retries types its failure classes as the alias <Base>Class,
+// which recordAttempt's failure names, and keeps retryAt, failingSince and
+// keyedBy, each absent until set; an engine type's keeps none of the
+// three, answers no retryAt and never backing_off or throttled (D104), so
+// its generated clients do not change.
+func TestNarrowRetriesOfATableAndOfAnEngineType(t *testing.T) {
+	reg := registry.New(naming.Default())
+	declaration, _ := reg.Behavior("Retries")
+	config := json.RawMessage(`{"classes": {"timeout": {"attempts": 3}, "build": {"attempts": 1}, "rejected": "terminal"}, "totalAttempts": 4, "exhaustedState": "failed"}`)
+	table := &ir.TypeDef{Name: "Job", Behaviors: []ir.BehaviorRef{{Name: "Retries", Implements: true}, {Name: "Workflow", Field: "status"}}}
+	n, err := Narrow(declaration, config, Target{Schema: "jobs", Base: "JobRetries", Document: ir.NewSchema("jobs", ir.SchemaKindDB), Instance: table})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(n.Aliases) != 1 || n.Aliases[0].Name != "JobRetriesClass" || n.Aliases[0].Doc != "A failure class of a JobRetries's Retries." {
+		t.Fatalf("aliases = %+v, want JobRetriesClass", n.Aliases)
+	}
+	if values := stringsOf(n.Aliases[0].Schema.(map[string]any)["enum"]); !slices.Equal(values, []string{"build", "rejected", "timeout"}) {
+		t.Errorf("JobRetriesClass = %v, want build, rejected and timeout", values)
+	}
+	if failure, err := at(n.Params["recordAttempt"], "properties", "failure"); err != nil || failure[RefKey] != "JobRetriesClass" {
+		t.Errorf("recordAttempt's failure = %v (%v), want JobRetriesClass", failure, err)
+	}
+	for name, kind := range map[string]string{"retryAt": "integer", "failingSince": "integer", "keyedBy": "string"} {
+		if field, ok := n.Fields[name]; !ok || field.Present || field.Schema.(map[string]any)["type"] != kind {
+			t.Errorf("%s = %+v, want an optional %s", name, field, kind)
+		}
+	}
+	if result, _ := at(n.Results["recordAttempt"], "properties"); result["retryAt"] == nil {
+		t.Errorf("recordAttempt's result = %v, want retryAt", result)
+	}
+	if !slices.Contains(n.Vetoes, "backing_off") || !slices.Contains(n.Vetoes, "throttled") {
+		t.Errorf("vetoes = %v, want backing_off and throttled", n.Vetoes)
+	}
+	engine := &ir.TypeDef{Name: "Job", Behaviors: []ir.BehaviorRef{{Name: "Retries"}}}
+	for _, instance := range []*ir.TypeDef{engine, nil} {
+		n, err := Narrow(declaration, config, Target{Schema: "jobs", Base: "Job", Document: ir.NewSchema("jobs", ir.SchemaKindGeneral), Instance: instance})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(n.Aliases) != 0 {
+			t.Errorf("instance %v: aliases = %+v, want none", instance, n.Aliases)
+		}
+		if got := slices.Sorted(maps.Keys(n.Fields)); !slices.Equal(got, []string{"bestScore", "classAttempts", "exhausted", "stuck", "total"}) {
+			t.Errorf("instance %v: fields = %v, want the engine's", instance, got)
+		}
+		if result, _ := at(n.Results["recordAttempt"], "properties"); result["retryAt"] != nil {
+			t.Errorf("instance %v: recordAttempt's result = %v, want no retryAt", instance, result)
+		}
+		if want := []string{"exhausted", "limits_fixed", "not_configured"}; !slices.Equal(n.Vetoes, want) {
+			t.Errorf("instance %v: vetoes = %v, want %v", instance, n.Vetoes, want)
+		}
+	}
+}
+
+// A table's Budget types its meters as the alias <Base>Meter, which every
+// operation's meter names and recordUsage's, setLimit's and observe's
+// results; an engine type's refuses every observe (D104), so its clients
+// leave it out (Refused), and names its meters inline as before.
+func TestNarrowBudgetOfATableAndOfAnEngineType(t *testing.T) {
+	reg := registry.New(naming.Default())
+	declaration, _ := reg.Behavior("Budget")
+	config := json.RawMessage(`{"meters": {"tokens": {"limit": 10}, "questions": {"limit": 5}}}`)
+	table := &ir.TypeDef{Name: "Account", Behaviors: []ir.BehaviorRef{{Name: "Budget", Implements: true}}}
+	n, err := Narrow(declaration, config, Target{Schema: "accounts", Base: "AccountBudget", Document: ir.NewSchema("accounts", ir.SchemaKindDB), Instance: table})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(n.Aliases) != 1 || n.Aliases[0].Name != "AccountBudgetMeter" || n.Aliases[0].Doc != "A meter of an AccountBudget's Budget." {
+		t.Fatalf("aliases = %+v, want AccountBudgetMeter", n.Aliases)
+	}
+	for _, op := range []string{"reserve", "checkReserve", "recordUsage", "settle", "setLimit", "observe", "reserveFor", "settleFor", "recordUsageFor"} {
+		if meter, err := at(n.Params[op], "properties", "meter"); err != nil || meter[RefKey] != "AccountBudgetMeter" {
+			t.Errorf("%s's meter = %v (%v), want AccountBudgetMeter", op, meter, err)
+		}
+	}
+	for _, op := range []string{"recordUsage", "setLimit", "observe"} {
+		if meter, err := at(n.Results[op], "properties", "meter"); err != nil || meter[RefKey] != "AccountBudgetMeter" {
+			t.Errorf("%s's result's meter = %v (%v), want AccountBudgetMeter", op, meter, err)
+		}
+	}
+	if len(n.Refused) != 0 || !n.Offers("observe") {
+		t.Errorf("a table's Budget refuses %v, want none", n.Refused)
+	}
+	engine := &ir.TypeDef{Name: "Account", Behaviors: []ir.BehaviorRef{{Name: "Budget"}}}
+	for _, instance := range []*ir.TypeDef{engine, nil} {
+		n, err := Narrow(declaration, config, Target{Schema: "accounts", Base: "Account", Document: ir.NewSchema("accounts", ir.SchemaKindGeneral), Instance: instance})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(n.Aliases) != 0 || !slices.Equal(n.Refused, []string{"observe"}) || n.Offers("observe") || !n.Offers("reserve") {
+			t.Errorf("instance %v: aliases = %+v, refused = %v, want none and observe", instance, n.Aliases, n.Refused)
+		}
+		if meter, _ := at(n.Params["reserve"], "properties", "meter"); meter[RefKey] != nil {
+			t.Errorf("instance %v: reserve's meter = %v, want the declaration's string", instance, meter)
+		}
+	}
+}

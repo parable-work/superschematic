@@ -26,6 +26,8 @@ pub fn register(file: &str, name: &str, core: &mut Core) -> bool {
         ("core-timers", "test.Bounce") => core.push(Bounce),
         ("core-timers", "test.Hold") => core.push(FireHold),
         ("core-workflow-principals", "test.Gate") => core.push(Gate),
+        ("workqueue-lease", "test.Gate") => core.push(LeaseGate),
+        ("workqueue-lease", "test.Signal") => core.push(Signal),
         _ => return false,
     }
     true
@@ -269,5 +271,83 @@ impl Behavior for Gate {
             }
         );
         Ok(gated.then(|| Veto::new("the gate is closed").with_code("gated")))
+    }
+}
+
+/// test.Gate of `runtime/engine-workqueue/typescript/test/fixtures.ts`: it
+/// refuses Workflow's transition of a row titled held, and Lease's expire
+/// of one titled stuck, with no code, whoever calls.
+pub struct LeaseGate;
+
+impl Behavior for LeaseGate {
+    type Config = ();
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("test.Gate")
+    }
+
+    fn parse_config(&self, _raw: &Value, _target: &ConfigTarget<'_>) -> Result<(), ConfigError> {
+        Ok(())
+    }
+
+    fn guard(&self, view: &View<'_, ()>, request: &GuardRequest<'_>) -> Hook<Option<Veto>> {
+        let GuardRequest::Operation {
+            behavior,
+            operation,
+            ..
+        } = request
+        else {
+            return Ok(None);
+        };
+        let title = view.own_field("title");
+        let titled = |name: &str| title.as_ref().and_then(Value::as_str) == Some(name);
+        if titled("held") && (*behavior, *operation) == ("Workflow", "transition") {
+            return Ok(Some(Veto::new("it is held")));
+        }
+        if titled("stuck") && (*behavior, *operation) == ("Lease", "expire") {
+            return Ok(Some(Veto::new("it is stuck")));
+        }
+        Ok(None)
+    }
+}
+
+/// test.Signal of `runtime/engine-workqueue/typescript/test/fixtures.ts`:
+/// its own operation, `signal({ name })`, sends the holder a directive
+/// through Lease's direct (`Cx::call`), as a budget does on an overrun.
+pub struct Signal;
+
+impl Behavior for Signal {
+    type Config = ();
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("test.Signal").operation("signal", true)
+    }
+
+    fn parse_config(&self, _raw: &Value, _target: &ConfigTarget<'_>) -> Result<(), ConfigError> {
+        Ok(())
+    }
+
+    // The paramsSchema is a closed object: signal takes name, a string.
+    fn check_params(&self, _config: &(), _operation: &str, params: &Value) -> Vec<SchemaIssue> {
+        let Some(members) = params.as_object() else {
+            return vec![SchemaIssue::new("", "must be object")];
+        };
+        let mut issues: Vec<SchemaIssue> = members
+            .keys()
+            .filter(|key| key.as_str() != "name")
+            .map(|key| SchemaIssue::new("", format!("must NOT have additional properties: {key}")))
+            .collect();
+        match members.get("name") {
+            None => issues.push(SchemaIssue::new("", "must have required property 'name'")),
+            Some(name) if !name.is_string() => {
+                issues.push(SchemaIssue::new("/name", "must be string"));
+            }
+            Some(_) => {}
+        }
+        issues
+    }
+
+    fn operation(&self, cx: &Cx<'_, ()>, _name: &str, params: &Value) -> Hook<Value> {
+        cx.call("Lease", "direct", &json!({ "name": params.get("name") }))
     }
 }

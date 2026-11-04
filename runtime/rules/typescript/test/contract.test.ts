@@ -152,6 +152,31 @@ test('a veto, a parameter refusal and an owned field written are refusals whole'
   expect(core.run(order, { ...transition('paid'), action: { kind: 'update', key: 'o1', patch: { status: 'paid' } } }, answered)).toEqual(owned);
 });
 
+test("a command's preconditions, each use's entry by its use id, are checked before the row is read, and refused on any other action (D104)", () => {
+  const refused: Step = {
+    done: {
+      refused: {
+        code: 'invalid_argument',
+        status: 400,
+        class: 'PreconditionsError',
+        message: 'preconditions of Order: /status: behavior Workflow takes no precondition',
+        details: { issues: [{ path: '/status', message: 'behavior Workflow takes no precondition' }] },
+      },
+    },
+  };
+  // Workflow takes none, so its use's entry is refused, with no read asked.
+  const presented: Command = { ...transition('paid'), preconditions: { status: { token: 1 } } };
+  expect(core.run(order, presented)).toEqual(refused);
+  const lacking: Command = { ...transition('paid'), preconditions: { Lease: { token: 1 } } };
+  expect(core.run(order, lacking)).toMatchObject({
+    done: { refused: { class: 'PreconditionsError', message: 'preconditions of Order: /Lease: Order has no behavior use Lease (its uses that take preconditions: none)' } },
+  });
+  const create: Command = { caller: alice, now: 1000, request: 'r1', action: { kind: 'create', id: 'o1', own: { title: 'Desk' } }, preconditions: { status: { token: 1 } } };
+  expect(core.run(order, create)).toMatchObject({ done: { refused: { code: 'invalid_argument', class: 'PreconditionsError' } } });
+  // None, or an empty set, presents nothing.
+  expect(core.run(order, { ...transition('paid'), preconditions: {} })).toEqual({ read: [{ kind: 'row', type: 'Order', key: 'o1' }] });
+});
+
 test('a delete is held to the version read', () => {
   const deleted: Step = {
     done: { changed: { rows: [{ kind: 'delete', type: 'Order', key: 'o1', expectedVersion: 1 }], subRows: [], events: [], deadlines: [], result: null } },
@@ -227,7 +252,7 @@ test("a change of a task is heard by its project's allTerminal through task.proj
 
 test('declarations are the registered files, each field typed and the value field named', () => {
   const declarations: BehaviorDeclaration[] = core.declarations();
-  expect(declarations.map(d => d.name)).toEqual(['Workflow', 'Reactions', 'Constants', 'StateRules', 'Approvals', 'Timers']);
+  expect(declarations.map(d => d.name)).toEqual(['Workflow', 'Reactions', 'Constants', 'StateRules', 'Approvals', 'Timers', 'Lease', 'Presence', 'Budget', 'Retries']);
   const byName = (name: string) => declarations.find(d => d.name === name)!;
   const workflow = declarations[0]!;
   expect(workflow.value).toBe('status');
@@ -279,6 +304,18 @@ test('declarations are the registered files, each field typed and the value fiel
     },
   ]);
   expect(timers.operations?.map(o => o.name)).toEqual(['fireTimer', 'resetTimer', 'snoozeTimer']);
+  // Lease takes its fencing token as a command's precondition, keeps its
+  // directives in a sub-table and arms its expiry; Retries keeps its
+  // attempts in one and arms its then; Presence arms its miss; Budget
+  // keeps its meters, holds and buckets in three (D104).
+  const lease = byName('Lease');
+  expect(lease.preconditionSchema).toMatchObject({ type: 'object', required: ['token'], properties: { token: { type: 'integer', minimum: 0 } } });
+  expect([lease.armsDeadlines, lease.tables?.map(t => `${t.name} by ${t.key}`)]).toEqual([true, ['directives by number']]);
+  expect(lease.fields?.find(f => f.name === 'token')?.type).toBe('Generic.Int64');
+  expect([byName('Retries').armsDeadlines, byName('Retries').tables?.map(t => `${t.name} by ${t.key}`)]).toEqual([true, ['attempts by number']]);
+  expect([byName('Presence').armsDeadlines, byName('Presence').tables]).toEqual([true, undefined]);
+  expect(byName('Budget').tables?.map(t => `${t.name} by ${t.key}`)).toEqual(['meters by meter', 'holds by hold', 'buckets by bucket']);
+  expect(declarations.filter(d => d.preconditionSchema !== undefined).map(d => d.name)).toEqual(['Lease']);
 });
 
 test('check is each spec define check: null for one the core takes, its refusal for one it refuses', () => {

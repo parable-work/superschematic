@@ -164,6 +164,81 @@ func TestACreateGivesTheCoreTheOwnFieldsTheInsertWrites(t *testing.T) {
 	}
 }
 
+// A database one of whose uses takes a command's preconditions (D104),
+// fixture-agents-db's Job's Lease, puts WithPreconditions in rules.go and
+// JobLeasePrecondition, typed from Lease's preconditionSchema, beside
+// Lease's types; every command a repository of a table that composes
+// behaviors runs through the core presents what it names, Job's, Session's
+// and Account's alike. A database whose uses take none, fixture-approvals-db,
+// has neither, and its commands present nothing.
+func TestTheCommandsOfADatabaseWhoseUsesTakePreconditionsPresentThem(t *testing.T) {
+	agents := generateFixture(t, agentsFixture)
+	if agents.Rules == nil || !agents.Rules.Preconditions {
+		t.Fatalf("fixture-agents-db's Rules = %+v, want preconditions", agents.Rules)
+	}
+	for _, name := range []string{"Job", "Session", "Account", "Workspace"} {
+		if !repositoryOf(t, agents, name).Preconditions {
+			t.Errorf("%s's commands present no preconditions", name)
+		}
+	}
+	var preconditions []string
+	for _, use := range repositoryOf(t, agents, "Job").Uses {
+		preconditions = append(preconditions, use.ID+" "+use.Precondition)
+	}
+	if want := []string{"Lease JobLeasePrecondition", "Retries ", "status "}; !slices.Equal(preconditions, want) {
+		t.Fatalf("Job's uses' preconditions = %q, want %q", preconditions, want)
+	}
+	if got, want := agents.RulesPreconditionExample(), `rules.Preconditions{"Lease": JobLeasePrecondition{...}}`; got != want {
+		t.Errorf("the example = %s, want %s", got, want)
+	}
+	outDir := t.TempDir()
+	if err := WriteORM(agents, outDir); err != nil {
+		t.Fatal(err)
+	}
+	for file, wants := range map[string][]string{
+		"rules.go": {
+			"func WithPreconditions(ctx context.Context, preconditions rules.Preconditions) context.Context {",
+		},
+		"repository_job.go": {
+			"type JobLeasePrecondition struct {\n\t// Token is the lease's current fencing token",
+			"\tToken int64 `json:\"token\"`\n}",
+			"&rules.ExecuteOptions{OwnColumns: columns, Preconditions: behaviorPreconditions(ctx)}",
+			"opts := &rules.ExecuteOptions{Preconditions: behaviorPreconditions(ctx)}",
+		},
+		"repository_session.go": {
+			"return &rules.ExecuteOptions{Preconditions: behaviorPreconditions(ctx)}",
+		},
+	} {
+		source, err := os.ReadFile(filepath.Join(outDir, file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range wants {
+			if !strings.Contains(string(source), want) {
+				t.Errorf("%s has no %q", file, want)
+			}
+		}
+	}
+
+	approvals := generateFixture(t, approvalsFixture)
+	if approvals.Rules == nil || approvals.Rules.Preconditions || repositoryOf(t, approvals, "Task").Preconditions {
+		t.Fatalf("fixture-approvals-db takes preconditions: %+v", approvals.Rules)
+	}
+	outDir = t.TempDir()
+	if err := WriteORM(approvals, outDir); err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range []string{"rules.go", "repository_task.go", "repository_note.go"} {
+		source, err := os.ReadFile(filepath.Join(outDir, file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(source), "Precondition") {
+			t.Errorf("%s names a precondition, and fixture-approvals-db's uses take none", file)
+		}
+	}
+}
+
 // Generate refuses a table whose fields are behaviors when no registry
 // declares them.
 func TestATableWhoseFieldsAreBehaviorsNeedsARegistry(t *testing.T) {

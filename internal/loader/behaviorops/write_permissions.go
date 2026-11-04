@@ -8,10 +8,20 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// writeRules are the behaviors whose config's permission the core checks on
-// an update of a row (D104): Constants' lets a caller change a constant or
-// move a oneWay field back, StateRules' change a field a state freezes.
-var writeRules = []string{"Constants", "StateRules"}
+// writeRules are the behaviors whose config names a permission the core
+// checks on an update of a row (D104), by the member that names it:
+// Constants' permission lets a caller change a constant or move a oneWay
+// field back, StateRules' change a field a state freezes, Lease's
+// overridePermission change a row another principal holds the lease of,
+// Retries' limitsPermission change limitsField, and Budget's
+// limitPermission change a meter's limitField.
+var writeRules = map[string]string{
+	"Constants":  "permission",
+	"StateRules": "permission",
+	"Lease":      "overridePermission",
+	"Retries":    "limitsPermission",
+	"Budget":     "limitPermission",
+}
 
 // UpdatesARow reports whether op, whose method is not GET, writes a row of td
 // that exists: a PUT or a PATCH, or an operation of another method with an
@@ -37,9 +47,10 @@ func UpdatesARow(op *ir.FieldDef, td *ir.TypeDef) bool {
 }
 
 // WritePermissions are the permissions the core checks on op's writes (D104):
-// the permission of each Constants and StateRules use of each table op
-// updates a row of (UpdatesARow) through an argument of a @source view of it,
-// sorted, each once. A view's target that names a service is looked up in
+// the permission each use of each table op updates a row of (UpdatesARow)
+// through an argument of a @source view of it names of those writeRules
+// lists (Constants' and StateRules' permission, Lease's overridePermission,
+// Retries' limitsPermission, Budget's limitPermission), sorted, each once. A view's target that names a service is looked up in
 // deps by that name; one that names none in the API's database, its authDb or
 // its one DB dependency. None for a GET, a behavior operation, and an
 // operation that updates no table so.
@@ -57,16 +68,16 @@ func WritePermissions(api *ir.Schema, op *ir.FieldDef, deps map[string]*ir.Schem
 			continue
 		}
 		for _, ref := range td.TableBehaviors() {
-			if !slices.Contains(writeRules, ref.Name) || len(ref.Config) == 0 {
+			member, ok := writeRules[ref.Name]
+			if !ok || len(ref.Config) == 0 {
 				continue
 			}
-			var config struct {
-				Permission string `json:"permission"`
-			}
-			if json.Unmarshal(ref.Config, &config) != nil || config.Permission == "" || slices.Contains(out, config.Permission) {
+			var config map[string]json.RawMessage
+			var permission string
+			if json.Unmarshal(ref.Config, &config) != nil || json.Unmarshal(config[member], &permission) != nil || permission == "" || slices.Contains(out, permission) {
 				continue
 			}
-			out = append(out, config.Permission)
+			out = append(out, permission)
 		}
 	}
 	slices.Sort(out)

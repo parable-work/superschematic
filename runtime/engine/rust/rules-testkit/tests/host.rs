@@ -5,8 +5,9 @@
 //! that writes two rows held to both versions, events written whatever
 //! rows a change set writes, the request ids keys are made from, a
 //! deadline that falls due and one cleared or moved before it does, the
-//! define and publish checks, and a repeat answered as no change, which
-//! writes nothing a host keeps.
+//! define and publish checks, a repeat answered as no change, which
+//! writes nothing a host keeps, and a read of the rows whose owned field
+//! holds a value.
 
 use serde_json::{json, Map, Value};
 
@@ -761,4 +762,40 @@ fn a_repeat_writes_no_row_logs_no_change_and_queues_no_change() {
     );
     assert_eq!(after, before);
     assert_eq!(after.0.map(|row| row.version), Some(2));
+}
+
+/// A holding read answers the rows of a type whose use's owned field holds
+/// a value, compared as JSON, in key order, a page at a time.
+#[test]
+fn a_holding_read_answers_the_rows_whose_owned_field_holds_a_value() {
+    let mut host = host();
+    host.execute("Counter", create("c2", json!({}))).unwrap();
+    host.execute("Counter", create("c3", json!({}))).unwrap();
+    host.execute("Counter", add("c3", 2)).unwrap();
+    let store = host.store();
+    let keys = |after: Option<&str>, limit: usize, value: Value| -> (Vec<String>, bool) {
+        let page = store.holding("Counter", "Tally", "count", &value, after, limit);
+        (
+            page.rows.into_iter().map(|row| row.key).collect(),
+            page.more,
+        )
+    };
+    assert_eq!(
+        keys(None, 500, json!(0)),
+        (vec!["c1".into(), "c2".into()], false)
+    );
+    assert_eq!(keys(None, 1, json!(0)), (vec!["c1".into()], true));
+    assert_eq!(keys(Some("c1"), 500, json!(0)), (vec!["c2".into()], false));
+    assert_eq!(keys(None, 500, json!(2)), (vec!["c3".into()], false));
+    assert_eq!(keys(None, 500, json!("0")), (Vec::new(), false));
+    assert_eq!(
+        store.answer(&ReadRequest::holding(
+            "Nope",
+            "Tally",
+            "count",
+            json!(0),
+            None
+        )),
+        Some(Answer::Linked(Default::default()))
+    );
 }

@@ -215,9 +215,25 @@ type BehaviorRoute struct {
 	// parameters when they are null (behaviorParams, D104), as the Go
 	// ORM's typed parameters omit one that is none, since a behavior's
 	// paramsSchema types an optional parameter without null (Workflow's
-	// from). None for an input without one.
+	// from). None for an input without one. The preconditions member is
+	// not among them: Preconditions says the handler presents it apart.
 	Optional []string
+	// Preconditions reports whether the input has the preconditions member
+	// (D16, D104), which the loader adds, typed <Table>Preconditions, to
+	// every behavior operation's input on a table one of whose uses takes a
+	// precondition: the handler leaves it out of the repository's
+	// parameters and presents it in the operation's options
+	// (behaviorPreconditions), each use's entry by its use id, so the core
+	// checks it before it reads the row.
+	Preconditions bool
 }
+
+// PreconditionsMember is the member of a behavior operation's input that
+// carries the caller's preconditions (D16, D104), keyed by use id: the
+// body's preconditions, which the loader adds beside the operation's
+// parameters and refuses a parameter of the name on a table that takes
+// one.
+const PreconditionsMember = "preconditions"
 
 // OptionalList is Optional as router.ts writes it: a TypeScript array of
 // the members' names.
@@ -589,6 +605,19 @@ func (o *APIOutput) BehaviorsTakeOptional() bool {
 	return false
 }
 
+// BehaviorsTakePreconditions reports whether a behavior operation the API
+// serves takes the caller's preconditions (D16, D104), which its handler
+// leaves out of the parameters with behaviorParams and presents with
+// behaviorPreconditions.
+func (o *APIOutput) BehaviorsTakePreconditions() bool {
+	for _, route := range o.BehaviorRoutes() {
+		if route.Preconditions {
+			return true
+		}
+	}
+	return false
+}
+
 // RuntimeImport is router.ts's import from the runtime's main entry: the
 // helpers of the behavior operations' handlers (D103, D104), the page
 // helpers (D60) and the dropper of undeclared keys (D87) the router calls,
@@ -597,8 +626,11 @@ func (o *APIOutput) RuntimeImport() string {
 	var values []string
 	if o.HasBehaviors() {
 		values = append(values, "behaviorCaller", "behaviorOperation")
-		if o.BehaviorsTakeOptional() {
+		if o.BehaviorsTakeOptional() || o.BehaviorsTakePreconditions() {
 			values = append(values, "behaviorParams")
+		}
+		if o.BehaviorsTakePreconditions() {
+			values = append(values, "behaviorPreconditions")
 		}
 	}
 	if o.HasPages && o.HasSortedPages {
@@ -896,6 +928,14 @@ func (b *builder) useMember(op *ir.BehaviorOperation) string {
 	return tsutil.ToCamelCase(op.Use)
 }
 
+// preconditionsField reports whether field is the preconditions member of
+// the behavior operation op's input (D16, D104): the member the loader adds,
+// named preconditions and typed by the table's <Table>Preconditions, which
+// holds each use's precondition by its use id.
+func preconditionsField(field *ir.FieldDef, op *ir.BehaviorOperation) bool {
+	return field.Name == PreconditionsMember && field.TypeRef.Name == op.Type+"Preconditions" && !field.TypeRef.IsArray && !field.TypeRef.IsMap
+}
+
 // identifierPattern matches a TypeScript identifier a member access can
 // name after a dot.
 var identifierPattern = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$]*$`)
@@ -935,7 +975,14 @@ func (b *builder) behaviorEndpoint(ep apigen.EndpointInfo, op *ir.BehaviorOperat
 	if endpoint.HasInput {
 		if input := b.findType(ep.InputType); input != nil {
 			for _, field := range input.Fields {
-				if field != nil && !field.Required {
+				if field == nil {
+					continue
+				}
+				if preconditionsField(field, op) {
+					route.Preconditions = true
+					continue
+				}
+				if !field.Required {
 					route.Optional = append(route.Optional, field.Name)
 				}
 			}

@@ -206,6 +206,13 @@ type EndpointInfo struct {
 	Description string
 	// Operation is the schema operation the endpoint is generated from.
 	Operation *ir.FieldDef `json:"-"`
+	// BehaviorPreconditions is a behavior operation whose input carries the
+	// caller's preconditions (D16, D104), each use's entry by its use id,
+	// in its member preconditions (BehaviorPreconditionsMember), which the
+	// loader adds to every behavior operation's input on a table one of
+	// whose uses takes them: its handler presents them to the core rather
+	// than as the operation's parameters.
+	BehaviorPreconditions bool
 
 	// Docs is the operation's @docs record; nil without it.
 	Docs *ir.OperationDocs
@@ -1216,9 +1223,11 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 	}
 
 	inputAllowsUnknownFields := false
+	behaviorPreconditions := false
 	if inputType != "" {
 		if typeDef, ok := types.findTypeDef(inputType); ok {
 			inputAllowsUnknownFields = InputAllowsUnknownFields(op, typeDef)
+			behaviorPreconditions = carriesBehaviorPreconditions(op, typeDef)
 		}
 	}
 
@@ -1267,6 +1276,7 @@ func operationToEndpoint(op *ir.FieldDef, namespace, defaultMethod string, set *
 		ScalarArgs:                   scalarArgs,
 		Description:                  codegen.DocText(op.Description, op.Comment),
 		Operation:                    op,
+		BehaviorPreconditions:        behaviorPreconditions,
 		Docs:                         op.Docs,
 		MCP:                          mcp,
 		RequiresAuth:                 requiresAuth,

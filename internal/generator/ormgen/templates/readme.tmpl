@@ -15,7 +15,7 @@ Generated at: {{ .Timestamp }}
 - `search.go` -- the words of a filter's `SearchText` and their `LIKE` patterns
 {{- end }}
 {{- if .Rules }}
-- `rules.go` -- the layout of the tables whose fields are behaviors (`RulesLayout`) and `WithBehaviorCaller`
+- `rules.go` -- the layout of the tables whose fields are behaviors (`RulesLayout`) and `WithBehaviorCaller`{{ if .Rules.Preconditions }}, and `WithPreconditions`{{ end }}
 {{- end }}
 {{- range .Repositories }}
 - `repository_{{ toSnakeCase .TypeName }}.go` -- {{ .TypeName }} repository
@@ -92,7 +92,12 @@ and each field's operations{{ with .RulesExample }}
 (`{{ . }}`){{ end }}
 run through the behaviors' core in a transaction over `RulesLayout`, as
 the context's user holding no permissions unless `WithBehaviorCaller` names
-a caller. An upsert inserts a new row with what the core's create gives it,
+a caller.{{ if .Rules.Preconditions }} A command presents the preconditions `WithPreconditions` names, each
+use's entry by its use id{{ with .RulesPreconditionExample }}
+(`orm.WithPreconditions(ctx, {{ . }})`){{ end }},
+which the core checks before it reads the row of an update, a delete or an
+operation and hands the use's guard (D104); it refuses a create that
+presents one.{{ end }} An upsert inserts a new row with what the core's create gives it,
 and updates a row the key holds by its own fields alone, through the core's
 update as `UpdateOne` does, so each use's guards hold it, Constants' and
 StateRules' among them (D104): its statement locks the row and writes

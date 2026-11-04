@@ -1459,7 +1459,7 @@ func create{{ .HandlerName }}(impl {{ toGoName .Namespace }}Implementation) goht
 
 		// Run the operation through the ORM, as the request's caller (D103)
 		var result {{ .BehaviorResultGoType }}
-		if err := runBehaviorOperation(r.Context(), db.{{ .BehaviorRepositoryCall }}{{- range .PathParams }}, {{ .GoName }}{{- end }}, {{ if .HasInput }}input{{ else }}nil{{ end }}, &result); err != nil {
+		if err := {{ .BehaviorRunner }}(r.Context(), db.{{ .BehaviorRepositoryCall }}{{- range .PathParams }}, {{ .GoName }}{{- end }}, {{ if .HasInput }}input{{ else }}nil{{ end }}, &result); err != nil {
 			respondBehaviorError(w, r, err)
 			return
 		}

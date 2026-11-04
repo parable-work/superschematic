@@ -7,7 +7,15 @@
 //! `core-workflow-principals.json` (D104: a transition's `by`,
 //! `overridePermission`, `repeat` and `from`) and
 //! `core-freezes-and-sign-offs.json` (D104: Constants' `oneWay`,
-//! StateRules' `by`, and Approvals' `resetOn` and `pinned`), whose
+//! StateRules' `by`, and Approvals' `resetOn` and `pinned`); from the work
+//! queue's recordings of the behaviors D104 ports to tables,
+//! `workqueue-lease.json`, `workqueue-presence.json`,
+//! `workqueue-budget.json` and `workqueue-retries.json` (`core-lease`,
+//! `core-presence`, `core-budget`, `core-retries`); and from their
+//! upgrades' scenarios written by hand, `core-retries-waits.json` (Retries'
+//! waits and Lease's fencing token, presented as a command's
+//! `preconditions`) and `core-periods-and-presence.json` (Budget's periods
+//! and observe, and Presence's `ttlByState`), whose hand-written
 //! transcripts hold each command's row version too
 //! (`runtime/engine/testdata/rules/<name>.transcript.json`, whose format its
 //! `transcript` module states) replayed through this adapter on rusqlite
@@ -16,10 +24,13 @@
 //! and database, its own fields' columns (a link's `<link>Id` among them)
 //! beside the owned columns the layout rule gives each use of any version
 //! and `_version` with sqlgen's trigger, a sub-table per table a use's
-//! behavior declares, and a deadline queue when a use's behavior arms
+//! behavior declares, each column of its declared type (a `Generic.Int64`
+//! a whole number's, D104), and a deadline queue when a use's behavior arms
 //! deadlines; each check runs on the core alone, answering whether the
 //! type has rows from its table; each command runs through `execute` in a
 //! transaction of its own over a layout of every type of its database, the
+//! caller's preconditions it carries passed through to the core as written
+//! (D104), the
 //! command's type at the version live at it and each other at the version
 //! the scenario last made live (a deadline the runner ran among them, run
 //! only while it is armed at its time and its message spent with it, and a
@@ -60,7 +71,7 @@ use common::{camel, column_types, p, snake, storage_key, Param};
 /// The transcripts every dialect replays, each with the steps it holds,
 /// the testkit's floor (`tests/transcript.rs`): each dialect replays every
 /// one, so a regression cannot pass by skipping.
-const TRANSCRIPTS: [(&str, usize); 9] = [
+const TRANSCRIPTS: [(&str, usize); 15] = [
     ("core-workflow", 96),
     ("core-timers", TIMERS_FLOOR),
     ("core-reactions", REACTIONS_FLOOR),
@@ -70,6 +81,12 @@ const TRANSCRIPTS: [(&str, usize); 9] = [
     ("core-staterules", STATERULES_FLOOR),
     ("core-approvals", APPROVALS_FLOOR),
     ("core-freezes-and-sign-offs", FREEZES_AND_SIGN_OFFS_FLOOR),
+    ("core-lease", LEASE_FLOOR),
+    ("core-presence", PRESENCE_FLOOR),
+    ("core-budget", BUDGET_FLOOR),
+    ("core-retries", RETRIES_FLOOR),
+    ("core-retries-waits", RETRIES_WAITS_FLOOR),
+    ("core-periods-and-presence", PERIODS_AND_PRESENCE_FLOOR),
 ];
 
 /// core-timers' floor, as the core's milestone states it: 139 steps, 85
@@ -112,6 +129,51 @@ const APPROVALS_FLOOR: usize = 122;
 /// holding its row's version, among them updates of booleans, numbers and
 /// date-times, and 40 checks.
 const FREEZES_AND_SIGN_OFFS_FLOOR: usize = 115;
+
+/// core-lease's floor, as the core's milestone states it: 436 steps, 323
+/// commands (233 operations, 84 of them presenting Lease's token as its
+/// precondition, and 3 deadlines the runner ran: a lease's expiry) and 113
+/// checks (D104); its directives held as sub-table rows and its expiry as
+/// an armed deadline. What the recording composed beside Lease that the
+/// core does not run (Comments, Queue, the runner's sweep cadence) the
+/// transcript leaves out with its reasons.
+const LEASE_FLOOR: usize = 436;
+
+/// core-presence's floor, as the core's milestone states it: 141 steps, 89
+/// commands (8 of them deadlines the runner ran: a miss, 3 of which wrote
+/// the rows of the leases it expired, its others) and 52 checks (D104).
+const PRESENCE_FLOOR: usize = 141;
+
+/// core-budget's floor, as the core's milestone states it: 495 steps, 331
+/// commands (162 operations and 68 updates, 46 of the commands writing a
+/// scope's row, their others) and 164 checks (D104); its meters, holds and
+/// buckets held as sub-table rows. The scenarios that compose Queue, and the
+/// limitField scenarios past their setLimit, the transcript leaves out
+/// with its reasons.
+const BUDGET_FLOOR: usize = 495;
+
+/// core-retries' floor, as the core's milestone states it: 250 steps, 196
+/// commands (149 of them recordAttempt, each attempt a row of its
+/// sub-table) and 54 checks (D104). The scenarios that give resultField
+/// stop at their define, and those that compose Queue are left out, with
+/// their reasons.
+const RETRIES_FLOOR: usize = 250;
+
+/// core-retries-waits' floor: 158 steps of the scenarios written by hand
+/// (D104), 118 commands, each holding its row's version (24 of them
+/// presenting Lease's token as its precondition and 9 deadlines the runner
+/// ran: then's moves, one armed again at a status's entry, one another
+/// principal's lease refuses and one the window arms again, and a lease's
+/// expiry), and 40 checks, the define refusals among them.
+const RETRIES_WAITS_FLOOR: usize = 158;
+
+/// core-periods-and-presence's floor, as the core's milestone states it:
+/// 77 steps of the scenarios written by hand (D104), 52 commands, each
+/// holding its row's version (1 of them a miss the runner ran), and 25
+/// checks, the define refusals among them: each reset period, a rolling
+/// window across a boundary, observe and its permission, and ttlByState on
+/// a beat and on a transition.
+const PERIODS_AND_PRESENCE_FLOOR: usize = 77;
 
 /// How many runs a check makes before the test calls it unsettled.
 const CHECK_ROUNDS: usize = 16;
@@ -303,6 +365,7 @@ fn sql_type(postgres: bool, column: &Column) -> &'static str {
     match column.type_name.as_str() {
         "string" => t.text,
         "number" => t.number,
+        "Generic.Int64" => t.integer,
         "boolean" => t.boolean,
         _ => t.json,
     }

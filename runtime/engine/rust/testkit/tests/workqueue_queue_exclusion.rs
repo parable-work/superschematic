@@ -241,6 +241,9 @@ impl Behavior for CountedBudget {
                 ("recordUsageFor", |_, cx, params| {
                     budget_operation("recordUsageFor")(&BUDGET, cx, params)
                 }),
+                ("observe", |_, cx, params| {
+                    budget_operation("observe")(&BUDGET, cx, params)
+                }),
             ],
             fields: vec![("meters", |_, view| {
                 let field = BUDGET

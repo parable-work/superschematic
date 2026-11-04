@@ -373,6 +373,12 @@ type Repository struct {
 	OwnedFields  []RepositoryOwnedField
 	CoreOwn      []CoreOwnColumn
 
+	// Preconditions is a table that composes behaviors in a database one of
+	// whose uses takes a command's preconditions (Rules.Preconditions,
+	// D104): each command its repository runs through the core presents
+	// the preconditions WithPreconditions names. False for any other table.
+	Preconditions bool
+
 	// DeadlineQueue is the deadline queue of a table whose behaviors arm
 	// deadlines (D103), its message's type (TicketDeadline), whose
 	// RunDeadline runs one; "" for any other table. NoUpsert is a table

@@ -9,7 +9,11 @@
 //! before any guard, the fields a read of a row
 //! computes, the defects the core holds a behavior to, and the change
 //! command a write from the outbox runs: the uses that hear it, the
-//! listeners a relation reaches, a row found gone and the linked read.
+//! listeners a relation reaches, a row found gone and the linked read; a
+//! command's preconditions and the guard that reads its use's entry, the
+//! read of the rows whose owned field holds a value, the fields a read
+//! computes at a time, and another row's sub-table rows as the run has
+//! them (D104).
 
 use std::collections::BTreeMap;
 
@@ -429,6 +433,7 @@ impl Behavior for Ledger {
             .operation("callNoop", true)
             .operation("undeclared", true)
             .operation("keyed", true)
+            .operation("peer", true)
     }
 
     fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<Value, ConfigError> {
@@ -477,6 +482,30 @@ impl Behavior for Ledger {
                 Ok(Value::Null)
             }
             "callNoop" => cx.call(cx.use_id(), "noop", &json!({})),
+            // peer puts an entry on another row through its operation and
+            // reads that row's entries as the run has them.
+            "peer" => {
+                let key = params["key"].as_str().unwrap_or_default();
+                cx.call_on(
+                    "Order",
+                    key,
+                    "Ledger",
+                    "put",
+                    &json!({"names": ["z"], "amount": 2}),
+                )?;
+                let table = params
+                    .get("table")
+                    .and_then(Value::as_str)
+                    .unwrap_or("entries");
+                let use_id = params
+                    .get("use")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Ledger");
+                Ok(
+                    serde_json::to_value(cx.sub_rows_of("Order", key, use_id, table)?)
+                        .unwrap_or_default(),
+                )
+            }
             "undeclared" => cx
                 .insert_row("entries", "a", object(json!({"colour": "red"})))
                 .map(|()| Value::Null),
@@ -493,6 +522,12 @@ impl Behavior for Ledger {
                 cx.insert_row("entries", "opening", object(json!({"amount": held})))
             }
             Change::Operation { .. } => cx.emit("changed", Value::Null),
+            // A deleted row's entries, as the run has them, are none.
+            Change::Delete => {
+                let key = cx.key().unwrap_or_default();
+                let rows = cx.sub_rows_of(cx.type_name(), key, cx.use_id(), "entries")?;
+                cx.emit("deleted", serde_json::to_value(rows).unwrap_or_default())
+            }
             _ => Ok(()),
         }
     }
@@ -809,6 +844,109 @@ impl Behavior for Nudge {
     }
 }
 
+// Fence: a token a caller presents as its precondition (D104). Its entry
+// is `{ token }`, a whole number; its guard vetoes a write that presents
+// another token than the row's, and a bump that presents none, so a call
+// of bump from its own relay, which presents nothing, is vetoed. holders
+// reads the rows of a type whose token holds a value; a read at a time
+// shows that time.
+struct Fence;
+
+fn token_of(view: &View<'_, ()>) -> i64 {
+    view.get("token").and_then(|v| v.as_i64()).unwrap_or(0)
+}
+
+impl Behavior for Fence {
+    type Config = ();
+
+    fn declaration(&self) -> Declaration {
+        Declaration::new("Fence")
+            .field("token")
+            .operation("bump", true)
+            .operation("relay", true)
+            .operation("holders", false)
+            .veto("stale")
+            .veto("missing")
+            .preconditions()
+    }
+
+    fn parse_config(&self, _raw: &Value, _target: &ConfigTarget<'_>) -> Result<(), ConfigError> {
+        Ok(())
+    }
+
+    fn check_precondition(&self, _config: &(), entry: &Value) -> Vec<SchemaIssue> {
+        match entry.as_object() {
+            None => vec![SchemaIssue::new("", "must be object")],
+            Some(entry) => match entry.get("token") {
+                None => vec![SchemaIssue::new("", "must have required property 'token'")],
+                Some(token) if token.as_i64().is_none() => {
+                    vec![SchemaIssue::new("/token", "must be integer")]
+                }
+                Some(_) => Vec::new(),
+            },
+        }
+    }
+
+    fn initialize(&self, cx: &Cx<'_, ()>, _params: &Value) -> Hook<()> {
+        cx.set("token", 0)
+    }
+
+    fn guard(&self, view: &View<'_, ()>, request: &GuardRequest<'_>) -> Hook<Option<Veto>> {
+        let presented = view
+            .precondition()
+            .and_then(|entry| entry.get("token"))
+            .and_then(Value::as_i64);
+        let writes = match request {
+            GuardRequest::Create { .. } => return Ok(None),
+            GuardRequest::Operation { writes, .. } => *writes,
+            _ => true,
+        };
+        if let (true, Some(token)) = (writes, presented) {
+            if token != token_of(view) {
+                return Ok(Some(
+                    Veto::new(format!("token {token} is stale"))
+                        .with_code("stale")
+                        .with_details(object(json!({"token": token, "current": token_of(view)}))),
+                ));
+            }
+        }
+        if request.operation_of("Fence", "bump").is_some() && presented.is_none() {
+            return Ok(Some(
+                Veto::new("bump presents the token").with_code("missing"),
+            ));
+        }
+        Ok(None)
+    }
+
+    fn operation(&self, cx: &Cx<'_, ()>, name: &str, params: &Value) -> Hook<Value> {
+        match name {
+            "bump" => {
+                let token = token_of(cx) + 1;
+                cx.set("token", token)?;
+                Ok(json!({ "token": token }))
+            }
+            "relay" => cx.call("Fence", "bump", &json!({})),
+            _ => {
+                let value = params.get("token").cloned().unwrap_or(Value::Null);
+                let after = params.get("after").and_then(Value::as_str);
+                let page = cx.read_holding("Order", "Fence", "token", &value, after)?;
+                let keys: Vec<&str> = page.rows.iter().map(|row| row.key.as_str()).collect();
+                Ok(json!({ "keys": keys, "more": page.more }))
+            }
+        }
+    }
+
+    fn read_fields_at(
+        &self,
+        _config: &(),
+        _row: &Row,
+        _tables: &BTreeMap<String, Vec<SubRow>>,
+        now: i64,
+    ) -> Map<String, Value> {
+        object(json!({ "at": now }))
+    }
+}
+
 // ---- the harness ----
 
 fn core() -> superschematic_rules::Core {
@@ -825,6 +963,7 @@ fn core() -> superschematic_rules::Core {
         .with(Bell)
         .with(Latch)
         .with(Nudge)
+        .with(Fence)
 }
 
 fn alice() -> Caller {
@@ -949,6 +1088,35 @@ impl Source for Memory {
                     .filter(|((name, row_key), row)| {
                         name == type_name
                             && row.own.get(field).and_then(Value::as_str) == Some(key.as_str())
+                            && after.as_ref().is_none_or(|after| row_key > after)
+                    })
+                    .map(|((_, row_key), row)| KeyedRow {
+                        key: row_key.clone(),
+                        row: row.clone(),
+                    })
+                    .collect();
+                let more = rows.len() > *limit;
+                rows.truncate(*limit);
+                Ok(Answer::Linked(LinkedRows { rows, more }))
+            }
+            ReadRequest::Holding {
+                type_name,
+                use_id,
+                field,
+                value,
+                after,
+                limit,
+            } => {
+                self.log.push(format!(
+                    "holding {type_name} {use_id}.{field} {value} after {}",
+                    after.as_deref().unwrap_or("-")
+                ));
+                let mut rows: Vec<KeyedRow> = self
+                    .rows
+                    .iter()
+                    .filter(|((name, row_key), row)| {
+                        name == type_name
+                            && row.owned(use_id, field) == Some(value)
                             && after.as_ref().is_none_or(|after| row_key > after)
                     })
                     .map(|((_, row_key), row)| KeyedRow {
@@ -2026,13 +2194,13 @@ fn define_refuses_an_unknown_behavior_a_repeated_id_and_a_config_it_cannot_parse
         refusal.details.as_deref().map(|d| d["issues"].clone()),
         Some(json!([
             {"use": "Counter", "index": 1, "behavior": "Counter", "kind": "use", "path": "", "message": "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one"},
-            {"use": "likes", "index": 2, "behavior": "Nope", "kind": "use", "path": "", "message": "type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge)"},
+            {"use": "likes", "index": 2, "behavior": "Nope", "kind": "use", "path": "", "message": "type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence)"},
             {"use": "views", "index": 3, "behavior": "Counter", "kind": "schema", "path": "/config/max", "message": "must be integer"}
         ]))
     );
     assert_eq!(
         refusal.message,
-        "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one; type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge); type Order: field views: behavior Counter config: /max: must be integer"
+        "type Order: two uses have the id Counter; a behavior is anchored on the type once, and each field carries one; type Order: behavior Nope is not one this core runs (Counter, Relay, Freeze, Mirror, Stock, Loop, Bin, Picker, Ledger, Bell, Latch, Nudge, Fence); type Order: field views: behavior Counter config: /max: must be integer"
     );
     // With every shape sound, the rules.
     let rules = TypeSpec::new("Order")
@@ -3083,4 +3251,314 @@ fn the_change_command_reads_as_json() {
         serde_json::to_value(core.run(&child_spec(json!({})), &command, &answers)).unwrap(),
         json!({"read": [{"kind": "linked", "type": "Child", "field": "parentId", "key": "p1", "limit": 500}]})
     );
+}
+
+// ---- preconditions, holding reads, reads at a time and others' sub-rows ----
+
+fn fenced() -> (TypeSpec, Memory) {
+    let spec = TypeSpec::new("Order")
+        .with(UseSpec::on_type("Fence", None))
+        .with(UseSpec::on_type("Counter", json!({"max": 9})));
+    let memory = Memory::default().with(
+        "Order",
+        "o1",
+        row(
+            json!({"title": "Desk"}),
+            json!({"Fence": {"token": 2}, "Counter": {"count": 1}}),
+            4,
+        ),
+    );
+    (spec, memory)
+}
+
+fn presenting(action: Action, preconditions: Value) -> Command {
+    command(alice(), action).with_preconditions(object(preconditions))
+}
+
+/// A command's preconditions are held to the type's uses before the row is
+/// read (D104): an entry for a use the type lacks, for a use whose behavior
+/// takes none, and one its behavior's check refuses are invalid_argument,
+/// each issue under its entry, in the command's order.
+#[test]
+fn preconditions_are_checked_before_the_row_is_read() {
+    let core = core();
+    let (spec, mut memory) = fenced();
+    let update = |key: &str| Action::Update {
+        key: key.into(),
+        patch: object(json!({"title": "Chair"})),
+    };
+    let refusal = refused(core.drive(
+        &spec,
+        &presenting(
+            update("o9"),
+            json!({"Ghost": {"token": 1}, "Counter": {}, "Fence": {"token": "two"}}),
+        ),
+        &mut memory,
+    ));
+    assert_eq!(
+        refusal.error_json(),
+        json!({"class": "PreconditionsError", "code": "invalid_argument",
+        "message": "preconditions of Order: /Ghost: Order has no behavior use Ghost (its uses that take preconditions: Fence); /Counter: behavior Counter takes no precondition; /Fence/token: must be integer",
+        "details": {"issues": [
+            {"path": "/Ghost", "message": "Order has no behavior use Ghost (its uses that take preconditions: Fence)"},
+            {"path": "/Counter", "message": "behavior Counter takes no precondition"},
+            {"path": "/Fence/token", "message": "must be integer"}
+        ]}})
+    );
+    assert_eq!(refusal.status, 400);
+    // The row was not read: o9 does not exist, and the refusal is the
+    // preconditions'.
+    assert!(memory.log.is_empty(), "{:?}", memory.log);
+    // A delete and an operation are checked so too.
+    for action in [
+        Action::Delete { key: "o1".into() },
+        invoke("o1", "Fence", "bump", json!({})),
+    ] {
+        let refusal = refused(core.drive(
+            &spec,
+            &presenting(action, json!({"Fence": []})),
+            &mut memory,
+        ));
+        assert_eq!(
+            refusal.message,
+            "preconditions of Order: /Fence: must be object"
+        );
+    }
+    // A type none of whose uses takes one names none.
+    let plain = counter_spec(json!({"max": 9}));
+    assert_eq!(
+        refused(core.drive(
+            &plain,
+            &presenting(update("o1"), json!({"Fence": {"token": 1}})),
+            &mut memory
+        ))
+        .message,
+        "preconditions of Order: /Fence: Order has no behavior use Fence (its uses that take preconditions: none)"
+    );
+}
+
+/// Only an update, a delete and an operation of a row present
+/// preconditions: any other action that carries them is refused.
+#[test]
+fn only_a_rows_update_delete_or_operation_presents_preconditions() {
+    let core = core();
+    let (spec, mut memory) = fenced();
+    for (action, kind) in [
+        (
+            Action::Create {
+                id: Some("o2".into()),
+                own: Map::new(),
+                params: Map::new(),
+            },
+            "create",
+        ),
+        (
+            Action::Deadline {
+                key: "o1".into(),
+                use_id: "Fence".into(),
+                name: "x".into(),
+                at: NOW,
+                payload: Value::Null,
+            },
+            "deadline",
+        ),
+        (Action::Define, "define"),
+        (Action::Publish { from: None }, "publish"),
+    ] {
+        let refusal = refused(core.drive(
+            &spec,
+            &presenting(action, json!({"Fence": {"token": 2}})),
+            &mut memory,
+        ));
+        assert_eq!(refusal.class, "PreconditionsError");
+        assert_eq!(
+            refusal.message,
+            format!("preconditions of Order: a {kind} takes no preconditions: an update, a delete or an operation of a row presents them")
+        );
+    }
+}
+
+/// A guard reads its use's entry of the command's preconditions when it is
+/// asked about the command's own update, delete or operation, and none when
+/// it is asked about a call its code makes.
+#[test]
+fn a_guard_reads_its_uses_precondition_of_the_commands_own_write() {
+    let core = core();
+    let (spec, mut memory) = fenced();
+    // The current token goes through, and the bump moves it.
+    let bump = invoke("o1", "Fence", "bump", json!({}));
+    let changes = changed(core.drive(
+        &spec,
+        &presenting(bump.clone(), json!({"Fence": {"token": 2}})),
+        &mut memory,
+    ));
+    assert_eq!(changes.result, json!({"token": 3}));
+    // Another is stale, on an update, a delete and an operation alike.
+    for action in [
+        Action::Update {
+            key: "o1".into(),
+            patch: object(json!({"title": "Chair"})),
+        },
+        Action::Delete { key: "o1".into() },
+        bump.clone(),
+    ] {
+        let refusal = refused(core.drive(
+            &spec,
+            &presenting(action, json!({"Fence": {"token": 1}})),
+            &mut memory,
+        ));
+        assert_eq!(
+            refusal.details.as_deref().and_then(|d| d.get("vetoCode")),
+            Some(&json!("stale"))
+        );
+        assert_eq!(
+            refusal
+                .details
+                .as_deref()
+                .and_then(|d| d.get("vetoDetails")),
+            Some(&json!({"token": 1, "current": 2}))
+        );
+    }
+    // A bump that presents nothing is vetoed by its own guard.
+    assert_eq!(
+        refused(core.drive(&spec, &command(alice(), bump), &mut memory)).message,
+        "behavior Fence vetoes bump of Order o1: bump presents the token"
+    );
+    // relay's own guard reads the token, and the bump it calls presents
+    // none: a request a behavior's code makes presents nothing.
+    let relay = presenting(
+        invoke("o1", "Fence", "relay", json!({})),
+        json!({"Fence": {"token": 2}}),
+    );
+    assert_eq!(
+        refused(core.drive(&spec, &relay, &mut memory)).message,
+        "behavior Fence vetoes bump of Order o1: bump presents the token"
+    );
+    // The command's preconditions read as JSON.
+    let read: Command = serde_json::from_value(json!({
+        "caller": {"subject": "alice"}, "now": NOW,
+        "action": {"kind": "operation", "key": "o1", "useId": "Fence", "operation": "bump", "params": {}},
+        "preconditions": {"Fence": {"token": 2}}
+    }))
+    .unwrap();
+    assert_eq!(
+        changed(core.drive(&spec, &read, &mut memory)).result,
+        json!({"token": 3})
+    );
+}
+
+/// A read of the rows of a type whose use's owned field holds a value
+/// answers them in key order, a page at a time, as a linked read does.
+#[test]
+fn a_holding_read_finds_the_rows_whose_owned_field_holds_a_value() {
+    let core = core();
+    let (spec, memory) = fenced();
+    let mut memory = memory
+        .with(
+            "Order",
+            "o2",
+            row(json!({}), json!({"Fence": {"token": 7}}), 1),
+        )
+        .with(
+            "Order",
+            "o3",
+            row(json!({}), json!({"Fence": {"token": 2}}), 1),
+        );
+    let holders = |params: Value| command(alice(), invoke("o1", "Fence", "holders", params));
+    assert_eq!(
+        changed(core.drive(&spec, &holders(json!({"token": 2})), &mut memory)).result,
+        json!({"keys": ["o1", "o3"], "more": false})
+    );
+    assert_eq!(
+        changed(core.drive(
+            &spec,
+            &holders(json!({"token": 2, "after": "o1"})),
+            &mut memory
+        ))
+        .result,
+        json!({"keys": ["o3"], "more": false})
+    );
+    assert!(memory
+        .log
+        .contains(&"holding Order Fence.token 2 after o1".to_owned()));
+    assert_eq!(
+        serde_json::to_value(core.run(&spec, &holders(json!({"token": 7})), &{
+            let mut answers = Answers::new();
+            answers.answer(
+                ReadRequest::row("Order", "o1"),
+                Answer::Row(Some(order_at(1, 1))),
+            );
+            answers
+        }))
+        .unwrap(),
+        json!({"read": [{"kind": "holding", "type": "Order", "useId": "Fence", "field": "token", "value": 7, "limit": 500}]})
+    );
+}
+
+/// A read at a time hands the behavior the time; one that computes nothing
+/// at a time gives what read_fields gives.
+#[test]
+fn read_fields_at_reads_at_a_time() {
+    let core = core();
+    let (spec, _) = fenced();
+    let desk = row(json!({"title": "Desk"}), json!({}), 1);
+    assert_eq!(
+        core.read_fields_at(&spec, "Fence", &desk, &BTreeMap::new(), 5_000),
+        Ok(object(json!({"at": 5_000})))
+    );
+    assert_eq!(
+        core.read_fields(&spec, "Fence", &desk, &BTreeMap::new()),
+        Ok(Map::new())
+    );
+    let (ledger_spec, _) = ledger();
+    assert_eq!(
+        core.read_fields_at(&ledger_spec, "Ledger", &desk, &BTreeMap::new(), 5_000),
+        Ok(object(json!({"total": 0, "title": "Desk"})))
+    );
+}
+
+/// Another row's sub-table rows read as the run has them: the host's, with
+/// a call_on's writes of them in the same run applied, and none for a row
+/// the run deleted; a use or a table the type does not have is a defect.
+#[test]
+fn another_rows_sub_table_rows_read_as_the_run_has_them() {
+    let core = core();
+    let (spec, memory) = ledger();
+    let mut memory = memory
+        .with("Order", "o2", row(json!({}), json!({}), 1))
+        .with_sub_rows(
+            ["Order", "o2", "Ledger", "entries"],
+            json!([{"key": "a", "values": {"amount": 9}}]),
+        );
+    let peer = |params: Value| command(alice(), invoke("o1", "Ledger", "peer", params));
+    assert_eq!(
+        changed(core.drive(&spec, &peer(json!({"key": "o2"})), &mut memory)).result,
+        json!([
+            {"key": "a", "values": {"amount": 9}},
+            {"key": "z", "values": {"amount": 2}}
+        ])
+    );
+    assert_eq!(
+        refused(core.drive(
+            &spec,
+            &peer(json!({"key": "o2", "use": "Ghost"})),
+            &mut memory
+        ))
+        .message,
+        "behavior Ledger: sub_rows_of: Order has no behavior use Ghost (its uses: Ledger)"
+    );
+    assert_eq!(
+        refused(core.drive(
+            &spec,
+            &peer(json!({"key": "o2", "table": "notes"})),
+            &mut memory
+        ))
+        .message,
+        "behavior Ledger: sub_rows_of: notes is not a sub-table Ledger declares (entries)"
+    );
+    // A row the run deleted has none.
+    let delete = command(alice(), Action::Delete { key: "o1".into() });
+    let changes = changed(core.drive(&spec, &delete, &mut memory));
+    assert_eq!(changes.events[0].kind, "deleted");
+    assert_eq!(changes.events[0].payload, json!([]));
 }

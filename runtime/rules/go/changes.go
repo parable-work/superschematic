@@ -237,12 +237,39 @@ func readLinked(ctx context.Context, store Store, table *Table, request ReadRequ
 	if column == nil {
 		return nil, Internal("%s has no own field %s in the behaviors' layout", table.Type, request.Field)
 	}
-	dialect := store.Dialect()
 	encoded, err := json.Marshal(request.Key)
 	if err != nil {
 		return nil, fmt.Errorf("rules: encode the key %q: %w", request.Key, err)
 	}
-	value, err := toColumn(encoded, *column, table, dialect)
+	return readPage(ctx, store, table, *column, encoded, request)
+}
+
+// readHolding is one page of the rows of table whose use request.UseID's
+// owned field request.Field holds request.Value (D104), as readLinked
+// reads a page: the value bound as a command's value of the field's column
+// is, so it compares as the column holds it. A use or a field the layout
+// does not give the table refuses the command as internal.
+func readHolding(ctx context.Context, store Store, table *Table, request ReadRequest) (*LinkedRows, error) {
+	use := useOf(table, request.UseID)
+	if use == nil {
+		return nil, Internal("%s has no use %s in the behaviors' layout", table.Type, request.UseID)
+	}
+	field := fieldOf(use, request.Field)
+	if field == nil {
+		return nil, Internal("%s's use %s (%s) has no field %s in the behaviors' layout", table.Type, request.UseID, use.Behavior, request.Field)
+	}
+	return readPage(ctx, store, table, field.Column, json.RawMessage(request.Value), request)
+}
+
+// readPage is one page of the rows of table whose column holds the core's
+// value raw, converted as a command's value of it is: a soft-deletable
+// table's live rows alone, in the key column's order, at most
+// request.Limit, after the key request.After when it is set, each row as a
+// row read gives it, with its key as the key column reads, and whether
+// more follow.
+func readPage(ctx context.Context, store Store, table *Table, column Column, raw json.RawMessage, request ReadRequest) (*LinkedRows, error) {
+	dialect := store.Dialect()
+	value, err := toColumn(raw, column, table, dialect)
 	if err != nil {
 		return nil, err
 	}

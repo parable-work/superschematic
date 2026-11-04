@@ -1,0 +1,68 @@
+{
+  "name": "fixture-agents-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-agents-db",
+      "types": [
+        "Account",
+        "Job",
+        "Session"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-agents-db",
+      "kind": "DB"
+    }
+  ],
+  "operationSets": [
+    {
+      "name": "AccountActions",
+      "comment": "An account's budget and status operations (D104), for any signed-in caller:\nthe core checks accounts.limits on a limit's change and accounts.observe on\na provider's usage.",
+      "operations": [],
+      "behaviorOperations": {
+        "type": "Account"
+      },
+      "auth": true
+    },
+    {
+      "name": "JobActions",
+      "comment": "A job's lease, retries and status operations (D104), for any signed-in\ncaller: the core decides who holds a job, whose writes its token fences\nand when it may run again.",
+      "operations": [],
+      "behaviorOperations": {
+        "type": "Job"
+      },
+      "auth": true
+    },
+    {
+      "name": "SessionActions",
+      "comment": "A session's presence and status operations (D104), for any signed-in\ncaller: the core decides who may beat a session, its device's principal.",
+      "operations": [],
+      "behaviorOperations": {
+        "type": "Session"
+      },
+      "auth": true
+    }
+  ],
+  "workers": [
+    {
+      "name": "JobDeadlines",
+      "comment": "Runs Job's deadlines as they fall due (D103, D104): a lease's expiry and\nthe end of a backoff. The worker fixture-agents-api-job-deadlines.",
+      "behaviorWorker": {
+        "type": "Job"
+      }
+    },
+    {
+      "name": "SessionPresence",
+      "comment": "Runs each session's miss as it falls due (D104): the worker\nfixture-agents-api-session-presence. A miss expires the leases the device\nholds on jobs through Lease's expire, which needs Job's Lease\noverridePermission, so the worker holds it.",
+      "behaviorWorker": {
+        "type": "Session",
+        "permissions": [
+          "jobs.override"
+        ]
+      }
+    }
+  ]
+}

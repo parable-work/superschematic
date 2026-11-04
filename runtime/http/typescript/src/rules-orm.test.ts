@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import pg from 'pg';
-import { NotFoundError, ormOf, type Clauses, type Orm, type OrmDefinition, type TableDefinition } from './orm';
+import { NotFoundError, ormOf, type Clauses, type Orm, type OrmDefinition, type TableDefinition, type WriteOptions } from './orm';
 import { RulesRefusal, withRulesCore, type RulesCallOptions, type RulesLayout } from './rules';
 import { bumpVersion, rulesCore, rulesDsn } from './rules.testing';
 import { uuidToDb } from './uuid';
@@ -198,11 +198,11 @@ interface Repositories {
     createOne(input: { id?: string; title: string }): Promise<OrderRow>;
     createMany(inputs: readonly { id?: string; title: string }[]): Promise<OrderRow[]>;
     getOne(id: string): Promise<OrderRow>;
-    updateOne(id: string, update: { title?: string }): Promise<OrderRow>;
+    updateOne(id: string, update: { title?: string }, options?: WriteOptions): Promise<OrderRow>;
     upsertOne(input: { id?: string; title: string }, on: readonly ['id'], update: { title?: string }): Promise<OrderRow>;
     upsertOneResult(input: { id?: string; title: string }, on: readonly ['id'], update: { title?: string }): Promise<Upserted<OrderRow>>;
     upsertMany(inputs: readonly { id?: string; title: string }[], on: readonly ['id'], update: readonly 'title'[]): Promise<Upserted<OrderRow>[]>;
-    deleteOne(id: string): Promise<void>;
+    deleteOne(id: string, options?: WriteOptions): Promise<void>;
     readonly status: { transition(key: string, params: { to: string }, options?: RulesCallOptions): Promise<{ from: string; to: string }> };
   };
 }
@@ -297,6 +297,33 @@ describe.skipIf(rulesCore === undefined || rulesDsn === '')('a repository of a t
     await expect(orm.order.updateOne(id, { status: 'draft' } as never)).rejects.toMatchObject({ code: 'invalid_instance', status: 422 });
     await expect(orm.order.updateOne(id, { statusEnteredAt: null } as never)).rejects.toBeInstanceOf(RulesRefusal);
     await expect(orm.order.createOne({ title: 'Lamp', status: 'paid' } as never)).rejects.toMatchObject({ code: 'invalid_instance' });
+  });
+
+  test("updateOne, deleteOne and an operation present the caller's preconditions to the core, which checks them before it reads the row and writes nothing when it refuses them", async () => {
+    const row = await orm.order.createOne({ title: 'Fence' });
+    // Workflow takes no precondition (D104): the core refuses an entry for
+    // its use, as it would a stale fencing token's, and nothing is written.
+    const refused = { status: 400, code: 'invalid_argument', class: 'PreconditionsError', message: 'preconditions of Order: /status: behavior Workflow takes no precondition' };
+    await expect(orm.order.updateOne(row.id, { title: 'Gate' }, { preconditions: { status: { token: 1 } } })).rejects.toMatchObject(refused);
+    await expect(orm.order.status.transition(row.id, { to: 'paid' }, { preconditions: { status: { token: 1 } } })).rejects.toMatchObject(refused);
+    await expect(orm.order.deleteOne(row.id, { preconditions: { status: { token: 1 } } })).rejects.toMatchObject(refused);
+    expect(await orm.order.getOne(row.id)).toMatchObject({ title: 'Fence', status: 'draft', _version: 1 });
+    // Checked before the row is read: a key no row holds is refused alike,
+    // not NotFoundError.
+    await expect(orm.order.updateOne('6fe1XoZ0UJpMNNdUOSMC2X', { title: 'x' }, { preconditions: { status: {} } })).rejects.toMatchObject({ code: 'invalid_argument', class: 'PreconditionsError' });
+    // None, or an empty set, presents none.
+    expect(await orm.order.updateOne(row.id, { title: 'Gate' }, { preconditions: {} })).toMatchObject({ title: 'Gate', _version: 2 });
+  });
+
+  test('a precondition given to a write of a table that composes no behaviors throws before anything is written', async () => {
+    const row = await orm.order.createOne({ title: 'Plain' });
+    // The same tables, with Order left out of the layout: a plain table.
+    const plain = ormOf<Repositories>(pool, { ...definition, rules: { types: { Ticket: rules.types.Ticket! } } }, withRulesCore(null, () => rulesCore!));
+    const refusal = "orm: preconditions are a behavior table's (D104): Order composes none";
+    await expect(plain.order.updateOne(row.id, { title: 'Fenced' }, { preconditions: { Lease: { token: 1 } } })).rejects.toThrow(refusal);
+    await expect(plain.order.deleteOne(row.id, { preconditions: { Lease: { token: 1 } } })).rejects.toThrow(refusal);
+    expect(await orm.order.getOne(row.id)).toMatchObject({ title: 'Plain', _version: 1 });
+    expect(await plain.order.updateOne(row.id, { title: 'Open' }, { preconditions: {} })).toMatchObject({ title: 'Open' });
   });
 
   test("an upsert inserts a new row with what the core's create gives it, and updates a held row's own fields through the core, its state kept", async () => {

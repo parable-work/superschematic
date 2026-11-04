@@ -47,6 +47,15 @@ A row read holds a table's audit fields (the layout's audit, createdBy,
 D104) among its own fields, which a Workflow transition's by may name; no
 change set writes one.
 
+A command may carry the caller's preconditions (D16, D104), each use's
+entry by its use id ({ Lease: { token: 3 } }), which the core checks
+before it reads the row and hands that use's guard; the adapter passes
+them on as the command or ExecuteOptions gives them and reads none of
+them. A rule over the rows a principal holds asks for the rows of a type
+whose use's owned field holds a value (a holding read, D104), which the
+adapter reads by the layout's column of that field as it reads a linked
+read's own field.
+
 A use's sub-tables are child tables of its row (the layout's tables), whose
 rows the core reads (subRows) and the change set inserts, updates and
 deletes in the unit, after the row's fenced write; a hard delete of the row
@@ -177,6 +186,14 @@ export interface CoreCommand {
   readonly now: number;
   readonly action: CoreAction;
   readonly request?: string;
+  /**
+   * The caller's preconditions (D16, D104): each use's entry by its use id
+   * (an implemented use's id is its behavior's name, { Lease: { token: 3 } }),
+   * which the core checks before it reads the row and hands that use's
+   * guard. Only an update, a delete and an operation present them; absent
+   * or empty for none.
+   */
+  readonly preconditions?: Readonly<Record<string, unknown>>;
 }
 
 /** What the core asks the host to read, tagged by kind. Open. */
@@ -186,7 +203,9 @@ export type CoreReadRequest =
   | { readonly kind: 'spec'; readonly type: string }
   | { readonly kind: 'subRows'; readonly type: string; readonly key: string; readonly useId: string; readonly table: string }
   /** The rows of a type whose own field holds a key, in its key column's order, at most limit, after the key after when given (D103). */
-  | { readonly kind: 'linked'; readonly type: string; readonly field: string; readonly key: string; readonly after?: string; readonly limit: number };
+  | { readonly kind: 'linked'; readonly type: string; readonly field: string; readonly key: string; readonly after?: string; readonly limit: number }
+  /** The rows of a type whose use's owned field holds a value, in its key column's order, at most limit, after the key after when given (D104), answered as a linked read is. */
+  | { readonly kind: 'holding'; readonly type: string; readonly useId: string; readonly field: string; readonly value: unknown; readonly after?: string; readonly limit: number };
 
 /** One row as the host read it: own fields, owned fields by use id then declared name, and its version. */
 export interface CoreRow {
@@ -694,6 +713,15 @@ export interface ExecuteOptions {
    * update is fenced on the version as the delete would be.
    */
   readonly softDelete?: Readonly<Record<string, unknown>>;
+  /**
+   * The caller's preconditions (D16, D104), each use's entry by its use id,
+   * which every run of the command presents to the core beside the
+   * command's own, an entry here in place of the command's for the same
+   * use: what a repository's write and operation pass on. The core refuses
+   * them on a command that is no update, delete or operation, so none is
+   * ever dropped. Absent or empty for none.
+   */
+  readonly preconditions?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -851,7 +879,7 @@ async function perform(host: RulesHost, type: string, command: CoreCommand, opti
   const table = tableOf(host.layout, type);
   const refused = checked(host).get(type);
   if (refused) throw new RulesRefusal(refused);
-  const run = prepared(host, table, command);
+  const run = prepared(host, table, command, options.preconditions);
   refuseOwnedWrites(table, run);
   const deadline = run.action.kind === 'deadline' ? run.action : undefined;
   // The queue table a claim's message is in: the deadline queue for a
@@ -983,10 +1011,10 @@ async function claimHeld(host: RulesHost, queue: string, claim: DeadlineClaim): 
   return rows.length > 0;
 }
 
-/** Runs an operation of a use on a row and resolves to its result. */
-export async function runOperation(host: RulesHost, type: string, key: string, useId: string, operation: string, params: unknown, caller: CoreCaller): Promise<unknown> {
+/** Runs an operation of a use on a row and resolves to its result; options.preconditions are the caller's (D104). */
+export async function runOperation(host: RulesHost, type: string, key: string, useId: string, operation: string, params: unknown, caller: CoreCaller, options?: ExecuteOptions): Promise<unknown> {
   const command = commandOf(host, caller, { kind: 'operation', key, useId, operation, params: params ?? {} });
-  return (await execute(host, type, command)).result;
+  return (await execute(host, type, command, options)).result;
 }
 
 /** What a create through the core takes beside its own fields. */
@@ -1004,12 +1032,12 @@ export async function runCreate(host: RulesHost, type: string, own: Readonly<Rec
   return result.key!;
 }
 
-/** Updates a row's own fields through the core with a merge patch; a patch that names an owned field is refused (invalid_instance). */
+/** Updates a row's own fields through the core with a merge patch; a patch that names an owned field is refused (invalid_instance). options.preconditions are the caller's (D104). */
 export async function runUpdate(host: RulesHost, type: string, key: string, patch: Readonly<Record<string, unknown>>, caller: CoreCaller, options?: ExecuteOptions): Promise<void> {
   await execute(host, type, commandOf(host, caller, { kind: 'update', key, patch }), options);
 }
 
-/** Deletes a row through the core, its uses' guards run; options.softDelete stamps it deleted in place of deleting it. */
+/** Deletes a row through the core, its uses' guards run; options.softDelete stamps it deleted in place of deleting it, and options.preconditions are the caller's (D104). */
 export async function runDelete(host: RulesHost, type: string, key: string, caller: CoreCaller, options?: ExecuteOptions): Promise<void> {
   await execute(host, type, commandOf(host, caller, { kind: 'delete', key }), options);
 }
@@ -1107,9 +1135,34 @@ export async function readLinked(host: RulesHost, type: string, field: string, k
   if (table === undefined) return { rows: [], more: false };
   const column = table.own.find(c => c.field === field);
   if (column === undefined) throw internal(`${type} has no own field ${field} in the behaviors' layout`);
-  if (!Number.isSafeInteger(limit) || limit < 0) throw internal(`a linked read of ${type} asks for ${JSON.stringify(limit)} rows`);
+  return rowsHolding(host, table, column, key, after, limit, 'a linked read');
+}
+
+/**
+ * Reads the rows of a type whose use's owned field holds a value, as the
+ * core reads them (ReadRequest::Holding, D104): at most limit of them in
+ * the key column's order, after the key after when given, a soft-deletable
+ * table's live rows alone, the value bound as a command's value of the
+ * field binds, each row with its key in its wire form and converted as a
+ * row read converts it, and whether more follow. A type the layout lacks
+ * has none; a use or a field the layout does not give the type refuses the
+ * command as internal.
+ */
+export async function readHolding(host: RulesHost, type: string, useId: string, field: string, value: unknown, after: string | undefined, limit: number): Promise<CoreLinkedRows> {
+  const table = host.layout.types[type];
+  if (table === undefined) return { rows: [], more: false };
+  const use = table.uses.find(u => u.id === useId);
+  if (use === undefined) throw internal(`${type} has no use ${useId} in the behaviors' layout`);
+  const column = use.fields.find(f => f.name === field);
+  if (column === undefined) throw internal(`${type}'s use ${useId} (${use.behavior}) has no field ${field} in the behaviors' layout`);
+  return rowsHolding(host, table, column, value, after, limit, 'a read of the rows that hold a value');
+}
+
+/** The rows of a table whose column holds a value, a linked read's and a holding read's page: the value bound as the column binds it, at most limit of them after the key after, and whether more follow. */
+async function rowsHolding(host: RulesHost, table: RulesTable, column: RulesColumn, value: unknown, after: string | undefined, limit: number, what: string): Promise<CoreLinkedRows> {
+  if (!Number.isSafeInteger(limit) || limit < 0) throw internal(`${what} of ${table.type} asks for ${JSON.stringify(limit)} rows`);
   const dialect = host.store.dialect;
-  const values: unknown[] = [toColumn(key, column, table, dialect)];
+  const values: unknown[] = [toColumn(value, column, table, dialect)];
   let where = `${quote(column.column)} = ${placeholder(dialect, 1)}${live(table)}`;
   if (after !== undefined) {
     values.push(keyValue(table, after));
@@ -1168,10 +1221,11 @@ function checked(host: RulesHost): ReadonlyMap<string, CoreRefusal> {
   return refusals;
 }
 
-/** The command as every run of it runs: a request id, and a create's key. */
-function prepared(host: RulesHost, table: RulesTable, command: CoreCommand): CoreCommand {
+/** The command as every run of it runs: a request id, a create's key, and the preconditions the options add to its own. */
+function prepared(host: RulesHost, table: RulesTable, command: CoreCommand, preconditions?: Readonly<Record<string, unknown>>): CoreCommand {
   let run = command;
   if (run.request === undefined || run.request === '') run = { ...run, request: (host.request ?? randomRequest)() };
+  if (preconditions !== undefined && Object.keys(preconditions).length > 0) run = { ...run, preconditions: { ...run.preconditions, ...preconditions } };
   const action = run.action;
   if (action.kind === 'create' && (action.id === undefined || action.id === null || action.id === '')) {
     run = { ...run, action: { ...action, id: newKey(table) } };
@@ -1256,6 +1310,10 @@ async function settle(host: RulesHost, spec: CoreTypeSpec, command: CoreCommand)
         if (request.kind === 'linked' && locks.length > 0 && host.store.locks === 'fenced') {
           // Nor of the rows that link to a row.
           throw internal('a read of the rows that link to a row under a lock has no check on SQLite or D1 yet (D103)');
+        }
+        if (request.kind === 'holding' && locks.length > 0 && host.store.locks === 'fenced') {
+          // Nor of the rows whose owned field holds a value.
+          throw internal('a read of the rows whose owned field holds a value under a lock has no check on SQLite or D1 yet (D104)');
         }
         const answered: CoreAnswered = { request, answer: await answerOf(host, request), held: locks.length };
         const same = JSON.stringify(request);
@@ -1366,6 +1424,8 @@ async function answerOf(host: RulesHost, request: CoreReadRequest): Promise<Core
       return { subRows: await readSubRows(host, request.type, request.key, request.useId, request.table) };
     case 'linked':
       return { linked: await readLinked(host, request.type, request.field, request.key, request.after, request.limit) };
+    case 'holding':
+      return { linked: await readHolding(host, request.type, request.useId, request.field, request.value, request.after, request.limit) };
     default:
       throw internal(`the adapter answers no read of this kind: ${JSON.stringify(request)}`);
   }
@@ -1729,6 +1789,9 @@ function keyValue(table: RulesTable, key: string): unknown {
 /** The IR type of a column that holds JSON (D103): JSONB on Postgres, its JSON text on SQLite. */
 const JSON_TYPE = 'Generic.JSON';
 
+/** The IR type of a BIGINT column (D104): a number to the core, which pg reads as its text unless the pool parses it. */
+const INT64_TYPE = 'Generic.Int64';
+
 /**
  * A value of the core's as its column binds it: null for none; a
  * timestamp's epoch milliseconds as a Date on Postgres and its ISO text on
@@ -1758,7 +1821,8 @@ function toColumn(value: unknown, column: RulesColumn, table: RulesTable, dialec
  * boolean column's 1 or 0 as a boolean on SQLite; a JSON column's SQLite
  * text as the JSON it holds (pg reads a JSONB column already parsed, so on
  * Postgres its value is taken as it is, a string among them); a BIGINT pg
- * reads as text as a number.
+ * reads as a bigint, or as its text (a Generic.Int64 column on a pool that
+ * does not parse it), as a number.
  */
 function fromColumn(value: unknown, column: RulesColumn, table: RulesTable, dialect: RulesDialect): unknown {
   if (value === null || value === undefined) return undefined;
@@ -1777,6 +1841,7 @@ function fromColumn(value: unknown, column: RulesColumn, table: RulesTable, dial
   if (UUID_TYPES.has(column.type)) return uuidFromDb(value);
   if (column.type === 'boolean' && typeof value === 'number') return value !== 0;
   if (typeof value === 'bigint') return Number(value);
+  if (column.type === INT64_TYPE && typeof value === 'string' && /^-?[0-9]+$/.test(value)) return Number(value);
   if (value instanceof Date) return value.toISOString();
   return value;
 }
@@ -1824,9 +1889,16 @@ export class RulesRefusal extends HttpProblem {
 // ---- The repositories ----
 
 /** What a behavior's operation on a repository takes beside its key and parameters. */
-export interface RulesCallOptions {
+export interface RulesCallOptions<Preconditions = Readonly<Record<string, unknown>>> {
   /** The caller the core checks a behavior's permissions against; the ORM's acting user, holding no permissions, unless set. */
   readonly caller?: CoreCaller;
+  /**
+   * What the caller asserts of the row, each use's entry by its use id
+   * (D16, D104): Lease's fencing token, { Lease: { token } }, which its
+   * guard holds the operation to. The generated orm.ts types it per table
+   * (<Type>Preconditions); absent for none.
+   */
+  readonly preconditions?: Preconditions;
 }
 
 /**
@@ -1834,10 +1906,12 @@ export interface RulesCallOptions {
  * use's id: each operation's (key, params, options) to its result. The
  * generated orm.ts types each operation's parameters and result from its
  * declaration, as orm.order.status's
- * UseOperations<{ transition: { params: { to: 'draft' | 'paid' }; result: { from: string; to: string } } }, string>.
+ * UseOperations<{ transition: { params: { to: 'draft' | 'paid' }; result: { from: string; to: string } } }, string>,
+ * and the preconditions its options take by the table's uses
+ * (<Type>Preconditions, D104).
  */
-export type UseOperations<Ops extends Record<string, { readonly params: unknown; readonly result: unknown }>, Key = string> = {
-  readonly [Name in keyof Ops]: (key: Key, params: Ops[Name]['params'], options?: RulesCallOptions) => Promise<Ops[Name]['result']>;
+export type UseOperations<Ops extends Record<string, { readonly params: unknown; readonly result: unknown }>, Key = string, Preconditions = Readonly<Record<string, unknown>>> = {
+  readonly [Name in keyof Ops]: (key: Key, params: Ops[Name]['params'], options?: RulesCallOptions<Preconditions>) => Promise<Ops[Name]['result']>;
 };
 
 /** What a repository's runDeadline takes beside the deadline. */

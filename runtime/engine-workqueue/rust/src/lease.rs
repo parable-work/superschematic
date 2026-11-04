@@ -90,6 +90,12 @@
 //! configChange: any config may change. Lease can be added to a schema that
 //! has instances, which start free at token 0, and cannot be removed from
 //! one: the leases and directives its instances hold would stay behind.
+//!
+//! What only a table's Lease takes (D104), whose declaration the engine
+//! shares, the engine refuses rather than ignores: the config's `status`,
+//! the Workflow a table's lease moves, at define, naming the table form. An
+//! engine type's Lease moves its one Workflow, and an engine type can be
+//! defined at run time, past any build's check.
 
 use std::collections::HashSet;
 
@@ -130,6 +136,10 @@ pub const MAX_SWEEP: i64 = 1000;
 const BATCH: i64 = 100;
 
 const NAME: &str = "Lease";
+
+// How a refusal of what only a table's Lease takes names the table form
+// (D104).
+const TABLE_FORM: &str = "implements Lease<T, { ... }> on a DB table, D104";
 
 /// A move of the status a lease's end makes.
 pub type LeaseTransition = StatusMove;
@@ -737,6 +747,12 @@ impl Behavior for Lease {
     // The configSchema holds the shape; this holds the config to the type:
     // its fields, its Workflow's states and the behaviors it lists.
     fn parse_config(&self, raw: &Value, target: &ConfigTarget<'_>) -> Result<LeaseConfig> {
+        // What only a table's Lease takes is refused first (D104).
+        if raw.get("status").is_some() {
+            return Err(Error::config(format!(
+                "status is a table's Lease's ({TABLE_FORM}): an engine type's Lease moves its one Workflow"
+            )));
+        }
         let number = |name: &str| integer(raw, name);
         let text = |name: &str| raw.get(name).and_then(Value::as_str).map(str::to_owned);
         let ttl_ms = number("ttlMs").unwrap_or(DEFAULT_TTL_MS);

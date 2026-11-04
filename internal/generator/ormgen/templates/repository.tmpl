@@ -4650,7 +4650,7 @@ func (r *{{ $repo.Name }}) {{ .GoName }}() {{ .Interface }} { return {{ .Value }
 type {{ .Value }} struct{ r *{{ $repo.Name }} }
 {{- range .Operations }}
 
-{{ docComment "" (printf "%s runs %s's %s on the row id names, in a transaction, and returns its result. It returns ErrNotFound when no live row holds id, and any other refusal of the core's as the *rules.Refusal it is." .GoName $use.Member .Name) }}
+{{ docComment "" (printf "%s runs %s's %s on the row id names, in a transaction, and returns its result.%s It returns ErrNotFound when no live row holds id, and any other refusal of the core's as the *rules.Refusal it is." .GoName $use.Member .Name (or (and $repo.Preconditions " It presents the preconditions WithPreconditions names (D104).") "")) }}
 func (o {{ $use.Value }}) {{ .GoName }}(ctx context.Context, id {{ $repo.PrimaryKeyType }}, params {{ .Params }}) ({{ .ResultReturn }}, error) {
 	{{- if eq .Params "json.RawMessage" }}
 	var given any = params
@@ -4888,7 +4888,7 @@ func (r *{{ .Name }}) updateColumns(ctx context.Context, update *{{ .TypeName }}
 {{- else if .HasField "updatedAt" }}{{ $stamps = ": updatedAt" }}
 {{- else if .HasField "updatedBy" }}{{ $stamps = ": updatedBy, when the context has a user" }}{{ end }}
 
-{{ docComment "" (printf "operationOptions are the stamps an operation's write of the row sets%s." $stamps) }}
+{{ docComment "" (printf "operationOptions are the stamps an operation's write of the row sets%s%s." $stamps (or (and .Preconditions ", and the preconditions WithPreconditions names, which its command presents (D104)") "")) }}
 func (r *{{ .Name }}) operationOptions(ctx context.Context) *rules.ExecuteOptions {
 	{{- if or (.HasField "updatedAt") (.HasField "updatedBy") }}
 	columns := map[string]any{}
@@ -4900,7 +4900,9 @@ func (r *{{ .Name }}) operationOptions(ctx context.Context) *rules.ExecuteOption
 		columns[{{ printf "%q" (.FieldColumn "updatedBy") }}] = GetUserID(ctx)
 	}
 	{{- end }}
-	return &rules.ExecuteOptions{OwnColumns: columns}
+	return &rules.ExecuteOptions{OwnColumns: columns{{ if .Preconditions }}, Preconditions: behaviorPreconditions(ctx){{ end }}}
+	{{- else if .Preconditions }}
+	return &rules.ExecuteOptions{Preconditions: behaviorPreconditions(ctx)}
 	{{- else }}
 	return nil
 	{{- end }}
@@ -4929,7 +4931,7 @@ func (r *{{ .Name }}) createThroughCore(ctx context.Context, input *{{ .TypeName
 	if err != nil {
 		return nil, err
 	}
-	opts := &rules.CreateOptions{ID: r.createKey(row), ExecuteOptions: rules.ExecuteOptions{OwnColumns: columns}}
+	opts := &rules.CreateOptions{ID: r.createKey(row), ExecuteOptions: rules.ExecuteOptions{OwnColumns: columns{{ if .Preconditions }}, Preconditions: behaviorPreconditions(ctx){{ end }}}}
 	{{- if or .PrimaryKeyIsUUID .PrimaryKey.IsStringLike }}
 	key, err := rules.RunCreate(ctx, rulesHost(r.tx), {{ printf "%q" .TypeName }}, r.coreOwn(row), behaviorCaller(ctx), opts)
 	if err != nil {
@@ -4967,7 +4969,7 @@ func (r *{{ .Name }}) upsertInputs(ctx context.Context, inputs []*{{ .TypeName }
 	rows := make([]*types.{{ .TypeName }}, 0, len(inputs))
 	for _, input := range inputs {
 		row := input.row()
-		owned, err := rules.PrepareCreate(ctx, host, {{ printf "%q" .TypeName }}, r.coreOwn(row), behaviorCaller(ctx), &rules.CreateOptions{ID: r.createKey(row)})
+		{{ if .OwnedFields }}owned{{ else }}_{{ end }}, err := rules.PrepareCreate(ctx, host, {{ printf "%q" .TypeName }}, r.coreOwn(row), behaviorCaller(ctx), &rules.CreateOptions{ID: r.createKey(row){{ if .Preconditions }}, ExecuteOptions: rules.ExecuteOptions{Preconditions: behaviorPreconditions(ctx)}{{ end }}})
 		if err != nil {
 			return nil, err
 		}
@@ -5142,7 +5144,7 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*{{ .TypeName }}C
 
 {{- define "behaviorUpdateOne" }}
 
-{{ docComment "" (printf "UpdateOne updates a single %s row by ID through the behaviors' core (D103), in a transaction: the own fields update sets, which holds no field a behavior owns, and the row is read back. It returns ErrNotFound when no live row holds id, and any other refusal of the core's as the *rules.Refusal it is." .TypeName) }}
+{{ docComment "" (printf "UpdateOne updates a single %s row by ID through the behaviors' core (D103), in a transaction: the own fields update sets, which holds no field a behavior owns, and the row is read back.%s It returns ErrNotFound when no live row holds id, and any other refusal of the core's as the *rules.Refusal it is." .TypeName (or (and .Preconditions " The update presents the preconditions WithPreconditions names (D104).") "")) }}
 func (r *{{ .Name }}) UpdateOne(ctx context.Context, id {{ .PrimaryKeyType }}, update *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error) {
 	if update == nil {
 		update = &{{ .TypeName }}Update{}
@@ -5170,7 +5172,7 @@ func (r *{{ .Name }}) UpdateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 		if len(patch) == 0 && len(columns) == 0 {
 			return nil, fmt.Errorf("no fields to update")
 		}
-		if err := rules.RunUpdate(ctx, rulesHost(tx), {{ printf "%q" .TypeName }}, {{ .WireKey "id" }}, patch, behaviorCaller(ctx), &rules.ExecuteOptions{OwnColumns: columns}); err != nil {
+		if err := rules.RunUpdate(ctx, rulesHost(tx), {{ printf "%q" .TypeName }}, {{ .WireKey "id" }}, patch, behaviorCaller(ctx), &rules.ExecuteOptions{OwnColumns: columns{{ if .Preconditions }}, Preconditions: behaviorPreconditions(ctx){{ end }}}); err != nil {
 			return nil, behaviorNotFound(err, {{ printf "%q" .TypeName }}, id)
 		}
 		return repo.GetOne(ctx, id, nil)
@@ -5185,7 +5187,7 @@ func (r *{{ .Name }}) UpdateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 {{- if .HasSoftDelete }}{{ $verb = "soft deletes" }}{{ $how = ": the live row is stamped deleted in place of deleted" }}
 {{- else if .HistoryActorCol }}{{ $how = printf ". The history tombstone records the context user as its %s" .HistoryActorCol }}{{ end }}
 
-{{ docComment "" (printf "DeleteOne %s a single %s row by ID through the behaviors' core (D103), in a transaction%s. It returns ErrNotFound when no live row holds id, and any other refusal of the core's as the *rules.Refusal it is." $verb .TypeName $how) }}
+{{ docComment "" (printf "DeleteOne %s a single %s row by ID through the behaviors' core (D103), in a transaction%s.%s It returns ErrNotFound when no live row holds id, and any other refusal of the core's as the *rules.Refusal it is." $verb .TypeName $how (or (and .Preconditions " The delete presents the preconditions WithPreconditions names (D104).") "")) }}
 func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) error {
 	{{- if .HasSoftDelete }}
 	if !HasUserID(ctx) {
@@ -5193,7 +5195,7 @@ func (r *{{ .Name }}) DeleteOne(ctx context.Context, id {{ .PrimaryKeyType }}) e
 	}
 	{{- end }}
 	_, err := inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (struct{}, error) {
-		opts := &rules.ExecuteOptions{}
+		opts := &rules.ExecuteOptions{ {{- if .Preconditions }}Preconditions: behaviorPreconditions(ctx){{ end -}} }
 		{{- if .HasSoftDelete }}
 		opts.SoftDelete = map[string]any{ {{- printf "%q" .DeletedAtCol }}: time.Now()}
 		{{- if .HasDeletedBy }}
@@ -5280,7 +5282,7 @@ func (r *{{ .Name }}) updateThroughCore(ctx context.Context, id {{ .PrimaryKeyTy
 	if err != nil {
 		return nil, err
 	}
-	if err := rules.RunUpdate(ctx, rulesHost(r.tx), {{ printf "%q" .TypeName }}, {{ .WireKey "id" }}, patch, behaviorCaller(ctx), &rules.ExecuteOptions{OwnColumns: columns}); err != nil {
+	if err := rules.RunUpdate(ctx, rulesHost(r.tx), {{ printf "%q" .TypeName }}, {{ .WireKey "id" }}, patch, behaviorCaller(ctx), &rules.ExecuteOptions{OwnColumns: columns{{ if .Preconditions }}, Preconditions: behaviorPreconditions(ctx){{ end }}}); err != nil {
 		return nil, behaviorNotFound(err, {{ printf "%q" .TypeName }}, id)
 	}
 	return r.GetOne(ctx, id, nil)

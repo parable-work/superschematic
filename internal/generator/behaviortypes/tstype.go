@@ -368,7 +368,11 @@ func (r *TSRenderer) BehaviorMembers(behaviors []Behavior) string {
 		}
 		fmt.Fprintf(&b, "  readonly %s: {\n", TSPropertyKey(behavior.Declaration.Name))
 		for _, declared := range behavior.Declaration.Fields {
-			shape := behavior.Narrowed.Fields[declared.Name]
+			shape, ok := behavior.Narrowed.Fields[declared.Name]
+			if !ok {
+				// The type's form keeps none of it (D104).
+				continue
+			}
 			if doc := DescriptionOf(shape.Schema); doc != "" {
 				b.WriteString("    " + TSDoc(doc) + "\n")
 			}

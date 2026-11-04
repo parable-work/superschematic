@@ -70,6 +70,17 @@
 //! configChange: a meter cannot be removed while the schema has instances;
 //! limits, reservations, scopes and resets may change. Budget can be added
 //! to a schema that has instances and cannot be removed from one.
+//!
+//! What only a table's Budget takes (D104), whose declaration the engine
+//! shares, the engine refuses rather than ignores: a meter's reset other
+//! than daily (hourly, weekly, monthly, `{ everyMs }`) and its `window`,
+//! the config's `observePermission` and `status`, each at define, naming
+//! the table form, and every call of `observe`, as a bad parameter. An
+//! engine type's meter resets daily or never and counts what its instances
+//! record; ignoring a rule of what a meter counts would be a hole, and an
+//! engine type can be defined at run time, past any build's check. The
+//! declaration's `tables`, which a table keeps its meters in, read nothing
+//! here.
 
 use serde_json::{json, Map, Value};
 
@@ -77,7 +88,7 @@ use superschematic_engine::behaviors::{
     BehaviorMigration, ColumnSpec, InstanceCx, InstanceView, TableSpec,
 };
 use superschematic_engine::errors::{SchemaIssue, Veto};
-use superschematic_engine::json::{js_keys, number_value};
+use superschematic_engine::json::{js_keys, number_value, stringify};
 use superschematic_engine::storage::{Row, Sql, SqlValue};
 use superschematic_engine::{
     Behavior, ConfigTarget, EngineError, EngineErrorCode, Error, GuardRequest, Hooks,
@@ -86,6 +97,10 @@ use superschematic_engine::{
 use superschematic_engine_behaviors::link_many;
 
 const NAME: &str = "Budget";
+
+// How a refusal of what only a table's Budget takes names the table form
+// (D104).
+const TABLE_FORM: &str = "implements Budget<T, { ... }> on a DB table, D104";
 const DAY_MS: i64 = 86_400_000;
 
 /// The most enclosing scopes checkReserve walks up a meter's chain.
@@ -1220,6 +1235,43 @@ fn check_reserve(
     })
 }
 
+// table_member says why a config names a member only a table's Budget
+// takes (D104): each meter's reset other than daily, then its window, meter
+// by meter in the config's order, then observePermission, then status;
+// None for a config that names none.
+fn table_member(raw: &Value) -> Option<String> {
+    if let Some(meters) = raw.get("meters").and_then(Value::as_object) {
+        for name in js_keys(meters) {
+            let meter = &meters[name];
+            if let Some(reset) = meter
+                .get("reset")
+                .filter(|reset| reset.as_str() != Some("daily"))
+            {
+                return Some(format!(
+                    "meter {name}: reset {} is a table's Budget's ({TABLE_FORM}): an engine type's meter resets daily or never",
+                    stringify(reset)
+                ));
+            }
+            if meter.get("window").is_some() {
+                return Some(format!(
+                    "meter {name}: window is a table's Budget's ({TABLE_FORM}): an engine type's meter counts its current day, or everything"
+                ));
+            }
+        }
+    }
+    if raw.get("observePermission").is_some() {
+        return Some(format!(
+            "observePermission is a table's Budget's ({TABLE_FORM}): an engine type's meters count what its instances record, and refuse observe"
+        ));
+    }
+    if raw.get("status").is_some() {
+        return Some(format!(
+            "status is a table's Budget's ({TABLE_FORM}): an engine type's Budget reads its one Workflow"
+        ));
+    }
+    None
+}
+
 // check_integer_field holds limitField and reserveField to an integer field
 // of the type.
 fn check_integer_field(target: &ConfigTarget<'_>, at: &str, field: &str) -> Result<()> {
@@ -1391,6 +1443,9 @@ impl Behavior for Budget {
     // The configSchema holds the shape; this holds the config to the type:
     // its fields, its Links config and the schemas its scopes point at.
     fn parse_config(&self, raw: &Value, target: &ConfigTarget<'_>) -> Result<BudgetConfig> {
+        if let Some(reason) = table_member(raw) {
+            return Err(Error::config(reason));
+        }
         let mut meters = Vec::new();
         if let Some(given) = raw.get("meters").and_then(Value::as_object) {
             for name in js_keys(given) {
@@ -1531,6 +1586,7 @@ impl Behavior for Budget {
                 ("reserveFor", reserve_for),
                 ("settleFor", settle_for),
                 ("recordUsageFor", record_usage_for),
+                ("observe", observe),
             ],
             fields: vec![("meters", |_, view| {
                 let found = rows(view)?;
@@ -1817,6 +1873,21 @@ fn set_limit(_: &Budget, cx: &OperationCx<'_, BudgetConfig>, params: &Value) -> 
         }
     }
     Ok(json!({ "meter": meter, "limit": limit, "previous": previous }))
+}
+
+// observe records a provider's usage on a table's Budget (D104); an engine
+// type's meters count what its instances record, so every call is a bad
+// parameter.
+fn observe(_: &Budget, _: &OperationCx<'_, BudgetConfig>, _: &Value) -> Result<Value> {
+    Err(EngineError::operation_params(
+        NAME,
+        "observe",
+        vec![SchemaIssue::new(
+            "",
+            format!("observe is a table's Budget's ({TABLE_FORM}): an engine type's meters count what its instances record"),
+        )],
+    )
+    .into())
 }
 
 fn reserve_for(_: &Budget, cx: &OperationCx<'_, BudgetConfig>, params: &Value) -> Result<Value> {

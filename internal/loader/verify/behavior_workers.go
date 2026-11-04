@@ -1,6 +1,7 @@
 package verify
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/registry"
@@ -98,6 +99,41 @@ func checkBehaviorWorkers(schema *ir.Schema, in Input, r *Result) {
 			continue
 		}
 		run[typeName] = worker.Name
+		warnReleaseLeasesUnheld(schema, worker, td, in.Database, r)
+	}
+}
+
+// warnReleaseLeasesUnheld warns, never refuses, when worker runs the misses
+// of td's Presence, whose releaseLeases names a table whose Lease names an
+// overridePermission the worker's permissions do not cover (D104): a miss
+// expires the principal's leases there through Lease's expire, which checks
+// that permission against the deadline's caller, the worker, so without it
+// every miss fails and the worker releases it to fall due again.
+func warnReleaseLeasesUnheld(schema *ir.Schema, worker *ir.Worker, td *ir.TypeDef, db *ir.Schema, r *Result) {
+	config, ok := implementedConfig(td, presenceBehavior)
+	if !ok {
+		return
+	}
+	var presence struct {
+		ReleaseLeases []string `json:"releaseLeases"`
+	}
+	if len(config) == 0 || json.Unmarshal(config, &presence) != nil {
+		return
+	}
+	for _, name := range presence.ReleaseLeases {
+		leased := db.Types[name]
+		if leased == nil {
+			continue
+		}
+		lease, ok := implementedConfig(leased, leaseBehavior)
+		if !ok {
+			continue
+		}
+		permission := leaseOverridePermission(lease)
+		if permission == "" || coveredBy(permission, worker.BehaviorWorker.Permissions) {
+			continue
+		}
+		r.warnf("", "%s: %s runs %s's misses, which expire the leases %s's Presence releases on %s through Lease's expire, which needs %s's Lease overridePermission %s: list it in the worker's permissions, or every miss fails (D104)", schema.Name, worker.Name, td.Name, td.Name, name, name, permission)
 	}
 }
 

@@ -558,7 +558,10 @@ func (m *module) operations(s *schemaModel) ([]operationInfo, error) {
 	var ops []operationInfo
 	for _, behavior := range s.behaviors {
 		for _, declared := range behavior.Declaration.Operations {
-			if namespaceScope(declared) {
+			// An operation the type's form refuses every call of (an
+			// engine type's Budget's observe, D104) is none the client
+			// offers.
+			if namespaceScope(declared) || !behavior.Narrowed.Offers(declared.Name) {
 				continue
 			}
 			for _, member := range clientMembers {

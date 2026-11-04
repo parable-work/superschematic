@@ -37,7 +37,9 @@ it already holds and no other:
   roll back and try again.
 
 Each module has the same functions: `execute` (a command the caller built),
-`run_operation`, `run_create`, `run_update`, `run_delete`, `prepare_create`
+`run_operation`, `run_operation_with` (an operation with `ExecuteOptions`,
+the caller's preconditions among them), `run_create`, `run_update`,
+`run_delete`, `prepare_create`
 (a create run to its change set and applied nowhere, for an upsert's
 insert), `read_row`, `read_sub_rows` (a use's sub-table rows of a row, in
 key order), `run_deadline` (a due deadline, below) and `run_change` (a write
@@ -80,10 +82,18 @@ The core's README ("The host loop" and "The adapter") is the contract; in
 brief:
 
 1. The command is built with the caller, the host's time and a request id
-   of the host's, kept for every run. A create that names no key gets one:
-   a UUID's base62 wire form for an `Identity.UUID` or `Identity.UserID`
-   key, a UUID's text for a `string` key; any other key type is refused
-   (`invalid_argument`), since the change set names every row by its key.
+   of the host's, kept for every run, and the caller's preconditions
+   (`ExecuteOptions::preconditions`, D16 and D104), each use's entry by its
+   use id as the core's command carries them (`{"Lease": {"token": 3}}`),
+   set over the command's own entry of the same use. The core checks them
+   against each use's behavior before it reads the row and hands each to
+   its use's guard; an update, a delete and an operation present them, and
+   any other command that does (a create, `prepare_create`'s among them) is
+   refused (`PreconditionsError`), so none is ignored. A create that names
+   no key gets one: a UUID's base62 wire form for an `Identity.UUID` or
+   `Identity.UserID` key, a UUID's text for a `string` key; any other key
+   type is refused (`invalid_argument`), since the change set names every
+   row by its key.
 2. The layout's define check runs once per core a command runs on over
    it, as `rules.ts` keeps it per core and layout; a type whose spec that
    core refuses is refused so on every command on it. A create or an update whose own fields name an owned
@@ -131,7 +141,12 @@ brief:
    first, live rows alone, after a key when given, in key order, `LIMIT
    limit + 1`, `more` set when the extra row comes back; a type the layout
    lacks answers an empty page, a field that is no own field of it is
-   `internal`, and on SQLite one made under a lock is `internal`. A row a
+   `internal`, and on SQLite one made under a lock is `internal`. A
+   `holding` read (the rows whose use's owned field holds a value, D104:
+   Presence's miss over Lease's `holder`) is answered alike from the
+   layout's column of the use's field, the value bound as a command's value
+   of that column binds; a use or a field the layout lacks is `internal`,
+   and so is one made under a lock on SQLite. A row a
    change command found gone (`RowWrite::Gone`) is applied in the row
    writes' place with two `NOT EXISTS` deletes: its deadline messages
    unless a live row of the key exists, then its sub-table rows unless any
@@ -210,7 +225,10 @@ as its JSON text; a boolean as 1 or 0 on SQLite. A JSON column's value,
 whatever it is (a string, a number and a boolean among them), binds as its
 JSON text, so it reads back as it was; and a double that is a whole number
 reads back as its digits (SQLite's REAL 2.0 as 2), as JavaScript writes it
-and Postgres's `to_jsonb` writes a DOUBLE PRECISION (D104).
+and Postgres's `to_jsonb` writes a DOUBLE PRECISION (D104). A
+`Generic.Int64` column (a `BIGINT` on Postgres, an `INTEGER` on SQLite),
+own, owned or of a sub-table, binds and reads back as a JSON number, as a
+lease's token and a meter's usage are kept (D104).
 
 Postgres binds every value as text, as node-pg does, so each is read into
 the type of the column it meets, and reads each column of a row as
@@ -230,7 +248,10 @@ crate that serves a table's behavior operations (an API's
 `src/behaviors.rs` embeds the database's layout, builds the core of
 `superschematic-rules-behaviors` once per process, and runs each
 operation with `postgres::run_operation` on a transaction of the
-database's deadpool, which it commits on success, and each due deadline of
+database's deadpool, which it commits on success (one whose input carries
+the caller's preconditions, a body member by use id, with
+`postgres::run_operation_with`, the member taken out of its parameters
+and handed to the core in `ExecuteOptions`, D104), and each due deadline of
 a `@behaviorWorker` with `postgres::run_deadline` and each change of its
 table's change queue with `postgres::run_change`. The naming file's
 `[paths] rules_adapter_rust` and `rules_behaviors_rust` name the two
@@ -272,7 +293,15 @@ and Approvals implemented beside a Workflow, which holds a sub-table on a
 table with neither queue, a read-only operation that reads sub-rows, the
 audit `createdBy` that a gate excluding the creator reads, and own
 booleans, numbers and JSON read back as the core holds them
-(`a_sub_table_with_no_queue_and_own_columns_read_as_the_core_holds_them`).
+(`a_sub_table_with_no_queue_and_own_columns_read_as_the_core_holds_them`);
+and `Job`, Lease and Retries implemented beside a Workflow, with a toy
+`Finder` that reads the rows whose Lease's holder is a subject, which holds
+owned whole numbers (`Generic.Int64`), JSON and timestamps, two sub-tables
+of every declared type, a deadline armed, moved, cleared, and cleared and
+armed again in one change set, the holding read, and the caller's
+preconditions on an update, a delete and an operation, a malformed one
+refused before the row is read
+(`a_leased_row_keeps_its_token_its_sub_tables_and_its_deadline_and_a_write_presents_the_token`).
 `tests/transcript.rs`
 replays the transcripts in `runtime/engine/testdata/rules` on rusqlite and
 on Postgres, each command over a layout of every type of its database:
@@ -290,6 +319,17 @@ hand-written `core-workflow-principals.transcript.json` (D104), 92 steps
 (58 commands, each compared with its row's `expect.version`, and 34
 checks), and `core-freezes-and-sign-offs.transcript.json` (D104), 115 steps
 (75 commands, each compared with its row's `expect.version`, and 40
+checks); from the work queue's recordings of the behaviors D104 ports to
+tables, `core-lease.transcript.json`, 436 steps (323 commands, 84 of them
+presenting Lease's token as the command's `preconditions` and 3 deadlines,
+and 113 checks), `core-presence.transcript.json`, 141 steps (89 commands, 8
+of them a miss's deadline, and 52 checks), `core-budget.transcript.json`,
+495 steps (331 commands, 46 of them writing a scope's row, and 164 checks),
+and `core-retries.transcript.json`, 250 steps (196 commands and 54
+checks); and the hand-written `core-retries-waits.transcript.json` (D104),
+158 steps (118 commands, each compared with its row's `expect.version`,
+and 40 checks), and `core-periods-and-presence.transcript.json` (D104), 77 steps
+(52 commands, each compared with its row's `expect.version`, and 25
 checks); each held to a floor of its step count, its `expect.others`
 compared on every command step and its numbers by value, 0 mismatches each.
 

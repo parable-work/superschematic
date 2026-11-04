@@ -87,13 +87,15 @@ func coreBehaviorSpecs() []BehaviorSpec {
 
 // RulesBehaviors are the behaviors the behaviors' core runs (D103): those
 // superschematic-rules-behaviors registers (its NAMES), in its order, the
-// engine's order of the six, so a build-time table may compose them. Of
-// these, a table implements one that names no value field (implements
-// Timers<T, C>, and Constants, StateRules and Approvals since D104's step 2)
-// and carries one that does on a field (status: Workflow<C>). A test holds
-// the list to the behaviors each transcript of runtime/engine/testdata/rules
-// records.
-var RulesBehaviors = []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers"}
+// engine's order of the first six and then the work queue's order of the
+// four D104's step 2 ported in its second batch (Lease, Presence, Budget,
+// Retries), so a build-time table may compose them. Of these, a table
+// implements one that names no value field (implements Timers<T, C>, and
+// Constants, StateRules and Approvals since D104's step 2, and Lease,
+// Presence, Budget and Retries since its second batch) and carries one that
+// does on a field (status: Workflow<C>). A test holds the list to the
+// behaviors each transcript of runtime/engine/testdata/rules records.
+var RulesBehaviors = []string{"Workflow", "Reactions", "Constants", "StateRules", "Approvals", "Timers", "Lease", "Presence", "Budget", "Retries"}
 
 // RunsOnTheCore reports whether the behaviors' core runs the behavior name
 // (RulesBehaviors).

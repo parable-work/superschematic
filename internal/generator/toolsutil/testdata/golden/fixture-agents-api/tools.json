@@ -1,0 +1,1207 @@
+[
+  {
+    "name": "account.budgetCheckReserve",
+    "inputSchemaDigest": "sha256:dc6f34affb6770812cf7a459583249ef876b7c35a525eb70c53c45390fea0582",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "amount": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "meter": {
+          "description": "A AccountBudgetMeter value",
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "questions",
+            "tokens",
+            null
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "AccountBudgetCheckReserveResult object"
+    }
+  },
+  {
+    "name": "account.budgetObserve",
+    "inputSchemaDigest": "sha256:b9205ef28eca1e94e25c2a08460ad18c39a13b6ea8c5008498108ace74053de0",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "limit": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "meter": {
+          "type": "string",
+          "description": "A AccountBudgetMeter value",
+          "enum": [
+            "questions",
+            "tokens"
+          ]
+        },
+        "resetsAt": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "used": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "type": "integer",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "id",
+        "meter",
+        "used"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "AccountBudgetObserveResult object"
+    }
+  },
+  {
+    "name": "account.budgetRecordUsage",
+    "inputSchemaDigest": "sha256:c0436f534af7ccb5e7edc914a3f879fda077490d4c425f9cb18ae7951b1b5819",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "amount": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "type": "integer",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "meter": {
+          "type": "string",
+          "description": "A AccountBudgetMeter value",
+          "enum": [
+            "questions",
+            "tokens"
+          ]
+        }
+      },
+      "required": [
+        "amount",
+        "id",
+        "meter"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "AccountBudgetRecordUsageResult object"
+    }
+  },
+  {
+    "name": "account.budgetRecordUsageFor",
+    "inputSchemaDigest": "sha256:6b7fbe809b5ef73e84ff97ba0736e1afcd7e20156e4303bddb9d977b9e8dcbd0",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "amount": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "type": "integer",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "id": {
+          "type": "string",
+          "description": "A string value",
+          "minLength": 1
+        },
+        "meter": {
+          "type": "string",
+          "description": "A AccountBudgetMeter value",
+          "enum": [
+            "questions",
+            "tokens"
+          ]
+        },
+        "released": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "type": "integer",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "schema": {
+          "type": "string",
+          "description": "A string value",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "amount",
+        "id",
+        "id",
+        "meter",
+        "released",
+        "schema"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "AccountBudgetRecordUsageForResult object"
+    }
+  },
+  {
+    "name": "account.budgetReserve",
+    "inputSchemaDigest": "sha256:dc6f34affb6770812cf7a459583249ef876b7c35a525eb70c53c45390fea0582",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "amount": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "meter": {
+          "description": "A AccountBudgetMeter value",
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "questions",
+            "tokens",
+            null
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "AccountBudgetReserveResult object"
+    }
+  },
+  {
+    "name": "account.budgetReserveFor",
+    "inputSchemaDigest": "sha256:775df17108ba429940277f7510f4f5ed37d7b432d08e8db99401a9f344b1bbbd",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "amount": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "type": "integer",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "id": {
+          "type": "string",
+          "description": "A string value",
+          "minLength": 1
+        },
+        "meter": {
+          "type": "string",
+          "description": "A AccountBudgetMeter value",
+          "enum": [
+            "questions",
+            "tokens"
+          ]
+        },
+        "schema": {
+          "type": "string",
+          "description": "A string value",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "amount",
+        "id",
+        "id",
+        "meter",
+        "schema"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "AccountBudgetReserveForResult object"
+    }
+  },
+  {
+    "name": "account.budgetSetLimit",
+    "inputSchemaDigest": "sha256:12520954c749484ddf27f2ceb91276866c641cc8856d38d63a2c59ffe4407f8a",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "limit": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "type": "integer",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "meter": {
+          "type": "string",
+          "description": "A AccountBudgetMeter value",
+          "enum": [
+            "questions",
+            "tokens"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "limit",
+        "meter"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "AccountBudgetSetLimitResult object"
+    }
+  },
+  {
+    "name": "account.budgetSettle",
+    "inputSchemaDigest": "sha256:583c961fdc0f338ae3055b539caf9514d55e686c18b8c1def9bd433ab2ea08a7",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "meter": {
+          "description": "A AccountBudgetMeter value",
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "questions",
+            "tokens",
+            null
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "AccountBudgetSettleResult object"
+    }
+  },
+  {
+    "name": "account.budgetSettleFor",
+    "inputSchemaDigest": "sha256:775df17108ba429940277f7510f4f5ed37d7b432d08e8db99401a9f344b1bbbd",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "amount": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "type": "integer",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "id": {
+          "type": "string",
+          "description": "A string value",
+          "minLength": 1
+        },
+        "meter": {
+          "type": "string",
+          "description": "A AccountBudgetMeter value",
+          "enum": [
+            "questions",
+            "tokens"
+          ]
+        },
+        "schema": {
+          "type": "string",
+          "description": "A string value",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "amount",
+        "id",
+        "id",
+        "meter",
+        "schema"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "AccountBudgetSettleForResult object"
+    }
+  },
+  {
+    "name": "account.statusTransition",
+    "inputSchemaDigest": "sha256:b6f88f8f512d4c80fc73f5520004bfc789388baaa91e4ae54387fb403a9f29d0",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "from": {
+          "description": "A AccountStatusState value",
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "open",
+            "out",
+            null
+          ]
+        },
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "to": {
+          "type": "string",
+          "description": "A AccountStatusState value",
+          "enum": [
+            "open",
+            "out"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "to"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "AccountStatusTransitionResult object"
+    }
+  },
+  {
+    "name": "job.leaseAcknowledge",
+    "inputSchemaDigest": "sha256:49329f61d165535749be7002fd110817254f6a5d82e924012a451e5d32f0b7b4",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "ids": {
+          "type": "array",
+          "description": "Array of Generic.Int64 values",
+          "items": {
+            "x-superschematic-scalar": "Generic.Int64",
+            "type": "integer",
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "preconditions": {
+          "additionalProperties": false,
+          "description": "JobPreconditions object",
+          "properties": {
+            "Lease": {
+              "additionalProperties": false,
+              "description": "JobLeasePrecondition object",
+              "properties": {
+                "token": {
+                  "x-superschematic-scalar": "Generic.Int64",
+                  "type": "integer",
+                  "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "token"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "ids"
+      ]
+    },
+    "returns": {
+      "type": "any",
+      "description": "Any valid JSON value: object, array, primitive, or null"
+    }
+  },
+  {
+    "name": "job.leaseAcquire",
+    "inputSchemaDigest": "sha256:e1e1d2573d011e11df2a997f11629f4f5532b6149b9b66a8d141d437c195b13e",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "preconditions": {
+          "additionalProperties": false,
+          "description": "JobPreconditions object",
+          "properties": {
+            "Lease": {
+              "additionalProperties": false,
+              "description": "JobLeasePrecondition object",
+              "properties": {
+                "token": {
+                  "x-superschematic-scalar": "Generic.Int64",
+                  "type": "integer",
+                  "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "token"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "ttlMs": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 1000,
+          "maximum": 9007199254740991,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "JobLeaseAcquireResult object"
+    }
+  },
+  {
+    "name": "job.leaseDirect",
+    "inputSchemaDigest": "sha256:1ad3fd8c7b0d2f761f0adfc881f7d55faed054828dbd4b51de9db805701819d8",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "data": {
+          "x-superschematic-scalar": "Generic.JSON",
+          "description": "Any valid JSON value: object, array, primitive, or null",
+          "type": [
+            "object",
+            "array",
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ]
+        },
+        "dedupeKey": {
+          "description": "A string value",
+          "minLength": 1,
+          "maxLength": 128,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "name": {
+          "type": "string",
+          "description": "A string value",
+          "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,63}$"
+        },
+        "preconditions": {
+          "additionalProperties": false,
+          "description": "JobPreconditions object",
+          "properties": {
+            "Lease": {
+              "additionalProperties": false,
+              "description": "JobLeasePrecondition object",
+              "properties": {
+                "token": {
+                  "x-superschematic-scalar": "Generic.Int64",
+                  "type": "integer",
+                  "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "token"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "JobLeaseDirectResult object"
+    }
+  },
+  {
+    "name": "job.leaseExpire",
+    "inputSchemaDigest": "sha256:7d47a66d837a51bc9b1392e6481e891a6bed7dc646cbf4a9fa6bd3f1f5f002c9",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "holder": {
+          "description": "A string value",
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "notRenewedAfter": {
+          "x-superschematic-scalar": "Generic.Int64",
+          "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "preconditions": {
+          "additionalProperties": false,
+          "description": "JobPreconditions object",
+          "properties": {
+            "Lease": {
+              "additionalProperties": false,
+              "description": "JobLeasePrecondition object",
+              "properties": {
+                "token": {
+                  "x-superschematic-scalar": "Generic.Int64",
+                  "type": "integer",
+                  "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "token"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "JobLeaseExpireResult object"
+    }
+  },
+  {
+    "name": "job.leaseHeartbeat",
+    "inputSchemaDigest": "sha256:a0f6b62c0a85d37c4926cc99d3fc07c3ed09a0a6cdfccf564da2421612dfae8a",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "acknowledge": {
+          "description": "Array of Generic.Int64 values",
+          "items": {
+            "x-superschematic-scalar": "Generic.Int64",
+            "type": "integer",
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "preconditions": {
+          "additionalProperties": false,
+          "description": "JobPreconditions object",
+          "properties": {
+            "Lease": {
+              "additionalProperties": false,
+              "description": "JobLeasePrecondition object",
+              "properties": {
+                "token": {
+                  "x-superschematic-scalar": "Generic.Int64",
+                  "type": "integer",
+                  "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "token"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "JobLeaseHeartbeatResult object"
+    }
+  },
+  {
+    "name": "job.leaseRelease",
+    "inputSchemaDigest": "sha256:b4790edb78aea29dc7fe4d468059820cb0290b43e65f4c28cb3a233e8ca3cfbd",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "abandon": {
+          "description": "A boolean value (true or false)",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "preconditions": {
+          "additionalProperties": false,
+          "description": "JobPreconditions object",
+          "properties": {
+            "Lease": {
+              "additionalProperties": false,
+              "description": "JobLeasePrecondition object",
+              "properties": {
+                "token": {
+                  "x-superschematic-scalar": "Generic.Int64",
+                  "type": "integer",
+                  "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "token"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "returns": {
+      "type": "any",
+      "description": "Any valid JSON value: object, array, primitive, or null"
+    }
+  },
+  {
+    "name": "job.leaseResetExpiries",
+    "inputSchemaDigest": "sha256:91b101486ab2282bb46251a2a2682c893800514c7646bca2947bda9329b20ae2",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "preconditions": {
+          "additionalProperties": false,
+          "description": "JobPreconditions object",
+          "properties": {
+            "Lease": {
+              "additionalProperties": false,
+              "description": "JobLeasePrecondition object",
+              "properties": {
+                "token": {
+                  "x-superschematic-scalar": "Generic.Int64",
+                  "type": "integer",
+                  "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "token"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "JobLeaseResetExpiriesResult object"
+    }
+  },
+  {
+    "name": "job.retriesRecordAttempt",
+    "inputSchemaDigest": "sha256:324851bb8e36a615686bcd8daf5ba3d21be9c2a77df9384befa0bba29fc324cc",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "detail": {
+          "x-superschematic-scalar": "Generic.JSON",
+          "description": "Any valid JSON value: object, array, primitive, or null",
+          "type": [
+            "object",
+            "array",
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ]
+        },
+        "failure": {
+          "description": "A JobRetriesClass value",
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "build",
+            "rejected",
+            "timeout",
+            null
+          ]
+        },
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "preconditions": {
+          "additionalProperties": false,
+          "description": "JobPreconditions object",
+          "properties": {
+            "Lease": {
+              "additionalProperties": false,
+              "description": "JobLeasePrecondition object",
+              "properties": {
+                "token": {
+                  "x-superschematic-scalar": "Generic.Int64",
+                  "type": "integer",
+                  "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "token"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "predicates": {
+          "additionalProperties": {
+            "type": "boolean",
+            "description": "A boolean value (true or false)"
+          },
+          "description": "Map of boolean values",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "result": {
+          "x-superschematic-scalar": "Generic.JSON",
+          "description": "Any valid JSON value: object, array, primitive, or null",
+          "type": [
+            "object",
+            "array",
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ]
+        },
+        "score": {
+          "description": "A numeric value",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "signature": {
+          "description": "A string value",
+          "minLength": 1,
+          "maxLength": 512,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "JobRetriesRecordAttemptResult object"
+    }
+  },
+  {
+    "name": "job.statusTransition",
+    "inputSchemaDigest": "sha256:4d7f531f8912ca8d4dd814712f8512f6604e63346cecbd38f71ae012420a48a5",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "from": {
+          "description": "A JobStatusState value",
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "queued",
+            "running",
+            "waiting",
+            "done",
+            "failed",
+            null
+          ]
+        },
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "preconditions": {
+          "additionalProperties": false,
+          "description": "JobPreconditions object",
+          "properties": {
+            "Lease": {
+              "additionalProperties": false,
+              "description": "JobLeasePrecondition object",
+              "properties": {
+                "token": {
+                  "x-superschematic-scalar": "Generic.Int64",
+                  "type": "integer",
+                  "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "token"
+              ],
+              "type": [
+                "object",
+                "null"
+              ]
+            }
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "to": {
+          "type": "string",
+          "description": "A JobStatusState value",
+          "enum": [
+            "queued",
+            "running",
+            "waiting",
+            "done",
+            "failed"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "to"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "JobStatusTransitionResult object"
+    }
+  },
+  {
+    "name": "session.presenceBeat",
+    "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "SessionPresenceBeatResult object"
+    }
+  },
+  {
+    "name": "session.presenceMiss",
+    "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "SessionPresenceMissResult object"
+    }
+  },
+  {
+    "name": "session.statusTransition",
+    "inputSchemaDigest": "sha256:20f78270ec326865eb7157e0762ad2e582fec5931a1190cf4c90ebc4a91a4dac",
+    "parameters": {
+      "additionalProperties": false,
+      "type": "object",
+      "properties": {
+        "from": {
+          "description": "A SessionStatusState value",
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "idle",
+            "turn",
+            "missing",
+            "closed",
+            null
+          ]
+        },
+        "id": {
+          "x-superschematic-scalar": "Identity.UUID",
+          "type": "string",
+          "description": "id parameter",
+          "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"
+        },
+        "to": {
+          "type": "string",
+          "description": "A SessionStatusState value",
+          "enum": [
+            "idle",
+            "turn",
+            "missing",
+            "closed"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "to"
+      ]
+    },
+    "returns": {
+      "type": "object",
+      "description": "SessionStatusTransitionResult object"
+    }
+  }
+]

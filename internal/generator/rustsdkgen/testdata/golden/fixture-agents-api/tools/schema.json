@@ -1,0 +1,966 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FixtureAgentsApiSdk Tool Definitions",
+  "description": "LLM tool calling bindings for fixture-agents-api API",
+  "tools": [
+    {
+      "name": "account.budget.checkReserve",
+      "operationId": "AccountBudgetCheckReserveHandler",
+      "title": "Account budget: check reserve",
+      "mcp": {
+        "hidden": false,
+        "name": "Account budget: check reserve",
+        "handle": "account_budget_check_reserve",
+        "description": "Whether reserve with the same parameters would fit now, here and in every enclosing scope, after the reservations of a lease that is no longer active are settled, as reserve settles them; it changes nothing and does not ask for a lease. Queue copies its answer so that a claim that cannot fit is not tried.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "account.budget.check-reserve",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": {
+        "mode": "read_only",
+        "idempotencyKeyPointers": [],
+        "expectedRevisionPointers": []
+      },
+      "description": "Whether reserve with the same parameters would fit now, here and in every enclosing scope, after the reservations of a lease that is no longer active are settled, as reserve settles them; it changes nothing and does not ask for a lease. Queue copies its answer so that a claim that cannot fit is not tried.",
+      "namespace": "account",
+      "methodName": "budget.check_reserve",
+      "httpMethod": "POST",
+      "httpPath": "/api/account/{id}/budget/check-reserve",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:dc6f34affb6770812cf7a459583249ef876b7c35a525eb70c53c45390fea0582",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "amount": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "meter": {"description":"A AccountBudgetMeter value","enum":["questions","tokens",null],"type":["string","null"]}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "AccountBudgetCheckReserveResult object"
+      }
+    },
+    {
+      "name": "account.budget.observe",
+      "operationId": "AccountBudgetObserveHandler",
+      "title": "Account budget: observe",
+      "mcp": {
+        "hidden": false,
+        "name": "Account budget: observe",
+        "handle": "account_budget_observe",
+        "description": "Records the usage of a meter a provider reports, in place of what the meter counts until resetsAt (until the meter's next reset without it, and until the next observe for a meter with no reset): the meter's used is the figure given, usage recorded after it adds to it, and limit, when given, is the meter's limit while it holds. Nothing passes up to an enclosing scope. Needs observePermission. A table's alone: an engine type refuses it.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "account.budget.observe",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Records the usage of a meter a provider reports, in place of what the meter counts until resetsAt (until the meter's next reset without it, and until the next observe for a meter with no reset): the meter's used is the figure given, usage recorded after it adds to it, and limit, when given, is the meter's limit while it holds. Nothing passes up to an enclosing scope. Needs observePermission. A table's alone: an engine type refuses it.",
+      "namespace": "account",
+      "methodName": "budget.observe",
+      "httpMethod": "POST",
+      "httpPath": "/api/account/{id}/budget/observe",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:b9205ef28eca1e94e25c2a08460ad18c39a13b6ea8c5008498108ace74053de0",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "limit": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+          "meter": {"description":"A AccountBudgetMeter value","enum":["questions","tokens"],"type":"string"},
+          "resetsAt": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+          "used": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}
+        },
+        "required": ["id", "meter", "used"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "AccountBudgetObserveResult object"
+      }
+    },
+    {
+      "name": "account.budget.recordUsage",
+      "operationId": "AccountBudgetRecordUsageHandler",
+      "title": "Account budget: record usage",
+      "mcp": {
+        "hidden": false,
+        "name": "Account budget: record usage",
+        "handle": "account_budget_record_usage",
+        "description": "Records usage of a meter, which is never refused. The part of it the instance's own reservation covers is released, here and in every enclosing scope, and the usage counts in each of them. Reports every instance of the chain whose usage is over its limit after it, moves the status of each whose config gives escalate, and sends onExceeded's directive to the holder of the active lease once per meter per lease.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "account.budget.record-usage",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Records usage of a meter, which is never refused. The part of it the instance's own reservation covers is released, here and in every enclosing scope, and the usage counts in each of them. Reports every instance of the chain whose usage is over its limit after it, moves the status of each whose config gives escalate, and sends onExceeded's directive to the holder of the active lease once per meter per lease.",
+      "namespace": "account",
+      "methodName": "budget.record_usage",
+      "httpMethod": "POST",
+      "httpPath": "/api/account/{id}/budget/record-usage",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:c0436f534af7ccb5e7edc914a3f879fda077490d4c425f9cb18ae7951b1b5819",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "amount": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "meter": {"description":"A AccountBudgetMeter value","enum":["questions","tokens"],"type":"string"}
+        },
+        "required": ["amount", "id", "meter"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "AccountBudgetRecordUsageResult object"
+      }
+    },
+    {
+      "name": "account.budget.recordUsageFor",
+      "operationId": "AccountBudgetRecordUsageForHandler",
+      "title": "Account budget: record usage for",
+      "mcp": {
+        "hidden": false,
+        "name": "Account budget: record usage for",
+        "handle": "account_budget_record_usage_for",
+        "description": "Counts usage of a meter by an instance whose scope link points here, releases the part of what this instance holds for it that its own reservation covered, never more than that one no longer holds, and passes both on up this instance's own scope. Never refused for the amount.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "account.budget.record-usage-for",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Counts usage of a meter by an instance whose scope link points here, releases the part of what this instance holds for it that its own reservation covered, never more than that one no longer holds, and passes both on up this instance's own scope. Never refused for the amount.",
+      "namespace": "account",
+      "methodName": "budget.record_usage_for",
+      "httpMethod": "POST",
+      "httpPath": "/api/account/{id}/budget/record-usage-for",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:6b7fbe809b5ef73e84ff97ba0736e1afcd7e20156e4303bddb9d977b9e8dcbd0",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "amount": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"A string value","minLength":1,"type":"string"},
+          "meter": {"description":"A AccountBudgetMeter value","enum":["questions","tokens"],"type":"string"},
+          "released": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "schema": {"description":"A string value","minLength":1,"type":"string"}
+        },
+        "required": ["amount", "id", "id", "meter", "released", "schema"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "AccountBudgetRecordUsageForResult object"
+      }
+    },
+    {
+      "name": "account.budget.reserve",
+      "operationId": "AccountBudgetReserveHandler",
+      "title": "Account budget: reserve",
+      "mcp": {
+        "hidden": false,
+        "name": "Account budget: reserve",
+        "handle": "account_budget_reserve",
+        "description": "Reserves an amount of one meter, or of every meter the config gives a reservation, for the instance and every enclosing scope. Refused when the instance or an enclosing scope cannot fit it, and then nothing is reserved anywhere. On a type that composes Lease it needs an active lease, and the reservation is settled when that lease ends.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "account.budget.reserve",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Reserves an amount of one meter, or of every meter the config gives a reservation, for the instance and every enclosing scope. Refused when the instance or an enclosing scope cannot fit it, and then nothing is reserved anywhere. On a type that composes Lease it needs an active lease, and the reservation is settled when that lease ends.",
+      "namespace": "account",
+      "methodName": "budget.reserve",
+      "httpMethod": "POST",
+      "httpPath": "/api/account/{id}/budget/reserve",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:dc6f34affb6770812cf7a459583249ef876b7c35a525eb70c53c45390fea0582",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "amount": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "meter": {"description":"A AccountBudgetMeter value","enum":["questions","tokens",null],"type":["string","null"]}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "AccountBudgetReserveResult object"
+      }
+    },
+    {
+      "name": "account.budget.reserveFor",
+      "operationId": "AccountBudgetReserveForHandler",
+      "title": "Account budget: reserve for",
+      "mcp": {
+        "hidden": false,
+        "name": "Account budget: reserve for",
+        "handle": "account_budget_reserve_for",
+        "description": "Holds an amount of a meter for an instance whose scope link points here, as that instance's reserve does, and passes it on up this instance's own scope. Refused when the amount does not fit, when that instance does not draw the meter from here, and beyond what it has reserved and this instance does not hold for it yet.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "account.budget.reserve-for",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Holds an amount of a meter for an instance whose scope link points here, as that instance's reserve does, and passes it on up this instance's own scope. Refused when the amount does not fit, when that instance does not draw the meter from here, and beyond what it has reserved and this instance does not hold for it yet.",
+      "namespace": "account",
+      "methodName": "budget.reserve_for",
+      "httpMethod": "POST",
+      "httpPath": "/api/account/{id}/budget/reserve-for",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:775df17108ba429940277f7510f4f5ed37d7b432d08e8db99401a9f344b1bbbd",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "amount": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"A string value","minLength":1,"type":"string"},
+          "meter": {"description":"A AccountBudgetMeter value","enum":["questions","tokens"],"type":"string"},
+          "schema": {"description":"A string value","minLength":1,"type":"string"}
+        },
+        "required": ["amount", "id", "id", "meter", "schema"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "AccountBudgetReserveForResult object"
+      }
+    },
+    {
+      "name": "account.budget.setLimit",
+      "operationId": "AccountBudgetSetLimitHandler",
+      "title": "Account budget: set limit",
+      "mcp": {
+        "hidden": false,
+        "name": "Account budget: set limit",
+        "handle": "account_budget_set_limit",
+        "description": "Sets a meter's limit on the instance, raising or lowering it; through limitField when the meter has one. Needs limitPermission, and is refused when the config names none, and below what the instance has used and reserved.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "account.budget.set-limit",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Sets a meter's limit on the instance, raising or lowering it; through limitField when the meter has one. Needs limitPermission, and is refused when the config names none, and below what the instance has used and reserved.",
+      "namespace": "account",
+      "methodName": "budget.set_limit",
+      "httpMethod": "POST",
+      "httpPath": "/api/account/{id}/budget/set-limit",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:12520954c749484ddf27f2ceb91276866c641cc8856d38d63a2c59ffe4407f8a",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "limit": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "meter": {"description":"A AccountBudgetMeter value","enum":["questions","tokens"],"type":"string"}
+        },
+        "required": ["id", "limit", "meter"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "AccountBudgetSetLimitResult object"
+      }
+    },
+    {
+      "name": "account.budget.settle",
+      "operationId": "AccountBudgetSettleHandler",
+      "title": "Account budget: settle",
+      "mcp": {
+        "hidden": false,
+        "name": "Account budget: settle",
+        "handle": "account_budget_settle",
+        "description": "Releases the instance's own reservation of one meter, or of every meter, here and in every enclosing scope.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "account.budget.settle",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Releases the instance's own reservation of one meter, or of every meter, here and in every enclosing scope.",
+      "namespace": "account",
+      "methodName": "budget.settle",
+      "httpMethod": "POST",
+      "httpPath": "/api/account/{id}/budget/settle",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:583c961fdc0f338ae3055b539caf9514d55e686c18b8c1def9bd433ab2ea08a7",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "meter": {"description":"A AccountBudgetMeter value","enum":["questions","tokens",null],"type":["string","null"]}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "AccountBudgetSettleResult object"
+      }
+    },
+    {
+      "name": "account.budget.settleFor",
+      "operationId": "AccountBudgetSettleForHandler",
+      "title": "Account budget: settle for",
+      "mcp": {
+        "hidden": false,
+        "name": "Account budget: settle for",
+        "handle": "account_budget_settle_for",
+        "description": "Releases up to an amount of what this instance holds of a meter for another, never more than that one no longer holds itself, and passes the release on up this instance's own scope.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "account.budget.settle-for",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Releases up to an amount of what this instance holds of a meter for another, never more than that one no longer holds itself, and passes the release on up this instance's own scope.",
+      "namespace": "account",
+      "methodName": "budget.settle_for",
+      "httpMethod": "POST",
+      "httpPath": "/api/account/{id}/budget/settle-for",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:775df17108ba429940277f7510f4f5ed37d7b432d08e8db99401a9f344b1bbbd",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "amount": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1,"type":"integer","x-superschematic-scalar":"Generic.Int64"},
+          "id": {"description":"A string value","minLength":1,"type":"string"},
+          "meter": {"description":"A AccountBudgetMeter value","enum":["questions","tokens"],"type":"string"},
+          "schema": {"description":"A string value","minLength":1,"type":"string"}
+        },
+        "required": ["amount", "id", "id", "meter", "schema"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "AccountBudgetSettleForResult object"
+      }
+    },
+    {
+      "name": "account.status.transition",
+      "operationId": "AccountStatusTransitionHandler",
+      "title": "Account status: transition",
+      "mcp": {
+        "hidden": false,
+        "name": "Account status: transition",
+        "handle": "account_status_transition",
+        "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "account.status.transition",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+      "namespace": "account",
+      "methodName": "status.transition",
+      "httpMethod": "POST",
+      "httpPath": "/api/account/{id}/status/transition",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:b6f88f8f512d4c80fc73f5520004bfc789388baaa91e4ae54387fb403a9f29d0",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "from": {"description":"A AccountStatusState value","enum":["open","out",null],"type":["string","null"]},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "to": {"description":"A AccountStatusState value","enum":["open","out"],"type":"string"}
+        },
+        "required": ["id", "to"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "AccountStatusTransitionResult object"
+      }
+    },
+    {
+      "name": "job.lease.acknowledge",
+      "operationId": "JobLeaseAcknowledgeHandler",
+      "title": "Job lease: acknowledge",
+      "mcp": {
+        "hidden": false,
+        "name": "Job lease: acknowledge",
+        "handle": "job_lease_acknowledge",
+        "description": "Marks directives of the lease as handled, so heartbeats stop delivering them. Only the holder, presenting the current token as Lease's precondition.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "job.lease.acknowledge",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Marks directives of the lease as handled, so heartbeats stop delivering them. Only the holder, presenting the current token as Lease's precondition.",
+      "namespace": "job",
+      "methodName": "lease.acknowledge",
+      "httpMethod": "POST",
+      "httpPath": "/api/job/{id}/lease/acknowledge",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:49329f61d165535749be7002fd110817254f6a5d82e924012a451e5d32f0b7b4",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "ids": {"description":"Array of Generic.Int64 values","items":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":"integer","x-superschematic-scalar":"Generic.Int64"},"type":"array"},
+          "preconditions": {"additionalProperties":false,"description":"JobPreconditions object","properties":{"Lease":{"additionalProperties":false,"description":"JobLeasePrecondition object","properties":{"token":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]}
+        },
+        "required": ["id", "ids"]
+      },
+      "returns": {
+        "type": ["object", "array", "string", "number", "boolean", "null"],
+        "description": "Any valid JSON value: object, array, primitive, or null"
+      }
+    },
+    {
+      "name": "job.lease.acquire",
+      "operationId": "JobLeaseAcquireHandler",
+      "title": "Job lease: acquire",
+      "mcp": {
+        "hidden": false,
+        "name": "Job lease: acquire",
+        "handle": "job_lease_acquire",
+        "description": "Takes the lease for the caller and returns its fencing token. Refused while a lease is active, the caller's own included (heartbeat renews it), without acquirePermission when the config names one, and once the instance has had maxExpiries expiries. Over a lease that expired, it applies that expiry first.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "job.lease.acquire",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Takes the lease for the caller and returns its fencing token. Refused while a lease is active, the caller's own included (heartbeat renews it), without acquirePermission when the config names one, and once the instance has had maxExpiries expiries. Over a lease that expired, it applies that expiry first.",
+      "namespace": "job",
+      "methodName": "lease.acquire",
+      "httpMethod": "POST",
+      "httpPath": "/api/job/{id}/lease/acquire",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:e1e1d2573d011e11df2a997f11629f4f5532b6149b9b66a8d141d437c195b13e",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "preconditions": {"additionalProperties":false,"description":"JobPreconditions object","properties":{"Lease":{"additionalProperties":false,"description":"JobLeasePrecondition object","properties":{"token":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]},
+          "ttlMs": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":1000,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "JobLeaseAcquireResult object"
+      }
+    },
+    {
+      "name": "job.lease.direct",
+      "operationId": "JobLeaseDirectHandler",
+      "title": "Job lease: direct",
+      "mcp": {
+        "hidden": false,
+        "name": "Job lease: direct",
+        "handle": "job_lease_direct",
+        "description": "Sends the holder of the active lease a directive, which its heartbeats deliver until it acknowledges it. With dedupeKey, a directive already sent under the lease with the key is not sent again. A principal needs directPermission, or overridePermission when that is absent, and is refused when the config names neither; another behavior of the type sends one with call(), as the principal it runs for, without either.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "job.lease.direct",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Sends the holder of the active lease a directive, which its heartbeats deliver until it acknowledges it. With dedupeKey, a directive already sent under the lease with the key is not sent again. A principal needs directPermission, or overridePermission when that is absent, and is refused when the config names neither; another behavior of the type sends one with call(), as the principal it runs for, without either.",
+      "namespace": "job",
+      "methodName": "lease.direct",
+      "httpMethod": "POST",
+      "httpPath": "/api/job/{id}/lease/direct",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:1ad3fd8c7b0d2f761f0adfc881f7d55faed054828dbd4b51de9db805701819d8",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "data": {"description":"Any valid JSON value: object, array, primitive, or null","type":["object","array","string","number","boolean","null"],"x-superschematic-scalar":"Generic.JSON"},
+          "dedupeKey": {"description":"A string value","maxLength":128,"minLength":1,"type":["string","null"]},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "name": {"description":"A string value","pattern":"^[A-Za-z][A-Za-z0-9_.:-]{0,63}$","type":"string"},
+          "preconditions": {"additionalProperties":false,"description":"JobPreconditions object","properties":{"Lease":{"additionalProperties":false,"description":"JobLeasePrecondition object","properties":{"token":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]}
+        },
+        "required": ["id", "name"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "JobLeaseDirectResult object"
+      }
+    },
+    {
+      "name": "job.lease.expire",
+      "operationId": "JobLeaseExpireHandler",
+      "title": "Job lease: expire",
+      "mcp": {
+        "hidden": false,
+        "name": "Job lease: expire",
+        "handle": "job_lease_expire",
+        "description": "Applies the expiry of a lease past its expiry time or its longest hold: the holder is cleared, the token advances, the expiry is counted unless the instance is in a terminal state of its Workflow, and onExpiry or escalate moves the status. Any principal who may write the instance may call it; on any other instance it changes nothing. With holder, a principal with overridePermission expires that holder's lease at once, active or not, unless notRenewedAfter spares it. The engine's runner calls it on every lapsed lease, every sweepMs.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "job.lease.expire",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Applies the expiry of a lease past its expiry time or its longest hold: the holder is cleared, the token advances, the expiry is counted unless the instance is in a terminal state of its Workflow, and onExpiry or escalate moves the status. Any principal who may write the instance may call it; on any other instance it changes nothing. With holder, a principal with overridePermission expires that holder's lease at once, active or not, unless notRenewedAfter spares it. The engine's runner calls it on every lapsed lease, every sweepMs.",
+      "namespace": "job",
+      "methodName": "lease.expire",
+      "httpMethod": "POST",
+      "httpPath": "/api/job/{id}/lease/expire",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:7d47a66d837a51bc9b1392e6481e891a6bed7dc646cbf4a9fa6bd3f1f5f002c9",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "holder": {"description":"A string value","minLength":1,"type":["string","null"]},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "notRenewedAfter": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":["integer","null"],"x-superschematic-scalar":"Generic.Int64"},
+          "preconditions": {"additionalProperties":false,"description":"JobPreconditions object","properties":{"Lease":{"additionalProperties":false,"description":"JobLeasePrecondition object","properties":{"token":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "JobLeaseExpireResult object"
+      }
+    },
+    {
+      "name": "job.lease.heartbeat",
+      "operationId": "JobLeaseHeartbeatHandler",
+      "title": "Job lease: heartbeat",
+      "mcp": {
+        "hidden": false,
+        "name": "Job lease: heartbeat",
+        "handle": "job_lease_heartbeat",
+        "description": "Renews the lease, never past its longest hold, acknowledges the directives acknowledge names, and returns the directives sent under it that are not acknowledged. Only the holder, presenting the current token as Lease's precondition, while the lease is active: an expired lease cannot be renewed.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "job.lease.heartbeat",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Renews the lease, never past its longest hold, acknowledges the directives acknowledge names, and returns the directives sent under it that are not acknowledged. Only the holder, presenting the current token as Lease's precondition, while the lease is active: an expired lease cannot be renewed.",
+      "namespace": "job",
+      "methodName": "lease.heartbeat",
+      "httpMethod": "POST",
+      "httpPath": "/api/job/{id}/lease/heartbeat",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:a0f6b62c0a85d37c4926cc99d3fc07c3ed09a0a6cdfccf564da2421612dfae8a",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "acknowledge": {"description":"Array of Generic.Int64 values","items":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":"integer","x-superschematic-scalar":"Generic.Int64"},"type":["array","null"]},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "preconditions": {"additionalProperties":false,"description":"JobPreconditions object","properties":{"Lease":{"additionalProperties":false,"description":"JobLeasePrecondition object","properties":{"token":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "JobLeaseHeartbeatResult object"
+      }
+    },
+    {
+      "name": "job.lease.release",
+      "operationId": "JobLeaseReleaseHandler",
+      "title": "Job lease: release",
+      "mcp": {
+        "hidden": false,
+        "name": "Job lease: release",
+        "handle": "job_lease_release",
+        "description": "Ends an active lease: the holder, presenting the current token as Lease's precondition, or a principal with overridePermission, who need not. The token advances, so the directives sent under the lease are not delivered again, and onExpiry moves the status when it is still one of its from states. With abandon, the holder gives the work up as failed: the release counts as an expiry, and escalate applies at the one that reaches maxExpiries.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "job.lease.release",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Ends an active lease: the holder, presenting the current token as Lease's precondition, or a principal with overridePermission, who need not. The token advances, so the directives sent under the lease are not delivered again, and onExpiry moves the status when it is still one of its from states. With abandon, the holder gives the work up as failed: the release counts as an expiry, and escalate applies at the one that reaches maxExpiries.",
+      "namespace": "job",
+      "methodName": "lease.release",
+      "httpMethod": "POST",
+      "httpPath": "/api/job/{id}/lease/release",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:b4790edb78aea29dc7fe4d468059820cb0290b43e65f4c28cb3a233e8ca3cfbd",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "abandon": {"description":"A boolean value (true or false)","type":["boolean","null"]},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "preconditions": {"additionalProperties":false,"description":"JobPreconditions object","properties":{"Lease":{"additionalProperties":false,"description":"JobLeasePrecondition object","properties":{"token":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": ["object", "array", "string", "number", "boolean", "null"],
+        "description": "Any valid JSON value: object, array, primitive, or null"
+      }
+    },
+    {
+      "name": "job.lease.resetExpiries",
+      "operationId": "JobLeaseResetExpiriesHandler",
+      "title": "Job lease: reset expiries",
+      "mcp": {
+        "hidden": false,
+        "name": "Job lease: reset expiries",
+        "handle": "job_lease_reset_expiries",
+        "description": "Sets the instance's count of expiries back to 0, so a lease can be acquired again after maxExpiries. Needs overridePermission; refused when the config names none.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "job.lease.reset-expiries",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Sets the instance's count of expiries back to 0, so a lease can be acquired again after maxExpiries. Needs overridePermission; refused when the config names none.",
+      "namespace": "job",
+      "methodName": "lease.reset_expiries",
+      "httpMethod": "POST",
+      "httpPath": "/api/job/{id}/lease/reset-expiries",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:91b101486ab2282bb46251a2a2682c893800514c7646bca2947bda9329b20ae2",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "preconditions": {"additionalProperties":false,"description":"JobPreconditions object","properties":{"Lease":{"additionalProperties":false,"description":"JobLeasePrecondition object","properties":{"token":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "JobLeaseResetExpiriesResult object"
+      }
+    },
+    {
+      "name": "job.retries.recordAttempt",
+      "operationId": "JobRetriesRecordAttemptHandler",
+      "title": "Job retries: record attempt",
+      "mcp": {
+        "hidden": false,
+        "name": "Job retries: record attempt",
+        "handle": "job_retries_record_attempt",
+        "description": "Records an attempt: a success without failure, or a failure of one of the config's classes, counted against its caps, and returns the class's hint. Decides whether its result is kept, and writes a kept result to resultField. Exhausts the instance at a terminal class, a failure past a cap or a stuck signature, moving its status to exhaustedState from the from states. Refused once the instance is exhausted, and without the config's permission.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "job.retries.record-attempt",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Records an attempt: a success without failure, or a failure of one of the config's classes, counted against its caps, and returns the class's hint. Decides whether its result is kept, and writes a kept result to resultField. Exhausts the instance at a terminal class, a failure past a cap or a stuck signature, moving its status to exhaustedState from the from states. Refused once the instance is exhausted, and without the config's permission.",
+      "namespace": "job",
+      "methodName": "retries.record_attempt",
+      "httpMethod": "POST",
+      "httpPath": "/api/job/{id}/retries/record-attempt",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:324851bb8e36a615686bcd8daf5ba3d21be9c2a77df9384befa0bba29fc324cc",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "detail": {"description":"Any valid JSON value: object, array, primitive, or null","type":["object","array","string","number","boolean","null"],"x-superschematic-scalar":"Generic.JSON"},
+          "failure": {"description":"A JobRetriesClass value","enum":["build","rejected","timeout",null],"type":["string","null"]},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "preconditions": {"additionalProperties":false,"description":"JobPreconditions object","properties":{"Lease":{"additionalProperties":false,"description":"JobLeasePrecondition object","properties":{"token":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]},
+          "predicates": {"additionalProperties":{"description":"A boolean value (true or false)","type":"boolean"},"description":"Map of boolean values","type":["object","null"]},
+          "result": {"description":"Any valid JSON value: object, array, primitive, or null","type":["object","array","string","number","boolean","null"],"x-superschematic-scalar":"Generic.JSON"},
+          "score": {"description":"A numeric value","type":["number","null"]},
+          "signature": {"description":"A string value","maxLength":512,"minLength":1,"type":["string","null"]}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "JobRetriesRecordAttemptResult object"
+      }
+    },
+    {
+      "name": "job.status.transition",
+      "operationId": "JobStatusTransitionHandler",
+      "title": "Job status: transition",
+      "mcp": {
+        "hidden": false,
+        "name": "Job status: transition",
+        "handle": "job_status_transition",
+        "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "job.status.transition",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+      "namespace": "job",
+      "methodName": "status.transition",
+      "httpMethod": "POST",
+      "httpPath": "/api/job/{id}/status/transition",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:4d7f531f8912ca8d4dd814712f8512f6604e63346cecbd38f71ae012420a48a5",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "from": {"description":"A JobStatusState value","enum":["queued","running","waiting","done","failed",null],"type":["string","null"]},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "preconditions": {"additionalProperties":false,"description":"JobPreconditions object","properties":{"Lease":{"additionalProperties":false,"description":"JobLeasePrecondition object","properties":{"token":{"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":0,"type":"integer","x-superschematic-scalar":"Generic.Int64"}},"required":["token"],"type":["object","null"]}},"type":["object","null"]},
+          "to": {"description":"A JobStatusState value","enum":["queued","running","waiting","done","failed"],"type":"string"}
+        },
+        "required": ["id", "to"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "JobStatusTransitionResult object"
+      }
+    },
+    {
+      "name": "session.presence.beat",
+      "operationId": "SessionPresenceBeatHandler",
+      "title": "Session presence: beat",
+      "mcp": {
+        "hidden": false,
+        "name": "Session presence: beat",
+        "handle": "session_presence_beat",
+        "description": "Moves the deadline to ttlMs from now and clears missed, and onBeat moves the status when it is one of its from states. Only the principal whose subject the instance's principalField holds.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "session.presence.beat",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Moves the deadline to ttlMs from now and clears missed, and onBeat moves the status when it is one of its from states. Only the principal whose subject the instance's principalField holds.",
+      "namespace": "session",
+      "methodName": "presence.beat",
+      "httpMethod": "POST",
+      "httpPath": "/api/session/{id}/presence/beat",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "SessionPresenceBeatResult object"
+      }
+    },
+    {
+      "name": "session.presence.miss",
+      "operationId": "SessionPresenceMissHandler",
+      "title": "Session presence: miss",
+      "mcp": {
+        "hidden": false,
+        "name": "Session presence: miss",
+        "handle": "session_presence_miss",
+        "description": "Applies the miss of an instance past its deadline and not missed yet: sets missed, moves the status with onMissed when it is one of its from states, and expires the principal's leases on the releaseLeases schemas that were not renewed after its last beat, recording which in released. Any principal who may write the instance may call it; on any other instance it changes nothing. The engine's runner calls it every sweepMs.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "session.presence.miss",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Applies the miss of an instance past its deadline and not missed yet: sets missed, moves the status with onMissed when it is one of its from states, and expires the principal's leases on the releaseLeases schemas that were not renewed after its last beat, recording which in released. Any principal who may write the instance may call it; on any other instance it changes nothing. The engine's runner calls it every sweepMs.",
+      "namespace": "session",
+      "methodName": "presence.miss",
+      "httpMethod": "POST",
+      "httpPath": "/api/session/{id}/presence/miss",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "SessionPresenceMissResult object"
+      }
+    },
+    {
+      "name": "session.status.transition",
+      "operationId": "SessionStatusTransitionHandler",
+      "title": "Session status: transition",
+      "mcp": {
+        "hidden": false,
+        "name": "Session status: transition",
+        "handle": "session_status_transition",
+        "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+        "invocationPolicy": "auto",
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "session.status.transition",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+      "namespace": "session",
+      "methodName": "status.transition",
+      "httpMethod": "POST",
+      "httpPath": "/api/session/{id}/status/transition",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:20f78270ec326865eb7157e0762ad2e582fec5931a1190cf4c90ebc4a91a4dac",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "from": {"description":"A SessionStatusState value","enum":["idle","turn","missing","closed",null],"type":["string","null"]},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "to": {"description":"A SessionStatusState value","enum":["idle","turn","missing","closed"],"type":"string"}
+        },
+        "required": ["id", "to"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "SessionStatusTransitionResult object"
+      }
+    }
+  ]
+}

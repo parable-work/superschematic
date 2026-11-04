@@ -1,0 +1,971 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schemaVersion": "1.0",
+  "generatedAt": "2026-01-02T03:04:05Z",
+  "apiId": "fixture-agents-api",
+  "sdkClassName": "FixtureAgentsApiSDK",
+  "tools": [
+    {
+      "toolName": "account.budget.checkReserve",
+      "apiId": "fixture-agents-api",
+      "namespace": "account",
+      "methodName": "checkReserve",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "amount",
+          "required": false,
+          "kind": "input",
+          "target": "input.amount"
+        },
+        {
+          "toolParameter": "meter",
+          "required": false,
+          "kind": "input",
+          "target": "input.meter"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["amount", "meter"]
+        }
+      ]
+    },
+    {
+      "toolName": "account.budget.observe",
+      "apiId": "fixture-agents-api",
+      "namespace": "account",
+      "methodName": "observe",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "limit",
+          "required": false,
+          "kind": "input",
+          "target": "input.limit"
+        },
+        {
+          "toolParameter": "meter",
+          "required": true,
+          "kind": "input",
+          "target": "input.meter"
+        },
+        {
+          "toolParameter": "resetsAt",
+          "required": false,
+          "kind": "input",
+          "target": "input.resetsAt"
+        },
+        {
+          "toolParameter": "used",
+          "required": true,
+          "kind": "input",
+          "target": "input.used"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["limit", "meter", "resetsAt", "used"]
+        }
+      ]
+    },
+    {
+      "toolName": "account.budget.recordUsage",
+      "apiId": "fixture-agents-api",
+      "namespace": "account",
+      "methodName": "recordUsage",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "amount",
+          "required": true,
+          "kind": "input",
+          "target": "input.amount"
+        },
+        {
+          "toolParameter": "meter",
+          "required": true,
+          "kind": "input",
+          "target": "input.meter"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["amount", "meter"]
+        }
+      ]
+    },
+    {
+      "toolName": "account.budget.recordUsageFor",
+      "apiId": "fixture-agents-api",
+      "namespace": "account",
+      "methodName": "recordUsageFor",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "amount",
+          "required": true,
+          "kind": "input",
+          "target": "input.amount"
+        },
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "input",
+          "target": "input.id"
+        },
+        {
+          "toolParameter": "meter",
+          "required": true,
+          "kind": "input",
+          "target": "input.meter"
+        },
+        {
+          "toolParameter": "released",
+          "required": true,
+          "kind": "input",
+          "target": "input.released"
+        },
+        {
+          "toolParameter": "schema",
+          "required": true,
+          "kind": "input",
+          "target": "input.schema"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["amount", "id", "meter", "released", "schema"]
+        }
+      ]
+    },
+    {
+      "toolName": "account.budget.reserve",
+      "apiId": "fixture-agents-api",
+      "namespace": "account",
+      "methodName": "reserve",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "amount",
+          "required": false,
+          "kind": "input",
+          "target": "input.amount"
+        },
+        {
+          "toolParameter": "meter",
+          "required": false,
+          "kind": "input",
+          "target": "input.meter"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["amount", "meter"]
+        }
+      ]
+    },
+    {
+      "toolName": "account.budget.reserveFor",
+      "apiId": "fixture-agents-api",
+      "namespace": "account",
+      "methodName": "reserveFor",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "amount",
+          "required": true,
+          "kind": "input",
+          "target": "input.amount"
+        },
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "input",
+          "target": "input.id"
+        },
+        {
+          "toolParameter": "meter",
+          "required": true,
+          "kind": "input",
+          "target": "input.meter"
+        },
+        {
+          "toolParameter": "schema",
+          "required": true,
+          "kind": "input",
+          "target": "input.schema"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["amount", "id", "meter", "schema"]
+        }
+      ]
+    },
+    {
+      "toolName": "account.budget.setLimit",
+      "apiId": "fixture-agents-api",
+      "namespace": "account",
+      "methodName": "setLimit",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "limit",
+          "required": true,
+          "kind": "input",
+          "target": "input.limit"
+        },
+        {
+          "toolParameter": "meter",
+          "required": true,
+          "kind": "input",
+          "target": "input.meter"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["limit", "meter"]
+        }
+      ]
+    },
+    {
+      "toolName": "account.budget.settle",
+      "apiId": "fixture-agents-api",
+      "namespace": "account",
+      "methodName": "settle",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "meter",
+          "required": false,
+          "kind": "input",
+          "target": "input.meter"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["meter"]
+        }
+      ]
+    },
+    {
+      "toolName": "account.budget.settleFor",
+      "apiId": "fixture-agents-api",
+      "namespace": "account",
+      "methodName": "settleFor",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "amount",
+          "required": true,
+          "kind": "input",
+          "target": "input.amount"
+        },
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "input",
+          "target": "input.id"
+        },
+        {
+          "toolParameter": "meter",
+          "required": true,
+          "kind": "input",
+          "target": "input.meter"
+        },
+        {
+          "toolParameter": "schema",
+          "required": true,
+          "kind": "input",
+          "target": "input.schema"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["amount", "id", "meter", "schema"]
+        }
+      ]
+    },
+    {
+      "toolName": "account.status.transition",
+      "apiId": "fixture-agents-api",
+      "namespace": "account",
+      "methodName": "transition",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "from",
+          "required": false,
+          "kind": "input",
+          "target": "input.from"
+        },
+        {
+          "toolParameter": "to",
+          "required": true,
+          "kind": "input",
+          "target": "input.to"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["from", "to"]
+        }
+      ]
+    },
+    {
+      "toolName": "job.lease.acknowledge",
+      "apiId": "fixture-agents-api",
+      "namespace": "job",
+      "methodName": "acknowledge",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "ids",
+          "required": true,
+          "kind": "input",
+          "target": "input.ids"
+        },
+        {
+          "toolParameter": "preconditions",
+          "required": false,
+          "kind": "input",
+          "target": "input.preconditions"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["ids", "preconditions"]
+        }
+      ]
+    },
+    {
+      "toolName": "job.lease.acquire",
+      "apiId": "fixture-agents-api",
+      "namespace": "job",
+      "methodName": "acquire",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "preconditions",
+          "required": false,
+          "kind": "input",
+          "target": "input.preconditions"
+        },
+        {
+          "toolParameter": "ttlMs",
+          "required": false,
+          "kind": "input",
+          "target": "input.ttlMs"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["preconditions", "ttlMs"]
+        }
+      ]
+    },
+    {
+      "toolName": "job.lease.direct",
+      "apiId": "fixture-agents-api",
+      "namespace": "job",
+      "methodName": "direct",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "data",
+          "required": false,
+          "kind": "input",
+          "target": "input.data"
+        },
+        {
+          "toolParameter": "dedupeKey",
+          "required": false,
+          "kind": "input",
+          "target": "input.dedupeKey"
+        },
+        {
+          "toolParameter": "name",
+          "required": true,
+          "kind": "input",
+          "target": "input.name"
+        },
+        {
+          "toolParameter": "preconditions",
+          "required": false,
+          "kind": "input",
+          "target": "input.preconditions"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["data", "dedupeKey", "name", "preconditions"]
+        }
+      ]
+    },
+    {
+      "toolName": "job.lease.expire",
+      "apiId": "fixture-agents-api",
+      "namespace": "job",
+      "methodName": "expire",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "holder",
+          "required": false,
+          "kind": "input",
+          "target": "input.holder"
+        },
+        {
+          "toolParameter": "notRenewedAfter",
+          "required": false,
+          "kind": "input",
+          "target": "input.notRenewedAfter"
+        },
+        {
+          "toolParameter": "preconditions",
+          "required": false,
+          "kind": "input",
+          "target": "input.preconditions"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["holder", "notRenewedAfter", "preconditions"]
+        }
+      ]
+    },
+    {
+      "toolName": "job.lease.heartbeat",
+      "apiId": "fixture-agents-api",
+      "namespace": "job",
+      "methodName": "heartbeat",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "acknowledge",
+          "required": false,
+          "kind": "input",
+          "target": "input.acknowledge"
+        },
+        {
+          "toolParameter": "preconditions",
+          "required": false,
+          "kind": "input",
+          "target": "input.preconditions"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["acknowledge", "preconditions"]
+        }
+      ]
+    },
+    {
+      "toolName": "job.lease.release",
+      "apiId": "fixture-agents-api",
+      "namespace": "job",
+      "methodName": "release",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "abandon",
+          "required": false,
+          "kind": "input",
+          "target": "input.abandon"
+        },
+        {
+          "toolParameter": "preconditions",
+          "required": false,
+          "kind": "input",
+          "target": "input.preconditions"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["abandon", "preconditions"]
+        }
+      ]
+    },
+    {
+      "toolName": "job.lease.resetExpiries",
+      "apiId": "fixture-agents-api",
+      "namespace": "job",
+      "methodName": "resetExpiries",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "preconditions",
+          "required": false,
+          "kind": "input",
+          "target": "input.preconditions"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["preconditions"]
+        }
+      ]
+    },
+    {
+      "toolName": "job.retries.recordAttempt",
+      "apiId": "fixture-agents-api",
+      "namespace": "job",
+      "methodName": "recordAttempt",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "detail",
+          "required": false,
+          "kind": "input",
+          "target": "input.detail"
+        },
+        {
+          "toolParameter": "failure",
+          "required": false,
+          "kind": "input",
+          "target": "input.failure"
+        },
+        {
+          "toolParameter": "preconditions",
+          "required": false,
+          "kind": "input",
+          "target": "input.preconditions"
+        },
+        {
+          "toolParameter": "predicates",
+          "required": false,
+          "kind": "input",
+          "target": "input.predicates"
+        },
+        {
+          "toolParameter": "result",
+          "required": false,
+          "kind": "input",
+          "target": "input.result"
+        },
+        {
+          "toolParameter": "score",
+          "required": false,
+          "kind": "input",
+          "target": "input.score"
+        },
+        {
+          "toolParameter": "signature",
+          "required": false,
+          "kind": "input",
+          "target": "input.signature"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["detail", "failure", "preconditions", "predicates", "result", "score", "signature"]
+        }
+      ]
+    },
+    {
+      "toolName": "job.status.transition",
+      "apiId": "fixture-agents-api",
+      "namespace": "job",
+      "methodName": "transition",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "from",
+          "required": false,
+          "kind": "input",
+          "target": "input.from"
+        },
+        {
+          "toolParameter": "preconditions",
+          "required": false,
+          "kind": "input",
+          "target": "input.preconditions"
+        },
+        {
+          "toolParameter": "to",
+          "required": true,
+          "kind": "input",
+          "target": "input.to"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["from", "preconditions", "to"]
+        }
+      ]
+    },
+    {
+      "toolName": "session.presence.beat",
+      "apiId": "fixture-agents-api",
+      "namespace": "session",
+      "methodName": "beat",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        }
+      ]
+    },
+    {
+      "toolName": "session.presence.miss",
+      "apiId": "fixture-agents-api",
+      "namespace": "session",
+      "methodName": "miss",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        }
+      ]
+    },
+    {
+      "toolName": "session.status.transition",
+      "apiId": "fixture-agents-api",
+      "namespace": "session",
+      "methodName": "transition",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "from",
+          "required": false,
+          "kind": "input",
+          "target": "input.from"
+        },
+        {
+          "toolParameter": "to",
+          "required": true,
+          "kind": "input",
+          "target": "input.to"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["from", "to"]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,4506 @@
+{
+  "components": {
+    "schemas": {
+      "AccountBudgetCheckReserveInput": {
+        "description": "The parameters of Account's budget checkReserve.",
+        "properties": {
+          "amount": {
+            "description": "How much of the meter; its configured reservation when absent. Needs meter.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "nullable": true,
+            "type": "integer"
+          },
+          "meter": {
+            "description": "The meter; every meter with a configured reservation when absent.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccountBudgetMeter"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "AccountBudgetCheckReserveResult": {
+        "description": "What Account's budget checkReserve returns.",
+        "properties": {
+          "fits": {
+            "description": "Whether the reservation fits now.",
+            "type": "boolean"
+          },
+          "scopes": {
+            "description": "The enclosing scopes the answer read, innermost first, each with the values of it the answer turns on: a move of one can change it.",
+            "items": {
+              "$ref": "#/components/schemas/AccountBudgetCheckReserveResultScopes"
+            },
+            "type": "array"
+          },
+          "until": {
+            "description": "When it does not fit: the start of the next UTC day, when the daily meters starting again make it fit with nothing else changing; null when only a change can make it fit, and when it fits.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fits",
+          "scopes"
+        ],
+        "type": "object"
+      },
+      "AccountBudgetCheckReserveResultScopes": {
+        "properties": {
+          "hears": {
+            "description": "The values of the scope the answer turns on, as a reference hears them: a JSON pointer into the scope as a read returns it (/behaviors/Budget/meters/\u003cmeter\u003e/remaining, /behaviors/Links/targets/\u003clink\u003e), and, for a number, the value it changes at when it crosses it. The meter's remaining, which the reservation fits while it is at or above the number; where a daily meter keeps it out now, the scope's reserved and limit; and the link to the scope's own scope.",
+            "items": {
+              "$ref": "#/components/schemas/AccountBudgetCheckReserveResultScopesHears"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "hears",
+          "id",
+          "schema"
+        ],
+        "type": "object"
+      },
+      "AccountBudgetCheckReserveResultScopesHears": {
+        "properties": {
+          "crosses": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "AccountBudgetMeter": {
+        "description": "A meter of Account's Budget.",
+        "enum": [
+          "questions",
+          "tokens"
+        ],
+        "type": "string"
+      },
+      "AccountBudgetObserveInput": {
+        "description": "The parameters of Account's budget observe.",
+        "properties": {
+          "limit": {
+            "description": "The limit the provider holds the row to, while the observation holds; the meter's own when absent.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "meter": {
+            "$ref": "#/components/schemas/AccountBudgetMeter",
+            "description": "The meter."
+          },
+          "resetsAt": {
+            "description": "When the provider's count starts again, in epoch milliseconds: the observation lapses then.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "used": {
+            "description": "What the provider counts as used.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "meter",
+          "used"
+        ],
+        "type": "object"
+      },
+      "AccountBudgetObserveResult": {
+        "description": "What Account's budget observe returns.",
+        "properties": {
+          "limit": {
+            "description": "The meter's limit while the observation holds; null when it has none.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "meter": {
+            "$ref": "#/components/schemas/AccountBudgetMeter"
+          },
+          "resetsAt": {
+            "description": "When the observation lapses, in epoch milliseconds: resetsAt, else the meter's next reset; null when it holds until the next observe.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "used": {
+            "description": "The meter's usage after this call: the figure given.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "meter",
+          "used"
+        ],
+        "type": "object"
+      },
+      "AccountBudgetRecordUsageForInput": {
+        "description": "The parameters of Account's budget recordUsageFor.",
+        "properties": {
+          "amount": {
+            "description": "How much it used.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "id": {
+            "description": "Its id.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "meter": {
+            "$ref": "#/components/schemas/AccountBudgetMeter",
+            "description": "The meter."
+          },
+          "released": {
+            "description": "How much of its reservation the usage drew down.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema": {
+            "description": "The schema of the instance inside this scope.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "id",
+          "meter",
+          "released",
+          "schema"
+        ],
+        "type": "object"
+      },
+      "AccountBudgetRecordUsageForResult": {
+        "description": "What Account's budget recordUsageFor returns.",
+        "properties": {
+          "overruns": {
+            "description": "This instance and every scope up from it whose usage of the meter is over its limit after the usage, innermost first.",
+            "items": {
+              "$ref": "#/components/schemas/AccountBudgetRecordUsageForResultOverruns"
+            },
+            "type": "array"
+          },
+          "released": {
+            "description": "What this instance released.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "overruns",
+          "released"
+        ],
+        "type": "object"
+      },
+      "AccountBudgetRecordUsageForResultOverruns": {
+        "properties": {
+          "escalated": {
+            "description": "Whether its escalate moved its status in this call.",
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "limit": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "schema": {
+            "type": "string"
+          },
+          "used": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "escalated",
+          "id",
+          "limit",
+          "schema",
+          "used"
+        ],
+        "type": "object"
+      },
+      "AccountBudgetRecordUsageInput": {
+        "description": "The parameters of Account's budget recordUsage.",
+        "properties": {
+          "amount": {
+            "description": "How much was used.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "meter": {
+            "$ref": "#/components/schemas/AccountBudgetMeter",
+            "description": "The meter."
+          }
+        },
+        "required": [
+          "amount",
+          "meter"
+        ],
+        "type": "object"
+      },
+      "AccountBudgetRecordUsageResult": {
+        "description": "What Account's budget recordUsage returns.",
+        "properties": {
+          "directed": {
+            "description": "Whether this call sent onExceeded's directive.",
+            "type": "boolean"
+          },
+          "meter": {
+            "$ref": "#/components/schemas/AccountBudgetMeter"
+          },
+          "overruns": {
+            "description": "Every instance of the chain whose usage of the meter is over its limit after this call, this one first, then outward.",
+            "items": {
+              "$ref": "#/components/schemas/AccountBudgetRecordUsageResultOverruns"
+            },
+            "type": "array"
+          },
+          "released": {
+            "description": "The part of the instance's own reservation the usage drew down.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "used": {
+            "description": "The instance's usage of the meter after this call.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "directed",
+          "meter",
+          "overruns",
+          "released",
+          "used"
+        ],
+        "type": "object"
+      },
+      "AccountBudgetRecordUsageResultOverruns": {
+        "properties": {
+          "escalated": {
+            "description": "Whether its escalate moved its status in this call.",
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "limit": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "schema": {
+            "type": "string"
+          },
+          "used": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "escalated",
+          "id",
+          "limit",
+          "schema",
+          "used"
+        ],
+        "type": "object"
+      },
+      "AccountBudgetReserveForInput": {
+        "description": "The parameters of Account's budget reserveFor.",
+        "properties": {
+          "amount": {
+            "description": "How much to hold.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "id": {
+            "description": "Its id.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "meter": {
+            "$ref": "#/components/schemas/AccountBudgetMeter",
+            "description": "The meter."
+          },
+          "schema": {
+            "description": "The schema of the instance inside this scope.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "id",
+          "meter",
+          "schema"
+        ],
+        "type": "object"
+      },
+      "AccountBudgetReserveForResult": {
+        "description": "What Account's budget reserveFor returns.",
+        "properties": {
+          "held": {
+            "description": "What this instance now holds of the meter for that one.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "held"
+        ],
+        "type": "object"
+      },
+      "AccountBudgetReserveInput": {
+        "description": "The parameters of Account's budget reserve.",
+        "properties": {
+          "amount": {
+            "description": "How much to reserve of the meter; its configured reservation when absent. Needs meter.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "nullable": true,
+            "type": "integer"
+          },
+          "meter": {
+            "description": "The meter; every meter with a configured reservation when absent.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccountBudgetMeter"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "AccountBudgetReserveResult": {
+        "description": "What Account's budget reserve returns.",
+        "properties": {
+          "reserved": {
+            "additionalProperties": {
+              "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+              "format": "int64",
+              "maximum": 9007199254740991,
+              "minimum": -9007199254740991,
+              "type": "integer"
+            },
+            "description": "What this call reserved, by meter.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "reserved"
+        ],
+        "type": "object"
+      },
+      "AccountBudgetSetLimitInput": {
+        "description": "The parameters of Account's budget setLimit.",
+        "properties": {
+          "limit": {
+            "description": "The new limit.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "meter": {
+            "$ref": "#/components/schemas/AccountBudgetMeter",
+            "description": "The meter."
+          }
+        },
+        "required": [
+          "limit",
+          "meter"
+        ],
+        "type": "object"
+      },
+      "AccountBudgetSetLimitResult": {
+        "description": "What Account's budget setLimit returns.",
+        "properties": {
+          "limit": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "meter": {
+            "$ref": "#/components/schemas/AccountBudgetMeter"
+          },
+          "previous": {
+            "description": "The limit before; null when there was none.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "limit",
+          "meter"
+        ],
+        "type": "object"
+      },
+      "AccountBudgetSettleForInput": {
+        "description": "The parameters of Account's budget settleFor.",
+        "properties": {
+          "amount": {
+            "description": "How much to release.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "id": {
+            "description": "Its id.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "meter": {
+            "$ref": "#/components/schemas/AccountBudgetMeter",
+            "description": "The meter."
+          },
+          "schema": {
+            "description": "The schema of the instance inside this scope.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "id",
+          "meter",
+          "schema"
+        ],
+        "type": "object"
+      },
+      "AccountBudgetSettleForResult": {
+        "description": "What Account's budget settleFor returns.",
+        "properties": {
+          "released": {
+            "description": "What this instance released.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "released"
+        ],
+        "type": "object"
+      },
+      "AccountBudgetSettleInput": {
+        "description": "The parameters of Account's budget settle.",
+        "properties": {
+          "meter": {
+            "description": "The meter; every meter when absent.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccountBudgetMeter"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "AccountBudgetSettleResult": {
+        "description": "What Account's budget settle returns.",
+        "properties": {
+          "released": {
+            "additionalProperties": {
+              "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+              "format": "int64",
+              "maximum": 9007199254740991,
+              "minimum": -9007199254740991,
+              "type": "integer"
+            },
+            "description": "What this call released, by meter.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "released"
+        ],
+        "type": "object"
+      },
+      "AccountStatusState": {
+        "description": "A state of Account's status Workflow.",
+        "enum": [
+          "open",
+          "out"
+        ],
+        "type": "string"
+      },
+      "AccountStatusTransitionInput": {
+        "description": "The parameters of Account's status transition.",
+        "properties": {
+          "from": {
+            "description": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccountStatusState"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          },
+          "to": {
+            "$ref": "#/components/schemas/AccountStatusState",
+            "description": "The state to move to."
+          }
+        },
+        "required": [
+          "to"
+        ],
+        "type": "object"
+      },
+      "AccountStatusTransitionResult": {
+        "description": "What Account's status transition returns.",
+        "properties": {
+          "from": {
+            "$ref": "#/components/schemas/AccountStatusState",
+            "description": "The state the instance was in."
+          },
+          "to": {
+            "$ref": "#/components/schemas/AccountStatusState",
+            "description": "The state it is in now."
+          },
+          "unchanged": {
+            "description": "True when the instance was already in to and the config's repeat is unchanged, so nothing was written; absent otherwise.",
+            "nullable": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "Error": {
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "JobLeaseAcknowledgeInput": {
+        "description": "The parameters of Job's lease acknowledge.",
+        "properties": {
+          "ids": {
+            "description": "The directives' numbers.",
+            "items": {
+              "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+              "format": "int64",
+              "maximum": 9007199254740991,
+              "minimum": -9007199254740991,
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "preconditions": {
+            "description": "What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/JobPreconditions"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "type": "object"
+      },
+      "JobLeaseAcquireInput": {
+        "description": "The parameters of Job's lease acquire.",
+        "properties": {
+          "preconditions": {
+            "description": "What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/JobPreconditions"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          },
+          "ttlMs": {
+            "description": "How long the lease lasts after its acquire and each heartbeat, in milliseconds, at most the config's ttlMs; the config's when absent.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1000,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "JobLeaseAcquireResult": {
+        "description": "What Job's lease acquire returns.",
+        "properties": {
+          "expiresAt": {
+            "description": "When the lease expires unless renewed, in epoch milliseconds.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "heartbeatMs": {
+            "description": "How often to send a heartbeat, in milliseconds.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "token": {
+            "description": "The lease's fencing token, which the holder's writes present as Lease's precondition.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expiresAt",
+          "heartbeatMs",
+          "token"
+        ],
+        "type": "object"
+      },
+      "JobLeaseDirectInput": {
+        "description": "The parameters of Job's lease direct.",
+        "properties": {
+          "data": {
+            "description": "Its data.",
+            "nullable": true
+          },
+          "dedupeKey": {
+            "description": "Sends the directive once per lease: when one was sent under the current token with this key, acknowledged or not, that one stands and nothing is sent.",
+            "maxLength": 128,
+            "minLength": 1,
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "description": "What the directive asks.",
+            "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,63}$",
+            "type": "string"
+          },
+          "preconditions": {
+            "description": "What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/JobPreconditions"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "JobLeaseDirectResult": {
+        "description": "What Job's lease direct returns.",
+        "properties": {
+          "created": {
+            "description": "Whether this call sent it; false when one with dedupeKey was already sent.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "The directive's number in its lease: the one sent, or the one already sent with dedupeKey.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "created",
+          "id"
+        ],
+        "type": "object"
+      },
+      "JobLeaseExpireInput": {
+        "description": "The parameters of Job's lease expire.",
+        "properties": {
+          "holder": {
+            "description": "The principal whose lease to expire now, active or not; it needs overridePermission.",
+            "minLength": 1,
+            "nullable": true,
+            "type": "string"
+          },
+          "notRenewedAfter": {
+            "description": "With holder: an active lease its holder acquired or renewed after this time, in epoch milliseconds, is spared, since its own heartbeats show the process holding it is alive. A lapsed one expires all the same.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "preconditions": {
+            "description": "What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/JobPreconditions"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "JobLeaseExpireResult": {
+        "description": "What Job's lease expire returns.",
+        "properties": {
+          "expired": {
+            "description": "Whether a lease expired.",
+            "type": "boolean"
+          },
+          "reason": {
+            "description": "Why, when one expired: ttl, its holder stopped renewing it; maxHold, it reached its longest hold; holder, it was active and expired by its holder's name.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/JobLeaseExpireResultReason"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "required": [
+          "expired"
+        ],
+        "type": "object"
+      },
+      "JobLeaseExpireResultReason": {
+        "description": "Why, when one expired: ttl, its holder stopped renewing it; maxHold, it reached its longest hold; holder, it was active and expired by its holder's name.",
+        "enum": [
+          "ttl",
+          "maxHold",
+          "holder"
+        ],
+        "type": "string"
+      },
+      "JobLeaseHeartbeatInput": {
+        "description": "The parameters of Job's lease heartbeat.",
+        "properties": {
+          "acknowledge": {
+            "description": "Directives of the lease to mark handled first, as acknowledge does, so a heartbeat acknowledges in the same write; empty, none.",
+            "items": {
+              "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+              "format": "int64",
+              "maximum": 9007199254740991,
+              "minimum": -9007199254740991,
+              "type": "integer"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "preconditions": {
+            "description": "What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/JobPreconditions"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "JobLeaseHeartbeatResult": {
+        "description": "What Job's lease heartbeat returns.",
+        "properties": {
+          "directives": {
+            "description": "The directives sent under this lease and not acknowledged, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/JobLeaseHeartbeatResultDirectives"
+            },
+            "type": "array"
+          },
+          "expiresAt": {
+            "description": "When the lease now expires unless renewed, in epoch milliseconds.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "directives",
+          "expiresAt"
+        ],
+        "type": "object"
+      },
+      "JobLeaseHeartbeatResultDirectives": {
+        "properties": {
+          "createdAt": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "data": {
+            "description": "Any valid JSON value: object, array, primitive, or null",
+            "nullable": true
+          },
+          "dedupeKey": {
+            "description": "The key it was sent with, when it was.",
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "description": "The directive's number in its lease.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "createdAt",
+          "createdBy",
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "JobLeasePrecondition": {
+        "description": "What a caller presents Job's Lease, as its precondition: its guard holds the call to it before the row is read (D16, D104).",
+        "properties": {
+          "token": {
+            "description": "The lease's current fencing token, as acquire returned it: a write that presents another is refused (token_stale).",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "type": "object"
+      },
+      "JobLeaseReleaseInput": {
+        "description": "The parameters of Job's lease release.",
+        "properties": {
+          "abandon": {
+            "description": "Whether the work is given up as failed, so the release counts as an expiry.",
+            "nullable": true,
+            "type": "boolean"
+          },
+          "preconditions": {
+            "description": "What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/JobPreconditions"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "JobLeaseResetExpiriesInput": {
+        "description": "The parameters of Job's lease resetExpiries.",
+        "properties": {
+          "preconditions": {
+            "description": "What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/JobPreconditions"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "JobLeaseResetExpiriesResult": {
+        "description": "What Job's lease resetExpiries returns.",
+        "properties": {
+          "expiries": {
+            "description": "The count before the reset.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expiries"
+        ],
+        "type": "object"
+      },
+      "JobPreconditions": {
+        "description": "What the caller asserts of the Job row, by use, which each use's guard holds the call to before the row is read (D16, D104); a call that presents an entry its use refuses, or one for a use that takes none, is refused.",
+        "properties": {
+          "Lease": {
+            "description": "Lease's precondition; absent, the call presents it none.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/JobLeasePrecondition"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "JobRetriesClass": {
+        "description": "A failure class of Job's Retries.",
+        "enum": [
+          "build",
+          "rejected",
+          "timeout"
+        ],
+        "type": "string"
+      },
+      "JobRetriesRecordAttemptInput": {
+        "description": "The parameters of Job's retries recordAttempt.",
+        "properties": {
+          "detail": {
+            "description": "Anything about the attempt worth keeping, such as validation errors: recorded in the operation's event and nowhere else.",
+            "nullable": true
+          },
+          "failure": {
+            "description": "The failure class; a success when absent.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/JobRetriesClass"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          },
+          "preconditions": {
+            "description": "What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/JobPreconditions"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          },
+          "predicates": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "description": "Named checks the attempt passed or failed, for keepBest's neverRegress; a predicate absent here counts as failed.",
+            "nullable": true,
+            "type": "object"
+          },
+          "result": {
+            "description": "The attempt's result, written to resultField when it is kept; needs resultField.",
+            "nullable": true
+          },
+          "score": {
+            "description": "The attempt's score; higher is better.",
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "signature": {
+            "description": "What identifies the failure, for stuckAfter: the same signature in a row is the same failure.",
+            "maxLength": 512,
+            "minLength": 1,
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "JobRetriesRecordAttemptResult": {
+        "description": "What Job's retries recordAttempt returns.",
+        "properties": {
+          "classAttempts": {
+            "additionalProperties": {
+              "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+              "format": "int64",
+              "maximum": 9007199254740991,
+              "minimum": -9007199254740991,
+              "type": "integer"
+            },
+            "description": "Failures counted so far, by class.",
+            "type": "object"
+          },
+          "exhausted": {
+            "type": "boolean"
+          },
+          "failure": {
+            "description": "The failure class; null for a success.",
+            "nullable": true,
+            "type": "string"
+          },
+          "hint": {
+            "description": "The failure class's hint; null for a success and a class without one.",
+            "nullable": true,
+            "type": "string"
+          },
+          "kept": {
+            "description": "Whether the attempt's result was kept.",
+            "type": "boolean"
+          },
+          "retryAt": {
+            "description": "When the row may run again, as its class's backoff gives it; absent when it may run at once. A table's alone: an engine type answers none.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "score": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "stuck": {
+            "description": "Whether a repeated signature exhausted the instance.",
+            "type": "boolean"
+          },
+          "total": {
+            "description": "Failures counted so far.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "classAttempts",
+          "exhausted",
+          "kept",
+          "stuck",
+          "total"
+        ],
+        "type": "object"
+      },
+      "JobStatusState": {
+        "description": "A state of Job's status Workflow.",
+        "enum": [
+          "queued",
+          "running",
+          "waiting",
+          "done",
+          "failed"
+        ],
+        "type": "string"
+      },
+      "JobStatusTransitionInput": {
+        "description": "The parameters of Job's status transition.",
+        "properties": {
+          "from": {
+            "description": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/JobStatusState"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          },
+          "preconditions": {
+            "description": "What the caller asserts of the row, by use, which each use's guard holds the call to (D16, D104).",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/JobPreconditions"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          },
+          "to": {
+            "$ref": "#/components/schemas/JobStatusState",
+            "description": "The state to move to."
+          }
+        },
+        "required": [
+          "to"
+        ],
+        "type": "object"
+      },
+      "JobStatusTransitionResult": {
+        "description": "What Job's status transition returns.",
+        "properties": {
+          "from": {
+            "$ref": "#/components/schemas/JobStatusState",
+            "description": "The state the instance was in."
+          },
+          "to": {
+            "$ref": "#/components/schemas/JobStatusState",
+            "description": "The state it is in now."
+          },
+          "unchanged": {
+            "description": "True when the instance was already in to and the config's repeat is unchanged, so nothing was written; absent otherwise.",
+            "nullable": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "ResponseMeta": {
+        "properties": {
+          "requestId": {
+            "description": "Unique identifier for the request",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requestId"
+        ],
+        "type": "object"
+      },
+      "SessionPresenceBeatResult": {
+        "description": "What Session's presence beat returns.",
+        "properties": {
+          "deadline": {
+            "description": "When the instance is missed unless beaten again, in epoch milliseconds.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deadline"
+        ],
+        "type": "object"
+      },
+      "SessionPresenceMissResult": {
+        "description": "What Session's presence miss returns.",
+        "properties": {
+          "missed": {
+            "description": "Whether this call missed the instance.",
+            "type": "boolean"
+          },
+          "released": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "description": "When it did: the instances whose lease it expired, by releaseLeases schema; empty when another instance that stands for the principal is present.",
+            "nullable": true,
+            "type": "object"
+          }
+        },
+        "required": [
+          "missed"
+        ],
+        "type": "object"
+      },
+      "SessionStatusState": {
+        "description": "A state of Session's status Workflow.",
+        "enum": [
+          "idle",
+          "turn",
+          "missing",
+          "closed"
+        ],
+        "type": "string"
+      },
+      "SessionStatusTransitionInput": {
+        "description": "The parameters of Session's status transition.",
+        "properties": {
+          "from": {
+            "description": "The state the caller read the instance in. An instance in another state refuses the move as the veto stale, before anything else is checked, so a retry that finds its move made is stale with the state it moved to. A table's alone: an engine type refuses it.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SessionStatusState"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          },
+          "to": {
+            "$ref": "#/components/schemas/SessionStatusState",
+            "description": "The state to move to."
+          }
+        },
+        "required": [
+          "to"
+        ],
+        "type": "object"
+      },
+      "SessionStatusTransitionResult": {
+        "description": "What Session's status transition returns.",
+        "properties": {
+          "from": {
+            "$ref": "#/components/schemas/SessionStatusState",
+            "description": "The state the instance was in."
+          },
+          "to": {
+            "$ref": "#/components/schemas/SessionStatusState",
+            "description": "The state it is in now."
+          },
+          "unchanged": {
+            "description": "True when the instance was already in to and the config's repeat is unchanged, so nothing was written; absent otherwise.",
+            "nullable": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "bearerFormat": "JWT",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "REST API generated from the fixture-agents-api schema",
+    "title": "Fixture-Agents-Api API",
+    "version": "__OPENAPI_VERSION__"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/api/account/{id}/budget/check-reserve": {
+      "post": {
+        "description": "Whether reserve with the same parameters would fit now, here and in every enclosing scope, after the reservations of a lease that is no longer active are settled, as reserve settles them; it changes nothing and does not ask for a lease. Queue copies its answer so that a claim that cannot fit is not tried.",
+        "operationId": "AccountBudgetCheckReserveHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountBudgetCheckReserveInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AccountBudgetCheckReserveResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Account budget: check reserve",
+        "tags": [
+          "account"
+        ],
+        "x-superschematic-docs": {
+          "capability": "account.budget.check-reserve",
+          "description": "Whether reserve with the same parameters would fit now, here and in every enclosing scope, after the reservations of a lease that is no longer active are settled, as reserve settles them; it changes nothing and does not ask for a lease. Queue copies its answer so that a claim that cannot fit is not tried.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Account budget: check reserve",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/account/{id}/budget/observe": {
+      "post": {
+        "description": "Records the usage of a meter a provider reports, in place of what the meter counts until resetsAt (until the meter's next reset without it, and until the next observe for a meter with no reset): the meter's used is the figure given, usage recorded after it adds to it, and limit, when given, is the meter's limit while it holds. Nothing passes up to an enclosing scope. Needs observePermission. A table's alone: an engine type refuses it.",
+        "operationId": "AccountBudgetObserveHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountBudgetObserveInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AccountBudgetObserveResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Account budget: observe",
+        "tags": [
+          "account"
+        ],
+        "x-superschematic-docs": {
+          "capability": "account.budget.observe",
+          "description": "Records the usage of a meter a provider reports, in place of what the meter counts until resetsAt (until the meter's next reset without it, and until the next observe for a meter with no reset): the meter's used is the figure given, usage recorded after it adds to it, and limit, when given, is the meter's limit while it holds. Nothing passes up to an enclosing scope. Needs observePermission. A table's alone: an engine type refuses it.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Account budget: observe",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/account/{id}/budget/record-usage": {
+      "post": {
+        "description": "Records usage of a meter, which is never refused. The part of it the instance's own reservation covers is released, here and in every enclosing scope, and the usage counts in each of them. Reports every instance of the chain whose usage is over its limit after it, moves the status of each whose config gives escalate, and sends onExceeded's directive to the holder of the active lease once per meter per lease.",
+        "operationId": "AccountBudgetRecordUsageHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountBudgetRecordUsageInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AccountBudgetRecordUsageResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Account budget: record usage",
+        "tags": [
+          "account"
+        ],
+        "x-superschematic-docs": {
+          "capability": "account.budget.record-usage",
+          "description": "Records usage of a meter, which is never refused. The part of it the instance's own reservation covers is released, here and in every enclosing scope, and the usage counts in each of them. Reports every instance of the chain whose usage is over its limit after it, moves the status of each whose config gives escalate, and sends onExceeded's directive to the holder of the active lease once per meter per lease.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Account budget: record usage",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/account/{id}/budget/record-usage-for": {
+      "post": {
+        "description": "Counts usage of a meter by an instance whose scope link points here, releases the part of what this instance holds for it that its own reservation covered, never more than that one no longer holds, and passes both on up this instance's own scope. Never refused for the amount.",
+        "operationId": "AccountBudgetRecordUsageForHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountBudgetRecordUsageForInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AccountBudgetRecordUsageForResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Account budget: record usage for",
+        "tags": [
+          "account"
+        ],
+        "x-superschematic-docs": {
+          "capability": "account.budget.record-usage-for",
+          "description": "Counts usage of a meter by an instance whose scope link points here, releases the part of what this instance holds for it that its own reservation covered, never more than that one no longer holds, and passes both on up this instance's own scope. Never refused for the amount.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Account budget: record usage for",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/account/{id}/budget/reserve": {
+      "post": {
+        "description": "Reserves an amount of one meter, or of every meter the config gives a reservation, for the instance and every enclosing scope. Refused when the instance or an enclosing scope cannot fit it, and then nothing is reserved anywhere. On a type that composes Lease it needs an active lease, and the reservation is settled when that lease ends.",
+        "operationId": "AccountBudgetReserveHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountBudgetReserveInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AccountBudgetReserveResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Account budget: reserve",
+        "tags": [
+          "account"
+        ],
+        "x-superschematic-docs": {
+          "capability": "account.budget.reserve",
+          "description": "Reserves an amount of one meter, or of every meter the config gives a reservation, for the instance and every enclosing scope. Refused when the instance or an enclosing scope cannot fit it, and then nothing is reserved anywhere. On a type that composes Lease it needs an active lease, and the reservation is settled when that lease ends.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Account budget: reserve",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/account/{id}/budget/reserve-for": {
+      "post": {
+        "description": "Holds an amount of a meter for an instance whose scope link points here, as that instance's reserve does, and passes it on up this instance's own scope. Refused when the amount does not fit, when that instance does not draw the meter from here, and beyond what it has reserved and this instance does not hold for it yet.",
+        "operationId": "AccountBudgetReserveForHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountBudgetReserveForInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AccountBudgetReserveForResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Account budget: reserve for",
+        "tags": [
+          "account"
+        ],
+        "x-superschematic-docs": {
+          "capability": "account.budget.reserve-for",
+          "description": "Holds an amount of a meter for an instance whose scope link points here, as that instance's reserve does, and passes it on up this instance's own scope. Refused when the amount does not fit, when that instance does not draw the meter from here, and beyond what it has reserved and this instance does not hold for it yet.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Account budget: reserve for",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/account/{id}/budget/set-limit": {
+      "post": {
+        "description": "Sets a meter's limit on the instance, raising or lowering it; through limitField when the meter has one. Needs limitPermission, and is refused when the config names none, and below what the instance has used and reserved.",
+        "operationId": "AccountBudgetSetLimitHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountBudgetSetLimitInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AccountBudgetSetLimitResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Account budget: set limit",
+        "tags": [
+          "account"
+        ],
+        "x-superschematic-docs": {
+          "capability": "account.budget.set-limit",
+          "description": "Sets a meter's limit on the instance, raising or lowering it; through limitField when the meter has one. Needs limitPermission, and is refused when the config names none, and below what the instance has used and reserved.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Account budget: set limit",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/account/{id}/budget/settle": {
+      "post": {
+        "description": "Releases the instance's own reservation of one meter, or of every meter, here and in every enclosing scope.",
+        "operationId": "AccountBudgetSettleHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountBudgetSettleInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AccountBudgetSettleResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Account budget: settle",
+        "tags": [
+          "account"
+        ],
+        "x-superschematic-docs": {
+          "capability": "account.budget.settle",
+          "description": "Releases the instance's own reservation of one meter, or of every meter, here and in every enclosing scope.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Account budget: settle",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/account/{id}/budget/settle-for": {
+      "post": {
+        "description": "Releases up to an amount of what this instance holds of a meter for another, never more than that one no longer holds itself, and passes the release on up this instance's own scope.",
+        "operationId": "AccountBudgetSettleForHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountBudgetSettleForInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AccountBudgetSettleForResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Account budget: settle for",
+        "tags": [
+          "account"
+        ],
+        "x-superschematic-docs": {
+          "capability": "account.budget.settle-for",
+          "description": "Releases up to an amount of what this instance holds of a meter for another, never more than that one no longer holds itself, and passes the release on up this instance's own scope.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Account budget: settle for",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/account/{id}/status/transition": {
+      "post": {
+        "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+        "operationId": "AccountStatusTransitionHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountStatusTransitionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AccountStatusTransitionResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Account status: transition",
+        "tags": [
+          "account"
+        ],
+        "x-superschematic-docs": {
+          "capability": "account.status.transition",
+          "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Account status: transition",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/job/{id}/lease/acknowledge": {
+      "post": {
+        "description": "Marks directives of the lease as handled, so heartbeats stop delivering them. Only the holder, presenting the current token as Lease's precondition.",
+        "operationId": "JobLeaseAcknowledgeHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobLeaseAcknowledgeInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "description": "Any valid JSON value: object, array, primitive, or null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Job lease: acknowledge",
+        "tags": [
+          "job"
+        ],
+        "x-superschematic-docs": {
+          "capability": "job.lease.acknowledge",
+          "description": "Marks directives of the lease as handled, so heartbeats stop delivering them. Only the holder, presenting the current token as Lease's precondition.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Job lease: acknowledge",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/job/{id}/lease/acquire": {
+      "post": {
+        "description": "Takes the lease for the caller and returns its fencing token. Refused while a lease is active, the caller's own included (heartbeat renews it), without acquirePermission when the config names one, and once the instance has had maxExpiries expiries. Over a lease that expired, it applies that expiry first.",
+        "operationId": "JobLeaseAcquireHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobLeaseAcquireInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/JobLeaseAcquireResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Job lease: acquire",
+        "tags": [
+          "job"
+        ],
+        "x-superschematic-docs": {
+          "capability": "job.lease.acquire",
+          "description": "Takes the lease for the caller and returns its fencing token. Refused while a lease is active, the caller's own included (heartbeat renews it), without acquirePermission when the config names one, and once the instance has had maxExpiries expiries. Over a lease that expired, it applies that expiry first.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Job lease: acquire",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/job/{id}/lease/direct": {
+      "post": {
+        "description": "Sends the holder of the active lease a directive, which its heartbeats deliver until it acknowledges it. With dedupeKey, a directive already sent under the lease with the key is not sent again. A principal needs directPermission, or overridePermission when that is absent, and is refused when the config names neither; another behavior of the type sends one with call(), as the principal it runs for, without either.",
+        "operationId": "JobLeaseDirectHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobLeaseDirectInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/JobLeaseDirectResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Job lease: direct",
+        "tags": [
+          "job"
+        ],
+        "x-superschematic-docs": {
+          "capability": "job.lease.direct",
+          "description": "Sends the holder of the active lease a directive, which its heartbeats deliver until it acknowledges it. With dedupeKey, a directive already sent under the lease with the key is not sent again. A principal needs directPermission, or overridePermission when that is absent, and is refused when the config names neither; another behavior of the type sends one with call(), as the principal it runs for, without either.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Job lease: direct",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/job/{id}/lease/expire": {
+      "post": {
+        "description": "Applies the expiry of a lease past its expiry time or its longest hold: the holder is cleared, the token advances, the expiry is counted unless the instance is in a terminal state of its Workflow, and onExpiry or escalate moves the status. Any principal who may write the instance may call it; on any other instance it changes nothing. With holder, a principal with overridePermission expires that holder's lease at once, active or not, unless notRenewedAfter spares it. The engine's runner calls it on every lapsed lease, every sweepMs.",
+        "operationId": "JobLeaseExpireHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobLeaseExpireInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/JobLeaseExpireResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Job lease: expire",
+        "tags": [
+          "job"
+        ],
+        "x-superschematic-docs": {
+          "capability": "job.lease.expire",
+          "description": "Applies the expiry of a lease past its expiry time or its longest hold: the holder is cleared, the token advances, the expiry is counted unless the instance is in a terminal state of its Workflow, and onExpiry or escalate moves the status. Any principal who may write the instance may call it; on any other instance it changes nothing. With holder, a principal with overridePermission expires that holder's lease at once, active or not, unless notRenewedAfter spares it. The engine's runner calls it on every lapsed lease, every sweepMs.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Job lease: expire",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/job/{id}/lease/heartbeat": {
+      "post": {
+        "description": "Renews the lease, never past its longest hold, acknowledges the directives acknowledge names, and returns the directives sent under it that are not acknowledged. Only the holder, presenting the current token as Lease's precondition, while the lease is active: an expired lease cannot be renewed.",
+        "operationId": "JobLeaseHeartbeatHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobLeaseHeartbeatInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/JobLeaseHeartbeatResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Job lease: heartbeat",
+        "tags": [
+          "job"
+        ],
+        "x-superschematic-docs": {
+          "capability": "job.lease.heartbeat",
+          "description": "Renews the lease, never past its longest hold, acknowledges the directives acknowledge names, and returns the directives sent under it that are not acknowledged. Only the holder, presenting the current token as Lease's precondition, while the lease is active: an expired lease cannot be renewed.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Job lease: heartbeat",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/job/{id}/lease/release": {
+      "post": {
+        "description": "Ends an active lease: the holder, presenting the current token as Lease's precondition, or a principal with overridePermission, who need not. The token advances, so the directives sent under the lease are not delivered again, and onExpiry moves the status when it is still one of its from states. With abandon, the holder gives the work up as failed: the release counts as an expiry, and escalate applies at the one that reaches maxExpiries.",
+        "operationId": "JobLeaseReleaseHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobLeaseReleaseInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "description": "Any valid JSON value: object, array, primitive, or null"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Job lease: release",
+        "tags": [
+          "job"
+        ],
+        "x-superschematic-docs": {
+          "capability": "job.lease.release",
+          "description": "Ends an active lease: the holder, presenting the current token as Lease's precondition, or a principal with overridePermission, who need not. The token advances, so the directives sent under the lease are not delivered again, and onExpiry moves the status when it is still one of its from states. With abandon, the holder gives the work up as failed: the release counts as an expiry, and escalate applies at the one that reaches maxExpiries.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Job lease: release",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/job/{id}/lease/reset-expiries": {
+      "post": {
+        "description": "Sets the instance's count of expiries back to 0, so a lease can be acquired again after maxExpiries. Needs overridePermission; refused when the config names none.",
+        "operationId": "JobLeaseResetExpiriesHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobLeaseResetExpiriesInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/JobLeaseResetExpiriesResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Job lease: reset expiries",
+        "tags": [
+          "job"
+        ],
+        "x-superschematic-docs": {
+          "capability": "job.lease.reset-expiries",
+          "description": "Sets the instance's count of expiries back to 0, so a lease can be acquired again after maxExpiries. Needs overridePermission; refused when the config names none.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Job lease: reset expiries",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/job/{id}/retries/record-attempt": {
+      "post": {
+        "description": "Records an attempt: a success without failure, or a failure of one of the config's classes, counted against its caps, and returns the class's hint. Decides whether its result is kept, and writes a kept result to resultField. Exhausts the instance at a terminal class, a failure past a cap or a stuck signature, moving its status to exhaustedState from the from states. Refused once the instance is exhausted, and without the config's permission.",
+        "operationId": "JobRetriesRecordAttemptHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobRetriesRecordAttemptInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/JobRetriesRecordAttemptResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Job retries: record attempt",
+        "tags": [
+          "job"
+        ],
+        "x-superschematic-docs": {
+          "capability": "job.retries.record-attempt",
+          "description": "Records an attempt: a success without failure, or a failure of one of the config's classes, counted against its caps, and returns the class's hint. Decides whether its result is kept, and writes a kept result to resultField. Exhausts the instance at a terminal class, a failure past a cap or a stuck signature, moving its status to exhaustedState from the from states. Refused once the instance is exhausted, and without the config's permission.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Job retries: record attempt",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/job/{id}/status/transition": {
+      "post": {
+        "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+        "operationId": "JobStatusTransitionHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobStatusTransitionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/JobStatusTransitionResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Job status: transition",
+        "tags": [
+          "job"
+        ],
+        "x-superschematic-docs": {
+          "capability": "job.status.transition",
+          "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Job status: transition",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/session/{id}/presence/beat": {
+      "post": {
+        "description": "Moves the deadline to ttlMs from now and clears missed, and onBeat moves the status when it is one of its from states. Only the principal whose subject the instance's principalField holds.",
+        "operationId": "SessionPresenceBeatHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SessionPresenceBeatResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Session presence: beat",
+        "tags": [
+          "session"
+        ],
+        "x-superschematic-docs": {
+          "capability": "session.presence.beat",
+          "description": "Moves the deadline to ttlMs from now and clears missed, and onBeat moves the status when it is one of its from states. Only the principal whose subject the instance's principalField holds.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Session presence: beat",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/session/{id}/presence/miss": {
+      "post": {
+        "description": "Applies the miss of an instance past its deadline and not missed yet: sets missed, moves the status with onMissed when it is one of its from states, and expires the principal's leases on the releaseLeases schemas that were not renewed after its last beat, recording which in released. Any principal who may write the instance may call it; on any other instance it changes nothing. The engine's runner calls it every sweepMs.",
+        "operationId": "SessionPresenceMissHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SessionPresenceMissResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Session presence: miss",
+        "tags": [
+          "session"
+        ],
+        "x-superschematic-docs": {
+          "capability": "session.presence.miss",
+          "description": "Applies the miss of an instance past its deadline and not missed yet: sets missed, moves the status with onMissed when it is one of its from states, and expires the principal's leases on the releaseLeases schemas that were not renewed after its last beat, recording which in released. Any principal who may write the instance may call it; on any other instance it changes nothing. The engine's runner calls it every sweepMs.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Session presence: miss",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/session/{id}/status/transition": {
+      "post": {
+        "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+        "operationId": "SessionStatusTransitionHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionStatusTransitionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SessionStatusTransitionResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "forbidden: the caller lacks a permission the behavior's config names, which the core checks."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "not_found: no row holds the key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "vetoed: a behavior's guard or handler refuses the change; details.vetoCode names the rule. conflict: a row the operation would write collides with one that exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "invalid_instance: a behavior's validation refuses the fields the operation would store."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "busy: the row kept changing while the operation ran again, and it gave up; try again."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Session status: transition",
+        "tags": [
+          "session"
+        ],
+        "x-superschematic-docs": {
+          "capability": "session.status.transition",
+          "description": "Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Session status: transition",
+          "visibility": "public"
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "Runtime server",
+      "url": "__OPENAPI_BASE_URL__"
+    }
+  ]
+}

@@ -10,10 +10,11 @@ route runs every step an implemented route runs (the service step, the
 end-user step and the permission check of the set's clause among them);
 the handler then builds the caller the behaviors' core checks a behavior's
 own permissions against (a Workflow transition's), hands the repository
-the input with each optional member that is null left out, runs the
-repository's operation, and answers a refusal of the core's as the problem
-of its status, code, message and details, as the Go and Rust servers
-answer it.
+the input with each optional member that is null left out, and the
+preconditions it presents (its preconditions member, D104) beside the
+caller rather than among the parameters, runs the repository's operation,
+and answers a refusal of the core's as the problem of its status, code,
+message and details, as the Go and Rust servers answer it.
 
 It imports nothing from pg, the repositories or the rules adapter, so the
 main entry stays free of them: a refusal is recognized by its shape, the
@@ -53,24 +54,46 @@ export function behaviorCaller(ctx: RequestContext): BehaviorCaller {
 /**
  * A behavior operation's input as the route hands it to the repository: its
  * wire values with each of its optional members that is null left out
- * (D104). The API's types take null for an optional member as its absence,
- * as the Go ORM's typed parameters omit one that is none, while a
- * behavior's paramsSchema types an optional parameter without null
- * (Workflow's from, the state the caller read), so the core would refuse a
- * null one as invalid_argument. optional names the input's optional
- * members, by their wire names; any other member, and an input that is no
- * object, is handed on as it is.
+ * (D104), and each member omit names left out whatever its value. The
+ * API's types take null for an optional member as its absence, as the Go
+ * ORM's typed parameters omit one that is none, while a behavior's
+ * paramsSchema types an optional parameter without null (Workflow's from,
+ * the state the caller read), so the core would refuse a null one as
+ * invalid_argument. optional names the input's optional members, by their
+ * wire names; omit the members that are no parameter of the operation
+ * (preconditions, which the handler presents apart, behaviorPreconditions);
+ * any other member, and an input that is no object, is handed on as it is.
  */
-export function behaviorParams(input: unknown, optional: readonly string[]): unknown {
+export function behaviorParams(input: unknown, optional: readonly string[], omit: readonly string[] = []): unknown {
   if (input === null || typeof input !== 'object' || Array.isArray(input)) return input;
   const members = input as Readonly<Record<string, unknown>>;
-  if (!optional.some(name => Object.hasOwn(members, name) && members[name] === null)) return input;
+  if (!optional.some(name => Object.hasOwn(members, name) && members[name] === null) && !omit.some(name => Object.hasOwn(members, name))) return input;
   const out: Record<string, unknown> = {};
   for (const [name, value] of Object.entries(members)) {
-    if (value === null && optional.includes(name)) continue;
+    if (omit.includes(name) || (value === null && optional.includes(name))) continue;
     out[name] = value;
   }
   return out;
+}
+
+/**
+ * The preconditions a behavior operation's input presents (D16, D104): its
+ * preconditions member, each use's entry by its use id ({ Lease: { token } }),
+ * with each entry that is null left out, as the API's types take null for
+ * an absent member; undefined for an input without one, or with none but
+ * null entries. The handler passes them to the repository's operation
+ * beside its caller, never among the operation's parameters, so the core
+ * checks them before it reads the row and hands each its use's guard.
+ */
+export function behaviorPreconditions(input: unknown): Readonly<Record<string, unknown>> | undefined {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) return undefined;
+  const given = (input as Readonly<Record<string, unknown>>).preconditions;
+  if (given === null || given === undefined || typeof given !== 'object' || Array.isArray(given)) return undefined;
+  const out: Record<string, unknown> = {};
+  for (const [id, entry] of Object.entries(given as Readonly<Record<string, unknown>>)) {
+    if (entry !== null && entry !== undefined) out[id] = entry;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /** A refusal of the behaviors' core, as the rules adapter's CoreRefusal holds it. */

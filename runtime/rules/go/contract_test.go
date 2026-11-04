@@ -89,6 +89,30 @@ func TestContractJSON(t *testing.T) {
 		if got := marshal(t, command); got != `{"caller":{"subject":"alice"},"now":1,"action":{"kind":"delete","key":"o1"}}` {
 			t.Errorf("a command with no request = %s", got)
 		}
+		// A command's preconditions, each use's entry by its use id (D16,
+		// D104): written when it has any, its entries' JSON as given, and
+		// read back with each entry's text kept.
+		command.Preconditions = rules.Preconditions{"Lease": struct {
+			Token int64 `json:"token"`
+		}{3}}
+		presented := `{"caller":{"subject":"alice"},"now":1,"action":{"kind":"delete","key":"o1"},"preconditions":{"Lease":{"token":3}}}`
+		if got := marshal(t, command); got != presented {
+			t.Errorf("a command presenting a precondition = %s, want %s", got, presented)
+		}
+		var back rules.Command
+		if err := json.Unmarshal([]byte(`{"caller":{"subject":"alice"},"now":1,"action":{"kind":"delete","key":"o1"},"preconditions":{"Lease":{"token":3.0},"Other":null}}`), &back); err != nil {
+			t.Fatal(err)
+		}
+		if got := marshal(t, back); got != `{"caller":{"subject":"alice"},"now":1,"action":{"kind":"delete","key":"o1"},"preconditions":{"Lease":{"token":3.0},"Other":null}}` {
+			t.Errorf("a command's preconditions read back as %s", got)
+		}
+		var none rules.Command
+		if err := json.Unmarshal([]byte(`{"caller":{"subject":"alice"},"now":1,"action":{"kind":"delete","key":"o1"},"preconditions":null}`), &none); err != nil || none.Preconditions != nil {
+			t.Errorf("null preconditions read as %+v, %v", none.Preconditions, err)
+		}
+		if err := json.Unmarshal([]byte(`{"caller":{"subject":"alice"},"now":1,"action":{"kind":"delete","key":"o1"},"preconditions":[1]}`), &none); err == nil {
+			t.Error("preconditions that are no object read")
+		}
 	})
 
 	t.Run("anchors", func(t *testing.T) {
@@ -175,6 +199,28 @@ func TestContractJSON(t *testing.T) {
 			if got := marshal(t, linked); got != text {
 				t.Errorf("a linked read reads back as %s, want %s", got, text)
 			}
+		}
+		// A holding read (D104): its use, its owned field and the value as
+		// its JSON, its limit always.
+		for _, text := range []string{
+			`{"kind":"holding","type":"Job","useId":"Lease","field":"holder","value":"wren","limit":500}`,
+			`{"kind":"holding","type":"Job","useId":"Lease","field":"holder","value":"wren","after":"j9","limit":500}`,
+			`{"kind":"holding","type":"Job","useId":"Lease","field":"token","value":3,"limit":0}`,
+			`{"kind":"holding","type":"Job","useId":"Lease","field":"ended","value":{"reason":"ttl"},"limit":1}`,
+		} {
+			var holding rules.ReadRequest
+			if err := json.Unmarshal([]byte(text), &holding); err != nil {
+				t.Fatal(err)
+			}
+			if got := marshal(t, holding); got != text {
+				t.Errorf("a holding read reads back as %s, want %s", got, text)
+			}
+			if again := holding; again != holding {
+				t.Errorf("a holding read compares unequal to its copy")
+			}
+		}
+		if _, err := json.Marshal(rules.ReadRequest{Kind: rules.ReadKindHolding, Type: "Job", UseID: "Lease", Field: "holder", Value: "{"}); err == nil {
+			t.Error("a holding read of a value that is no JSON marshalled")
 		}
 	})
 

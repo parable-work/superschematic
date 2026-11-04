@@ -66,6 +66,34 @@ func behaviorCaller(ctx context.Context) rules.Caller {
 	}
 	return rules.Caller{}
 }
+{{- if .Rules.Preconditions }}
+
+// behaviorPreconditionsKey is the context key WithPreconditions stores
+// preconditions under.
+const behaviorPreconditionsKey contextKey = "orm_behavior_preconditions"
+
+// WithPreconditions returns ctx whose behaviors' commands present
+// preconditions (D16, D104): what the caller asserts of the row, each use's
+// entry by its use id{{ with .RulesPreconditionExample }}
+// ({{ . }}){{ end }},
+// which the use's guard holds the command to. Every command a repository
+// runs through the core with ctx presents them: the core checks them
+// against each use's behavior before it reads the row of an update, a
+// delete or an operation, and refuses as PreconditionsError an entry for a
+// use the table lacks or whose behavior takes none, and any other command
+// that presents one, a create, an upsert's insert and a deadline among
+// them. A table that composes no behavior reads none.
+func WithPreconditions(ctx context.Context, preconditions rules.Preconditions) context.Context {
+	return context.WithValue(ctx, behaviorPreconditionsKey, preconditions)
+}
+
+// behaviorPreconditions are the preconditions WithPreconditions names; nil
+// for none.
+func behaviorPreconditions(ctx context.Context) rules.Preconditions {
+	preconditions, _ := ctx.Value(behaviorPreconditionsKey).(rules.Preconditions)
+	return preconditions
+}
+{{- end }}
 
 // rulesHost is the host the core runs on in tx.
 func rulesHost(tx pgx.Tx) rules.Host {

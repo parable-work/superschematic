@@ -14,7 +14,8 @@ use std::task::{Context, Poll, Waker};
 
 use serde_json::{json, Map, Value};
 use superschematic_rules::{
-    Behavior, ConfigError, ConfigTarget, Cx, Declaration, FieldSpec, Heard, Hook, RowWrite, UseSpec,
+    Behavior, ConfigError, ConfigTarget, Cx, Declaration, FieldSpec, GuardRequest, Heard, Hook,
+    RowWrite, SchemaIssue, UseSpec, Veto, View,
 };
 
 use crate::convert::{iso_of_millis, Bind, Cell};
@@ -155,6 +156,31 @@ impl Behavior for Toy {
             .operation("clear", true)
             .operation("walk", false)
             .operation("mint", true)
+            .operation("holding", false)
+            .preconditions()
+    }
+
+    // A caller presents it a precondition of `{"stop": <boolean>}`, an
+    // object with no other member.
+    fn check_precondition(&self, _config: &Value, entry: &Value) -> Vec<SchemaIssue> {
+        match entry {
+            Value::Object(members) => members
+                .keys()
+                .filter(|name| *name != "stop")
+                .map(|name| {
+                    SchemaIssue::new("", format!("must NOT have additional properties: {name}"))
+                })
+                .collect(),
+            _ => vec![SchemaIssue::new("", "must be object")],
+        }
+    }
+
+    // A precondition of `{"stop": true}` vetoes the command's own write.
+    fn guard(&self, view: &View<'_, Value>, _request: &GuardRequest<'_>) -> Hook<Option<Veto>> {
+        Ok(view
+            .precondition()
+            .filter(|entry| entry.get("stop") == Some(&Value::Bool(true)))
+            .map(|_| Veto::new("its caller's precondition stops it")))
     }
 
     fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<Value, ConfigError> {
@@ -257,6 +283,24 @@ impl Behavior for Toy {
                 let key = cx.new_key("thing")?;
                 cx.set("seen", key.clone())?;
                 Ok(Value::from(key))
+            }
+            // A page of the rows of params' type whose use's field holds
+            // its value, after its after, under the lock Stock/s1 with its
+            // lock.
+            "holding" => {
+                if params.get("lock") == Some(&Value::Bool(true)) {
+                    cx.lock("Stock/s1")?;
+                }
+                let param = |name: &str| params.get(name).and_then(Value::as_str);
+                let value = params.get("value").cloned().unwrap_or(Value::Null);
+                let page = cx.read_holding(
+                    param("type").unwrap_or_default(),
+                    param("use").unwrap_or_default(),
+                    param("field").unwrap_or_default(),
+                    &value,
+                    param("after"),
+                )?;
+                Ok(serde_json::to_value(page).unwrap_or_default())
             }
             // A page of the rows of params' type whose field holds its
             // key, after its after, under the lock Stock/s1 with its lock.
@@ -562,7 +606,7 @@ fn a_create_with_no_id_gets_a_uuid_key_in_its_wire_form_and_its_own_columns_as_t
     let options = CreateOptions {
         execute: ExecuteOptions {
             own_columns: Some(own(json!({"title": "Desk", "created_by": "u1"}))),
-            soft_delete: None,
+            ..ExecuteOptions::default()
         },
         ..CreateOptions::default()
     };
@@ -606,7 +650,7 @@ fn an_operation_reads_its_row_by_its_key_converting_each_column_to_the_core_and_
     store.recorded.borrow_mut().queries.clear();
     let options = ExecuteOptions {
         own_columns: Some(own(json!({"updated_at": "1970-01-01T00:00:00.007Z"}))),
-        soft_delete: None,
+        ..ExecuteOptions::default()
     };
     let executed = block(run::execute(
         &host,
@@ -707,6 +751,7 @@ fn a_refusal_is_the_cores_whole_and_writes_nothing() {
         "transition",
         json!({"to": "shipped"}),
         alice(),
+        &ExecuteOptions::default(),
     ));
     let refused = refusal(result);
     assert_eq!(
@@ -1588,6 +1633,7 @@ fn a_delete_deletes_the_rows_messages_and_a_hard_one_its_sub_table_rows_after_it
     let options = ExecuteOptions {
         own_columns: None,
         soft_delete: Some(own(json!({"deleted_at": "1970-01-01T00:00:09.000Z"}))),
+        ..ExecuteOptions::default()
     };
     block(run::run_delete(
         &host,
@@ -2057,6 +2103,7 @@ fn a_soft_delete_stamps_the_live_row_held_to_its_version_in_place_of_deleting_it
         soft_delete: Some(own(
             json!({"deleted_at": "1970-01-01T00:00:09.000Z", "deleted_by": "u1"}),
         )),
+        ..ExecuteOptions::default()
     };
     block(run::run_delete(
         &host,
@@ -2664,4 +2711,251 @@ fn a_linked_read_selects_a_page_of_the_live_rows_whose_field_holds_the_key_in_ke
         )),
         Refusal::internal("rules: a read of the rows that link to a row under a lock has no check on SQLite or D1 yet (D103)")
     );
+}
+
+/// The Postgres read of a page of Probe's rows whose Toy's seen holds a
+/// value (D104).
+const HOLDING: &str = r#"SELECT to_jsonb("id") AS k, to_jsonb("title") AS c0, to_jsonb("at") AS c1, to_jsonb("owner_id") AS c2, to_jsonb("done") AS c3, to_jsonb("data") AS c4, to_jsonb("toy_seen") AS c5, "_version" AS v FROM "probe" WHERE "toy_seen" = $1 AND "deleted_at" IS NULL"#;
+
+/// Runs the toy's holding read of Probe from Order's row with `params`.
+fn holding(store: &MemoryStore, params: Value) -> Result<Value, Error> {
+    let core = toy();
+    let layout = Layout::new([toy_table(), probe_table()]);
+    let host = Host::new(&core, &layout);
+    block(run::execute(
+        &host,
+        store,
+        "Order",
+        toy_op("holding", params),
+        &ExecuteOptions::default(),
+    ))
+    .map(|executed| executed.result)
+}
+
+#[test]
+fn a_holding_read_selects_a_page_of_the_live_rows_whose_use_field_holds_the_value_by_its_column() {
+    let store = MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy()))
+        .responding(HOLDING, vec![linked_row(1), linked_row(2)]);
+    let page = holding(
+        &store,
+        json!({"type": "Probe", "use": "Toy", "field": "seen", "value": "wren"}),
+    )
+    .expect("read");
+    let row = json!({"own": {"title": "Desk", "done": false}, "owned": {}, "version": 1});
+    assert_eq!(
+        page,
+        json!({"rows": [{"key": "1", "row": row}, {"key": "2", "row": row}], "more": false})
+    );
+    assert!(store.queries().contains(&(
+        format!(r#"{HOLDING} ORDER BY "id" LIMIT 501"#),
+        vec![text("wren")]
+    )));
+
+    // After a key, bound as the key column binds one; a page of 500 of the
+    // 501 rows the read gives, and more follow.
+    let rows = (1..=501).map(linked_row).collect();
+    let store =
+        MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy())).responding(HOLDING, rows);
+    let page = holding(
+        &store,
+        json!({"type": "Probe", "use": "Toy", "field": "seen", "value": "wren", "after": "1"}),
+    )
+    .expect("read");
+    assert_eq!(page["rows"].as_array().map(Vec::len), Some(500));
+    assert_eq!(page["more"], json!(true));
+    assert!(store.queries().contains(&(
+        format!(r#"{HOLDING} AND "id" > $2 ORDER BY "id" LIMIT 501"#),
+        vec![text("wren"), text("00000000-0000-0000-0000-000000000001")]
+    )));
+
+    // SQLite selects each column as it is stored.
+    let store = MemoryStore::new(Dialect::Sqlite, Some(draft_row_of_toy()))
+        .responding(r#"SELECT "id" AS k"#, Vec::new());
+    holding(
+        &store,
+        json!({"type": "Probe", "use": "Toy", "field": "seen", "value": "wren"}),
+    )
+    .expect("read");
+    assert!(store.queries().iter().any(|(text, _)| text
+        == r#"SELECT "id" AS k, "title" AS c0, "at" AS c1, "owner_id" AS c2, "done" AS c3, "data" AS c4, "toy_seen" AS c5, "_version" AS v FROM "probe" WHERE "toy_seen" = ?1 AND "deleted_at" IS NULL ORDER BY "id" LIMIT 501"#));
+
+    // A type the layout lacks has no rows; a use or a field the layout
+    // lacks is internal, and so is a holding read under a lock a store
+    // fences.
+    let store = MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy()));
+    assert_eq!(
+        holding(
+            &store,
+            json!({"type": "Ghost", "use": "Toy", "field": "seen", "value": "wren"})
+        )
+        .expect("read"),
+        json!({"rows": [], "more": false})
+    );
+    assert_eq!(
+        refusal(holding(
+            &store,
+            json!({"type": "Probe", "use": "Lease", "field": "holder", "value": "wren"})
+        )),
+        Refusal::internal("rules: Probe has no use Lease in the behaviors' layout")
+    );
+    assert_eq!(
+        refusal(holding(
+            &store,
+            json!({"type": "Probe", "use": "Toy", "field": "holder", "value": "wren"})
+        )),
+        Refusal::internal(
+            "rules: Probe's use Toy (Toy) has no field holder in the behaviors' layout"
+        )
+    );
+    let fenced = MemoryStore::new(Dialect::Sqlite, Some(draft_row_of_toy())).fenced();
+    assert_eq!(
+        refusal(holding(
+            &fenced,
+            json!({"type": "Probe", "use": "Toy", "field": "seen", "value": "wren", "lock": true})
+        )),
+        Refusal::internal("rules: a read of the rows whose use's field holds a value under a lock has no check on SQLite or D1 yet (D103)")
+    );
+}
+
+/// Preconditions of `entries`, by use id.
+fn preconditions(entries: Value) -> ExecuteOptions {
+    ExecuteOptions {
+        preconditions: own(entries),
+        ..ExecuteOptions::default()
+    }
+}
+
+#[test]
+fn the_callers_preconditions_reach_the_command_and_its_uses_guard_and_a_malformed_one_is_refused_before_any_read(
+) {
+    let (core, layout) = (toy(), Layout::new([toy_table()]));
+    let host = Host::new(&core, &layout);
+    let update = |store: &MemoryStore, options: &ExecuteOptions| {
+        block(run::run_update(
+            &host,
+            store,
+            "Order",
+            KEY,
+            own(json!({"title": "Lamp"})),
+            alice(),
+            options,
+        ))
+    };
+
+    // An update presenting the toy's entry: its guard reads it.
+    let store = MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy()));
+    update(&store, &preconditions(json!({"Toy": {"stop": false}}))).expect("updated");
+    assert_eq!(store.applied().len(), 1);
+    let store = MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy()));
+    let refused = refusal(update(
+        &store,
+        &preconditions(json!({"Toy": {"stop": true}})),
+    ));
+    assert_eq!(
+        (refused.code, refused.class.as_str()),
+        (Code::Vetoed, "BehaviorVetoError")
+    );
+    assert!(store.applied().is_empty());
+
+    // An operation and a delete present them alike.
+    let store = MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy()));
+    let stop = preconditions(json!({"Toy": {"stop": true}}));
+    let refused = refusal(block(run::run_operation(
+        &host,
+        &store,
+        "Order",
+        KEY,
+        "Toy",
+        "mint",
+        json!({}),
+        alice(),
+        &stop,
+    )));
+    assert_eq!(refused.code, Code::Vetoed);
+    let refused = refusal(block(run::run_delete(
+        &host,
+        &store,
+        "Order",
+        KEY,
+        alice(),
+        &stop,
+    )));
+    assert_eq!(refused.code, Code::Vetoed);
+    assert!(store.applied().is_empty());
+
+    // The options' entry stands in for the command's own of the same use,
+    // and the command's other entries stay, as TypeScript's and Go's
+    // adapters merge them.
+    let store = MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy()));
+    let fenced = command(Action::Update {
+        key: KEY.into(),
+        patch: own(json!({"title": "Lamp"})),
+    })
+    .with_preconditions(own(json!({"Toy": {"stop": true}})));
+    block(run::execute(
+        &host,
+        &store,
+        "Order",
+        fenced,
+        &preconditions(json!({"Toy": {"stop": false}})),
+    ))
+    .expect("the options' entry stands in for the command's");
+    assert_eq!(store.applied().len(), 1);
+
+    // A malformed entry is the core's PreconditionsError, refused before
+    // the row is read.
+    let store = MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy()));
+    let refused = refusal(update(
+        &store,
+        &preconditions(json!({"Toy": {"stop": true, "at": 2}})),
+    ));
+    assert_eq!(
+        (
+            refused.code,
+            refused.class.as_str(),
+            refused.message.as_str()
+        ),
+        (
+            Code::InvalidArgument,
+            "PreconditionsError",
+            "preconditions of Order: /Toy: must NOT have additional properties: at"
+        )
+    );
+    assert!(store.queries().is_empty(), "{:?}", store.queries());
+
+    // A create takes none: run, or prepared for an upsert's insert, it is
+    // refused, never ignored.
+    let options = CreateOptions {
+        id: Some(KEY.into()),
+        execute: preconditions(json!({"Toy": {}})),
+        ..CreateOptions::default()
+    };
+    let store = MemoryStore::new(Dialect::Postgres, None);
+    let created = block(run::run_create(
+        &host,
+        &store,
+        "Order",
+        own(json!({"title": "Desk"})),
+        alice(),
+        &options,
+    ));
+    let refused = refusal(created);
+    assert_eq!(
+        (refused.code, refused.class.as_str()),
+        (Code::InvalidArgument, "PreconditionsError")
+    );
+    assert_eq!(
+        refused.message,
+        "preconditions of Order: a create takes no preconditions: an update, a delete or an operation of a row presents them"
+    );
+    let prepared = block(run::prepare_create(
+        &host,
+        &store,
+        "Order",
+        own(json!({"title": "Desk"})),
+        alice(),
+        &options,
+    ));
+    assert_eq!(refusal(prepared).class, "PreconditionsError");
+    assert!(store.applied().is_empty());
 }

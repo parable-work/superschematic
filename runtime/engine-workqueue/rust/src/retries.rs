@@ -59,6 +59,16 @@
 //! configChange: any config may change. Retries can be added to a schema
 //! that has instances, which start with no attempts, and cannot be removed
 //! from one: the attempts its instances recorded would stay behind.
+//!
+//! What only a table's Retries takes (D104), whose declaration the engine
+//! shares, the engine refuses rather than ignores, at define, naming the
+//! table form: a class's `backoff`, and the config's `retryInto`, `then`,
+//! `giveUpAfterMs`, `window`, `keyField` and `status`, the first it names in
+//! that order. An engine type's Retries keeps no time and no key, so a wait
+//! it would not keep is a hole, and an engine type can be defined at run
+//! time, past any build's check. Its readers of a table's `retryAt`,
+//! `failingSince` and `keyedBy` read none, so the engine's records do not
+//! change, and it never answers `backing_off` or `throttled`.
 
 use serde_json::{json, Map, Value};
 
@@ -77,6 +87,40 @@ use superschematic_engine_behaviors::is_terminal_state;
 use crate::moves::{self, StatusMove};
 
 const NAME: &str = "Retries";
+
+// How a refusal of what only a table's Retries takes names the table form
+// (D104).
+const TABLE_FORM: &str = "implements Retries<T, { ... }> on a DB table, D104";
+
+// table_member says why a config names a member only a table's Retries
+// takes (D104): each class's backoff, in the config's order, then
+// retryInto, then, giveUpAfterMs, window, keyField and status; None for a
+// config that names none.
+fn table_member(raw: &Value) -> Option<String> {
+    if let Some(classes) = raw.get("classes").and_then(Value::as_object) {
+        for class in js_keys(classes) {
+            if classes[class].get("backoff").is_some() {
+                return Some(format!(
+                    "the class \"{class}\" sets backoff, which a table's Retries takes ({TABLE_FORM}): an engine type's Retries keeps no time, and work that may run again may be claimed at once"
+                ));
+            }
+        }
+    }
+    let members = [
+        ("retryInto", "keeps no time, so no move waits for it"),
+        ("then", "arms no deadline"),
+        ("giveUpAfterMs", "exhausts an instance by its caps alone"),
+        ("window", "keeps no attempt's time"),
+        ("keyField", "counts every attempt of an instance together"),
+        ("status", "reads its one Workflow"),
+    ];
+    members
+        .iter()
+        .find(|(member, _)| raw.get(*member).is_some())
+        .map(|(member, why)| {
+            format!("{member} is a table's Retries' ({TABLE_FORM}): an engine type's Retries {why}")
+        })
+}
 
 /// A failure class: a cap of failures with an optional hint for the next
 /// attempt, or terminal.
@@ -415,6 +459,10 @@ impl Behavior for Retries {
     // The configSchema holds the shape; this holds the config to the type:
     // its fields and its Workflow's states.
     fn parse_config(&self, raw: &Value, target: &ConfigTarget<'_>) -> Result<RetriesConfig> {
+        // What only a table's Retries takes is refused first (D104).
+        if let Some(reason) = table_member(raw) {
+            return Err(Error::config(reason));
+        }
         let text = |name: &str| raw.get(name).and_then(Value::as_str).map(str::to_owned);
         let field_of = |at: &str, field: &str| -> Result<Vec<Value>> {
             if !target.fields().iter().any(|known| known == field) {
@@ -571,6 +619,10 @@ impl Behavior for Retries {
                 ("stuck", |_, view| {
                     Ok(Some(Value::Bool(state_of(view)?.stuck)))
                 }),
+                // A table's alone (D104): an engine type keeps none.
+                ("retryAt", |_, _| Ok(None)),
+                ("failingSince", |_, _| Ok(None)),
+                ("keyedBy", |_, _| Ok(None)),
             ],
             after_change: Some(|_, cx, change| {
                 if matches!(change, InstanceChange::Delete) {

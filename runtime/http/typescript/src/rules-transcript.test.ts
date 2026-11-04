@@ -43,7 +43,17 @@ import { bumpVersion, columnTypes, core, packageCore, postgresDatabase, rulesDsn
 // frozen field a by names, or of a gate's resetOn or pinned, whose commands
 // each hold the version of their row after them (expect.version), so a
 // repeat answered unchanged is held to writing nothing and a sign-off to
-// moving the version. Each
+// moving the version; core-lease's and core-retries', from the work
+// queue's recordings, whose uses keep a fencing token, BIGINT and JSON
+// columns, sub-tables and deadlines, and whose commands present Lease's
+// token as their preconditions, which the adapter passes on as the
+// transcript writes them; core-presence's and core-budget's, whose miss
+// expires the leases a principal holds on another table (a holding read)
+// and whose meters are sub-table rows of a row and of its scope; and
+// core-retries-waits' and core-periods-and-presence', written by hand for
+// D104's upgrades (a backoff, a window, a key, a precondition refused,
+// reset periods, a rolling window, an observed usage, a ttl by state).
+// Each
 // scenario gets a table per type and database, its own fields' columns
 // beside the owned columns the layout rule gives each use of any version
 // and _version, and, for a use whose behavior declares tables, each
@@ -65,10 +75,11 @@ import { bumpVersion, columnTypes, core, packageCore, postgresDatabase, rulesDsn
 // The tables here follow the layout rule as the core's README states it,
 // restated by this test (the corpus's uses are type-anchored: Workflow's
 // workflow_status and workflow_entered_at, Timers' sub-table
-// <table>_timers_deadlines, Approvals' <table>_approvals_sign_offs), and
-// an own field of a JSON type other than a string, a number or a boolean
-// (an object, a list) is a Generic.JSON column, JSONB on Postgres and its
-// text on SQLite. The layout the generator writes
+// <table>_timers_deadlines, Approvals' <table>_approvals_sign_offs), an
+// own field of a JSON type other than a string, a number or a boolean (an
+// object, a list) is a Generic.JSON column, JSONB on Postgres and its text
+// on SQLite, and a declared field of Generic.Int64 is a BIGINT, which pg
+// hands over as its text and the adapter reads as a number. The layout the generator writes
 // (internal/generator/behaviorlayout) is held by the generated packages'
 // own end-to-end tests, not by this one.
 
@@ -87,6 +98,12 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   { file: 'core-staterules', floor: 76 },
   { file: 'core-approvals', floor: 122 },
   { file: 'core-freezes-and-sign-offs', floor: 115 },
+  { file: 'core-lease', floor: 436 },
+  { file: 'core-presence', floor: 141 },
+  { file: 'core-budget', floor: 495 },
+  { file: 'core-retries', floor: 250 },
+  { file: 'core-retries-waits', floor: 158 },
+  { file: 'core-periods-and-presence', floor: 77 },
 ];
 
 /** A row as the transcript holds it: its own and owned fields, each with no value absent. */
@@ -183,6 +200,8 @@ function sqlType(dialect: 'sqlite' | 'postgres', column: RulesColumn): string {
       return t.number;
     case 'boolean':
       return t.boolean;
+    case 'Generic.Int64':
+      return t.integer;
     default:
       return t.json;
   }

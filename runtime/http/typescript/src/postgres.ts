@@ -400,6 +400,7 @@ export type {
   UuidFilter,
   VectorMetric,
   VectorRepository,
+  WriteOptions,
 } from './orm.js';
 // The system actor an ORM's asSystem() acts as, for a job's or a worker's
 // writes (D87).
@@ -416,6 +417,7 @@ export {
   postgresRulesStore,
   prepareCreate,
   readArmedDeadlines,
+  readHolding,
   readLinked,
   readRow,
   readSubRows,

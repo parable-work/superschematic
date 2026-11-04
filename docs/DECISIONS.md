@@ -13580,7 +13580,7 @@ This entry records the design before any of it is built.
 | Decision | Alternatives not taken |
 |----------|------------------------|
 | A behavior is a mixin on a persisted type. It contributes fields, sub-tables, indexes and constraints, operations, reads, timed work and rules, and the type stays a table: its repository, migrations, relations, indexes, reports, projections, vectors, upserts and queues work beside the behavior as they do without it. | Engine types (D58), which move the type's rows into the engine's store; a service kind of its own for behaviors |
-| A behavior has state of its own, rules over how that state changes, and recurs across applications. A storage shape alone, or a query alone, is a schema feature. By that test `Links` is `Relation<>`, `Search` is `@searchField` with D84's vectors, `Queue`, `Lease` and `Retries` are `@queue` (D53, D68, D80), and `Branches` is `@versioned` with its version graph (D17, D19), and each of those behaviors goes. Every other behavior is held to the test when it is ported. | Keeping both, two ways to say each thing, which an agent writing a schema has to choose between |
+| A behavior has state of its own, rules over how that state changes, and recurs across applications. A storage shape alone, or a query alone, is a schema feature. By that test `Links` is `Relation<>`, `Search` is `@searchField` with D84's vectors, `Queue`, `Lease` and `Retries` are `@queue` (D53, D68, D80), and `Branches` is `@versioned` with its version graph (D17, D19), and each of those behaviors goes. Every other behavior is held to the test when it is ported. (Amended by D104: `Lease` and `Retries` stay behaviors a table implements, since an application leases and retries rows that are no queue's messages; `Queue` folds.) | Keeping both, two ways to say each thing, which an agent writing a schema has to choose between |
 | A behavior changes another's state only through that behavior's operations, as D16 has it, and two behaviors meet through a named contract. A contract is an interface: D70's supply contract (`holdFor`, `commitFor`, `releaseFor`, `checkHold`) becomes `Supply`, which `Stock` and `Calendar` implement and a project's own supply may. The loader checks that a link `Holds` reads names a type that implements `Supply`, and that every requirement (`Holds` requires `Workflow`) is met, naming the one missing. | Requirements as TypeScript constraints, which `implements` cannot carry, since it adds nothing to the class's type |
 | The fields a behavior owns are read-only in the generated repository and SDKs, and only its operations change them. Nothing refuses a raw SQL write to one: an operator who needs to repair a row has a way to, and the documentation and the agent skill (D76) say why not to. | A trigger that refuses the write, which leaves no way out |
 
@@ -13689,8 +13689,13 @@ sub-table of its own; Constants and StateRules fail it, keeping no state
 of their own and holding rules over the table's own fields, and are ported
 because D104 orders it, which leaves step 5 the question of whether a
 field's constancy and direction and a state's required and frozen fields
-become declarative rules. The rest of step 4, and steps 5 to 7, are not
-built. The names and rules are reversible until the first release.
+become declarative rules. Lease, Retries, Presence and Budget followed,
+each with D104's upgrade (its step 2's second batch), and each passes the
+test with state of its own: Lease's holder, token and directives,
+Retries' counts and attempts, Presence's deadline and misses, and
+Budget's meters, holds and buckets, each rule over time a deadline in
+place of the engine runner's sweep. The rest of step 4, and steps 5 to 7,
+are not built. The names and rules are reversible until the first release.
 - **The core.** `runtime/engine/rust/rules` (`superschematic-rules`)
   depends on serde and serde_json alone and builds for
   wasm32-unknown-unknown. `Core::run(type, command, answers)` returns
@@ -14833,7 +14838,7 @@ minutes.
 
 | Decision | Alternatives not taken |
 |----------|------------------------|
-| `Lease` stays a behavior a table implements (`implements Lease<Session, { ttlMs, onExpiry, ... }>`): its holder, token and times are the table's owned columns, its directives a sub-table, with the config, guards and fencing token D16's amendments gave it. A `@queue`'s claim keeps its own lease (D53), which is a message's. | The fold D103 records, which leaves a row no lease; a queue message per leased row, whose claim is a worker's and not the caller's who holds the row |
+| `Lease` stays a behavior a table implements (`implements Lease<Session, { ttlMs, onExpiry, ... }>`): its holder, token and times are the table's owned columns, its directives a sub-table, with the config, guards and fencing token D16's amendments gave it. A `@queue`'s claim keeps its own lease (D53), which is a message's. (Amended when step 2 was built: a table's lease expires at a deadline of its own, so its Lease takes no `sweepMs`; `directOn` waits for Revisions and Branches on the core, and `expireHolder`, an operation of the table as a whole, for a command without a row; and the token is the command's precondition, which an API's request presents in its body rather than in D16's header.) | The fold D103 records, which leaves a row no lease; a queue message per leased row, whose claim is a worker's and not the caller's who holds the row |
 | `Retries` stays a behavior a table implements, counting the row's attempts, with the time the section below gives it. D68's backoff stays the queue's, for its messages. | Counting a row's attempts as messages of a queue that no worker drains |
 | `Queue` folds as D103 has it. A claim of the next row is a declared read (D86) of the rows that may be claimed, in the order the app wants, and Lease's `acquire` on the one it picks; a claimer that loses the race meets `held_by_another` and reads again. | Keeping `Queue`'s `claimNext` as a behavior: its one transaction saves a retry under contention, which the app's claims, a handful a minute, never meet |
 
@@ -14900,7 +14905,7 @@ and count per version.
 | A class may set `backoff: { firstMs, maxMs, factor? }` (`factor` 2 when absent). An attempt that fails in it sets the owned `retryAt`, and until then a Workflow transition into a state of `retryInto`, or Lease's `acquire`, is `vetoed` (`backing_off`, details `{ retryAt }`). With `then`, a deadline (D103, step 3) armed at `retryAt` moves the row. | Backoff in each caller, which every caller of the row has to agree on; D68's backoff, which is a message's |
 | `giveUpAfterMs` exhausts the row at its first failed attempt that long after the first failure since its last success. | A count alone, which cannot say "for half an hour" of a wait that doubles |
 | `window: { attempts, ms }` caps the attempts in any `ms`: one more is `vetoed` (`throttled`, details `{ until }`) until the oldest leaves the window. The attempts' times are a sub-table. | Exhausting at the cap, which ends a record that may run again in half an hour |
-| `keyField` names an own field whose value keys every class's count: a new value starts them again. `{ attempts: 1 }` with `keyField: "version"` is once per version. | A class per version, which a config cannot list ahead |
+| `keyField` names an own field whose value keys every class's count: a new value starts them again. `{ attempts: 1 }` with `keyField: "version"` is once per version. (Amended when step 2 was built: a table that composes behaviors keeps its version in `_version` and declares no field named `version`, so the key is an own field of the app's, `keyField: "revision"`.) | A class per version, which a config cannot list ahead |
 
 ### Budget keeps periods, and usage reported from outside
 
@@ -14915,7 +14920,7 @@ cap until its period rolls over.
 |----------|------------------------|
 | A meter's `reset` is `hourly`, `daily`, `weekly` or `monthly`, in UTC, or `{ everyMs }`. | Daily alone |
 | `window: "rolling"` counts the last period rather than the current one, from usage kept in buckets of a sub-table, a sixtieth of the period each. | Fixed windows alone, which let twice the cap through across a boundary |
-| `observe({ meter, used, limit?, resetsAt? })` records usage a provider reports, which replaces what the meter counts until `resetsAt`; a caller needs `observePermission`. | Recording the provider's figure as usage, which adds it to what the app counted itself; `@rateLimit`, which counts a route's calls per client, outside the write's transaction |
+| `observe({ meter, used, limit?, resetsAt? })` records usage a provider reports, which replaces what the meter counts until `resetsAt`; a caller needs `observePermission`. (Amended when step 2 was built: without `resetsAt` it holds until the meter's next period starts, or with no reset until the next observe, and usage recorded while it holds adds to the provider's figure.) | Recording the provider's figure as usage, which adds it to what the app counted itself; `@rateLimit`, which counts a route's calls per client, outside the write's transaction |
 
 ### Presence times by state, and Constants moves one way
 
@@ -14925,7 +14930,7 @@ requirements on and never off; its person may do both.
 
 | Decision | Alternatives not taken |
 |----------|------------------------|
-| `Presence` may set `ttlByState: { <state>: ms }`, read against the Workflow its `status` names, or the table's one, as Timers' config reads it, with `ttlMs` for the states it does not list. A beat arms the deadline its row's state gives, and a transition arms it again. | Two Presence uses, which one use of a behavior per type rules out (D16), and whose two deadlines would both miss |
+| `Presence` may set `ttlByState: { <state>: ms }`, read against the Workflow its `status` names, or the table's one, as Timers' config reads it, with `ttlMs` for the states it does not list. A beat arms the deadline its row's state gives, and a transition arms it again. (Amended when step 2 was built: the deadline counts from the later of the row's last beat and its entry into its state, so a transition arms it from the entry, and a row that leaves a long state is not missed the instant it leaves it.) | Two Presence uses, which one use of a behavior per type rules out (D16), and whose two deadlines would both miss |
 | `Constants` may list `oneWay: { <field>: "up" }` or `"down"`: a boolean that only turns true (or false), a number or a date-time that only grows (or shrinks), unless the caller holds `permission`. | A guard per app, or a field per direction |
 
 ### Pool
@@ -15059,9 +15064,13 @@ refusing each. Step 2's first batch built: Constants with `oneWay`,
 StateRules with `by` and Approvals with `resetOn` and `pinned`, ported
 onto the core with their recordings replayed, their upgrades' cases
 written by hand, and a table implementing them in each language. Step
-2's second batch (Lease, Retries, Presence and Budget) and steps 3 and 4
-are not built. The names and configs are reversible until the first
-release.
+2's second batch built: Lease with its fencing token presented as a
+command's precondition, Retries with a backoff, a window of attempts and
+keyField, Presence with ttlByState, and Budget with its periods, its
+rolling window and observe, ported onto the core with their recordings
+replayed, their upgrades' cases written by hand, and a table implementing
+each in each language. Steps 3 and 4 are not built. The names and
+configs are reversible until the first release.
 - **The core addition.** `Behavior::settle(view, operation, params)` is a
   hook a use answers about an operation of its own before any use's guard
   is asked. The core asks it after the parameter check, for a caller's
@@ -15489,6 +15498,434 @@ release.
   (`TestABuildsCatalogListsTheCoresWritePermissions`). The existing
   fixtures' goldens change by the declarations' new members alone, but the
   Go ORM's fix above.
+- **Step 2, second batch: the ports.** `rules-behaviors` ports Lease,
+  Retries, Presence and Budget from the engine's work queue (`lease.rs`,
+  `retries.rs`, `presence.rs`, `budget.rs`, beside two private helpers:
+  `moves.rs`, the moves of a status a config makes, `{ transition, from }`,
+  checked against the Workflow the config reads and made through
+  Workflow's `transition` by `Cx::call`; and `periods.rs`, Budget's periods
+  in UTC), with the engine's rules, codes and wording, their config checks
+  hand-written and held to the declarations' configSchemas by a test, and
+  their declarations read in place from the work queue's copies
+  (`runtime/engine-workqueue/rust/declarations`, which `make behaviors`
+  writes). The core registers the ten in the order Workflow, Reactions,
+  Constants, StateRules, Approvals, Timers, Lease, Presence, Budget and
+  Retries, the engine's work-queue order after the six (`NAMES`, `core()`,
+  Go's `registry.RulesBehaviors`, every transcript's `behaviors`). Each
+  module doc holds it to D103's test, and all four pass it. Each keeps state
+  of its own: Lease its holder, token, times, expiries and how its last
+  lease ended, its directives and its expiry's deadline; Retries its
+  counts, its exhaustion, when the row may run again, since when it has
+  failed and the key it counted under, its attempts and its `then`'s
+  deadline; Presence its deadline, last beat, whether it was missed and
+  what its last miss released, and the miss's deadline; Budget its meters,
+  what it holds for the rows inside it and a rolling meter's buckets. Each
+  has rules over how that state changes, and each recurs (a session a
+  device claims, a job a worker runs, a sandbox tried once per version, a
+  worker's heartbeat, an API's quotas, a workspace's caps over its
+  members). A table says `implements Lease<Job, { ... }>`, `Retries<Job, {
+  ... }>`, `Presence<Session, { ... }>` and `Budget<Account, { ... }>`
+  beside a Workflow field (`@superschematic/db`'s carriers), and each reads
+  the Workflow its config's new `status` names (a table's alone) or the
+  table's one, as Timers' does. Every rule over time is a deadline (D103,
+  step 3), never a runner's sweep: Lease's `expire` at `expiresAt`, which
+  already holds the earlier of the ttl and the longest hold; Retries'
+  `retry` at `retryAt`; Presence's `miss` at its deadline. Each holds every
+  write through the core, as the first batch's do. `tests/lease.rs` has 17
+  cases, `tests/retries.rs` 16, `tests/presence.rs` 22 and
+  `tests/budget.rs` 23, the last two on a host of several types
+  (`tests/tables`) with the real Lease among them.
+- **Lease on a table.** Its owned columns are `holder`, `token`,
+  `acquiredAt`, `renewedAt`, `expiresAt`, `expiries` and `ended`
+  (`lease_holder` to `lease_ended`, `ended` a `Generic.JSON`), its
+  directives the sub-table `directives` (`job_lease_directives`, keyed by
+  the directive's number in ten digits), and its expiry one deadline,
+  `expire`. `active` stays volatile, computed at the read's time
+  (`Behavior::read_fields_at`), and no `ttlMs` column is kept: a heartbeat
+  renews by `expiresAt − renewedAt`, the length the last acquire or
+  heartbeat gave, which is the engine's renewal while the hold stays where
+  it was. The guard
+  keeps the engine's order and words: `token_stale` first, whoever calls,
+  then the holder's own operations' refusals, `hold_limit_fixed`,
+  `held_by_another`, `token_required` under `requireToken`, and `lapsed`. A
+  use's call of its own operation on its row (the deadline's handler
+  calling `expire`, Timers' `fireTimer`), and any call a deadline's handler
+  makes on its row (`fired`: Retries' `then`), is held as the command's
+  caller's request, since the engine's runner invoked it as its principal,
+  so a worker's fire meets an active lease as the runner's did; every other
+  `call()` and `call_on()` is a behavior's request, which the guard lets
+  through (D16). A fire whose lease's deadline moved since it was armed
+  arms it again. An update of `maxHoldField` while a lease is held, which
+  only a caller with `overridePermission` makes past `hold_limit_fixed`,
+  caps `expiresAt` at the new hold and moves the deadline there; a longer
+  hold extends it only when the old one cut the last renewal short
+  (`expiresAt` at the old hold), to the renewal the config's `ttlMs` gives
+  from `renewedAt` under the new hold, so the heartbeats renew by the ttl
+  again rather than by the short length the cut left, which would lapse a
+  lease the operator meant to give more time. A row that predates the use
+  reads as free at token 0. `sweepMs`, how often the engine's runner swept
+  the lapsed leases, is refused on a table, since each lease expires at its
+  own deadline, which the API's behavior worker runs; `directOn`, which sends
+  the holder a directive when a link's target moves on, waits for
+  Revisions and Branches on the core (D103, step 4); both are refused by
+  the core's define check and the build, after every check the engine
+  made. `expireHolder`, an operation of the table as a whole, is left out
+  of the core's declaration (`declared.rs` leaves out every operation whose
+  scope is `schema` or `namespace`), of the layout and of a
+  `@behaviorOperations` set, which warns of it.
+- **The fencing token as a command's precondition.** The core's command
+  carries `preconditions`, each use's entry by its use id (`{ "Lease": {
+  "token": 3 } }`, D16's form, since an implements use's id is its
+  behavior's name). A behavior whose declaration has a
+  `preconditionSchema` declares that it takes one
+  (`Declaration::preconditions`) and checks an entry
+  (`Behavior::check_precondition`: Lease's `{ token }`, an integer of at
+  least 0, in the registry's words). For an update, a delete or an
+  operation the core checks them before it reads the row: an entry for a
+  use the type lacks, for a use whose behavior takes none (`behavior
+  Retries takes no precondition`) or one its behavior refuses is
+  `invalid_argument`, class `PreconditionsError` (`preconditions of Job:
+  /Lease/token: must be >= 0`), details `{ issues }`, and any other command
+  that presents one is refused the same way (`a create takes no
+  preconditions: an update, a delete or an operation of a row presents
+  them`). A guard reads its use's entry through `View::precondition()`, and
+  only when asked about the command's own update, delete or operation: a
+  `call()`, a `call_on()`, a create and every other hook read none, so a
+  request a behavior's code makes presents nothing, as D16 has it. A
+  transcript's command carries `preconditions` as the core's `Command`
+  serializes it. TypeScript's adapter takes `ExecuteOptions.preconditions`,
+  and its ORM `updateOne(id, update, { preconditions })`, `deleteOne(id, {
+  preconditions })` and an operation's `{ caller, preconditions }`, typed
+  per table (`JobPreconditions`, `{ readonly Lease?: { readonly token:
+  number } }`), throwing for one given to a table that composes no
+  behavior; Go's `Command.Preconditions`, and the ORM's
+  `WithPreconditions(ctx, rules.Preconditions{...})`, read by every command
+  the context's repositories run through the core, beside a struct per use
+  (`JobLeasePrecondition`); Rust's `ExecuteOptions.preconditions` and
+  `run_operation_with`. An API presents it as a body member,
+  `preconditions`, of every behavior operation's input on a table one of
+  whose uses takes one, typed `JobPreconditions` with a member per use
+  (`JobLeasePrecondition`), never a header: the input is a type the build
+  writes, so the member sits beside the parameters (the build refuses a
+  parameter of that name on such a table), and an SDK's call and an MCP
+  tool carry it as any input member, with no header to plumb through four
+  SDKs and the MCP endpoint; D16 chose a header because the engine's body
+  was a merge patch or a closed paramsSchema, neither of which a table's
+  generated input is. The generated handlers take the member out of the
+  input and pass it on (TypeScript's `behaviorPreconditions`, beside a new
+  third argument of `behaviorParams`, the members it leaves out; Go's
+  `runBehaviorOperationWithPreconditions` under `orm.WithPreconditions`;
+  Rust's `run_operation_with_preconditions`), each generated only where an
+  input has it, so no existing golden changes. OpenAPI, the four SDKs and
+  the MCP tools (`job_lease_heartbeat`'s `preconditions` argument) carry it
+  with no change to their generators. A table's API has no generated
+  update or delete route, so those present it through the repositories.
+- **Retries that wait.** A class takes `backoff: { firstMs, maxMs,
+  factor? }`; the config takes `retryInto`, `then`, `giveUpAfterMs`,
+  `window`, `keyField` and `status`, since a row has one `retryAt`, one
+  first failure since its last success, one window and one key. A failure
+  that does not exhaust, in a class with a backoff, sets the owned
+  `retryAt` to `now + min(maxMs, floor(firstMs × factor^(n−1)))`, `n` the
+  class's failures since the row's last success under its current key,
+  this one included; a success, a failure of a class without one, an
+  exhausting failure and a new key clear it. Until then a transition into
+  a state of `retryInto`, and Lease's `acquire`, is vetoed `backing_off`,
+  `{ retryAt }`; `recordAttempt` itself never waits. `then: { transition,
+  from }` arms the deadline `retry` at `retryAt`, whose fire moves the row
+  through Workflow's `transition` while its status is one of `from`; a
+  status that enters one of them once `retryAt` has passed (the fire having
+  fallen due while the row was elsewhere, say) arms it again at once. The
+  move is the worker's request, which the core tells each guard
+  (`GuardRequest::Operation`'s `fired`, a call a deadline's handler makes
+  on its row), so another principal's active lease holds it as it holds
+  Timers' fire: a guard's veto refuses the deadline's command, which the
+  worker releases to fall due a minute on, a move into `retryInto` the
+  window holds arms the deadline again at the window's `until`, and
+  `forbidden` leaves the status. `giveUpAfterMs` keeps the
+  owned `failingSince`, and exhausts at a failure that long after it, once
+  that failure has counted. `window: { attempts, ms }` counts every recorded
+  attempt, a success or a failure, within the last `ms`, and with
+  `attempts` of them vetoes the next start `throttled`, `{ until }`, the
+  time the oldest of the last `attempts` leaves the window. The attempts
+  are the sub-table `attempts` (`job_retries_attempts`): every attempt
+  recorded, with its time, failure, score, whether it was kept, its
+  signature, predicates and detail, its subject and its key, from which the
+  streak, the last kept predicates, the backoff's `n` and the window are
+  read. `keyField` keeps the owned `keyedBy`, the key's text: a row whose
+  field holds another value reads as one with no attempts, and an update
+  through the core that changes it resets the owned fields at once and
+  clears the `retry` deadline; the attempts keep the key each was counted
+  under. The other owned columns are `total`, `classAttempts` (a
+  `Generic.JSON` of every class), `bestScore`, `exhausted` and `stuck`. A
+  member nothing waits for is refused at define (`then` with no backoff,
+  `retryInto` with no backoff and no window, a backoff with no `retryInto`,
+  no `then` and no Lease, a window with no `retryInto` and no Lease), and
+  so, last, is `resultField`, which writes a kept result through an update
+  an operation makes and waits for Revisions on the core (D103, step 4).
+  Retries reads its classes by code point, as the engine read its
+  canonical document, so its messages and `classAttempts` list them so.
+- **Presence by state.** Its state is four owned columns, `deadline`,
+  `lastBeatAt`, `missed` and `released` (`presence_deadline` to
+  `presence_released`, a `Generic.JSON`), and one deadline, `miss`, armed
+  while the row is not missed, whose fire calls Presence's own `miss`.
+  Only the principal `principalField` holds beats a row (`not_principal`,
+  compared by `subjects::names_subject`, so a UUID field names its subject
+  in either form), `principal_fixed` holds the field once set, and
+  `sweepMs` is refused on a table, as Lease's is. With `ttlByState` the
+  deadline is the later of the row's last beat and its entry into its
+  state (its Workflow's `enteredAt`), plus the ttl its state gives, else
+  `ttlMs`: a function of the row's fields, which every write through the
+  core reconciles, and a row that leaves a long state is never missed the
+  instant it leaves it. A beat arms it from the beat; Presence's
+  after-change hook, which reads the status and `enteredAt` as each write
+  through the core leaves them, arms it again when it moved, so a
+  transition another use makes (a Timers `then`, Lease's `onExpiry`, a
+  Reactions rule) arms it too. It is no `listens`, which hears another
+  table's rows, and no `hearsChanges`, which would give every Presence
+  table a change queue and a trigger and lag the commit. A fire whose row's
+  state now gives a later deadline (a raw write moved it) arms that one
+  rather than miss. Without `ttlByState` the engine's rule stands: the
+  create, then each beat, plus `ttlMs`. A miss moves the status by
+  `onMissed` and, while no other row of the principal is present, expires
+  the leases the principal holds on each table `releaseLeases` names: it
+  finds them with the core's new holding read (`ReadRequest::Holding`,
+  `View::read_holding`: the rows of a type whose use's owned field holds a
+  value, a page at a time), once per form of a UUID subject
+  (`subjects::subject_forms`), and calls Lease's own `expire({ holder,
+  notRenewedAfter })` on each through `Cx::call_on`, so Lease's rules run
+  and its `overridePermission` is checked against the deadline's caller,
+  the worker, which holds the permissions its `@behaviorWorker` lists, as
+  the engine's runner needed it. `notRenewedAfter` is the principal's last
+  sight over its rows, so a lease renewed since is spared.
+- **Budget's periods and observe.** Its state is three sub-tables:
+  `meters`, a row per meter (`account_budget_meters`: used, reserved, the
+  limit `setLimit` set, the reservation and its lease's token, the period's
+  start, the scope that holds the reservation, and an observation);
+  `holds`, what a scope holds for each row inside it; and `buckets`, a
+  rolling meter's usage, a sixtieth of its period each, so a write touches
+  one bucket and SQL reads them as rows. `meters` stays the computed field
+  it was, computed at the read's time (`read_fields_at`); Budget arms no
+  deadline and hears no change. `reset` is `hourly`, `daily`, `weekly`
+  (from each Monday 00:00 UTC), `monthly` (the calendar month in UTC) or
+  `{ everyMs }` (a whole number of minutes, from each multiple of it since
+  the epoch); a read writes nothing, and the next write starts the period.
+  `window: "rolling"`, which needs a `reset`, counts every bucket that
+  overlaps the last period, the current one and the sixty before it, so no
+  stretch of a period's length lets more than the limit through (sixty
+  would let a bucket's usage leave up to a bucket early, and the limit
+  through twice within a period at any bucket's boundary); a month is
+  thirty days for a window, and each write deletes the buckets that left
+  it; reservations are not windowed.
+  `observe({ meter, used, limit?, resetsAt? })` needs `observePermission`
+  (`not_configured` when the config names none, `forbidden` for a caller
+  without it), and holds the provider's figure in place of the meter's own
+  count, and its `limit` in place of the meter's, until `resetsAt`, else
+  the meter's next period start, else the next observe; usage recorded
+  while it holds adds to it, and it passes nothing up a chain of scopes,
+  whose meters count what their rows record. A meter's `scope` is a to-one
+  relation of the table (`workspace: Relation<Workspace>`, where the engine
+  read a Links link), whose target implements Budget with the meter; the
+  scope operations run on the target's row through `Cx::call_on`, reading
+  the inner row's meters as the run has them (`View::sub_rows_of`), and an
+  update of the relation's column while the meter holds a reservation is
+  vetoed `scope_reserved`. On a table that implements Lease a reservation
+  needs an active lease (`not_leased`), read from Lease's owned fields by
+  Lease's rule, and what an ended lease reserved is settled after each
+  Lease operation or deadline. `setLimit` of a meter whose limit an own
+  field holds is refused (`invalid_argument` at `/meter`), since an
+  operation writes no own field on a table (D103): an update of the field
+  sets it, held to `limitPermission` and to what is committed. `escalate`
+  tolerates a veto and a permission the caller lacks, as the engine's did.
+  `checkReserve`'s `until` is the earliest instant at which the clock alone
+  lets the plan fit: a period's start, an observation's lapse or a
+  bucket's departure. Budget reads its meters by code point, as the engine
+  read its canonical document.
+- **The core additions.** Beside the precondition: `ReadRequest::Holding`
+  (`{ kind: "holding", type, useId, field, value, after?, limit }`),
+  answered as a linked read, by every adapter from the layout's column of
+  the use's field, live rows alone, and refused as internal under a lock on
+  SQLite and D1; `Behavior::read_fields_at` and `Core::read_fields_at`, the
+  fields a behavior computes at a read's time (Lease's `active`, Budget's
+  `meters`); `View::sub_rows_of`, another row's sub-table rows as the run
+  has them; and `subjects::subject_forms`, a subject's base62 and
+  hyphenated forms. `tests/core.rs` has 53 cases.
+- **The engine.** The four declarations
+  (`internal/registry/behaviors/*.behavior.json`) gain the new members
+  alone: each config's `status`; Retries' class `backoff`, its
+  `retryInto`, `then`, `giveUpAfterMs`, `window` and `keyField`, the fields
+  `retryAt`, `failingSince` and `keyedBy`, `recordAttempt`'s `retryAt` and
+  the vetoes `backing_off` and `throttled`; Presence's `ttlByState`;
+  Budget's meter `window`, `observePermission`, the operation `observe` and
+  its tool, and `reset`, whose values change, so its schema (an `enum`
+  becomes a `oneOf`) and its description are rewritten; and the members a
+  table's layout alone reads (`tables`, `armsDeadlines`, a field's
+  `type`). The engine shares them and refuses each new member rather than
+  ignore it: a define naming one is refused with a reason naming the table
+  form (`backoff, which a table's Retries takes (implements Retries<T, {
+  ... }> on a DB table, D104)`), every `observe` call is
+  `invalid_argument`, and Retries' new fields read none there.
+  `testkit/tests/workqueue_lease_table_members.rs`,
+  `workqueue_retries_table_members.rs`,
+  `workqueue_presence_table_members.rs` and
+  `workqueue_budget_table_members.rs` hold it on SQLite and Postgres. The
+  scenario corpus (`registry.json`'s metaSchema, `workqueue-package.json`,
+  `workqueue-filters.json` and `workqueue-lease-branches.json`) was
+  recorded again and changes by the new members alone; the HTTP and
+  commerce corpora do not change. The engine's describe leaves out the
+  members only a table's layout reads, so the work queue package's test
+  compares it with the file without them.
+- **The surface.** `@superschematic/db` exports the carriers and configs
+  of the four, each member a table refuses typed `?: never` (Lease's
+  `sweepMs` and `directOn`, Retries' `resultField`, Presence's `sweepMs`),
+  so a config that names one fails to compile (`lease.typecheck.ts` and
+  the like); `@superschematic/schema` does not change, so each new member is
+  an excess property on an engine type's `@behavior`. The build holds each
+  config to the table in the core's words and order
+  (`verify/behaviors_lease.go`, `behaviors_retries.go`,
+  `behaviors_presence.go` and `behaviors_budget.go`, beside
+  `behaviors_moves.go`): each field a config names exists, is an own field
+  and has the type its rule needs (`maxHoldField` a `Generic.Int64`,
+  `limitsField` a `Generic.JSON`, `keyField` one scalar, `limitField` and
+  `reserveField` integers, `principalField` one that holds a subject), and
+  beside the core it refuses an owned field, a relation by its name, an
+  audit field, a list and a field encrypted at rest; the moves and
+  `ttlByState`'s states are held to the Workflow's; each `releaseLeases`
+  table implements Lease with an `overridePermission`, and a
+  `@behaviorWorker` whose permissions lack it is warned of; a Budget scope
+  is a to-one relation (a to-many is refused) whose target implements
+  Budget with the meter, and a chain of scopes that comes back to its table
+  is refused on each table in the loop. Each new member on an engine type
+  is refused, one error per member. The build's type lists are held to the
+  core's (`TestHoldTypesAreTheCores`, `TestLimitsTypesAreTheCores`,
+  `TestBudgetIntegerTypesAreTheCores`). `behaviorops.WritePermissions`
+  lists Lease's `overridePermission`, Retries' `limitsPermission` and
+  Budget's `limitPermission` under an operation that updates a row of the
+  table. `@behaviorOperations` warns of an operation that runs on the table
+  as a whole and leaves it out, where it refused the set. `behaviortypes`
+  types a table's operations by its config (`JobRetriesClass`, the classes
+  `recordAttempt`'s `failure` takes; `AccountBudgetMeter`, the meter of
+  every Budget operation) and drops for an engine type Retries' new
+  fields, vetoes and result member; its new `Narrowing.Refused` lists the
+  operations a type's form refuses every call of (an engine type's
+  Budget's `observe`), which engineclientgen leaves out, so the engine
+  clients do not change.
+- **The adapters.** None names a behavior. Each answers the holding read
+  from the layout's column of the use's field, a page at a time; reads and
+  binds a `Generic.Int64` own, owned or sub-table column as a JSON number
+  (Postgres's BIGINT among them); applies a deadline's change set that
+  writes other rows, their sub-table rows and their deadlines (Presence's
+  miss through Lease's `expire` on `Job` rows) in one unit, each row
+  fenced; and keeps a `Generic.JSON` owned column as its JSON. Each one's
+  store test holds these, a precondition on an update, a delete and an
+  operation, and its refusal before the row is read, on both dialects. Go's
+  ORM no longer writes an unused import and variable for a behavior table
+  with no owned fields (`Workspace`).
+- **The specification.** `rules-testkit` replays the engine's recordings
+  on the reference host: `workqueue-lease.json` 610 of its 691 steps (the
+  scenario that composes Dependencies, `expireHolder`'s calls and the steps
+  after the three that wrote rows, the engines opened with a value store,
+  Comments' steps, incidental there, and reads of the engine's store
+  skipped); `workqueue-lease-timers.json` 24 and
+  `workqueue-lease-approvals.json` 25, every step, on the reference host
+  alone, since their rules are the ones `core-lease`, `core-timers` and
+  `core-approvals` hold; `workqueue-lease-direct-on.json` skipped whole,
+  for Branches and Revisions; `workqueue-retries.json` 290 of 379 (Queue's
+  scenarios, the five whose config gives `resultField`, each stopping at
+  its define, and a define the engine's `requires` refused);
+  `workqueue-presence.json` 207 of 226 (a scenario whose defines name
+  another schema's state, the steps after two failed runs of the runner,
+  and four reads of the event log); `workqueue-budget.json` 613 of 796
+  (Queue's five scenarios, the two limitField scenarios from their
+  `setLimit`, the defines that name Links and a link that holds a list,
+  Links' own validations, and reads of the engine's store and event log);
+  and `core-behaviors.json` 87, from 86, its Lease scenario's `open` now
+  checked. Each has 0 mismatches, each refusal compared whole, and a floor
+  from the first green run. The replayer leaves out of a recorded config a
+  member only the engine's runner read (`RUNNER_MEMBERS`: Lease's and
+  Presence's `sweepMs`), leaves an incidental behavior's use out of a
+  file's types (`INCIDENTAL`: Comments in `workqueue-lease.json` and
+  `workqueue-budget.json`), maps `preconditions` from the recorded
+  options, compares a row that predates an added use without that use's
+  owned fields the core holds no value of, computes a record at the step's
+  time, runs each `runner.runDue`'s due deadlines as the worker does (a
+  Lease `expire` and a Presence `miss` compared as the sweep's events,
+  `SWEEP_OPERATIONS`), and prints a recorded `IncompatibleChangeError`'s
+  configs canonically, as the core writes them. D104's upgrades have no
+  recordings: `rules/scenarios/core-retries-waits.json` (12 scenarios, 193
+  steps: a class's backoff and the moves into `retryInto` and Lease's
+  acquire that wait for it, `then`'s deadline (armed again at a status's
+  entry, held by another principal's lease, armed again at the window's
+  `until`), `giveUpAfterMs`, a window, `keyField`, the precondition's
+  refusals, `token_required` and `token_stale`, a lease's expiry as a
+  deadline, and each one's define refusals) and `core-periods-and-presence.json` (8 scenarios, 119 steps:
+  each reset period and `everyMs`, a rolling window across its boundary,
+  `observe` and its lapse at `resetsAt` and at the next period,
+  `observePermission`, `setLimit` of a limitField meter and the update that
+  sets it, `ttlByState` on a beat and on a transition, the miss at the
+  deadline the state gives, and each one's define refusals) are written by
+  hand in the recorded format and replayed whole, floors 193 and 119. The
+  transcripts: `core-lease.transcript.json` 436 steps (323 commands, 84 of
+  them presenting a precondition and 3 deadlines, and 113 checks),
+  `core-presence` 141 (89 commands, 8 of them deadlines, and 52 checks),
+  `core-budget` 495 (331 and 164), `core-retries` 250 (196 and 54),
+  `core-retries-waits` 158 (118 commands, each with its row's
+  `expect.version` where it has a row, 24 presenting a precondition and 9
+  deadlines, and 40 checks) and `core-periods-and-presence` 77 (52 and
+  25), each one's floor its count; the nine existing ones change by their
+  `behaviors` header alone and keep their steps and floors. TypeScript
+  replays the fifteen on bun:sqlite and Postgres, Go on SQLite and Postgres
+  and Rust on rusqlite and Postgres, each at its step count with 0
+  mismatches.
+- **Fixtures and end-to-end tests.** `fixture-agents-db`'s `Job` is a job
+  a worker leases with a fencing token (`requireToken`, `onExpiry` back to
+  queued and `escalate` to failed at the third expiry), retried a minute
+  after a timeout and twice as long after each next one up to ten minutes,
+  `then` moving it from waiting back to queued, once per revision after a
+  build failure (`keyField: "revision"`), given up after half an hour of
+  failures and started at most four times an hour; its `Session` is beaten
+  by its device's principal, live three minutes after its last beat and
+  fifteen in a turn (`ttlByState`), missed into `missing` with its
+  device's leases on jobs expired (`releaseLeases`) and brought back to
+  idle by its next beat; and its `Account` meters questions hourly and
+  tokens over a rolling day, takes a provider's figure from callers
+  holding `accounts.observe` and escalates to `out`, inside a `Workspace`
+  scope through its to-one relation `workspace`. `fixture-agents-api`
+  serves their operations (`JobActions`, `SessionActions`,
+  `AccountActions`, each `@behaviorOperations @auth`) and runs Job's
+  deadlines and Session's misses (`JobDeadlines`, and `SessionPresence`,
+  holding `jobs.override`); its one warning is that `expireHolder` is left
+  out (`TestAgentsFixturesLoad`). Each language's test runs, on Postgres,
+  the generated server through its SDK, the repositories (Rust's adapter)
+  for creates and updates, and the two workers' queues in process, a
+  deadline made due by moving its message's `due_at`, through 21 cases in
+  one wording: a lease acquired and renewed presenting its token;
+  `token_required`, and the holder's write presenting it saved;
+  `token_stale`; `held_by_another`; `backing_off` on the move into running
+  and on acquire; `then` run by the worker; a lapsed lease expired by its
+  deadline, `onExpiry` moving the job back and the token advancing; a
+  second build failure of one revision exhausting the job, and a new
+  revision starting its counts again; a precondition for a use that takes
+  none refused `invalid_argument`, and a token of -1 the route's 400; a
+  session's create arming its miss; `not_principal`, and the device's beat
+  moving the deadline; `ttlByState` on a transition into a turn; a due miss
+  moving the session to `missing` and expiring its device's leases; a beat
+  recovering it; `principal_fixed`; `recordUsage` charging the account's
+  meter and its workspace's; `over_limit`; an hourly meter starting again;
+  a rolling meter's buckets leaving the window; `observe` forbidden without
+  its permission and replacing the count with it; and usage that escalates
+  the account and counts all the same (`TestAgentsGoServerOnPostgres`,
+  `TestGeneratedAgentsEndToEnd`, which also calls the MCP tools
+  `job_lease_heartbeat` and `account_budget_observe`, and
+  `TestRustAgentsOnPostgres`). Each refusal is checked to leave the row's
+  `_version` where it was. The miss's case beats a device with no other
+  live session, since a miss spares the leases of a principal present
+  elsewhere. Each language's servergen test plans `JobDeadlines`' main,
+  holds it to a golden and compiles it
+  (`TestGoBehaviorWorkerEntrypointOfJobDeadlines`,
+  `TestTypeScriptAgentsBehaviorWorkerEntrypoint`,
+  `TestRustAgentsBehaviorWorkerEntrypoint`). No existing fixture's golden
+  changes, and the engine clients do not change; the IR's schema file and
+  its parity meta-schema change by the declarations' new members.
 - **Left for later steps.**
   - `seat:<name>` entries in `by`, a Workflow transition's and a StateRules
     state's, refused at define and by the build until Seats (step 3).
@@ -15542,8 +15979,6 @@ release.
     before a gate too).
   - `transition`'s parameter issues sort by pointer, as the engine sorts
     its validator's, so `/from` comes before `/to`.
-  - Lease, Retries, Presence and Budget, each with its upgrade: step 2's
-    second batch.
   - Constants and StateRules fail D103's test, holding rules over the
     table's own fields and keeping no state of their own: whether a
     field's constancy, its direction and a state's required and frozen
@@ -15627,3 +16062,146 @@ release.
   - The engine advertises the new members of Constants, StateRules and
     Approvals through their shared declarations and refuses each, until
     engine types go (D103, step 7).
+  - `expireHolder`, and every operation whose scope is a table or a
+    namespace: a command without a row. `@behaviorOperations` warns of it
+    and leaves it out. A gone holder's leases expire at their own
+    deadlines, by `expire` with `holder` on each row, or by a Presence
+    miss's `releaseLeases`.
+  - Lease's `directOn` waits for Revisions and Branches on the core (D103,
+    step 4). `sweepMs`, Lease's and Presence's, is refused on a table, and
+    the replayer leaves it out of the recordings' configs; Timers still
+    parses its own and reads none of it (D103). Lease's and Presence's
+    descriptions still name the engine's runner, and `releaseLeases`'
+    still names `expireHolder`, so the recorded declarations change by new
+    members alone.
+  - Retries' `resultField` waits for an update an operation makes
+    (Revisions, D103 step 4); five recorded scenarios stop at their define.
+    A table's `recordAttempt` input still offers `result`, as the
+    declaration's paramsSchema does, and the core refuses one
+    (`invalid_argument` at `/result`, `the config names no resultField to
+    keep a result in`); narrowing it out of a table's types is left.
+  - A build that shortens `maxHoldMs` lapses a held lease at once, while
+    its expiry falls due at the time its last acquire or heartbeat armed;
+    a heartbeat applies the new hold. No `ttlMs` column is kept, so a
+    lease whose hold is raised after it cut a renewal short renews by the
+    config's `ttlMs` from then on, where the engine renewed by the ttl the
+    acquire took (a shorter `ttlMs` parameter's is lost), and a build that
+    raises `maxHoldMs` gives back nothing a cut took: the lease renews by
+    the cut length until it lapses. An owned `ttlMs` column, which the
+    engine's records do not show, is left.
+  - A lease's holder and an attempt's subject are the caller's subject as
+    text, compared exactly, as a sign-off's is; releaseLeases finds a
+    holder in each form of a UUID subject (base62, and hyphenated in
+    lowercase and in uppercase), and a hyphenated one of mixed case is not
+    found. An index on a holder column is the project's.
+  - Retries' `then` that a veto refuses which does not lift (a
+    transition whose `by` names a subject the worker is not, say) falls
+    due again every minute, as a Timers fire a guard keeps vetoing does;
+    only Retries' own window gives the time it lifts. A table that wants
+    the move past another principal's active lease lists
+    `Workflow.transition` in Lease's `exempt`, which exempts every
+    transition: an exemption by the calling behavior is left.
+  - A Retries table without `then` gets a deadline queue it never arms
+    (`armsDeadlines` is the declaration's), and the build warns an API
+    that serves it without a worker.
+  - The `attempts` sub-table keeps every attempt, read whole at each
+    decision, as the engine kept them; a read by a condition (the
+    window's, the streak's) is left.
+  - `limitsField` takes a `Generic.JSON` field; a typed JSON field
+    (`JsonField<T>`) is left.
+  - A write around the core (raw SQL of a `lease_*`, `retries_*` or
+    `presence_*` column or of a sub-table's row, a repository's bulk
+    write) runs none of the four's rules, and none of them hears a change:
+    a raw write of `keyField` resets nothing until the next decision reads
+    the key and the next attempt writes the columns, a raw write of a
+    status re-arms no `ttlByState` deadline until the row's next write
+    through the core or its miss's fire, which arms a later deadline and
+    otherwise misses at the old one, and a meter's row moved by hand
+    counts as it reads. The docs and the agent skill say so, and no
+    trigger or check refuses such a write.
+  - The precondition reaches an authored route's write only as the
+    project's code passes it to the repository (`preconditions`,
+    `WithPreconditions`); an API's generated routes carry it on behavior
+    operations alone. Over HTTP it is the body's member, where the
+    engine's routes read a `Preconditions` header.
+  - Go's `WithPreconditions` scopes the preconditions to every command
+    made with the context, so a command on a table whose uses take none of
+    its entries is refused, and a table that composes no behavior, which
+    runs no command through the core, reads none, where TypeScript's ORM
+    throws for one given to such a table. Go's `Preconditions` is a map,
+    so its entries reach the core in code point order where TypeScript's
+    keep theirs: two entries that each carry an issue would be listed in
+    another order. Lease is the one behavior that takes a precondition
+    today.
+  - The API generators find an input's preconditions member by its name
+    and type (`preconditions`, typed `<Table>Preconditions`, from a
+    behavior), since the build refuses a parameter of that name; a marker
+    on `ir.BehaviorOperation` that behaviorops sets would be sturdier.
+  - Under `ttlByState` a transition counts as a sighting: the deadline
+    counts from the later of the last beat and the entry, and a miss's
+    `notRenewedAfter` reads a row not missed the same way; a row that
+    never beat counts from its deadline less `ttlMs`.
+  - Two misses of one principal's rows at one instant may each read the
+    other present and leave the leases, which expire on their own: a
+    linked read under a lock is refused on SQLite and D1 (D103), so the
+    miss takes none. A miss reads the principal's other rows only when
+    `releaseLeases` names tables.
+  - A holding read pages by its table's key column as the database orders
+    it, so a UUID key on Postgres pages in UUID order where the reference
+    host pages by base62 text: a miss that expires several of one
+    principal's leases may list them in `released` in another order on
+    each host. No transcript or case holds more than one.
+  - On a table that implements both Lease and Presence, the miss
+    deadline's call of Presence's own `miss` meets another principal's
+    active lease as the worker's write, so such a table lists
+    `Presence.miss` in Lease's `exempt`, as a Timers table lists
+    `Timers.fireTimer`. No fixture composes the two.
+  - The core's define check reads no other type: `releaseLeases`' tables
+    and a Budget scope's target are the build's to check, and at run time
+    a name the core cannot follow is a defect.
+  - A config's field that is a relation by its name, an audit field, a
+    list or a field encrypted at rest (a `principalField`, `maxHoldField`,
+    `limitsField`, `keyField`, `limitField` or `reserveField`) is refused by
+    the build, since the core reads none of them as its rule needs.
+  - `setLimit` of a meter whose limit an own field holds is refused on a
+    table (no own-field write from an operation, D103); the replay stops
+    the two recorded limitField scenarios there.
+  - `observe` passes nothing up a chain of scopes, and holds until
+    `resetsAt`, the meter's next period start, or with no reset the next
+    observe; usage recorded between two observations is replaced by the
+    second.
+  - A rolling month is thirty days; `everyMs` is a whole number of minutes
+    from the epoch; a week starts on Monday 00:00 UTC.
+  - `checkReserve`'s `hears` keep the engine's rule, a fixed reset in
+    place of daily, for a Queue that no table runs yet.
+  - Budget's `meters` field is the core's `read_fields_at` alone: no
+    repository, route, SDK or tool reads it, and a client reads the
+    sub-tables by SQL or an operation's results.
+  - A transcript's `others` carry no sub-table rows, so the adapters'
+    replays hold a scope's meters through the inner row's results; the
+    replayer and the end-to-end tests hold the scope's rows.
+  - `not_configured`'s description still names `limitPermission` alone,
+    though `observe` answers it too; Budget's `reset` description and
+    schema were rewritten, since its values changed, so the recorded
+    declarations change by that beside the new members.
+  - A chain of scopes is held to sixteen at a read (`MAX_CHAIN`) and
+    refused by the build when it comes back to its table.
+  - Retries reads its classes, Budget its meters and Presence its
+    `ttlByState` by code point, as the engine read its canonical document,
+    not in the config's order, so a refusal names the first by code point.
+  - The engine advertises the four's new members, `observe` among them,
+    through their shared declarations and refuses each, until engine types
+    go (D103, step 7); `Narrowing.Refused` keeps `observe` out of the
+    engine clients.
+  - `workqueue-lease-timers.json` and `workqueue-lease-approvals.json` are
+    replayed on the reference host alone, with no transcript;
+    `workqueue-lease-direct-on.json` waits for Revisions and Branches; and
+    the recordings that compose Presence or Budget beside Queue
+    (`workqueue-package.json`, `workqueue-queue.json`,
+    `workqueue-queue-exclusion.json`) wait for Queue's fold.
+  - Comments in `workqueue-lease.json` and `workqueue-budget.json` is
+    incidental: Lease's rule over another behavior's operation is held
+    through Workflow's transition, and Comments' own steps wait for it on
+    the core. The replayer skips the event log's reads with a `limit`,
+    three of Presence's, which the reference host does not take.
+  - Pool's `Capacity` contract over Budget is step 3's.

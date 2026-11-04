@@ -14,12 +14,14 @@ import (
 // stateRulesBehavior is the name of the core's StateRules.
 const stateRulesBehavior = "StateRules"
 
-// flow is the Workflow a table use of StateRules or Approvals reads (D104):
-// its use's id and its states, nil when its config holds no list of
-// strings, which is Workflow's own to refuse.
+// flow is the Workflow a table use of StateRules, Approvals or a work-queue
+// behavior reads (D104): its use's id, its states, nil when its config holds
+// no list of strings, which is Workflow's own to refuse, and its
+// transitions, each from and to.
 type flow struct {
-	id     string
-	states []string
+	id          string
+	states      []string
+	transitions [][2]string
 }
 
 // flowOf is the Workflow of td a config reads: the one its status names,
@@ -54,12 +56,26 @@ func flowOf(td *ir.TypeDef, named *string) (flow, string) {
 		use = workflows[0]
 	}
 	var config struct {
-		States []string `json:"states"`
+		States      []string `json:"states"`
+		Transitions []struct {
+			From string `json:"from"`
+			To   string `json:"to"`
+		} `json:"transitions"`
 	}
 	if len(use.Config) > 0 && json.Unmarshal(use.Config, &config) != nil {
-		config.States = nil
+		config.States, config.Transitions = nil, nil
 	}
-	return flow{id: use.UseID(), states: config.States}, ""
+	f := flow{id: use.UseID(), states: config.States}
+	for _, transition := range config.Transitions {
+		f.transitions = append(f.transitions, [2]string{transition.From, transition.To})
+	}
+	return f, ""
+}
+
+// leads reports whether a transition of the Workflow leads from one state
+// to another.
+func (f flow) leads(from, to string) bool {
+	return slices.Contains(f.transitions, [2]string{from, to})
 }
 
 // has reports whether the Workflow lists state; every state, when its
