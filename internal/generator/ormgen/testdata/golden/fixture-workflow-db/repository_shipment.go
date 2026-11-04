@@ -1132,17 +1132,18 @@ func (r *ShipmentRepository) CreateOne(ctx context.Context, input *ShipmentCreat
 }
 
 // shipmentUniqueKeys are the conflict targets of Shipment's unique keys, and
-// the assignment an upsert that sets nothing writes, so the row it
-// conflicts with is returned (sqlutil.UniqueKey, D79); the read of the rows
-// that hold keys, which an upsert only if changed reads back, empty for a
-// key over an expression, and the key's columns as a batch insert's cells
-// name them (D89).
+// the assignment of the update an upsert that sets nothing names, which its
+// WHERE FALSE never runs (sqlutil.UniqueKey, D79); the read of the rows
+// that hold keys, which an upsert reads back when it leaves them as they
+// were, empty for a key over an expression, and that key's read of the row
+// that holds one input's value of it, empty for a key over columns; and the
+// key's columns as a batch insert's cells name them (D89).
 var shipmentUniqueKeys = map[ShipmentUniqueKey]struct {
-	conflict, keep, rows string
-	columns              []string
+	conflict, keep, rows, held string
+	columns                    []string
 }{
-	ShipmentUniqueById:        {`(id)`, `id = shipment.id`, `SELECT "id", "reference", "status", "status_entered_at", "payment_status", "payment_status_entered_at", "_version" FROM shipment WHERE (id) IN (%s)`, []string{`id`}},
-	ShipmentUniqueByReference: {`(reference)`, `reference = shipment.reference`, `SELECT "id", "reference", "status", "status_entered_at", "payment_status", "payment_status_entered_at", "_version" FROM shipment WHERE (reference) IN (%s)`, []string{`reference`}},
+	ShipmentUniqueById:        {`(id)`, `id = shipment.id`, `SELECT "id", "reference", "status", "status_entered_at", "payment_status", "payment_status_entered_at", "_version" FROM shipment WHERE (id) IN (%s)`, ``, []string{`id`}},
+	ShipmentUniqueByReference: {`(reference)`, `reference = shipment.reference`, `SELECT "id", "reference", "status", "status_entered_at", "payment_status", "payment_status_entered_at", "_version" FROM shipment WHERE (reference) IN (%s)`, ``, []string{`reference`}},
 }
 
 // shipmentKeyOf is the text of row's values of the unique key on, as
@@ -1443,14 +1444,14 @@ func (r *ShipmentRepository) upsertRow(ctx context.Context, input *types.Shipmen
 	// holds runs through the core's update, as UpdateOne's does (D104).
 	sets := assigned > 0
 	// The statement's update of the row the key holds is the key's keep
-	// assignment: an update that sets no field leaves the row as it is,
-	// stamps and all, and returns it. One that sets a field never runs it:
-	// Postgres locks the row and returns none, and the row is read back by
-	// its key and updated through the core below, so its version moves
-	// once, as UpdateOne's does. The statement then binds the insert's
-	// values alone.
+	// assignment, which it never runs: Postgres locks the row and returns
+	// none, and the row is read back by its key. An update that sets no
+	// field compares none, so its WHERE is FALSE, and leaves the row as it
+	// is, its version, stamps and history all. One that sets a field
+	// updates the row through the core below, so its version moves once, as
+	// UpdateOne's does. The statement then binds the insert's values alone.
 	setClauses = []string{key.keep}
-	where := upsertWhere(``, compareCurrent, compareNext, onlyIfChanged)
+	where := upsertWhere(``, compareCurrent, compareNext, true)
 	if sets {
 		if key.rows == "" {
 			return nil, fmt.Errorf("orm: UpsertOne of Shipment on %s, a unique index over an expression: an upsert of a table that composes behaviors updates the row the key holds through the core (D103), and needs a key over columns to find it; upsert on another key", string(on))
@@ -1480,18 +1481,10 @@ func (r *ShipmentRepository) upsertRow(ctx context.Context, input *types.Shipmen
 	var upserted *UpsertResult[*types.Shipment]
 	switch {
 	case err == nil:
-		// The row it inserted, or the row the key holds, as it is, for an
-		// update that sets no field.
-		status := UpsertUnchanged
-		if inserted {
-			status = UpsertInserted
-		}
-		upserted = &UpsertResult[*types.Shipment]{Row: scanned, Status: status}
+		// The row it inserted.
+		upserted = &UpsertResult[*types.Shipment]{Row: scanned, Status: UpsertInserted}
 	case err != pgx.ErrNoRows:
 		return nil, fmt.Errorf("failed to scan result: %w", err)
-	case !sets && !onlyIfChanged:
-		// The row the key conflicts with is soft-deleted.
-		return nil, ErrNotFound
 	default:
 		// The row the key conflicts with, which the statement left as it
 		// was, read back by its key: a soft-deleted one is ErrNotFound.
@@ -1499,13 +1492,13 @@ func (r *ShipmentRepository) upsertRow(ctx context.Context, input *types.Shipmen
 		if !ok {
 			return nil, fmt.Errorf("no Shipment row holds an unset %s: %w", string(on), ErrNotFound)
 		}
-		found, err := r.rowsOfKeys(ctx, on, [][]any{keyValues}, []*types.Shipment{input})
+		found, err := r.heldOfKey(ctx, on, keyValues, input)
 		if err != nil {
 			return nil, err
 		}
-		upserted = &UpsertResult[*types.Shipment]{Row: found[0], Status: UpsertUnchanged}
+		upserted = &UpsertResult[*types.Shipment]{Row: found, Status: UpsertUnchanged}
 		if sets {
-			held, err := r.upsertHeld(ctx, found[0], update, onlyIfChanged)
+			held, err := r.upsertHeld(ctx, found, update, onlyIfChanged)
 			if err != nil {
 				return nil, err
 			}
@@ -1616,11 +1609,12 @@ func (r *ShipmentRepository) upsertBatches(ctx context.Context, inputs []*types.
 	}
 	// The statement sets none of them: sets is whether update names a
 	// field, whose update of each row a key holds runs through the core's
-	// update, as UpdateOne's does (D104). The statement's update of such a
-	// row never runs then: Postgres locks the row and returns none, and the
-	// row is read back by its key, so its version moves once.
+	// update, as UpdateOne's does (D104). The statement's update of a row a
+	// key holds never runs: Postgres locks the row and returns none, and the
+	// row is read back by its key, so its version moves once, or, when
+	// update names no field, which compares none, not at all.
 	sets := len(setClauses) > 0
-	where := upsertWhere(``, compareCurrent, compareNext, onlyIfChanged)
+	where := upsertWhere(``, compareCurrent, compareNext, true)
 	if sets {
 		where = upsertWhere(``, nil, nil, true)
 	}
@@ -1732,9 +1726,6 @@ func (r *ShipmentRepository) upsertBatches(ctx context.Context, inputs []*types.
 			}
 		}
 		if len(left) > 0 {
-			if !onlyIfChanged && !sets {
-				return nil, fmt.Errorf("the Shipment row that holds the %s of input %d is deleted: %w", string(on), start+left[0], ErrNotFound)
-			}
 			keyValues := make([][]any, len(left))
 			wanted := make([]*types.Shipment, len(left))
 			for n, i := range left {
@@ -1801,8 +1792,9 @@ func (r *ShipmentRepository) upsertReturned(ctx context.Context, query string, v
 
 // rowsOfKeys reads the rows that hold keys, each the values of the unique
 // key on an input's insert binds, among the rows the key's index holds, in
-// the inputs' order: the rows an upsert only if changed left as they were
-// (D89). A key no live row holds is ErrNotFound.
+// the inputs' order: the rows an upsert left as they were, as one whose
+// update sets no field or one only if changed does (D89). A key no live
+// row holds is ErrNotFound.
 func (r *ShipmentRepository) rowsOfKeys(ctx context.Context, on ShipmentUniqueKey, keys [][]any, inputs []*types.Shipment) ([]*types.Shipment, error) {
 	tuples, values := upsertKeyTuples(keys)
 	query := fmt.Sprintf(shipmentUniqueKeys[on].rows, strings.Join(tuples, ", "))
@@ -1840,6 +1832,36 @@ func (r *ShipmentRepository) rowsOfKeys(ctx context.Context, on ShipmentUniqueKe
 		out[i] = row
 	}
 	return out, nil
+}
+
+// heldOfKey reads the row that holds input's value of the unique key on,
+// keyValues the values of the key's columns its insert binds, which an
+// upsert left as it was: by rowsOfKeys, or, for a key over an expression,
+// whose columns read no row, by the expression's value over keyValues
+// (sqlutil.UniqueKey.Held, D105). A key no live row holds is ErrNotFound.
+func (r *ShipmentRepository) heldOfKey(ctx context.Context, on ShipmentUniqueKey, keyValues []any, input *types.Shipment) (*types.Shipment, error) {
+	query := shipmentUniqueKeys[on].held
+	if query == "" {
+		found, err := r.rowsOfKeys(ctx, on, [][]any{keyValues}, []*types.Shipment{input})
+		if err != nil {
+			return nil, err
+		}
+		return found[0], nil
+	}
+	var read pgx.Row
+	if r.tx != nil {
+		read = r.tx.QueryRow(ctx, query, keyValues...)
+	} else {
+		read = r.db.pool.QueryRow(ctx, query, keyValues...)
+	}
+	row, err := r.scanReturned(read, nil)
+	if err == pgx.ErrNoRows {
+		return nil, fmt.Errorf("the Shipment row that holds the key %s is deleted: %w", string(on), ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the row the upsert left: %w", err)
+	}
+	return row, nil
 }
 
 // CreateMany inserts multiple Shipment rows, each a create of the behaviors'

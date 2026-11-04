@@ -407,13 +407,13 @@ describe.skipIf(rulesCore === undefined || rulesDsn === '')('a repository of a t
   });
 });
 
-const itemColumns = '"id", "code", "title", "owner", "urgent", "plan", "reviewer", "status", "status_entered_at", "updated_at", "deleted_at", "_version"';
+const itemColumns = '"id", "code", "sku", "title", "owner", "urgent", "plan", "reviewer", "status", "status_entered_at", "updated_at", "deleted_at", "_version"';
 
 /**
  * A soft-deletable table that implements Constants and StateRules beside
  * its Workflow on status (D104), as the fixture-approvals-db golden lays
  * one out, with no sub-table, so it has upserts: by its unique key, code,
- * and by a unique index over lower(code), an expression.
+ * and by a unique index over lower(sku), an expression.
  */
 const itemTable: TableDefinition = {
   ...orderTable,
@@ -423,6 +423,7 @@ const itemTable: TableDefinition = {
   columns: [
     { name: 'id', column: 'id', field: 'id', qualified: 'item.id', uuid: true, key: true, auto: true, required: true },
     { name: 'code', column: 'code', field: 'code', qualified: 'item.code', required: true },
+    { name: 'sku', column: 'sku', field: 'sku', qualified: 'item.sku' },
     { name: 'title', column: 'title', field: 'title', qualified: 'item.title', required: true },
     { name: 'owner', column: 'owner', field: 'owner', qualified: 'item.owner' },
     { name: 'urgent', column: 'urgent', field: 'urgent', qualified: 'item.urgent', boolean: true },
@@ -451,7 +452,12 @@ const itemTable: TableDefinition = {
   uniqueKeys: {
     id: { conflict: '(id)', keep: 'id = item.id', rows: `SELECT ${itemColumns} FROM item WHERE (id) IN (%s)` },
     code: { conflict: '(code)', keep: 'code = item.code', rows: `SELECT ${itemColumns} FROM item WHERE (code) IN (%s)` },
-    lowerCode: { conflict: '((lower(code)))', keep: 'code = item.code', expression: true },
+    sku: {
+      conflict: '((lower(sku)))',
+      keep: 'sku = item.sku',
+      held: `SELECT ${itemColumns} FROM item WHERE (lower(sku)) = (SELECT (lower(sku)) FROM (VALUES (CAST($1 AS TEXT))) AS item (sku))`,
+      expression: true,
+    },
   },
 };
 
@@ -466,6 +472,7 @@ const itemRules: RulesLayout = {
       live: { column: 'deleted_at' },
       own: [
         { field: 'code', column: 'code', type: 'string' },
+        { field: 'sku', column: 'sku', type: 'string' },
         { field: 'title', column: 'title', type: 'string' },
         { field: 'owner', column: 'owner', type: 'string' },
         { field: 'urgent', column: 'urgent', type: 'boolean' },
@@ -486,6 +493,7 @@ const itemRules: RulesLayout = {
         ],
         fields: [
           { name: 'code', type: 'string' },
+          { name: 'sku', type: 'string' },
           { name: 'title', type: 'string' },
           { name: 'owner', type: 'string' },
           { name: 'urgent', type: 'boolean' },
@@ -502,6 +510,7 @@ const itemDefinition: OrmDefinition = { clauses, defaultLimit: 100, historyActor
 interface ItemRow {
   id: string;
   code: string;
+  sku: string | null;
   title: string;
   owner: string | null;
   urgent: boolean | null;
@@ -514,6 +523,7 @@ interface ItemRow {
 
 interface ItemInput {
   code: string;
+  sku?: string;
   title: string;
   owner?: string;
   urgent?: boolean;
@@ -521,9 +531,9 @@ interface ItemInput {
   reviewer?: string;
 }
 
-type ItemUpdate = Partial<Omit<ItemInput, 'code'>>;
+type ItemUpdate = Partial<Omit<ItemInput, 'code' | 'sku'>>;
 
-type ItemKey = readonly ['code'] | readonly ['lowerCode'];
+type ItemKey = readonly ['code'] | readonly ['sku'];
 
 interface ItemRepositories {
   readonly item: {
@@ -547,6 +557,7 @@ describe.skipIf(rulesCore === undefined || rulesDsn === '')('an upsert of a tabl
     await pool.query(`CREATE TABLE item (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
   code TEXT NOT NULL UNIQUE,
+  sku TEXT,
   title TEXT NOT NULL,
   owner TEXT,
   urgent BOOLEAN,
@@ -558,7 +569,7 @@ describe.skipIf(rulesCore === undefined || rulesDsn === '')('an upsert of a tabl
   deleted_at TIMESTAMPTZ,
   _version BIGINT DEFAULT 1 NOT NULL
 )`);
-    await pool.query('CREATE UNIQUE INDEX item_lower_code ON item ((lower(code)))');
+    await pool.query('CREATE UNIQUE INDEX item_lower_sku ON item ((lower(sku)))');
     for (const ddl of bumpVersion('item')) await pool.query(ddl);
     orm = ormOf<ItemRepositories>(pool, itemDefinition, withRulesCore(null, () => rulesCore!));
   });
@@ -578,9 +589,19 @@ describe.skipIf(rulesCore === undefined || rulesDsn === '')('an upsert of a tabl
     const inserted = await orm.item.upsertOneResult({ code: 'k1', title: 'Kettle', owner: 'ann', urgent: false, plan: 'boil', reviewer: 'rita' }, ['code'], { title: 'Kettle' });
     expect(inserted.status).toBe('inserted');
     expect(inserted.row).toMatchObject({ code: 'k1', title: 'Kettle', owner: 'ann', urgent: false, plan: 'boil', reviewer: 'rita', status: 'draft', _version: 1 });
+    const before = await stored('k1');
     const same = await orm.item.upsertOneResult(held, ['code'], {});
     expect(same.status).toBe('unchanged');
-    expect(same.row).toMatchObject({ id: inserted.row.id, title: 'Kettle', owner: 'ann', plan: 'boil' });
+    expect(same.row).toMatchObject({ id: inserted.row.id, title: 'Kettle', owner: 'ann', plan: 'boil', _version: 1 });
+    // It updates nothing, so the bump trigger never runs: the row keeps its
+    // version and its stamp.
+    expect(await stored('k1')).toEqual(before);
+    const many = await orm.item.upsertMany([held, { code: 'k0', title: 'Tray' }], ['code'], []);
+    expect(many.map(result => [result.status, result.row.code, result.row._version])).toEqual([
+      ['unchanged', 'k1', 1],
+      ['inserted', 'k0', 1],
+    ]);
+    expect(await stored('k1')).toEqual(before);
   });
 
   test('an upsert of a held key that changes a constant is refused and leaves the row as it was; a caller with the permission changes it, moving its version once', async () => {
@@ -685,22 +706,22 @@ describe.skipIf(rulesCore === undefined || rulesDsn === '')('an upsert of a tabl
   });
 
   test('an upsert on a key over an expression whose update sets a field is refused before anything is written; one that sets none keeps the row as it is', async () => {
-    const before = await stored('k1');
-    await expect(orm.item.upsertOne({ code: 'K1', title: 'Kettle' }, ['lowerCode'], { title: 'Urn' })).rejects.toThrow(
-      'orm: upsertOne of Item on lowerCode, a unique index over an expression: an upsert of a table that composes behaviors updates the row the key holds through the core (D103), and needs a key over columns to find it; upsert on another key'
+    const mug = await orm.item.upsertOne({ code: 'k6', sku: 's6', title: 'Mug' }, ['sku'], {});
+    const before = await stored('k6');
+    // S6 conflicts with s6 under lower(sku).
+    const input = { code: 'k7', sku: 'S6', title: 'Cup' };
+    await expect(orm.item.upsertOne(input, ['sku'], { title: 'Urn' })).rejects.toThrow(
+      'orm: upsertOne of Item on sku, a unique index over an expression: an upsert of a table that composes behaviors updates the row the key holds through the core (D103), and needs a key over columns to find it; upsert on another key'
     );
-    await expect(orm.item.upsertMany([{ code: 'K1', title: 'Urn' }], ['lowerCode'], ['title'])).rejects.toThrow('a unique index over an expression');
-    expect(await stored('k1')).toEqual(before);
-    expect(await stored('K1')).toBeUndefined();
-    // The key's keep sets its first column to the held row's own value, not
-    // the input's K1, so k1 keeps its text; the bump trigger still moves
-    // its version, as it does on every update.
-    const [{ id }] = (await pool.query("SELECT id FROM item WHERE code = 'k1'")).rows;
-    const kept = await orm.item.upsertOneResult({ code: 'K1', title: 'Kettle' }, ['lowerCode'], {});
+    await expect(orm.item.upsertMany([input], ['sku'], ['title'])).rejects.toThrow('a unique index over an expression');
+    expect(await stored('k6')).toEqual(before);
+    expect(await stored('k7')).toBeUndefined();
+    // It updates nothing and reads the held row back by the expression's
+    // value of the input, so s6 keeps its text, its version and its stamp.
+    const kept = await orm.item.upsertOneResult(input, ['sku'], {});
     expect(kept.status).toBe('unchanged');
-    expect(uuidToDb(kept.row.id)).toBe(id);
-    expect(kept.row.code).toBe('k1');
-    expect(await stored('k1')).toEqual({ ...before, _version: expect.anything() });
-    expect(await stored('K1')).toBeUndefined();
+    expect(kept.row).toMatchObject({ id: mug.id, code: 'k6', sku: 's6', title: 'Mug', _version: 1 });
+    expect(await stored('k6')).toEqual(before);
+    expect(await stored('k7')).toBeUndefined();
   });
 });

@@ -271,13 +271,15 @@ type ORMColumn struct {
 
 // ORMUniqueKey is a unique key an upsert is keyed by: Fields its schema
 // fields, Name them joined by ",". Rows reads the rows that hold keys
-// (D89), and Expression is a key over an expression, which has none.
+// (D89), and Expression is a key over an expression, which has none, and
+// Held its read of the row that holds one input's value of it.
 type ORMUniqueKey struct {
 	Name       string
 	Fields     []string
 	Conflict   string
 	Keep       string
 	Rows       string
+	Held       string
 	Expression bool
 }
 
@@ -462,7 +464,7 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 			table.Columns = append(table.Columns, column)
 		}
 		for _, k := range t.UniqueKeys {
-			table.UniqueKeys = append(table.UniqueKeys, ORMUniqueKey{Name: k.Name, Fields: k.Fields, Conflict: k.Conflict, Keep: k.Keep, Rows: k.Rows, Expression: k.Expression})
+			table.UniqueKeys = append(table.UniqueKeys, ORMUniqueKey{Name: k.Name, Fields: k.Fields, Conflict: k.Conflict, Keep: k.Keep, Rows: k.Rows, Held: k.Held, Expression: k.Expression})
 		}
 		if err := ormRelations(&table, t, owned); err != nil {
 			return nil, err
@@ -1051,13 +1053,16 @@ func (c ORMColumn) Flags() string {
 }
 
 // Definition is the key as orm.ts writes it in its table's uniqueKeys:
-// its conflict target, the assignment of an update that sets nothing, and
-// the read of the rows that hold keys, or that it is a key over an
-// expression (D89).
+// its conflict target, the assignment of the update an upsert that sets
+// nothing names, and the read of the rows that hold keys, or that it is a
+// key over an expression and its read of the row that holds one (D89).
 func (k ORMUniqueKey) Definition() string {
 	out := "{ conflict: " + jsonQuote(k.Conflict) + ", keep: " + jsonQuote(k.Keep)
 	if k.Rows != "" {
 		out += ", rows: " + jsonQuote(k.Rows)
+	}
+	if k.Held != "" {
+		out += ", held: " + jsonQuote(k.Held)
 	}
 	if k.Expression {
 		out += ", expression: true"

@@ -2622,17 +2622,18 @@ func (r *{{ .Name }}) CreateOne(ctx context.Context, input *types.{{ .TypeName }
 
 
 // {{ lowerFirst .TypeName }}UniqueKeys are the conflict targets of {{ .TypeName }}'s unique keys, and
-// the assignment an upsert that sets nothing writes, so the row it
-// conflicts with is returned (sqlutil.UniqueKey, D79); the read of the rows
-// that hold keys, which an upsert only if changed reads back, empty for a
-// key over an expression, and the key's columns as a batch insert's cells
-// name them (D89).
+// the assignment of the update an upsert that sets nothing names, which its
+// WHERE FALSE never runs (sqlutil.UniqueKey, D79); the read of the rows
+// that hold keys, which an upsert reads back when it leaves them as they
+// were, empty for a key over an expression, and that key's read of the row
+// that holds one input's value of it, empty for a key over columns; and the
+// key's columns as a batch insert's cells name them (D89).
 var {{ lowerFirst .TypeName }}UniqueKeys = map[{{ .TypeName }}UniqueKey]struct {
-	conflict, keep, rows string
-	columns              []string
+	conflict, keep, rows, held string
+	columns                    []string
 }{
 	{{- range .UniqueKeys }}
-	{{ .Const }}: { {{- goRawString .Conflict }}, {{ goRawString .Keep }}, {{ goRawString .Rows }}, []string{ {{- range $i, $c := .QuotedColumns }}{{ if $i }}, {{ end }}{{ goRawString $c }}{{ end -}} } },
+	{{ .Const }}: { {{- goRawString .Conflict }}, {{ goRawString .Keep }}, {{ goRawString .Rows }}, {{ goRawString .Held }}, []string{ {{- range $i, $c := .QuotedColumns }}{{ if $i }}, {{ end }}{{ goRawString $c }}{{ end -}} } },
 	{{- end }}
 }
 
@@ -2743,7 +2744,9 @@ func (r *{{ .Name }}) UpsertOne(ctx context.Context, input *types.{{ .TypeName }
 // UpsertOneResult is UpsertOne, and what it did with the row: inserted it,
 // updated the row that held the key, or left that row as it was (D89).
 // With opts.OnlyIfChanged it updates the row only when a field the update
-// sets differs from what the row holds, which it reads back otherwise.{{ if .EncryptedFields }} An
+// sets differs from what the row holds, which it reads back otherwise. One
+// whose update sets no field updates nothing, so the row keeps its version
+// and no trigger fires, and reads the row back.{{ if .EncryptedFields }} An
 // encrypted field the update sets is sealed under the key of the row it
 // updates, which only the statement names, so a second statement, an
 // UpdateOne, sets it when it differs from what the row holds.{{ end }} A write that
@@ -2771,12 +2774,19 @@ func (r *{{ .Name }}) UpsertOneResult(ctx context.Context, input *types.{{ .Type
 		}
 		return *result, nil
 	}
-	if {{ if .EncryptedFields }}{{ lowerFirst .TypeName }}SetsEncrypted(update) == "" && {{ end }}!opts.OnlyIfChanged {
+	if {{ if .EncryptedFields }}{{ lowerFirst .TypeName }}SetsEncrypted(update) == "" && {{ end }}!opts.OnlyIfChanged && {{ lowerFirst .TypeName }}UpdateSetsField(update) {
 		return write(r)
 	}
 	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (UpsertResult[*types.{{ .TypeName }}], error) {
 		return write(&{{ .Name }}{tx: tx, txDB: r.database()})
 	})
+}
+
+// {{ lowerFirst .TypeName }}UpdateSetsField reports whether update sets a field, a value or a
+// null: UpdatedBy alone sets none, but stamps the row an update that sets
+// one changes.
+func {{ lowerFirst .TypeName }}UpdateSetsField(update *{{ .TypeName }}Update) bool {
+	return update != nil && *update != ({{ .TypeName }}Update{UpdatedBy: update.UpdatedBy})
 }
 {{- end }}
 {{- if .UpsertsThroughCore }}
@@ -2785,8 +2795,8 @@ func (r *{{ .Name }}) UpsertOneResult(ctx context.Context, input *types.{{ .Type
 {{- else }}
 
 // upsertRow is UpsertOneResult on the repository's connection: the upsert,
-// a read of the row it left as it was, only if changed, and the second
-// statement of an encrypted field.
+// a read of the row it left as it was, when the update sets no field or
+// only if changed, and the second statement of an encrypted field.
 {{- end }}
 func (r *{{ .Name }}) upsertRow(ctx context.Context, input *types.{{ .TypeName }}, on {{ .TypeName }}UniqueKey, update *{{ .TypeName }}Update, onlyIfChanged bool) (*UpsertResult[*types.{{ .TypeName }}], error) {
 	key := {{ lowerFirst .TypeName }}UniqueKeys[on]
@@ -3070,14 +3080,14 @@ func (r *{{ .Name }}) upsertRow(ctx context.Context, input *types.{{ .TypeName }
 	// holds runs through the core's update, as UpdateOne's does (D104).
 	sets := assigned > 0{{ if .EncryptedFields }} || {{ lowerFirst .TypeName }}SetsEncrypted(sealing) != ""{{ end }}
 	// The statement's update of the row the key holds is the key's keep
-	// assignment: an update that sets no field leaves the row as it is,
-	// stamps and all, and returns it. One that sets a field never runs it:
-	// Postgres locks the row and returns none, and the row is read back by
-	// its key and updated through the core below, so its version moves
-	// once, as UpdateOne's does. The statement then binds the insert's
-	// values alone.
+	// assignment, which it never runs: Postgres locks the row and returns
+	// none, and the row is read back by its key. An update that sets no
+	// field compares none, so its WHERE is FALSE, and leaves the row as it
+	// is, its version, stamps and history all. One that sets a field
+	// updates the row through the core below, so its version moves once, as
+	// UpdateOne's does. The statement then binds the insert's values alone.
 	setClauses = []string{key.keep}
-	where := upsertWhere({{ goRawString .SQL.LiveCondition }}, compareCurrent, compareNext, onlyIfChanged)
+	where := upsertWhere({{ goRawString .SQL.LiveCondition }}, compareCurrent, compareNext, true)
 	if sets {
 		if key.rows == "" {
 			return nil, fmt.Errorf("orm: UpsertOne of {{ .TypeName }} on %s, a unique index over an expression: an upsert of a table that composes behaviors updates the row the key holds through the core (D103), and needs a key over columns to find it; upsert on another key", string(on))
@@ -3087,8 +3097,9 @@ func (r *{{ .Name }}) upsertRow(ctx context.Context, input *types.{{ .TypeName }
 	}
 	{{- else }}
 	if assigned == 0 {
-		// An update that sets no field leaves the row as it is, stamps and
-		// all, and returns it.
+		// An update that sets no field compares none, so its WHERE is FALSE:
+		// it leaves the row as it is, its version, stamps and history all,
+		// and reads it back below.
 		setClauses = append(setClauses, key.keep)
 	} else {
 		// Set updated_at
@@ -3127,7 +3138,7 @@ func (r *{{ .Name }}) upsertRow(ctx context.Context, input *types.{{ .TypeName }
 		"("+strings.Join(placeholders, ", ")+")",
 		key.conflict,
 		strings.Join(setClauses, ", "),
-		{{ if .UpsertsThroughCore }}where{{ else }}upsertWhere({{ goRawString .SQL.LiveCondition }}, compareCurrent, compareNext, onlyIfChanged){{ end }},
+		{{ if .UpsertsThroughCore }}where{{ else }}upsertWhere({{ goRawString .SQL.LiveCondition }}, compareCurrent, compareNext, onlyIfChanged || assigned == 0){{ end }},
 	)
 
 	// Execute query
@@ -3143,18 +3154,10 @@ func (r *{{ .Name }}) upsertRow(ctx context.Context, input *types.{{ .TypeName }
 	switch {
 	{{- if .UpsertsThroughCore }}
 	case err == nil:
-		// The row it inserted, or the row the key holds, as it is, for an
-		// update that sets no field.
-		status := UpsertUnchanged
-		if inserted {
-			status = UpsertInserted
-		}
-		upserted = &UpsertResult[*types.{{ .TypeName }}]{Row: scanned, Status: status}
+		// The row it inserted.
+		upserted = &UpsertResult[*types.{{ .TypeName }}]{Row: scanned, Status: UpsertInserted}
 	case err != pgx.ErrNoRows:
 		return nil, fmt.Errorf("failed to scan result: %w", err)
-	case !sets && !onlyIfChanged:
-		// The row the key conflicts with is soft-deleted.
-		return nil, ErrNotFound
 	default:
 		// The row the key conflicts with, which the statement left as it
 		// was, read back by its key: a soft-deleted one is ErrNotFound.
@@ -3162,13 +3165,13 @@ func (r *{{ .Name }}) upsertRow(ctx context.Context, input *types.{{ .TypeName }
 		if !ok {
 			return nil, fmt.Errorf("no {{ .TypeName }} row holds an unset %s: %w", string(on), ErrNotFound)
 		}
-		found, err := r.rowsOfKeys(ctx, on, [][]any{keyValues}, []*types.{{ .TypeName }}{input})
+		found, err := r.heldOfKey(ctx, on, keyValues, input)
 		if err != nil {
 			return nil, err
 		}
-		upserted = &UpsertResult[*types.{{ .TypeName }}]{Row: found[0], Status: UpsertUnchanged}
+		upserted = &UpsertResult[*types.{{ .TypeName }}]{Row: found, Status: UpsertUnchanged}
 		if sets {
-			held, err := r.upsertHeld(ctx, found[0], {{ if .EncryptedFields }}sealing{{ else }}update{{ end }}, onlyIfChanged)
+			held, err := r.upsertHeld(ctx, found, {{ if .EncryptedFields }}sealing{{ else }}update{{ end }}, onlyIfChanged)
 			if err != nil {
 				return nil, err
 			}
@@ -3185,20 +3188,22 @@ func (r *{{ .Name }}) upsertRow(ctx context.Context, input *types.{{ .TypeName }
 		upserted = &UpsertResult[*types.{{ .TypeName }}]{Row: scanned, Status: status}
 	case err != pgx.ErrNoRows:
 		return nil, fmt.Errorf("failed to scan result: %w", err)
-	case !onlyIfChanged:
+	case !onlyIfChanged && assigned > 0:
 		// The row the key conflicts with is soft-deleted.
 		return nil, ErrNotFound
 	default:
-		// The row the key conflicts with already held the update's values.
+		// The row the key conflicts with, which the update sets no field of
+		// or which already held the update's values, read back by its key:
+		// a soft-deleted one is ErrNotFound.
 		keyValues, ok := upsertCellValues(upsertCells(fields, values), key.columns)
 		if !ok {
 			return nil, fmt.Errorf("no {{ .TypeName }} row holds an unset %s: %w", string(on), ErrNotFound)
 		}
-		found, err := r.rowsOfKeys(ctx, on, [][]any{keyValues}, []*types.{{ .TypeName }}{input})
+		found, err := r.heldOfKey(ctx, on, keyValues, input)
 		if err != nil {
 			return nil, err
 		}
-		upserted = &UpsertResult[*types.{{ .TypeName }}]{Row: found[0], Status: UpsertUnchanged}
+		upserted = &UpsertResult[*types.{{ .TypeName }}]{Row: found, Status: UpsertUnchanged}
 	{{- end }}
 	}
 	{{- if .EncryptedFields }}
@@ -3221,8 +3226,9 @@ func (r *{{ .Name }}) upsertRow(ctx context.Context, input *types.{{ .TypeName }
 // rows, opts.Batch or as many as Postgres binds the parameters of, and more
 // rows take a statement per batch, in one transaction; a write that may
 // take more than one statement runs in a transaction of its own when none
-// is open. An update that names no field leaves each row that holds a key
-// as it is.{{ if .HasSoftDelete }} A soft-deleted row that holds a key is left as it is, and
+// is open. One whose update names no field updates nothing, so each row
+// that holds a key keeps its version and no trigger fires, and reads those
+// rows back.{{ if .HasSoftDelete }} A soft-deleted row that holds a key is left as it is, and
 // UpsertMany returns ErrNotFound.{{ end }} Two inputs of one batch that hold one key fail
 // the statement, and a key over an expression, whose rows the statement's
 // cannot be matched to the inputs by, is refused.
@@ -3251,7 +3257,7 @@ func (r *{{ .Name }}) UpsertMany(ctx context.Context, inputs []*types.{{ .TypeNa
 	if len(inputs) == 0 {
 		return []UpsertResult[*types.{{ .TypeName }}]{}, nil
 	}
-	if len(inputs) <= batch && !opts.OnlyIfChanged{{ range .EncryptedFields }} && !update.{{ toGoName .Name }}{{ end }} {
+	if len(inputs) <= batch && !opts.OnlyIfChanged{{ range .EncryptedFields }} && !update.{{ toGoName .Name }}{{ end }} && update != ({{ .TypeName }}Fields{}) {
 		return r.upsertBatches(ctx, inputs, on, update, batch, false)
 	}
 	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]UpsertResult[*types.{{ .TypeName }}], error) {
@@ -3266,7 +3272,8 @@ func (r *{{ .Name }}) UpsertMany(ctx context.Context, inputs []*types.{{ .TypeNa
 
 // upsertBatches is UpsertMany on the repository's connection, a batch at a
 // time: each batch's statement, a read of the rows it left as they were,
-// only if changed, and the second statement of each encrypted field.
+// when update names no field or only if changed, and the second statement
+// of each encrypted field.
 {{- end }}
 func (r *{{ .Name }}) upsertBatches(ctx context.Context, inputs []*types.{{ .TypeName }}, on {{ .TypeName }}UniqueKey, update {{ .TypeName }}Fields, batch int, onlyIfChanged bool) ([]UpsertResult[*types.{{ .TypeName }}], error) {
 	key := {{ lowerFirst .TypeName }}UniqueKeys[on]
@@ -3333,11 +3340,12 @@ func (r *{{ .Name }}) upsertBatches(ctx context.Context, inputs []*types.{{ .Typ
 	{{- if .UpsertsThroughCore }}
 	// The statement sets none of them: sets is whether update names a
 	// field, whose update of each row a key holds runs through the core's
-	// update, as UpdateOne's does (D104). The statement's update of such a
-	// row never runs then: Postgres locks the row and returns none, and the
-	// row is read back by its key, so its version moves once.
+	// update, as UpdateOne's does (D104). The statement's update of a row a
+	// key holds never runs: Postgres locks the row and returns none, and the
+	// row is read back by its key, so its version moves once, or, when
+	// update names no field, which compares none, not at all.
 	sets := len(setClauses) > 0{{ range .EncryptedFields }} || update.{{ toGoName .Name }}{{ end }}
-	where := upsertWhere({{ goRawString .SQL.LiveCondition }}, compareCurrent, compareNext, onlyIfChanged)
+	where := upsertWhere({{ goRawString .SQL.LiveCondition }}, compareCurrent, compareNext, true)
 	if sets {
 		where = upsertWhere({{ goRawString .SQL.LiveCondition }}, nil, nil, true)
 	}
@@ -3375,7 +3383,9 @@ func (r *{{ .Name }}) upsertBatches(ctx context.Context, inputs []*types.{{ .Typ
 		{{- else }}
 		assignments := append([]string(nil), setClauses...)
 		if len(setClauses) == 0 {
-			// An update that names no field leaves each row as it is.
+			// An update that names no field compares none, so its WHERE is
+			// FALSE: it leaves each row as it is, its version, stamps and
+			// history all, and reads it back below.
 			assignments = append(assignments, key.keep)
 		} else {
 			{{- range .Fields }}
@@ -3400,7 +3410,7 @@ func (r *{{ .Name }}) upsertBatches(ctx context.Context, inputs []*types.{{ .Typ
 			strings.Join(valuePlaceholders, ", "),
 			key.conflict,
 			strings.Join(assignments, ", "),
-			{{ if .UpsertsThroughCore }}where{{ else }}upsertWhere({{ goRawString .SQL.LiveCondition }}, compareCurrent, compareNext, onlyIfChanged){{ end }},
+			{{ if .UpsertsThroughCore }}where{{ else }}upsertWhere({{ goRawString .SQL.LiveCondition }}, compareCurrent, compareNext, onlyIfChanged || len(setClauses) == 0){{ end }},
 		)
 		returned, inserted, err := r.upsertReturned(ctx, query, values)
 		if err != nil {
@@ -3438,8 +3448,9 @@ func (r *{{ .Name }}) upsertBatches(ctx context.Context, inputs []*types.{{ .Typ
 		// was and reads back by its key, or a deleted one.
 		{{- else }}
 
-		// A row it did not return is one it left as it was, only if changed,
-		// which it reads back by its key, or a deleted one.
+		// A row it did not return is one it left as it was, when update
+		// names no field or only if changed, which it reads back by its key,
+		// or a deleted one.
 		{{- end }}
 		var left []int
 		for i := range matched {
@@ -3448,9 +3459,11 @@ func (r *{{ .Name }}) upsertBatches(ctx context.Context, inputs []*types.{{ .Typ
 			}
 		}
 		if len(left) > 0 {
-			if !onlyIfChanged{{ if .UpsertsThroughCore }} && !sets{{ end }} {
+			{{- if not .UpsertsThroughCore }}
+			if !onlyIfChanged && len(setClauses) > 0 {
 				return nil, fmt.Errorf("the {{ .TypeName }} row that holds the %s of input %d is deleted: %w", string(on), start+left[0], ErrNotFound)
 			}
+			{{- end }}
 			keyValues := make([][]any, len(left))
 			wanted := make([]*types.{{ .TypeName }}, len(left))
 			for n, i := range left {
@@ -3543,8 +3556,9 @@ func (r *{{ .Name }}) upsertReturned(ctx context.Context, query string, values [
 
 // rowsOfKeys reads the rows that hold keys, each the values of the unique
 // key on an input's insert binds, among the rows the key's index holds, in
-// the inputs' order: the rows an upsert only if changed left as they were
-// (D89). A key no live row holds is ErrNotFound.
+// the inputs' order: the rows an upsert left as they were, as one whose
+// update sets no field or one only if changed does (D89). A key no live
+// row holds is ErrNotFound.
 func (r *{{ .Name }}) rowsOfKeys(ctx context.Context, on {{ .TypeName }}UniqueKey, keys [][]any, inputs []*types.{{ .TypeName }}) ([]*types.{{ .TypeName }}, error) {
 	tuples, values := upsertKeyTuples(keys)
 	query := fmt.Sprintf({{ lowerFirst .TypeName }}UniqueKeys[on].rows, strings.Join(tuples, ", "))
@@ -3582,6 +3596,36 @@ func (r *{{ .Name }}) rowsOfKeys(ctx context.Context, on {{ .TypeName }}UniqueKe
 		out[i] = row
 	}
 	return out, nil
+}
+
+// heldOfKey reads the row that holds input's value of the unique key on,
+// keyValues the values of the key's columns its insert binds, which an
+// upsert left as it was: by rowsOfKeys, or, for a key over an expression,
+// whose columns read no row, by the expression's value over keyValues
+// (sqlutil.UniqueKey.Held, D105). A key no live row holds is ErrNotFound.
+func (r *{{ .Name }}) heldOfKey(ctx context.Context, on {{ .TypeName }}UniqueKey, keyValues []any, input *types.{{ .TypeName }}) (*types.{{ .TypeName }}, error) {
+	query := {{ lowerFirst .TypeName }}UniqueKeys[on].held
+	if query == "" {
+		found, err := r.rowsOfKeys(ctx, on, [][]any{keyValues}, []*types.{{ .TypeName }}{input})
+		if err != nil {
+			return nil, err
+		}
+		return found[0], nil
+	}
+	var read pgx.Row
+	if r.tx != nil {
+		read = r.tx.QueryRow(ctx, query, keyValues...)
+	} else {
+		read = r.db.pool.QueryRow(ctx, query, keyValues...)
+	}
+	row, err := r.scanReturned(read, nil)
+	if err == pgx.ErrNoRows{{ if .HasSoftDelete }} || (err == nil && upsertHolds(row.DeletedAt)){{ end }} {
+		return nil, fmt.Errorf("the {{ .TypeName }} row that holds the key %s is deleted: %w", string(on), ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the row the upsert left: %w", err)
+	}
+	return row, nil
 }
 {{- if .EncryptedFields }}
 

@@ -260,12 +260,14 @@ export interface Clauses {
   readonly group?: string;
 }
 
-/** A unique key an upsert is keyed by: its conflict target and the assignment of an update that sets nothing. */
+/** A unique key an upsert is keyed by: its conflict target and the assignment of the update an upsert that sets nothing names, which its WHERE FALSE never runs. */
 export interface UniqueKeyDefinition {
   readonly conflict: string;
   readonly keep: string;
-  /** The read of the rows that hold the keys of the tuples %s, which an upsert only if changed reads back (D89); absent for an expression key. */
+  /** The read of the rows that hold the keys of the tuples %s, which an upsert reads back when it leaves them as they were (D89); absent for an expression key. */
   readonly rows?: string;
+  /** An expression key's read of the row that holds one input's value of it, $1 on its columns' values (D105); absent for a key over columns. */
+  readonly held?: string;
   /** A unique index over an expression, whose rows an upsert cannot match to its inputs by their columns. */
   readonly expression?: boolean;
 }
@@ -1950,7 +1952,9 @@ class TableRepository {
     // seals the field itself (D103), so a refusal of either writes nothing.
     const sealing = this.encrypted.filter(c => change[c.name] !== undefined && change[c.name] !== null);
     const write = async (repo: TableRepository): Promise<UpsertResult<Values>> => repo.upsertRow((await repo.upsertInputs([input]))[0]!, name, key, change, sealing, onlyIfChanged);
-    return this.behaviors || sealing.length > 0 || onlyIfChanged ? this.atomically(write) : write(this);
+    // An update that sets no field reads back the row the key holds, which
+    // the statement locked, in its transaction.
+    return this.behaviors || sealing.length > 0 || onlyIfChanged || !setsField(this.def.columns, change) ? this.atomically(write) : write(this);
   }
 
   async upsertMany(inputs: readonly Values[], on: readonly string[], update: readonly string[], options: UpsertManyOptions = {}): Promise<UpsertResult<Values>[]> {
@@ -1978,7 +1982,7 @@ class TableRepository {
     const batch = Math.min(options.batch ?? most, most);
     const onlyIfChanged = options.onlyIfChanged === true;
     const write = async (repo: TableRepository): Promise<UpsertResult<Values>[]> => repo.upsertBatches(await repo.upsertInputs(inputs), name, key, fields, batch, onlyIfChanged);
-    return this.behaviors || inputs.length > batch || onlyIfChanged || fields.some(c => c.encrypted) ? this.atomically(write) : write(this);
+    return this.behaviors || inputs.length > batch || onlyIfChanged || fields.length === 0 || fields.some(c => c.encrypted) ? this.atomically(write) : write(this);
   }
 
   /**
@@ -2075,7 +2079,10 @@ class TableRepository {
 
   /**
    * upsertOneResult on the repository's runner: the upsert, a read of a row
-   * it left as it was, and the second statement of an encrypted field. On a
+   * it left as it was, and the second statement of an encrypted field. An
+   * update that sets no field compares none, so its WHERE is FALSE: it
+   * leaves the row the key holds as it is, its version, stamps and history
+   * all, and reads it back. On a
    * table that composes behaviors, the conflict branch of an update that
    * sets a field locks the row the key holds and writes nothing, and the
    * update runs through the core's on the row read back by the key (D103).
@@ -2107,21 +2114,17 @@ class TableRepository {
     }
     const compared = { current: [] as string[], next: [] as string[] };
     const sets = this.setClauses(plain, args, false, compared);
-    // An update that sets no field leaves the row as it is, stamps and
-    // all, and returns it.
     const assignments = sets.length === 0 ? [key.keep] : [...sets];
     if (sets.length > 0) this.stamp(assignments, update, args);
-    const where = this.upsertWhere(compared.current, compared.next, onlyIfChanged);
+    const where = this.upsertWhere(compared.current, compared.next, onlyIfChanged || sets.length === 0);
     const { rows } = await run(this.runner, fill(s.upsert, columns.join(', '), `(${placeholders.join(', ')})`, key.conflict, assignments.join(', '), where), args);
     let result: UpsertResult<Values>;
     if (rows.length > 0) {
-      result = { row: this.decode(rows[0]!), status: rows[0]![UPSERT_INSERTED] === true ? 'inserted' : sets.length > 0 ? 'updated' : 'unchanged' };
-    } else if (!onlyIfChanged) {
+      result = { row: this.decode(rows[0]!), status: rows[0]![UPSERT_INSERTED] === true ? 'inserted' : 'updated' };
+    } else if (!onlyIfChanged && sets.length > 0) {
       throw new NotFoundError(`the ${this.def.name} row that holds the key ${name} is deleted`);
     } else {
-      const keyColumns = this.keyColumns(name);
-      const [found] = await this.rowsOfKeys(name, key, keyColumns, [keyColumns.map(c => this.insertValue(sealed, c))]);
-      result = { row: found!, status: 'unchanged' };
+      result = { row: await this.heldRow(name, key, sealed), status: 'unchanged' };
     }
     return this.resealed(result, update, sealing);
   }
@@ -2159,14 +2162,14 @@ class TableRepository {
       const args: unknown[] = [];
       const { columns, tuples } = this.insertTuples(order, cells, args);
       // Each field takes the value the input would have inserted; through
-      // the core, the branch compares nothing, so it updates and returns no
-      // row, and locks each one a key holds.
+      // the core, or when fields names none, the branch compares nothing,
+      // so it updates and returns no row, and locks each one a key holds.
       const sets = core ? [] : plain.map(column => fill(c.setExcluded, column.column, column.column));
       const current = plain.map(column => this.compareAs(column, column.qualified));
       const next = plain.map(column => this.compareAs(column, fill(c.excluded, column.column)));
       const assignments = sets.length === 0 ? [key.keep] : [...sets];
       if (sets.length > 0) this.stamp(assignments, {}, args);
-      const where = core ? this.upsertWhere([], [], true) : this.upsertWhere(current, next, onlyIfChanged);
+      const where = sets.length === 0 ? this.upsertWhere([], [], true) : this.upsertWhere(current, next, onlyIfChanged);
       const { rows } = await run(this.runner, fill(s.upsert, columns.join(', '), tuples.join(', '), key.conflict, assignments.join(', '), where), args);
       // A row is its input's by the key's values; an input that sets none
       // of them, whose key the database generates, takes the next row whose
@@ -2185,12 +2188,12 @@ class TableRepository {
         if (i === undefined) throw new Error(`orm: upsertMany of ${this.def.name} wrote a row whose ${name} no input holds`);
         matched[i] = { row: this.decode(raw), status: raw[UPSERT_INSERTED] === true ? 'inserted' : sets.length > 0 ? 'updated' : 'unchanged' };
       }
-      // A row it did not return is one it left as it was, only if changed
-      // or for the core to update, which it reads back by its key, or a
-      // deleted one.
+      // A row it did not return is one it left as it was, when fields names
+      // none, only if changed or for the core to update, which it reads
+      // back by its key, or a deleted one.
       const left = matched.flatMap((result, i) => (result === undefined ? [i] : []));
       if (left.length > 0) {
-        if (!onlyIfChanged && !core) throw new NotFoundError(`the ${this.def.name} row that holds the ${name} of input ${start + left[0]!} is deleted`);
+        if (!onlyIfChanged && sets.length > 0) throw new NotFoundError(`the ${this.def.name} row that holds the ${name} of input ${start + left[0]!} is deleted`);
         const found = await this.rowsOfKeys(name, key, keyColumns, left.map(i => at.map(j => cells[i]![j]!)));
         left.forEach((i, n) => {
           matched[i] = { row: found[n]!, status: 'unchanged' };
@@ -2222,9 +2225,31 @@ class TableRepository {
   }
 
   /**
+   * The row that holds the unique key name's value of sealed, an input as
+   * its insert binds it, which an upsert left as it was: by rowsOfKeys, or,
+   * for a key over an expression, whose columns read no row, by the
+   * expression's value over them (held, D105). NotFoundError for a key no
+   * live row holds.
+   */
+  private async heldRow(name: string, key: UniqueKeyDefinition, sealed: Values): Promise<Values> {
+    const keyColumns = this.keyColumns(name);
+    const cells = keyColumns.map(c => this.insertValue(sealed, c));
+    if (key.rows) return (await this.rowsOfKeys(name, key, keyColumns, [cells]))[0]!;
+    if (!key.held) throw new Error(`orm: ${this.def.name}'s unique key ${name}, over an expression, has no read of the row that holds it; regenerate the types package`);
+    if (cells.some(cell => !cell.set)) throw new NotFoundError(`no ${this.def.name} row holds an unset ${name}`);
+    const { rows } = await run(this.runner, key.held, cells.map(cell => cell.value));
+    const raw = rows[0];
+    const deletedAt = this.audit('deletedAt');
+    if (!raw || (deletedAt && raw[columnKey(deletedAt.column)] !== null && raw[columnKey(deletedAt.column)] !== undefined)) {
+      throw new NotFoundError(`the ${this.def.name} row that holds the key ${name} is deleted`);
+    }
+    return this.decode(raw);
+  }
+
+  /**
    * The rows that hold the keys of the cells, each a key column's insert
-   * cell, in their order, which an upsert only if changed left as they
-   * were: NotFoundError for a key no live row holds (D89).
+   * cell, in their order, which an upsert left as they were: NotFoundError
+   * for a key no live row holds (D89).
    */
   private async rowsOfKeys(name: string, key: UniqueKeyDefinition, keyColumns: readonly TableColumn[], keys: readonly { set: boolean; value?: unknown }[][]): Promise<Values[]> {
     const args: unknown[] = [];

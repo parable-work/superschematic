@@ -32,6 +32,16 @@ func (c ColumnModel) CompareAs() string {
 	return "%s"
 }
 
+// SQLType is the type a statement casts a value of the column to: Type, as
+// the DDL writes it, or its class's for a column the generator adds and a
+// relation's key, which have none.
+func (c ColumnModel) SQLType() string {
+	if c.Type != "" {
+		return c.Type
+	}
+	return c.Class.SQLType
+}
+
 // columnList is every column of the table, each in double quotes, joined
 // by ", ", as TableStatements.Columns lists them.
 func (t *TableModel) columnList() string {

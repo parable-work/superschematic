@@ -557,10 +557,10 @@ type RelationModel struct {
 // conflict target of an upsert on it, "(sku)", or with the predicate of a
 // partial index, "(product_id, author_id) WHERE deleted_at IS NULL", or
 // over an expression index's expression, "((lower(email)))". Keep
-// is the assignment an upsert that sets nothing writes, so the conflicting
-// row is returned: its first column set to itself, "email = account.email",
-// never to the input's value, which a key over an expression may hold in
-// another form.
+// is the assignment of the update an upsert that sets nothing names, which
+// its WHERE FALSE never runs: its first column set to itself, "email =
+// account.email", never to the input's value, which a key over an
+// expression may hold in another form.
 type UniqueKey struct {
 	Name     string
 	Fields   []string
@@ -573,9 +573,17 @@ type UniqueKey struct {
 	Expression bool
 	// Rows reads the rows that hold the keys of the tuples %s, each of the
 	// key's columns in order, among the rows the key's index holds: the
-	// rows an upsert with OnlyIfChanged left as they were, which RETURNING
-	// leaves out (D89). Empty for an expression key.
+	// rows an upsert left as they were, which RETURNING leaves out: one
+	// with OnlyIfChanged (D89) or whose update sets no field (D105). Empty
+	// for an expression key.
 	Rows string
+	// Held reads the row that holds an expression key's value of one
+	// input, among the rows the key's index holds: the expression over the
+	// input's values of the key's columns, $1 on in their order, each cast
+	// to its column's type, as the index evaluates it over the row's. It
+	// is the row an upsert that sets no field leaves as it was and reads
+	// back (D105). Empty for a key over columns, whose Rows reads it.
+	Held string
 }
 
 // Reference is a to-one relation of another table, Source, through its
@@ -921,6 +929,7 @@ func uniqueKeys(td *ir.TypeDef, table *TableModel) ([]UniqueKey, error) {
 		}
 		seen[key.Name] = true
 		deletedAt := false
+		var casts []string
 		for _, field := range fields {
 			column := table.columnOfKey(field)
 			if column == nil {
@@ -928,6 +937,7 @@ func uniqueKeys(td *ir.TypeDef, table *TableModel) ([]UniqueKey, error) {
 			}
 			key.Columns = append(key.Columns, column.Name)
 			deletedAt = deletedAt || column.Audit == AuditDeletedAt
+			casts = append(casts, fmt.Sprintf("CAST($%d AS %s)", len(casts)+1, column.SQLType()))
 		}
 		quoted := make([]string, len(key.Columns))
 		for i, column := range key.Columns {
@@ -943,6 +953,11 @@ func uniqueKeys(td *ir.TypeDef, table *TableModel) ([]UniqueKey, error) {
 			if idx.Expression != "" {
 				key.Conflict = "((" + idx.Expression + "))"
 				key.Expression, key.Rows = true, ""
+				// The expression reads the key's columns (ir.IndexDef), so
+				// over a row of the input's values under the table's name
+				// and theirs it is the input's value of the key.
+				key.Held = "SELECT " + table.columnList() + " FROM " + table.Quoted +
+					" WHERE (" + idx.Expression + ") = (SELECT (" + idx.Expression + ") FROM (VALUES (" + strings.Join(casts, ", ") + ")) AS " + table.Quoted + " (" + strings.Join(quoted, ", ") + "))"
 			}
 			live := ""
 			if table.SoftDelete && !deletedAt {
@@ -953,11 +968,15 @@ func uniqueKeys(td *ir.TypeDef, table *TableModel) ([]UniqueKey, error) {
 				if key.Rows != "" {
 					key.Rows += " AND (" + predicate + ")"
 				}
+				if key.Held != "" {
+					key.Held += " AND (" + predicate + ")"
+				}
 			}
 		}
 		// keep sets the held row's first column to its own value, not the
 		// input's: over an expression the two may differ, as 'K1' conflicts
-		// with 'k1' under lower(code).
+		// with 'k1' under lower(code). An upsert's WHERE FALSE never runs
+		// it, but ON CONFLICT DO UPDATE, which locks the row, needs a SET.
 		key.Keep = quoted[0] + " = " + table.columnOfKey(fields[0]).Qualified
 		keys = append(keys, key)
 		return nil
