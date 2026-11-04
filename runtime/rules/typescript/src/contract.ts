@@ -97,6 +97,14 @@ export interface Command {
   readonly now: number;
   readonly action: Action;
   readonly request?: string;
+  /**
+   * The caller's preconditions (D16, D104): each use's entry by its use id
+   * (an implemented use's id is its behavior's name, { Lease: { token: 3 } }),
+   * which the core checks against the use's behavior before it reads the
+   * row, and hands that use's guard. Only an update, a delete and an
+   * operation present them; absent or empty for none.
+   */
+  readonly preconditions?: Readonly<Record<string, unknown>>;
 }
 
 /** What the core asks the host to read (superschematic_rules::ReadRequest), tagged by kind. Open. */
@@ -107,7 +115,9 @@ export type ReadRequest =
   /** The rows of one sub-table of one use on one row (Answer subRows), each by its key, in key order by code point. */
   | { readonly kind: 'subRows'; readonly type: string; readonly key: string; readonly useId: string; readonly table: string }
   /** The rows of a type whose own field holds a key (Answer linked), in the host's key order, at most limit (the core asks for its LINKED_PAGE, 500), after the key after when given; a soft-deletable table's live rows alone (D103). */
-  | { readonly kind: 'linked'; readonly type: string; readonly field: string; readonly key: string; readonly after?: string; readonly limit: number };
+  | { readonly kind: 'linked'; readonly type: string; readonly field: string; readonly key: string; readonly after?: string; readonly limit: number }
+  /** The rows of a type whose use's owned field holds a value (Answer linked), in the host's key order, at most limit, after the key after when given, the value compared as the column holds it; a soft-deletable table's live rows alone, and none of a type the host does not have (D104). */
+  | { readonly kind: 'holding'; readonly type: string; readonly useId: string; readonly field: string; readonly value: unknown; readonly after?: string; readonly limit: number };
 
 /** One row as the host read it: its own fields, each use's owned fields by use id then declared name, and its version. */
 export interface Row {
@@ -302,6 +312,8 @@ export interface BehaviorDeclaration {
   readonly armsDeadlines?: boolean;
   /** Whether the behavior hears its row's writes, which a table that composes it keeps in a change queue its trigger writes (D103). */
   readonly hearsChanges?: boolean;
+  /** The JSON Schema of the entry a caller presents the behavior as a command's precondition (D16, D104); absent for a behavior that takes none. */
+  readonly preconditionSchema?: unknown;
   readonly operations?: readonly DeclaredOperation[];
   readonly vetoes?: readonly { readonly code: string; readonly description?: string }[];
   readonly [member: string]: unknown;

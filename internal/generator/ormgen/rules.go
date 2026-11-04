@@ -40,6 +40,12 @@ type Rules struct {
 	// LayoutJSON is behaviorlayout.Of's document, json.MarshalIndent with
 	// two spaces, which rules.go embeds.
 	LayoutJSON string
+	// Preconditions is a schema one of whose tables' uses has a behavior
+	// that takes a command's preconditions, a preconditionSchema in its
+	// declaration (D16, D104): rules.go then holds WithPreconditions, and
+	// every command a repository of a table that composes behaviors runs
+	// through the core presents what it names.
+	Preconditions bool
 }
 
 // RepositoryUse is a use of a behavior on a table, as the repository
@@ -73,6 +79,11 @@ type RepositoryUse struct {
 	// Operations are the use's operations on a row, in the declaration's
 	// order.
 	Operations []RepositoryOperation
+	// Precondition is the struct the use's entry of a command's
+	// preconditions is (<Type><Member>Precondition, D104), one of Structs,
+	// typed from its behavior's preconditionSchema; "" for a use whose
+	// behavior takes none.
+	Precondition string
 }
 
 // RepositoryOperation is one operation of a use as the repository writes
@@ -443,6 +454,21 @@ func (o *ORMOutput) RulesExample() string {
 	return ""
 }
 
+// RulesPreconditionExample is the preconditions of the first use whose
+// behavior takes one, as the README and WithPreconditions' doc show them:
+// rules.Preconditions{"Lease": JobLeasePrecondition{...}}; "" for a schema
+// with none.
+func (o *ORMOutput) RulesPreconditionExample() string {
+	for _, repo := range o.Repositories {
+		for _, use := range repo.Uses {
+			if use.Precondition != "" {
+				return fmt.Sprintf("rules.Preconditions{%q: %s{...}}", use.ID, use.Precondition)
+			}
+		}
+	}
+	return ""
+}
+
 // repositoryMethods are the exported methods a repository holds itself,
 // which a use's method may not take; ListAsOfBy* is checked by its prefix.
 var repositoryMethods = []string{
@@ -473,7 +499,7 @@ var packageNames = []string{
 	"Database", "Tx", "TxInterface", "DatabaseInterface", "NoOpDatabase", "NoOpTx", "TxOptions",
 	"IsolationLevel", "UpsertOptions", "UpsertResult", "UpsertStatus", "UpsertInserted", "UpsertUpdated",
 	"UpsertUnchanged", "ErrNotFound", "ErrVersionConflict", "ErrNoUserInContext", "RulesLayout",
-	"WithBehaviorCaller", "WithUserID", "GetUserID", "HasUserID", "WithCaller", "ParseUserID",
+	"WithBehaviorCaller", "WithPreconditions", "WithUserID", "GetUserID", "HasUserID", "WithCaller", "ParseUserID",
 	"Connect", "ConnectWithPool",
 }
 
@@ -524,12 +550,24 @@ func attachRules(schema *ir.Schema, repositories []Repository, reg *registry.Reg
 		names["Parse"+repo.TypeName+"Sort"] = "the repository of " + repo.TypeName
 	}
 
+	// A use whose behavior takes a command's preconditions puts
+	// WithPreconditions in the package, which every command of every table
+	// that composes behaviors then reads (D104).
+	preconditions := false
+	for _, table := range layout.Types {
+		for _, use := range table.Uses {
+			if declaration, ok := reg.Behavior(use.Behavior); ok && len(declaration.PreconditionSchema) > 0 {
+				preconditions = true
+			}
+		}
+	}
 	for i := range repositories {
 		repo := &repositories[i]
 		table := layout.Types[repo.TypeName]
 		if table == nil {
 			continue
 		}
+		repo.Preconditions = preconditions
 		if err := attachTableRules(schema, repo, table, reg, names); err != nil {
 			return nil, err
 		}
@@ -542,7 +580,7 @@ func attachRules(schema *ir.Schema, repositories []Repository, reg *registry.Reg
 	if strings.Contains(string(encoded), "`") {
 		return nil, fmt.Errorf("ormgen: the behaviors' layout holds a backquote, which rules.go's raw string cannot: %s", encoded)
 	}
-	return &Rules{LayoutJSON: string(encoded)}, nil
+	return &Rules{LayoutJSON: string(encoded), Preconditions: preconditions}, nil
 }
 
 // attachTableRules gives repo, a table that composes behaviors as a table,
@@ -552,7 +590,6 @@ func attachRules(schema *ir.Schema, repositories []Repository, reg *registry.Reg
 func attachTableRules(schema *ir.Schema, repo *Repository, table *behaviorlayout.Table, reg *registry.Registry, names map[string]string) error {
 	td := schema.Types[repo.TypeName]
 	repo.HasBehaviors = true
-	repo.NeedsTime = true
 	if table.Deadlines != nil {
 		repo.DeadlineQueue = table.Deadlines.Queue
 		repo.NoUpsert = true
@@ -689,6 +726,20 @@ func attachTableRules(schema *ir.Schema, repo *Repository, table *behaviorlayout
 			NoOp:      "noOp" + base + "Operations",
 			Doc: fmt.Sprintf("%sOperations are the operations of %s's %s, %s (D103), each run through the behaviors' core on the row whose key it takes, in a transaction.",
 				base, repo.TypeName, member, behaviortypes.An(use.Behavior)),
+		}
+		if narrowed.Preconditions != nil {
+			// The use's entry of a command's preconditions, by its use id
+			// (D16, D104): a struct of the behavior's preconditionSchema.
+			name := base + "Precondition"
+			precondition, isStruct, err := b.typeOf(narrowed.Preconditions, name,
+				fmt.Sprintf("%s is the entry %s's %s takes in the preconditions a command presents (WithPreconditions), by its use id, %s (D16, D104).", name, repo.TypeName, member, use.ID))
+			if err != nil {
+				return fmt.Errorf("ormgen: table %s: use %s: its precondition: %w", repo.TypeName, use.ID, err)
+			}
+			if !isStruct {
+				return fmt.Errorf("ormgen: table %s: use %s: behavior %s's preconditionSchema is no object of named members, which the ORM writes a struct of", repo.TypeName, use.ID, use.Behavior)
+			}
+			ru.Precondition = precondition
 		}
 		for _, op := range use.Operations {
 			var doc string

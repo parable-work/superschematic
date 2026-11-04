@@ -4,7 +4,9 @@
 //! the time it runs at, in epoch milliseconds, since the core reads no
 //! clock, and the host's id for the request, which the keys a behavior
 //! makes are derived from, since the core makes no id; a create carries
-//! the id the host will write.
+//! the id the host will write. An update, a delete and an operation may
+//! carry the caller's preconditions too, which the uses' guards hold the
+//! command to (D16, D104).
 //!
 //! The list of actions is open (a behavior's own outbox events may join it),
 //! so a host matches it with a fallback arm.
@@ -76,6 +78,14 @@ pub struct Command {
     /// host gives none, and then a behavior that makes a key is refused.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub request: String,
+    /// The caller's preconditions (D16, D104): each use's entry by its use
+    /// id (an implements use's id is its behavior's name: `{ "Lease": {
+    /// "token": 3 } }`), checked against the use's behavior before the row
+    /// is read, and handed to that use's guard as the request's
+    /// precondition ([`crate::View::precondition`]). Only an update, a
+    /// delete and an operation present them; empty for none.
+    #[serde(default, skip_serializing_if = "Map::is_empty")]
+    pub preconditions: Map<String, Value>,
 }
 
 impl Command {
@@ -86,12 +96,19 @@ impl Command {
             now,
             action,
             request: String::new(),
+            preconditions: Map::new(),
         }
     }
 
     /// The command with the host's id for the request.
     pub fn with_request(mut self, request: impl Into<String>) -> Self {
         self.request = request.into();
+        self
+    }
+
+    /// The command with the caller's preconditions, by use id.
+    pub fn with_preconditions(mut self, preconditions: Map<String, Value>) -> Self {
+        self.preconditions = preconditions;
         self
     }
 }
@@ -192,6 +209,21 @@ impl Action {
         }
     }
 
+    /// The action's kind, as its JSON tag writes it: `define`, `publish`,
+    /// `create`, `update`, `delete`, `operation`, `deadline` or `change`.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Action::Define => "define",
+            Action::Publish { .. } => "publish",
+            Action::Create { .. } => "create",
+            Action::Update { .. } => "update",
+            Action::Delete { .. } => "delete",
+            Action::Operation { .. } => "operation",
+            Action::Deadline { .. } => "deadline",
+            Action::Change { .. } => "change",
+        }
+    }
+
     /// The row the command runs on: a create's id, or the key the others
     /// name; `None` for a create without one and for the define and
     /// publish checks.
@@ -225,10 +257,22 @@ mod tests {
         assert_eq!(command.action.name(), "transition");
         assert_eq!(command.action.key(), Some("o1"));
         assert_eq!(command.request, "");
-        assert_eq!(
-            serde_json::to_value(command.with_request("r1")).unwrap()["request"],
-            json!("r1")
+        assert!(command.preconditions.is_empty());
+        let written = serde_json::to_value(command.clone().with_request("r1")).unwrap();
+        assert_eq!(written["request"], json!("r1"));
+        // A command with no preconditions writes none.
+        assert!(written.get("preconditions").is_none());
+        let fenced = command.with_preconditions(
+            json!({"Lease": {"token": 3}})
+                .as_object()
+                .cloned()
+                .unwrap_or_default(),
         );
+        let written = serde_json::to_value(&fenced).unwrap();
+        assert_eq!(written["preconditions"], json!({"Lease": {"token": 3}}));
+        let read: Command = serde_json::from_value(written).unwrap();
+        assert_eq!(read, fenced);
+        assert_eq!(fenced.action.kind(), "operation");
         let due: Action = serde_json::from_value(json!({"kind": "deadline", "key": "o1", "useId": "Timers", "name": "expire", "at": 5000})).unwrap();
         assert_eq!(due.name(), "expire");
 

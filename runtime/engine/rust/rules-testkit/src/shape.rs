@@ -544,16 +544,17 @@ fn snake(field: &str) -> String {
 /// A row as the engine's record, with what this replayer compares: its id,
 /// its own fields, and the fields each behavior owns under `behaviors`, by
 /// use id, for each use whose behavior declares fields, a field with no
-/// value left out, with the fields the behavior computes on a read
-/// ([`Core::read_fields`], from the row and its sub-table rows, by use id
-/// and table), and its links as the engine's `Links` field, their keys
-/// left out of its own fields.
+/// value left out, with the fields the behavior computes on a read at the
+/// read's time ([`Core::read_fields_at`], from the row and its sub-table
+/// rows, by use id and table, and the time), and its links as the engine's
+/// `Links` field, their keys left out of its own fields.
 pub fn record(
     core: &Core,
     spec: &TypeSpec,
     key: &str,
     row: &StoredRow,
     tables: &BTreeMap<String, BTreeMap<String, Vec<SubRow>>>,
+    now: i64,
 ) -> Value {
     let mut behaviors = Map::new();
     for entry in &spec.uses {
@@ -576,11 +577,12 @@ pub fn record(
             .unwrap_or_default();
         let empty = BTreeMap::new();
         let computed = core
-            .read_fields(
+            .read_fields_at(
                 spec,
                 entry.id(),
                 &row.as_row(),
                 tables.get(entry.id()).unwrap_or(&empty),
+                now,
             )
             .unwrap_or_default();
         fields.extend(computed);

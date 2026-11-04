@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
-import { behaviorCaller, behaviorOperation, behaviorParams } from './behavior-routes';
+import { behaviorCaller, behaviorOperation, behaviorParams, behaviorPreconditions } from './behavior-routes';
 import { mountOperation } from './hono';
 import { HttpProblem, type OperationSpec, type RequestContext } from './index';
 import { NotFoundError } from './orm';
@@ -9,7 +9,8 @@ import { RulesRefusal, type CoreRefusal } from './rules';
 // The helpers a generated router's behavior operations run through (D103):
 // the caller the core checks a behavior's permissions against, built from
 // the route's principal or calling service, the input with each optional
-// member that is null left out (D104), and each refusal of the core's
+// member that is null left out and its preconditions apart (D104), and
+// each refusal of the core's
 // answered as the problem of its status, code, message and details, a
 // refusal of status 500 as the server's own internal error.
 
@@ -94,6 +95,29 @@ describe('behaviorParams', () => {
     expect(behaviorParams({ to: null, from: null }, ['from'])).toEqual({ to: null });
     expect(behaviorParams(null, ['from'])).toBeNull();
     expect(behaviorParams([null], ['from'])).toEqual([null]);
+  });
+
+  test('a member omit names is left out whatever its value, the preconditions the handler presents apart (D104)', () => {
+    expect(behaviorParams({ acknowledge: [1], preconditions: { Lease: { token: 3 } } }, ['acknowledge', 'preconditions'], ['preconditions'])).toEqual({ acknowledge: [1] });
+    expect(behaviorParams({ preconditions: null, acknowledge: null }, ['acknowledge'], ['preconditions'])).toEqual({});
+    const input = { to: 'running' };
+    expect(behaviorParams(input, [], ['preconditions'])).toBe(input);
+  });
+});
+
+describe('behaviorPreconditions', () => {
+  test("the input's preconditions, each use's entry by its use id, with each null entry left out", () => {
+    expect(behaviorPreconditions({ to: 'running', preconditions: { Lease: { token: 3 } } })).toEqual({ Lease: { token: 3 } });
+    expect(behaviorPreconditions({ preconditions: { Lease: { token: 0 }, Other: null } })).toEqual({ Lease: { token: 0 } });
+  });
+
+  test('none for an input without them, with null or only null entries, or that is no object', () => {
+    expect(behaviorPreconditions({ to: 'running' })).toBeUndefined();
+    expect(behaviorPreconditions({ preconditions: null })).toBeUndefined();
+    expect(behaviorPreconditions({ preconditions: { Lease: null } })).toBeUndefined();
+    expect(behaviorPreconditions({ preconditions: [{ token: 1 }] })).toBeUndefined();
+    expect(behaviorPreconditions(null)).toBeUndefined();
+    expect(behaviorPreconditions(undefined)).toBeUndefined();
   });
 });
 

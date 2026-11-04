@@ -99,8 +99,9 @@ pub struct Refusal {
     pub status: u16,
     /// The engine's class for the refusal: `EngineError`,
     /// `BehaviorVetoError`, `SchemaDocumentError`, `InstanceValidationError`,
-    /// `OperationParamsError`, `CreateParamsError`, `IncompatibleChangeError`,
-    /// `BehaviorError`, or `Error` for an internal failure.
+    /// `OperationParamsError`, `CreateParamsError`, `PreconditionsError`,
+    /// `IncompatibleChangeError`, `BehaviorError`, or `Error` for an internal
+    /// failure.
     pub class: String,
     pub message: String,
     /// The class's members beyond the code and the message, as the
@@ -253,6 +254,21 @@ impl Refusal {
             ..Self::new(
                 Code::InvalidArgument,
                 format!("create of {type_name}: {}", join_issues(&issues)),
+            )
+        }
+    }
+
+    /// A command's preconditions, refused (D16, D104): `invalid_argument`, as
+    /// the engine's `PreconditionsError`, `preconditions of {Type}:
+    /// {issues}`, details `{ issues }`, each issue at a JSON pointer into the
+    /// command's preconditions (`/Lease/token`).
+    pub fn preconditions(type_name: &str, issues: Vec<SchemaIssue>) -> Self {
+        Refusal {
+            class: "PreconditionsError".to_owned(),
+            details: Some(Box::new(members(json!({ "issues": issues })))),
+            ..Self::new(
+                Code::InvalidArgument,
+                format!("preconditions of {type_name}: {}", join_issues(&issues)),
             )
         }
     }
@@ -630,6 +646,18 @@ mod tests {
             )
             .error_json(),
             json!({"class": "OperationParamsError", "code": "invalid_argument", "message": "operation transition of behavior Workflow on field fulfilment: /to: must be string", "details": {"use": "fulfilment", "issues": [{"path": "/to", "message": "must be string"}]}})
+        );
+        // A command's preconditions, each issue under its use's entry.
+        assert_eq!(
+            Refusal::preconditions(
+                "Job",
+                vec![
+                    SchemaIssue::new("/Lease", "must NOT have additional properties: at"),
+                    SchemaIssue::new("/Lease/token", "must be >= 0"),
+                ]
+            )
+            .error_json(),
+            json!({"class": "PreconditionsError", "code": "invalid_argument", "message": "preconditions of Job: /Lease: must NOT have additional properties: at; /Lease/token: must be >= 0", "details": {"issues": [{"path": "/Lease", "message": "must NOT have additional properties: at"}, {"path": "/Lease/token", "message": "must be >= 0"}]}})
         );
         assert_eq!(
             Refusal::forbidden("alice may not").error_json(),

@@ -284,18 +284,19 @@ func ignoreClosed(err error) error {
 	return err
 }
 
-// Types are the SQL types of a test table's columns in a dialect.
+// Types are the SQL types of a test table's columns in a dialect: Integer
+// is a Generic.Int64's.
 type Types struct {
-	Key, Text, Timestamp, Version, Number, Boolean, JSON string
+	Key, Text, Timestamp, Version, Number, Integer, Boolean, JSON string
 }
 
 // ColumnTypes is the SQL types of a dialect, as sqlgen writes them for the
 // tests' tables.
 func (db *DB) ColumnTypes() Types {
 	if db.Dialect == rules.DialectPostgres {
-		return Types{Key: "TEXT PRIMARY KEY", Text: "TEXT", Timestamp: "TIMESTAMPTZ", Version: "BIGINT DEFAULT 1 NOT NULL", Number: "DOUBLE PRECISION", Boolean: "BOOLEAN", JSON: "JSONB"}
+		return Types{Key: "TEXT PRIMARY KEY", Text: "TEXT", Timestamp: "TIMESTAMPTZ", Version: "BIGINT DEFAULT 1 NOT NULL", Number: "DOUBLE PRECISION", Integer: "BIGINT", Boolean: "BOOLEAN", JSON: "JSONB"}
 	}
-	return Types{Key: "TEXT PRIMARY KEY", Text: "TEXT", Timestamp: "TEXT", Version: "INTEGER DEFAULT 1 NOT NULL", Number: "REAL", Boolean: "INTEGER", JSON: "TEXT"}
+	return Types{Key: "TEXT PRIMARY KEY", Text: "TEXT", Timestamp: "TEXT", Version: "INTEGER DEFAULT 1 NOT NULL", Number: "REAL", Integer: "INTEGER", Boolean: "INTEGER", JSON: "TEXT"}
 }
 
 // BumpVersion is @optimistic's trigger, which bumps _version on every

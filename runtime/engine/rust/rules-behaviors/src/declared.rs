@@ -6,8 +6,11 @@
 //! `volatile` one), its sub-tables (`tables`: each one's name, key and
 //! fields), whether it arms deadlines (`armsDeadlines`) and whether it hears
 //! its row's writes (`hearsChanges`), its operations and whether each
-//! writes, its veto codes, and whether a create gives it parameters (a
-//! createParamsSchema). The file stays the one declaration; the core reads
+//! writes, its veto codes, whether a create gives it parameters (a
+//! createParamsSchema), and whether a caller presents it a precondition (a
+//! preconditionSchema). An operation of a table or a namespace as a whole
+//! (`scope` `schema` or `namespace`, Lease's expireHolder) is left out: a
+//! row's core runs the operations of a row (D104). The file stays the one declaration; the core reads
 //! only what it holds a behavior to, and the rest (descriptions, schemas,
 //! each field's column type, which a table's layout reads) is the file's.
 
@@ -56,6 +59,12 @@ pub(crate) fn declaration(text: &str) -> Declaration {
         declaration = declaration.hears_changes();
     }
     for operation in listed(&file, "operations") {
+        // A row's core runs the operations of a row; one of a table or a
+        // namespace waits for a command without a row (D104).
+        let scope = operation.get("scope").and_then(Value::as_str);
+        if matches!(scope, Some("schema" | "namespace")) {
+            continue;
+        }
         if let Some(name) = operation.get("name").and_then(Value::as_str) {
             // An operation writes only when it says so, as the engine reads
             // the file.
@@ -75,6 +84,14 @@ pub(crate) fn declaration(text: &str) -> Declaration {
         .is_some_and(|schema| !schema.is_null())
     {
         declaration = declaration.create_params();
+    }
+    // A caller presents it a precondition when its file has a
+    // preconditionSchema (D16, D104).
+    if file
+        .get("preconditionSchema")
+        .is_some_and(|schema| !schema.is_null())
+    {
+        declaration = declaration.preconditions();
     }
     declaration
 }
@@ -146,6 +163,24 @@ mod tests {
                 .hears_changes()
         );
         assert!(!declaration(r#"{"name": "Tally", "hearsChanges": 1}"#).hears_changes);
+    }
+
+    #[test]
+    fn a_file_leaves_out_row_less_operations_and_says_it_takes_preconditions() {
+        let fenced = declaration(
+            r#"{"name": "Tally",
+                "operations": [{"name": "add", "writes": true}, {"name": "sweep", "writes": true, "scope": "schema"},
+                               {"name": "purge", "writes": true, "scope": "namespace"}, {"name": "peek", "scope": "instance"}],
+                "preconditionSchema": {"type": "object"}}"#,
+        );
+        assert_eq!(
+            fenced,
+            Declaration::new("Tally")
+                .operation("add", true)
+                .operation("peek", false)
+                .preconditions()
+        );
+        assert!(!declaration(r#"{"name": "Tally", "preconditionSchema": null}"#).preconditions);
     }
 
     #[test]

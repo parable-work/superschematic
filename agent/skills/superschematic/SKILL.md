@@ -395,6 +395,61 @@ Most are load errors; knowing them saves a build round-trip:
   StateRules' `required` and `frozen` and `resetOn`. These members are a
   table's alone: an engine type's `@behavior` refuses `oneWay`, `by`,
   `status`, `resetOn`, `pinned` and `version`.
+- For a row a worker leases, a row retried with a wait, a row a device or
+  agent keeps alive, or usage capped per period, implement Lease, Retries,
+  Presence and Budget on the table beside its Workflow field (D104), never
+  a lease column, a retry counter or a quota of your own:
+  `implements Lease<Job, { onExpiry: { transition: "queued"; from:
+  ["running"] }; requireToken: true; overridePermission: "jobs.override"
+  }>`, `Retries<Job, { classes: { timeout: { attempts: 5; backoff: {
+  firstMs: 60000; maxMs: 600000 } }; build: { attempts: 1 } };
+  totalAttempts: 6; exhaustedState: "failed"; retryInto: ["running"];
+  then: { transition: "queued"; from: ["waiting"] }; keyField: "revision"
+  }>`, `Presence<Session, { ttlMs: 180000; ttlByState: { turn: 900000 };
+  principalField: "device"; onMissed: { ... }; releaseLeases: ["Job"] }>`
+  and `Budget<Account, { meters: { questions: { limit: 40; reset:
+  "hourly"; scope: "workspace" }; tokens: { limit: 1000000; reset:
+  "daily"; window: "rolling" } }; observePermission: "accounts.observe"
+  }>`. Lease: `lease.acquire` answers the fencing token; every write under
+  the lease presents it as its precondition, `{ Lease: { token } }`: an
+  API call in its body's `preconditions` member (`sdk.job.lease.heartbeat(id,
+  { preconditions: { Lease: { token } } })`, the MCP tool's `preconditions`
+  argument), a repository write in its options
+  (`updateOne(id, update, { preconditions })`, Go's
+  `orm.WithPreconditions(ctx, rules.Preconditions{...})`), never a header.
+  On `token_stale` the process lost the lease: stop writing for the row.
+  A lapsed lease expires when its deadline falls due, `onExpiry` moving
+  the row back. Lease takes no `sweepMs` or `directOn` on a table and has
+  no `expireHolder` there. Retries: a class's `backoff` sets `retryAt`,
+  until which a move into `retryInto` and Lease's `acquire` are
+  `backing_off`; `then` moves the row back when it ends; `giveUpAfterMs`
+  exhausts after a while; `window: { attempts, ms }` caps starts
+  (`throttled`); `keyField` starts the counts again at each new value of
+  a field of yours (never one named `version`, which a behavior table
+  keeps in `_version`); `resultField` is refused on a table. Presence:
+  only the principal `principalField` holds beats (`not_principal`);
+  `ttlByState` keeps a state's rows present longer, counted from the later
+  of the last beat and the state's entry; a miss moves the row by
+  `onMissed` and expires the principal's leases on the `releaseLeases`
+  tables, which needs that Lease's `overridePermission` on the worker:
+  `@behaviorWorker(Session, { permissions: ["jobs.override"] })`; a table
+  with both Lease and Presence lists `"Presence.miss"` in Lease's
+  `exempt`. Budget: `reset` is `hourly`, `daily`, `weekly`, `monthly` (UTC)
+  or `{ everyMs }`; `window: "rolling"` counts the last period; `scope`
+  names a to-one relation whose table implements Budget with the meter;
+  `observe({ meter, used, limit?, resetsAt? })` takes a provider's figure
+  in place of the count until `resetsAt` or the next period, for a caller
+  with `observePermission`; set a `limitField` meter's limit by updating
+  the field, not `setLimit`. Serve the operations with
+  `@behaviorOperations(Table)` and run Lease's expiry, Retries' `then` and
+  Presence's miss with `@behaviorWorker(Table)`; Budget needs no worker.
+  The tables have no upserts. A raw SQL write of a `lease_*`, `retries_*`
+  or `presence_*` column or a `*_budget_*` row is never refused but runs
+  no rule and re-arms no deadline: repair with the operations
+  (`lease.release` with `overridePermission`, `lease.resetExpiries`,
+  `budget.setLimit`) where you can. These members are a table's alone: an
+  engine type's `@behavior` refuses `status`, Retries' waits, `ttlByState`
+  and Budget's new resets, `window`, `observePermission` and `observe`.
 - A service's config is the `@envVars` class no other `@envVars` class
   extends; it holds the fields of each class it extends. Two `@envVars`
   classes that do not extend one another fail the load: make the

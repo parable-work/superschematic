@@ -34,9 +34,15 @@ function fixtureType(name: string, file: string): Record<string, unknown> {
 }
 
 // The declaration the work queue's Rust crate embeds, the copy `make
-// behaviors` writes and CI checks.
+// behaviors` writes and CI checks, as the engine answers with it: without
+// the members only a table's layout reads (D103), its value, tables,
+// armsDeadlines and hearsChanges and each field's type, which the engine,
+// keeping no table, leaves out.
 function declarationFile(name: string): unknown {
-  return JSON.parse(readFileSync(new URL(`../../rust/declarations/${name}.behavior.json`, import.meta.url), 'utf8'));
+  const declaration = JSON.parse(readFileSync(new URL(`../../rust/declarations/${name}.behavior.json`, import.meta.url), 'utf8')) as Record<string, unknown>;
+  const { value: _value, tables: _tables, armsDeadlines: _armsDeadlines, hearsChanges: _hearsChanges, ...served } = declaration;
+  const fields = served.fields as Record<string, unknown>[] | undefined;
+  return fields ? { ...served, fields: fields.map(({ type: _type, ...field }) => field) } : served;
 }
 
 for (const driver of drivers) {
@@ -89,7 +95,7 @@ for (const driver of drivers) {
           ['Lease', ['acquire', 'heartbeat', 'release', 'expire', 'direct', 'acknowledge', 'expireHolder', 'resetExpiries']],
           ['Assignment', ['assign', 'unassign']],
           ['Queue', ['claim', 'claimNext', 'countClaimable', 'refresh']],
-          ['Budget', ['reserve', 'checkReserve', 'recordUsage', 'settle', 'setLimit', 'reserveFor', 'settleFor', 'recordUsageFor']],
+          ['Budget', ['reserve', 'checkReserve', 'recordUsage', 'settle', 'setLimit', 'reserveFor', 'settleFor', 'recordUsageFor', 'observe']],
           ['Retries', ['recordAttempt']],
         ]
       );

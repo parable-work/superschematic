@@ -24,7 +24,8 @@ const (
 // Task through TaskAssignment, writes under tasks.admin, which Constants
 // names; a GET, a create, a behavior operation, an operation of a plain
 // input and a dependency the deps lack write under none. Each permission is
-// listed once, sorted, StateRules' beside Constants'.
+// listed once, sorted, StateRules' beside Constants', and Lease's, Retries'
+// and Budget's beside them.
 func TestWritePermissions(t *testing.T) {
 	db, err := loader.LoadService(filepath.FromSlash(approvalsDB))
 	if err != nil {
@@ -90,5 +91,16 @@ func TestWritePermissions(t *testing.T) {
 	}
 	if !behaviorops.UpdatesARow(&post, &task) || behaviorops.UpdatesARow(&ir.FieldDef{HTTPMethod: "POST"}, &task) {
 		t.Error("UpdatesARow: a POST that takes the key updates a row, one that takes none creates one")
+	}
+	// Lease's overridePermission, Retries' limitsPermission and Budget's
+	// limitPermission, each checked on an update through the core, join
+	// them (D104); a member of another name does not.
+	task.Behaviors = append(slices.Clone(task.Behaviors),
+		ir.BehaviorRef{Name: "Lease", Implements: true, Config: json.RawMessage(`{"overridePermission": "tasks.override", "acquirePermission": "tasks.lease"}`)},
+		ir.BehaviorRef{Name: "Retries", Implements: true, Config: json.RawMessage(`{"limitsPermission": "tasks.caps", "permission": "tasks.attempt"}`)},
+		ir.BehaviorRef{Name: "Budget", Implements: true, Config: json.RawMessage(`{"limitPermission": "tasks.budget", "observePermission": "tasks.observe"}`)},
+	)
+	if got, want := behaviorops.WritePermissions(api, &post, map[string]*ir.Schema{db.Name: &edited}), []string{"tasks.admin", "tasks.budget", "tasks.caps", "tasks.edit", "tasks.override"}; !slices.Equal(got, want) {
+		t.Errorf("a POST of a table that implements Lease, Retries and Budget writes under %v, want %v", got, want)
 	}
 }

@@ -79,6 +79,18 @@
 //! use id and then name, absent when none. Both are absent after a delete,
 //! and a refused command's are as they were.
 //!
+//! A command that presents the caller's preconditions (D16, D104) carries
+//! them as the core's command does, each use's entry by its use id, absent
+//! when there are none, which the replay maps from a recorded update's,
+//! delete's or invoke's `preconditions` option; an adapter runs it as
+//! written, from its repository's option to the core:
+//!
+//! ```json
+//! "command": {"caller": {"subject": "wren"}, "now": 1000000, "request": "r9",
+//!             "action": {"kind": "operation", "key": "j1", "useId": "Lease", "operation": "heartbeat", "params": {}},
+//!             "preconditions": {"Lease": {"token": 1}}}
+//! ```
+//!
 //! A write of a row that the type's change trigger queued (D103) is a
 //! `command` step whose action is `change`, with the `step` and `call` of
 //! the `runner.runDue` that ran it, the runner's caller, its `now` and its

@@ -40,6 +40,15 @@ const reactionsFixture = "fixture-reactions-db"
 // has upserts, whose update of the row a key holds runs through the core.
 const approvalsFixture = "fixture-approvals-db"
 
+// agentsFixture is the DB fixture whose tables implement the work queue's
+// behaviors on the core (D104): Job implements Lease and Retries beside its
+// Workflow on status, a command presenting Lease's fencing token as its
+// precondition (WithPreconditions, JobLeasePrecondition); Session
+// implements Presence, Workspace and Account Budget, Account's meters
+// scoped to its workspace through a to-one relation. Each keeps its
+// sub-tables, Job and Session arm deadlines on their deadline queues.
+const agentsFixture = "fixture-agents-db"
+
 var update = flag.Bool("update", false, "rewrite golden files")
 
 const fixturesDir = "../../loader/tsreader/testdata/services"
@@ -58,7 +67,7 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 	// tables.
 	var loadOpts []loader.Option
 	var reg *registry.Registry
-	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture {
+	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture {
 		reg = registry.New(naming.Default())
 		loadOpts = append(loadOpts, loader.WithRegistry(reg))
 	}
@@ -147,6 +156,12 @@ func TestWriteORMGolden(t *testing.T) {
 		// StateRules and keeps no sub-table, whose upserts update the row
 		// a key holds through the core.
 		{approvalsFixture, []string{"repository_note.go", "repository_task.go", "rules.go"}},
+		// Tables that implement Lease, Retries, Presence and Budget (D104):
+		// their operations under Lease(), Retries(), Presence() and
+		// Budget(), WithPreconditions and JobLeasePrecondition, which every
+		// command through the core presents, no upsert, no repository of a
+		// sub-table, and the deadline queues of Job and Session.
+		{agentsFixture, []string{"repository_account.go", "repository_job.go", "repository_session.go", "repository_workspace.go", "rules.go", "queues.go"}},
 	} {
 		t.Run(tc.svc, func(t *testing.T) {
 			output := generateFixture(t, tc.svc)

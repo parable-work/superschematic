@@ -53,6 +53,14 @@ own, updateMany's, deleteMany's and hardDeleteOne's among them, and raw
 SQL's; its repository runs one, as a behavior worker claimed it
 (runChange), so the row's deadlines reconcile, and its rules run, after the
 write commits.{{else}}, and arms or clears no deadline.{{end}}
+{{- if .ORM.HasPreconditions}}
+
+A table one of whose uses takes a precondition (D16, D104) types what a
+write presents as <Type>Preconditions, each such use's entry by its use
+id: updateOne, deleteOne and each operation take it in their options ({
+preconditions }), which the core checks before it reads the row and the
+use's guard holds the write to.
+{{- end}}
 {{- end}}
 */
 
@@ -151,6 +159,17 @@ export interface {{.Type}}Relations {
 export type {{.Type}}VectorField = {{tsUnion .VectorFields}};
 {{- end}}
 
+{{- if .Preconditions}}
+
+/** What a write of {{.Type}} presents its behaviors (D16, D104): each use's precondition by its use id, which the behaviors' core checks before it reads the row and the use's guard holds the write to. updateOne, deleteOne and each operation take it in their options ({ preconditions }). */
+export interface {{.Type}}Preconditions {
+{{- range .Preconditions}}
+  /** The precondition of {{if eq .ID .Behavior}}the {{.Behavior}} {{$t.Type}} implements{{else}}{{.ID}}, a {{.Behavior}}{{end}}. */
+  readonly {{.ID}}?: {{.Type}};
+{{- end}}
+}
+{{- end}}
+
 {{- if .Uses}}
 
 /** The behaviors of {{.Type}} (D103): each use's operations, under its member, each run through the behaviors' core on the row whose key it takes. */
@@ -167,7 +186,7 @@ export interface {{.Type}}Uses {
       result: {{.Result}};
     };
 {{- end}}
-  }, {{$t.KeyType}}>;
+  }, {{$t.KeyType}}{{if $t.Preconditions}}, {{$t.Type}}Preconditions{{end}}>;
 {{- end}}
 }
 {{- end}}
@@ -183,7 +202,8 @@ export type {{.Type}}Repository = {{if .NoUpserts}}WithoutUpserts<{{end}}{{if .S
   {{.Type}}UniqueKey,
   {{.KeyType}},
   {{.Type}}PageKey,
-  {{.Type}}Relations
+  {{.Type}}Relations{{if .Preconditions}},
+  {{.Type}}Preconditions{{end}}
 >{{if .NoUpserts}}>{{end}}{{if .Encrypted}} & EncryptedRepository{{end}}{{if .VectorFields}} &
   VectorRepository<{{.Type}}Row, {{.Type}}Filter, {{.Type}}VectorField, {{.KeyType}}>{{end}}{{if .Uses}} & {{.Type}}Uses{{end}}{{if .Deadlines}} & BehaviorDeadlines<{{.KeyType}}>{{end}}{{if .Changes}} & BehaviorChanges<{{.KeyType}}>{{end}};
 

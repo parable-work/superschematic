@@ -69,9 +69,38 @@ pub async fn run_operation<C: GenericClient + Sync>(
     params: Value,
     caller: Caller,
 ) -> Result<Value, Error> {
+    run_operation_with(
+        host,
+        client,
+        type_name,
+        key,
+        use_id,
+        operation,
+        params,
+        caller,
+        &ExecuteOptions::default(),
+    )
+    .await
+}
+
+/// Runs an operation of a use on a row with what the options give it
+/// beside, the caller's preconditions among them (D16, D104), and returns
+/// its result; null params are `{}`.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_operation_with<C: GenericClient + Sync>(
+    host: &Host<'_>,
+    client: &C,
+    type_name: &str,
+    key: &str,
+    use_id: &str,
+    operation: &str,
+    params: Value,
+    caller: Caller,
+    options: &ExecuteOptions,
+) -> Result<Value, Error> {
     let store = PgStore { client };
     run::run_operation(
-        host, &store, type_name, key, use_id, operation, params, caller,
+        host, &store, type_name, key, use_id, operation, params, caller, options,
     )
     .await
 }

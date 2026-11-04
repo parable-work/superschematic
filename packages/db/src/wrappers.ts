@@ -1,4 +1,14 @@
-import type { ApprovalsGate, BehaviorConfigs, TimersDeadline, WorkflowOutcome, WorkflowTransition } from "@superschematic/schema";
+import type {
+  ApprovalsGate,
+  BehaviorConfigs,
+  BudgetMeter,
+  LeaseConfig,
+  PresenceTransition,
+  RetriesConfig,
+  TimersDeadline,
+  WorkflowOutcome,
+  WorkflowTransition,
+} from "@superschematic/schema";
 
 // FK ON DELETE actions expressible on a relation. SET NULL clears the
 // reference instead of deleting the row, so it needs a nullable foreign key
@@ -215,3 +225,178 @@ export interface ApprovalsGateOn<T> extends ApprovalsGate {
  * empty object type; the first type argument is the table itself.
  */
 export type Approvals<T, C extends ApprovalsOn<T>> = NonNullable<unknown>;
+
+/**
+ * Lease's config on a table (D103, D104): @superschematic/schema's
+ * LeaseConfig, its maxHoldField named by the table's own fields, and the
+ * Workflow its moves read (status). sweepMs is the engine's runner's, and a
+ * table's lease expires at its own deadline, which the API's @behaviorWorker
+ * runs; directOn waits for Revisions and Branches on the core: a table takes
+ * neither. An engine type's @behavior("Lease", ...) takes the schema
+ * package's config, which has no status, and the build refuses it there.
+ */
+export interface LeaseOn<T> extends Omit<LeaseConfig, "maxHoldField" | "sweepMs" | "directOn"> {
+  /** A Generic.Int64 field of the table whose positive value overrides maxHoldMs for the row. */
+  readonly maxHoldField?: Extract<keyof T, string>;
+  /** The field whose Workflow onExpiry and escalate move, and in whose terminal states an expiry does not count; implied when the table has one Workflow, needed when it has several. */
+  readonly status?: Extract<keyof T, string>;
+  /** The engine's runner's: a table's lease expires at its own deadline, so a table's Lease takes none. */
+  readonly sweepMs?: never;
+  /** Waits for Revisions and Branches on the core (D103, step 4), so a table's Lease takes none. */
+  readonly directOn?: never;
+}
+
+/**
+ * An exclusive, time-bounded lease on a table's rows, numbered by a fencing
+ * token (D16, D104): `export abstract class Job implements Lease<Job, { ... }>`.
+ * The type stays a table. Its holder, token, times, expiries and how the last
+ * lease ended are columns of the row (lease_holder, ...), its directives a
+ * sub-table (job_lease_directives), and its expiry a message of the table's
+ * deadline queue (job_deadline_queue), which the API's @behaviorWorker(Job)
+ * runs. A write presents the token as Lease's precondition
+ * ({ preconditions: { Lease: { token } } }). Its operations (lease.acquire,
+ * heartbeat, release, expire, direct, acknowledge, resetExpiries) change it.
+ * Like Timers, it resolves to the empty object type; the first type argument
+ * is the table itself.
+ */
+export type Lease<T, C extends LeaseOn<T>> = NonNullable<unknown>;
+
+/** A backoff of a Retries class on a table (D104). */
+export interface RetryBackoffOn {
+  /** The wait after the class's first failure since the row's last success, in milliseconds. */
+  readonly firstMs: number;
+  /** The longest wait, in milliseconds, at least firstMs. */
+  readonly maxMs: number;
+  /** How many times longer each next wait is; 2 when absent. */
+  readonly factor?: number;
+}
+
+/** A capped failure class of RetriesOn<T>: its cap, its hint, and how long a failure of it waits (D104). */
+export interface RetryClassOn {
+  readonly attempts: number;
+  readonly hint?: string;
+  readonly backoff?: RetryBackoffOn;
+}
+
+/**
+ * Retries' config on a table (D103, D104): @superschematic/schema's
+ * RetriesConfig, its fields named by the table's own, with the waits a table
+ * keeps: a class's backoff, the states an attempt starts in (retryInto), the
+ * move its end makes (then), a time to give up after (giveUpAfterMs), a cap of
+ * attempts in a window, and a field whose value keys the counts (keyField).
+ * resultField writes through an update an operation makes, which waits for
+ * the core to run one, so a table takes none. An engine type's
+ * @behavior("Retries", ...) takes the schema package's config, and the build
+ * refuses each of these there.
+ */
+export interface RetriesOn<T> extends Omit<RetriesConfig, "classes" | "limitsField" | "resultField"> {
+  readonly classes: { readonly [failure: string]: RetryClassOn | "terminal" };
+  /** A Generic.JSON field of the table with the row's own caps. */
+  readonly limitsField?: Extract<keyof T, string>;
+  /** The field whose Workflow exhaustedState, from, retryInto and then name; implied when the table has one Workflow, needed when it has several. */
+  readonly status?: Extract<keyof T, string>;
+  /** The states an attempt starts in: a move into one waits for the row's retryAt and the window. */
+  readonly retryInto?: readonly string[];
+  /** The move a row's backoff makes when it ends, from one of from. */
+  readonly then?: { readonly transition: string; readonly from: readonly string[] };
+  /** Exhausts the row at its first failure this long after the first failure since its last success, in milliseconds. */
+  readonly giveUpAfterMs?: number;
+  /** At most attempts recorded in any ms milliseconds before the next start waits. */
+  readonly window?: { readonly attempts: number; readonly ms: number };
+  /** An own field whose value keys every class's count: a new value starts them again. */
+  readonly keyField?: Extract<keyof T, string>;
+  /** Writes through an update an operation makes, which waits for the core to run one (D103, step 4), so a table's Retries takes none. */
+  readonly resultField?: never;
+}
+
+/**
+ * Retries per failure class on a table's rows, with waits between attempts
+ * (D16, D104): `export abstract class Job implements Retries<Job, { ... }>`.
+ * The type stays a table. Its counts, exhaustion and waits are columns of the
+ * row (retries_total, ...), its attempts a sub-table (job_retries_attempts),
+ * and then's move a message of the table's deadline queue. Its operation
+ * (retries.recordAttempt) changes them. Like Timers, it resolves to the empty
+ * object type; the first type argument is the table itself.
+ */
+export type Retries<T, C extends RetriesOn<T>> = NonNullable<unknown>;
+
+/**
+ * Presence's config on a table (D103, D104): @superschematic/schema's
+ * PresenceConfig, its principalField named by the table's own fields, how long
+ * a row stays present in each state of its Workflow (ttlByState) and the
+ * Workflow it reads (status). sweepMs is the engine's runner's: a table's
+ * misses fall due one by one through the API's @behaviorWorker, and the build
+ * refuses it.
+ */
+export interface PresenceOn<T> {
+  /** How long a row stays present after its create or its last beat, in milliseconds, at least 1000; with ttlByState, in each state it does not list. */
+  readonly ttlMs: number;
+  /** The field that holds the subject of the principal the row stands for (string, Identity.UUID or Identity.UserID), the only principal that may beat it; it does not change once set. */
+  readonly principalField: Extract<keyof T, string>;
+  /** Moves the row's Workflow status, through transition, when it is missed while the status is one of from. */
+  readonly onMissed?: PresenceTransition;
+  /** Moves the row's Workflow status, through transition, at a beat while the status is one of from. */
+  readonly onBeat?: PresenceTransition;
+  /** Tables of the database that implement Lease: a miss expires the leases the principal holds on them through Lease's expire, but for one renewed since its last beat. The table's @behaviorWorker needs each one's Lease overridePermission. */
+  readonly releaseLeases?: readonly string[];
+  /** How long a row stays present in a state of its Workflow, by state, in milliseconds, at least 1000: counted from the later of the last beat and the entry into the state. */
+  readonly ttlByState?: { readonly [state: string]: number };
+  /** The field whose Workflow onMissed, onBeat and ttlByState read and move; implied when the table has one Workflow, needed when it has several. */
+  readonly status?: Extract<keyof T, string>;
+  /** The engine's runner's: a table's row is missed at its own deadline, so a table's Presence takes none. */
+  readonly sweepMs?: never;
+}
+
+/**
+ * A heartbeat on a table's rows (D103, D104):
+ * `export abstract class Session implements Presence<Session, { ttlMs: 180000, principalField: "device" }>`.
+ * The type stays a table. Presence keeps its state in owned columns
+ * (presence_deadline, presence_last_beat_at, presence_missed,
+ * presence_released) and arms each row's miss as a message of the table's
+ * deadline queue, which the API's @behaviorWorker(Session) runs as it falls
+ * due. Its operations (presence.beat, miss) change it. Like Timers, it
+ * resolves to the empty object type; the first type argument is the table
+ * itself.
+ */
+export type Presence<T, C extends PresenceOn<T>> = NonNullable<unknown>;
+
+/** Budget's config on a table (D103, D104): its meters' fields and scopes named by the table's own, their periods, the permission observe needs, and the Workflow escalate moves (status). */
+export interface BudgetOn<T> {
+  readonly meters: { readonly [meter: string]: BudgetMeterOn<T> };
+  /** The permission a caller needs to change a meter's limit, with setLimit or through limitField. */
+  readonly limitPermission?: string;
+  /** The permission a caller needs to record a provider's usage with observe; observe is refused when absent. */
+  readonly observePermission?: string;
+  /** A directive sent to the holder of the row's active lease when usage takes it or an enclosing scope over its limit; needs Lease. */
+  readonly onExceeded?: { readonly direct: string };
+  /** Moves the row's Workflow status, through transition, when usage leaves it over a limit while the status is one of from. */
+  readonly escalate?: { readonly transition: string; readonly from: readonly string[] };
+  /** The field whose Workflow escalate moves; implied when the table has one Workflow, needed when it has several. */
+  readonly status?: Extract<keyof T, string>;
+}
+
+/** One meter of BudgetOn<T>: @superschematic/schema's BudgetMeter, its fields and its scope named by the table's own, and its period. */
+export interface BudgetMeterOn<T> extends Omit<BudgetMeter, "limitField" | "reserveField" | "scope" | "reset"> {
+  /** An integer field of the table that holds the row's limit; limit is the limit while it holds no value of at least 0. */
+  readonly limitField?: Extract<keyof T, string>;
+  /** An integer field of the table whose positive value is the amount reserve takes, in place of reserve. */
+  readonly reserveField?: Extract<keyof T, string>;
+  /** A to-one relation of the table whose target, which implements Budget with the meter, is the enclosing scope. */
+  readonly scope?: Extract<keyof T, string>;
+  /** When used starts again at 0, in UTC: each hour, day, Monday, first of the month, or multiple of everyMs (whole minutes) from the epoch. */
+  readonly reset?: "hourly" | "daily" | "weekly" | "monthly" | { readonly everyMs: number };
+  /** rolling: the meter counts its last period, from buckets of a sixtieth of it; needs reset. */
+  readonly window?: "rolling";
+}
+
+/**
+ * Reserve-then-settle budgets on a table's rows (D103, D104):
+ * `export abstract class Account implements Budget<Account, { meters: { ... } }>`.
+ * The type stays a table. Budget keeps its meters in sub-tables of the row
+ * (account_budget_meters, account_budget_holds, account_budget_buckets); its
+ * operations (budget.reserve, checkReserve, recordUsage, settle, setLimit,
+ * observe and the scope operations) change and read them. A meter's scope is
+ * a to-one relation. Like Timers, it resolves to the empty object type; the
+ * first type argument is the table itself.
+ */
+export type Budget<T, C extends BudgetOn<T>> = NonNullable<unknown>;

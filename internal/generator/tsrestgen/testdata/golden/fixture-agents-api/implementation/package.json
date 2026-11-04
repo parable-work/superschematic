@@ -1,0 +1,22 @@
+{
+  "name": "@schemas/fixture-agents-api-implementation",
+  "version": "0.0.0",
+  "description": "The implementation of the fixture-agents-api API.",
+  "private": true,
+  "type": "module",
+  "main": "index.ts",
+  "types": "index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@schemas/fixture-agents-api-api": "workspace:*",
+    "@schemas/fixture-agents-api-types": "workspace:*",
+    "@schemas/fixture-agents-db-types": "workspace:*",
+    "@superschematic/http-runtime": "*"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.9",
+    "typescript": "5.9.3"
+  }
+}

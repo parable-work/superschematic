@@ -44,6 +44,11 @@ Generated TypeScript API server for the `{{ .SchemaName }}` schema. Built on
   repositories (`Deps.orm`), in a transaction of its own and as the
   request's caller, and answers a refusal of the behaviors' core as the
   problem of its status, code and message.
+{{- if .BehaviorsTakePreconditions }} An operation's input may carry
+  `preconditions`, what the caller asserts of the row, each use's entry by
+  its use id (D16, D104), which the handler presents in the repository's
+  options and the core checks before it reads the row.
+{{- end }}
 {{- end }}
 {{- if .HasServiceCallers }}
   A `@requireService` or `@allowService` operation also admits a calling

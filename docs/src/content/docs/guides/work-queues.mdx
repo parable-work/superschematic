@@ -371,6 +371,13 @@ An exclusive, time-bounded lease on the instance, held by one principal.
   `service:<deployable>`, which holds no permissions: give it what it may
   do in the access policy, and fence its processes from each other with
   the token.
+- **A table's Lease.** A DB table implements Lease too (D104,
+  [Rows a worker leases, retries, beats and meters](/superschematic/guides/database-tables/#rows-a-worker-leases-retries-beats-and-meters)):
+  its lease is the table's columns, its expiry a deadline the API's
+  behavior worker runs, and its config takes `status`, the Workflow its
+  moves read. The engine refuses `status` at define, naming the table
+  form (`implements Lease<T, { ... }> on a DB table`); a table refuses
+  `sweepMs` and `directOn`, and has no `expireHolder`.
 
 ## Assignment
 
@@ -501,6 +508,14 @@ When worker-1 comes back, its next heartbeat presents token 1, which
 Lease refuses (`token_stale`, details `{ token: 1, current: 3 }`): the
 worker aborts its handler, and writes nothing more for the job.
 
+A DB table implements Presence too (D104,
+[Rows a worker leases, retries, beats and meters](/superschematic/guides/database-tables/#rows-a-worker-leases-retries-beats-and-meters)):
+its miss is a deadline the API's behavior worker runs, `ttlByState` keeps
+a state's rows present longer, and `status` names the Workflow it reads.
+The engine refuses `ttlByState` and `status` at define, naming the table
+form (`implements Presence<T, { ... }> on a DB table`), and a table
+refuses `sweepMs`.
+
 ## Blueprint
 
 Children created with their parent: a map of steps says which instances
@@ -586,12 +601,24 @@ the enclosing scopes its `scope` link points at.
 - A `scope` link to a pool or a project applies that scope's own limit
   too, in the same transaction.
 - A `daily` meter's usage resets at the start of each UTC day.
+- **A table's Budget.** A DB table implements Budget too (D104,
+  [Rows a worker leases, retries, beats and meters](/superschematic/guides/database-tables/#rows-a-worker-leases-retries-beats-and-meters)),
+  with a to-one relation for a meter's `scope`, resets `hourly`, `daily`,
+  `weekly`, `monthly` and `{ everyMs }`, `window: "rolling"`, `observe`
+  and `observePermission`, and `status`. The engine refuses each but
+  `daily` at define, naming the table form (`implements Budget<T, { ...
+  }> on a DB table`), and refuses every `observe`.
 
 ## Retries
 
 Attempts counted per failure class, against per-class caps and a total.
-There is no backoff in time: work that may run again may be claimed at
-once.
+On an engine type there is no backoff in time: work that may run again
+may be claimed at once. A DB table's Retries waits (D104,
+[Rows a worker leases, retries, beats and meters](/superschematic/guides/database-tables/#rows-a-worker-leases-retries-beats-and-meters)):
+a class's `backoff`, `retryInto`, `then`, `giveUpAfterMs`, `window` and
+`keyField`, with `status`, are a table's alone, and the engine refuses
+each at define, naming the table form (`implements Retries<T, { ... }> on
+a DB table`).
 
 | | |
 | --- | --- |

@@ -19,7 +19,8 @@ as JSON.
 
 `superschematic-rules-behaviors` (`../rules-behaviors`) holds the behaviors
 ported onto it, in the engine's order: Workflow, Reactions, Constants,
-StateRules, Approvals and Timers; `superschematic-rules-testkit` (`../rules-testkit`) is its
+StateRules, Approvals, Timers, Lease, Presence, Budget and Retries;
+`superschematic-rules-testkit` (`../rules-testkit`) is its
 reference host, an adapter over memory, and the replayer that holds the core
 to the recorded scenarios (`runtime/engine/testdata/scenarios`). The engine
 (`../engine`, D58) stays beside them until the order of the work in D103
@@ -179,6 +180,23 @@ with a fallback arm.
     "after":  {"own": {"title": "t1", "projectId": "p1"}, "owned": {"Workflow": {"status": "doing", "enteredAt": 1001000}}}}}
   ```
 
+A `Command` carries `preconditions` beside its action (D16, D104): the
+caller's assertions of the row, each use's entry by its use id (an
+implements use's id is its behavior's name, so `{"Lease": {"token": 3}}`),
+written only when there are any. An update, a delete and an operation hold
+them to the type's uses before the row is read: an entry for a use the type
+lacks (`/Ghost: Job has no behavior use Ghost (its uses that take
+preconditions: Lease)`), for a use whose behavior's declaration takes none
+(`/Workflow: behavior Workflow takes no precondition`), and each issue a
+behavior's `check_precondition` finds, under its entry (`/Lease/token: must
+be >= 0`), refuse the command together as `PreconditionsError`, in the
+command's order. Any other action that carries them is refused so (`a create
+takes no preconditions: an update, a delete or an operation of a row
+presents them`). A guard asked about the command's own update, delete or
+operation reads its use's entry (`view.precondition()`); one asked about a
+create, a `call()` or a `call_on()` reads none, so a request a behavior's
+code makes presents nothing.
+
 A command on a row reads it first (`ReadRequest::Row`); a key the type has
 none of is `not_found`. Then the uses compose in list order:
 
@@ -236,7 +254,12 @@ field `field` holds `key`, in its key column's order, after the key `after`
 when given, at most `limit` (`LINKED_PAGE`, 500, Links' page), a
 soft-deletable table's live rows alone, and none for a type the host does
 not have: what a rule over the rows that link to a row reads (Reactions'
-allTerminal). The enum is open: sub-table rows by a condition and counts
+allTerminal); and `Holding { type, use_id, field, value, after, limit }`
+(`Answer::Linked(LinkedRows)` too), the rows of a type whose use's owned
+field holds `value`, compared as the column holds it, converted as a
+command's value of the field is, in its key column's order, paged as a
+linked read is: what a rule over the rows a principal holds reads
+(Presence's releaseLeases over Lease's holder, D104). The enum is open: sub-table rows by a condition and counts
 join it as behaviors need them, so a host matches it with a fallback arm,
 which refuses the command as `internal`. An answer of
 another kind than its request asks for is refused as `invalid_argument`.
@@ -250,6 +273,11 @@ on its row, with the run's own writes so far applied: an insert adds, an
 update merges, a delete removes; a row the run creates has none and reads
 no host; a table the declaration does not declare is a defect),
 `ctx.read_linked(type, field, key, after)?` (one page of a linked read),
+`ctx.read_holding(type, use_id, field, &value, after)?` (one page of a
+holding read), `ctx.sub_rows_of(type, key, use_id, table)?` (any row's
+rows of a sub-table as the run has them: the host's with the run's writes
+of them applied, none for a row the run creates or deleted; a use the type
+lacks, or a table its behavior does not declare, is a defect),
 `ctx.row_of(type, key)?` (a row of any type as the run has it: its writes so
 far applied when the run reached it, else the host's; `None` when there is
 none of the key or the run deleted it),
@@ -325,6 +353,7 @@ internal failure). The shapes:
 | own fields a validation refuses, or that name a field anchor's field (rule `owned`) | `invalid_instance` | 422 | `InstanceValidationError` | `issues: [{ path, rule, message }]` |
 | operation parameters | `invalid_argument` | 400 | `OperationParamsError` | `use` (a field anchor's, also named in the message: `operation transition of behavior Workflow on field fulfilment: ...`), `issues: [{ path, message }]` |
 | create parameters | `invalid_argument` | 400 | `CreateParamsError` | `issues: [{ path, message }]` |
+| a command's preconditions | `invalid_argument` | 400 | `PreconditionsError` | `issues: [{ path, message }]`, each path under its use's entry (`/Lease/token`) |
 | a row, type, use or operation that does not exist | `not_found` | 404 | `EngineError` | none |
 | a row `create_row` makes that the run reached already | `conflict` | 409 | `EngineError` | none |
 | a permission the caller lacks | `forbidden` | 403 | `EngineError` | none |
@@ -386,7 +415,8 @@ A behavior implements `Behavior`:
   write carries (Timers' `deadlines`)
   (`Declaration::new(..).value(..).field(..).sub_table(TableDecl::new(name,
   key, fields)).arms_deadlines().hears_changes().computed(name).operation(name,
-  writes).veto(code).create_params()`; the struct may gain members, so it is
+  writes).veto(code).create_params().preconditions()`, the last for a
+  behavior a caller presents a precondition, as a preconditionSchema says); the struct may gain members, so it is
   built so; `.table(name)` declares a sub-table of no key and no fields,
   whose writes the core does not check). The core holds a behavior to it: a
   field, a sub-table or a veto code it does not declare is a defect; so is
@@ -409,6 +439,10 @@ and the hooks it needs, each with a default:
   params)`: issues by JSON pointer, before any guard, as a createParamsSchema
   and a paramsSchema would. The core asks `check_create_params` only of a
   behavior whose declaration takes create parameters.
+- `check_precondition(config, entry)`: issues by JSON pointer into the use's
+  entry of a command's preconditions, before the row is read, as a
+  preconditionSchema would (D104). The core asks it only of a behavior whose
+  declaration takes preconditions.
 - `settle(view, operation, params)`: an answer to an operation of the
   use's own before any use's guard is asked (D104). The core asks it after
   the parameter check, for a caller's operation, a `call()` and a
@@ -428,10 +462,13 @@ and the hooks it needs, each with a default:
   config and its entry of the create's parameters (`{}` without one).
 - `guard(view, request)`: `Some(Veto)` refuses a `GuardRequest` (`Create`,
   `Update`, `Delete`, or any use's `Operation`, a caller's or a call's,
-  `caller` naming the calling use and `caller_type` its type for a call from
-  another row); `request.operation_of(use_id, name)` matches the use's own
-  operation. A guard refuses otherwise through its error
-  (`view.forbidden(..)`, `Refusal::operation_params(..)`).
+  `caller` naming the calling use, `caller_type` its type for a call from
+  another row, and `fired` a call a deadline's handler makes on its row,
+  the request of the worker that runs the deadline, as the engine's runner
+  made one: Lease holds it to an active lease as a caller's, D104);
+  `request.operation_of(use_id, name)` matches the use's own operation. A
+  guard refuses otherwise through its error (`view.forbidden(..)`,
+  `Refusal::operation_params(..)`).
 - `validate(view, request)`: issues with the own fields a write would store.
 - `operation(cx, name, params)`: a declared operation's handler and its
   result. The default is a defect.
@@ -457,6 +494,11 @@ and the hooks it needs, each with a default:
   `deadlines`). None by default. `Core::read_fields(spec, use_id, row,
   tables)` computes them; the replayer compares them, and no adapter serves
   them yet (D103's Left for later).
+- `read_fields_at(config, row, tables, now)`: `read_fields` at the time the
+  read is made at, for a field that turns on the clock (Lease's `active`,
+  D104); the default is `read_fields`'. `Core::read_fields_at(spec, use_id,
+  row, tables, now)` computes them, and the replayer reads at the step's
+  time.
 
 `GuardRequest`, `Change`, `Heard` and `ValidationRequest` are open, so a hook matches
 the cases it handles with a fallback arm.
@@ -465,7 +507,7 @@ Every hook returns `Hook<T>`, a `Result<T, Stop>`, and passes on with `?`
 every `Stop` it does not make itself. A hook runs on one row, the command's
 or one a call reached. A `View` (guards, validation) reads: `config()`,
 `type_name()`, `use_id()`, `behavior()`, `anchor()`, `field()`, `action()`,
-`key()`, `now()`, `caller()`, `can(permission)?`, `own()`,
+`key()`, `now()`, `caller()`, `precondition()`, `can(permission)?`, `own()`,
 `own_field(name)`, `get(field)`, `get_of(use_id, field)`, `version()`, the
 reads and `lock(key)?`, and makes refusals: `veto(..)`, `forbidden(..)`,
 `defect(..)`. A `Cx` (initializers, handlers, deadlines, after-change hooks)
@@ -697,6 +739,17 @@ came back. A type the layout lacks answers no rows; a field that is no own
 field of it is refused as `internal` (`rules: <Type> has no own field
 <field> in the behaviors' layout`). On SQLite and D1 one made under a lock is
 refused as `internal`, as a `subRows` read is.
+
+A `holding` read is a linked read by a use's owned column: the layout's
+`uses[id].fields[name].column` for `useId` and `field`, `WHERE <column> =
+$1 [AND <key> > $2] ORDER BY <key> LIMIT limit + 1`, the value bound as a
+command's value of that field binds, live rows alone. A type the layout
+lacks answers no rows; a use or a field the layout lacks is refused as
+`internal`, and so is one made under a lock on SQLite and D1.
+
+A command's `preconditions` pass through the adapter as the command's
+member, from the repository's option to the core: the adapter maps no
+name and checks nothing of them.
 
 An upsert's insert applies no change set of the core's, so it binds what
 the core's create of the row gives it: the adapter runs the create to its
@@ -977,7 +1030,7 @@ cargo build -p superschematic-rules-wasm --target wasm32-unknown-unknown
 ```
 
 with `RUSTUP_TOOLCHAIN` set to the toolchain `tools.env` pins.
-`tests/core.rs` (47 cases) runs the core through its public API with toy behaviors: the
+`tests/core.rs` (53 cases) runs the core through its public API with toy behaviors: the
 read exchange, vetoes, a call between two behaviors, two uses of one
 behavior on two fields and the own writes their fields refuse, a field
 anchor on a behavior with no value field, a config change that reads
@@ -995,10 +1048,15 @@ gone target passed over, a linked read paging by key, a heard write fenced
 with its after-change hooks, a change that writes nothing, `Core::listeners`
 and the JSON of the action, the read and `Gone`; and `settle` answering an
 operation before any guard with nothing written, refusing before any
-guard, and a settled `call_on` writing nothing on the other row.
+guard, and a settled `call_on` writing nothing on the other row; and a
+command's preconditions (held to the uses before the row is read, refused
+on any other action, read by a guard of the command's own write and by no
+call), a holding read, `read_fields_at`, and another row's sub-table rows as
+the run has them (D104).
 `rules-behaviors`' `tests/workflow.rs` (34), `tests/timers.rs` (18),
 `tests/reactions.rs` (16), `tests/constants.rs` (11), `tests/staterules.rs`
-(11) and `tests/approvals.rs` (14) hold each behavior to its declaration's
+(11), `tests/approvals.rs` (14), `tests/lease.rs` (16) and
+`tests/retries.rs` (14) hold each behavior to its declaration's
 schemas and its rules: Workflow's `by` on a string, a UUID in either form and a
 field with no value, `by` with a permission, `overridePermission`, a call
 held to `by`, `repeat` and `from`, and its config checks; Timers'
@@ -1019,7 +1077,20 @@ unchanged and `[]`, `resetOnChange`, `pinned` with a matching, stale and
 missing `version`, a version on a gate that is not pinned, the creator read
 from `createdBy`, entering a gate's state, a move by `Cx::call`, a removed
 gate's sign-offs consumed at the next write, `listSignOffs`' cursor, and a
-Timers `then` vetoed by `missing_fields` and by `approvals_missing`.
+Timers `then` vetoed by `missing_fields` and by `approvals_missing`; Lease's
+acquire, heartbeat (renewed by the last renewal's length, capped by the
+longest hold), release, abandon, expire's reasons, its expiry's deadline
+armed, moved, fired and vetoed, directives, the fencing token presented as
+the command's precondition (stale on a free row, passed for a read-only
+operation, required, absent in a call), a use's call of its own operation
+held as the caller's, a raised hold after a cut renewal, `active` at a
+read's time and a row with no token; and Retries' caps, limitsField,
+keepBest and stuckAfter, a backoff's wait, backing_off on a move into
+retryInto and on Lease's acquire, then's deadline (armed again at a
+status's entry, a veto falling due again, another principal's lease, the
+window), giveUpAfterMs, the window and its until, keyField read lazily and
+reset by an update, the Workflow among two, and its composition with
+Lease.
 
 `superschematic-rules-testkit`'s `tests/workflow_scenarios.rs`,
 `tests/timers_scenarios.rs`, `tests/reactions_scenarios.rs`,
@@ -1031,6 +1102,14 @@ Reactions and Timers, and `core-constants.json`, `core-staterules.json`
 and `core-approvals.json` on the six through the reference host, and fail
 on any step that answers otherwise than the engine, or when fewer steps
 are checked than their floors (154, 346, 443, 65, 45, 88 and 151).
+`tests/lease_scenarios.rs` replays the work queue's `workqueue-lease.json`,
+`workqueue-lease-timers.json` and `workqueue-lease-approvals.json` (floors
+610, 24 and 25; `workqueue-lease-direct-on.json` is skipped whole, for
+Branches and Revisions), and `tests/retries_scenarios.rs`
+`workqueue-retries.json` (290), with the configs' sweepMs left out, Comments
+incidental to the Lease file, and the kit's `test.Gate` and `test.Signal`;
+`tests/retries_waits_scenarios.rs` the hand-written `core-retries-waits.json`
+(D104, step 2) with a floor of 159.
 `tests/workflow_principals_scenarios.rs` replays the hand-written
 `core-workflow-principals.json` (`runtime/engine/testdata/rules/scenarios`,
 D104) on Workflow and the test behavior `test.Gate`, whose guard vetoes

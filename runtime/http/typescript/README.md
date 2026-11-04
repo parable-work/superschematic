@@ -52,7 +52,13 @@ Its entry points:
   behavior route its input with each optional member that is null left
   out (D104): the API's types and MCP tool schemas take null for an
   optional member and a behavior's paramsSchema does not (Workflow's
-  `from`), so a caller's `from: null` reaches the core absent.
+  `from`), so a caller's `from: null` reaches the core absent; its third
+  argument names the members it leaves out whatever their value, the
+  input's `preconditions` among them. `behaviorPreconditions(input)` is
+  what the input presents the core apart from the parameters (D16, D104):
+  its `preconditions` member, each use's entry by its use id (`{ Lease: {
+  token } }`), a null entry left out, which the route hands the
+  repository's operation in its options beside the caller.
   `decodeParam` reads a path or query value from its strings; a query
   list accepts repeated keys and comma-separated values.
   `decodeJsonParam` reads every body parameter from its JSON value, with
@@ -145,7 +151,14 @@ Its entry points:
   writes (`claim lost` when it is no longer held), a gone row's deadline
   messages and, deleted for good, its sub-table rows deleted. The adapter
   answers the core's `linked` read (a type's rows whose own field holds a
-  key, a page at a time, in key order). Every row read holds the layout's
+  key, a page at a time, in key order) and its `holding` read (a type's
+  rows whose use's owned field holds a value, `readHolding`, by the
+  layout's column of that field, D104), and passes a command's
+  `preconditions` (D16, D104), each use's entry by its use id, to the core
+  as the command or `ExecuteOptions.preconditions` gives them, which the
+  core checks before it reads the row; it reads none of them. An owned or
+  sub-table column of IR type `Generic.Int64` reaches the core as a number,
+  from the BIGINT's text pg hands a pool that does not parse it too. Every row read holds the layout's
   audit fields (`createdBy`, D104) among the row's own fields, converted as
   an own column is (a UUID to base62, NULL absent); no change set writes
   one, and a change set with no writes (a Workflow repeat) applies
@@ -178,9 +191,9 @@ Its entry points:
   D1's interface, which `Deps.db` is for a database whose DB service lists
   `sqlite` first, `ping`, and the behaviors' adapter (D103, `src/rules.ts`)
   with `sqliteRulesStore`, which runs a command of a table that composes
-  behaviors over the layout its generated `orm.ts` embeds. A `subRows` or
-  `linked` read made under a lock is refused there as `internal`: a D1
-  batch has no check of it yet.
+  behaviors over the layout its generated `orm.ts` embeds. A `subRows`,
+  `linked` or `holding` read made under a lock is refused there as
+  `internal`: a D1 batch has no check of it yet.
 - `@superschematic/http-runtime/sqlite`, `openSqlite(path)`, a
   `SqlDatabase` over `bun:sqlite` for `stack dev`, and `sqliteFile(url)`,
   the path a `sqlite:` URL names. It runs under Bun alone.
@@ -473,7 +486,13 @@ subject and the permissions the behaviors' configs name, such as
 Constants' and StateRules' permission on an update (D104), while the acting
 user still stamps the audit fields; `null` unsets it, and unset a command
 runs as the acting user holding no permissions (Go's ORM is
-`WithBehaviorCaller`); `transaction(fn)` gives `fn` repositories on one
+`WithBehaviorCaller`); `updateOne(id, update, { preconditions })`,
+`deleteOne(id, { preconditions })` and an operation's `{ preconditions }`
+present the caller's preconditions to the core (D16, D104), each use's
+entry by its use id, typed per table by the generated orm.ts
+(`<Type>Preconditions`), such as a lease's fencing token, and a table that
+composes no behaviors throws for any rather than drop them (Go's ORM is
+`WithPreconditions`); `transaction(fn)` gives `fn` repositories on one
 connection, with `query` and `exec`, and rolls back when it throws. A key
 no live row holds is `NotFoundError`, and a page key that names no row
 `PageKeyError`.

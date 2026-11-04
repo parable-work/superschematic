@@ -331,13 +331,48 @@ func (a *Action) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Command is one command: who calls, when (epoch milliseconds), what, and
-// the host's id for the request, the same for every run of the command.
+// Command is one command: who calls, when (epoch milliseconds), what, the
+// host's id for the request, the same for every run of the command, and
+// the caller's preconditions.
 type Command struct {
 	Caller  Caller `json:"caller"`
 	Now     int64  `json:"now"`
 	Action  Action `json:"action"`
 	Request string `json:"request,omitempty"`
+	// Preconditions are what the caller asserts of the row (D16, D104),
+	// each use's entry by its use id: an implements use's id is its
+	// behavior's name, so Lease's fencing token is {"Lease": {"token": 3}}.
+	// The core checks them against each use's behavior before it reads the
+	// row of an update, a delete or an operation, hands each use's guard
+	// its own entry, and refuses any other command that presents one.
+	// Empty for none.
+	Preconditions Preconditions `json:"preconditions,omitempty"`
+}
+
+// Preconditions are a command's preconditions, each use's entry by its use
+// id (D16, D104), as Command.Preconditions takes them: a value of any Go
+// type encoding/json writes as the entry's JSON (a generated
+// <Type><Member>Precondition, a map, a json.RawMessage). Read from JSON,
+// each entry is the json.RawMessage of its value, so its text reaches the
+// core as it was written.
+type Preconditions map[string]any
+
+// UnmarshalJSON reads each use's entry as its JSON text; null is none.
+func (p *Preconditions) UnmarshalJSON(data []byte) error {
+	var entries map[string]json.RawMessage
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return fmt.Errorf("rules: preconditions are an object of each use's entry by its use id: %w", err)
+	}
+	if entries == nil {
+		*p = nil
+		return nil
+	}
+	out := make(Preconditions, len(entries))
+	for id, entry := range entries {
+		out[id] = entry
+	}
+	*p = out
+	return nil
 }
 
 // ReadKind is what a ReadRequest asks for. The list is open: a kind the
@@ -353,6 +388,10 @@ const (
 	// ReadKindLinked is the rows of a type whose own field holds a key
 	// (D103): what a rule over the rows that link to a row reads.
 	ReadKindLinked ReadKind = "linked"
+	// ReadKindHolding is the rows of a type whose use's owned field holds a
+	// value (D104), answered as a linked read is: what a rule over the rows
+	// a principal holds reads.
+	ReadKindHolding ReadKind = "holding"
 )
 
 // LinkedPage is how many rows a linked read asks for at a time, the core's
@@ -361,9 +400,10 @@ const LinkedPage = 500
 
 // ReadRequest is what the core asks the host to read: a row of a type by
 // its key, whether a type has rows, a type's spec, the rows of one
-// sub-table of one use on one row (UseID and Table name it), or one page of
-// the rows of a type whose own field Field holds Key, in key order, at
-// most Limit, after the key After when it is not "".
+// sub-table of one use on one row (UseID and Table name it), one page of
+// the rows of a type whose own field Field holds Key, or one page of the
+// rows of a type whose use UseID's owned field Field holds Value; a page in
+// key order, at most Limit, after the key After when it is not "".
 type ReadRequest struct {
 	Kind  ReadKind `json:"kind"`
 	Type  string   `json:"type"`
@@ -371,18 +411,24 @@ type ReadRequest struct {
 	UseID string   `json:"useId,omitempty"`
 	Table string   `json:"table,omitempty"`
 	Field string   `json:"field,omitempty"`
-	After string   `json:"after,omitempty"`
-	Limit int      `json:"limit,omitempty"`
+	// Value is a holding read's value, its JSON text, which the request
+	// writes as the JSON it is; "" for every other kind. Text, so a request
+	// compares as a value.
+	Value string `json:"-"`
+	After string `json:"after,omitempty"`
+	Limit int    `json:"limit,omitempty"`
 }
 
 // MarshalJSON writes the request with its kind's members: a linked read's
-// limit always, any other kind's members as they are set.
+// and a holding read's limit always, a holding read's value as its JSON,
+// any other kind's members as they are set.
 func (r ReadRequest) MarshalJSON() ([]byte, error) {
-	if r.Kind == ReadKindLinked {
-		var after *string
-		if r.After != "" {
-			after = &r.After
-		}
+	var after *string
+	if r.After != "" {
+		after = &r.After
+	}
+	switch r.Kind {
+	case ReadKindLinked:
 		return json.Marshal(struct {
 			Kind  ReadKind `json:"kind"`
 			Type  string   `json:"type"`
@@ -391,9 +437,44 @@ func (r ReadRequest) MarshalJSON() ([]byte, error) {
 			After *string  `json:"after,omitempty"`
 			Limit int      `json:"limit"`
 		}{r.Kind, r.Type, r.Field, r.Key, after, r.Limit})
+	case ReadKindHolding:
+		value := json.RawMessage(r.Value)
+		if isNull(value) {
+			value = json.RawMessage(`null`)
+		}
+		if !json.Valid(value) {
+			return nil, fmt.Errorf("rules: a holding read's value %q is no JSON", r.Value)
+		}
+		return json.Marshal(struct {
+			Kind  ReadKind        `json:"kind"`
+			Type  string          `json:"type"`
+			UseID string          `json:"useId"`
+			Field string          `json:"field"`
+			Value json.RawMessage `json:"value"`
+			After *string         `json:"after,omitempty"`
+			Limit int             `json:"limit"`
+		}{r.Kind, r.Type, r.UseID, r.Field, value, after, r.Limit})
 	}
 	type plain ReadRequest
 	return json.Marshal(plain(r))
+}
+
+// UnmarshalJSON reads a request of any kind, a holding read's value as its
+// compact JSON text.
+func (r *ReadRequest) UnmarshalJSON(data []byte) error {
+	type plain ReadRequest
+	var out struct {
+		plain
+		Value json.RawMessage `json:"value"`
+	}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return err
+	}
+	*r = ReadRequest(out.plain)
+	if len(out.Value) > 0 {
+		r.Value = compactText(out.Value)
+	}
+	return nil
 }
 
 // Row is one row as the host read it: its own fields, its owned fields by

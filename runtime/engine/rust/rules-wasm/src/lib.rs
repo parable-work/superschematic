@@ -25,7 +25,12 @@
 //!   `{"subRows": [{"key", "values"}]}` in key order), or one page of the
 //!   rows of a type whose own field holds a key (`{"kind": "linked", "type",
 //!   "field", "key", "after"?, "limit"}`, answered `{"linked": {"rows":
-//!   [{"key", "row"}], "more"}}` in key order); a deadline command (`{"kind":
+//!   [{"key", "row"}], "more"}}` in key order), or one page of the rows of a
+//!   type whose use's owned field holds a value (`{"kind": "holding",
+//!   "type", "useId", "field", "value", "after"?, "limit"}`, answered as a
+//!   linked read is); a command may carry the caller's preconditions by use
+//!   id (`"preconditions": {"Lease": {"token": 3}}`, D104), which the core
+//!   holds to the uses before it reads the row; a deadline command (`{"kind":
 //!   "deadline", ...}`) runs only while the host holds the deadline armed at
 //!   its `at`, which the host checks, never the core (D103); and a change
 //!   command (`{"kind": "change", "key", "change": {"write", "at",
@@ -233,6 +238,61 @@ mod tests {
         assert_eq!(
             files[5]["tables"][0]["fields"][3]["type"],
             "Temporal.DateTime"
+        );
+        let named: Vec<&str> = files
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|file| file["name"].as_str())
+            .collect();
+        assert_eq!(named, superschematic_rules_behaviors::NAMES);
+        let lease = &files[named.iter().position(|name| *name == "Lease").unwrap()];
+        assert_eq!(lease["armsDeadlines"], true);
+        assert_eq!(lease["tables"][0]["name"], "directives");
+        assert!(lease["preconditionSchema"].is_object());
+    }
+
+    // A job whose lease's token a command presents as its precondition.
+    fn job() -> Value {
+        json!({
+            "name": "Job",
+            "uses": [
+                {"behavior": "Lease", "config": {}, "anchor": "type"},
+                {"behavior": "Workflow", "config": flow(), "anchor": {"field": "status"}}
+            ],
+            "fields": [{"name": "title", "type": "string"}]
+        })
+    }
+
+    #[test]
+    fn a_commands_preconditions_are_held_to_the_uses_before_the_row_is_read() {
+        let input = json!({
+            "spec": job(),
+            "command": {"caller": {"subject": "wren"}, "now": 1000, "request": "r1",
+                "action": {"kind": "operation", "key": "j1", "useId": "Lease", "operation": "heartbeat", "params": {}},
+                "preconditions": {"Lease": {"token": -1}}}
+        });
+        let (out, ok) = run_json(Op::Run, input.to_string().as_bytes());
+        assert!(ok, "{out}");
+        let step: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(step["done"]["refused"]["class"], "PreconditionsError");
+        assert_eq!(
+            step["done"]["refused"]["message"],
+            "preconditions of Job: /Lease/token: must be >= 0"
+        );
+        // One the uses take goes on to read the row.
+        let input = json!({
+            "spec": job(),
+            "command": {"caller": {"subject": "wren"}, "now": 1000, "request": "r1",
+                "action": {"kind": "operation", "key": "j1", "useId": "Lease", "operation": "heartbeat", "params": {}},
+                "preconditions": {"Lease": {"token": 1}}}
+        });
+        let (out, ok) = run_json(Op::Run, input.to_string().as_bytes());
+        assert!(ok, "{out}");
+        let step: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            step,
+            json!({"read": [{"kind": "row", "type": "Job", "key": "j1"}]})
         );
     }
 

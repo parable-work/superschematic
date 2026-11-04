@@ -36,12 +36,34 @@
               "type": "string",
               "pattern": "^[a-z][A-Za-z0-9]{0,63}$"
             },
-            "reset": { "description": "daily: the used amount starts again at 0 at each UTC day; reservations are kept.", "enum": ["daily"] }
+            "reset": {
+              "description": "When the used amount starts again at 0, in UTC; reservations are kept. daily: at each UTC day. hourly, weekly (each Monday), monthly (each first of the month) and { everyMs } (at each multiple of everyMs from the epoch, a whole number of minutes) are a table's alone: an engine type refuses them.",
+              "oneOf": [
+                { "enum": ["hourly", "daily", "weekly", "monthly"] },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["everyMs"],
+                  "properties": {
+                    "everyMs": { "description": "The period's length, in milliseconds.", "type": "integer", "minimum": 60000, "multipleOf": 60000 }
+                  }
+                }
+              ]
+            },
+            "window": {
+              "description": "rolling: the meter counts the usage of its last period rather than of the current one, from buckets of a sixtieth of the period each (a month is thirty days), so no boundary lets twice the limit through. Needs reset. A table's alone: an engine type refuses it.",
+              "enum": ["rolling"]
+            }
           }
         }
       },
       "limitPermission": {
         "description": "The permission a principal needs to change a meter's limit, with setLimit or through limitField. Absent, no limit changes once the instance exists.",
+        "type": "string",
+        "minLength": 1
+      },
+      "observePermission": {
+        "description": "The permission a caller needs to record the usage a provider reports with observe; absent, observe is refused (not_configured). A table's alone: an engine type refuses it.",
         "type": "string",
         "minLength": 1
       },
@@ -73,6 +95,11 @@
             "items": { "type": "string", "minLength": 1 }
           }
         }
+      },
+      "status": {
+        "description": "The field of the type whose Workflow escalate moves. Implied when the type has one Workflow; needed when it has several. A Workflow anchored on the type is named Workflow. A table's alone: an engine type refuses it.",
+        "type": "string",
+        "minLength": 1
       }
     }
   },
@@ -321,6 +348,33 @@
         }
       },
       "writes": true
+    },
+    {
+      "name": "observe",
+      "description": "Records the usage of a meter a provider reports, in place of what the meter counts until resetsAt (until the meter's next reset without it, and until the next observe for a meter with no reset): the meter's used is the figure given, usage recorded after it adds to it, and limit, when given, is the meter's limit while it holds. Nothing passes up to an enclosing scope. Needs observePermission. A table's alone: an engine type refuses it.",
+      "paramsSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["meter", "used"],
+        "properties": {
+          "meter": { "description": "The meter.", "type": "string", "minLength": 1 },
+          "used": { "description": "What the provider counts as used.", "type": "integer", "minimum": 0 },
+          "limit": { "description": "The limit the provider holds the row to, while the observation holds; the meter's own when absent.", "type": "integer", "minimum": 0 },
+          "resetsAt": { "description": "When the provider's count starts again, in epoch milliseconds: the observation lapses then.", "type": "integer", "minimum": 0 }
+        }
+      },
+      "resultSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["meter", "used", "limit", "resetsAt"],
+        "properties": {
+          "meter": { "type": "string" },
+          "used": { "description": "The meter's usage after this call: the figure given.", "type": "integer" },
+          "limit": { "description": "The meter's limit while the observation holds; null when it has none.", "type": ["integer", "null"] },
+          "resetsAt": { "description": "When the observation lapses, in epoch milliseconds: resetsAt, else the meter's next reset; null when it holds until the next observe.", "type": ["integer", "null"] }
+        }
+      },
+      "writes": true
     }
   ],
   "vetoes": [
@@ -331,5 +385,51 @@
     { "code": "below_committed", "description": "A limit below what the instance has used and reserved." },
     { "code": "exceeds_reservation", "description": "A scope holds no more for an instance than that instance has reserved." },
     { "code": "not_configured", "description": "The config names no limitPermission, which changing a limit needs." }
+  ],
+  "tables": [
+    {
+      "name": "meters",
+      "description": "One row per meter the row has written, keyed by the meter's name: what it has used in its current period, what it has reserved (its own reservation and what it holds for the rows inside it), the limit setLimit gave it, the start of the period its used counts from, its own reservation with the lease token it was made under, the token onExceeded last directed under, the scope that holds its reservation, and the usage a provider last reported, with its limit, when, and until when it holds.",
+      "key": "meter",
+      "fields": [
+        { "name": "meter", "description": "The meter's name.", "type": "string" },
+        { "name": "used", "description": "What the row has used in its current period (everything without reset; 0 for a rolling meter, whose buckets hold its usage).", "type": "Generic.Int64" },
+        { "name": "reserved", "description": "What the row has reserved: its own reservation and what it holds for the rows inside it.", "type": "Generic.Int64" },
+        { "name": "limitValue", "description": "The limit setLimit gave the row; absent for none.", "type": "Generic.Int64" },
+        { "name": "periodStart", "description": "The start of the period used counts from, for a meter with a fixed reset.", "type": "Temporal.DateTime" },
+        { "name": "reservation", "description": "The row's own reservation, a part of reserved.", "type": "Generic.Int64" },
+        { "name": "token", "description": "The lease token the own reservation was made under.", "type": "Generic.Int64" },
+        { "name": "directed", "description": "The lease token onExceeded's directive was last sent under.", "type": "Generic.Int64" },
+        { "name": "scopeType", "description": "The type of the scope that holds the reservation.", "type": "string" },
+        { "name": "scopeKey", "description": "Its key.", "type": "string" },
+        { "name": "observed", "description": "The usage a provider last reported, with what the row recorded since; absent before an observe.", "type": "Generic.Int64" },
+        { "name": "observedLimit", "description": "The limit the provider reported; absent for none.", "type": "Generic.Int64" },
+        { "name": "observedAt", "description": "When observe recorded it.", "type": "Temporal.DateTime" },
+        { "name": "observedUntil", "description": "The resetsAt observe was given; absent without one.", "type": "Temporal.DateTime" }
+      ]
+    },
+    {
+      "name": "holds",
+      "description": "What the row, a scope, holds of a meter for each row inside it, keyed by the meter, that row's type and its key.",
+      "key": "hold",
+      "fields": [
+        { "name": "hold", "description": "<meter>:<type>:<key> of the row it holds for.", "type": "string" },
+        { "name": "meter", "description": "The meter.", "type": "string" },
+        { "name": "innerType", "description": "The type of the row it holds for.", "type": "string" },
+        { "name": "innerKey", "description": "Its key.", "type": "string" },
+        { "name": "amount", "description": "What it holds.", "type": "Generic.Int64" }
+      ]
+    },
+    {
+      "name": "buckets",
+      "description": "A rolling meter's usage, a sixtieth of its period each, keyed by the meter and the bucket's start; a write deletes the ones that left the window.",
+      "key": "bucket",
+      "fields": [
+        { "name": "bucket", "description": "<meter>:<start in epoch milliseconds, fifteen digits>.", "type": "string" },
+        { "name": "meter", "description": "The meter.", "type": "string" },
+        { "name": "startsAt", "description": "When the bucket starts.", "type": "Temporal.DateTime" },
+        { "name": "used", "description": "What the row used in it.", "type": "Generic.Int64" }
+      ]
+    }
   ]
 }

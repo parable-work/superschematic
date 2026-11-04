@@ -7,8 +7,8 @@
 
 use superschematic_rules_testkit::{ported, replay_path, scenario_path};
 
-/// The steps of `core-behaviors.json` the replayer maps and compares: 86 of
-/// its 223, in five of its 13 scenarios. The expenses document's 20, a
+/// The steps of `core-behaviors.json` the replayer maps and compares: 87 of
+/// its 223, in six of its 13 scenarios. The expenses document's 20, a
 /// claim two approvers sign and its claimant never does (Approvals beside a
 /// Workflow); the invoices document's 12, a sent invoice that needs a
 /// customer, an amount and its lines, which then stay (StateRules beside a
@@ -18,13 +18,16 @@ use superschematic_rules_testkit::{ported, replay_path, scenario_path};
 /// writes as an update of the row's owned fields; and the `open` of the
 /// scenario that registers the core's behaviors, whose two reads of the
 /// engine's registry and `behaviors.register`, where it stops, are outside
-/// the reference host's surface. The 8 other scenarios compose behaviors
-/// the core does not run yet (Branches, Comments, Dependencies, Lease,
-/// Numbering, Revisions, Rollups, Search, Variants), and are skipped whole.
+/// the reference host's surface; and the `open` of the scenario whose
+/// engine ran without the work queue's package and refused a define of
+/// Lease for its implementation, which the core runs (D104), where it skips
+/// that define. The 7 other scenarios compose behaviors the core does not
+/// run yet (Branches, Comments, Dependencies, Numbering, Revisions,
+/// Rollups, Search, Variants), and are skipped whole.
 /// The `open` steps that run count but compare nothing, and each
 /// `runner.runDue` counts as checked once the changes and deadlines it ran
 /// answered.
-const FLOOR: usize = 86;
+const FLOOR: usize = 87;
 
 #[test]
 fn core_behaviors_scenarios_replay_on_the_core() {

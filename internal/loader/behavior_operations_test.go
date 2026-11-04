@@ -464,20 +464,6 @@ func TestBehaviorOperationsRefusals(t *testing.T) {
 			db.Types["Order"].Fields[1].Key = true
 			return db
 		}, "OrderActions: @behaviorOperations names Order, whose key is 2 fields (id, title): its operations' routes address a row by one"},
-		{"an operation on the schema", func() *ir.Schema {
-			return ordersAPI(actionsOf("OrderActions", "Order"))
-		}, func() *ir.Schema {
-			db := ordersDB()
-			db.Types["Order"].Behaviors = append(db.Types["Order"].Behaviors, ir.BehaviorRef{Name: "Gauge", Field: "fill"})
-			return db
-		}, "OrderActions: Order's fill is a Gauge, whose operation census runs on the schema as a whole, not on a row: @behaviorOperations serves the operations a behavior runs on a row (D103)"},
-		{"an operation on a namespace", func() *ir.Schema {
-			return ordersAPI(actionsOf("OrderActions", "Order"))
-		}, func() *ir.Schema {
-			db := ordersDB()
-			db.Types["Order"].Behaviors = append(db.Types["Order"].Behaviors, ir.BehaviorRef{Name: "Tally", Field: "items"})
-			return db
-		}, "OrderActions: Order's items is a Tally, whose operation sum runs on the namespace as a whole, not on a row: @behaviorOperations serves the operations a behavior runs on a row (D103)"},
 		{"a second set of the table", func() *ir.Schema {
 			return ordersAPI(actionsOf("OrderActions", "Order"), actionsOf("Fulfilment", "Order"))
 		}, ordersDB, "Fulfilment: @behaviorOperations names Order, which OrderActions names too: an API serves a table's behavior operations from one set"},
@@ -744,4 +730,108 @@ func viewTSConfig(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return string(out)
+}
+
+// TestBehaviorOperationsLeaveOutOperationsWithoutARow: an operation of a
+// use that runs on the schema or a namespace as a whole, not on a row, is
+// one a command without a row would run, which the core does not take yet
+// (Lease's expireHolder): the set is not refused, the build warns of it
+// once per set, use and operation, and the expansion leaves it out, serving
+// the use's other operations (D103, D104).
+func TestBehaviorOperationsLeaveOutOperationsWithoutARow(t *testing.T) {
+	reg := behaviorOperationsRegistry(t)
+	db := ordersDB()
+	db.Types["Order"].Behaviors = append(db.Types["Order"].Behaviors, ir.BehaviorRef{Name: "Gauge", Field: "fill"}, ir.BehaviorRef{Name: "Tally", Field: "items"})
+	api := ordersAPI(actionsOf("OrderActions", "Order"))
+	in := verify.Input{Registry: reg, Database: db}
+	res := verify.CheckBehaviorOperations(api, in)
+	if err := res.Err(); err != nil {
+		t.Fatalf("CheckBehaviorOperations = %v", err)
+	}
+	var warnings []string
+	for _, d := range res.Warnings {
+		warnings = append(warnings, d.Msg)
+	}
+	want := []string{
+		"OrderActions: Order's fill is a Gauge, whose operation census runs on the schema as a whole, not on a row: @behaviorOperations serves the operations a behavior runs on a row and leaves census out (D103, D104)",
+		"OrderActions: Order's items is a Tally, whose operation sum runs on the namespace as a whole, not on a row: @behaviorOperations serves the operations a behavior runs on a row and leaves sum out (D103, D104)",
+	}
+	if !reflect.DeepEqual(warnings, want) {
+		t.Errorf("CheckBehaviorOperations' warnings =\n%q\nwant\n%q", warnings, want)
+	}
+	if _, err := behaviorops.Expand(api, db, reg); err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, op := range api.OperationSets[0].Operations {
+		names = append(names, op.Name)
+	}
+	if want := []string{"statusTransition"}; !reflect.DeepEqual(names, want) {
+		t.Errorf("OrderActions' operations = %v, want %v", names, want)
+	}
+}
+
+// TestBehaviorOperationsPresentPreconditions: on a table one of whose uses'
+// behaviors takes a precondition, every operation of every use takes an
+// input with the optional member preconditions, typed <Table>Preconditions,
+// whose members are those uses' ids, each typed <Table><Member>Precondition
+// from the behavior's preconditionSchema, an operation with no parameters
+// included; and a parameter named preconditions on such a table is refused,
+// naming the set, the table, the use and the operation (D16, D104).
+func TestBehaviorOperationsPresentPreconditions(t *testing.T) {
+	reg := registry.New(naming.Default())
+	fence := func(params string) string {
+		return `{"name":"Fence","fields":[{"name":"level","type":"number"}],"value":"level",
+		  "preconditionSchema":{"type":"object","additionalProperties":false,"required":["token"],"properties":{"token":{"description":"The fence's token.","type":"integer","minimum":0}}},
+		  "operations":[{"name":"raise","paramsSchema":{"type":"object","additionalProperties":false` + params + `},"resultSchema":{"type":"object"},"writes":true}]}`
+	}
+	for _, decl := range []string{fence(""), strings.Replace(fence(`,"properties":{"preconditions":{"type":"object"}}`), `"Fence"`, `"Gate"`, 1)} {
+		if err := reg.RegisterBehavior(registry.BehaviorSpec{Declaration: json.RawMessage(decl)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db := ordersDB()
+	db.Types["Order"].Behaviors = append(db.Types["Order"].Behaviors, ir.BehaviorRef{Name: "Fence", Field: "fence"})
+	api := ordersAPI(actionsOf("OrderActions", "Order"))
+	in := verify.Input{Registry: reg, Database: db}
+	if err := verify.CheckBehaviorOperations(api, in).Err(); err != nil {
+		t.Fatalf("CheckBehaviorOperations = %v", err)
+	}
+	if _, err := behaviorops.Expand(api, db, reg); err != nil {
+		t.Fatal(err)
+	}
+	fields := func(name string) string {
+		td := api.Types[name]
+		if td == nil {
+			t.Fatalf("%s was not added", name)
+		}
+		var out []string
+		for _, fd := range td.Fields {
+			out = append(out, fd.Name+":"+fd.TypeRef.Name+":"+map[bool]string{true: "required", false: "optional"}[fd.Required])
+		}
+		return strings.Join(out, ",")
+	}
+	for name, want := range map[string]string{
+		"OrderStatusTransitionInput": "from:OrderStatusState:optional,preconditions:OrderPreconditions:optional,to:OrderStatusState:required",
+		"OrderFenceRaiseInput":       "preconditions:OrderPreconditions:optional",
+		"OrderPreconditions":         "fence:OrderFencePrecondition:optional",
+		"OrderFencePrecondition":     "token:Generic.Int64:required",
+	} {
+		if got := fields(name); got != want {
+			t.Errorf("%s = %s, want %s", name, got, want)
+		}
+	}
+	for _, op := range api.OperationSets[0].Operations {
+		if len(op.Arguments) != 2 || op.Arguments[1].Name != ir.BehaviorInputArgument {
+			t.Errorf("OrderActions.%s takes %+v, want its key and an input", op.Name, op.Arguments)
+		}
+	}
+
+	db = ordersDB()
+	db.Types["Order"].Behaviors = append(db.Types["Order"].Behaviors, ir.BehaviorRef{Name: "Gate", Field: "gate"})
+	res := verify.CheckBehaviorOperations(ordersAPI(actionsOf("OrderActions", "Order")), verify.Input{Registry: reg, Database: db})
+	want := "OrderActions: Order's gate is a Gate, whose operation raise takes a parameter preconditions, the member every behavior operation's input on Order presents the caller's preconditions in, since its uses gate take one (D16, D104): rename the parameter, or serve the table's operations from code of the project's own"
+	if err := res.Err(); err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("CheckBehaviorOperations = %v, want %q", err, want)
+	}
 }

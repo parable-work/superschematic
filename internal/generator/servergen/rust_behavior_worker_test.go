@@ -29,6 +29,29 @@ import (
 // fixture-timers-api's behavior worker TicketTimers (D103).
 const rustBehaviorWorkerGoldenRoot = "testdata/golden/behavior-worker/rust"
 
+// rustAgentsWorkerGoldenRoot holds the Rust entrypoint of
+// fixture-agents-api's behavior worker JobDeadlines (D104).
+const rustAgentsWorkerGoldenRoot = "testdata/golden/behavior-worker/rust-agents"
+
+// rustBehaviorFixture is an API whose behavior workers run on the tables of
+// its database, fixtures of the TypeScript reader's, and the stack and the
+// environment key of its database a build of it names.
+type rustBehaviorFixture struct {
+	api, db, stack, databaseKey, databaseGoName string
+}
+
+// rustTimersFixture is fixture-timers-api over fixture-timers-db (D103).
+var rustTimersFixture = rustBehaviorFixture{
+	api: "fixture-timers-api", db: "fixture-timers-db", stack: "timers-stack",
+	databaseKey: "FIXTURE_TIMERS_DB_DATABASE", databaseGoName: "FixtureTimersDbDatabase",
+}
+
+// rustAgentsFixture is fixture-agents-api over fixture-agents-db (D104).
+var rustAgentsFixture = rustBehaviorFixture{
+	api: "fixture-agents-api", db: "fixture-agents-db", stack: "agents-stack",
+	databaseKey: "FIXTURE_AGENTS_DB_DATABASE", databaseGoName: "FixtureAgentsDbDatabase",
+}
+
 // rustTimers is fixture-timers-api's Rust crate as a build of an output
 // root makes it, with what a test that compiles it writes beside it.
 type rustTimers struct {
@@ -47,13 +70,20 @@ type rustTimers struct {
 // holding the database's field.
 func rustTimersAPI(t *testing.T, out string, paths naming.LocalPaths) rustTimers {
 	t.Helper()
+	return rustTimersFixture.apiCrate(t, out, paths)
+}
+
+// apiCrate is the fixture's Rust crate as rustTimersAPI makes
+// fixture-timers-api's.
+func (f rustBehaviorFixture) apiCrate(t *testing.T, out string, paths naming.LocalPaths) rustTimers {
+	t.Helper()
 	const fixtures = "../../loader/tsreader/testdata/services"
 	reg := registry.New(naming.Default())
-	db, err := loader.LoadService(filepath.Join(fixtures, "fixture-timers-db"), loader.WithRegistry(reg))
+	db, err := loader.LoadService(filepath.Join(fixtures, f.db), loader.WithRegistry(reg))
 	if err != nil {
 		t.Fatal(err)
 	}
-	schema, err := loader.LoadService(filepath.Join(fixtures, "fixture-timers-api"), loader.WithRegistry(reg))
+	schema, err := loader.LoadService(filepath.Join(fixtures, f.api), loader.WithRegistry(reg))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +141,7 @@ func rustTimersAPI(t *testing.T, out string, paths naming.LocalPaths) rustTimers
 	config := &envgen.ConfigOutput{
 		SchemaName: schema.Name,
 		EnvConfig:  true,
-		Derived:    []envgen.DerivedField{{Key: "FIXTURE_TIMERS_DB_DATABASE", GoName: "FixtureTimersDbDatabase", Kind: ir.EdgeSQL, Service: db.Name}},
+		Derived:    []envgen.DerivedField{{Key: f.databaseKey, GoName: f.databaseGoName, Kind: ir.EdgeSQL, Service: db.Name}},
 	}
 	return rustTimers{output: output, routes: routes, config: config, api: schema, db: db, reg: reg}
 }
@@ -121,14 +151,22 @@ func rustTimersAPI(t *testing.T, out string, paths naming.LocalPaths) rustTimers
 // repoRoot.
 func behaviorWorkerInput(t *testing.T, repoRoot, out string, paths naming.LocalPaths, timers rustTimers) servergen.RustInput {
 	t.Helper()
+	return rustTimersFixture.workerInput(t, repoRoot, out, paths, timers, "TicketTimers", "fixture-timers-api-ticket-timers")
+}
+
+// workerInput is the plan's input of the entrypoint of the fixture's
+// behavior worker name, the server server of its stack, under the output
+// root out of the repository at repoRoot.
+func (f rustBehaviorFixture) workerInput(t *testing.T, repoRoot, out string, paths naming.LocalPaths, timers rustTimers, name, server string) servergen.RustInput {
+	t.Helper()
 	impl, err := servergen.ReadRustImplementation(naming.Default(), timers.output.SchemaName, filepath.Join(repoRoot, "services", timers.output.SchemaName, "rust"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return servergen.RustInput{
-		Stack:      "timers-stack",
-		Server:     "fixture-timers-api-ticket-timers",
-		Dir:        servergen.ServerDir(out, "timers-stack", "fixture-timers-api-ticket-timers"),
+		Stack:      f.stack,
+		Server:     server,
+		Dir:        servergen.ServerDir(out, f.stack, server),
 		OutputRoot: out,
 		APIs: []servergen.RustAPIInput{{
 			Output:         timers.output,
@@ -140,7 +178,7 @@ func behaviorWorkerInput(t *testing.T, repoRoot, out string, paths naming.LocalP
 		Naming:         naming.Default(),
 		RepositoryRoot: repoRoot,
 		Paths:          paths,
-		Worker:         &servergen.WorkerInput{Name: "TicketTimers"},
+		Worker:         &servergen.WorkerInput{Name: name},
 	}
 }
 
@@ -244,11 +282,19 @@ func TestRustBehaviorWorkerEntrypoint(t *testing.T) {
 // clippy, warnings denied.
 func checkRustBehaviorWorkerCompiles(t *testing.T, cargo string) {
 	t.Helper()
+	rustTimersFixture.checkWorkerCompiles(t, cargo, "TicketTimers", "fixture-timers-api-ticket-timers")
+}
+
+// checkWorkerCompiles writes the entrypoint of the fixture's behavior
+// worker name, the server server, as checkRustBehaviorWorkerCompiles
+// writes TicketTimers', and lints it with clippy, warnings denied.
+func (f rustBehaviorFixture) checkWorkerCompiles(t *testing.T, cargo, name, server string) {
+	t.Helper()
 	paths := testpaths.Local(t)
 	names := naming.Default()
 	repoRoot := testpaths.TempDir(t)
 	out := filepath.Join(repoRoot, "schemas", "dist")
-	timers := rustTimersAPI(t, out, paths)
+	timers := f.apiCrate(t, out, paths)
 	for _, service := range []struct {
 		schema *ir.Schema
 		deps   map[string]*ir.Schema
@@ -282,7 +328,7 @@ func checkRustBehaviorWorkerCompiles(t *testing.T, cargo string) {
 	if err := envgen.WriteRustConfig(timers.config, apiDir); err != nil {
 		t.Fatal(err)
 	}
-	in := behaviorWorkerInput(t, repoRoot, out, paths, timers)
+	in := f.workerInput(t, repoRoot, out, paths, timers, name, server)
 	s, err := servergen.PlanRust(in)
 	if err != nil {
 		t.Fatalf("PlanRust: %v", err)
@@ -307,4 +353,80 @@ func appendManifest(t *testing.T, dir, text string) {
 	if err := os.WriteFile(manifest, append(data, []byte(text)...), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// TestRustAgentsBehaviorWorkerEntrypoint: the entrypoint of
+// fixture-agents-api's behavior worker JobDeadlines (D104) opens a pool on
+// the API's database and runs Job's deadline queue, a lease's expiry and a
+// backoff's end, with the handler the API crate's behaviors module holds,
+// in a claim loop of the HTTP runtime's, as TicketTimers' runs Ticket's;
+// the same API's SessionPresence plans its own entrypoint over Session's
+// deadline queue. JobDeadlines' main.rs passes clippy against the API
+// crate, the database's Rust types and the checkout's crates, unless in
+// -short mode or without cargo. Regenerate with:
+//
+//	go test ./internal/generator/servergen -run TestRustAgentsBehaviorWorkerEntrypoint -update
+func TestRustAgentsBehaviorWorkerEntrypoint(t *testing.T) {
+	repoRoot := testpaths.TempDir(t)
+	out := filepath.Join(repoRoot, "schemas", "dist")
+	paths := rustFakePaths(repoRoot)
+	paths.RulesAdapterRust = filepath.Join(repoRoot, "runtime", "engine", "rust", "rules-adapter")
+	paths.RulesBehaviorsRust = filepath.Join(repoRoot, "runtime", "engine", "rust", "rules-behaviors")
+	dir := filepath.Join(repoRoot, "runtime", "engine", "rust")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Cargo.toml"), []byte("[workspace]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	agents := rustAgentsFixture.apiCrate(t, out, paths)
+	for _, worker := range []struct{ name, server, queues string }{
+		{"JobDeadlines", "fixture-agents-api-job-deadlines", "JobDeadline"},
+		{"SessionPresence", "fixture-agents-api-session-presence", "SessionDeadline"},
+	} {
+		in := rustAgentsFixture.workerInput(t, repoRoot, out, paths, agents, worker.name, worker.server)
+		s, err := servergen.PlanRust(in)
+		if err != nil {
+			t.Fatalf("PlanRust %s: %v", worker.name, err)
+		}
+		if s.Kind != "worker" || s.Worker == nil || s.Worker.Behavior == nil {
+			t.Fatalf("planned %s as %s with worker %+v, want a behavior worker", worker.name, s.Kind, s.Worker)
+		}
+		if got := s.Worker.QueueNames(); got != worker.queues {
+			t.Errorf("%s runs %s, want %s", worker.name, got, worker.queues)
+		}
+		if worker.name != "JobDeadlines" {
+			continue
+		}
+		if err := servergen.WriteRust(s, in.Dir); err != nil {
+			t.Fatal(err)
+		}
+		files := map[string]string{}
+		for _, file := range []string{servergen.RustManifestFile, servergen.RustMainFile, servergen.DockerFile, servergen.DockerIgnoreFile} {
+			files[filepath.FromSlash(file)] = filepath.Join(in.Dir, filepath.FromSlash(file))
+		}
+		compareGoldens(t, rustAgentsWorkerGoldenRoot, files)
+		main, err := os.ReadFile(filepath.Join(in.Dir, filepath.FromSlash(servergen.RustMainFile)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{
+			"fixture_agents_api_api::behaviors::job_deadlines_deadlines(&fixture_agents_db_pool)?",
+			"fixture_agents_api_api::behaviors::run_job_deadlines_deadline(&pool, claimed).await",
+		} {
+			if !strings.Contains(string(main), want) {
+				t.Errorf("main.rs does not contain %q:\n%s", want, main)
+			}
+		}
+	}
+
+	if testing.Short() {
+		return
+	}
+	cargo, err := exec.LookPath("cargo")
+	if err != nil {
+		t.Log("cargo not available; main.rs is not compiled")
+		return
+	}
+	rustAgentsFixture.checkWorkerCompiles(t, cargo, "JobDeadlines", "fixture-agents-api-job-deadlines")
 }

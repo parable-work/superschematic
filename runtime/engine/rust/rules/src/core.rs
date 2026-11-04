@@ -172,6 +172,40 @@ impl Core {
         row: &Row,
         tables: &BTreeMap<String, Vec<SubRow>>,
     ) -> Result<Map<String, Value>, Refusal> {
+        self.read_fields_with(spec, use_id, |bound| {
+            bound
+                .registered
+                .behavior
+                .read_fields(&*bound.config, row, tables)
+        })
+    }
+
+    /// [`Core::read_fields`] at a time, in epoch milliseconds
+    /// ([`Behavior::read_fields_at`]): for a field that turns on the clock
+    /// (Lease's `active`, D104), the time the read is made at.
+    pub fn read_fields_at(
+        &self,
+        spec: &TypeSpec,
+        use_id: &str,
+        row: &Row,
+        tables: &BTreeMap<String, Vec<SubRow>>,
+        now: i64,
+    ) -> Result<Map<String, Value>, Refusal> {
+        self.read_fields_with(spec, use_id, |bound| {
+            bound
+                .registered
+                .behavior
+                .read_fields_at(&*bound.config, row, tables, now)
+        })
+    }
+
+    // read_fields_with binds the type and asks one use for its fields.
+    fn read_fields_with(
+        &self,
+        spec: &TypeSpec,
+        use_id: &str,
+        read: impl FnOnce(&crate::run::Bound<'_>) -> Option<Map<String, Value>>,
+    ) -> Result<Map<String, Value>, Refusal> {
         let uses = Run::bind(self, spec)?;
         let Some(bound) = uses.iter().find(|bound| bound.spec.id() == use_id) else {
             let ids: Vec<String> = spec.uses.iter().map(|u| u.id().to_owned()).collect();
@@ -181,11 +215,7 @@ impl Core {
                 listed(&ids)
             )));
         };
-        bound
-            .registered
-            .behavior
-            .read_fields(&*bound.config, row, tables)
-            .ok_or_else(|| Refusal::defect(&bound.spec.behavior, CONFIG_OF_ANOTHER_TYPE))
+        read(bound).ok_or_else(|| Refusal::defect(&bound.spec.behavior, CONFIG_OF_ANOTHER_TYPE))
     }
 
     /// What a type's uses listen to (D103): each use's

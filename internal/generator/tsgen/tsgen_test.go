@@ -80,6 +80,12 @@ func TestWriteTypesGolden(t *testing.T) {
 		// upserts, and the layout's audit createdBy, which its gates and a
 		// StateRules by read.
 		{service: "fixture-approvals-db", behaviors: true},
+		// Tables that implement Lease, Retries, Presence and Budget beside
+		// their Workflows (D104): Job's JobPreconditions, which updateOne,
+		// deleteOne and each operation take in their options, its
+		// sub-tables and deadlines, Session's deadline, and Account's and
+		// Workspace's meters, holds and buckets, none with a repository.
+		{service: "fixture-agents-db", behaviors: true},
 	}
 
 	for _, tc := range cases {

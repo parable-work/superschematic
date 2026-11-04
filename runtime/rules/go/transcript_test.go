@@ -19,11 +19,14 @@ import (
 // The recorded scenarios are the specification (D103): the transcripts
 // superschematic-rules-testkit writes from core-workflow.json,
 // core-timers.json, core-reactions.json, core-reactions-changes.json,
-// core-constants.json, core-staterules.json and core-approvals.json, and
-// from the scenarios written by hand in their format where the engine
-// recorded none, core-workflow-principals.json and
-// core-freezes-and-sign-offs.json (D104), whose transcripts hold each
-// command's row version too
+// core-constants.json, core-staterules.json and core-approvals.json, from
+// the work queue's recordings workqueue-lease.json, workqueue-presence.json,
+// workqueue-budget.json and workqueue-retries.json (core-lease,
+// core-presence, core-budget and core-retries, D104), and from the
+// scenarios written by hand in their format where the engine recorded
+// none, core-workflow-principals.json, core-freezes-and-sign-offs.json,
+// core-retries-waits.json and core-periods-and-presence.json (D104), whose
+// transcripts hold each command's row version too
 // (runtime/engine/testdata/rules/*.transcript.json, whose format its
 // transcript module states) replayed through this adapter on SQLite and on
 // Postgres, as the TypeScript adapter replays them
@@ -33,17 +36,19 @@ import (
 // gives each use of any version and _version, with @optimistic's trigger;
 // for each use whose behavior declares tables, a sub-table per table, a
 // child of the row; and, when a use's behavior arms deadlines, the type's
-// deadline queue. Each check runs on the core alone, answering whether the
-// type has rows from its table; each command runs through Execute in a
-// transaction of its own over a layout of every type the step's database
-// holds, each at the version live at it (a deadline the runner ran among
-// them, which reads its arming and spends it, and a change the runner
-// drained, whose listeners write rows of other types), its refusal compared
-// whole and the row it names read back after it and compared, with its
-// version when the transcript holds it (so a repeat is held to writing
-// nothing), its sub-table rows, its armed deadlines and the other rows its
-// change set wrote; and each raw step writes owned columns with SQL past
-// the adapter.
+// deadline queue. A Generic.Int64 column is an integer column, as sqlgen
+// writes one, and a command presents the preconditions the transcript's
+// command holds (D104). Each check runs on the core alone, answering
+// whether the type has rows from its table; each command runs through
+// Execute in a transaction of its own over a layout of every type the
+// step's database holds, each at the version live at it (a deadline the
+// runner ran among them, which reads its arming and spends it, and a
+// change the runner drained, whose listeners write rows of other types),
+// its refusal compared whole and the row it names read back after it and
+// compared, with its version when the transcript holds it (so a repeat is
+// held to writing nothing), its sub-table rows, its armed deadlines and
+// the other rows its change set wrote; and each raw step writes owned
+// columns with SQL past the adapter.
 // The Postgres replay skips without SUPERSCHEMATIC_RULES_TEST_DATABASE_URL.
 //
 // The tables here follow the layout rule as the core's README states it,
@@ -72,6 +77,12 @@ var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-staterules.transcript.json", 76},
 	{"../../engine/testdata/rules/core-approvals.transcript.json", 122},
 	{"../../engine/testdata/rules/core-freezes-and-sign-offs.transcript.json", 115},
+	{"../../engine/testdata/rules/core-lease.transcript.json", 436},
+	{"../../engine/testdata/rules/core-presence.transcript.json", 141},
+	{"../../engine/testdata/rules/core-budget.transcript.json", 495},
+	{"../../engine/testdata/rules/core-retries.transcript.json", 250},
+	{"../../engine/testdata/rules/core-retries-waits.transcript.json", 158},
+	{"../../engine/testdata/rules/core-periods-and-presence.transcript.json", 77},
 }
 
 type transcript struct {
@@ -205,7 +216,10 @@ func irType(jsonType string) string {
 	return "Generic.JSON"
 }
 
-// sqlType is the SQL type of a column in the database's dialect.
+// sqlType is the SQL type of a column in the database's dialect: a
+// Generic.Int64 an integer column, as sqlgen writes one (a TEXT column, on
+// SQLite, would give its number back as text), any type it does not know
+// JSON.
 func sqlType(db *rulestest.DB, column rules.Column) string {
 	types := db.ColumnTypes()
 	if column.Convert == rules.ConvertEpochMillis {
@@ -216,6 +230,8 @@ func sqlType(db *rulestest.DB, column rules.Column) string {
 		return types.Text
 	case "number":
 		return types.Number
+	case "Generic.Int64":
+		return types.Integer
 	case "boolean":
 		return types.Boolean
 	}
